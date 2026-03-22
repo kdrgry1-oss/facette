@@ -2644,6 +2644,536 @@ async def import_trendyol_orders(
         logger.error(f"Trendyol import error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==================== GIB E-FATURA / E-ARŞİV INTEGRATION ====================
+from lxml import etree
+import qrcode
+from io import BytesIO
+
+# GIB Configuration
+GIB_MODE = os.environ.get('GIB_MODE', 'test')  # 'test' or 'production'
+GIB_USERNAME = os.environ.get('GIB_USERNAME', '')
+GIB_PASSWORD = os.environ.get('GIB_PASSWORD', '')
+GIB_VKN = os.environ.get('GIB_VKN', '')  # Company Tax ID (10 digits)
+GIB_COMPANY_NAME = os.environ.get('GIB_COMPANY_NAME', 'FACETTE')
+GIB_BASE_URL = os.environ.get('GIB_BASE_URL',
+    'https://earsivportal.efatura.gov.tr' if GIB_MODE == 'production' 
+    else 'https://earsivportaltest.efatura.gov.tr'
+)
+
+def is_gib_configured():
+    """Check if GIB is properly configured"""
+    return bool(GIB_USERNAME and GIB_PASSWORD and GIB_VKN and len(GIB_VKN) == 10)
+
+def validate_vkn(vkn: str) -> bool:
+    """Validate Turkish VKN using checksum algorithm"""
+    if not vkn or len(vkn) != 10 or not vkn.isdigit():
+        return False
+    digits = [int(d) for d in vkn]
+    checksum = sum(digits[i] * (9 - i) for i in range(9)) % 11
+    return checksum == digits[9]
+
+def generate_invoice_number() -> str:
+    """Generate unique invoice number"""
+    year = datetime.now().year
+    # Get last invoice number from db
+    return f"FAC{year}{str(uuid.uuid4().int)[:10]}"
+
+def generate_qr_code(invoice_uuid: str) -> str:
+    """Generate QR code for invoice verification"""
+    verify_url = f"{GIB_BASE_URL}/qr?uuid={invoice_uuid}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(verify_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format='PNG')
+    return base64.b64encode(buffer.getvalue()).decode()
+
+class UBLTRInvoiceBuilder:
+    """Builds UBL-TR 1.2.1 compliant invoice XML for Turkish e-invoicing"""
+    
+    NAMESPACES = {
+        'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
+        'cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
+    }
+    
+    def __init__(self):
+        self.root = None
+    
+    def build_invoice(self, order: dict, invoice_number: str, invoice_type: str = "SATIS") -> str:
+        """
+        Build UBL-TR invoice XML from order data
+        
+        Args:
+            order: Order document from database
+            invoice_number: Unique invoice number
+            invoice_type: SATIS (sale) or IADE (return)
+        """
+        # Create Invoice root element
+        nsmap = {
+            None: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+            'cac': self.NAMESPACES['cac'],
+            'cbc': self.NAMESPACES['cbc'],
+        }
+        
+        self.root = etree.Element('Invoice', nsmap=nsmap)
+        
+        # UBL Version
+        etree.SubElement(self.root, '{%s}UBLVersionID' % self.NAMESPACES['cbc']).text = '2.1'
+        etree.SubElement(self.root, '{%s}CustomizationID' % self.NAMESPACES['cbc']).text = 'TR1.2.1'
+        
+        # Invoice identification
+        etree.SubElement(self.root, '{%s}ID' % self.NAMESPACES['cbc']).text = invoice_number
+        
+        # Issue date/time
+        now = datetime.now(timezone.utc)
+        etree.SubElement(self.root, '{%s}IssueDate' % self.NAMESPACES['cbc']).text = now.strftime('%Y-%m-%d')
+        etree.SubElement(self.root, '{%s}IssueTime' % self.NAMESPACES['cbc']).text = now.strftime('%H:%M:%S')
+        
+        # Invoice type code
+        type_code = '388'  # Commercial Invoice
+        etree.SubElement(self.root, '{%s}InvoiceTypeCode' % self.NAMESPACES['cbc']).text = type_code
+        
+        # Currency
+        etree.SubElement(self.root, '{%s}DocumentCurrencyCode' % self.NAMESPACES['cbc']).text = 'TRY'
+        
+        # Add supplier (seller)
+        self._add_supplier_party()
+        
+        # Add customer (buyer)
+        self._add_customer_party(order)
+        
+        # Add line items
+        for idx, item in enumerate(order.get('items', []), 1):
+            self._add_invoice_line(item, idx)
+        
+        # Add tax totals
+        self._add_tax_totals(order)
+        
+        # Add monetary totals
+        self._add_monetary_totals(order)
+        
+        return etree.tostring(
+            self.root,
+            pretty_print=True,
+            xml_declaration=True,
+            encoding='UTF-8'
+        ).decode('utf-8')
+    
+    def _add_supplier_party(self):
+        """Add supplier (AccountingSupplierParty) - your company"""
+        supplier = etree.SubElement(self.root, '{%s}AccountingSupplierParty' % self.NAMESPACES['cac'])
+        party = etree.SubElement(supplier, '{%s}Party' % self.NAMESPACES['cac'])
+        
+        # Party ID (VKN)
+        party_id = etree.SubElement(party, '{%s}PartyIdentification' % self.NAMESPACES['cac'])
+        id_elem = etree.SubElement(party_id, '{%s}ID' % self.NAMESPACES['cbc'])
+        id_elem.set('schemeID', 'VKN')
+        id_elem.text = GIB_VKN
+        
+        # Party name
+        party_name = etree.SubElement(party, '{%s}PartyName' % self.NAMESPACES['cac'])
+        etree.SubElement(party_name, '{%s}Name' % self.NAMESPACES['cbc']).text = GIB_COMPANY_NAME
+    
+    def _add_customer_party(self, order: dict):
+        """Add customer (AccountingCustomerParty) from order"""
+        customer = etree.SubElement(self.root, '{%s}AccountingCustomerParty' % self.NAMESPACES['cac'])
+        party = etree.SubElement(customer, '{%s}Party' % self.NAMESPACES['cac'])
+        
+        shipping = order.get('shipping_address', {})
+        
+        # Party name
+        party_name = etree.SubElement(party, '{%s}PartyName' % self.NAMESPACES['cac'])
+        full_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip()
+        etree.SubElement(party_name, '{%s}Name' % self.NAMESPACES['cbc']).text = full_name or 'Müşteri'
+        
+        # Address
+        address = etree.SubElement(party, '{%s}PostalAddress' % self.NAMESPACES['cac'])
+        etree.SubElement(address, '{%s}CityName' % self.NAMESPACES['cbc']).text = shipping.get('city', '')
+        etree.SubElement(address, '{%s}PostalZone' % self.NAMESPACES['cbc']).text = shipping.get('postal_code', '00000')
+        
+        country = etree.SubElement(address, '{%s}Country' % self.NAMESPACES['cac'])
+        etree.SubElement(country, '{%s}IdentificationCode' % self.NAMESPACES['cbc']).text = 'TR'
+    
+    def _add_invoice_line(self, item: dict, line_number: int):
+        """Add invoice line item"""
+        line = etree.SubElement(self.root, '{%s}InvoiceLine' % self.NAMESPACES['cac'])
+        etree.SubElement(line, '{%s}ID' % self.NAMESPACES['cbc']).text = str(line_number)
+        
+        # Quantity
+        qty = etree.SubElement(line, '{%s}InvoicedQuantity' % self.NAMESPACES['cbc'])
+        qty.set('unitCode', 'C62')  # Unit (piece)
+        qty.text = str(item.get('quantity', 1))
+        
+        # Line extension amount (price * quantity, without tax)
+        price = float(item.get('price', 0))
+        quantity = int(item.get('quantity', 1))
+        line_total = price * quantity
+        
+        amount = etree.SubElement(line, '{%s}LineExtensionAmount' % self.NAMESPACES['cbc'])
+        amount.set('currencyID', 'TRY')
+        amount.text = f"{line_total:.2f}"
+        
+        # Item description
+        item_elem = etree.SubElement(line, '{%s}Item' % self.NAMESPACES['cac'])
+        etree.SubElement(item_elem, '{%s}Name' % self.NAMESPACES['cbc']).text = item.get('name', 'Ürün')
+        
+        if item.get('size'):
+            etree.SubElement(item_elem, '{%s}Description' % self.NAMESPACES['cbc']).text = f"Beden: {item.get('size')}"
+        
+        # Price
+        price_elem = etree.SubElement(line, '{%s}Price' % self.NAMESPACES['cac'])
+        price_amount = etree.SubElement(price_elem, '{%s}PriceAmount' % self.NAMESPACES['cbc'])
+        price_amount.set('currencyID', 'TRY')
+        price_amount.text = f"{price:.2f}"
+    
+    def _add_tax_totals(self, order: dict):
+        """Add tax totals section"""
+        # Calculate totals
+        subtotal = float(order.get('subtotal', 0))
+        tax_rate = 0.20  # 20% KDV
+        tax_amount = subtotal * tax_rate
+        
+        tax_total = etree.SubElement(self.root, '{%s}TaxTotal' % self.NAMESPACES['cac'])
+        
+        total_tax = etree.SubElement(tax_total, '{%s}TaxAmount' % self.NAMESPACES['cbc'])
+        total_tax.set('currencyID', 'TRY')
+        total_tax.text = f"{tax_amount:.2f}"
+        
+        # Tax subtotal
+        subtotal_elem = etree.SubElement(tax_total, '{%s}TaxSubtotal' % self.NAMESPACES['cac'])
+        
+        taxable = etree.SubElement(subtotal_elem, '{%s}TaxableAmount' % self.NAMESPACES['cbc'])
+        taxable.set('currencyID', 'TRY')
+        taxable.text = f"{subtotal:.2f}"
+        
+        tax_amt = etree.SubElement(subtotal_elem, '{%s}TaxAmount' % self.NAMESPACES['cbc'])
+        tax_amt.set('currencyID', 'TRY')
+        tax_amt.text = f"{tax_amount:.2f}"
+        
+        category = etree.SubElement(subtotal_elem, '{%s}TaxCategory' % self.NAMESPACES['cac'])
+        etree.SubElement(category, '{%s}ID' % self.NAMESPACES['cbc']).text = 'S'
+        etree.SubElement(category, '{%s}Percent' % self.NAMESPACES['cbc']).text = '20'
+        
+        scheme = etree.SubElement(category, '{%s}TaxScheme' % self.NAMESPACES['cac'])
+        etree.SubElement(scheme, '{%s}Name' % self.NAMESPACES['cbc']).text = 'KDV'
+    
+    def _add_monetary_totals(self, order: dict):
+        """Add legal monetary totals"""
+        subtotal = float(order.get('subtotal', 0))
+        total = float(order.get('total', subtotal))
+        tax_amount = subtotal * 0.20
+        
+        totals = etree.SubElement(self.root, '{%s}LegalMonetaryTotal' % self.NAMESPACES['cac'])
+        
+        line_ext = etree.SubElement(totals, '{%s}LineExtensionAmount' % self.NAMESPACES['cbc'])
+        line_ext.set('currencyID', 'TRY')
+        line_ext.text = f"{subtotal:.2f}"
+        
+        tax_excl = etree.SubElement(totals, '{%s}TaxExclusiveAmount' % self.NAMESPACES['cbc'])
+        tax_excl.set('currencyID', 'TRY')
+        tax_excl.text = f"{subtotal:.2f}"
+        
+        tax_incl = etree.SubElement(totals, '{%s}TaxInclusiveAmount' % self.NAMESPACES['cbc'])
+        tax_incl.set('currencyID', 'TRY')
+        tax_incl.text = f"{total:.2f}"
+        
+        payable = etree.SubElement(totals, '{%s}PayableAmount' % self.NAMESPACES['cbc'])
+        payable.set('currencyID', 'TRY')
+        payable.text = f"{total:.2f}"
+
+
+# GIB API Endpoints
+@api_router.get("/gib/status")
+async def get_gib_status():
+    """Get GIB integration status"""
+    return {
+        "configured": is_gib_configured(),
+        "mode": GIB_MODE,
+        "vkn": GIB_VKN[:4] + "******" if GIB_VKN else None,
+        "company_name": GIB_COMPANY_NAME
+    }
+
+@api_router.post("/orders/{order_id}/create-invoice")
+async def create_invoice(
+    order_id: str,
+    invoice_type: str = Query("e-arsiv", description="e-fatura veya e-arsiv"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create e-Fatura or e-Arşiv invoice for an order
+    
+    For now, generates UBL-TR XML and stores it.
+    Full GIB submission requires Mali Mühür (digital seal) certificate.
+    """
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    
+    try:
+        # Fetch order
+        order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+        if not order:
+            raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+        
+        # Check if invoice already exists
+        if order.get("invoice"):
+            return {
+                "success": False,
+                "message": "Bu sipariş için zaten fatura oluşturulmuş",
+                "invoice": order.get("invoice")
+            }
+        
+        # Generate invoice number
+        invoice_number = generate_invoice_number()
+        invoice_uuid = str(uuid.uuid4())
+        
+        # Build UBL-TR XML
+        builder = UBLTRInvoiceBuilder()
+        xml_content = builder.build_invoice(order, invoice_number)
+        
+        # Generate QR code
+        qr_code = generate_qr_code(invoice_uuid)
+        
+        # Store invoice data
+        invoice_data = {
+            "uuid": invoice_uuid,
+            "number": invoice_number,
+            "type": invoice_type,
+            "status": "draft",  # draft, submitted, approved, rejected
+            "xml_content": xml_content,
+            "qr_code": qr_code,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "submitted_at": None,
+            "gib_response": None
+        }
+        
+        # Update order with invoice
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {"invoice": invoice_data, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        logger.info(f"Invoice {invoice_number} created for order {order_id}")
+        
+        return {
+            "success": True,
+            "invoice_number": invoice_number,
+            "invoice_uuid": invoice_uuid,
+            "type": invoice_type,
+            "status": "draft",
+            "message": "Fatura taslağı oluşturuldu. GIB'e gönderim için Mali Mühür gereklidir."
+        }
+        
+    except Exception as e:
+        logger.error(f"Invoice creation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/orders/{order_id}/invoice")
+async def get_order_invoice(
+    order_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get invoice details for an order"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Yetkilendirme gerekli")
+    
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0, "invoice": 1})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    invoice = order.get("invoice")
+    if not invoice:
+        return {"success": False, "message": "Bu sipariş için fatura bulunmuyor"}
+    
+    return {
+        "success": True,
+        "invoice": {
+            "uuid": invoice.get("uuid"),
+            "number": invoice.get("number"),
+            "type": invoice.get("type"),
+            "status": invoice.get("status"),
+            "created_at": invoice.get("created_at"),
+            "qr_code": invoice.get("qr_code")
+        }
+    }
+
+@api_router.get("/orders/{order_id}/invoice/download")
+async def download_invoice_xml(
+    order_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Download invoice XML"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0, "invoice": 1})
+    if not order or not order.get("invoice"):
+        raise HTTPException(status_code=404, detail="Fatura bulunamadı")
+    
+    invoice = order.get("invoice")
+    
+    return Response(
+        content=invoice.get("xml_content", ""),
+        media_type="application/xml",
+        headers={
+            "Content-Disposition": f"attachment; filename=fatura_{invoice.get('number')}.xml"
+        }
+    )
+
+@api_router.get("/orders/{order_id}/invoice/print")
+async def get_printable_invoice(
+    order_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get printable HTML invoice"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Yetkilendirme gerekli")
+    
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    invoice = order.get("invoice", {})
+    shipping = order.get("shipping_address", {})
+    items = order.get("items", [])
+    
+    # Calculate totals
+    subtotal = float(order.get("subtotal", 0))
+    tax_rate = 0.20
+    tax_amount = subtotal * tax_rate
+    total = float(order.get("total", subtotal))
+    
+    # Build items HTML
+    items_html = ""
+    for idx, item in enumerate(items, 1):
+        price = float(item.get("price", 0))
+        qty = int(item.get("quantity", 1))
+        line_total = price * qty
+        items_html += f"""
+        <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">{idx}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">
+                {item.get('name', '')}
+                {f"<br><small>Beden: {item.get('size')}</small>" if item.get('size') else ""}
+            </td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">{qty}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">{price:,.2f} TL</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">{line_total:,.2f} TL</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Fatura - {invoice.get('number', order.get('order_number', ''))}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; font-size: 12px; margin: 0; padding: 20px; }}
+            .invoice-header {{ display: flex; justify-content: space-between; margin-bottom: 30px; }}
+            .company-info {{ }}
+            .invoice-info {{ text-align: right; }}
+            .invoice-title {{ font-size: 24px; font-weight: bold; margin-bottom: 10px; }}
+            .parties {{ display: flex; justify-content: space-between; margin-bottom: 30px; }}
+            .party {{ width: 45%; }}
+            .party-title {{ font-weight: bold; margin-bottom: 5px; border-bottom: 2px solid #000; padding-bottom: 5px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+            th {{ background: #f5f5f5; padding: 10px 8px; text-align: left; border-bottom: 2px solid #000; }}
+            .totals {{ width: 300px; margin-left: auto; }}
+            .totals td {{ padding: 5px 10px; }}
+            .totals .total {{ font-weight: bold; font-size: 14px; border-top: 2px solid #000; }}
+            .qr-section {{ text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; }}
+            .footer {{ margin-top: 30px; text-align: center; font-size: 10px; color: #666; }}
+            @media print {{
+                body {{ padding: 0; }}
+                .no-print {{ display: none; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="invoice-header">
+            <div class="company-info">
+                <div style="font-size: 20px; font-weight: bold;">FACETTE</div>
+                <div>E-Ticaret Mağazası</div>
+                <div>VKN: {GIB_VKN or '0000000000'}</div>
+            </div>
+            <div class="invoice-info">
+                <div class="invoice-title">{invoice.get('type', 'e-Arşiv').upper()} FATURA</div>
+                <div><strong>Fatura No:</strong> {invoice.get('number', '-')}</div>
+                <div><strong>Tarih:</strong> {datetime.now().strftime('%d.%m.%Y')}</div>
+                <div><strong>Sipariş No:</strong> {order.get('order_number', '')}</div>
+            </div>
+        </div>
+        
+        <div class="parties">
+            <div class="party">
+                <div class="party-title">SATICI</div>
+                <div><strong>{GIB_COMPANY_NAME or 'FACETTE'}</strong></div>
+                <div>VKN: {GIB_VKN or '0000000000'}</div>
+            </div>
+            <div class="party">
+                <div class="party-title">ALICI</div>
+                <div><strong>{shipping.get('first_name', '')} {shipping.get('last_name', '')}</strong></div>
+                <div>{shipping.get('address', '')}</div>
+                <div>{shipping.get('district', '')} / {shipping.get('city', '')}</div>
+                <div>Tel: {shipping.get('phone', '')}</div>
+            </div>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px;">#</th>
+                    <th>Ürün</th>
+                    <th style="width: 60px; text-align: center;">Adet</th>
+                    <th style="width: 100px; text-align: right;">Birim Fiyat</th>
+                    <th style="width: 100px; text-align: right;">Tutar</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items_html}
+            </tbody>
+        </table>
+        
+        <table class="totals">
+            <tr>
+                <td>Ara Toplam:</td>
+                <td style="text-align: right;">{subtotal:,.2f} TL</td>
+            </tr>
+            <tr>
+                <td>KDV (%20):</td>
+                <td style="text-align: right;">{tax_amount:,.2f} TL</td>
+            </tr>
+            <tr class="total">
+                <td>GENEL TOPLAM:</td>
+                <td style="text-align: right;">{total:,.2f} TL</td>
+            </tr>
+        </table>
+        
+        {f'''
+        <div class="qr-section">
+            <img src="data:image/png;base64,{invoice.get('qr_code', '')}" width="100" height="100" />
+            <div style="margin-top: 5px; font-size: 10px;">Fatura Doğrulama QR Kodu</div>
+        </div>
+        ''' if invoice.get('qr_code') else ''}
+        
+        <div class="footer">
+            <p>Bu belge 5070 sayılı Elektronik İmza Kanunu uyarınca elektronik ortamda oluşturulmuştur.</p>
+            <p>Fatura UUID: {invoice.get('uuid', '-')}</p>
+        </div>
+        
+        <div class="no-print" style="text-align: center; margin-top: 20px;">
+            <button onclick="window.print()" style="padding: 10px 30px; font-size: 14px; cursor: pointer;">
+                Yazdır
+            </button>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return Response(content=html, media_type="text/html")
+
 # Root endpoint
 @api_router.get("/")
 async def root():

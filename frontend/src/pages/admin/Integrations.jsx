@@ -13,7 +13,8 @@ export default function Integrations() {
     iyzico: { configured: false, mode: "sandbox" },
     trendyol: { configured: false, mode: "sandbox" },
     mng: { configured: true, mode: "live" },
-    netgsm: { configured: false, mode: "sandbox" }
+    netgsm: { configured: false, mode: "sandbox" },
+    gib: { configured: false, mode: "test" }
   });
   const [trendyolOrders, setTrendyolOrders] = useState([]);
 
@@ -28,15 +29,17 @@ export default function Integrations() {
       const headers = { Authorization: `Bearer ${token}` };
 
       // Fetch integration statuses
-      const [paymentRes, trendyolRes] = await Promise.all([
+      const [paymentRes, trendyolRes, gibRes] = await Promise.all([
         axios.get(`${API}/payment/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
-        axios.get(`${API}/trendyol/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } }))
+        axios.get(`${API}/trendyol/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
+        axios.get(`${API}/gib/status`, { headers }).catch(() => ({ data: { configured: false, mode: "test" } }))
       ]);
 
       setStatuses(prev => ({
         ...prev,
         iyzico: paymentRes.data,
-        trendyol: trendyolRes.data
+        trendyol: trendyolRes.data,
+        gib: gibRes.data
       }));
     } catch (err) {
       console.error("Status fetch error:", err);
@@ -121,6 +124,16 @@ export default function Integrations() {
       envKeys: []
     },
     {
+      id: "gib",
+      name: "GIB E-Fatura / E-Arşiv",
+      description: "Elektronik fatura ve e-arşiv fatura oluşturma, GIB entegrasyonu",
+      icon: <FileText className="w-8 h-8" />,
+      status: statuses.gib,
+      color: "blue",
+      instructions: "GIB entegrasyonu için Mali Mühür (dijital imza sertifikası) gereklidir. VKN ve şirket bilgilerini .env dosyasına ekleyiniz.",
+      envKeys: ["GIB_USERNAME", "GIB_PASSWORD", "GIB_VKN", "GIB_COMPANY_NAME", "GIB_MODE"]
+    },
+    {
       id: "netgsm",
       name: "Netgsm SMS",
       description: "SMS bildirimleri, sipariş durumu güncellemeleri",
@@ -129,16 +142,6 @@ export default function Integrations() {
       color: "purple",
       instructions: "Netgsm panel'den API bilgilerini alınız.",
       envKeys: ["NETGSM_USERNAME", "NETGSM_PASSWORD", "NETGSM_HEADER"]
-    },
-    {
-      id: "gib",
-      name: "GIB e-Fatura",
-      description: "Elektronik fatura ve e-arşiv fatura entegrasyonu",
-      icon: <FileText className="w-8 h-8" />,
-      status: { configured: false, mode: "planned" },
-      color: "gray",
-      instructions: "GIB entegrasyonu yakında eklenecek.",
-      envKeys: []
     }
   ];
 

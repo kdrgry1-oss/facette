@@ -13,9 +13,27 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.5 - Homepage CMS Render ✅
+## Current Status: v9.6 - GIB E-Fatura Entegrasyonu ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.6 - GIB E-Fatura / E-Arşiv Entegrasyonu
+- [x] **UBL-TR 1.2.1 XML Fatura Oluşturma**
+  - Türkiye e-fatura standardına uygun XML üretimi
+  - Satıcı ve alıcı bilgileri
+  - Fatura kalemleri ve KDV hesaplaması
+- [x] **Fatura API Endpoint'leri**
+  - POST /api/orders/{id}/create-invoice - Fatura taslağı oluşturma
+  - GET /api/orders/{id}/invoice - Fatura bilgileri
+  - GET /api/orders/{id}/invoice/print - Yazdırılabilir HTML fatura
+- [x] **QR Kod ve Yazdırılabilir Fatura**
+  - Fatura doğrulama QR kodu
+  - Profesyonel HTML fatura tasarımı
+- [x] **Admin Panel Entegrasyonu**
+  - Siparişler sayfasında "Fatura Kes" butonu
+  - Entegrasyonlar sayfasında GIB kartı
+
+**Not:** Tam GIB portal entegrasyonu için Mali Mühür gereklidir.
 
 #### v9.5 - Ana Sayfada CMS Bloklarını Render Etme
 - [x] **Dinamik Blok Render Sistemi**
@@ -152,7 +170,6 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [ ] Müşteri hesap yönetimi (sipariş geçmişi)
 
 ## P2 - Backlog
-- [ ] GIB e-fatura entegrasyonu
 - [ ] Netgsm SMS (canlı credentials)
 - [ ] Gelişmiş raporlama ve analitik
 

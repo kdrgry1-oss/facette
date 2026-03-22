@@ -89,14 +89,23 @@ export default function AdminOrders() {
   const handleGenerateInvoice = async (orderId) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/orders/${orderId}/invoice`, {}, {
+      const res = await axios.post(`${API}/orders/${orderId}/create-invoice?invoice_type=e-arsiv`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      toast.success(`Fatura oluşturuldu: ${res.data.invoice_number}`);
-      fetchOrders();
+      if (res.data.success) {
+        toast.success(`Fatura oluşturuldu: ${res.data.invoice_number}`);
+        fetchOrders();
+      } else {
+        toast.error(res.data.message || "Fatura oluşturulamadı");
+      }
     } catch (err) {
-      toast.error("Fatura oluşturulamadı");
+      toast.error(err.response?.data?.detail || "Fatura oluşturulamadı");
     }
+  };
+
+  const handlePrintInvoice = async (orderId) => {
+    const token = localStorage.getItem('token');
+    window.open(`${API}/orders/${orderId}/invoice/print?token=${token}`, '_blank');
   };
 
   const handleGenerateCargoBarcode = async (orderId, company = selectedCargo) => {
