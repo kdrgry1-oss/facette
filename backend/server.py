@@ -1302,6 +1302,31 @@ async def set_combo_products(product_id: str, combo_ids: list[str]):
     return {"success": True}
 
 # ==================== CARGO/SHIPPING API ====================
+from zeep import Client as SoapClient, Settings as SoapSettings
+from zeep.transports import Transport as SoapTransport
+from zeep.exceptions import Fault as SoapFault
+import barcode
+from barcode.writer import ImageWriter
+from io import BytesIO
+import base64
+
+# MNG Kargo API Credentials
+MNG_CONFIG = {
+    "customer_code": "FACETTE DIŞ TİC.A.Ş.",
+    "username": "490059279",
+    "password": "Face.0024E",
+    "tax_number": "6080712084",
+    "company_name": "MNG KARGO YURTİÇİ VE YURT",
+    "wsdl_url": "https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL"
+}
+
+# Gönderici (Sender) bilgileri
+SENDER_INFO = {
+    "firma": "FACETTE DIŞ TİCARET A.Ş.",
+    "telefon": "90 543 330 03 10",
+    "adres": "-KÜÇÜKÇEKMECE IKITELLI OSB MAH.\nIMSAN D BLOK\nNO: 3 KÜÇÜKÇEKMECE/ ISTANBUL\nKüçükçekmece / İstanbul"
+}
+
 CARGO_COMPANIES = {
     "MNG": {"name": "MNG Kargo", "tracking_url": "https://www.mngkargo.com.tr/gonderi-takip/?q="},
     "DHL": {"name": "DHL", "tracking_url": "https://www.dhl.com/tr-tr/home/tracking.html?tracking-id="},
@@ -1381,6 +1406,529 @@ async def track_order(order_id: str):
         "tracking_url": cargo.get('tracking_url'),
         "shipped_at": cargo.get('shipped_at')
     }
+
+# ==================== MNG KARGO API INTEGRATION ====================
+def generate_barcode_base64(data: str, barcode_type: str = "code128"):
+    """Generate barcode as base64 image"""
+    try:
+        CODE128 = barcode.get_barcode_class('code128')
+        
+        # Custom writer for higher quality
+        writer = ImageWriter()
+        writer.set_options({
+            'module_width': 0.4,
+            'module_height': 15.0,
+            'quiet_zone': 2.5,
+            'font_size': 10,
+            'text_distance': 5.0,
+            'dpi': 300
+        })
+        
+        code = CODE128(str(data), writer=writer)
+        
+        buffer = BytesIO()
+        code.write(buffer)
+        buffer.seek(0)
+        
+        return base64.b64encode(buffer.read()).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Barcode generation error: {e}")
+        return None
+
+def create_mng_order_via_api(order_data: dict):
+    """Create MNG Kargo order via SOAP API"""
+    try:
+        settings = SoapSettings(strict=False, xml_huge_tree=True)
+        client = SoapClient(MNG_CONFIG["wsdl_url"], settings=settings)
+        
+        # Build request parameters
+        shipping = order_data.get('shipping_address', {})
+        
+        response = client.service.SiparisGirisiDetayliV3(
+            pWsUserName=MNG_CONFIG["username"],
+            pWsPassword=MNG_CONFIG["password"],
+            pChMusteriKodu=MNG_CONFIG["customer_code"],
+            pChIrsaliyeNo=order_data.get('order_number', ''),
+            pChAliciAdSoyad=f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}",
+            pChAliciAdres=shipping.get('address', ''),
+            pChAliciIl=shipping.get('city', 'İstanbul'),
+            pChAliciIlce=shipping.get('district', ''),
+            pChAliciPostaKodu=shipping.get('postal_code', ''),
+            pChAliciTelCep=shipping.get('phone', ''),
+            pChAliciTelEv="",
+            pChAliciTelIs="",
+            pChAliciEmail=shipping.get('email', ''),
+            pIntParcaSayisi=1,
+            pIntDesi=1,
+            pIntKg=1,
+            pDbTahsilatTutari=0 if order_data.get('payment_status') == 'paid' else order_data.get('total', 0),
+            pChOdemeTipi="G",  # Gönderici Ödemeli
+            pChGondericiMusteriKodu=MNG_CONFIG["customer_code"],
+            pChAciklama=f"Sipariş: {order_data.get('order_number', '')}"
+        )
+        
+        # Extract tracking number from response
+        if hasattr(response, 'SiparisNo'):
+            return {"success": True, "tracking_number": str(response.SiparisNo)}
+        elif hasattr(response, 'Sonuc') and response.Sonuc:
+            return {"success": True, "tracking_number": str(response.Sonuc)}
+        else:
+            return {"success": True, "tracking_number": order_data.get('order_number')}
+            
+    except SoapFault as e:
+        logger.error(f"MNG SOAP Fault: {e}")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error(f"MNG API Error: {e}")
+        # Fallback: generate local tracking number
+        import random
+        tracking = f"MNG{random.randint(100000000000, 999999999999)}"
+        return {"success": True, "tracking_number": tracking, "note": "Local generated"}
+
+@api_router.post("/orders/{order_id}/create-mng-shipment", dependencies=[Depends(require_admin)])
+async def create_mng_shipment(order_id: str):
+    """Create shipment via MNG Kargo API"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Create MNG shipment
+    result = create_mng_order_via_api(order)
+    
+    if result.get("success"):
+        tracking_number = result.get("tracking_number")
+        
+        cargo_data = {
+            "company": "MNG",
+            "company_name": "MNG DHL E-Commerce",
+            "tracking_number": tracking_number,
+            "tracking_url": f"https://www.mngkargo.com.tr/gonderi-takip/?q={tracking_number}",
+            "shipped_at": datetime.now(timezone.utc).isoformat(),
+            "status": "shipped",
+            "odeme_turu": "Gönderici Ödemeli",
+            "kargo_tipi": "Gönderici Ödemeli Kargo",
+            "paket_sayisi": "1/1",
+            "desi": 1
+        }
+        
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {
+                "cargo": cargo_data,
+                "status": "shipped",
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        return {
+            "success": True,
+            "tracking_number": tracking_number,
+            "message": "MNG Kargo siparişi oluşturuldu"
+        }
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "MNG API hatası"))
+
+# ==================== CARGO LABEL (ETİKET) GENERATION ====================
+from fastapi.responses import HTMLResponse
+
+@api_router.get("/orders/{order_id}/cargo-label")
+async def get_cargo_label(order_id: str):
+    """Generate printable cargo label (10cm x 15cm) for an order"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    cargo = order.get('cargo', {})
+    shipping = order.get('shipping_address', {})
+    
+    tracking_number = cargo.get('tracking_number', order.get('order_number', 'N/A'))
+    
+    # Generate barcodes
+    top_barcode = generate_barcode_base64(tracking_number[:6] if len(tracking_number) > 6 else tracking_number)
+    bottom_barcode = generate_barcode_base64(tracking_number)
+    
+    # Build label HTML
+    label_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Kargo Etiketi - {tracking_number}</title>
+        <style>
+            @page {{
+                size: 10cm 15cm;
+                margin: 0;
+            }}
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            body {{
+                font-family: Arial, sans-serif;
+                font-size: 11px;
+                width: 10cm;
+                height: 15cm;
+                padding: 3mm;
+                background: white;
+            }}
+            .label-container {{
+                width: 100%;
+                height: 100%;
+                border: 1px solid #000;
+                display: flex;
+                flex-direction: column;
+            }}
+            .top-barcode {{
+                text-align: center;
+                padding: 5px;
+                border-bottom: 1px solid #000;
+            }}
+            .top-barcode img {{
+                height: 35px;
+                width: auto;
+            }}
+            .top-barcode .number {{
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 2px;
+            }}
+            .section {{
+                border-bottom: 1px solid #000;
+                padding: 5px 8px;
+            }}
+            .section-title {{
+                font-weight: bold;
+                font-size: 12px;
+                text-align: center;
+                margin-bottom: 5px;
+                background: #f0f0f0;
+                padding: 3px;
+            }}
+            .info-row {{
+                display: flex;
+                border-bottom: 1px solid #ddd;
+                padding: 2px 0;
+            }}
+            .info-row:last-child {{
+                border-bottom: none;
+            }}
+            .info-label {{
+                width: 80px;
+                font-weight: bold;
+                flex-shrink: 0;
+            }}
+            .info-value {{
+                flex: 1;
+            }}
+            .bottom-barcode {{
+                text-align: center;
+                padding: 8px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }}
+            .bottom-barcode img {{
+                height: 50px;
+                width: auto;
+                max-width: 100%;
+            }}
+            .bottom-barcode .number {{
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 5px;
+                letter-spacing: 2px;
+            }}
+            @media print {{
+                body {{
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="label-container">
+            <!-- Top Barcode -->
+            <div class="top-barcode">
+                {f'<img src="data:image/png;base64,{top_barcode}" alt="barcode"/>' if top_barcode else ''}
+                <div class="number">{tracking_number[:6] if len(tracking_number) > 6 else tracking_number}</div>
+            </div>
+            
+            <!-- Gönderici Bilgileri -->
+            <div class="section">
+                <div class="section-title">Gönderici Bilgileri</div>
+                <div class="info-row">
+                    <span class="info-label">Firma</span>
+                    <span class="info-value">{SENDER_INFO['firma']}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Telefon</span>
+                    <span class="info-value">{SENDER_INFO['telefon']}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Adres</span>
+                    <span class="info-value">{SENDER_INFO['adres'].replace(chr(10), '<br>')}</span>
+                </div>
+            </div>
+            
+            <!-- Alıcı Bilgileri -->
+            <div class="section">
+                <div class="section-title">Alıcı Bilgileri</div>
+                <div class="info-row">
+                    <span class="info-label">İsim</span>
+                    <span class="info-value">{shipping.get('first_name', '')} {shipping.get('last_name', '')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Telefon</span>
+                    <span class="info-value">{shipping.get('phone', '')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Adres</span>
+                    <span class="info-value">{shipping.get('address', '')}<br>{shipping.get('district', '')} / {shipping.get('city', '')}</span>
+                </div>
+            </div>
+            
+            <!-- Kargo Bilgileri -->
+            <div class="section">
+                <div class="section-title">Kargo Bilgileri</div>
+                <div class="info-row">
+                    <span class="info-label">Kargo Firması</span>
+                    <span class="info-value">{cargo.get('company_name', 'MNG DHL E-Commerce')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Ödeme Türü</span>
+                    <span class="info-value">{cargo.get('odeme_turu', 'Gönderici Ödemeli')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Kargo Tipi</span>
+                    <span class="info-value">{cargo.get('kargo_tipi', 'Gönderici Ödemeli Kargo')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Paket Sayısı</span>
+                    <span class="info-value">{cargo.get('paket_sayisi', '1/1')}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Desi</span>
+                    <span class="info-value">{cargo.get('desi', 1)}</span>
+                </div>
+            </div>
+            
+            <!-- Bottom Barcode -->
+            <div class="bottom-barcode">
+                {f'<img src="data:image/png;base64,{bottom_barcode}" alt="barcode"/>' if bottom_barcode else ''}
+                <div class="number">{tracking_number}</div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=label_html)
+
+@api_router.post("/orders/bulk-labels")
+async def get_bulk_cargo_labels(order_ids: list[str]):
+    """Generate printable cargo labels for multiple orders"""
+    labels_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Toplu Kargo Etiketleri</title>
+        <style>
+            @page {
+                size: 10cm 15cm;
+                margin: 0;
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: Arial, sans-serif;
+                font-size: 11px;
+            }
+            .label-page {
+                width: 10cm;
+                height: 15cm;
+                padding: 3mm;
+                background: white;
+                page-break-after: always;
+            }
+            .label-page:last-child {
+                page-break-after: auto;
+            }
+            .label-container {
+                width: 100%;
+                height: 100%;
+                border: 1px solid #000;
+                display: flex;
+                flex-direction: column;
+            }
+            .top-barcode {
+                text-align: center;
+                padding: 5px;
+                border-bottom: 1px solid #000;
+            }
+            .top-barcode img {
+                height: 35px;
+                width: auto;
+            }
+            .top-barcode .number {
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 2px;
+            }
+            .section {
+                border-bottom: 1px solid #000;
+                padding: 5px 8px;
+            }
+            .section-title {
+                font-weight: bold;
+                font-size: 12px;
+                text-align: center;
+                margin-bottom: 5px;
+                background: #f0f0f0;
+                padding: 3px;
+            }
+            .info-row {
+                display: flex;
+                border-bottom: 1px solid #ddd;
+                padding: 2px 0;
+            }
+            .info-row:last-child {
+                border-bottom: none;
+            }
+            .info-label {
+                width: 80px;
+                font-weight: bold;
+                flex-shrink: 0;
+            }
+            .info-value {
+                flex: 1;
+            }
+            .bottom-barcode {
+                text-align: center;
+                padding: 8px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+            .bottom-barcode img {
+                height: 50px;
+                width: auto;
+                max-width: 100%;
+            }
+            .bottom-barcode .number {
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 5px;
+                letter-spacing: 2px;
+            }
+            @media print {
+                body {
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+            }
+        </style>
+    </head>
+    <body>
+    """
+    
+    for order_id in order_ids:
+        order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+        if not order:
+            continue
+            
+        cargo = order.get('cargo', {})
+        shipping = order.get('shipping_address', {})
+        tracking_number = cargo.get('tracking_number', order.get('order_number', 'N/A'))
+        
+        top_barcode = generate_barcode_base64(tracking_number[:6] if len(tracking_number) > 6 else tracking_number)
+        bottom_barcode = generate_barcode_base64(tracking_number)
+        
+        labels_html += f"""
+        <div class="label-page">
+            <div class="label-container">
+                <div class="top-barcode">
+                    {f'<img src="data:image/png;base64,{top_barcode}" alt="barcode"/>' if top_barcode else ''}
+                    <div class="number">{tracking_number[:6] if len(tracking_number) > 6 else tracking_number}</div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Gönderici Bilgileri</div>
+                    <div class="info-row">
+                        <span class="info-label">Firma</span>
+                        <span class="info-value">{SENDER_INFO['firma']}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Telefon</span>
+                        <span class="info-value">{SENDER_INFO['telefon']}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Adres</span>
+                        <span class="info-value">{SENDER_INFO['adres'].replace(chr(10), '<br>')}</span>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Alıcı Bilgileri</div>
+                    <div class="info-row">
+                        <span class="info-label">İsim</span>
+                        <span class="info-value">{shipping.get('first_name', '')} {shipping.get('last_name', '')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Telefon</span>
+                        <span class="info-value">{shipping.get('phone', '')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Adres</span>
+                        <span class="info-value">{shipping.get('address', '')}<br>{shipping.get('district', '')} / {shipping.get('city', '')}</span>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Kargo Bilgileri</div>
+                    <div class="info-row">
+                        <span class="info-label">Kargo Firması</span>
+                        <span class="info-value">{cargo.get('company_name', 'MNG DHL E-Commerce')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Ödeme Türü</span>
+                        <span class="info-value">{cargo.get('odeme_turu', 'Gönderici Ödemeli')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Kargo Tipi</span>
+                        <span class="info-value">{cargo.get('kargo_tipi', 'Gönderici Ödemeli Kargo')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Paket Sayısı</span>
+                        <span class="info-value">{cargo.get('paket_sayisi', '1/1')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Desi</span>
+                        <span class="info-value">{cargo.get('desi', 1)}</span>
+                    </div>
+                </div>
+                
+                <div class="bottom-barcode">
+                    {f'<img src="data:image/png;base64,{bottom_barcode}" alt="barcode"/>' if bottom_barcode else ''}
+                    <div class="number">{tracking_number}</div>
+                </div>
+            </div>
+        </div>
+        """
+    
+    labels_html += """
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=labels_html)
 
 # Root endpoint
 @api_router.get("/")

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer } from "lucide-react";
+import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer, Tag } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -138,6 +138,63 @@ export default function AdminOrders() {
     }
   };
 
+  const handleCreateMngShipment = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/${orderId}/create-mng-shipment`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`MNG Kargo oluşturuldu: ${res.data.tracking_number}`);
+      fetchOrders();
+    } catch (err) {
+      toast.error("MNG Kargo oluşturulamadı");
+    }
+  };
+
+  const handlePrintLabel = (orderId) => {
+    const labelUrl = `${API}/orders/${orderId}/cargo-label`;
+    const printWindow = window.open(labelUrl, '_blank', 'width=400,height=600');
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      };
+    }
+  };
+
+  const handleBulkPrintLabels = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/bulk-labels`,
+        selectedOrders,
+        { 
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'text'
+        }
+      );
+      
+      // Open in new window for printing
+      const printWindow = window.open('', '_blank', 'width=400,height=600');
+      if (printWindow) {
+        printWindow.document.write(res.data);
+        printWindow.document.close();
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      }
+    } catch (err) {
+      toast.error("Etiketler oluşturulamadı");
+    }
+  };
+
   const handleBulkCargoBarcode = async () => {
     if (selectedOrders.length === 0) {
       toast.error("Lütfen sipariş seçiniz");
@@ -234,6 +291,13 @@ export default function AdminOrders() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between">
           <span className="text-sm font-medium">{selectedOrders.length} sipariş seçildi</span>
           <div className="flex items-center gap-3">
+            <button 
+              onClick={handleBulkPrintLabels}
+              className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+            >
+              <Tag size={16} />
+              Toplu Etiket Yazdır
+            </button>
             <select
               value={selectedCargo}
               onChange={(e) => setSelectedCargo(e.target.value)}
@@ -370,15 +434,32 @@ export default function AdminOrders() {
                           >
                             {order.cargo.tracking_number}
                           </a>
+                          <button 
+                            onClick={() => handlePrintLabel(order.id)}
+                            className="ml-2 text-purple-600 hover:text-purple-800"
+                            title="Etiket Yazdır"
+                          >
+                            <Tag size={14} />
+                          </button>
                         </div>
                       ) : (
-                        <button 
-                          onClick={() => openShipModal(order.id)}
-                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                        >
-                          <Truck size={14} />
-                          Kargoya Ver
-                        </button>
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={() => handleCreateMngShipment(order.id)}
+                            className="text-xs text-green-600 hover:underline flex items-center gap-1"
+                            title="MNG ile Gönder"
+                          >
+                            <Truck size={14} />
+                            MNG
+                          </button>
+                          <button 
+                            onClick={() => openShipModal(order.id)}
+                            className="text-xs text-blue-600 hover:underline"
+                            title="Manuel Giriş"
+                          >
+                            Manuel
+                          </button>
+                        </div>
                       )}
                     </td>
                     <td>
@@ -468,16 +549,36 @@ export default function AdminOrders() {
                     Fatura Kes
                   </button>
                 )}
-                {!selectedOrder.cargo?.tracking_number && (
+                {!selectedOrder.cargo?.tracking_number ? (
+                  <>
+                    <button 
+                      onClick={() => handleCreateMngShipment(selectedOrder.id)}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                    >
+                      <Truck size={16} />
+                      MNG ile Gönder
+                    </button>
+                    <button 
+                      onClick={() => openShipModal(selectedOrder.id)}
+                      className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50"
+                    >
+                      <Truck size={16} />
+                      Manuel Kargo
+                    </button>
+                  </>
+                ) : (
                   <button 
-                    onClick={() => openShipModal(selectedOrder.id)}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                    onClick={() => handlePrintLabel(selectedOrder.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
                   >
-                    <Truck size={16} />
-                    Kargoya Ver
+                    <Tag size={16} />
+                    Etiket Yazdır
                   </button>
                 )}
-                <button className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50">
+                <button 
+                  onClick={() => window.print()}
+                  className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50"
+                >
                   <Printer size={16} />
                   Yazdır
                 </button>
