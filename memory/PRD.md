@@ -13,9 +13,18 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.0 - Real Product Data + Variants ✅
+## Current Status: v9.1 - Admin Varyant Görüntüleme ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.1 - Admin Panelde Mevcut Varyantları Gösterme
+- [x] **Ürün Düzenleme Modalında Varyantlar Sekmesi**
+  - "Mevcut Varyantlar" tablosu eklendi
+  - Her varyant için: Beden, Stok Kodu, Barkod, Stok, Fiyat Farkı gösteriliyor
+  - Stok değeri düşükse (< 5) kırmızı vurgu
+  - Toplam stok hesabı footer'da
+  - Varyant silme butonu
+  - Yeni varyant ekleme formu (Beden, Stok Kodu, Barkod, Stok, Fiyat Farkı)
 
 #### v9.0 - Gerçek Ürün Verileri ve Varyantlar
 - [x] **XML + Excel'den Gerçek Veriler**
@@ -29,9 +38,8 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
   - Bedenler: XS, S, M, L, XL, STD
   - Renkler: Mavi, Buz Mavisi, Ekru, Bej, Siyah, Kahverengi...
 - [x] **Varyantları Görüntüle Butonu**
-  - Admin ürün listesinde "X Varyant" butonu
+  - Admin ürün listesinde "X Beden" butonu
   - Modal ile tüm varyant detayları
-  - Beden, Renk, Stok Kodu, Barkod, Varyasyon Kodu, Stok, Fiyat, Durum
 
 #### v8.0 - Order Tracking + SMS
 - [x] Sipariş Takip Sayfası
@@ -41,21 +49,6 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [x] MNG Kargo API entegrasyonu
 - [x] Kargo etiketi (10cm x 15cm)
 
-## Varyant Yapısı (Excel'den)
-```
-URUNADI: Tina Straight Fit Jean
-├── Varyant 1: L + Mavi
-│   ├── STOKKODU: FCSS1100001
-│   ├── BARKOD: 8684483525551
-│   ├── VARYASYONKODU: 2828-8335
-│   └── STOKADEDI: 47
-├── Varyant 2: M + Mavi
-│   ├── STOKKODU: FCSS1100001
-│   ├── BARKOD: 8684483525568
-│   └── ...
-└── ... (15 varyant total)
-```
-
 ## Admin Panel - Ürünler Sayfası
 | Sütun | Açıklama |
 |-------|----------|
@@ -63,33 +56,35 @@ URUNADI: Tina Straight Fit Jean
 | Ürün Adı | Ad + Kategori |
 | Stok Kodu | Ana stok kodu |
 | Barkod | Ana barkod |
-| **Varyantlar** | "X Varyant" butonu (tıklanabilir) |
+| **Bedenler** | "X Beden" butonu (tıklanabilir) |
 | Fiyat | Satış fiyatı |
 | Stok | Toplam stok |
 | Durum | Aktif/Pasif |
 | İşlemler | Edit, Copy, Toggle, More |
 
-## Import Scripts
-- `/app/backend/import_excel_v2.py` - Excel'den varyantlı ürün import
-- XML'den görseller çekme (inline script)
-
 ## Test Credentials
 - Admin: admin@facette.com / admin123
-- URL: https://mega-menu-catalog.preview.emergentagent.com
+- URL: https://fashion-shop-156.preview.emergentagent.com
 
-## Veri Kaynakları
-- XML: https://www.facette.com.tr/XMLExport/7BECCB0A782647BFAB843E68AD11E468
-- Excel: TicimaxExport (23).xls
+## P0 - Sonraki Görevler
+- [ ] **Frontend Beden Seçimi** - Ürün detay sayfasında beden seçimi (dropdown)
+- [ ] **CMS (Sayfa Tasarımı)** - Sürükle-bırak ile blok sıralama
+- [ ] **Iyzico Ödeme** - Mock'tan canlıya geçiş
 
-## P1 - Sonraki Görevler
-- [ ] Ürün detay sayfasında varyant seçimi (beden/renk dropdown)
+## P1 - Yaklaşan Görevler
 - [ ] Sepete varyant bazlı ekleme
 - [ ] Stok kontrolü varyant bazlı
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
 - [ ] GIB e-fatura
+- [ ] Netgsm SMS (canlı)
 - [ ] Gelişmiş raporlama
+- [ ] Müşteri hesap yönetimi
+
+## Teknik Borç
+- [ ] server.py 2000+ satır - modüler yapıya bölünmeli (routes klasörü)
+- [ ] Eski import scriptleri temizlenmeli
 
 ## Last Updated
-2026-03-22 - v9.0 Real Product Data + Variants System
+2026-03-22 - v9.1 Admin Varyant Görüntüleme

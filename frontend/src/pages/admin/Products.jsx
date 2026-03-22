@@ -50,6 +50,7 @@ export default function AdminProducts() {
     min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
     is_free_shipping: false, is_showcase: false,
     meta_title: "", meta_description: "", meta_keywords: "",
+    variants: [], newVariant: {},
   });
 
   useEffect(() => {
@@ -195,6 +196,7 @@ export default function AdminProducts() {
       meta_title: product.meta_title || "",
       meta_description: product.meta_description || "",
       meta_keywords: product.meta_keywords || "",
+      variants: product.variants || [],
     });
     setModalOpen(true);
   };
@@ -213,6 +215,7 @@ export default function AdminProducts() {
       min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
       is_free_shipping: false, is_showcase: false,
       meta_title: "", meta_description: "", meta_keywords: "",
+      variants: [], newVariant: {},
     });
   };
 
@@ -851,33 +854,130 @@ export default function AdminProducts() {
               <TabsContent value="variants" className="space-y-4 mt-4">
                 <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm mb-4">
                   <p className="font-medium text-amber-800">Varyant Yönetimi</p>
-                  <p className="text-amber-700 text-xs mt-1">Renk ve beden kombinasyonları için stok ve fiyat bilgilerini yönetebilirsiniz.</p>
+                  <p className="text-amber-700 text-xs mt-1">Beden varyantları için stok kodları, barkodlar ve stok miktarlarını yönetebilirsiniz.</p>
                 </div>
+
+                {/* Existing Variants Table */}
+                {formData.variants?.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden mb-6">
+                    <div className="bg-gray-100 px-4 py-2 border-b">
+                      <h4 className="text-sm font-semibold text-gray-700">Mevcut Varyantlar ({formData.variants.length})</h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left px-3 py-2 font-medium">Beden</th>
+                            <th className="text-left px-3 py-2 font-medium">Stok Kodu</th>
+                            <th className="text-left px-3 py-2 font-medium">Barkod</th>
+                            <th className="text-center px-3 py-2 font-medium">Stok</th>
+                            <th className="text-center px-3 py-2 font-medium">Fiyat Farkı</th>
+                            <th className="text-center px-3 py-2 font-medium">İşlem</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {formData.variants.map((v, idx) => (
+                            <tr key={v.id || idx} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                <span className="font-semibold text-base">{v.size || "-"}</span>
+                                {v.color && <span className="text-xs text-gray-500 ml-1">({v.color})</span>}
+                              </td>
+                              <td className="px-3 py-2">
+                                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{v.stock_code || "-"}</code>
+                              </td>
+                              <td className="px-3 py-2">
+                                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{v.barcode || "-"}</code>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="number"
+                                  value={v.stock || 0}
+                                  onChange={(e) => {
+                                    const updated = [...formData.variants];
+                                    updated[idx].stock = parseInt(e.target.value) || 0;
+                                    setFormData({...formData, variants: updated});
+                                  }}
+                                  className={`w-20 border px-2 py-1 rounded text-center ${(v.stock || 0) < 5 ? 'border-red-300 bg-red-50 text-red-700' : ''}`}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="number"
+                                  value={v.price_diff || v.price_adjustment || 0}
+                                  onChange={(e) => {
+                                    const updated = [...formData.variants];
+                                    updated[idx].price_diff = parseFloat(e.target.value) || 0;
+                                    setFormData({...formData, variants: updated});
+                                  }}
+                                  className="w-20 border px-2 py-1 rounded text-center"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormData({
+                                      ...formData,
+                                      variants: formData.variants.filter((_, i) => i !== idx)
+                                    });
+                                  }}
+                                  className="text-red-500 hover:text-red-700 p-1"
+                                  title="Varyantı Sil"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-gray-50 border-t">
+                          <tr>
+                            <td className="px-3 py-2 font-medium">Toplam</td>
+                            <td className="px-3 py-2"></td>
+                            <td className="px-3 py-2"></td>
+                            <td className="px-3 py-2 text-center font-semibold">
+                              {formData.variants.reduce((sum, v) => sum + (v.stock || 0), 0)} adet
+                            </td>
+                            <td className="px-3 py-2"></td>
+                            <td className="px-3 py-2"></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {(!formData.variants || formData.variants.length === 0) && (
+                  <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed border-gray-300 mb-6">
+                    <Layers size={32} className="mx-auto text-gray-400 mb-2" />
+                    <p className="text-sm text-gray-500">Bu ürünün henüz varyantı yok</p>
+                  </div>
+                )}
                 
                 {/* Add New Variant */}
-                <div className="border rounded-lg p-4">
+                <div className="border rounded-lg p-4 bg-blue-50/50">
                   <h4 className="text-sm font-medium mb-3">Yeni Varyant Ekle</h4>
                   <div className="grid grid-cols-6 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">Beden</label>
+                      <label className="block text-xs text-gray-600 mb-1">Beden *</label>
                       <select
                         value={formData.newVariant?.size || ""}
                         onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), size: e.target.value}})}
                         className="w-full border px-2 py-1.5 text-sm rounded"
                       >
                         <option value="">Seçin</option>
-                        {["XS", "S", "M", "L", "XL", "XXL", "36", "38", "40", "42", "44"].map(s => (
+                        {["XS", "S", "M", "L", "XL", "XXL", "STD", "36", "38", "40", "42", "44"].map(s => (
                           <option key={s} value={s}>{s}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">Renk</label>
+                      <label className="block text-xs text-gray-600 mb-1">Stok Kodu</label>
                       <input
                         type="text"
-                        value={formData.newVariant?.color || ""}
-                        onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), color: e.target.value}})}
-                        placeholder="Siyah"
+                        value={formData.newVariant?.stock_code || ""}
+                        onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), stock_code: e.target.value}})}
+                        placeholder="FCSS0100001"
                         className="w-full border px-2 py-1.5 text-sm rounded"
                       />
                     </div>
@@ -887,24 +987,26 @@ export default function AdminProducts() {
                         type="text"
                         value={formData.newVariant?.barcode || ""}
                         onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), barcode: e.target.value}})}
+                        placeholder="8684483..."
                         className="w-full border px-2 py-1.5 text-sm rounded"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-600 mb-1">Stok</label>
+                      <label className="block text-xs text-gray-600 mb-1">Stok *</label>
                       <input
                         type="number"
                         value={formData.newVariant?.stock || ""}
                         onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), stock: parseInt(e.target.value) || 0}})}
                         className="w-full border px-2 py-1.5 text-sm rounded"
+                        min="0"
                       />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-600 mb-1">Fiyat Farkı</label>
                       <input
                         type="number"
-                        value={formData.newVariant?.price_adjustment || ""}
-                        onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), price_adjustment: parseFloat(e.target.value) || 0}})}
+                        value={formData.newVariant?.price_diff || ""}
+                        onChange={(e) => setFormData({...formData, newVariant: {...(formData.newVariant || {}), price_diff: parseFloat(e.target.value) || 0}})}
                         placeholder="0"
                         className="w-full border px-2 py-1.5 text-sm rounded"
                       />
@@ -913,16 +1015,24 @@ export default function AdminProducts() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (!formData.newVariant?.size) return;
+                          if (!formData.newVariant?.size) {
+                            toast.error("Beden seçimi zorunludur");
+                            return;
+                          }
                           const newVar = {
                             id: `var-${Date.now()}`,
-                            ...formData.newVariant
+                            size: formData.newVariant.size,
+                            stock_code: formData.newVariant.stock_code || "",
+                            barcode: formData.newVariant.barcode || "",
+                            stock: formData.newVariant.stock || 0,
+                            price_diff: formData.newVariant.price_diff || 0
                           };
                           setFormData({
                             ...formData,
                             variants: [...(formData.variants || []), newVar],
                             newVariant: {}
                           });
+                          toast.success("Varyant eklendi");
                         }}
                         className="w-full bg-black text-white py-1.5 text-sm rounded hover:bg-gray-800"
                       >
@@ -931,75 +1041,6 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
-
-                {/* Existing Variants */}
-                {formData.variants?.length > 0 && (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left px-3 py-2">Beden</th>
-                          <th className="text-left px-3 py-2">Renk</th>
-                          <th className="text-left px-3 py-2">Barkod</th>
-                          <th className="text-left px-3 py-2">Stok</th>
-                          <th className="text-left px-3 py-2">Fiyat Farkı</th>
-                          <th className="text-center px-3 py-2">İşlem</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {formData.variants.map((v, idx) => (
-                          <tr key={v.id || idx} className="border-t">
-                            <td className="px-3 py-2">{v.size}</td>
-                            <td className="px-3 py-2">{v.color || "-"}</td>
-                            <td className="px-3 py-2">{v.barcode || "-"}</td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={v.stock || 0}
-                                onChange={(e) => {
-                                  const updated = [...formData.variants];
-                                  updated[idx].stock = parseInt(e.target.value) || 0;
-                                  setFormData({...formData, variants: updated});
-                                }}
-                                className="w-16 border px-2 py-1 rounded"
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={v.price_adjustment || 0}
-                                onChange={(e) => {
-                                  const updated = [...formData.variants];
-                                  updated[idx].price_adjustment = parseFloat(e.target.value) || 0;
-                                  setFormData({...formData, variants: updated});
-                                }}
-                                className="w-20 border px-2 py-1 rounded"
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFormData({
-                                    ...formData,
-                                    variants: formData.variants.filter((_, i) => i !== idx)
-                                  });
-                                }}
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {(!formData.variants || formData.variants.length === 0) && (
-                  <p className="text-sm text-gray-500 text-center py-4">Henüz varyant eklenmemiş</p>
-                )}
               </TabsContent>
             </Tabs>
 
