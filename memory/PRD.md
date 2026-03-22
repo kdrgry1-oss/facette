@@ -13,9 +13,24 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.1 - Admin Varyant Görüntüleme ✅
+## Current Status: v9.2 - Frontend Beden Seçimi ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.2 - Frontend Ürün Detay Sayfasında Beden Seçimi
+- [x] **Beden Seçimi UI**
+  - Stokta olmayan bedenler devre dışı (gri, çizgili)
+  - Seçilen beden siyah arkaplan ile vurgulanıyor
+  - "Stokta: X adet" yeşil yazıyla gösteriliyor
+- [x] **Seçili Varyant Detayları**
+  - Seçilen beden için ayrı bilgi kutusu
+  - Stok kodu ve barkod gösterimi
+  - Fiyat farkı varsa gösteriliyor
+- [x] **Sepete Ekleme**
+  - Beden seçilmeden "Sepete Ekle" butonu devre dışı
+  - Stok kontrolü - yetersiz stok uyarısı
+  - Toast mesajı beden bilgisi ile birlikte
+  - Sepette beden bilgisi görünüyor
 
 #### v9.1 - Admin Panelde Mevcut Varyantları Gösterme
 - [x] **Ürün Düzenleme Modalında Varyantlar Sekmesi**
@@ -67,13 +82,13 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - URL: https://fashion-shop-156.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
-- [ ] **Frontend Beden Seçimi** - Ürün detay sayfasında beden seçimi (dropdown)
 - [ ] **CMS (Sayfa Tasarımı)** - Sürükle-bırak ile blok sıralama
 - [ ] **Iyzico Ödeme** - Mock'tan canlıya geçiş
 
 ## P1 - Yaklaşan Görevler
-- [ ] Sepete varyant bazlı ekleme
-- [ ] Stok kontrolü varyant bazlı
+- [x] ~~Sepete varyant bazlı ekleme~~ ✅
+- [x] ~~Stok kontrolü varyant bazlı~~ ✅
+- [ ] Checkout sayfasında varyant bilgisi gösterimi
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
@@ -87,4 +102,4 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [ ] Eski import scriptleri temizlenmeli
 
 ## Last Updated
-2026-03-22 - v9.1 Admin Varyant Görüntüleme
+2026-03-22 - v9.2 Frontend Beden Seçimi

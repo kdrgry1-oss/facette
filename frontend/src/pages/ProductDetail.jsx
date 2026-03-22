@@ -80,8 +80,18 @@ export default function ProductDetail() {
       toast.error("Lütfen beden seçiniz");
       return;
     }
+    
+    // Check stock for selected variant
+    if (selectedVariant && selectedVariant.stock < quantity) {
+      toast.error(`Yetersiz stok! Mevcut stok: ${selectedVariant.stock}`);
+      return;
+    }
+    
     addItem(product, selectedVariant, quantity);
-    toast.success("Ürün sepete eklendi");
+    toast.success(selectedVariant 
+      ? `${product.name} - ${selectedVariant.size} sepete eklendi` 
+      : "Ürün sepete eklendi"
+    );
   };
 
   const handleSizeSelect = (variant) => {
@@ -127,7 +137,9 @@ export default function ProductDetail() {
   }
 
   const hasDiscount = product.sale_price && product.sale_price < product.price;
-  const displayPrice = product.sale_price || product.price;
+  const basePrice = product.sale_price || product.price;
+  const variantPriceDiff = selectedVariant?.price_diff || 0;
+  const displayPrice = basePrice + variantPriceDiff;
 
   // Remove duplicate images and separate size chart
   const allImages = product.images || [];
@@ -244,18 +256,26 @@ export default function ProductDetail() {
 
             {/* Size Selection */}
             <div className="mb-5">
-              <span className="text-xs block mb-2">Beden Seçiniz</span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs">Beden Seçiniz</span>
+                {selectedVariant && (
+                  <span className={`text-xs ${selectedVariant.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {selectedVariant.stock > 0 ? `Stokta: ${selectedVariant.stock} adet` : 'Tükendi'}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => (
                   <button
                     key={index}
                     onClick={() => handleSizeSelect(variant)}
                     disabled={variant.stock === 0}
-                    className={`min-w-[44px] h-9 px-3 border text-xs transition-colors ${
+                    data-testid={`size-btn-${variant.size}`}
+                    className={`min-w-[44px] h-9 px-3 border text-xs transition-all ${
                       selectedSize === variant.size 
                         ? "border-black bg-black text-white" 
                         : variant.stock === 0 
-                          ? "border-gray-200 text-gray-300 cursor-not-allowed line-through" 
+                          ? "border-gray-200 text-gray-300 cursor-not-allowed line-through bg-gray-50" 
                           : "border-gray-300 hover:border-black"
                     }`}
                   >
@@ -263,6 +283,22 @@ export default function ProductDetail() {
                   </button>
                 ))}
               </div>
+              
+              {/* Selected Variant Details */}
+              {selectedVariant && (
+                <div className="mt-3 p-3 bg-gray-50 rounded text-xs space-y-1">
+                  <p className="font-medium text-gray-700">Seçili Beden: {selectedVariant.size}</p>
+                  {selectedVariant.stock_code && (
+                    <p className="text-gray-500">Stok Kodu: <span className="font-mono">{selectedVariant.stock_code}</span></p>
+                  )}
+                  {selectedVariant.barcode && (
+                    <p className="text-gray-500">Barkod: <span className="font-mono">{selectedVariant.barcode}</span></p>
+                  )}
+                  {selectedVariant.price_diff > 0 && (
+                    <p className="text-gray-600">Fiyat Farkı: +{selectedVariant.price_diff.toFixed(2)} TL</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Quantity */}
@@ -292,9 +328,15 @@ export default function ProductDetail() {
             <div className="flex gap-2 mb-6">
               <button 
                 onClick={handleAddToCart}
-                className="flex-1 bg-black text-white py-3 text-xs uppercase tracking-wider hover:bg-gray-900"
+                data-testid="add-to-cart-btn"
+                disabled={product.variants?.length > 0 && !selectedVariant}
+                className={`flex-1 py-3 text-xs uppercase tracking-wider transition-colors ${
+                  product.variants?.length > 0 && !selectedVariant
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-black text-white hover:bg-gray-900"
+                }`}
               >
-                Sepete Ekle
+                {product.variants?.length > 0 && !selectedVariant ? "Beden Seçiniz" : "Sepete Ekle"}
               </button>
               <button className="w-12 h-12 border border-gray-300 flex items-center justify-center hover:border-black">
                 <Heart size={18} strokeWidth={1.5} />

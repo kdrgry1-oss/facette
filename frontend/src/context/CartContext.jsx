@@ -28,6 +28,11 @@ export function CartProvider({ children }) {
         );
       }
 
+      // Calculate price with variant adjustment
+      const basePrice = product.sale_price || product.price;
+      const priceDiff = variant?.price_diff || variant?.price_adjustment || 0;
+      const finalPrice = basePrice + priceDiff;
+
       return [
         ...prev,
         {
@@ -35,10 +40,12 @@ export function CartProvider({ children }) {
           productId: product.id,
           variantId: variant?.id || null,
           name: product.name,
-          price: variant?.price_adjustment ? product.price + variant.price_adjustment : (product.sale_price || product.price),
+          price: finalPrice,
           image: product.images?.[0] || "",
           size: variant?.size || null,
           color: variant?.color || null,
+          stockCode: variant?.stock_code || product.stock_code || null,
+          barcode: variant?.barcode || product.barcode || null,
           quantity,
         },
       ];
