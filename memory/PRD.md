@@ -13,9 +13,30 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.8 - Dashboard Raporlama ✅
+## Current Status: v10.0 - Backend Modüler Mimari ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v10.0 - Backend Modüler Mimari Refactoring
+- [x] **Monolitik server.py Parçalandı**
+  - 3400+ satırlık server.py → modüler routes/ dizini
+  - Her endpoint grubu ayrı dosyada
+- [x] **Yeni Dosya Yapısı**
+  - routes/auth.py - Login, Register, Google OAuth, /me
+  - routes/products.py - Ürün CRUD ve listeleme
+  - routes/orders.py - Sipariş CRUD
+  - routes/categories.py - Kategori CRUD
+  - routes/banners.py - Banner CRUD
+  - routes/cms.py - CMS sayfa blokları
+  - routes/admin.py - Dashboard istatistikleri
+  - routes/customer.py - Müşteri hesap yönetimi
+  - routes/integrations.py - 3. parti entegrasyon durumları
+  - routes/deps.py - Ortak bağımlılıklar (db, auth helpers)
+- [x] **Güvenlik Düzeltmesi**
+  - /auth/me endpoint'i artık password hash döndürmüyor
+- [x] **Tüm API'ler Çalışıyor**
+  - 26/26 backend test geçti
+  - Frontend tamamen fonksiyonel
 
 #### v9.8 - Admin Dashboard ve Raporlama
 - [x] **Ana İstatistikler**
@@ -210,18 +231,40 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - URL: https://couture-platform-dev.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
-- [ ] **Server.py Refactoring** - 3300+ satırlık dosyayı modüler yapıya bölme
+- [x] **Server.py Refactoring** - ✅ TAMAMLANDI - Modüler routes/ yapısına bölündü
 
 ## P1 - Yaklaşan Görevler
-- [ ] Trendyol kategori ve marka eşleştirmesi
+- [ ] Trendyol kategori ve marka eşleştirmesi UI
+- [ ] Favoriler sistemi (tam fonksiyonel)
 
 ## P2 - Backlog
 - [ ] Netgsm SMS (canlı credentials)
 - [ ] Favoriler sistemi (tam fonksiyonel)
 
 ## Teknik Borç
-- [ ] server.py 2000+ satır - modüler yapıya bölünmeli (routes klasörü)
-- [ ] Eski import scriptleri temizlenmeli
+- [x] ~~server.py 2000+ satır~~ - ✅ Modüler routes/ yapısına bölündü
+- [ ] Eski import scriptleri temizlenmeli (import_excel.py, import_excel_v2.py)
+
+## Kod Mimarisi
+```
+/app/backend/
+├── server.py          # Ana FastAPI app (router import'ları)
+├── server.py.old      # Eski monolitik dosya (yedek)
+├── models.py          # Pydantic modelleri
+├── requirements.txt
+└── routes/
+    ├── __init__.py    # Router export'ları
+    ├── deps.py        # Ortak bağımlılıklar (db, auth)
+    ├── auth.py        # /auth/* endpoints
+    ├── products.py    # /products/* endpoints
+    ├── orders.py      # /orders/* endpoints
+    ├── categories.py  # /categories/* endpoints
+    ├── banners.py     # /banners/* endpoints
+    ├── cms.py         # /page-blocks/* endpoints
+    ├── admin.py       # /admin/* endpoints
+    ├── customer.py    # Customer account endpoints
+    └── integrations.py # Integration status endpoints
+```
 
 ## Last Updated
-2026-03-22 - v9.5 Homepage CMS Render
+2026-03-22 - v10.0 Backend Modüler Mimari Refactoring
