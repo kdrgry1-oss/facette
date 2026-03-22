@@ -389,8 +389,11 @@ export default function Checkout() {
                       <img src={item.image} alt={item.name} className="w-16 h-20 object-cover bg-gray-100" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">{item.name}</p>
-                        {item.size && <p className="text-xs text-gray-500">Beden: {item.size}</p>}
-                        <p className="text-xs text-gray-500">Adet: {item.quantity}</p>
+                        <div className="text-xs text-gray-500 space-y-0.5">
+                          {item.size && <p>Beden: <span className="font-medium text-gray-700">{item.size}</span></p>}
+                          {item.color && <p>Renk: <span className="font-medium text-gray-700">{item.color}</span></p>}
+                          <p>Adet: {item.quantity}</p>
+                        </div>
                         <p className="text-sm font-medium mt-1">{(item.price * item.quantity).toFixed(2)} TL</p>
                       </div>
                     </div>

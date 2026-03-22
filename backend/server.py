@@ -3174,6 +3174,255 @@ async def get_printable_invoice(
     
     return Response(content=html, media_type="text/html")
 
+# ==================== CUSTOMER ACCOUNT APIs ====================
+
+@api_router.get("/my-orders")
+async def get_my_orders(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get current user's orders"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    skip = (page - 1) * limit
+    query = {"user_id": current_user.get("id")}
+    
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.orders.count_documents(query)
+    
+    return {
+        "orders": orders,
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }
+
+@api_router.put("/users/me")
+async def update_my_profile(
+    profile_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update current user's profile"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    allowed_fields = ["first_name", "last_name", "phone"]
+    update_data = {k: v for k, v in profile_data.items() if k in allowed_fields}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.users.update_one(
+        {"id": current_user.get("id")},
+        {"$set": update_data}
+    )
+    
+    return {"success": True, "message": "Profil güncellendi"}
+
+@api_router.get("/my-addresses")
+async def get_my_addresses(current_user: dict = Depends(get_current_user)):
+    """Get current user's addresses"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    addresses = await db.addresses.find(
+        {"user_id": current_user.get("id")}, 
+        {"_id": 0}
+    ).to_list(20)
+    
+    return {"addresses": addresses}
+
+@api_router.post("/addresses")
+async def create_address(
+    address_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Create new address"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    address = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "title": address_data.get("title", ""),
+        "first_name": address_data.get("first_name", ""),
+        "last_name": address_data.get("last_name", ""),
+        "phone": address_data.get("phone", ""),
+        "address": address_data.get("address", ""),
+        "city": address_data.get("city", ""),
+        "district": address_data.get("district", ""),
+        "postal_code": address_data.get("postal_code", ""),
+        "is_default": address_data.get("is_default", False),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # If setting as default, unset others
+    if address["is_default"]:
+        await db.addresses.update_many(
+            {"user_id": current_user.get("id")},
+            {"$set": {"is_default": False}}
+        )
+    
+    await db.addresses.insert_one(address)
+    
+    return {"success": True, "address_id": address["id"]}
+
+@api_router.put("/addresses/{address_id}")
+async def update_address(
+    address_id: str,
+    address_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update address"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    # Verify ownership
+    address = await db.addresses.find_one({
+        "id": address_id, 
+        "user_id": current_user.get("id")
+    })
+    
+    if not address:
+        raise HTTPException(status_code=404, detail="Adres bulunamadı")
+    
+    # If setting as default, unset others
+    if address_data.get("is_default"):
+        await db.addresses.update_many(
+            {"user_id": current_user.get("id"), "id": {"$ne": address_id}},
+            {"$set": {"is_default": False}}
+        )
+    
+    allowed_fields = ["title", "first_name", "last_name", "phone", "address", "city", "district", "postal_code", "is_default"]
+    update_data = {k: v for k, v in address_data.items() if k in allowed_fields}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.addresses.update_one({"id": address_id}, {"$set": update_data})
+    
+    return {"success": True}
+
+@api_router.delete("/addresses/{address_id}")
+async def delete_address(
+    address_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete address"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    
+    result = await db.addresses.delete_one({
+        "id": address_id,
+        "user_id": current_user.get("id")
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Adres bulunamadı")
+    
+    return {"success": True}
+
+# ==================== ADMIN DASHBOARD STATS ====================
+
+@api_router.get("/admin/dashboard-stats")
+async def get_dashboard_stats(
+    days: int = Query(30, ge=1, le=365),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get dashboard statistics for admin"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    
+    try:
+        # Calculate date range
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+        prev_start = start_date - timedelta(days=days)
+        
+        # Get totals
+        total_orders = await db.orders.count_documents({})
+        total_products = await db.products.count_documents({"is_active": True})
+        total_customers = await db.users.count_documents({"is_admin": {"$ne": True}})
+        
+        # Get orders in date range
+        orders_in_range = await db.orders.find({
+            "created_at": {"$gte": start_date.isoformat()}
+        }, {"_id": 0}).to_list(1000)
+        
+        # Calculate revenue
+        total_revenue = sum(o.get("total", 0) for o in orders_in_range)
+        
+        # Previous period for comparison
+        prev_orders = await db.orders.find({
+            "created_at": {
+                "$gte": prev_start.isoformat(),
+                "$lt": start_date.isoformat()
+            }
+        }, {"_id": 0}).to_list(1000)
+        prev_revenue = sum(o.get("total", 0) for o in prev_orders)
+        
+        # Growth calculations
+        growth_orders = ((len(orders_in_range) - len(prev_orders)) / max(len(prev_orders), 1)) * 100 if prev_orders else 0
+        growth_revenue = ((total_revenue - prev_revenue) / max(prev_revenue, 1)) * 100 if prev_revenue else 0
+        
+        # Today's stats
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        orders_today = [o for o in orders_in_range if o.get("created_at", "") >= today_start.isoformat()]
+        revenue_today = sum(o.get("total", 0) for o in orders_today)
+        
+        # Order status breakdown
+        status_breakdown = {}
+        for order in orders_in_range:
+            status = order.get("status", "pending")
+            status_breakdown[status] = status_breakdown.get(status, 0) + 1
+        
+        # Pending and shipped counts
+        pending_orders = await db.orders.count_documents({"status": "pending"})
+        shipped_orders = await db.orders.count_documents({"status": "shipped"})
+        
+        # Recent orders
+        recent_orders = await db.orders.find(
+            {}, {"_id": 0, "id": 1, "order_number": 1, "total": 1, "status": 1, "created_at": 1}
+        ).sort("created_at", -1).limit(5).to_list(5)
+        
+        # Top selling products (simplified - count from order items)
+        pipeline = [
+            {"$unwind": "$items"},
+            {"$group": {
+                "_id": "$items.name",
+                "sold": {"$sum": "$items.quantity"},
+                "revenue": {"$sum": {"$multiply": ["$items.price", "$items.quantity"]}}
+            }},
+            {"$sort": {"sold": -1}},
+            {"$limit": 5}
+        ]
+        top_products_cursor = db.orders.aggregate(pipeline)
+        top_products = []
+        async for p in top_products_cursor:
+            top_products.append({
+                "name": p["_id"],
+                "sold": p["sold"],
+                "revenue": p["revenue"]
+            })
+        
+        return {
+            "total_orders": total_orders,
+            "total_revenue": total_revenue,
+            "total_products": total_products,
+            "total_customers": total_customers,
+            "pending_orders": pending_orders,
+            "shipped_orders": shipped_orders,
+            "orders_today": len(orders_today),
+            "revenue_today": revenue_today,
+            "growth_orders": round(growth_orders, 1),
+            "growth_revenue": round(growth_revenue, 1),
+            "recent_orders": recent_orders,
+            "top_products": top_products,
+            "order_status_breakdown": status_breakdown
+        }
+        
+    except Exception as e:
+        logger.error(f"Dashboard stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Root endpoint
 @api_router.get("/")
 async def root():

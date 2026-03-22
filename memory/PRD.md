@@ -13,9 +13,56 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.6 - GIB E-Fatura Entegrasyonu ✅
+## Current Status: v9.8 - Dashboard Raporlama ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.8 - Admin Dashboard ve Raporlama
+- [x] **Ana İstatistikler**
+  - Toplam Sipariş, Gelir, Ürün, Müşteri kartları
+  - Geçen aya göre büyüme oranları (%)
+  - Renkli ikonlar ve modern tasarım
+- [x] **İkincil İstatistikler**
+  - Bekleyen Siparişler (sarı)
+  - Kargodaki Siparişler (mor)
+  - Bugünkü Gelir (yeşil)
+- [x] **Sipariş Durumu Dağılımı**
+  - Progress bar'lı görsel dağılım
+  - Beklemede, Onaylandı, Kargoda, Teslim, İptal
+- [x] **En Çok Satan Ürünler**
+  - Top 5 ürün listesi
+  - Satış adedi ve gelir
+  - Sıralama badge'leri (altın, gümüş, bronz)
+- [x] **Son Siparişler**
+  - Son 5 sipariş tablosu
+  - "Tümünü Gör" linki
+- [x] **Tarih Filtresi**
+  - Son 7, 30, 90 gün ve 1 yıl seçenekleri
+- [x] **Backend API**
+  - GET /api/admin/dashboard-stats
+
+#### v9.7 - Müşteri Hesap Yönetimi ve Checkout İyileştirmeleri
+- [x] **Checkout Varyant Bilgisi**
+  - Sipariş özetinde beden ve renk gösterimi
+- [x] **Hesabım Sayfası**
+  - Profil Bilgileri - Ad, Soyad, E-posta, Telefon, Üyelik Tarihi
+  - Profil düzenleme formu
+  - Şifre değiştir bölümü
+- [x] **Siparişlerim**
+  - Sipariş listesi (tarih, durum badge'i)
+  - Sipariş detayları (ürünler, beden, adet, fiyat)
+  - Teslimat adresi ve kargo bilgisi
+  - Sipariş durumu: Beklemede, Onaylandı, Kargoda, Teslim Edildi, İptal
+- [x] **Adreslerim**
+  - Adres listesi
+  - Yeni adres ekleme formu
+  - Adres düzenleme/silme
+  - Varsayılan adres seçimi
+- [x] **Favorilerim** (placeholder)
+- [x] **Backend API'leri**
+  - GET /api/my-orders - Kullanıcının siparişleri
+  - PUT /api/users/me - Profil güncelleme
+  - CRUD /api/addresses - Adres yönetimi
 
 #### v9.6 - GIB E-Fatura / E-Arşiv Entegrasyonu
 - [x] **UBL-TR 1.2.1 XML Fatura Oluşturma**
@@ -163,15 +210,14 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - URL: https://fashion-shop-156.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
-- [ ] **Checkout sayfasında varyant bilgisi** - Seçilen beden gösterimi
+- [ ] **Server.py Refactoring** - 3300+ satırlık dosyayı modüler yapıya bölme
 
 ## P1 - Yaklaşan Görevler
 - [ ] Trendyol kategori ve marka eşleştirmesi
-- [ ] Müşteri hesap yönetimi (sipariş geçmişi)
 
 ## P2 - Backlog
 - [ ] Netgsm SMS (canlı credentials)
-- [ ] Gelişmiş raporlama ve analitik
+- [ ] Favoriler sistemi (tam fonksiyonel)
 
 ## Teknik Borç
 - [ ] server.py 2000+ satır - modüler yapıya bölünmeli (routes klasörü)
