@@ -7,54 +7,80 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Frontend: React 18, Tailwind CSS, Shadcn/UI
 - Backend: FastAPI (Python 3.11), Motor (async MongoDB)
 - Database: MongoDB
+- Storage: Emergent Object Storage
+- Auth: JWT + Google OAuth (Emergent Auth)
 
-## Current Status: v2.0 - facette.com.tr Replica ✅
+## Current Status: v3.0 - facette.com.tr Replica ✅
 
 ### What's Been Implemented (2026-03-22)
 
 #### UI/UX - facette.com.tr Replica
-- [x] **Üst Banner**: "500 TL ÜZERİ ÜCRETSİZ KARGO"
-- [x] **Header**: Logo ortada, menü solda (EN YENİLER, GİYİM, AKSESUAR, SALE kırmızı)
-- [x] **Alt Kategori Dropdown**: GİYİM ve AKSESUAR hoverde alt kategoriler
-- [x] **Hero Slider**: facette.com.tr görsellerinden
-- [x] **Banner Yapısı**: Tam genişlik (BLOOM TOGETHER) + yarı yarıya (GÖMLEK, ÇANTA)
-- [x] **Ürün Kartları**: Bookmark ikonu, sepete ekle ikonu (ad yanında), resim noktaları
-- [x] **Arama**: "EN ÇOK ARANANLAR", canlı arama sonuçları
-- [x] **Ürün Detay**: 
-  - "Beden Tablosu" linki SEPETE EKLE üzerinde
-  - Son görsel popup olarak açılıyor
-  - Sayfa üstten açılıyor (scroll fix)
-  - Tekrar eden resimler kaldırıldı
-- [x] **Checkout**: Menüler gizli, sadece logo
+- [x] **Üst Banner**: "500 TL ÜZERİ ÜCRETSİZ KARGO" (beyaz bg, siyah text)
+- [x] **Logo**: Doğru FACETTE logosu
+- [x] **Header Menü**: EN YENİLER, GİYİM ▾, AKSESUAR ▾, SALE (kırmızı)
+- [x] **Alt Kategori Dropdown**: Hoverde tüm alt kategoriler
+- [x] **Hero Slider**: Tam genişlik, boşluksuz
+- [x] **Banner Yapısı**: 
+  - Tam genişlik (BLOOM TOGETHER)
+  - Yarı yarıya (GÖMLEK, ÇANTA)
+  - Aralarında boşluk yok
+- [x] **Ürün Kartları**: Bookmark, sepete ekle (ad yanında)
+- [x] **Ürün Detay**:
+  - İki resim yan yana
+  - Sol/sağ navigasyon okları
+  - Sticky header (scroll sonrası)
+  - Beden Tablosu popup
 
-#### Admin Panel - Gelişmiş Sipariş Yönetimi
-- [x] **Fatura Kesme**: Her siparişte "Fatura Kes" butonu
-- [x] **Kargo Barkodu**: "Barkod Oluştur" butonu (MNG, DHL, Yurtiçi, Aras)
-- [x] **Toplu İşlemler**: Checkbox ile seçim, toplu barkod, toplu durum güncelleme
-- [x] **Sipariş Detay Modal**: Fatura ve kargo bilgileri gösterimi
+#### Authentication
+- [x] **Google Auth**: Emergent Auth ile entegre
+- [x] **JWT Auth**: Normal e-posta/şifre girişi
+
+#### Object Storage
+- [x] **Görsel Yükleme**: /api/upload/image endpoint'i
+- [x] **Dosya Servisi**: /api/files/{path} endpoint'i
+
+#### Ürün Modeli - Ticimax Excel Alanları
+- [x] urun_karti_id, urun_id, stock_code, variation_code
+- [x] barcode, gtip_code, unit, keywords
+- [x] supplier, purchase_price, market_price
+- [x] vat_rate, vat_included, currency
+- [x] cargo_weight, product_weight, dimensions
+- [x] min/max_order_qty, estimated_delivery
+- [x] marketplace_active, custom_fields
+
+#### Admin Panel Özellikleri
+- [x] Sipariş yönetimi (fatura kes, kargo barkodu)
+- [x] Toplu işlemler (toplu barkod, toplu durum)
+- [x] Detay modal (fatura/kargo bilgileri)
 
 ## API Endpoints
 
-### Orders - Advanced
-- GET /api/orders/{order_id}/detail - Admin detaylı sipariş
-- POST /api/orders/{order_id}/invoice - Fatura oluştur
-- POST /api/orders/{order_id}/cargo-barcode - Kargo barkodu
-- POST /api/orders/bulk/cargo-barcode - Toplu kargo barkodu
-- POST /api/orders/bulk/status - Toplu durum güncelleme
+### Auth
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+- POST /api/auth/google/session - Google OAuth callback
 
-### Search
-- GET /api/search/popular - En çok arananlar
-- POST /api/search/log - Arama loglama
+### Upload
+- POST /api/upload/image - Görsel yükleme
+- GET /api/files/{path} - Dosya servisi
+
+### Orders (Admin)
+- GET /api/orders/{id}/detail
+- POST /api/orders/{id}/invoice
+- POST /api/orders/{id}/cargo-barcode
+- POST /api/orders/bulk/cargo-barcode
+- POST /api/orders/bulk/status
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://fashion-ecom-mvp.preview.emergentagent.com
 
 ## P1 - Devam Eden Görevler
-- [ ] Sayfa tasarım yönetimi (admin'den banner/içerik düzenleme)
-- [ ] Ürün varyant yönetimi (renk, beden stok takibi)
-- [ ] Checkout tamamlama
-- [ ] Kullanıcı hesabım sayfası
+- [ ] Sayfa tasarım yönetimi (CMS)
+- [ ] Excel import - tüm ürünleri güncelleme
+- [ ] Admin ürün ekleme - görsel yükleme arayüzü
+- [ ] Checkout akışı tamamlama
 
 ## P2 - Entegrasyonlar
 - [ ] Iyzico ödeme
@@ -63,31 +89,5 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [ ] Trendyol API
 - [ ] GIB e-fatura
 
-## File Structure
-```
-/app/
-├── backend/
-│   ├── server.py          # All API endpoints
-│   ├── models.py          # Pydantic models
-│   └── requirements.txt
-├── frontend/
-│   └── src/
-│       ├── components/
-│       │   ├── Header.jsx      # facette style, dropdown menu
-│       │   ├── ProductCard.jsx # bookmark, cart icon next to name
-│       │   ├── CartDrawer.jsx
-│       │   └── Footer.jsx
-│       ├── pages/
-│       │   ├── Home.jsx        # Full/half banners, products
-│       │   ├── Category.jsx    # Filter sidebar, grid options
-│       │   ├── ProductDetail.jsx # Size chart popup, scroll fix
-│       │   ├── Checkout.jsx    # Hidden menu
-│       │   └── admin/
-│       │       ├── Orders.jsx  # Invoice, cargo, bulk ops
-│       │       └── ...
-│       └── context/
-└── memory/PRD.md
-```
-
 ## Last Updated
-2026-03-22 - facette.com.tr replica + admin enhancements
+2026-03-22 - v3.0 facette replica + Google Auth + Object Storage

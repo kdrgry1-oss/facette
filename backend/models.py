@@ -56,7 +56,7 @@ class ProductVariant(BaseModel):
     stock: int = 0
     price_adjustment: float = 0
 
-# Product Models
+# Product Models - Extended with Ticimax fields
 class ProductBase(BaseModel):
     name: str
     slug: str
@@ -82,6 +82,43 @@ class ProductBase(BaseModel):
     size_chart_images: List[str] = []
     combo_product_ids: List[str] = []
     similar_product_ids: List[str] = []
+    # Ticimax Excel fields
+    urun_karti_id: Optional[str] = None
+    urun_id: Optional[str] = None
+    stock_code: Optional[str] = None  # STOKKODU
+    variation_code: Optional[str] = None  # VARYASYONKODU
+    gtip_code: Optional[str] = None  # GTIPKODU
+    unit: Optional[str] = None  # SATISBIRIMI
+    keywords: Optional[str] = None  # ANAHTARKELIME
+    adwords_description: Optional[str] = None
+    adwords_category: Optional[str] = None
+    breadcrumb_category: Optional[str] = None
+    custom_field_1: Optional[str] = None
+    custom_field_2: Optional[str] = None
+    custom_field_3: Optional[str] = None
+    custom_field_4: Optional[str] = None
+    custom_field_5: Optional[str] = None
+    supplier: Optional[str] = None  # TEDARIKCI
+    max_installment: Optional[int] = None  # MAKSTAKSITSAYISI
+    is_showcase: bool = False  # VITRIN
+    is_opportunity: bool = False  # FIRSATURUNU
+    is_free_shipping: bool = False  # UCRETSIZKARGO
+    consignment_stock: int = 0  # KONSINYESTOKADEDI
+    purchase_price: Optional[float] = None  # ALISFIYATI
+    market_price: Optional[float] = None  # PIYASAFIYATI
+    vat_rate: float = 20  # KDVORANI
+    vat_included: bool = True  # KDVDAHIL
+    currency: str = "TRY"  # PARABIRIMI
+    cargo_weight: Optional[float] = None  # KARGOAGIRLIGI
+    product_weight: Optional[float] = None  # URUNAGIRLIGI
+    width: Optional[float] = None  # URUNGENISLIK
+    depth: Optional[float] = None  # URUNDERINLIK
+    height: Optional[float] = None  # URUNYUKSEKLIK
+    min_order_qty: int = 1  # UYEALIMMIN
+    max_order_qty: Optional[int] = None  # UYEALIMMAKS
+    estimated_delivery: Optional[str] = None  # TAHMINITESLIMSURESI
+    marketplace_active: bool = False  # MARKETPLACEAKTIF
+    publish_date: Optional[datetime] = None  # YAYINTARIHI
 
 class ProductCreate(ProductBase):
     pass

@@ -87,6 +87,50 @@ def serialize_doc(doc):
         doc['end_date'] = doc['end_date'].isoformat()
     return doc
 
+# ==================== OBJECT STORAGE ====================
+import requests as http_requests
+
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "facette"
+storage_key = None
+
+def init_storage():
+    global storage_key
+    if storage_key:
+        return storage_key
+    try:
+        resp = http_requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+        resp.raise_for_status()
+        storage_key = resp.json()["storage_key"]
+        return storage_key
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
+        return None
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    key = init_storage()
+    if not key:
+        raise HTTPException(status_code=500, detail="Storage not initialized")
+    resp = http_requests.put(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key, "Content-Type": content_type},
+        data=data, timeout=120
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+def get_object(path: str) -> tuple:
+    key = init_storage()
+    if not key:
+        raise HTTPException(status_code=500, detail="Storage not initialized")
+    resp = http_requests.get(
+        f"{STORAGE_URL}/objects/{path}",
+        headers={"X-Storage-Key": key}, timeout=60
+    )
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
 # ==================== AUTH ====================
 @api_router.post("/auth/register")
 async def register(user_data: UserCreate):
@@ -117,6 +161,120 @@ async def get_me(user=Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=401, detail="Giriş yapmalısınız")
     return {"id": user['id'], "email": user['email'], "is_admin": user.get('is_admin', False)}
+
+# ==================== GOOGLE AUTH ====================
+@api_router.post("/auth/google/session")
+async def google_auth_session(session_id: str = Query(...)):
+    """Exchange session_id for user data from Emergent Auth"""
+    try:
+        resp = http_requests.get(
+            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+            headers={"X-Session-ID": session_id},
+            timeout=30
+        )
+        resp.raise_for_status()
+        auth_data = resp.json()
+        
+        email = auth_data.get("email")
+        name = auth_data.get("name", "")
+        picture = auth_data.get("picture", "")
+        session_token = auth_data.get("session_token")
+        
+        # Check if user exists
+        existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+        
+        if existing_user:
+            user_id = existing_user["id"]
+            # Update user info if needed
+            await db.users.update_one(
+                {"id": user_id},
+                {"$set": {"name": name, "picture": picture, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+        else:
+            # Create new user
+            import uuid
+            user_id = str(uuid.uuid4())
+            new_user = {
+                "id": user_id,
+                "email": email,
+                "first_name": name.split()[0] if name else "",
+                "last_name": " ".join(name.split()[1:]) if name and len(name.split()) > 1 else "",
+                "picture": picture,
+                "is_admin": False,
+                "is_active": True,
+                "password_hash": "",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.users.insert_one(new_user)
+        
+        # Store session
+        await db.user_sessions.insert_one({
+            "user_id": user_id,
+            "session_token": session_token,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        # Create JWT token for our app
+        token = create_token(user_id, False)
+        
+        return {
+            "success": True,
+            "token": token,
+            "session_token": session_token,
+            "user": {
+                "id": user_id,
+                "email": email,
+                "name": name,
+                "picture": picture,
+                "is_admin": False
+            }
+        }
+    except Exception as e:
+        logger.error(f"Google auth failed: {e}")
+        raise HTTPException(status_code=401, detail="Google authentication failed")
+
+# ==================== IMAGE UPLOAD ====================
+@api_router.post("/upload/image")
+async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
+    """Upload image to object storage"""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Sadece resim dosyaları yüklenebilir")
+    
+    import uuid
+    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    path = f"{APP_NAME}/images/{uuid.uuid4()}.{ext}"
+    data = await file.read()
+    
+    result = put_object(path, data, file.content_type or "image/jpeg")
+    
+    # Store reference in DB
+    await db.files.insert_one({
+        "id": str(uuid.uuid4()),
+        "storage_path": result["path"],
+        "original_filename": file.filename,
+        "content_type": file.content_type,
+        "size": result.get("size", len(data)),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {
+        "success": True,
+        "path": result["path"],
+        "url": f"/api/files/{result['path']}"
+    }
+
+@api_router.get("/files/{path:path}")
+async def get_file(path: str):
+    """Serve files from object storage"""
+    record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    from fastapi.responses import Response
+    data, content_type = get_object(path)
+    return Response(content=data, media_type=record.get("content_type", content_type))
 
 # ==================== PRODUCTS ====================
 @api_router.get("/products")
