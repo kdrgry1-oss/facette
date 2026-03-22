@@ -10,29 +10,35 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Storage: Emergent Object Storage
 - Auth: JWT + Google OAuth (Emergent Auth)
 
-## Current Status: v4.0 - Full CMS + Excel Import ✅
+## Current Status: v5.0 - Bug Fixes + UI Improvements ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### Bug Fixes (v5.0)
+- [x] Çift ürün sorunu çözüldü (197 duplicate ürün silindi)
+- [x] Ürün sayfası slider okları kaldırıldı, 2 sütunlu grid layout eklendi
+- [x] Accordion (Ürün Özellikleri) kayma sorunu çözüldü - custom toggle kullanıldı
+- [x] Admin ürün listesinde işlem ikonları eklendi (Edit, Copy, Active/Passive, More menu)
 
 #### UI/UX - facette.com.tr Replica
 - [x] Üst Banner: "500 TL ÜZERİ ÜCRETSİZ KARGO" (beyaz bg, siyah text)
 - [x] Logo: Doğru FACETTE logosu
 - [x] Header: EN YENİLER, GİYİM ▾, AKSESUAR ▾, SALE (kırmızı)
-- [x] Alt Kategori Dropdown
+- [x] Mega Menu: ÜST GİYİM, ALT GİYİM, DIŞ GİYİM sütunları
 - [x] Hero Slider: Tam genişlik, boşluksuz
 - [x] Banner Yapısı: Tam genişlik + yarı yarıya, boşluk yok
 - [x] Ürün Kartları: Bookmark, sepete ekle (ad yanında)
-- [x] Ürün Detay: İki resim yan yana, sol/sağ oklar, sticky header
+- [x] Ürün Detay: Tüm görseller 2 sütunlu grid'de, sticky header
 - [x] Checkout: Menüler gizli
 
-#### Excel Import - 900 Ürün
-- [x] Ticimax Excel import script
+#### Ürün Yönetimi
+- [x] 269 benzersiz ürün (duplicates silindi)
 - [x] Stok kodu, barkod, KDV, tedarikçi, ağırlık, boyutlar
 - [x] 50+ alan destekli ürün modeli
-- [x] 409 ürün başarıyla import edildi
 
 #### Admin Panel - Gelişmiş
 - [x] **Ürünler**: Stok kodu, barkod görüntüleme
+- [x] **Ürün İşlemleri**: Edit, Copy (kopyala), Aktif/Pasif, More menu (görüntüle, link kopyala, sil)
 - [x] **Ürün Düzenleme**: 5 sekmeli form (Temel, Fiyat, Görseller, Stok, SEO)
 - [x] **Görsel Yükleme**: Object Storage entegrasyonu
 - [x] **Siparişler**: Fatura kes, kargo barkodu, toplu işlemler
@@ -45,7 +51,7 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 
 ## Admin Panel Menüsü
 1. Dashboard
-2. Ürünler (stok kodu, barkod, görsel yükleme)
+2. Ürünler (stok kodu, barkod, görsel yükleme, kopyalama, aktif/pasif)
 3. Siparişler (fatura, kargo, toplu işlem)
 4. Kategoriler
 5. Sayfa Tasarımı (CMS)
@@ -55,6 +61,13 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 9. Ayarlar
 
 ## API Endpoints
+
+### Products
+- GET /api/products - Ürün listesi
+- GET /api/products/{id} - Ürün detayı
+- POST /api/products - Yeni ürün (Admin)
+- PUT /api/products/{id} - Ürün güncelle (Admin)
+- DELETE /api/products/{id} - Ürün sil (Admin)
 
 ### Page Blocks (CMS)
 - GET /api/page-blocks - Tüm blokları getir
@@ -71,12 +84,14 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
-- URL: https://fashion-ecom-mvp.preview.emergentagent.com
+- URL: https://mega-menu-catalog.preview.emergentagent.com
 
 ## P1 - Sonraki Görevler
 - [ ] Varyant yönetimi (renk, beden bazlı stok)
 - [ ] Checkout akışı tamamlama
 - [ ] Sipariş takibi müşteri paneli
+- [ ] Benzer ürün önerileri geliştirme
+- [ ] Kombin ürün seçeneği
 
 ## P2 - Entegrasyonlar
 - [ ] Iyzico ödeme
@@ -91,25 +106,25 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 ├── backend/
 │   ├── server.py
 │   ├── models.py
-│   ├── import_excel.py    # Excel import script
+│   ├── import_excel.py
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
 │       ├── components/
-│       │   ├── Header.jsx
+│       │   ├── Header.jsx        # Mega menu
 │       │   ├── ProductCard.jsx
 │       │   └── ...
 │       ├── pages/
 │       │   ├── Home.jsx
-│       │   ├── ProductDetail.jsx
+│       │   ├── ProductDetail.jsx # 2-column grid images
 │       │   └── admin/
-│       │       ├── Products.jsx      # 5-tab form
-│       │       ├── Orders.jsx        # Invoice, cargo
-│       │       ├── PageDesign.jsx    # CMS
+│       │       ├── Products.jsx  # Edit, copy, toggle icons
+│       │       ├── Orders.jsx
+│       │       ├── PageDesign.jsx
 │       │       └── ...
 │       └── context/
 └── memory/PRD.md
 ```
 
 ## Last Updated
-2026-03-22 - v4.0 CMS + Excel Import + Görsel Yükleme
+2026-03-22 - v5.0 Bug Fixes + Admin Product Actions

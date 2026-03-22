@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -14,6 +14,12 @@ import {
   TabsList,
   TabsTrigger,
 } from "../../components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -215,6 +221,46 @@ export default function AdminProducts() {
       .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   };
 
+  const handleDuplicate = async (product) => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      
+      const newProduct = {
+        ...product,
+        name: `${product.name} (Kopya)`,
+        slug: `${product.slug}-kopya-${Date.now()}`,
+        stock_code: product.stock_code ? `${product.stock_code}-COPY` : '',
+        barcode: '',
+      };
+      delete newProduct.id;
+      delete newProduct._id;
+      
+      await axios.post(`${API}/products`, newProduct, { headers });
+      toast.success("Ürün kopyalandı");
+      fetchProducts();
+    } catch (err) {
+      toast.error("Kopyalama başarısız");
+    }
+  };
+
+  const toggleProductStatus = async (product) => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      
+      await axios.put(`${API}/products/${product.id}`, {
+        ...product,
+        is_active: !product.is_active
+      }, { headers });
+      
+      toast.success(product.is_active ? "Ürün pasife alındı" : "Ürün aktifleştirildi");
+      fetchProducts();
+    } catch (err) {
+      toast.error("İşlem başarısız");
+    }
+  };
+
   return (
     <div data-testid="admin-products">
       <div className="flex items-center justify-between mb-6">
@@ -299,9 +345,28 @@ export default function AdminProducts() {
                       <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Düzenle">
                         <Edit size={16} />
                       </button>
-                      <button onClick={() => handleDelete(product.id)} className="p-1.5 hover:bg-gray-100 rounded text-red-600" title="Sil">
-                        <Trash2 size={16} />
+                      <button onClick={() => handleDuplicate(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Kopyala">
+                        <Copy size={16} />
                       </button>
+                      <button onClick={() => toggleProductStatus(product)} className="p-1.5 hover:bg-gray-100 rounded" title={product.is_active ? "Pasife Al" : "Aktifleştir"}>
+                        {product.is_active ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger className="p-1.5 hover:bg-gray-100 rounded">
+                          <MoreHorizontal size={16} />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => window.open(`/urun/${product.slug}`, '_blank')}>
+                            <Eye size={14} className="mr-2" /> Ürünü Görüntüle
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigator.clipboard.writeText(`${window.location.origin}/urun/${product.slug}`)}>
+                            <Link2 size={14} className="mr-2" /> Link Kopyala
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(product.id)}>
+                            <Trash2 size={14} className="mr-2" /> Sil
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </td>
                 </tr>

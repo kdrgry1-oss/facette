@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Search, User, ShoppingBag, Menu, X, ChevronDown } from "lucide-react";
+import { Search, User, ShoppingBag, Menu, X } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import CartDrawer from "./CartDrawer";
@@ -8,34 +8,38 @@ import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Menu structure with subcategories
-const MENU_ITEMS = [
-  { name: "EN YENİLER", slug: "en-yeniler", children: [] },
-  {
-    name: "GİYİM", slug: "giyim",
-    children: [
-      { name: "Elbise", slug: "elbise" },
-      { name: "Bluz", slug: "bluz" },
-      { name: "Gömlek", slug: "gomlek" },
-      { name: "Pantolon", slug: "pantolon" },
-      { name: "Etek", slug: "etek" },
-      { name: "Ceket", slug: "ceket" },
-      { name: "Kazak", slug: "kazak" },
-      { name: "Triko", slug: "triko" },
-      { name: "Kaban", slug: "kaban" },
-      { name: "Takım", slug: "takim" },
-    ]
-  },
-  {
-    name: "AKSESUAR", slug: "aksesuar",
-    children: [
-      { name: "Çanta", slug: "canta" },
-      { name: "Şal", slug: "sal" },
-      { name: "Atkı", slug: "atki" },
-      { name: "Kemer", slug: "kemer" },
-    ]
-  },
-  { name: "SALE", slug: "sale", isRed: true, children: [] }
+// Mega menu structure - facette.com.tr exact structure
+const GIYIM_MENU = {
+  "ÜST GİYİM": [
+    { name: "Elbise", slug: "elbise" },
+    { name: "Bluz", slug: "bluz" },
+    { name: "Kazak", slug: "kazak" },
+    { name: "Sweatshirt", slug: "sweatshirt" },
+    { name: "Takım", slug: "takim" },
+    { name: "Tişört", slug: "tisort" },
+    { name: "Gömlek", slug: "gomlek" },
+  ],
+  "ALT GİYİM": [
+    { name: "Etek", slug: "etek" },
+    { name: "Pantolon", slug: "pantolon" },
+    { name: "Şort", slug: "sort" },
+    { name: "Jean", slug: "jean" },
+  ],
+  "DIŞ GİYİM": [
+    { name: "Kaban", slug: "kaban" },
+    { name: "Mont", slug: "mont" },
+    { name: "Hırka", slug: "hirka" },
+    { name: "Trençkot", slug: "trenckot" },
+    { name: "Ceket", slug: "ceket" },
+  ]
+};
+
+const AKSESUAR_MENU = [
+  { name: "Çanta", slug: "canta" },
+  { name: "Şal", slug: "sal" },
+  { name: "Atkı", slug: "atki" },
+  { name: "Kemer", slug: "kemer" },
+  { name: "Şapka", slug: "sapka" },
 ];
 
 export default function Header({ hideMenu = false }) {
@@ -101,7 +105,7 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Top Banner - White background, black text */}
+      {/* Top Banner */}
       {!isCheckout && (
         <div className="bg-white text-black text-center py-2 border-b">
           <p className="text-xs tracking-wider">500 TL ÜZERİ ÜCRETSİZ KARGO</p>
@@ -124,35 +128,99 @@ export default function Header({ hideMenu = false }) {
                   </button>
 
                   <nav className="hidden lg:flex items-center gap-6">
-                    {MENU_ITEMS.map((item) => (
-                      <div 
-                        key={item.slug}
-                        className="relative"
-                        onMouseEnter={() => setActiveMenu(item.slug)}
-                        onMouseLeave={() => setActiveMenu(null)}
+                    {/* EN YENİLER */}
+                    <Link
+                      to="/kategori/en-yeniler"
+                      className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60"
+                    >
+                      EN YENİLER
+                    </Link>
+
+                    {/* GİYİM - Mega Menu */}
+                    <div 
+                      className="relative"
+                      onMouseEnter={() => setActiveMenu('giyim')}
+                      onMouseLeave={() => setActiveMenu(null)}
+                    >
+                      <Link
+                        to="/kategori/giyim"
+                        className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60 flex items-center"
                       >
-                        <Link
-                          to={`/kategori/${item.slug}`}
-                          className={`text-[11px] tracking-wider uppercase flex items-center gap-1 py-4 hover:opacity-60 transition-opacity ${item.isRed ? 'text-red-600' : ''}`}
-                        >
-                          {item.name}
-                          {item.children.length > 0 && <ChevronDown size={10} />}
-                        </Link>
-                        {item.children.length > 0 && activeMenu === item.slug && (
-                          <div className="absolute left-0 top-full bg-white shadow-lg py-3 min-w-[160px] z-50">
-                            {item.children.map((child) => (
-                              <Link
-                                key={child.slug}
-                                to={`/kategori/${child.slug}`}
-                                className="block px-5 py-1.5 text-xs hover:bg-gray-50"
-                              >
-                                {child.name}
-                              </Link>
+                        GİYİM
+                      </Link>
+
+                      {/* Mega Menu Dropdown */}
+                      {activeMenu === 'giyim' && (
+                        <div className="absolute left-0 top-full bg-white shadow-lg py-6 px-8 min-w-[500px] z-50 border-t">
+                          <div className="grid grid-cols-3 gap-8">
+                            {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                              <div key={category}>
+                                <h3 className="text-xs font-medium tracking-wider mb-3">{category}</h3>
+                                <ul className="space-y-2">
+                                  {items.map((item) => (
+                                    <li key={item.slug}>
+                                      <Link
+                                        to={`/kategori/${item.slug}`}
+                                        className="text-sm text-gray-600 hover:text-black transition-colors"
+                                      >
+                                        {item.name}
+                                      </Link>
+                                    </li>
+                                  ))}
+                                  <li className="pt-2">
+                                    <Link
+                                      to={`/kategori/${category.toLowerCase().replace(/\s/g, '-').replace(/ş/g, 's').replace(/ı/g, 'i')}`}
+                                      className="text-xs underline hover:no-underline"
+                                    >
+                                      Tümünü Gör
+                                    </Link>
+                                  </li>
+                                </ul>
+                              </div>
                             ))}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* AKSESUAR */}
+                    <div 
+                      className="relative"
+                      onMouseEnter={() => setActiveMenu('aksesuar')}
+                      onMouseLeave={() => setActiveMenu(null)}
+                    >
+                      <Link
+                        to="/kategori/aksesuar"
+                        className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60"
+                      >
+                        AKSESUAR
+                      </Link>
+
+                      {activeMenu === 'aksesuar' && (
+                        <div className="absolute left-0 top-full bg-white shadow-lg py-4 min-w-[160px] z-50 border-t">
+                          <ul className="space-y-1">
+                            {AKSESUAR_MENU.map((item) => (
+                              <li key={item.slug}>
+                                <Link
+                                  to={`/kategori/${item.slug}`}
+                                  className="block px-5 py-1.5 text-sm text-gray-600 hover:text-black hover:bg-gray-50"
+                                >
+                                  {item.name}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* SALE */}
+                    <Link
+                      to="/kategori/sale"
+                      className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60 text-red-600"
+                    >
+                      SALE
+                    </Link>
                   </nav>
                 </>
               )}
@@ -195,27 +263,75 @@ export default function Header({ hideMenu = false }) {
             <img src="/logo.webp" alt="FACETTE" className="h-5" />
             <button onClick={() => setMobileMenuOpen(false)}><X size={22} /></button>
           </div>
-          <nav className="p-4">
-            {MENU_ITEMS.map((item) => (
-              <div key={item.slug}>
-                <Link 
-                  to={`/kategori/${item.slug}`} 
-                  className={`block py-3 text-sm tracking-wider uppercase border-b border-gray-100 ${item.isRed ? 'text-red-600' : ''}`}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  {item.name}
-                </Link>
-                {item.children.length > 0 && (
-                  <div className="pl-4">
-                    {item.children.map((child) => (
-                      <Link key={child.slug} to={`/kategori/${child.slug}`} className="block py-2 text-sm text-gray-600" onClick={() => setMobileMenuOpen(false)}>
-                        {child.name}
+          <nav className="p-4 overflow-y-auto h-[calc(100vh-60px)]">
+            {/* EN YENİLER */}
+            <Link 
+              to="/kategori/en-yeniler" 
+              className="block py-3 text-sm tracking-wider uppercase border-b border-gray-100"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              EN YENİLER
+            </Link>
+
+            {/* GİYİM with subcategories */}
+            <div className="border-b border-gray-100">
+              <Link 
+                to="/kategori/giyim" 
+                className="block py-3 text-sm tracking-wider uppercase"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                GİYİM
+              </Link>
+              <div className="pl-4 pb-3">
+                {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                  <div key={category} className="mb-3">
+                    <p className="text-xs font-medium text-gray-500 mb-1">{category}</p>
+                    {items.map((item) => (
+                      <Link 
+                        key={item.slug}
+                        to={`/kategori/${item.slug}`} 
+                        className="block py-1 text-sm text-gray-600"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        {item.name}
                       </Link>
                     ))}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* AKSESUAR */}
+            <div className="border-b border-gray-100">
+              <Link 
+                to="/kategori/aksesuar" 
+                className="block py-3 text-sm tracking-wider uppercase"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                AKSESUAR
+              </Link>
+              <div className="pl-4 pb-3">
+                {AKSESUAR_MENU.map((item) => (
+                  <Link 
+                    key={item.slug}
+                    to={`/kategori/${item.slug}`} 
+                    className="block py-1 text-sm text-gray-600"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    {item.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {/* SALE */}
+            <Link 
+              to="/kategori/sale" 
+              className="block py-3 text-sm tracking-wider uppercase text-red-600 border-b border-gray-100"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              SALE
+            </Link>
           </nav>
         </div>
       )}

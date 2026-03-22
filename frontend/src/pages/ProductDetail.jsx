@@ -1,18 +1,12 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Heart, Minus, Plus, X, ChevronLeft, ChevronRight, Bookmark } from "lucide-react";
+import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { useCart } from "../context/CartContext";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "../components/ui/accordion";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -28,6 +22,11 @@ export default function ProductDetail() {
   const [quantity, setQuantity] = useState(1);
   const [showSizeChart, setShowSizeChart] = useState(false);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const [expandedSections, setExpandedSections] = useState({
+    description: false,
+    shipping: false,
+    returns: false
+  });
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -120,8 +119,12 @@ export default function ProductDetail() {
   const sizeChartImage = hasSizeChart ? uniqueImages[uniqueImages.length - 1] : null;
   const displayImages = hasSizeChart ? uniqueImages.slice(0, -1) : uniqueImages;
 
-  const prevImage = () => setSelectedImage((prev) => (prev - 1 + displayImages.length) % displayImages.length);
-  const nextImage = () => setSelectedImage((prev) => (prev + 1) % displayImages.length);
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
 
   return (
     <div className="min-h-screen">
@@ -185,10 +188,10 @@ export default function ProductDetail() {
 
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
         <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
-          {/* Images with Navigation Arrows */}
-          <div className="relative">
+          {/* All Images in 2 Column Grid - facette.com.tr style */}
+          <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
-              {displayImages.slice(0, 2).map((img, index) => (
+              {displayImages.map((img, index) => (
                 <div key={index} className="relative aspect-[3/4] bg-gray-50">
                   <img
                     src={img}
@@ -198,41 +201,6 @@ export default function ProductDetail() {
                 </div>
               ))}
             </div>
-            
-            {/* Navigation Arrows on sides */}
-            {displayImages.length > 2 && (
-              <>
-                <button 
-                  onClick={prevImage}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white"
-                >
-                  <ChevronLeft size={20} />
-                </button>
-                <button 
-                  onClick={nextImage}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center shadow hover:bg-white"
-                >
-                  <ChevronRight size={20} />
-                </button>
-              </>
-            )}
-
-            {/* Thumbnails below */}
-            {displayImages.length > 2 && (
-              <div className="flex gap-2 mt-2">
-                {displayImages.map((img, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setSelectedImage(index)}
-                    className={`w-16 aspect-[3/4] overflow-hidden border-2 ${
-                      selectedImage === index ? "border-black" : "border-transparent"
-                    }`}
-                  >
-                    <img src={img} alt="" className="w-full h-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Product Info */}
@@ -316,30 +284,53 @@ export default function ProductDetail() {
               </button>
             </div>
 
-            {/* Accordion Details */}
-            <Accordion type="single" collapsible className="border-t">
-              <AccordionItem value="description">
-                <AccordionTrigger className="text-xs py-3">Ürün Özellikleri</AccordionTrigger>
-                <AccordionContent>
-                  <div className="text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: product.description || "Ürün açıklaması bulunmamaktadır." }} />
-                </AccordionContent>
-              </AccordionItem>
-              <AccordionItem value="shipping">
-                <AccordionTrigger className="text-xs py-3">Kargo ve Teslimat</AccordionTrigger>
-                <AccordionContent>
-                  <ul className="text-xs text-gray-600 space-y-1.5">
+            {/* Custom Accordion Details - No slider issues */}
+            <div className="border-t">
+              {/* Ürün Özellikleri */}
+              <div className="border-b">
+                <button 
+                  onClick={() => toggleSection('description')}
+                  className="w-full flex items-center justify-between py-3 text-xs hover:bg-gray-50"
+                >
+                  <span>Ürün Özellikleri</span>
+                  {expandedSections.description ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                {expandedSections.description && (
+                  <div className="pb-3 text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: product.description || "Ürün açıklaması bulunmamaktadır." }} />
+                )}
+              </div>
+              
+              {/* Kargo ve Teslimat */}
+              <div className="border-b">
+                <button 
+                  onClick={() => toggleSection('shipping')}
+                  className="w-full flex items-center justify-between py-3 text-xs hover:bg-gray-50"
+                >
+                  <span>Kargo ve Teslimat</span>
+                  {expandedSections.shipping ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                {expandedSections.shipping && (
+                  <ul className="pb-3 text-xs text-gray-600 space-y-1.5">
                     <li>• 500 TL ve üzeri siparişlerde ücretsiz kargo</li>
                     <li>• 1-3 iş günü içinde kargoya verilir</li>
                   </ul>
-                </AccordionContent>
-              </AccordionItem>
-              <AccordionItem value="return">
-                <AccordionTrigger className="text-xs py-3">İade ve Değişim</AccordionTrigger>
-                <AccordionContent>
-                  <p className="text-xs text-gray-600">14 gün içinde iade ve değişim hakkınız bulunmaktadır.</p>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+                )}
+              </div>
+              
+              {/* İade ve Değişim */}
+              <div className="border-b">
+                <button 
+                  onClick={() => toggleSection('returns')}
+                  className="w-full flex items-center justify-between py-3 text-xs hover:bg-gray-50"
+                >
+                  <span>İade ve Değişim</span>
+                  {expandedSections.returns ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                {expandedSections.returns && (
+                  <p className="pb-3 text-xs text-gray-600">14 gün içinde iade ve değişim hakkınız bulunmaktadır.</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
