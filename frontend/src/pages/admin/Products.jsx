@@ -302,7 +302,7 @@ export default function AdminProducts() {
               <th>Ürün Adı</th>
               <th>Stok Kodu</th>
               <th>Barkod</th>
-              <th>Varyantlar</th>
+              <th>Bedenler</th>
               <th>Fiyat</th>
               <th>Stok</th>
               <th>Durum</th>
@@ -339,7 +339,7 @@ export default function AdminProducts() {
                         className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
                       >
                         <Layers size={14} />
-                        {product.variants.length} Varyant
+                        {product.variants.length} Beden
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">-</span>
@@ -1024,10 +1024,10 @@ export default function AdminProducts() {
 
       {/* Variants Modal */}
       <Dialog open={variantsModalOpen} onOpenChange={setVariantsModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Varyantlar - {selectedProductForVariants?.name}
+              Beden Varyantları - {selectedProductForVariants?.name}
             </DialogTitle>
           </DialogHeader>
           
@@ -1036,7 +1036,11 @@ export default function AdminProducts() {
               {/* Summary */}
               <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
                 <div>
-                  <p className="text-xs text-gray-500">Toplam Varyant</p>
+                  <p className="text-xs text-gray-500">Renk</p>
+                  <p className="text-lg font-semibold">{selectedProductForVariants.color || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Toplam Beden</p>
                   <p className="text-lg font-semibold">{selectedProductForVariants.variants?.length || 0}</p>
                 </div>
                 <div>
@@ -1045,25 +1049,15 @@ export default function AdminProducts() {
                     {selectedProductForVariants.variants?.reduce((sum, v) => sum + (v.stock || 0), 0) || 0}
                   </p>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500">Bedenler / Renkler</p>
-                  <p className="text-sm">
-                    {[...new Set(selectedProductForVariants.variants?.map(v => v.size).filter(Boolean))].join(', ') || '-'}
-                    {' / '}
-                    {[...new Set(selectedProductForVariants.variants?.map(v => v.color).filter(Boolean))].join(', ') || '-'}
-                  </p>
-                </div>
               </div>
 
-              {/* Variants Table */}
+              {/* Variants Table - Only Sizes */}
               <table className="w-full text-sm border">
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="text-left px-3 py-2 border-b">Beden</th>
-                    <th className="text-left px-3 py-2 border-b">Renk</th>
                     <th className="text-left px-3 py-2 border-b">Stok Kodu</th>
                     <th className="text-left px-3 py-2 border-b">Barkod</th>
-                    <th className="text-left px-3 py-2 border-b">Varyasyon Kodu</th>
                     <th className="text-right px-3 py-2 border-b">Stok</th>
                     <th className="text-right px-3 py-2 border-b">Fiyat</th>
                     <th className="text-center px-3 py-2 border-b">Durum</th>
@@ -1072,11 +1066,9 @@ export default function AdminProducts() {
                 <tbody>
                   {selectedProductForVariants.variants?.map((variant, idx) => (
                     <tr key={variant.id || idx} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 border-b font-medium">{variant.size || '-'}</td>
-                      <td className="px-3 py-2 border-b">{variant.color || '-'}</td>
+                      <td className="px-3 py-2 border-b font-medium text-lg">{variant.size || '-'}</td>
                       <td className="px-3 py-2 border-b font-mono text-xs">{variant.stock_code || '-'}</td>
                       <td className="px-3 py-2 border-b font-mono text-xs">{variant.barcode || '-'}</td>
-                      <td className="px-3 py-2 border-b font-mono text-xs">{variant.variation_code || '-'}</td>
                       <td className={`px-3 py-2 border-b text-right ${variant.stock < 5 ? 'text-red-600 font-medium' : ''}`}>
                         {variant.stock || 0}
                       </td>
@@ -1101,7 +1093,7 @@ export default function AdminProducts() {
               </table>
 
               {(!selectedProductForVariants.variants || selectedProductForVariants.variants.length === 0) && (
-                <p className="text-center text-gray-500 py-8">Bu ürünün varyantı bulunmuyor</p>
+                <p className="text-center text-gray-500 py-8">Bu ürünün beden varyantı bulunmuyor</p>
               )}
             </div>
           )}
