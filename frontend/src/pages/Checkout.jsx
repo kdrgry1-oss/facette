@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { CreditCard, Building, Truck } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { CreditCard, Building, Truck, CheckCircle, AlertCircle } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -12,6 +12,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Checkout() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { items, total, clearCart } = useCart();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -19,6 +20,10 @@ export default function Checkout() {
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [paymentStep, setPaymentStep] = useState("form"); // form, processing, iframe, success, error
+  const [paymentUrl, setPaymentUrl] = useState("");
+  const [orderId, setOrderId] = useState(null);
+  const iframeRef = useRef(null);
   
   const [formData, setFormData] = useState({
     first_name: user?.first_name || "",
@@ -30,6 +35,35 @@ export default function Checkout() {
     district: "",
     postal_code: "",
   });
+
+  // Handle payment callback
+  useEffect(() => {
+    const token = searchParams.get('token');
+    if (token) {
+      handlePaymentCallback(token);
+    }
+  }, [searchParams]);
+
+  const handlePaymentCallback = async (token) => {
+    setPaymentStep("processing");
+    try {
+      const res = await axios.post(`${API}/payment/callback?token=${token}`);
+      if (res.data.success) {
+        clearCart();
+        setPaymentStep("success");
+        toast.success("Ödemeniz başarıyla tamamlandı!");
+        setTimeout(() => {
+          navigate(`/hesabim?order=${res.data.orderNumber}`);
+        }, 3000);
+      } else {
+        setPaymentStep("error");
+        toast.error(res.data.error || "Ödeme başarısız");
+      }
+    } catch (err) {
+      setPaymentStep("error");
+      toast.error("Ödeme doğrulanamadı");
+    }
+  };
 
   const freeShippingLimit = 500;
   const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
@@ -66,6 +100,7 @@ export default function Checkout() {
 
     setLoading(true);
     try {
+      // First create the order
       const orderData = {
         user_id: user?.id || null,
         items: items.map(item => ({
@@ -82,14 +117,37 @@ export default function Checkout() {
         subtotal: total,
         shipping_cost: shippingCost,
         discount: discount,
-        total: grandTotal,
+        total: grandTotal + (paymentMethod === "cash_on_delivery" ? 10 : 0),
         payment_method: paymentMethod,
       };
 
-      const res = await axios.post(`${API}/orders`, orderData);
-      clearCart();
-      toast.success("Siparişiniz alındı!");
-      navigate(`/hesabim?order=${res.data.order_number}`);
+      const orderRes = await axios.post(`${API}/orders`, orderData);
+      const newOrderId = orderRes.data.order_id;
+      setOrderId(newOrderId);
+
+      // If credit card payment, initialize Iyzico
+      if (paymentMethod === "credit_card") {
+        const callbackUrl = `${window.location.origin}/odeme`;
+        const paymentRes = await axios.post(
+          `${API}/payment/initialize?order_id=${newOrderId}&callback_url=${encodeURIComponent(callbackUrl)}`
+        );
+
+        if (paymentRes.data.success && paymentRes.data.paymentPageUrl) {
+          // Redirect to Iyzico payment page
+          window.location.href = paymentRes.data.paymentPageUrl;
+        } else if (paymentRes.data.checkoutFormContent) {
+          // Show embedded checkout form
+          setPaymentUrl(paymentRes.data.checkoutFormContent);
+          setPaymentStep("iframe");
+        } else {
+          toast.error(paymentRes.data.error || "Ödeme başlatılamadı");
+        }
+      } else {
+        // For other payment methods, complete order directly
+        clearCart();
+        toast.success("Siparişiniz alındı!");
+        navigate(`/hesabim?order=${orderRes.data.order_number}`);
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
     } finally {
@@ -97,9 +155,60 @@ export default function Checkout() {
     }
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && paymentStep === "form") {
     navigate("/sepet");
     return null;
+  }
+
+  // Payment Success Screen
+  if (paymentStep === "success") {
+    return (
+      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+        <Header />
+        <div className="container-main py-16 text-center">
+          <CheckCircle size={64} className="mx-auto text-green-500 mb-4" />
+          <h1 className="text-2xl font-medium mb-2">Ödemeniz Başarılı!</h1>
+          <p className="text-gray-600 mb-4">Siparişiniz alındı. Yönlendiriliyorsunuz...</p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Payment Error Screen
+  if (paymentStep === "error") {
+    return (
+      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+        <Header />
+        <div className="container-main py-16 text-center">
+          <AlertCircle size={64} className="mx-auto text-red-500 mb-4" />
+          <h1 className="text-2xl font-medium mb-2">Ödeme Başarısız</h1>
+          <p className="text-gray-600 mb-4">Ödeme işlemi tamamlanamadı. Lütfen tekrar deneyin.</p>
+          <button 
+            onClick={() => setPaymentStep("form")}
+            className="btn-primary"
+          >
+            Tekrar Dene
+          </button>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Processing Screen
+  if (paymentStep === "processing") {
+    return (
+      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+        <Header />
+        <div className="container-main py-16 text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-black mx-auto mb-4"></div>
+          <h1 className="text-2xl font-medium mb-2">Ödeme Doğrulanıyor...</h1>
+          <p className="text-gray-600">Lütfen bekleyin</p>
+        </div>
+        <Footer />
+      </div>
+    );
   }
 
   return (

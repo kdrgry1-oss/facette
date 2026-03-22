@@ -975,10 +975,417 @@ async def seed_data():
     
     return {"message": "Seed veriler oluşturuldu", "admin_email": "admin@facette.com", "admin_password": "admin123"}
 
+# ==================== IYZICO PAYMENT ====================
+import iyzipay
+
+IYZICO_API_KEY = os.environ.get('IYZICO_API_KEY', 'sandbox-api-key')
+IYZICO_SECRET_KEY = os.environ.get('IYZICO_SECRET_KEY', 'sandbox-secret-key')
+IYZICO_BASE_URL = os.environ.get('IYZICO_BASE_URL', 'https://sandbox-api.iyzipay.com')
+
+def get_iyzico_options():
+    return {
+        'api_key': IYZICO_API_KEY,
+        'secret_key': IYZICO_SECRET_KEY,
+        'base_url': IYZICO_BASE_URL
+    }
+
+@api_router.post("/payment/initialize")
+async def initialize_payment(
+    order_id: str = Query(...),
+    callback_url: str = Query(...)
+):
+    """Initialize 3DS payment for an order"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Get or create conversation ID
+    conversation_id = f"FC-{order['order_number']}"
+    
+    # Build basket items
+    basket_items = []
+    for item in order.get('items', []):
+        basket_items.append({
+            'id': item.get('product_id', 'item'),
+            'name': item.get('name', 'Ürün')[:50],
+            'category1': 'Giyim',
+            'category2': 'Moda',
+            'itemType': 'PHYSICAL',
+            'price': str(item.get('price', 0) * item.get('quantity', 1))
+        })
+    
+    # Build shipping address
+    shipping = order.get('shipping_address', {})
+    
+    request_data = {
+        'locale': 'tr',
+        'conversationId': conversation_id,
+        'price': str(order.get('subtotal', 0)),
+        'paidPrice': str(order.get('total', 0)),
+        'currency': 'TRY',
+        'installment': '1',
+        'basketId': order['order_number'],
+        'paymentChannel': 'WEB',
+        'paymentGroup': 'PRODUCT',
+        'callbackUrl': callback_url,
+        'buyer': {
+            'id': order.get('user_id', 'guest'),
+            'name': shipping.get('first_name', 'Misafir'),
+            'surname': shipping.get('last_name', 'Kullanıcı'),
+            'gsmNumber': shipping.get('phone', '+905001234567'),
+            'email': shipping.get('email', 'misafir@facette.com'),
+            'identityNumber': '11111111111',
+            'registrationAddress': shipping.get('address', 'Türkiye'),
+            'ip': '127.0.0.1',
+            'city': shipping.get('city', 'İstanbul'),
+            'country': 'Turkey',
+            'zipCode': shipping.get('postal_code', '34000')
+        },
+        'shippingAddress': {
+            'contactName': f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}",
+            'city': shipping.get('city', 'İstanbul'),
+            'country': 'Turkey',
+            'address': shipping.get('address', 'Türkiye'),
+            'zipCode': shipping.get('postal_code', '34000')
+        },
+        'billingAddress': {
+            'contactName': f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}",
+            'city': shipping.get('city', 'İstanbul'),
+            'country': 'Turkey',
+            'address': shipping.get('address', 'Türkiye'),
+            'zipCode': shipping.get('postal_code', '34000')
+        },
+        'basketItems': basket_items
+    }
+    
+    try:
+        checkout_form = iyzipay.CheckoutFormInitialize()
+        result = checkout_form.create(request_data, get_iyzico_options())
+        response = result.read()
+        
+        if isinstance(response, bytes):
+            response = json.loads(response.decode('utf-8'))
+        
+        if response.get('status') == 'success':
+            # Store payment token
+            await db.orders.update_one(
+                {"id": order_id},
+                {"$set": {
+                    "payment_token": response.get('token'),
+                    "conversation_id": conversation_id,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
+            return {
+                "success": True,
+                "paymentPageUrl": response.get('paymentPageUrl'),
+                "token": response.get('token'),
+                "checkoutFormContent": response.get('checkoutFormContent')
+            }
+        else:
+            logger.error(f"Iyzico init failed: {response}")
+            return {
+                "success": False,
+                "error": response.get('errorMessage', 'Ödeme başlatılamadı')
+            }
+    except Exception as e:
+        logger.error(f"Payment init error: {e}")
+        return {"success": False, "error": str(e)}
+
+@api_router.post("/payment/callback")
+async def payment_callback(token: str = Query(...)):
+    """Handle Iyzico payment callback"""
+    try:
+        request_data = {
+            'locale': 'tr',
+            'token': token
+        }
+        
+        checkout_form = iyzipay.CheckoutForm()
+        result = checkout_form.retrieve(request_data, get_iyzico_options())
+        response = result.read()
+        
+        if isinstance(response, bytes):
+            response = json.loads(response.decode('utf-8'))
+        
+        # Find order by payment token
+        order = await db.orders.find_one({"payment_token": token}, {"_id": 0})
+        
+        if response.get('status') == 'success' and response.get('paymentStatus') == 'SUCCESS':
+            if order:
+                await db.orders.update_one(
+                    {"id": order['id']},
+                    {"$set": {
+                        "payment_status": "paid",
+                        "payment_id": response.get('paymentId'),
+                        "status": "confirmed",
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+            
+            return {
+                "success": True,
+                "paymentId": response.get('paymentId'),
+                "orderId": order['id'] if order else None,
+                "orderNumber": order['order_number'] if order else None
+            }
+        else:
+            if order:
+                await db.orders.update_one(
+                    {"id": order['id']},
+                    {"$set": {
+                        "payment_status": "failed",
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+            
+            return {
+                "success": False,
+                "error": response.get('errorMessage', 'Ödeme başarısız')
+            }
+    except Exception as e:
+        logger.error(f"Payment callback error: {e}")
+        return {"success": False, "error": str(e)}
+
+# ==================== PRODUCT VARIANTS ====================
+@api_router.post("/products/{product_id}/variants", dependencies=[Depends(require_admin)])
+async def add_product_variant(product_id: str, variant_data: dict):
+    """Add a variant to a product"""
+    product = await db.products.find_one({"id": product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    import uuid
+    variant = {
+        "id": str(uuid.uuid4()),
+        "size": variant_data.get("size"),
+        "color": variant_data.get("color"),
+        "color_code": variant_data.get("color_code"),
+        "barcode": variant_data.get("barcode"),
+        "sku": variant_data.get("sku"),
+        "stock": variant_data.get("stock", 0),
+        "price_adjustment": variant_data.get("price_adjustment", 0),
+        "images": variant_data.get("images", [])
+    }
+    
+    result = await db.products.update_one(
+        {"id": product_id},
+        {
+            "$push": {"variants": variant},
+            "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}
+        }
+    )
+    
+    return {"success": True, "variant": variant}
+
+@api_router.put("/products/{product_id}/variants/{variant_id}", dependencies=[Depends(require_admin)])
+async def update_product_variant(product_id: str, variant_id: str, variant_data: dict):
+    """Update a product variant"""
+    update_fields = {}
+    for key, value in variant_data.items():
+        update_fields[f"variants.$.{key}"] = value
+    
+    result = await db.products.update_one(
+        {"id": product_id, "variants.id": variant_id},
+        {"$set": update_fields}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Varyant bulunamadı")
+    
+    return {"success": True}
+
+@api_router.delete("/products/{product_id}/variants/{variant_id}", dependencies=[Depends(require_admin)])
+async def delete_product_variant(product_id: str, variant_id: str):
+    """Delete a product variant"""
+    result = await db.products.update_one(
+        {"id": product_id},
+        {"$pull": {"variants": {"id": variant_id}}}
+    )
+    
+    return {"success": True}
+
+# ==================== SIMILAR & COMBO PRODUCTS ====================
+@api_router.get("/products/{product_id}/similar")
+async def get_similar_products(product_id: str, limit: int = 4):
+    """Get similar products based on category"""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        product = await db.products.find_one({"slug": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    # First check if product has manual similar products
+    if product.get('similar_product_ids'):
+        similar = await db.products.find(
+            {"id": {"$in": product['similar_product_ids']}, "is_active": True},
+            {"_id": 0}
+        ).limit(limit).to_list(limit)
+        if similar:
+            return [serialize_doc(p) for p in similar]
+    
+    # Auto-find similar products by category
+    query = {
+        "is_active": True,
+        "id": {"$ne": product['id']},
+        "$or": [
+            {"category_name": product.get('category_name')},
+            {"category_id": product.get('category_id')}
+        ]
+    }
+    
+    similar = await db.products.find(query, {"_id": 0}).limit(limit).to_list(limit)
+    return [serialize_doc(p) for p in similar]
+
+@api_router.get("/products/{product_id}/combo")
+async def get_combo_products(product_id: str, limit: int = 4):
+    """Get combo/outfit products - products that go well together"""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        product = await db.products.find_one({"slug": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    
+    # First check manual combo products
+    if product.get('combo_product_ids'):
+        combo = await db.products.find(
+            {"id": {"$in": product['combo_product_ids']}, "is_active": True},
+            {"_id": 0}
+        ).limit(limit).to_list(limit)
+        if combo:
+            return [serialize_doc(p) for p in combo]
+    
+    # Auto-find complementary products (different categories)
+    category = product.get('category_name', '').lower()
+    
+    # Define complementary categories
+    complements = {
+        'elbise': ['aksesuar', 'çanta', 'ayakkabı'],
+        'bluz': ['pantolon', 'etek', 'aksesuar'],
+        'gömlek': ['pantolon', 'etek', 'ceket'],
+        'pantolon': ['bluz', 'gömlek', 'kazak'],
+        'etek': ['bluz', 'gömlek', 'kazak'],
+        'ceket': ['pantolon', 'elbise', 'gömlek'],
+        'kazak': ['pantolon', 'etek', 'jean'],
+    }
+    
+    complement_categories = complements.get(category, ['aksesuar'])
+    
+    combo = await db.products.find(
+        {
+            "is_active": True,
+            "id": {"$ne": product['id']},
+            "category_name": {"$regex": "|".join(complement_categories), "$options": "i"}
+        },
+        {"_id": 0}
+    ).limit(limit).to_list(limit)
+    
+    return [serialize_doc(p) for p in combo]
+
+@api_router.put("/products/{product_id}/similar", dependencies=[Depends(require_admin)])
+async def set_similar_products(product_id: str, similar_ids: list[str]):
+    """Set similar product IDs for a product"""
+    result = await db.products.update_one(
+        {"id": product_id},
+        {"$set": {"similar_product_ids": similar_ids, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"success": True}
+
+@api_router.put("/products/{product_id}/combo", dependencies=[Depends(require_admin)])
+async def set_combo_products(product_id: str, combo_ids: list[str]):
+    """Set combo product IDs for a product"""
+    result = await db.products.update_one(
+        {"id": product_id},
+        {"$set": {"combo_product_ids": combo_ids, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"success": True}
+
+# ==================== CARGO/SHIPPING API ====================
+CARGO_COMPANIES = {
+    "MNG": {"name": "MNG Kargo", "tracking_url": "https://www.mngkargo.com.tr/gonderi-takip/?q="},
+    "DHL": {"name": "DHL", "tracking_url": "https://www.dhl.com/tr-tr/home/tracking.html?tracking-id="},
+    "YURTICI": {"name": "Yurtiçi Kargo", "tracking_url": "https://www.yurticikargo.com/tr/online-servisler/gonderi-sorgula?code="},
+    "ARAS": {"name": "Aras Kargo", "tracking_url": "https://www.araskargo.com.tr/trmGonderiSorgula.aspx?q="},
+    "PTT": {"name": "PTT Kargo", "tracking_url": "https://gonderitakip.ptt.gov.tr/Track/Verify?q="}
+}
+
+@api_router.get("/cargo/companies")
+async def get_cargo_companies():
+    """Get available cargo companies"""
+    return [{"code": code, **info} for code, info in CARGO_COMPANIES.items()]
+
+@api_router.post("/orders/{order_id}/ship", dependencies=[Depends(require_admin)])
+async def ship_order(
+    order_id: str,
+    cargo_company: str = Query(...),
+    tracking_number: str = Query(...)
+):
+    """Mark order as shipped with tracking info"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    company_info = CARGO_COMPANIES.get(cargo_company.upper())
+    if not company_info:
+        raise HTTPException(status_code=400, detail="Geçersiz kargo şirketi")
+    
+    cargo_data = {
+        "company": cargo_company.upper(),
+        "company_name": company_info["name"],
+        "tracking_number": tracking_number,
+        "tracking_url": f"{company_info['tracking_url']}{tracking_number}",
+        "shipped_at": datetime.now(timezone.utc).isoformat(),
+        "status": "shipped"
+    }
+    
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "cargo": cargo_data,
+            "status": "shipped",
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # TODO: Send SMS/Email notification to customer
+    
+    return {
+        "success": True,
+        "tracking_url": cargo_data["tracking_url"],
+        "message": f"Sipariş {company_info['name']} ile gönderildi"
+    }
+
+@api_router.get("/orders/{order_id}/track")
+async def track_order(order_id: str):
+    """Get order tracking information"""
+    order = await db.orders.find_one(
+        {"$or": [{"id": order_id}, {"order_number": order_id}]},
+        {"_id": 0}
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    cargo = order.get('cargo')
+    if not cargo:
+        return {
+            "status": order.get('status', 'pending'),
+            "message": "Kargo bilgisi henüz eklenmedi",
+            "tracking": None
+        }
+    
+    return {
+        "status": order.get('status'),
+        "cargo_company": cargo.get('company_name'),
+        "tracking_number": cargo.get('tracking_number'),
+        "tracking_url": cargo.get('tracking_url'),
+        "shipped_at": cargo.get('shipped_at')
+    }
+
 # Root endpoint
 @api_router.get("/")
 async def root():
-    return {"message": "Facette E-Commerce API", "version": "1.0"}
+    return {"message": "Facette E-Commerce API", "version": "2.0"}
 
 # Include router
 app.include_router(api_router)

@@ -15,6 +15,7 @@ export default function ProductDetail() {
   const { addItem } = useCart();
   const [product, setProduct] = useState(null);
   const [similarProducts, setSimilarProducts] = useState([]);
+  const [comboProducts, setComboProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [selectedSize, setSelectedSize] = useState(null);
@@ -47,9 +48,25 @@ export default function ProductDetail() {
     try {
       const res = await axios.get(`${API}/products/${slug}`);
       setProduct(res.data);
-      if (res.data?.category_name) {
-        const similarRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
-        setSimilarProducts(similarRes.data?.products?.filter(p => p.id !== res.data.id) || []);
+      
+      // Fetch similar products
+      try {
+        const similarRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
+        setSimilarProducts(similarRes.data || []);
+      } catch {
+        // Fallback to category-based similar products
+        if (res.data?.category_name) {
+          const fallbackRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
+          setSimilarProducts(fallbackRes.data?.products?.filter(p => p.id !== res.data.id) || []);
+        }
+      }
+      
+      // Fetch combo products
+      try {
+        const comboRes = await axios.get(`${API}/products/${res.data.id}/combo?limit=4`);
+        setComboProducts(comboRes.data || []);
+      } catch {
+        setComboProducts([]);
       }
     } catch (err) {
       console.error(err);
@@ -340,6 +357,16 @@ export default function ProductDetail() {
             <h2 className="text-base font-light mb-6">Benzer Ürünler</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {similarProducts.map((p) => <ProductCard key={p.id} product={p} />)}
+            </div>
+          </section>
+        )}
+
+        {/* Combo Products - "Bu Ürünle Giyin" */}
+        {comboProducts.length > 0 && (
+          <section className="mt-12 pt-12 border-t">
+            <h2 className="text-base font-light mb-6">Bu Ürünle Giyin</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {comboProducts.map((p) => <ProductCard key={p.id} product={p} />)}
             </div>
           </section>
         )}

@@ -32,6 +32,7 @@ const cargoCompanies = [
   { value: "DHL", label: "DHL" },
   { value: "YURTICI", label: "Yurtiçi Kargo" },
   { value: "ARAS", label: "Aras Kargo" },
+  { value: "PTT", label: "PTT Kargo" },
 ];
 
 export default function AdminOrders() {
@@ -45,6 +46,9 @@ export default function AdminOrders() {
   const [selectedOrders, setSelectedOrders] = useState([]);
   const [bulkAction, setBulkAction] = useState("");
   const [selectedCargo, setSelectedCargo] = useState("MNG");
+  const [shipModalOpen, setShipModalOpen] = useState(false);
+  const [shipOrderId, setShipOrderId] = useState(null);
+  const [trackingNumber, setTrackingNumber] = useState("");
 
   useEffect(() => {
     fetchOrders();
@@ -105,6 +109,32 @@ export default function AdminOrders() {
       fetchOrders();
     } catch (err) {
       toast.error("Kargo barkodu oluşturulamadı");
+    }
+  };
+
+  const openShipModal = (orderId) => {
+    setShipOrderId(orderId);
+    setTrackingNumber("");
+    setShipModalOpen(true);
+  };
+
+  const handleShipOrder = async () => {
+    if (!trackingNumber.trim()) {
+      toast.error("Lütfen takip numarası giriniz");
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/${shipOrderId}/ship?cargo_company=${selectedCargo}&tracking_number=${trackingNumber}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(res.data.message || "Sipariş kargoya verildi");
+      setShipModalOpen(false);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Kargo işlemi başarısız");
     }
   };
 
@@ -331,16 +361,23 @@ export default function AdminOrders() {
                     <td>
                       {order.cargo?.tracking_number ? (
                         <div className="text-xs">
-                          <p className="font-medium text-green-600">{order.cargo.company}</p>
-                          <p className="text-gray-500">{order.cargo.tracking_number}</p>
+                          <p className="font-medium text-green-600">{order.cargo.company_name || order.cargo.company}</p>
+                          <a 
+                            href={order.cargo.tracking_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {order.cargo.tracking_number}
+                          </a>
                         </div>
                       ) : (
                         <button 
-                          onClick={() => handleGenerateCargoBarcode(order.id)}
+                          onClick={() => openShipModal(order.id)}
                           className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                         >
                           <Truck size={14} />
-                          Barkod Oluştur
+                          Kargoya Ver
                         </button>
                       )}
                     </td>
@@ -433,11 +470,11 @@ export default function AdminOrders() {
                 )}
                 {!selectedOrder.cargo?.tracking_number && (
                   <button 
-                    onClick={() => handleGenerateCargoBarcode(selectedOrder.id)}
+                    onClick={() => openShipModal(selectedOrder.id)}
                     className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
                   >
                     <Truck size={16} />
-                    Kargo Barkodu Oluştur
+                    Kargoya Ver
                   </button>
                 )}
                 <button className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50">
@@ -545,6 +582,53 @@ export default function AdminOrders() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Ship Order Modal */}
+      <Dialog open={shipModalOpen} onOpenChange={setShipModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Siparişi Kargoya Ver</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Kargo Firması</label>
+              <select
+                value={selectedCargo}
+                onChange={(e) => setSelectedCargo(e.target.value)}
+                className="w-full border px-3 py-2 rounded"
+              >
+                {cargoCompanies.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Takip Numarası</label>
+              <input
+                type="text"
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+                placeholder="Kargo takip numarasını girin"
+                className="w-full border px-3 py-2 rounded"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShipModalOpen(false)}
+                className="px-4 py-2 border rounded hover:bg-gray-50"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleShipOrder}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                Kargoya Ver
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
