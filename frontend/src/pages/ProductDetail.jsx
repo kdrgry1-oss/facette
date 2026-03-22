@@ -29,6 +29,8 @@ export default function ProductDetail() {
   const [showSizeChart, setShowSizeChart] = useState(false);
 
   useEffect(() => {
+    // Scroll to top when page loads
+    window.scrollTo(0, 0);
     fetchProduct();
   }, [slug]);
 
@@ -38,7 +40,6 @@ export default function ProductDetail() {
       const res = await axios.get(`${API}/products/${slug}`);
       setProduct(res.data);
       
-      // Fetch similar products
       if (res.data?.category_name) {
         const similarRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
         setSimilarProducts(similarRes.data?.products?.filter(p => p.id !== res.data.id) || []);
@@ -106,11 +107,15 @@ export default function ProductDetail() {
   const hasDiscount = product.sale_price && product.sale_price < product.price;
   const displayPrice = product.sale_price || product.price;
 
-  // Son görsel beden tablosu olarak kullanılacak, diğerleri galeri için
+  // Remove duplicate images and separate size chart (last image)
   const allImages = product.images || [];
-  const hasSizeChart = allImages.length > 1;
-  const sizeChartImage = hasSizeChart ? allImages[allImages.length - 1] : null;
-  const displayImages = hasSizeChart ? allImages.slice(0, -1) : allImages;
+  const uniqueImages = allImages.length > 1 && allImages[0] === allImages[1] 
+    ? allImages.slice(1) 
+    : allImages;
+  
+  const hasSizeChart = uniqueImages.length > 1;
+  const sizeChartImage = hasSizeChart ? uniqueImages[uniqueImages.length - 1] : null;
+  const displayImages = hasSizeChart ? uniqueImages.slice(0, -1) : uniqueImages;
 
   return (
     <div className="min-h-screen" data-testid="product-detail-page">
@@ -137,7 +142,7 @@ export default function ProductDetail() {
         <div className="grid md:grid-cols-2 gap-8 lg:gap-16">
           {/* Images */}
           <div className="flex gap-4">
-            {/* Thumbnails - Son görsel hariç */}
+            {/* Thumbnails */}
             <div className="hidden md:flex flex-col gap-2 w-20">
               {displayImages.map((img, index) => (
                 <button
@@ -147,7 +152,7 @@ export default function ProductDetail() {
                     selectedImage === index ? "border-black" : "border-transparent hover:border-gray-300"
                   }`}
                 >
-                  <img src={img} alt={`${product.name} ${index + 1}`} className="w-full h-full object-cover" />
+                  <img src={img} alt="" className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
@@ -158,18 +163,15 @@ export default function ProductDetail() {
                 src={displayImages[selectedImage] || "/placeholder.jpg"}
                 alt={product.name}
                 className="w-full aspect-[3/4] object-cover object-top"
-                data-testid="main-product-image"
               />
               
-              {/* Mobile Image Dots */}
+              {/* Mobile Dots */}
               <div className="md:hidden absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
                 {displayImages.map((_, index) => (
                   <button
                     key={index}
                     onClick={() => setSelectedImage(index)}
-                    className={`w-2 h-2 rounded-full transition-colors ${
-                      selectedImage === index ? "bg-black" : "bg-gray-400"
-                    }`}
+                    className={`w-2 h-2 rounded-full ${selectedImage === index ? "bg-black" : "bg-gray-400"}`}
                   />
                 ))}
               </div>
@@ -178,7 +180,6 @@ export default function ProductDetail() {
 
           {/* Product Info */}
           <div className="lg:max-w-md">
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">FACETTE</p>
             <h1 className="text-2xl md:text-3xl font-light mb-4">{product.name}</h1>
             
             {/* Price */}
@@ -195,15 +196,6 @@ export default function ProductDetail() {
             <div className="mb-6">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm">Beden Seçiniz</span>
-                {sizeChartImage && (
-                  <button 
-                    onClick={() => setShowSizeChart(true)}
-                    className="text-sm underline hover:no-underline"
-                    data-testid="size-chart-btn"
-                  >
-                    Beden Tablosu
-                  </button>
-                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => (
@@ -232,21 +224,32 @@ export default function ProductDetail() {
               <div className="flex items-center border border-gray-300 w-fit">
                 <button 
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="p-3 hover:bg-gray-50 transition-colors"
-                  data-testid="decrease-qty"
+                  className="p-3 hover:bg-gray-50"
                 >
                   <Minus size={16} />
                 </button>
                 <span className="px-6 text-sm">{quantity}</span>
                 <button 
                   onClick={() => setQuantity(quantity + 1)}
-                  className="p-3 hover:bg-gray-50 transition-colors"
-                  data-testid="increase-qty"
+                  className="p-3 hover:bg-gray-50"
                 >
                   <Plus size={16} />
                 </button>
               </div>
             </div>
+
+            {/* Size Chart Link - Right above Add to Cart */}
+            {sizeChartImage && (
+              <div className="mb-4">
+                <button 
+                  onClick={() => setShowSizeChart(true)}
+                  className="text-sm underline hover:no-underline"
+                  data-testid="size-chart-btn"
+                >
+                  Beden Tablosu
+                </button>
+              </div>
+            )}
 
             {/* Add to Cart */}
             <div className="flex gap-3 mb-8">
@@ -257,7 +260,7 @@ export default function ProductDetail() {
               >
                 Sepete Ekle
               </button>
-              <button className="w-14 h-14 border border-gray-300 flex items-center justify-center hover:border-black transition-colors">
+              <button className="w-14 h-14 border border-gray-300 flex items-center justify-center hover:border-black">
                 <Heart size={20} strokeWidth={1.5} />
               </button>
             </div>
@@ -290,7 +293,6 @@ export default function ProductDetail() {
                 <AccordionContent>
                   <p className="text-sm text-gray-600">
                     Ürünlerimizi teslim aldığınız tarihten itibaren 14 gün içerisinde iade veya değişim yapabilirsiniz.
-                    Ürünün kullanılmamış, etiketli ve orijinal ambalajında olması gerekmektedir.
                   </p>
                 </AccordionContent>
               </AccordionItem>
@@ -311,12 +313,11 @@ export default function ProductDetail() {
         )}
       </div>
 
-      {/* Size Chart Modal - Son ürün görseli burada görünecek */}
+      {/* Size Chart Modal */}
       {showSizeChart && sizeChartImage && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" 
           onClick={() => setShowSizeChart(false)}
-          data-testid="size-chart-modal"
         >
           <div 
             className="bg-white max-w-lg w-full max-h-[90vh] overflow-auto relative" 
@@ -324,20 +325,12 @@ export default function ProductDetail() {
           >
             <div className="sticky top-0 bg-white flex justify-between items-center p-4 border-b">
               <h3 className="text-sm font-medium uppercase tracking-wider">Beden Tablosu</h3>
-              <button 
-                onClick={() => setShowSizeChart(false)} 
-                className="p-1 hover:bg-gray-100 rounded-full"
-                data-testid="close-size-chart"
-              >
+              <button onClick={() => setShowSizeChart(false)} className="p-1 hover:bg-gray-100 rounded-full">
                 <X size={20} />
               </button>
             </div>
             <div className="p-4">
-              <img 
-                src={sizeChartImage} 
-                alt="Beden tablosu" 
-                className="w-full h-auto"
-              />
+              <img src={sizeChartImage} alt="Beden tablosu" className="w-full h-auto" />
             </div>
           </div>
         </div>

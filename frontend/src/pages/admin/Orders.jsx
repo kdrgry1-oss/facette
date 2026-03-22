@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Eye, Truck, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -22,9 +22,16 @@ const statusOptions = [
   { value: "pending", label: "Bekliyor", class: "status-pending" },
   { value: "confirmed", label: "Onaylandı", class: "status-confirmed" },
   { value: "preparing", label: "Hazırlanıyor", class: "status-preparing" },
-  { value: "shipped", label: "Kargoda", class: "status-shipped" },
+  { value: "shipping", label: "Kargoda", class: "status-shipped" },
   { value: "delivered", label: "Teslim Edildi", class: "status-delivered" },
   { value: "cancelled", label: "İptal Edildi", class: "status-cancelled" },
+];
+
+const cargoCompanies = [
+  { value: "MNG", label: "MNG Kargo" },
+  { value: "DHL", label: "DHL" },
+  { value: "YURTICI", label: "Yurtiçi Kargo" },
+  { value: "ARAS", label: "Aras Kargo" },
 ];
 
 export default function AdminOrders() {
@@ -35,6 +42,9 @@ export default function AdminOrders() {
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedOrders, setSelectedOrders] = useState([]);
+  const [bulkAction, setBulkAction] = useState("");
+  const [selectedCargo, setSelectedCargo] = useState("MNG");
 
   useEffect(() => {
     fetchOrders();
@@ -43,9 +53,10 @@ export default function AdminOrders() {
   const fetchOrders = async () => {
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       let url = `${API}/orders?page=${page}&limit=20`;
       if (statusFilter) url += `&status=${statusFilter}`;
-      const res = await axios.get(url);
+      const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       setOrders(res.data?.orders || []);
       setTotal(res.data?.total || 0);
     } catch (err) {
@@ -57,7 +68,10 @@ export default function AdminOrders() {
 
   const handleStatusChange = async (orderId, newStatus) => {
     try {
-      await axios.put(`${API}/orders/${orderId}/status?status=${newStatus}`);
+      const token = localStorage.getItem('token');
+      await axios.put(`${API}/orders/${orderId}/status?status=${newStatus}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       toast.success("Sipariş durumu güncellendi");
       fetchOrders();
       if (selectedOrder?.id === orderId) {
@@ -65,6 +79,86 @@ export default function AdminOrders() {
       }
     } catch (err) {
       toast.error("Güncelleme başarısız");
+    }
+  };
+
+  const handleGenerateInvoice = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/${orderId}/invoice`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`Fatura oluşturuldu: ${res.data.invoice_number}`);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Fatura oluşturulamadı");
+    }
+  };
+
+  const handleGenerateCargoBarcode = async (orderId, company = selectedCargo) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/${orderId}/cargo-barcode?cargo_company=${company}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`Kargo barkodu: ${res.data.tracking_number}`);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Kargo barkodu oluşturulamadı");
+    }
+  };
+
+  const handleBulkCargoBarcode = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/bulk/cargo-barcode?cargo_company=${selectedCargo}`, 
+        selectedOrders, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${res.data.success_count} sipariş için kargo barkodu oluşturuldu`);
+      setSelectedOrders([]);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Toplu barkod oluşturulamadı");
+    }
+  };
+
+  const handleBulkStatusChange = async (status) => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/orders/bulk/status?status=${status}`, 
+        selectedOrders, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${selectedOrders.length} sipariş güncellendi`);
+      setSelectedOrders([]);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Toplu güncelleme başarısız");
+    }
+  };
+
+  const toggleSelectOrder = (orderId) => {
+    setSelectedOrders(prev => 
+      prev.includes(orderId) 
+        ? prev.filter(id => id !== orderId)
+        : [...prev, orderId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedOrders.length === orders.length) {
+      setSelectedOrders([]);
+    } else {
+      setSelectedOrders(orders.map(o => o.id));
     }
   };
 
@@ -105,13 +199,60 @@ export default function AdminOrders() {
         </div>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedOrders.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+          <span className="text-sm font-medium">{selectedOrders.length} sipariş seçildi</span>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedCargo}
+              onChange={(e) => setSelectedCargo(e.target.value)}
+              className="border px-2 py-1 rounded text-sm"
+            >
+              {cargoCompanies.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+            <button 
+              onClick={handleBulkCargoBarcode}
+              className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+            >
+              <Package size={16} />
+              Toplu Barkod Oluştur
+            </button>
+            <select
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkStatusChange(e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              className="border px-2 py-1 rounded text-sm"
+              defaultValue=""
+            >
+              <option value="" disabled>Toplu Durum Güncelle</option>
+              {statusOptions.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+        <div 
+          onClick={() => setStatusFilter("")}
+          className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${!statusFilter ? "ring-2 ring-black" : ""}`}
+        >
+          <p className="text-2xl font-bold">{total}</p>
+          <p className="text-sm text-gray-500">Toplam</p>
+        </div>
         {statusOptions.slice(0, 5).map((status) => (
           <div 
             key={status.value}
             onClick={() => setStatusFilter(status.value)}
-            className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer transition-shadow hover:shadow-md ${statusFilter === status.value ? "ring-2 ring-black" : ""}`}
+            className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${statusFilter === status.value ? "ring-2 ring-black" : ""}`}
           >
             <p className="text-2xl font-bold">
               {orders.filter(o => o.status === status.value).length}
@@ -126,11 +267,21 @@ export default function AdminOrders() {
         <table className="admin-table">
           <thead>
             <tr>
+              <th className="w-10">
+                <button onClick={toggleSelectAll} className="p-1">
+                  {selectedOrders.length === orders.length ? (
+                    <CheckSquare size={18} />
+                  ) : (
+                    <Square size={18} />
+                  )}
+                </button>
+              </th>
               <th>Sipariş No</th>
               <th>Müşteri</th>
               <th>Ürünler</th>
               <th>Tutar</th>
-              <th>Ödeme</th>
+              <th>Kargo</th>
+              <th>Fatura</th>
               <th>Durum</th>
               <th>Tarih</th>
               <th>İşlemler</th>
@@ -139,17 +290,26 @@ export default function AdminOrders() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-8">Yükleniyor...</td>
+                <td colSpan={10} className="text-center py-8">Yükleniyor...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
+                <td colSpan={10} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
               </tr>
             ) : (
               orders.map((order) => {
                 const statusInfo = getStatusInfo(order.status);
                 return (
                   <tr key={order.id}>
+                    <td>
+                      <button onClick={() => toggleSelectOrder(order.id)} className="p-1">
+                        {selectedOrders.includes(order.id) ? (
+                          <CheckSquare size={18} className="text-blue-600" />
+                        ) : (
+                          <Square size={18} />
+                        )}
+                      </button>
+                    </td>
                     <td className="font-medium">{order.order_number}</td>
                     <td>
                       <div>
@@ -160,24 +320,44 @@ export default function AdminOrders() {
                     <td>
                       <div className="flex -space-x-2">
                         {order.items?.slice(0, 3).map((item, i) => (
-                          <img 
-                            key={i} 
-                            src={item.image} 
-                            alt="" 
-                            className="w-8 h-10 object-cover border-2 border-white bg-gray-100"
-                          />
+                          <img key={i} src={item.image} alt="" className="w-8 h-10 object-cover border-2 border-white bg-gray-100" />
                         ))}
                         {order.items?.length > 3 && (
-                          <span className="w-8 h-10 bg-gray-200 flex items-center justify-center text-xs">
-                            +{order.items.length - 3}
-                          </span>
+                          <span className="w-8 h-10 bg-gray-200 flex items-center justify-center text-xs">+{order.items.length - 3}</span>
                         )}
                       </div>
                     </td>
-                    <td className="font-medium">{order.total.toFixed(2)} TL</td>
-                    <td className="capitalize text-xs">
-                      {order.payment_method === "credit_card" ? "Kredi Kartı" : 
-                       order.payment_method === "bank_transfer" ? "Havale" : "Kapıda"}
+                    <td className="font-medium">{order.total?.toFixed(2)} TL</td>
+                    <td>
+                      {order.cargo?.tracking_number ? (
+                        <div className="text-xs">
+                          <p className="font-medium text-green-600">{order.cargo.company}</p>
+                          <p className="text-gray-500">{order.cargo.tracking_number}</p>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => handleGenerateCargoBarcode(order.id)}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          <Truck size={14} />
+                          Barkod Oluştur
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      {order.invoice?.invoice_number ? (
+                        <div className="text-xs">
+                          <p className="text-green-600">{order.invoice.invoice_number}</p>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => handleGenerateInvoice(order.id)}
+                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          <FileText size={14} />
+                          Fatura Kes
+                        </button>
+                      )}
                     </td>
                     <td>
                       <Select
@@ -191,20 +371,17 @@ export default function AdminOrders() {
                         </SelectTrigger>
                         <SelectContent>
                           {statusOptions.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </td>
-                    <td className="text-sm text-gray-500">
-                      {formatDate(order.created_at)}
-                    </td>
+                    <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
                     <td>
                       <button 
                         onClick={() => openDetail(order)}
                         className="p-1 hover:bg-gray-100 rounded text-blue-600"
+                        title="Detayları Gör"
                       >
                         <Eye size={18} />
                       </button>
@@ -234,13 +411,61 @@ export default function AdminOrders() {
 
       {/* Order Detail Modal */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Sipariş Detayı - {selectedOrder?.order_number}</DialogTitle>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Sipariş Detayı - {selectedOrder?.order_number}</span>
+            </DialogTitle>
           </DialogHeader>
           
           {selectedOrder && (
             <div className="space-y-6">
+              {/* Action Buttons */}
+              <div className="flex gap-2 flex-wrap">
+                {!selectedOrder.invoice?.invoice_number && (
+                  <button 
+                    onClick={() => handleGenerateInvoice(selectedOrder.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                  >
+                    <FileText size={16} />
+                    Fatura Kes
+                  </button>
+                )}
+                {!selectedOrder.cargo?.tracking_number && (
+                  <button 
+                    onClick={() => handleGenerateCargoBarcode(selectedOrder.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                  >
+                    <Truck size={16} />
+                    Kargo Barkodu Oluştur
+                  </button>
+                )}
+                <button className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50">
+                  <Printer size={16} />
+                  Yazdır
+                </button>
+              </div>
+
+              {/* Invoice & Cargo Info */}
+              {(selectedOrder.invoice || selectedOrder.cargo) && (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {selectedOrder.invoice && (
+                    <div className="p-4 bg-green-50 border border-green-200 rounded">
+                      <h3 className="font-medium text-green-800 mb-2">Fatura Bilgileri</h3>
+                      <p className="text-sm">Fatura No: <span className="font-medium">{selectedOrder.invoice.invoice_number}</span></p>
+                      <p className="text-sm text-gray-600">Tarih: {formatDate(selectedOrder.invoice.invoice_date)}</p>
+                    </div>
+                  )}
+                  {selectedOrder.cargo && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded">
+                      <h3 className="font-medium text-blue-800 mb-2">Kargo Bilgileri</h3>
+                      <p className="text-sm">Firma: <span className="font-medium">{selectedOrder.cargo.company}</span></p>
+                      <p className="text-sm">Takip No: <span className="font-medium">{selectedOrder.cargo.tracking_number}</span></p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Status */}
               <div className="flex items-center justify-between p-4 bg-gray-50 rounded">
                 <div>
@@ -258,9 +483,7 @@ export default function AdminOrders() {
                   </SelectTrigger>
                   <SelectContent>
                     {statusOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -320,14 +543,6 @@ export default function AdminOrders() {
                   <span>{selectedOrder.total?.toFixed(2)} TL</span>
                 </div>
               </div>
-
-              {/* Notes */}
-              {selectedOrder.notes && (
-                <div className="p-4 border rounded">
-                  <h3 className="font-medium mb-2">Sipariş Notu</h3>
-                  <p className="text-sm text-gray-600">{selectedOrder.notes}</p>
-                </div>
-              )}
             </div>
           )}
         </DialogContent>

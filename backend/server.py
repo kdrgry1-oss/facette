@@ -262,6 +262,138 @@ async def update_order_status(order_id: str, status: str = Query(...)):
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
     return {"success": True}
 
+# ==================== ADVANCED ORDER MANAGEMENT ====================
+@api_router.get("/orders/{order_id}/detail", dependencies=[Depends(require_admin)])
+async def get_order_detail(order_id: str):
+    """Get detailed order information for admin"""
+    order = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Get customer details
+    customer = None
+    if order.get('user_id'):
+        customer = await db.users.find_one({"id": order['user_id']}, {"_id": 0, "password": 0})
+    
+    return {
+        "order": serialize_doc(order),
+        "customer": serialize_doc(customer) if customer else None
+    }
+
+@api_router.post("/orders/{order_id}/invoice", dependencies=[Depends(require_admin)])
+async def generate_invoice(order_id: str):
+    """Generate invoice for order"""
+    import random
+    import string
+    
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Generate invoice number
+    invoice_number = f"FAT-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{''.join(random.choices(string.digits, k=6))}"
+    
+    # Update order with invoice info
+    invoice_data = {
+        "invoice_number": invoice_number,
+        "invoice_date": datetime.now(timezone.utc).isoformat(),
+        "invoice_status": "generated"
+    }
+    
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"invoice": invoice_data, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {
+        "success": True,
+        "invoice_number": invoice_number,
+        "message": "Fatura oluşturuldu"
+    }
+
+@api_router.post("/orders/{order_id}/cargo-barcode", dependencies=[Depends(require_admin)])
+async def generate_cargo_barcode(order_id: str, cargo_company: str = Query(default="MNG")):
+    """Generate cargo barcode for order"""
+    import random
+    import string
+    
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Generate cargo tracking number
+    prefix = {"MNG": "MNG", "DHL": "JD", "YURTICI": "YK", "ARAS": "AR"}.get(cargo_company.upper(), "KRG")
+    tracking_number = f"{prefix}{''.join(random.choices(string.digits, k=12))}"
+    
+    # Update order with cargo info
+    cargo_data = {
+        "company": cargo_company.upper(),
+        "tracking_number": tracking_number,
+        "barcode": tracking_number,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending"
+    }
+    
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"cargo": cargo_data, "status": "shipping", "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {
+        "success": True,
+        "tracking_number": tracking_number,
+        "cargo_company": cargo_company.upper(),
+        "message": f"Kargo barkodu oluşturuldu: {tracking_number}"
+    }
+
+@api_router.post("/orders/bulk/cargo-barcode", dependencies=[Depends(require_admin)])
+async def bulk_generate_cargo_barcodes(order_ids: list[str], cargo_company: str = Query(default="MNG")):
+    """Generate cargo barcodes for multiple orders"""
+    import random
+    import string
+    
+    results = []
+    for order_id in order_ids:
+        order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+        if not order:
+            results.append({"order_id": order_id, "success": False, "error": "Sipariş bulunamadı"})
+            continue
+        
+        prefix = {"MNG": "MNG", "DHL": "JD", "YURTICI": "YK", "ARAS": "AR"}.get(cargo_company.upper(), "KRG")
+        tracking_number = f"{prefix}{''.join(random.choices(string.digits, k=12))}"
+        
+        cargo_data = {
+            "company": cargo_company.upper(),
+            "tracking_number": tracking_number,
+            "barcode": tracking_number,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "pending"
+        }
+        
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {"cargo": cargo_data, "status": "shipping", "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        results.append({
+            "order_id": order_id,
+            "order_number": order.get('order_number'),
+            "success": True,
+            "tracking_number": tracking_number
+        })
+    
+    return {"results": results, "total": len(order_ids), "success_count": sum(1 for r in results if r.get('success'))}
+
+@api_router.post("/orders/bulk/status", dependencies=[Depends(require_admin)])
+async def bulk_update_order_status(order_ids: list[str], status: str = Query(...)):
+    """Update status for multiple orders"""
+    result = await db.orders.update_many(
+        {"id": {"$in": order_ids}},
+        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"success": True, "modified_count": result.modified_count}
+
+
 # ==================== BANNERS ====================
 @api_router.get("/banners")
 async def get_banners(position: Optional[str] = None):
