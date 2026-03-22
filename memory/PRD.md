@@ -10,77 +10,73 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Storage: Emergent Object Storage
 - Auth: JWT + Google OAuth (Emergent Auth)
 
-## Current Status: v3.0 - facette.com.tr Replica ✅
+## Current Status: v4.0 - Full CMS + Excel Import ✅
 
-### What's Been Implemented (2026-03-22)
+### Tamamlanan Özellikler (2026-03-22)
 
 #### UI/UX - facette.com.tr Replica
-- [x] **Üst Banner**: "500 TL ÜZERİ ÜCRETSİZ KARGO" (beyaz bg, siyah text)
-- [x] **Logo**: Doğru FACETTE logosu
-- [x] **Header Menü**: EN YENİLER, GİYİM ▾, AKSESUAR ▾, SALE (kırmızı)
-- [x] **Alt Kategori Dropdown**: Hoverde tüm alt kategoriler
-- [x] **Hero Slider**: Tam genişlik, boşluksuz
-- [x] **Banner Yapısı**: 
-  - Tam genişlik (BLOOM TOGETHER)
-  - Yarı yarıya (GÖMLEK, ÇANTA)
-  - Aralarında boşluk yok
-- [x] **Ürün Kartları**: Bookmark, sepete ekle (ad yanında)
-- [x] **Ürün Detay**:
-  - İki resim yan yana
-  - Sol/sağ navigasyon okları
-  - Sticky header (scroll sonrası)
-  - Beden Tablosu popup
+- [x] Üst Banner: "500 TL ÜZERİ ÜCRETSİZ KARGO" (beyaz bg, siyah text)
+- [x] Logo: Doğru FACETTE logosu
+- [x] Header: EN YENİLER, GİYİM ▾, AKSESUAR ▾, SALE (kırmızı)
+- [x] Alt Kategori Dropdown
+- [x] Hero Slider: Tam genişlik, boşluksuz
+- [x] Banner Yapısı: Tam genişlik + yarı yarıya, boşluk yok
+- [x] Ürün Kartları: Bookmark, sepete ekle (ad yanında)
+- [x] Ürün Detay: İki resim yan yana, sol/sağ oklar, sticky header
+- [x] Checkout: Menüler gizli
 
-#### Authentication
-- [x] **Google Auth**: Emergent Auth ile entegre
-- [x] **JWT Auth**: Normal e-posta/şifre girişi
+#### Excel Import - 900 Ürün
+- [x] Ticimax Excel import script
+- [x] Stok kodu, barkod, KDV, tedarikçi, ağırlık, boyutlar
+- [x] 50+ alan destekli ürün modeli
+- [x] 409 ürün başarıyla import edildi
 
-#### Object Storage
-- [x] **Görsel Yükleme**: /api/upload/image endpoint'i
-- [x] **Dosya Servisi**: /api/files/{path} endpoint'i
+#### Admin Panel - Gelişmiş
+- [x] **Ürünler**: Stok kodu, barkod görüntüleme
+- [x] **Ürün Düzenleme**: 5 sekmeli form (Temel, Fiyat, Görseller, Stok, SEO)
+- [x] **Görsel Yükleme**: Object Storage entegrasyonu
+- [x] **Siparişler**: Fatura kes, kargo barkodu, toplu işlemler
+- [x] **Sayfa Tasarımı (CMS)**: Banner/blok yönetimi
 
-#### Ürün Modeli - Ticimax Excel Alanları
-- [x] urun_karti_id, urun_id, stock_code, variation_code
-- [x] barcode, gtip_code, unit, keywords
-- [x] supplier, purchase_price, market_price
-- [x] vat_rate, vat_included, currency
-- [x] cargo_weight, product_weight, dimensions
-- [x] min/max_order_qty, estimated_delivery
-- [x] marketplace_active, custom_fields
+#### Entegrasyonlar
+- [x] Google OAuth (Emergent Auth)
+- [x] Object Storage (görsel yükleme)
+- [x] API endpoint'leri (page-blocks, upload/image, files)
 
-#### Admin Panel Özellikleri
-- [x] Sipariş yönetimi (fatura kes, kargo barkodu)
-- [x] Toplu işlemler (toplu barkod, toplu durum)
-- [x] Detay modal (fatura/kargo bilgileri)
+## Admin Panel Menüsü
+1. Dashboard
+2. Ürünler (stok kodu, barkod, görsel yükleme)
+3. Siparişler (fatura, kargo, toplu işlem)
+4. Kategoriler
+5. Sayfa Tasarımı (CMS)
+6. Bannerlar
+7. Kampanyalar
+8. Sayfalar
+9. Ayarlar
 
 ## API Endpoints
 
-### Auth
-- POST /api/auth/register
-- POST /api/auth/login
-- GET /api/auth/me
-- POST /api/auth/google/session - Google OAuth callback
+### Page Blocks (CMS)
+- GET /api/page-blocks - Tüm blokları getir
+- POST /api/page-blocks - Yeni blok ekle
+- PUT /api/page-blocks/{id} - Blok güncelle
+- DELETE /api/page-blocks/{id} - Blok sil
 
 ### Upload
-- POST /api/upload/image - Görsel yükleme
-- GET /api/files/{path} - Dosya servisi
+- POST /api/upload/image - Görsel yükle
+- GET /api/files/{path} - Dosya servis
 
-### Orders (Admin)
-- GET /api/orders/{id}/detail
-- POST /api/orders/{id}/invoice
-- POST /api/orders/{id}/cargo-barcode
-- POST /api/orders/bulk/cargo-barcode
-- POST /api/orders/bulk/status
+### Auth
+- POST /api/auth/google/session - Google OAuth
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://fashion-ecom-mvp.preview.emergentagent.com
 
-## P1 - Devam Eden Görevler
-- [ ] Sayfa tasarım yönetimi (CMS)
-- [ ] Excel import - tüm ürünleri güncelleme
-- [ ] Admin ürün ekleme - görsel yükleme arayüzü
+## P1 - Sonraki Görevler
+- [ ] Varyant yönetimi (renk, beden bazlı stok)
 - [ ] Checkout akışı tamamlama
+- [ ] Sipariş takibi müşteri paneli
 
 ## P2 - Entegrasyonlar
 - [ ] Iyzico ödeme
@@ -89,5 +85,31 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [ ] Trendyol API
 - [ ] GIB e-fatura
 
+## File Structure
+```
+/app/
+├── backend/
+│   ├── server.py
+│   ├── models.py
+│   ├── import_excel.py    # Excel import script
+│   └── requirements.txt
+├── frontend/
+│   └── src/
+│       ├── components/
+│       │   ├── Header.jsx
+│       │   ├── ProductCard.jsx
+│       │   └── ...
+│       ├── pages/
+│       │   ├── Home.jsx
+│       │   ├── ProductDetail.jsx
+│       │   └── admin/
+│       │       ├── Products.jsx      # 5-tab form
+│       │       ├── Orders.jsx        # Invoice, cargo
+│       │       ├── PageDesign.jsx    # CMS
+│       │       └── ...
+│       └── context/
+└── memory/PRD.md
+```
+
 ## Last Updated
-2026-03-22 - v3.0 facette replica + Google Auth + Object Storage
+2026-03-22 - v4.0 CMS + Excel Import + Görsel Yükleme

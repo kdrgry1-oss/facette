@@ -24,6 +24,7 @@ import AdminBanners from "./pages/admin/Banners";
 import AdminSettings from "./pages/admin/Settings";
 import AdminCampaigns from "./pages/admin/Campaigns";
 import AdminPages from "./pages/admin/Pages";
+import AdminPageDesign from "./pages/admin/PageDesign";
 
 import "./App.css";
 
@@ -51,6 +52,7 @@ function App() {
               <Route path="urunler" element={<AdminProducts />} />
               <Route path="siparisler" element={<AdminOrders />} />
               <Route path="kategoriler" element={<AdminCategories />} />
+              <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
               <Route path="bannerlar" element={<AdminBanners />} />
               <Route path="kampanyalar" element={<AdminCampaigns />} />
               <Route path="sayfalar" element={<AdminPages />} />

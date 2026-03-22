@@ -617,6 +617,50 @@ async def log_search(term: str = Query(...)):
 @api_router.get("/homepage/blocks")
 async def get_homepage_blocks():
     blocks = await db.homepage_blocks.find({"is_active": True}, {"_id": 0}).sort("sort_order", 1).to_list(20)
+
+# ==================== PAGE BLOCKS (CMS) ====================
+@api_router.get("/page-blocks")
+async def get_page_blocks(page: str = Query(default="home")):
+    """Get all page blocks for CMS"""
+    blocks = await db.page_blocks.find({"page": page}, {"_id": 0}).sort("sort_order", 1).to_list(50)
+    return [serialize_doc(b) for b in blocks]
+
+@api_router.post("/page-blocks", dependencies=[Depends(require_admin)])
+async def create_page_block(block_data: dict):
+    """Create a new page block"""
+    import uuid
+    block = {
+        "id": str(uuid.uuid4()),
+        "type": block_data.get("type", "hero_slider"),
+        "title": block_data.get("title", ""),
+        "images": block_data.get("images", []),
+        "links": block_data.get("links", []),
+        "settings": block_data.get("settings", {}),
+        "sort_order": block_data.get("sort_order", 0),
+        "is_active": block_data.get("is_active", True),
+        "page": block_data.get("page", "home"),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.page_blocks.insert_one(block)
+    block.pop('_id', None)
+    return serialize_doc(block)
+
+@api_router.put("/page-blocks/{block_id}", dependencies=[Depends(require_admin)])
+async def update_page_block(block_id: str, block_data: dict):
+    """Update a page block"""
+    update_data = {k: v for k, v in block_data.items() if k != 'id'}
+    update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+    result = await db.page_blocks.update_one({"id": block_id}, {"$set": update_data})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Blok bulunamadı")
+    return {"success": True}
+
+@api_router.delete("/page-blocks/{block_id}", dependencies=[Depends(require_admin)])
+async def delete_page_block(block_id: str):
+    """Delete a page block"""
+    await db.page_blocks.delete_one({"id": block_id})
+    return {"success": True}
+
     return blocks
 
 @api_router.post("/homepage/blocks", dependencies=[Depends(require_admin)])
