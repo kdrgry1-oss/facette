@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Bookmark, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
@@ -8,6 +8,7 @@ export default function ProductCard({ product }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
   const { addItem } = useCart();
+  const imageContainerRef = useRef(null);
 
   // Remove duplicate first image
   const allImages = product.images || [];
@@ -33,15 +34,39 @@ export default function ProductCard({ product }) {
     toast.success(isFavorite ? "Favorilerden çıkarıldı" : "Favorilere eklendi");
   };
 
+  // Handle mouse move for image hover change
+  const handleMouseMove = (e) => {
+    if (!hasMultipleImages || !imageContainerRef.current) return;
+    
+    const rect = imageContainerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+    const segmentWidth = width / Math.min(images.length, 4);
+    const newIndex = Math.min(Math.floor(x / segmentWidth), images.length - 1);
+    
+    if (newIndex !== currentImageIndex && newIndex >= 0) {
+      setCurrentImageIndex(newIndex);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setCurrentImageIndex(0);
+  };
+
   return (
     <div className="product-card group" data-testid={`product-card-${product.id}`}>
       <Link to={`/urun/${product.slug || product.id}`}>
         {/* Image Container */}
-        <div className="relative aspect-[3/4] bg-white overflow-hidden">
+        <div 
+          ref={imageContainerRef}
+          className="relative aspect-[3/4] bg-white overflow-hidden"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
           <img
             src={images[currentImageIndex] || "/placeholder.jpg"}
             alt={product.name}
-            className="w-full h-full object-cover object-top"
+            className="w-full h-full object-cover object-top transition-opacity duration-200"
             loading="lazy"
           />
           
@@ -58,21 +83,16 @@ export default function ProductCard({ product }) {
             />
           </button>
 
-          {/* Image Dots */}
+          {/* Image Indicators - show which segment is active */}
           {hasMultipleImages && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
               {images.slice(0, 4).map((_, index) => (
-                <button
+                <div
                   key={index}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCurrentImageIndex(index);
-                  }}
                   className={`transition-all ${
                     index === currentImageIndex 
                       ? "w-5 h-1.5 bg-black rounded-full" 
-                      : "w-1.5 h-1.5 bg-gray-300 rounded-full hover:bg-gray-500"
+                      : "w-1.5 h-1.5 bg-gray-300 rounded-full"
                   }`}
                 />
               ))}

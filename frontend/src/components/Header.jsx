@@ -42,6 +42,17 @@ const AKSESUAR_MENU = [
   { name: "Şapka", slug: "sapka" },
 ];
 
+// Menu images for right side
+const MENU_IMAGES = {
+  giyim: [
+    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg",
+    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg"
+  ],
+  aksesuar: [
+    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg"
+  ]
+};
+
 export default function Header({ hideMenu = false }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -127,11 +138,11 @@ export default function Header({ hideMenu = false }) {
                     <Menu size={22} />
                   </button>
 
-                  <nav className="hidden lg:flex items-center gap-6">
+                  <nav className="hidden lg:flex items-center gap-8">
                     {/* EN YENİLER */}
                     <Link
                       to="/kategori/en-yeniler"
-                      className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60"
+                      className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60"
                     >
                       EN YENİLER
                     </Link>
@@ -144,43 +155,10 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/kategori/giyim"
-                        className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60 flex items-center"
+                        className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60 flex items-center"
                       >
                         GİYİM
                       </Link>
-
-                      {/* Mega Menu Dropdown */}
-                      {activeMenu === 'giyim' && (
-                        <div className="absolute left-0 top-full bg-white shadow-lg py-6 px-8 min-w-[500px] z-50 border-t">
-                          <div className="grid grid-cols-3 gap-8">
-                            {Object.entries(GIYIM_MENU).map(([category, items]) => (
-                              <div key={category}>
-                                <h3 className="text-xs font-medium tracking-wider mb-3">{category}</h3>
-                                <ul className="space-y-2">
-                                  {items.map((item) => (
-                                    <li key={item.slug}>
-                                      <Link
-                                        to={`/kategori/${item.slug}`}
-                                        className="text-sm text-gray-600 hover:text-black transition-colors"
-                                      >
-                                        {item.name}
-                                      </Link>
-                                    </li>
-                                  ))}
-                                  <li className="pt-2">
-                                    <Link
-                                      to={`/kategori/${category.toLowerCase().replace(/\s/g, '-').replace(/ş/g, 's').replace(/ı/g, 'i')}`}
-                                      className="text-xs underline hover:no-underline"
-                                    >
-                                      Tümünü Gör
-                                    </Link>
-                                  </li>
-                                </ul>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
 
                     {/* AKSESUAR */}
@@ -191,33 +169,16 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/kategori/aksesuar"
-                        className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60"
+                        className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60"
                       >
                         AKSESUAR
                       </Link>
-
-                      {activeMenu === 'aksesuar' && (
-                        <div className="absolute left-0 top-full bg-white shadow-lg py-4 min-w-[160px] z-50 border-t">
-                          <ul className="space-y-1">
-                            {AKSESUAR_MENU.map((item) => (
-                              <li key={item.slug}>
-                                <Link
-                                  to={`/kategori/${item.slug}`}
-                                  className="block px-5 py-1.5 text-sm text-gray-600 hover:text-black hover:bg-gray-50"
-                                >
-                                  {item.name}
-                                </Link>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
                     </div>
 
                     {/* SALE */}
                     <Link
                       to="/kategori/sale"
-                      className="text-[11px] tracking-wider uppercase py-4 hover:opacity-60 text-red-600"
+                      className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60 text-red-600"
                     >
                       SALE
                     </Link>
@@ -254,6 +215,121 @@ export default function Header({ hideMenu = false }) {
             </div>
           </div>
         </div>
+
+        {/* Full Width Mega Menu Dropdown - GİYİM */}
+        {activeMenu === 'giyim' && (
+          <div 
+            className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
+            onMouseEnter={() => setActiveMenu('giyim')}
+            onMouseLeave={() => setActiveMenu(null)}
+          >
+            <div className="max-w-screen-2xl mx-auto px-8 py-8">
+              <div className="flex gap-12">
+                {/* Categories */}
+                <div className="flex-1 grid grid-cols-3 gap-8">
+                  {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                    <div key={category}>
+                      <h3 className="text-xs font-bold tracking-wider mb-4 text-gray-900">{category}</h3>
+                      <ul className="space-y-2.5">
+                        {items.map((item) => (
+                          <li key={item.slug}>
+                            <Link
+                              to={`/kategori/${item.slug}`}
+                              className="text-sm text-gray-600 hover:text-black transition-colors"
+                              onClick={() => setActiveMenu(null)}
+                            >
+                              {item.name}
+                            </Link>
+                          </li>
+                        ))}
+                        <li className="pt-2">
+                          <Link
+                            to={`/kategori/${category.toLowerCase().replace(/\s/g, '-').replace(/ş/g, 's').replace(/ı/g, 'i')}`}
+                            className="text-xs font-medium underline hover:no-underline"
+                            onClick={() => setActiveMenu(null)}
+                          >
+                            Tümünü Gör
+                          </Link>
+                        </li>
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Right Images */}
+                <div className="flex-shrink-0 flex gap-4">
+                  {MENU_IMAGES.giyim.map((img, i) => (
+                    <Link 
+                      key={i} 
+                      to="/kategori/giyim"
+                      className="block w-48 h-60 overflow-hidden"
+                      onClick={() => setActiveMenu(null)}
+                    >
+                      <img 
+                        src={img} 
+                        alt="" 
+                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" 
+                      />
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Full Width Mega Menu Dropdown - AKSESUAR */}
+        {activeMenu === 'aksesuar' && (
+          <div 
+            className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
+            onMouseEnter={() => setActiveMenu('aksesuar')}
+            onMouseLeave={() => setActiveMenu(null)}
+          >
+            <div className="max-w-screen-2xl mx-auto px-8 py-8">
+              <div className="flex gap-12">
+                {/* Categories */}
+                <div className="flex-1">
+                  <h3 className="text-xs font-bold tracking-wider mb-4 text-gray-900">AKSESUAR</h3>
+                  <ul className="grid grid-cols-2 gap-x-12 gap-y-2.5">
+                    {AKSESUAR_MENU.map((item) => (
+                      <li key={item.slug}>
+                        <Link
+                          to={`/kategori/${item.slug}`}
+                          className="text-sm text-gray-600 hover:text-black transition-colors"
+                          onClick={() => setActiveMenu(null)}
+                        >
+                          {item.name}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    to="/kategori/aksesuar"
+                    className="inline-block mt-4 text-xs font-medium underline hover:no-underline"
+                    onClick={() => setActiveMenu(null)}
+                  >
+                    Tümünü Gör
+                  </Link>
+                </div>
+                
+                {/* Right Image */}
+                <div className="flex-shrink-0">
+                  <Link 
+                    to="/kategori/aksesuar"
+                    className="block w-48 h-60 overflow-hidden"
+                    onClick={() => setActiveMenu(null)}
+                  >
+                    <img 
+                      src={MENU_IMAGES.aksesuar[0]} 
+                      alt="" 
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" 
+                    />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Mobile Menu */}
@@ -267,7 +343,7 @@ export default function Header({ hideMenu = false }) {
             {/* EN YENİLER */}
             <Link 
               to="/kategori/en-yeniler" 
-              className="block py-3 text-sm tracking-wider uppercase border-b border-gray-100"
+              className="block py-3 text-sm font-semibold tracking-wider uppercase border-b border-gray-100"
               onClick={() => setMobileMenuOpen(false)}
             >
               EN YENİLER
@@ -277,7 +353,7 @@ export default function Header({ hideMenu = false }) {
             <div className="border-b border-gray-100">
               <Link 
                 to="/kategori/giyim" 
-                className="block py-3 text-sm tracking-wider uppercase"
+                className="block py-3 text-sm font-semibold tracking-wider uppercase"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 GİYİM
@@ -285,7 +361,7 @@ export default function Header({ hideMenu = false }) {
               <div className="pl-4 pb-3">
                 {Object.entries(GIYIM_MENU).map(([category, items]) => (
                   <div key={category} className="mb-3">
-                    <p className="text-xs font-medium text-gray-500 mb-1">{category}</p>
+                    <p className="text-xs font-bold text-gray-500 mb-1">{category}</p>
                     {items.map((item) => (
                       <Link 
                         key={item.slug}
@@ -305,7 +381,7 @@ export default function Header({ hideMenu = false }) {
             <div className="border-b border-gray-100">
               <Link 
                 to="/kategori/aksesuar" 
-                className="block py-3 text-sm tracking-wider uppercase"
+                className="block py-3 text-sm font-semibold tracking-wider uppercase"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 AKSESUAR
@@ -327,7 +403,7 @@ export default function Header({ hideMenu = false }) {
             {/* SALE */}
             <Link 
               to="/kategori/sale" 
-              className="block py-3 text-sm tracking-wider uppercase text-red-600 border-b border-gray-100"
+              className="block py-3 text-sm font-semibold tracking-wider uppercase text-red-600 border-b border-gray-100"
               onClick={() => setMobileMenuOpen(false)}
             >
               SALE

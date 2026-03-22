@@ -283,22 +283,6 @@ export default function ProductDetail() {
                   </button>
                 ))}
               </div>
-              
-              {/* Selected Variant Details */}
-              {selectedVariant && (
-                <div className="mt-3 p-3 bg-gray-50 rounded text-xs space-y-1">
-                  <p className="font-medium text-gray-700">Seçili Beden: {selectedVariant.size}</p>
-                  {selectedVariant.stock_code && (
-                    <p className="text-gray-500">Stok Kodu: <span className="font-mono">{selectedVariant.stock_code}</span></p>
-                  )}
-                  {selectedVariant.barcode && (
-                    <p className="text-gray-500">Barkod: <span className="font-mono">{selectedVariant.barcode}</span></p>
-                  )}
-                  {selectedVariant.price_diff > 0 && (
-                    <p className="text-gray-600">Fiyat Farkı: +{selectedVariant.price_diff.toFixed(2)} TL</p>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* Quantity */}

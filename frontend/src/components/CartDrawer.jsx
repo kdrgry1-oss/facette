@@ -62,13 +62,25 @@ export default function CartDrawer() {
               <div className="space-y-4">
                 {items.map((item) => (
                   <div key={item.id} className="flex gap-4 pb-4 border-b border-gray-100">
-                    <img 
-                      src={item.image} 
-                      alt={item.name}
-                      className="w-20 h-28 object-cover bg-gray-100"
-                    />
+                    <Link 
+                      to={`/urun/${item.slug || item.productId}`}
+                      onClick={() => setIsOpen(false)}
+                      className="flex-shrink-0"
+                    >
+                      <img 
+                        src={item.image} 
+                        alt={item.name}
+                        className="w-20 h-28 object-cover bg-gray-100 hover:opacity-80 transition-opacity"
+                      />
+                    </Link>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium truncate">{item.name}</h3>
+                      <Link 
+                        to={`/urun/${item.slug || item.productId}`}
+                        onClick={() => setIsOpen(false)}
+                        className="hover:underline"
+                      >
+                        <h3 className="text-sm font-medium truncate">{item.name}</h3>
+                      </Link>
                       {item.size && <p className="text-xs text-gray-500 mt-1">Beden: {item.size}</p>}
                       {item.color && <p className="text-xs text-gray-500">Renk: {item.color}</p>}
                       <p className="text-sm font-medium mt-2">{item.price.toFixed(2)} TL</p>
