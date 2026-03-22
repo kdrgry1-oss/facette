@@ -1,115 +1,268 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 5%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 5%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 5%;
+  --primary: 0 0% 5%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 5%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 5%;
+  --radius: 0px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #fff;
+  color: #0a0a0a;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
+
+::-webkit-scrollbar-track {
+  background: #f5f5f5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-black text-white px-6 py-3 text-sm font-medium tracking-wider uppercase transition-all duration-200 hover:bg-gray-900;
+}
+
+.btn-secondary {
+  @apply bg-white text-black border border-black px-6 py-3 text-sm font-medium tracking-wider uppercase transition-all duration-200 hover:bg-black hover:text-white;
+}
+
+/* Input styles */
+.input-minimal {
+  @apply w-full border-0 border-b border-gray-300 bg-transparent py-3 px-0 text-sm focus:outline-none focus:border-black transition-colors;
+}
+
+/* Product card hover */
+.product-card {
+  @apply relative overflow-hidden;
+}
+
+.product-card img {
+  @apply transition-transform duration-500;
+}
+
+.product-card:hover img {
+  @apply scale-105;
+}
+
+/* Search overlay */
+.search-overlay {
+  @apply fixed inset-0 bg-white z-50 flex items-start justify-center pt-32;
+}
+
+/* Mega menu */
+.mega-menu {
+  @apply absolute top-full left-0 w-full bg-white border-t border-gray-100 shadow-lg opacity-0 invisible transition-all duration-300;
+}
+
+.nav-item:hover .mega-menu {
+  @apply opacity-100 visible;
+}
+
+/* Admin sidebar */
+.admin-sidebar {
+  @apply fixed left-0 top-0 h-screen w-64 bg-gray-900 text-white overflow-y-auto;
+}
+
+.admin-sidebar-item {
+  @apply flex items-center gap-3 px-4 py-3 text-gray-300 hover:bg-gray-800 hover:text-white transition-colors;
+}
+
+.admin-sidebar-item.active {
+  @apply bg-gray-800 text-white border-l-2 border-white;
+}
+
+/* Toast */
+.toast-success {
+  @apply bg-green-500 text-white;
+}
+
+.toast-error {
+  @apply bg-red-500 text-white;
+}
+
+/* Skeleton loading */
+.skeleton {
+  @apply bg-gray-200 animate-pulse;
+}
+
+/* Responsive container */
+.container-main {
+  @apply max-w-[1440px] mx-auto px-4 md:px-6 lg:px-8;
+}
+
+/* Accordion */
+.accordion-trigger[data-state="open"] svg {
+  transform: rotate(180deg);
+}
+
+/* Quick View Image */
+.quick-image {
+  @apply aspect-[3/4] w-full object-cover;
+}
+
+/* Badge */
+.badge-new {
+  @apply absolute top-2 left-2 bg-black text-white text-[10px] px-2 py-1 uppercase tracking-wider;
+}
+
+.badge-sale {
+  @apply absolute top-2 left-2 bg-red-500 text-white text-[10px] px-2 py-1 uppercase tracking-wider;
+}
+
+/* Price */
+.price-original {
+  @apply text-gray-400 line-through text-sm;
+}
+
+.price-sale {
+  @apply text-red-500 font-medium;
+}
+
+/* Size selector */
+.size-btn {
+  @apply min-w-[40px] h-10 border border-gray-300 flex items-center justify-center text-sm transition-all;
+}
+
+.size-btn:hover:not(.out-of-stock) {
+  @apply border-black;
+}
+
+.size-btn.selected {
+  @apply bg-black text-white border-black;
+}
+
+.size-btn.out-of-stock {
+  @apply opacity-30 cursor-not-allowed line-through;
+}
+
+/* Cart drawer */
+.cart-drawer {
+  @apply fixed right-0 top-0 h-screen w-full max-w-md bg-white z-50 shadow-2xl transform translate-x-full transition-transform duration-300;
+}
+
+.cart-drawer.open {
+  @apply translate-x-0;
+}
+
+/* Mobile menu */
+.mobile-menu {
+  @apply fixed inset-0 bg-white z-50 transform -translate-x-full transition-transform duration-300;
+}
+
+.mobile-menu.open {
+  @apply translate-x-0;
+}
+
+/* Image gallery */
+.gallery-thumb {
+  @apply w-16 h-20 object-cover cursor-pointer opacity-60 transition-opacity;
+}
+
+.gallery-thumb:hover,
+.gallery-thumb.active {
+  @apply opacity-100;
+}
+
+/* Table */
+.admin-table {
+  @apply w-full text-sm;
+}
+
+.admin-table th {
+  @apply text-left py-3 px-4 bg-gray-50 font-medium text-gray-600 uppercase text-xs tracking-wider;
+}
+
+.admin-table td {
+  @apply py-3 px-4 border-b border-gray-100;
+}
+
+.admin-table tr:hover td {
+  @apply bg-gray-50;
+}
+
+/* Status badges */
+.status-pending { @apply bg-yellow-100 text-yellow-700 px-2 py-1 text-xs rounded; }
+.status-confirmed { @apply bg-blue-100 text-blue-700 px-2 py-1 text-xs rounded; }
+.status-preparing { @apply bg-purple-100 text-purple-700 px-2 py-1 text-xs rounded; }
+.status-shipped { @apply bg-indigo-100 text-indigo-700 px-2 py-1 text-xs rounded; }
+.status-delivered { @apply bg-green-100 text-green-700 px-2 py-1 text-xs rounded; }
+.status-cancelled { @apply bg-red-100 text-red-700 px-2 py-1 text-xs rounded; }
 
 @layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
-}
-
-@layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
-}
-
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
-
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
