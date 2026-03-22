@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -33,6 +33,8 @@ export default function AdminProducts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [variantsModalOpen, setVariantsModalOpen] = useState(false);
+  const [selectedProductForVariants, setSelectedProductForVariants] = useState(null);
   const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -261,6 +263,11 @@ export default function AdminProducts() {
     }
   };
 
+  const openVariantsModal = (product) => {
+    setSelectedProductForVariants(product);
+    setVariantsModalOpen(true);
+  };
+
   return (
     <div data-testid="admin-products">
       <div className="flex items-center justify-between mb-6">
@@ -295,6 +302,7 @@ export default function AdminProducts() {
               <th>Ürün Adı</th>
               <th>Stok Kodu</th>
               <th>Barkod</th>
+              <th>Varyantlar</th>
               <th>Fiyat</th>
               <th>Stok</th>
               <th>Durum</th>
@@ -303,9 +311,9 @@ export default function AdminProducts() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="text-center py-8">Yükleniyor...</td></tr>
+              <tr><td colSpan={9} className="text-center py-8">Yükleniyor...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
             ) : (
               products.map((product) => (
                 <tr key={product.id}>
@@ -324,6 +332,19 @@ export default function AdminProducts() {
                   </td>
                   <td className="text-sm">{product.stock_code || '-'}</td>
                   <td className="text-sm">{product.barcode || '-'}</td>
+                  <td>
+                    {product.variants?.length > 0 ? (
+                      <button 
+                        onClick={() => openVariantsModal(product)}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        <Layers size={14} />
+                        {product.variants.length} Varyant
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </td>
                   <td>
                     {product.sale_price ? (
                       <div>
@@ -998,6 +1019,92 @@ export default function AdminProducts() {
               </button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Variants Modal */}
+      <Dialog open={variantsModalOpen} onOpenChange={setVariantsModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Varyantlar - {selectedProductForVariants?.name}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {selectedProductForVariants && (
+            <div>
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="text-xs text-gray-500">Toplam Varyant</p>
+                  <p className="text-lg font-semibold">{selectedProductForVariants.variants?.length || 0}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Toplam Stok</p>
+                  <p className="text-lg font-semibold">
+                    {selectedProductForVariants.variants?.reduce((sum, v) => sum + (v.stock || 0), 0) || 0}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Bedenler / Renkler</p>
+                  <p className="text-sm">
+                    {[...new Set(selectedProductForVariants.variants?.map(v => v.size).filter(Boolean))].join(', ') || '-'}
+                    {' / '}
+                    {[...new Set(selectedProductForVariants.variants?.map(v => v.color).filter(Boolean))].join(', ') || '-'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Variants Table */}
+              <table className="w-full text-sm border">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="text-left px-3 py-2 border-b">Beden</th>
+                    <th className="text-left px-3 py-2 border-b">Renk</th>
+                    <th className="text-left px-3 py-2 border-b">Stok Kodu</th>
+                    <th className="text-left px-3 py-2 border-b">Barkod</th>
+                    <th className="text-left px-3 py-2 border-b">Varyasyon Kodu</th>
+                    <th className="text-right px-3 py-2 border-b">Stok</th>
+                    <th className="text-right px-3 py-2 border-b">Fiyat</th>
+                    <th className="text-center px-3 py-2 border-b">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedProductForVariants.variants?.map((variant, idx) => (
+                    <tr key={variant.id || idx} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 border-b font-medium">{variant.size || '-'}</td>
+                      <td className="px-3 py-2 border-b">{variant.color || '-'}</td>
+                      <td className="px-3 py-2 border-b font-mono text-xs">{variant.stock_code || '-'}</td>
+                      <td className="px-3 py-2 border-b font-mono text-xs">{variant.barcode || '-'}</td>
+                      <td className="px-3 py-2 border-b font-mono text-xs">{variant.variation_code || '-'}</td>
+                      <td className={`px-3 py-2 border-b text-right ${variant.stock < 5 ? 'text-red-600 font-medium' : ''}`}>
+                        {variant.stock || 0}
+                      </td>
+                      <td className="px-3 py-2 border-b text-right">
+                        {variant.sale_price ? (
+                          <>
+                            <span className="text-red-600">{variant.sale_price?.toFixed(2)} TL</span>
+                            <span className="text-xs text-gray-400 line-through ml-1">{variant.price?.toFixed(2)}</span>
+                          </>
+                        ) : (
+                          <span>{variant.price?.toFixed(2)} TL</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 border-b text-center">
+                        <span className={`px-2 py-0.5 text-xs rounded ${variant.is_active !== false ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                          {variant.is_active !== false ? 'Aktif' : 'Pasif'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {(!selectedProductForVariants.variants || selectedProductForVariants.variants.length === 0) && (
+                <p className="text-center text-gray-500 py-8">Bu ürünün varyantı bulunmuyor</p>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

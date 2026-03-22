@@ -10,110 +10,86 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Storage: Emergent Object Storage
 - Auth: JWT + Google OAuth (Emergent Auth)
 - Payment: Iyzico (Sandbox)
-- Cargo: MNG Kargo (SOAP API - Real Integration)
-- SMS: Netgsm API (Optional)
+- Cargo: MNG Kargo (SOAP API)
+- SMS: Netgsm API
 
-## Current Status: v8.0 - Full E-commerce Suite ✅
+## Current Status: v9.0 - Real Product Data + Variants ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
 
-#### v8.0 - Product Data Fix + Order Tracking + SMS
-- [x] **Ürün Stok Kodları** - Otomatik oluşturuldu (örn: FC-BKMI-7171)
-- [x] **Ürün Barkodları** - 13 haneli EAN-13 (örn: 8690017164670)
-- [x] **Duplicate Görseller Temizlendi** - 243 tekrar görsel silindi
-- [x] **Sipariş Takip Sayfası** - `/siparis-takip` müşteri için
-  - Sipariş numarası veya kargo takip numarası ile arama
-  - Timeline görünümü (Alındı → Onaylandı → Hazırlanıyor → Kargoda → Teslim)
-  - Kargo takip linki
-- [x] **Netgsm SMS Entegrasyonu**
-  - Sipariş onay SMS'i
-  - Kargo bildirim SMS'i
-  - Admin panelinde SMS butonları
-- [x] **Footer'a Sipariş Takip Linki** eklendi
+#### v9.0 - Gerçek Ürün Verileri ve Varyantlar
+- [x] **XML + Excel'den Gerçek Veriler**
+  - 170 ürün, 900 varyant satırı
+  - Gerçek stok kodları (FCSS1100001, FCSS0700004...)
+  - Gerçek barkodlar (8684483525551, 8684483525452...)
+  - Varyasyon kodları (2828-8335, 2829-8340...)
+- [x] **Varyant Sistemi**
+  - Her ürünün birden fazla varyantı (beden + renk kombinasyonları)
+  - Her varyantın kendi stok kodu, barkodu, stok miktarı
+  - Bedenler: XS, S, M, L, XL, STD
+  - Renkler: Mavi, Buz Mavisi, Ekru, Bej, Siyah, Kahverengi...
+- [x] **Varyantları Görüntüle Butonu**
+  - Admin ürün listesinde "X Varyant" butonu
+  - Modal ile tüm varyant detayları
+  - Beden, Renk, Stok Kodu, Barkod, Varyasyon Kodu, Stok, Fiyat, Durum
 
-#### v7.1 - MNG Kargo
-- [x] MNG Kargo SOAP API entegrasyonu
-- [x] 10 haneli tracking number
+#### v8.0 - Order Tracking + SMS
+- [x] Sipariş Takip Sayfası
+- [x] Netgsm SMS Entegrasyonu
+
+#### v7.0 - MNG Kargo
+- [x] MNG Kargo API entegrasyonu
 - [x] Kargo etiketi (10cm x 15cm)
-- [x] Toplu etiket yazdırma
 
-#### v6.0 - Full Features
-- [x] Varyant Yönetimi
-- [x] Benzer Ürünler & Kombin
-- [x] Iyzico Ödeme
-- [x] Multi-carrier cargo
-
-## API Endpoints
-
-### Public
-- `GET /api/track/{code}` - Sipariş takip (auth gerektirmez)
-
-### SMS (Admin)
-- `POST /api/orders/{id}/send-confirmation-sms` - Sipariş onay SMS
-- `POST /api/orders/{id}/send-shipping-sms` - Kargo bildirim SMS
-- `POST /api/sms/send-test` - Test SMS
-
-### Cargo
-- `POST /api/orders/{id}/create-mng-shipment` - MNG ile gönder
-- `GET /api/orders/{id}/cargo-label` - Kargo etiketi
-- `POST /api/orders/bulk-labels` - Toplu etiket
-
-## Netgsm SMS Ayarları
-```env
-# .env dosyasına ekleyin
-NETGSM_USERNAME=your_username
-NETGSM_PASSWORD=your_password
-NETGSM_HEADER=FACETTE
+## Varyant Yapısı (Excel'den)
+```
+URUNADI: Tina Straight Fit Jean
+├── Varyant 1: L + Mavi
+│   ├── STOKKODU: FCSS1100001
+│   ├── BARKOD: 8684483525551
+│   ├── VARYASYONKODU: 2828-8335
+│   └── STOKADEDI: 47
+├── Varyant 2: M + Mavi
+│   ├── STOKKODU: FCSS1100001
+│   ├── BARKOD: 8684483525568
+│   └── ...
+└── ... (15 varyant total)
 ```
 
-**SMS Şablonları:**
-1. Sipariş Onay: "Merhaba {isim}, siparişiniz alındı. Sipariş No: {no} Tutar: {tutar}TL FACETTE"
-2. Kargo Bildirim: "Merhaba, siparişiniz {kargo} ile gönderildi. Takip: {takip_no} FACETTE"
+## Admin Panel - Ürünler Sayfası
+| Sütun | Açıklama |
+|-------|----------|
+| Görsel | Ürün resmi |
+| Ürün Adı | Ad + Kategori |
+| Stok Kodu | Ana stok kodu |
+| Barkod | Ana barkod |
+| **Varyantlar** | "X Varyant" butonu (tıklanabilir) |
+| Fiyat | Satış fiyatı |
+| Stok | Toplam stok |
+| Durum | Aktif/Pasif |
+| İşlemler | Edit, Copy, Toggle, More |
 
-## Ürün Kodlama Sistemi
-- **Stok Kodu**: FC-{ISIM_KISALTMA}-{4_RAKAM} (örn: FC-BKMI-7171)
-- **Barkod**: 13 haneli EAN-13, Türk prefix 869 (örn: 8690017164670)
-
-## Sayfa URL'leri
-- `/siparis-takip` - Müşteri sipariş takip sayfası
-- `/siparis-takip/:trackingCode` - Direkt sipariş takip
-
-## Test Results
-- ✅ Sipariş takip API çalışıyor
-- ✅ Sipariş takip sayfası çalışıyor
-- ✅ Ürün stok kodları oluşturuldu
-- ✅ Ürün barkodları oluşturuldu
-- ✅ Duplicate görseller temizlendi
+## Import Scripts
+- `/app/backend/import_excel_v2.py` - Excel'den varyantlı ürün import
+- XML'den görseller çekme (inline script)
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://mega-menu-catalog.preview.emergentagent.com
 
+## Veri Kaynakları
+- XML: https://www.facette.com.tr/XMLExport/7BECCB0A782647BFAB843E68AD11E468
+- Excel: TicimaxExport (23).xls
+
 ## P1 - Sonraki Görevler
-- [ ] Netgsm credentials ile canlı SMS test
-- [ ] E-mail bildirimi (Resend/SendGrid)
-- [ ] Iyzico production key
+- [ ] Ürün detay sayfasında varyant seçimi (beden/renk dropdown)
+- [ ] Sepete varyant bazlı ekleme
+- [ ] Stok kontrolü varyant bazlı
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
 - [ ] GIB e-fatura
 - [ ] Gelişmiş raporlama
-- [ ] Müşteri hesap sayfası geliştirmeleri
-
-## File Structure
-```
-/app/
-├── backend/
-│   ├── server.py        # ~2260 lines
-│   └── requirements.txt
-└── frontend/
-    └── src/
-        ├── pages/
-        │   ├── TrackOrder.jsx    # NEW
-        │   └── admin/Orders.jsx  # SMS buttons
-        └── components/
-            └── Footer.jsx        # Sipariş takip linki
-```
 
 ## Last Updated
-2026-03-22 - v8.0 Product Data + Order Tracking + SMS
+2026-03-22 - v9.0 Real Product Data + Variants System
