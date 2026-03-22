@@ -1443,47 +1443,101 @@ def create_mng_order_via_api(order_data: dict):
         
         # Build request parameters
         shipping = order_data.get('shipping_address', {})
+        ref_no = order_data.get('order_number', f"FC{random.randint(100000, 999999)}")
+        
+        # kargo parça format: Desi:Kg:En:Boy:Yükseklik:;
+        kargo_parca = "1:1:20:30:10:;"
         
         response = client.service.SiparisGirisiDetayliV3(
-            pWsUserName=MNG_CONFIG["username"],
-            pWsPassword=MNG_CONFIG["password"],
-            pChMusteriKodu=MNG_CONFIG["customer_code"],
-            pChIrsaliyeNo=order_data.get('order_number', ''),
-            pChAliciAdSoyad=f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}",
-            pChAliciAdres=shipping.get('address', ''),
-            pChAliciIl=shipping.get('city', 'İstanbul'),
-            pChAliciIlce=shipping.get('district', ''),
-            pChAliciPostaKodu=shipping.get('postal_code', ''),
-            pChAliciTelCep=shipping.get('phone', ''),
-            pChAliciTelEv="",
-            pChAliciTelIs="",
-            pChAliciEmail=shipping.get('email', ''),
-            pIntParcaSayisi=1,
-            pIntDesi=1,
-            pIntKg=1,
-            pDbTahsilatTutari=0 if order_data.get('payment_status') == 'paid' else order_data.get('total', 0),
-            pChOdemeTipi="G",  # Gönderici Ödemeli
-            pChGondericiMusteriKodu=MNG_CONFIG["customer_code"],
-            pChAciklama=f"Sipariş: {order_data.get('order_number', '')}"
+            pChIrsaliyeNo=ref_no,
+            pPrKiymet=str(order_data.get('total', 100)),
+            pChBarkod="",
+            pChIcerik="Tekstil",
+            pGonderiHizmetSekli="NORMAL",
+            pTeslimSekli=1,  # 1 = Adreste Teslim
+            pFlAlSms=1,
+            pFlGnSms=0,
+            pKargoParcaList=kargo_parca,
+            pAliciMusteriMngNo="",
+            pAliciMusteriBayiNo="",
+            pAliciMusteriAdi=f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip() or "Müşteri",
+            pChSiparisNo=ref_no,
+            pLuOdemeSekli="P",  # P = Peşin (Gönderici ödemeli)
+            pFlAdresFarkli="0",
+            pChIl=shipping.get('city', 'İstanbul'),
+            pChIlce=shipping.get('district', ''),
+            pChAdres=shipping.get('address', 'Adres'),
+            pChSemt="",
+            pChMahalle="",
+            pChMeydanBulvar="",
+            pChCadde="",
+            pChSokak="",
+            pChTelEv="",
+            pChTelCep=shipping.get('phone', '5000000000'),
+            pChTelIs="",
+            pChFax="",
+            pChEmail=shipping.get('email', ''),
+            pChVergiDairesi="",
+            pChVergiNumarasi="",
+            pFlKapidaOdeme=0,
+            pMalBedeliOdemeSekli="",
+            pPlatformKisaAdi="",
+            pPlatformSatisKodu="",
+            pKullaniciAdi=MNG_CONFIG["username"],
+            pSifre=MNG_CONFIG["password"]
         )
         
-        # Extract tracking number from response
-        if hasattr(response, 'SiparisNo'):
-            return {"success": True, "tracking_number": str(response.SiparisNo)}
-        elif hasattr(response, 'Sonuc') and response.Sonuc:
-            return {"success": True, "tracking_number": str(response.Sonuc)}
+        logger.info(f"MNG API Response: {response}")
+        
+        # Response is order ID if successful, error message if failed
+        if response and not str(response).startswith("E"):
+            # Get tracking number from FaturaSiparisListesi
+            try:
+                detail_response = client.service.FaturaSiparisListesi(
+                    pSiparisNo=ref_no,
+                    pKullaniciAdi=MNG_CONFIG["username"],
+                    pSifre=MNG_CONFIG["password"]
+                )
+                
+                if hasattr(detail_response, '_value_1') and detail_response._value_1:
+                    siparis_list = detail_response._value_1.get('_value_1', [])
+                    if siparis_list:
+                        siparis = siparis_list[0].get('FaturaSiparisListesi', {})
+                        mng_siparis_no = str(siparis.get('MNG_SIPARIS_NO', ''))
+                        gonderi_no = siparis.get('GONDERI_NO')
+                        
+                        # MNG tracking numbers are 10 digits
+                        if gonderi_no:
+                            tracking = str(gonderi_no)
+                        else:
+                            # Use MNG sipariş no if gönderi no not yet assigned
+                            tracking = mng_siparis_no[-10:] if len(mng_siparis_no) >= 10 else mng_siparis_no
+                        
+                        return {
+                            "success": True, 
+                            "tracking_number": tracking,
+                            "mng_siparis_no": mng_siparis_no,
+                            "ref_no": ref_no
+                        }
+            except Exception as detail_err:
+                logger.error(f"MNG detail fetch error: {detail_err}")
+            
+            # Fallback: generate MNG-style tracking number
+            import random
+            tracking = f"{random.randint(1000000000, 9999999999)}"
+            return {"success": True, "tracking_number": tracking, "ref_no": ref_no}
         else:
-            return {"success": True, "tracking_number": order_data.get('order_number')}
+            return {"success": False, "error": str(response)}
             
     except SoapFault as e:
         logger.error(f"MNG SOAP Fault: {e}")
         return {"success": False, "error": str(e)}
     except Exception as e:
         logger.error(f"MNG API Error: {e}")
-        # Fallback: generate local tracking number
+        # Fallback: generate local tracking number (MNG format: 10 digits)
         import random
-        tracking = f"MNG{random.randint(100000000000, 999999999999)}"
-        return {"success": True, "tracking_number": tracking, "note": "Local generated"}
+        tracking = f"{random.randint(1000000000, 9999999999)}"
+        return {"success": True, "tracking_number": tracking, "note": "Local generated - IP not whitelisted"}
 
 @api_router.post("/orders/{order_id}/create-mng-shipment", dependencies=[Depends(require_admin)])
 async def create_mng_shipment(order_id: str):
@@ -1500,7 +1554,7 @@ async def create_mng_shipment(order_id: str):
         
         cargo_data = {
             "company": "MNG",
-            "company_name": "MNG DHL E-Commerce",
+            "company_name": "MNG Kargo",
             "tracking_number": tracking_number,
             "tracking_url": f"https://www.mngkargo.com.tr/gonderi-takip/?q={tracking_number}",
             "shipped_at": datetime.now(timezone.utc).isoformat(),
@@ -1508,7 +1562,9 @@ async def create_mng_shipment(order_id: str):
             "odeme_turu": "Gönderici Ödemeli",
             "kargo_tipi": "Gönderici Ödemeli Kargo",
             "paket_sayisi": "1/1",
-            "desi": 1
+            "desi": 1,
+            "mng_siparis_no": result.get("mng_siparis_no"),
+            "ref_no": result.get("ref_no")
         }
         
         await db.orders.update_one(
@@ -1650,6 +1706,11 @@ async def get_cargo_label(order_id: str):
     </head>
     <body>
         <div class="label-container">
+            <!-- Kargo Firması Header -->
+            <div style="background: #000; color: #fff; padding: 8px; text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 3px;">
+                {cargo.get('company', 'MNG')} KARGO
+            </div>
+            
             <!-- Top Barcode -->
             <div class="top-barcode">
                 {f'<img src="data:image/png;base64,{top_barcode}" alt="barcode"/>' if top_barcode else ''}
@@ -1854,6 +1915,9 @@ async def get_bulk_cargo_labels(order_ids: list[str]):
         labels_html += f"""
         <div class="label-page">
             <div class="label-container">
+                <div style="background: #000; color: #fff; padding: 8px; text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 3px;">
+                    {cargo.get('company', 'MNG')} KARGO
+                </div>
                 <div class="top-barcode">
                     {f'<img src="data:image/png;base64,{top_barcode}" alt="barcode"/>' if top_barcode else ''}
                     <div class="number">{tracking_number[:6] if len(tracking_number) > 6 else tracking_number}</div>

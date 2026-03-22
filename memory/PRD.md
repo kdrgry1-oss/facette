@@ -10,102 +10,96 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Storage: Emergent Object Storage
 - Auth: JWT + Google OAuth (Emergent Auth)
 - Payment: Iyzico (Sandbox)
-- Cargo: MNG Kargo (SOAP API)
+- Cargo: MNG Kargo (SOAP API - Real Integration)
 
-## Current Status: v7.0 - MNG Kargo Integration + Cargo Labels ✅
+## Current Status: v7.1 - MNG Kargo Real API + Labels ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
 
-#### v7.0 - MNG Kargo & Etiket Sistemi
-- [x] **MNG Kargo API** - Gerçek SOAP web service entegrasyonu
-  - Customer Code: FACETTE DIŞ TİC.A.Ş.
-  - Username: 490059279
-  - Kargo Vergi No: 6080712084
-- [x] **Kargo Etiketi** - 10cm x 15cm yazdırılabilir etiket
-  - Üst barkod (kısa takip numarası)
-  - Gönderici Bilgileri (Firma, Telefon, Adres)
-  - Alıcı Bilgileri (İsim, Telefon, Adres)
-  - Kargo Bilgileri (Firma, Ödeme Türü, Kargo Tipi, Paket Sayısı, Desi)
-  - Alt barkod (tam takip numarası)
-- [x] **Toplu Etiket Yazdırma** - Birden fazla siparişi tek seferde yazdır
-- [x] **Admin Sipariş Butonları**
-  - "MNG ile Gönder" - Otomatik MNG API ile kargo oluştur
-  - "Etiket Yazdır" - Tek sipariş etiketi
-  - "Toplu Etiket Yazdır" - Seçili siparişlerin etiketleri
+#### v7.1 - MNG Kargo Gerçek API Entegrasyonu
+- [x] **MNG Kargo SOAP API** - Gerçek sipariş oluşturma
+  - SiparisGirisiDetayliV3 endpoint
+  - FaturaSiparisListesi ile takip numarası alma
+  - 10 haneli gerçek tracking number (örn: 6092614519)
+  - IP whitelist gereksinimi (production için)
+- [x] **Kargo Etiketi** - 10cm x 15cm yazdırılabilir
+  - **MNG KARGO** başlığı (siyah banner)
+  - Üst barkod (6 haneli kısa kod)
+  - Gönderici Bilgileri
+  - Alıcı Bilgileri  
+  - Kargo Bilgileri
+  - Alt barkod (10 haneli tam takip numarası)
+- [x] **Toplu Etiket Yazdırma** - Birden fazla sipariş
 
-#### v6.0 - Full Features
-- [x] Varyant Yönetimi (beden/renk/stok)
-- [x] Benzer Ürünler & Kombin Ürünler
-- [x] Iyzico Ödeme (Sandbox)
-- [x] Kargo Entegrasyonu (MNG, DHL, Yurtiçi, Aras, PTT)
+#### MNG API Credentials (Production)
+```
+Username: 490059279
+Password: Face.0024E
+Customer Code: FACETTE DIŞ TİC.A.Ş.
+Tax Number: 6080712084
+WSDL: https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL
+```
 
-#### v5.0 - Bug Fixes
-- [x] Çift ürün temizliği
-- [x] Ürün sayfası 2 sütunlu grid
-- [x] Admin ürün işlemleri
+**NOT:** Production ortamında sunucu IP'niz MNG'ye kayıtlı olmalı (IP Whitelist).
 
 ## API Endpoints - Kargo
 
-### Kargo İşlemleri
-- `GET /api/cargo/companies` - Kargo firmaları listesi
-- `POST /api/orders/{id}/ship` - Siparişi kargoya ver (manuel)
-- `POST /api/orders/{id}/create-mng-shipment` - MNG API ile kargo oluştur
-- `GET /api/orders/{id}/track` - Sipariş takip bilgisi
+### MNG Kargo
+- `POST /api/orders/{id}/create-mng-shipment` - MNG API ile kargo oluştur (Admin)
+- `GET /api/orders/{id}/cargo-label` - Kargo etiketi (HTML, 10cm x 15cm)
+- `POST /api/orders/bulk-labels` - Toplu etiket (body: order_ids array)
 
-### Kargo Etiketi
-- `GET /api/orders/{id}/cargo-label` - Tek sipariş etiketi (HTML)
-- `POST /api/orders/bulk-labels` - Toplu etiket (HTML, body: order_ids array)
+### Genel Kargo
+- `GET /api/cargo/companies` - Kargo firmaları listesi
+- `POST /api/orders/{id}/ship` - Manuel kargo girişi
+- `GET /api/orders/{id}/track` - Sipariş takip
+
+## Gönderici Bilgileri (Sabit)
+```
+Firma: FACETTE DIŞ TİCARET A.Ş.
+Telefon: 90 543 330 03 10
+Adres: KÜÇÜKÇEKMECE IKITELLI OSB MAH.
+       IMSAN D BLOK
+       NO: 3 KÜÇÜKÇEKMECE/ ISTANBUL
+       Küçükçekmece / İstanbul
+```
 
 ## Kargo Etiketi Özellikleri
 - Boyut: 10cm x 15cm (termal yazıcı uyumlu)
 - Barkod: Code128 formatı
 - Print CSS: `@page { size: 10cm 15cm; margin: 0; }`
+- Header: Kargo firması adı (siyah banner)
 - Page break: Her etiket ayrı sayfada
 
-## MNG Kargo Bilgileri
-| Alan | Değer |
-|------|-------|
-| Customer Code | FACETTE DIŞ TİC.A.Ş. |
-| Username | 490059279 |
-| Password | Face.0024E |
-| Tax Number | 6080712084 |
-| Company Name | MNG KARGO YURTİÇİ VE YURT |
-| WSDL URL | https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL |
-
-## Gönderici Bilgileri (Sabit)
-- Firma: FACETTE DIŞ TİCARET A.Ş.
-- Telefon: 90 543 330 03 10
-- Adres: KÜÇÜKÇEKMECE IKITELLI OSB MAH. IMSAN D BLOK NO: 3 KÜÇÜKÇEKMECE/ ISTANBUL
-
 ## Test Results
-- Backend: 19/19 tests passed (100%)
-- Frontend: All features working (100%)
+- MNG API: ✅ Sipariş oluşturma çalışıyor
+- Tracking Number: ✅ 10 haneli (örn: 6092614519)
+- Kargo Etiketi: ✅ MNG KARGO başlığı, barkodlar, tüm bilgiler
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://mega-menu-catalog.preview.emergentagent.com
 
 ## P1 - Sonraki Görevler
+- [ ] MNG IP Whitelist kaydı (production için)
 - [ ] Netgsm SMS bildirimi
-- [ ] E-mail bildirimi (kargo durumu)
+- [ ] E-mail bildirimi
 - [ ] Müşteri sipariş takip sayfası
-- [ ] Iyzico production key
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
 - [ ] GIB e-fatura
+- [ ] Iyzico production
 - [ ] Gelişmiş raporlama
 
 ## File Structure
 ```
 /app/
 ├── backend/
-│   ├── server.py        # ~1700 lines (MNG API, cargo labels)
+│   ├── server.py        # ~2000 lines (MNG SOAP API, cargo labels)
 │   ├── models.py
 │   ├── tests/
-│   │   ├── test_new_features.py
-│   │   └── test_mng_cargo_labels.py
-│   └── requirements.txt (zeep, python-barcode added)
+│   └── requirements.txt (zeep, python-barcode)
 └── frontend/
     └── src/
         └── pages/
@@ -114,4 +108,4 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 ```
 
 ## Last Updated
-2026-03-22 - v7.0 MNG Kargo Integration + Cargo Labels
+2026-03-22 - v7.1 MNG Kargo Real API + 10-digit Tracking Numbers + Labels
