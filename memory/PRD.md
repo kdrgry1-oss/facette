@@ -10,124 +10,108 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Storage: Emergent Object Storage
 - Auth: JWT + Google OAuth (Emergent Auth)
 - Payment: Iyzico (Sandbox)
+- Cargo: MNG Kargo (SOAP API)
 
-## Current Status: v6.0 - Full Feature Implementation ✅
+## Current Status: v7.0 - MNG Kargo Integration + Cargo Labels ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
 
-#### v6.0 - New Features
-- [x] **Varyant Yönetimi** - Admin panelinde beden/renk/barkod/stok varyant yönetimi
-- [x] **Benzer Ürünler** - Ürün sayfasında otomatik kategori-bazlı benzer ürün önerileri
-- [x] **Kombin Ürünler** - "Bu Ürünle Giyin" bölümü (tamamlayıcı kategoriler)
-- [x] **Iyzico Ödeme** - 3D Secure ödeme entegrasyonu (sandbox)
-- [x] **Kargo Entegrasyonu** - MNG, DHL, Yurtiçi, Aras, PTT kargo firmaları
-- [x] **Sipariş Takip** - Kargo takip URL'leri ve takip numaraları
+#### v7.0 - MNG Kargo & Etiket Sistemi
+- [x] **MNG Kargo API** - Gerçek SOAP web service entegrasyonu
+  - Customer Code: FACETTE DIŞ TİC.A.Ş.
+  - Username: 490059279
+  - Kargo Vergi No: 6080712084
+- [x] **Kargo Etiketi** - 10cm x 15cm yazdırılabilir etiket
+  - Üst barkod (kısa takip numarası)
+  - Gönderici Bilgileri (Firma, Telefon, Adres)
+  - Alıcı Bilgileri (İsim, Telefon, Adres)
+  - Kargo Bilgileri (Firma, Ödeme Türü, Kargo Tipi, Paket Sayısı, Desi)
+  - Alt barkod (tam takip numarası)
+- [x] **Toplu Etiket Yazdırma** - Birden fazla siparişi tek seferde yazdır
+- [x] **Admin Sipariş Butonları**
+  - "MNG ile Gönder" - Otomatik MNG API ile kargo oluştur
+  - "Etiket Yazdır" - Tek sipariş etiketi
+  - "Toplu Etiket Yazdır" - Seçili siparişlerin etiketleri
 
-#### v5.0 - Bug Fixes & UI
-- [x] Çift ürün sorunu çözüldü (197 duplicate ürün silindi)
-- [x] Ürün sayfası slider okları kaldırıldı, 2 sütunlu grid layout
-- [x] Accordion kayma sorunu çözüldü
-- [x] Admin ürün işlemleri (Edit, Copy, Active/Passive, More menu)
+#### v6.0 - Full Features
+- [x] Varyant Yönetimi (beden/renk/stok)
+- [x] Benzer Ürünler & Kombin Ürünler
+- [x] Iyzico Ödeme (Sandbox)
+- [x] Kargo Entegrasyonu (MNG, DHL, Yurtiçi, Aras, PTT)
 
-#### UI/UX - facette.com.tr Replica
-- [x] Üst Banner, Logo, Header, Mega Menu
-- [x] Hero Slider ve Banner yapısı
-- [x] Ürün Kartları ve Detay sayfası
-- [x] Checkout akışı
+#### v5.0 - Bug Fixes
+- [x] Çift ürün temizliği
+- [x] Ürün sayfası 2 sütunlu grid
+- [x] Admin ürün işlemleri
 
-## Admin Panel Özellikleri
+## API Endpoints - Kargo
 
-### Ürün Yönetimi
-- 6 sekmeli form: Temel, Fiyat, Görseller, Stok, Varyantlar, SEO
-- Varyant yönetimi: Beden, Renk, Barkod, Stok, Fiyat farkı
-- Görsel yükleme (Object Storage)
-- Kopyalama, Aktif/Pasif, Silme işlemleri
+### Kargo İşlemleri
+- `GET /api/cargo/companies` - Kargo firmaları listesi
+- `POST /api/orders/{id}/ship` - Siparişi kargoya ver (manuel)
+- `POST /api/orders/{id}/create-mng-shipment` - MNG API ile kargo oluştur
+- `GET /api/orders/{id}/track` - Sipariş takip bilgisi
 
-### Sipariş Yönetimi
-- Sipariş listesi ve filtreleme
-- Fatura oluşturma (FAT-YYYYMMDD-XXXXXX)
-- Kargoya verme modal'ı
-- Kargo takip linki
-- Toplu işlemler (barkod, durum güncelleme)
+### Kargo Etiketi
+- `GET /api/orders/{id}/cargo-label` - Tek sipariş etiketi (HTML)
+- `POST /api/orders/bulk-labels` - Toplu etiket (HTML, body: order_ids array)
 
-## API Endpoints
+## Kargo Etiketi Özellikleri
+- Boyut: 10cm x 15cm (termal yazıcı uyumlu)
+- Barkod: Code128 formatı
+- Print CSS: `@page { size: 10cm 15cm; margin: 0; }`
+- Page break: Her etiket ayrı sayfada
 
-### Products
-- GET /api/products - Ürün listesi
-- GET /api/products/{id} - Ürün detayı
-- GET /api/products/{id}/similar - Benzer ürünler
-- GET /api/products/{id}/combo - Kombin ürünler
-- POST /api/products/{id}/variants - Varyant ekle
-- PUT /api/products/{id}/variants/{vid} - Varyant güncelle
-- DELETE /api/products/{id}/variants/{vid} - Varyant sil
+## MNG Kargo Bilgileri
+| Alan | Değer |
+|------|-------|
+| Customer Code | FACETTE DIŞ TİC.A.Ş. |
+| Username | 490059279 |
+| Password | Face.0024E |
+| Tax Number | 6080712084 |
+| Company Name | MNG KARGO YURTİÇİ VE YURT |
+| WSDL URL | https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL |
 
-### Payment (Iyzico)
-- POST /api/payment/initialize - Ödeme başlat
-- POST /api/payment/callback - Ödeme callback
-
-### Cargo
-- GET /api/cargo/companies - Kargo firmaları
-- POST /api/orders/{id}/ship - Kargoya ver
-- GET /api/orders/{id}/track - Sipariş takip
+## Gönderici Bilgileri (Sabit)
+- Firma: FACETTE DIŞ TİCARET A.Ş.
+- Telefon: 90 543 330 03 10
+- Adres: KÜÇÜKÇEKMECE IKITELLI OSB MAH. IMSAN D BLOK NO: 3 KÜÇÜKÇEKMECE/ ISTANBUL
 
 ## Test Results
-- Backend: 20/20 tests passed (100%)
+- Backend: 19/19 tests passed (100%)
 - Frontend: All features working (100%)
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://mega-menu-catalog.preview.emergentagent.com
 
-## Kargo Firmaları
-| Firma | Kod | Takip URL |
-|-------|-----|-----------|
-| MNG Kargo | MNG | mngkargo.com.tr |
-| DHL | DHL | dhl.com |
-| Yurtiçi | YURTICI | yurticikargo.com |
-| Aras | ARAS | araskargo.com.tr |
-| PTT | PTT | ptt.gov.tr |
-
-## MOCKED APIs
-- **Iyzico Payment**: Sandbox mode only (no real payments)
-
 ## P1 - Sonraki Görevler
-- [ ] Iyzico production key entegrasyonu
-- [ ] SMS bildirimi (Netgsm)
-- [ ] E-mail bildirimi (Resend/SendGrid)
-- [ ] Müşteri hesap sayfası (sipariş geçmişi)
+- [ ] Netgsm SMS bildirimi
+- [ ] E-mail bildirimi (kargo durumu)
+- [ ] Müşteri sipariş takip sayfası
+- [ ] Iyzico production key
 
 ## P2 - Backlog
-- [ ] Trendyol marketplace entegrasyonu
-- [ ] GIB e-fatura entegrasyonu
+- [ ] Trendyol marketplace
+- [ ] GIB e-fatura
 - [ ] Gelişmiş raporlama
-- [ ] SEO iyileştirmeleri
 
 ## File Structure
 ```
 /app/
 ├── backend/
-│   ├── server.py        # Main API (~1300 lines)
-│   ├── models.py        # Pydantic models
+│   ├── server.py        # ~1700 lines (MNG API, cargo labels)
+│   ├── models.py
 │   ├── tests/
-│   │   └── test_new_features.py
-│   └── requirements.txt
-├── frontend/
-│   └── src/
-│       ├── components/
-│       │   ├── Header.jsx
-│       │   ├── Footer.jsx
-│       │   └── ProductCard.jsx
-│       ├── pages/
-│       │   ├── Home.jsx
-│       │   ├── ProductDetail.jsx  # 2-col grid, similar/combo
-│       │   ├── Checkout.jsx       # Iyzico integration
-│       │   └── admin/
-│       │       ├── Products.jsx   # Variants tab
-│       │       ├── Orders.jsx     # Ship modal
-│       │       └── ...
-│       └── context/
-└── memory/PRD.md
+│   │   ├── test_new_features.py
+│   │   └── test_mng_cargo_labels.py
+│   └── requirements.txt (zeep, python-barcode added)
+└── frontend/
+    └── src/
+        └── pages/
+            └── admin/
+                └── Orders.jsx  # MNG shipment, print labels
 ```
 
 ## Last Updated
-2026-03-22 - v6.0 Full Feature Implementation
+2026-03-22 - v7.0 MNG Kargo Integration + Cargo Labels
