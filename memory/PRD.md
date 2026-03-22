@@ -207,7 +207,7 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
-- URL: https://fashion-shop-156.preview.emergentagent.com
+- URL: https://couture-platform-dev.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
 - [ ] **Server.py Refactoring** - 3300+ satırlık dosyayı modüler yapıya bölme
