@@ -8,27 +8,84 @@ import ProductCard from "../components/ProductCard";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Facette.com.tr banner images
+const HERO_BANNERS = [
+  {
+    id: 1,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/en-yeniler-dc2e.jpg",
+    link: "/kategori/en-yeniler",
+    title: "EN YENİLER"
+  },
+  {
+    id: 2,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/ae79c961-ba0b-49e3-b274-2c6cc78ab700.jpg",
+    link: "/kategori/sale",
+    title: "SALE"
+  }
+];
+
+const CATEGORY_BANNERS = [
+  {
+    id: 1,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-cb23757c-6.jpg",
+    link: "/kategori/en-yeniler",
+    title: "EN YENİLER"
+  },
+  {
+    id: 2,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg",
+    link: "/kategori/gomlek",
+    title: "GÖMLEK"
+  },
+  {
+    id: 3,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg",
+    link: "/kategori/aksesuar",
+    title: "AKSESUAR"
+  }
+];
+
+const INSTASHOP_IMAGES = [
+  {
+    id: 1,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9.jpg",
+    link: "/urun/basic-atki-kirmizi"
+  },
+  {
+    id: 2,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-114d3d37-9c7f-495c-8bc2-28d32781818d.jpg",
+    link: "/kategori/ceket"
+  },
+  {
+    id: 3,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-e18eff06-8597-4f10-92cb-64b11151a74d.jpg",
+    link: "/kategori/kaban"
+  },
+  {
+    id: 4,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0.jpg",
+    link: "/kategori/pantolon"
+  },
+  {
+    id: 5,
+    image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-87d15ba0-0081-4b65-acc5-b12328de368b.jpg",
+    link: "/kategori/elbise"
+  }
+];
+
 export default function Home() {
   const [products, setProducts] = useState([]);
-  const [banners, setBanners] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchData();
+    fetchProducts();
   }, []);
 
-  const fetchData = async () => {
+  const fetchProducts = async () => {
     try {
-      const [prodRes, bannerRes, catRes] = await Promise.all([
-        axios.get(`${API}/products?is_new=true&limit=12`),
-        axios.get(`${API}/banners`),
-        axios.get(`${API}/categories`),
-      ]);
-      setProducts(prodRes.data?.products || []);
-      setBanners(bannerRes.data || []);
-      setCategories(catRes.data || []);
+      const res = await axios.get(`${API}/products?limit=20&is_new=true`);
+      setProducts(res.data?.products || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -36,230 +93,117 @@ export default function Home() {
     }
   };
 
-  const heroSliders = banners.filter(b => b.position === "hero_slider" || b.position === "hero");
-  const singleBanner = banners.find(b => b.position === "single_banner");
-  const doubleBanners = banners.filter(b => b.position === "double_banner").slice(0, 2);
-  const instashopBanners = banners.filter(b => b.position === "instashop");
-
-  const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % Math.max(heroSliders.length, 1));
-  const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + Math.max(heroSliders.length, 1)) % Math.max(heroSliders.length, 1));
-
-  // Auto slide
+  // Auto slide for hero
   useEffect(() => {
-    if (heroSliders.length > 1) {
-      const interval = setInterval(nextSlide, 5000);
+    if (HERO_BANNERS.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % HERO_BANNERS.length);
+      }, 5000);
       return () => clearInterval(interval);
     }
-  }, [heroSliders.length]);
+  }, []);
+
+  const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % HERO_BANNERS.length);
+  const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + HERO_BANNERS.length) % HERO_BANNERS.length);
 
   return (
-    <div className="min-h-screen" data-testid="home-page">
+    <div className="min-h-screen bg-white" data-testid="home-page">
       <Header />
       
-      {/* Hero Slider */}
-      <section className="relative h-[60vh] md:h-[80vh] bg-gray-100 overflow-hidden">
-        {heroSliders.length > 0 ? (
+      {/* Hero Slider - Full Width */}
+      <section className="relative">
+        <div className="relative overflow-hidden">
+          {HERO_BANNERS.map((banner, index) => (
+            <Link
+              key={banner.id}
+              to={banner.link}
+              className={`block transition-opacity duration-700 ${
+                index === currentSlide ? "opacity-100" : "opacity-0 absolute inset-0"
+              }`}
+            >
+              <img
+                src={banner.image}
+                alt={banner.title}
+                className="w-full h-auto"
+              />
+            </Link>
+          ))}
+        </div>
+
+        {/* Slider Navigation */}
+        {HERO_BANNERS.length > 1 && (
           <>
-            {heroSliders.map((banner, index) => (
-              <div
-                key={banner.id}
-                className={`absolute inset-0 transition-opacity duration-700 ${index === currentSlide ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-              >
-                {banner.video_url ? (
-                  <video
-                    src={banner.video_url}
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <img
-                    src={banner.image_url}
-                    alt={banner.title || "Banner"}
-                    className="w-full h-full object-cover"
-                  />
-                )}
-                {(banner.title || banner.subtitle) && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center text-white">
-                      {banner.title && <h1 className="text-4xl md:text-6xl font-light tracking-wider mb-4">{banner.title}</h1>}
-                      {banner.subtitle && <p className="text-lg md:text-xl mb-6">{banner.subtitle}</p>}
-                      {banner.link_url && (
-                        <Link to={banner.link_url} className="btn-primary bg-white text-black hover:bg-gray-100">
-                          Keşfet
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            
-            {/* Navigation */}
-            {heroSliders.length > 1 && (
-              <>
-                <button 
-                  onClick={prevSlide}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/90 flex items-center justify-center hover:bg-white transition-colors"
-                  data-testid="slider-prev"
-                >
-                  <ChevronLeft size={24} />
-                </button>
-                <button 
-                  onClick={nextSlide}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/90 flex items-center justify-center hover:bg-white transition-colors"
-                  data-testid="slider-next"
-                >
-                  <ChevronRight size={24} />
-                </button>
-                
-                {/* Dots */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
-                  {heroSliders.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setCurrentSlide(index)}
-                      className={`w-2 h-2 rounded-full transition-colors ${index === currentSlide ? "bg-white" : "bg-white/50"}`}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
+            <button 
+              onClick={prevSlide}
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 flex items-center justify-center hover:bg-white transition-colors"
+              data-testid="slider-prev"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <button 
+              onClick={nextSlide}
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 flex items-center justify-center hover:bg-white transition-colors"
+              data-testid="slider-next"
+            >
+              <ChevronRight size={20} />
+            </button>
           </>
-        ) : (
-          <div className="w-full h-full bg-gradient-to-b from-gray-100 to-gray-200 flex items-center justify-center">
-            <div className="text-center">
-              <h1 className="text-5xl md:text-7xl font-light tracking-[0.3em] mb-4">FACETTE</h1>
-              <p className="text-lg text-gray-600 tracking-wider">Farkı Hisset</p>
-              <Link to="/kategori/en-yeniler" className="btn-primary mt-8 inline-block">
-                Koleksiyonu Keşfet
-              </Link>
-            </div>
-          </div>
         )}
       </section>
 
-      {/* Single Banner */}
-      {singleBanner && (
-        <section className="container-main py-8">
-          <Link to={singleBanner.link_url || "#"} className="block relative overflow-hidden group">
-            <img 
-              src={singleBanner.image_url} 
-              alt={singleBanner.title || "Banner"} 
-              className="w-full h-48 md:h-64 object-cover transition-transform duration-700 group-hover:scale-105"
-            />
-            {singleBanner.title && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                <h2 className="text-white text-2xl md:text-4xl font-light tracking-wider">{singleBanner.title}</h2>
-              </div>
-            )}
-          </Link>
-        </section>
-      )}
+      {/* Category Banners - 3 Column */}
+      <section className="container-main py-8">
+        <div className="grid grid-cols-3 gap-4">
+          {CATEGORY_BANNERS.map((banner) => (
+            <Link key={banner.id} to={banner.link} className="block overflow-hidden group">
+              <img
+                src={banner.image}
+                alt={banner.title}
+                className="w-full h-auto group-hover:scale-105 transition-transform duration-500"
+              />
+            </Link>
+          ))}
+        </div>
+      </section>
 
-      {/* Double Banners */}
-      {doubleBanners.length > 0 && (
-        <section className="container-main py-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {doubleBanners.map((banner) => (
-              <Link key={banner.id} to={banner.link_url || "#"} className="block relative overflow-hidden group">
-                <img 
-                  src={banner.image_url} 
-                  alt={banner.title || "Banner"} 
-                  className="w-full h-64 md:h-96 object-cover transition-transform duration-700 group-hover:scale-105"
-                />
-                {banner.title && (
-                  <div className="absolute bottom-6 left-6">
-                    <h3 className="text-white text-xl md:text-2xl font-light tracking-wider drop-shadow-lg">{banner.title}</h3>
-                  </div>
-                )}
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Category Banners (fallback if no double banners) */}
-      {doubleBanners.length === 0 && categories.length > 0 && (
-        <section className="container-main py-8">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {categories.slice(0, 3).map((cat) => (
-              <Link key={cat.id} to={`/kategori/${cat.slug}`} className="block relative overflow-hidden group bg-gray-100 aspect-[3/4]">
-                {cat.image_url && (
-                  <img 
-                    src={cat.image_url} 
-                    alt={cat.name} 
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  />
-                )}
-                <div className="absolute inset-0 flex items-end p-6 bg-gradient-to-t from-black/50 to-transparent">
-                  <h3 className="text-white text-lg md:text-xl font-medium tracking-wider">{cat.name}</h3>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Products Section */}
-      <section className="container-main py-12">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-xl md:text-2xl font-light tracking-wider uppercase">En Yeniler</h2>
-          <Link to="/kategori/en-yeniler" className="text-sm underline hover:no-underline">
-            Tümünü Gör
-          </Link>
+      {/* Products Grid - facette.com.tr style */}
+      <section className="container-main py-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+          {products.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
         </div>
 
-        {loading ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="animate-pulse">
-                <div className="aspect-[3/4] bg-gray-200" />
-                <div className="mt-3 space-y-2">
-                  <div className="h-3 bg-gray-200 w-1/3" />
-                  <div className="h-4 bg-gray-200 w-2/3" />
-                  <div className="h-4 bg-gray-200 w-1/4" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-        )}
+        {/* Load More / View All */}
+        <div className="text-center mt-12">
+          <Link 
+            to="/kategori/en-yeniler" 
+            className="inline-block border border-black px-12 py-3 text-sm tracking-wider uppercase hover:bg-black hover:text-white transition-colors"
+          >
+            Kategoriye Git
+          </Link>
+        </div>
       </section>
 
       {/* InstaShop Section */}
-      {instashopBanners.length > 0 && (
-        <section className="py-12 bg-gray-50">
-          <div className="container-main">
-            <h2 className="text-xl md:text-2xl font-light tracking-wider uppercase text-center mb-8">
-              @facette collection on instagram
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              {instashopBanners.slice(0, 5).map((banner) => (
-                <Link key={banner.id} to={banner.link_url || "#"} className="block relative overflow-hidden group aspect-square">
-                  <img 
-                    src={banner.image_url} 
-                    alt="Instagram" 
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                  />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                    <span className="opacity-0 group-hover:opacity-100 text-white text-sm transition-opacity">
-                      Ürünü Gör
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
+      <section className="py-12 bg-gray-50">
+        <div className="container-main">
+          <h2 className="text-center text-xs tracking-[0.3em] uppercase text-gray-500 mb-8">
+            @facette collection on instagram
+          </h2>
+          <div className="grid grid-cols-5 gap-2">
+            {INSTASHOP_IMAGES.map((item) => (
+              <Link key={item.id} to={item.link} className="block overflow-hidden group">
+                <img
+                  src={item.image}
+                  alt=""
+                  className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+              </Link>
+            ))}
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       <Footer />
     </div>

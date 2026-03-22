@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
-import { SlidersHorizontal, ChevronDown, Grid, List } from "lucide-react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { SlidersHorizontal, Grid2X2, Grid3X3, LayoutGrid, X } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -17,9 +17,8 @@ export default function Category() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
-  const [sortOpen, setSortOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [viewMode, setViewMode] = useState("grid");
+  const [gridCols, setGridCols] = useState(4); // 2, 3, or 4 columns
 
   const sort = searchParams.get("sort") || "created_at";
   const order = searchParams.get("order") || "desc";
@@ -34,8 +33,8 @@ export default function Category() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      let url = `${API}/products?page=${page}&limit=20&sort=${sort}&order=${order}`;
-      if (slug) url += `&category=${slug}`;
+      let url = `${API}/products?page=${page}&limit=24&sort=${sort}&order=${order}`;
+      if (slug && slug !== 'all') url += `&category=${slug}`;
       if (minPrice) url += `&min_price=${minPrice}`;
       if (maxPrice) url += `&max_price=${maxPrice}`;
       
@@ -63,10 +62,11 @@ export default function Category() {
     searchParams.set("sort", newSort);
     searchParams.set("order", newOrder);
     setSearchParams(searchParams);
-    setSortOpen(false);
   };
 
   const currentCategory = categories.find(c => c.slug === slug);
+  const categoryName = currentCategory?.name || slug?.replace(/-/g, ' ').toUpperCase() || 'TÜM ÜRÜNLER';
+
   const sortOptions = [
     { label: "En Yeniler", sort: "created_at", order: "desc" },
     { label: "Fiyat: Düşükten Yükseğe", sort: "price", order: "asc" },
@@ -74,172 +74,218 @@ export default function Category() {
     { label: "İsim: A-Z", sort: "name", order: "asc" },
   ];
 
-  const currentSortLabel = sortOptions.find(o => o.sort === sort && o.order === order)?.label || "En Yeniler";
+  const gridClass = {
+    2: "grid-cols-2",
+    3: "grid-cols-2 md:grid-cols-3",
+    4: "grid-cols-2 md:grid-cols-4"
+  };
 
   return (
-    <div className="min-h-screen" data-testid="category-page">
+    <div className="min-h-screen bg-white" data-testid="category-page">
       <Header />
 
-      {/* Breadcrumb */}
-      <div className="container-main py-4 border-b">
-        <nav className="text-xs">
-          <Link to="/" className="text-gray-500 hover:text-black">Ana Sayfa</Link>
-          <span className="mx-2 text-gray-300">/</span>
-          <span className="text-black">{currentCategory?.name || slug || "Tüm Ürünler"}</span>
-        </nav>
-      </div>
+      <div className="container-main">
+        {/* Category Title */}
+        <div className="py-8 text-center border-b">
+          <h1 className="text-2xl md:text-3xl tracking-wider uppercase font-light">
+            {categoryName}
+          </h1>
+        </div>
 
-      <div className="container-main py-8">
-        <div className="flex gap-8">
-          {/* Sidebar Filters - Desktop */}
-          <aside className="hidden lg:block w-64 flex-shrink-0">
-            <h2 className="text-lg font-medium mb-6">Kategoriler</h2>
-            <ul className="space-y-2">
-              {categories.map((cat) => (
-                <li key={cat.id}>
-                  <Link 
-                    to={`/kategori/${cat.slug}`}
-                    className={`block py-1 text-sm hover:text-black transition-colors ${cat.slug === slug ? "font-medium" : "text-gray-600"}`}
-                  >
-                    {cat.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+        {/* Toolbar */}
+        <div className="flex items-center justify-between py-4 border-b">
+          {/* Left: Filter */}
+          <button 
+            onClick={() => setFilterOpen(true)}
+            className="flex items-center gap-2 text-sm hover:opacity-60 transition-opacity"
+            data-testid="filter-btn"
+          >
+            <SlidersHorizontal size={16} strokeWidth={1.5} />
+            <span>Filtreleme</span>
+          </button>
 
-            <div className="mt-8 pt-8 border-t">
-              <h3 className="text-sm font-medium mb-4">Fiyat Aralığı</h3>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="number"
-                  placeholder="Min"
-                  value={minPrice}
-                  onChange={(e) => {
-                    if (e.target.value) searchParams.set("min_price", e.target.value);
-                    else searchParams.delete("min_price");
-                    setSearchParams(searchParams);
-                  }}
-                  className="w-20 px-2 py-1 border text-sm"
-                />
-                <span>-</span>
-                <input
-                  type="number"
-                  placeholder="Max"
-                  value={maxPrice}
-                  onChange={(e) => {
-                    if (e.target.value) searchParams.set("max_price", e.target.value);
-                    else searchParams.delete("max_price");
-                    setSearchParams(searchParams);
-                  }}
-                  className="w-20 px-2 py-1 border text-sm"
-                />
-              </div>
-            </div>
-          </aside>
+          {/* Center: Product Count */}
+          <span className="text-sm text-gray-500 hidden md:block">
+            {total} Ürün
+          </span>
 
-          {/* Main Content */}
-          <div className="flex-1">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between mb-6 pb-4 border-b">
-              <div className="flex items-center gap-4">
-                <button 
-                  className="lg:hidden flex items-center gap-2 text-sm"
-                  onClick={() => setFilterOpen(!filterOpen)}
-                >
-                  <SlidersHorizontal size={16} />
-                  Filtreler
-                </button>
-                <span className="text-sm text-gray-500">{total} ürün</span>
-              </div>
-
-              <div className="flex items-center gap-4">
-                {/* View Mode */}
-                <div className="hidden md:flex items-center gap-1 border-r pr-4">
-                  <button 
-                    onClick={() => setViewMode("grid")}
-                    className={`p-1 ${viewMode === "grid" ? "text-black" : "text-gray-400"}`}
-                  >
-                    <Grid size={18} />
-                  </button>
-                  <button 
-                    onClick={() => setViewMode("list")}
-                    className={`p-1 ${viewMode === "list" ? "text-black" : "text-gray-400"}`}
-                  >
-                    <List size={18} />
-                  </button>
-                </div>
-
-                {/* Sort */}
-                <div className="relative">
-                  <button 
-                    className="flex items-center gap-2 text-sm"
-                    onClick={() => setSortOpen(!sortOpen)}
-                    data-testid="sort-btn"
-                  >
-                    {currentSortLabel}
-                    <ChevronDown size={16} className={`transition-transform ${sortOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  
-                  {sortOpen && (
-                    <div className="absolute right-0 top-full mt-2 bg-white border shadow-lg py-2 min-w-[200px] z-10 animate-fade-in">
-                      {sortOptions.map((option) => (
-                        <button
-                          key={`${option.sort}-${option.order}`}
-                          onClick={() => handleSort(option.sort, option.order)}
-                          className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${sort === option.sort && order === option.order ? "font-medium" : ""}`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Products Grid */}
-            {loading ? (
-              <div className={`grid ${viewMode === "grid" ? "grid-cols-2 md:grid-cols-3" : "grid-cols-1"} gap-4 md:gap-6`}>
-                {[...Array(9)].map((_, i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="aspect-[3/4] bg-gray-200" />
-                    <div className="mt-3 space-y-2">
-                      <div className="h-3 bg-gray-200 w-1/3" />
-                      <div className="h-4 bg-gray-200 w-2/3" />
-                      <div className="h-4 bg-gray-200 w-1/4" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : products.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-gray-500">Bu kategoride ürün bulunamadı.</p>
-              </div>
-            ) : (
-              <div className={`grid ${viewMode === "grid" ? "grid-cols-2 md:grid-cols-3" : "grid-cols-1"} gap-4 md:gap-6`}>
-                {products.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
-            )}
-
-            {/* Pagination */}
-            {pages > 1 && (
-              <div className="flex justify-center gap-2 mt-12">
-                {[...Array(pages)].map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setPage(i + 1)}
-                    className={`w-10 h-10 flex items-center justify-center text-sm border ${page === i + 1 ? "bg-black text-white border-black" : "hover:border-black"}`}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* Right: Grid Options */}
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setGridCols(2)}
+              className={`p-1 ${gridCols === 2 ? 'text-black' : 'text-gray-400'}`}
+              data-testid="grid-2"
+            >
+              <Grid2X2 size={18} strokeWidth={1.5} />
+            </button>
+            <button 
+              onClick={() => setGridCols(3)}
+              className={`p-1 ${gridCols === 3 ? 'text-black' : 'text-gray-400'}`}
+              data-testid="grid-3"
+            >
+              <Grid3X3 size={18} strokeWidth={1.5} />
+            </button>
+            <button 
+              onClick={() => setGridCols(4)}
+              className={`p-1 ${gridCols === 4 ? 'text-black' : 'text-gray-400'}`}
+              data-testid="grid-4"
+            >
+              <LayoutGrid size={18} strokeWidth={1.5} />
+            </button>
           </div>
         </div>
+
+        {/* Products Grid */}
+        <div className="py-8">
+          {loading ? (
+            <div className={`grid ${gridClass[gridCols]} gap-4 gap-y-8`}>
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="animate-pulse">
+                  <div className="aspect-[3/4] bg-gray-100 mb-3" />
+                  <div className="h-3 bg-gray-100 w-1/3 mb-2" />
+                  <div className="h-4 bg-gray-100 w-3/4 mb-2" />
+                  <div className="h-4 bg-gray-100 w-1/4" />
+                </div>
+              ))}
+            </div>
+          ) : products.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="text-gray-500">Bu kategoride ürün bulunamadı</p>
+            </div>
+          ) : (
+            <div className={`grid ${gridClass[gridCols]} gap-x-4 gap-y-8`}>
+              {products.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {pages > 1 && (
+            <div className="flex justify-center items-center gap-2 mt-12">
+              {[...Array(pages)].map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPage(i + 1)}
+                  className={`w-10 h-10 text-sm transition-colors ${
+                    page === i + 1 
+                      ? 'bg-black text-white' 
+                      : 'border border-gray-300 hover:border-black'
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Filter Sidebar */}
+      {filterOpen && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/40 z-40"
+            onClick={() => setFilterOpen(false)}
+          />
+          <div className="fixed left-0 top-0 bottom-0 w-80 bg-white z-50 overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-sm font-medium uppercase tracking-wider">Filtreler</h3>
+              <button onClick={() => setFilterOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4">
+              {/* Sort */}
+              <div className="mb-6">
+                <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-3">Sıralama</h4>
+                <div className="space-y-2">
+                  {sortOptions.map((option, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleSort(option.sort, option.order)}
+                      className={`block w-full text-left text-sm py-2 px-3 transition-colors ${
+                        sort === option.sort && order === option.order
+                          ? 'bg-black text-white'
+                          : 'hover:bg-gray-100'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Categories */}
+              <div className="mb-6">
+                <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-3">Kategoriler</h4>
+                <div className="space-y-1">
+                  {categories.map((cat) => (
+                    <a
+                      key={cat.id}
+                      href={`/kategori/${cat.slug}`}
+                      className={`block text-sm py-2 px-3 transition-colors ${
+                        slug === cat.slug
+                          ? 'bg-black text-white'
+                          : 'hover:bg-gray-100'
+                      }`}
+                    >
+                      {cat.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+
+              {/* Price Range */}
+              <div className="mb-6">
+                <h4 className="text-xs uppercase tracking-wider text-gray-500 mb-3">Fiyat Aralığı</h4>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    placeholder="Min"
+                    value={minPrice}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        searchParams.set("min_price", e.target.value);
+                      } else {
+                        searchParams.delete("min_price");
+                      }
+                      setSearchParams(searchParams);
+                    }}
+                    className="w-1/2 border px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Max"
+                    value={maxPrice}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        searchParams.set("max_price", e.target.value);
+                      } else {
+                        searchParams.delete("max_price");
+                      }
+                      setSearchParams(searchParams);
+                    }}
+                    className="w-1/2 border px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Clear Filters */}
+              <button
+                onClick={() => {
+                  setSearchParams({});
+                  setFilterOpen(false);
+                }}
+                className="w-full border border-black py-3 text-sm uppercase tracking-wider hover:bg-black hover:text-white transition-colors"
+              >
+                Filtreleri Temizle
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <Footer />
     </div>

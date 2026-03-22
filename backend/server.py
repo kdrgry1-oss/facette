@@ -290,6 +290,39 @@ async def delete_banner(banner_id: str):
     await db.banners.delete_one({"id": banner_id})
     return {"success": True}
 
+# ==================== SEARCH ====================
+@api_router.get("/search/popular")
+async def get_popular_searches():
+    """Get most popular search terms"""
+    searches = await db.search_logs.aggregate([
+        {"$group": {"_id": "$term", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10}
+    ]).to_list(10)
+    
+    if not searches:
+        # Default popular searches
+        return [
+            {"term": "elbise", "count": 150},
+            {"term": "bluz", "count": 120},
+            {"term": "pantolon", "count": 100},
+            {"term": "ceket", "count": 80},
+            {"term": "kazak", "count": 70},
+            {"term": "gömlek", "count": 60},
+        ]
+    
+    return [{"term": s["_id"], "count": s["count"]} for s in searches]
+
+@api_router.post("/search/log")
+async def log_search(term: str = Query(...)):
+    """Log a search term for analytics"""
+    await db.search_logs.insert_one({
+        "term": term.lower().strip(),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    return {"success": True}
+
+
 # ==================== HOMEPAGE BLOCKS ====================
 @api_router.get("/homepage/blocks")
 async def get_homepage_blocks():
