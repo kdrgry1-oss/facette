@@ -11,101 +11,109 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Auth: JWT + Google OAuth (Emergent Auth)
 - Payment: Iyzico (Sandbox)
 - Cargo: MNG Kargo (SOAP API - Real Integration)
+- SMS: Netgsm API (Optional)
 
-## Current Status: v7.1 - MNG Kargo Real API + Labels ✅
+## Current Status: v8.0 - Full E-commerce Suite ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
 
-#### v7.1 - MNG Kargo Gerçek API Entegrasyonu
-- [x] **MNG Kargo SOAP API** - Gerçek sipariş oluşturma
-  - SiparisGirisiDetayliV3 endpoint
-  - FaturaSiparisListesi ile takip numarası alma
-  - 10 haneli gerçek tracking number (örn: 6092614519)
-  - IP whitelist gereksinimi (production için)
-- [x] **Kargo Etiketi** - 10cm x 15cm yazdırılabilir
-  - **MNG KARGO** başlığı (siyah banner)
-  - Üst barkod (6 haneli kısa kod)
-  - Gönderici Bilgileri
-  - Alıcı Bilgileri  
-  - Kargo Bilgileri
-  - Alt barkod (10 haneli tam takip numarası)
-- [x] **Toplu Etiket Yazdırma** - Birden fazla sipariş
+#### v8.0 - Product Data Fix + Order Tracking + SMS
+- [x] **Ürün Stok Kodları** - Otomatik oluşturuldu (örn: FC-BKMI-7171)
+- [x] **Ürün Barkodları** - 13 haneli EAN-13 (örn: 8690017164670)
+- [x] **Duplicate Görseller Temizlendi** - 243 tekrar görsel silindi
+- [x] **Sipariş Takip Sayfası** - `/siparis-takip` müşteri için
+  - Sipariş numarası veya kargo takip numarası ile arama
+  - Timeline görünümü (Alındı → Onaylandı → Hazırlanıyor → Kargoda → Teslim)
+  - Kargo takip linki
+- [x] **Netgsm SMS Entegrasyonu**
+  - Sipariş onay SMS'i
+  - Kargo bildirim SMS'i
+  - Admin panelinde SMS butonları
+- [x] **Footer'a Sipariş Takip Linki** eklendi
 
-#### MNG API Credentials (Production)
+#### v7.1 - MNG Kargo
+- [x] MNG Kargo SOAP API entegrasyonu
+- [x] 10 haneli tracking number
+- [x] Kargo etiketi (10cm x 15cm)
+- [x] Toplu etiket yazdırma
+
+#### v6.0 - Full Features
+- [x] Varyant Yönetimi
+- [x] Benzer Ürünler & Kombin
+- [x] Iyzico Ödeme
+- [x] Multi-carrier cargo
+
+## API Endpoints
+
+### Public
+- `GET /api/track/{code}` - Sipariş takip (auth gerektirmez)
+
+### SMS (Admin)
+- `POST /api/orders/{id}/send-confirmation-sms` - Sipariş onay SMS
+- `POST /api/orders/{id}/send-shipping-sms` - Kargo bildirim SMS
+- `POST /api/sms/send-test` - Test SMS
+
+### Cargo
+- `POST /api/orders/{id}/create-mng-shipment` - MNG ile gönder
+- `GET /api/orders/{id}/cargo-label` - Kargo etiketi
+- `POST /api/orders/bulk-labels` - Toplu etiket
+
+## Netgsm SMS Ayarları
+```env
+# .env dosyasına ekleyin
+NETGSM_USERNAME=your_username
+NETGSM_PASSWORD=your_password
+NETGSM_HEADER=FACETTE
 ```
-Username: 490059279
-Password: Face.0024E
-Customer Code: FACETTE DIŞ TİC.A.Ş.
-Tax Number: 6080712084
-WSDL: https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL
-```
 
-**NOT:** Production ortamında sunucu IP'niz MNG'ye kayıtlı olmalı (IP Whitelist).
+**SMS Şablonları:**
+1. Sipariş Onay: "Merhaba {isim}, siparişiniz alındı. Sipariş No: {no} Tutar: {tutar}TL FACETTE"
+2. Kargo Bildirim: "Merhaba, siparişiniz {kargo} ile gönderildi. Takip: {takip_no} FACETTE"
 
-## API Endpoints - Kargo
+## Ürün Kodlama Sistemi
+- **Stok Kodu**: FC-{ISIM_KISALTMA}-{4_RAKAM} (örn: FC-BKMI-7171)
+- **Barkod**: 13 haneli EAN-13, Türk prefix 869 (örn: 8690017164670)
 
-### MNG Kargo
-- `POST /api/orders/{id}/create-mng-shipment` - MNG API ile kargo oluştur (Admin)
-- `GET /api/orders/{id}/cargo-label` - Kargo etiketi (HTML, 10cm x 15cm)
-- `POST /api/orders/bulk-labels` - Toplu etiket (body: order_ids array)
-
-### Genel Kargo
-- `GET /api/cargo/companies` - Kargo firmaları listesi
-- `POST /api/orders/{id}/ship` - Manuel kargo girişi
-- `GET /api/orders/{id}/track` - Sipariş takip
-
-## Gönderici Bilgileri (Sabit)
-```
-Firma: FACETTE DIŞ TİCARET A.Ş.
-Telefon: 90 543 330 03 10
-Adres: KÜÇÜKÇEKMECE IKITELLI OSB MAH.
-       IMSAN D BLOK
-       NO: 3 KÜÇÜKÇEKMECE/ ISTANBUL
-       Küçükçekmece / İstanbul
-```
-
-## Kargo Etiketi Özellikleri
-- Boyut: 10cm x 15cm (termal yazıcı uyumlu)
-- Barkod: Code128 formatı
-- Print CSS: `@page { size: 10cm 15cm; margin: 0; }`
-- Header: Kargo firması adı (siyah banner)
-- Page break: Her etiket ayrı sayfada
+## Sayfa URL'leri
+- `/siparis-takip` - Müşteri sipariş takip sayfası
+- `/siparis-takip/:trackingCode` - Direkt sipariş takip
 
 ## Test Results
-- MNG API: ✅ Sipariş oluşturma çalışıyor
-- Tracking Number: ✅ 10 haneli (örn: 6092614519)
-- Kargo Etiketi: ✅ MNG KARGO başlığı, barkodlar, tüm bilgiler
+- ✅ Sipariş takip API çalışıyor
+- ✅ Sipariş takip sayfası çalışıyor
+- ✅ Ürün stok kodları oluşturuldu
+- ✅ Ürün barkodları oluşturuldu
+- ✅ Duplicate görseller temizlendi
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
 - URL: https://mega-menu-catalog.preview.emergentagent.com
 
 ## P1 - Sonraki Görevler
-- [ ] MNG IP Whitelist kaydı (production için)
-- [ ] Netgsm SMS bildirimi
-- [ ] E-mail bildirimi
-- [ ] Müşteri sipariş takip sayfası
+- [ ] Netgsm credentials ile canlı SMS test
+- [ ] E-mail bildirimi (Resend/SendGrid)
+- [ ] Iyzico production key
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
 - [ ] GIB e-fatura
-- [ ] Iyzico production
 - [ ] Gelişmiş raporlama
+- [ ] Müşteri hesap sayfası geliştirmeleri
 
 ## File Structure
 ```
 /app/
 ├── backend/
-│   ├── server.py        # ~2000 lines (MNG SOAP API, cargo labels)
-│   ├── models.py
-│   ├── tests/
-│   └── requirements.txt (zeep, python-barcode)
+│   ├── server.py        # ~2260 lines
+│   └── requirements.txt
 └── frontend/
     └── src/
-        └── pages/
-            └── admin/
-                └── Orders.jsx  # MNG shipment, print labels
+        ├── pages/
+        │   ├── TrackOrder.jsx    # NEW
+        │   └── admin/Orders.jsx  # SMS buttons
+        └── components/
+            └── Footer.jsx        # Sipariş takip linki
 ```
 
 ## Last Updated
-2026-03-22 - v7.1 MNG Kargo Real API + 10-digit Tracking Numbers + Labels
+2026-03-22 - v8.0 Product Data + Order Tracking + SMS

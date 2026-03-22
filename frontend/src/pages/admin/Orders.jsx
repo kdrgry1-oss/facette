@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer, Tag } from "lucide-react";
+import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer, Tag, MessageSquare } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -192,6 +192,42 @@ export default function AdminOrders() {
       }
     } catch (err) {
       toast.error("Etiketler oluşturulamadı");
+    }
+  };
+
+  const handleSendConfirmationSMS = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/${orderId}/send-confirmation-sms`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data.success) {
+        toast.success("Sipariş onay SMS'i gönderildi");
+      } else {
+        toast.error(res.data.error || "SMS gönderilemedi");
+      }
+    } catch (err) {
+      toast.error("SMS gönderilemedi: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleSendShippingSMS = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/${orderId}/send-shipping-sms`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data.success) {
+        toast.success("Kargo SMS'i gönderildi");
+      } else {
+        toast.error(res.data.error || "SMS gönderilemedi");
+      }
+    } catch (err) {
+      toast.error("SMS gönderilemedi: " + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -567,12 +603,30 @@ export default function AdminOrders() {
                     </button>
                   </>
                 ) : (
+                  <>
+                    <button 
+                      onClick={() => handlePrintLabel(selectedOrder.id)}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                    >
+                      <Tag size={16} />
+                      Etiket Yazdır
+                    </button>
+                    <button 
+                      onClick={() => handleSendShippingSMS(selectedOrder.id)}
+                      className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
+                    >
+                      <MessageSquare size={16} />
+                      Kargo SMS
+                    </button>
+                  </>
+                )}
+                {!selectedOrder.sms_confirmation_sent && (
                   <button 
-                    onClick={() => handlePrintLabel(selectedOrder.id)}
-                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                    onClick={() => handleSendConfirmationSMS(selectedOrder.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
                   >
-                    <Tag size={16} />
-                    Etiket Yazdır
+                    <MessageSquare size={16} />
+                    Onay SMS
                   </button>
                 )}
                 <button 

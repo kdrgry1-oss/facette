@@ -13,6 +13,7 @@ import Search from "./pages/Search";
 import StaticPage from "./pages/StaticPage";
 import Account from "./pages/Account";
 import Login from "./pages/Login";
+import TrackOrder from "./pages/TrackOrder";
 
 // Admin Pages
 import AdminLayout from "./pages/admin/AdminLayout";
@@ -45,6 +46,8 @@ function App() {
             <Route path="/sayfa/:slug" element={<StaticPage />} />
             <Route path="/hesabim" element={<Account />} />
             <Route path="/giris" element={<Login />} />
+            <Route path="/siparis-takip" element={<TrackOrder />} />
+            <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
             
             {/* Admin */}
             <Route path="/admin" element={<AdminLayout />}>

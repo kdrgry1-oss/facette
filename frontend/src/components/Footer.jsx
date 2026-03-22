@@ -41,6 +41,7 @@ export default function Footer() {
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider mb-4">Müşteri Hizmetleri</h4>
             <ul className="space-y-2">
+              <li><Link to="/siparis-takip" className="text-gray-400 text-sm hover:text-white transition-colors">Sipariş Takibi</Link></li>
               <li><Link to="/sayfa/hakkimizda" className="text-gray-400 text-sm hover:text-white transition-colors">Hakkımızda</Link></li>
               <li><Link to="/sayfa/iade-kosullari" className="text-gray-400 text-sm hover:text-white transition-colors">İade & Değişim</Link></li>
               <li><Link to="/sayfa/kvkk" className="text-gray-400 text-sm hover:text-white transition-colors">KVKK</Link></li>

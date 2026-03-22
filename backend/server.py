@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import random
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
@@ -1993,6 +1994,252 @@ async def get_bulk_cargo_labels(order_ids: list[str]):
     """
     
     return HTMLResponse(content=labels_html)
+
+# ==================== NETGSM SMS INTEGRATION ====================
+import httpx
+
+NETGSM_CONFIG = {
+    "username": os.environ.get("NETGSM_USERNAME", ""),
+    "password": os.environ.get("NETGSM_PASSWORD", ""),
+    "header": os.environ.get("NETGSM_HEADER", "FACETTE"),
+    "api_url": "https://api.netgsm.com.tr/sms/send/get"
+}
+
+def format_turkish_phone(phone: str) -> str:
+    """Format phone number to Turkish E.164 format"""
+    import re
+    cleaned = re.sub(r'[^\d+]', '', phone)
+    
+    if cleaned.startswith('+90'):
+        return cleaned
+    if cleaned.startswith('0'):
+        return '+90' + cleaned[1:]
+    if len(cleaned) == 10:
+        return '+90' + cleaned
+    if cleaned.startswith('90') and len(cleaned) == 12:
+        return '+' + cleaned
+    
+    return '+90' + cleaned[-10:] if len(cleaned) >= 10 else cleaned
+
+async def send_sms(phone: str, message: str, sms_type: str = "notification") -> dict:
+    """Send SMS via Netgsm API"""
+    if not NETGSM_CONFIG["username"] or not NETGSM_CONFIG["password"]:
+        logger.warning("Netgsm credentials not configured, SMS not sent")
+        return {"success": False, "error": "Netgsm credentials not configured"}
+    
+    try:
+        formatted_phone = format_turkish_phone(phone)
+        # Remove + for Netgsm API
+        gsm_number = formatted_phone.replace('+', '')
+        
+        params = {
+            "usercode": NETGSM_CONFIG["username"],
+            "password": NETGSM_CONFIG["password"],
+            "gsmno": gsm_number,
+            "message": message,
+            "msgheader": NETGSM_CONFIG["header"],
+            "dil": "TR"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(NETGSM_CONFIG["api_url"], params=params, timeout=30)
+            result = response.text.strip()
+            
+            # Netgsm returns codes: 00 = success, 20 = post error, 30 = invalid credentials, etc.
+            if result.startswith("00"):
+                logger.info(f"SMS sent successfully to {formatted_phone}: {result}")
+                return {"success": True, "message_id": result, "phone": formatted_phone}
+            else:
+                logger.error(f"Netgsm error: {result}")
+                return {"success": False, "error": result}
+                
+    except Exception as e:
+        logger.error(f"SMS send error: {e}")
+        return {"success": False, "error": str(e)}
+
+# SMS Templates
+def get_order_confirmation_sms(customer_name: str, order_number: str, total: float) -> str:
+    """Generate order confirmation SMS"""
+    return f"Merhaba {customer_name[:15]}, siparişiniz alındı. Sipariş No: {order_number} Tutar: {total:.0f}TL FACETTE"
+
+def get_shipping_sms(customer_name: str, tracking_number: str, carrier: str) -> str:
+    """Generate shipping notification SMS"""
+    return f"Merhaba, siparişiniz {carrier} ile gönderildi. Takip: {tracking_number} FACETTE"
+
+def get_delivery_sms(customer_name: str) -> str:
+    """Generate delivery confirmation SMS"""
+    return f"Merhaba {customer_name[:15]}, siparişiniz teslim edildi. Alışverişiniz için teşekkürler! FACETTE"
+
+@api_router.post("/sms/send-test", dependencies=[Depends(require_admin)])
+async def send_test_sms(phone: str = Query(...), message: str = Query(...)):
+    """Send a test SMS (Admin only)"""
+    result = await send_sms(phone, message, "test")
+    return result
+
+@api_router.post("/orders/{order_id}/send-confirmation-sms", dependencies=[Depends(require_admin)])
+async def send_order_confirmation_sms(order_id: str):
+    """Send order confirmation SMS"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    shipping = order.get('shipping_address', {})
+    phone = shipping.get('phone')
+    if not phone:
+        raise HTTPException(status_code=400, detail="Telefon numarası bulunamadı")
+    
+    customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip() or "Müşteri"
+    message = get_order_confirmation_sms(customer_name, order.get('order_number', ''), order.get('total', 0))
+    
+    result = await send_sms(phone, message, "order_confirmation")
+    
+    if result.get("success"):
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {"sms_confirmation_sent": True, "sms_confirmation_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    
+    return result
+
+@api_router.post("/orders/{order_id}/send-shipping-sms", dependencies=[Depends(require_admin)])
+async def send_shipping_sms(order_id: str):
+    """Send shipping notification SMS"""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    cargo = order.get('cargo')
+    if not cargo or not cargo.get('tracking_number'):
+        raise HTTPException(status_code=400, detail="Kargo bilgisi bulunamadı")
+    
+    shipping = order.get('shipping_address', {})
+    phone = shipping.get('phone')
+    if not phone:
+        raise HTTPException(status_code=400, detail="Telefon numarası bulunamadı")
+    
+    customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip() or "Müşteri"
+    message = get_shipping_sms(customer_name, cargo.get('tracking_number'), cargo.get('company_name', 'Kargo'))
+    
+    result = await send_sms(phone, message, "shipping")
+    
+    if result.get("success"):
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {"sms_shipping_sent": True, "sms_shipping_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    
+    return result
+
+# ==================== CUSTOMER ORDER TRACKING ====================
+@api_router.get("/track/{tracking_code}")
+async def public_order_tracking(tracking_code: str):
+    """Public order tracking endpoint - no auth required"""
+    # Search by order number or cargo tracking number
+    order = await db.orders.find_one(
+        {"$or": [
+            {"order_number": tracking_code},
+            {"cargo.tracking_number": tracking_code}
+        ]},
+        {"_id": 0, "user_id": 0}
+    )
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    
+    # Build tracking response with status timeline
+    cargo = order.get('cargo', {})
+    status = order.get('status', 'pending')
+    
+    timeline = []
+    
+    # Order placed
+    timeline.append({
+        "status": "placed",
+        "title": "Sipariş Alındı",
+        "date": order.get('created_at'),
+        "completed": True
+    })
+    
+    # Order confirmed
+    if status in ['confirmed', 'processing', 'shipped', 'delivered']:
+        timeline.append({
+            "status": "confirmed",
+            "title": "Sipariş Onaylandı",
+            "date": order.get('confirmed_at') or order.get('created_at'),
+            "completed": True
+        })
+    
+    # Processing
+    if status in ['processing', 'shipped', 'delivered']:
+        timeline.append({
+            "status": "processing",
+            "title": "Hazırlanıyor",
+            "date": order.get('processing_at'),
+            "completed": True
+        })
+    else:
+        timeline.append({
+            "status": "processing",
+            "title": "Hazırlanıyor",
+            "completed": False
+        })
+    
+    # Shipped
+    if status in ['shipped', 'delivered']:
+        timeline.append({
+            "status": "shipped",
+            "title": "Kargoya Verildi",
+            "date": cargo.get('shipped_at'),
+            "completed": True,
+            "tracking_number": cargo.get('tracking_number'),
+            "tracking_url": cargo.get('tracking_url'),
+            "carrier": cargo.get('company_name')
+        })
+    else:
+        timeline.append({
+            "status": "shipped",
+            "title": "Kargoya Verildi",
+            "completed": False
+        })
+    
+    # Delivered
+    timeline.append({
+        "status": "delivered",
+        "title": "Teslim Edildi",
+        "date": order.get('delivered_at') if status == 'delivered' else None,
+        "completed": status == 'delivered'
+    })
+    
+    # Mask sensitive data
+    shipping = order.get('shipping_address', {})
+    masked_shipping = {
+        "city": shipping.get('city', ''),
+        "district": shipping.get('district', ''),
+        "first_name": shipping.get('first_name', '')[:1] + "***" if shipping.get('first_name') else "",
+        "last_name": shipping.get('last_name', '')[:1] + "***" if shipping.get('last_name') else ""
+    }
+    
+    return {
+        "order_number": order.get('order_number'),
+        "status": status,
+        "status_text": {
+            "pending": "Beklemede",
+            "confirmed": "Onaylandı",
+            "processing": "Hazırlanıyor",
+            "shipped": "Kargoda",
+            "delivered": "Teslim Edildi",
+            "cancelled": "İptal Edildi"
+        }.get(status, status),
+        "timeline": timeline,
+        "shipping_address": masked_shipping,
+        "cargo": {
+            "company": cargo.get('company_name'),
+            "tracking_number": cargo.get('tracking_number'),
+            "tracking_url": cargo.get('tracking_url')
+        } if cargo else None,
+        "total": order.get('total'),
+        "item_count": len(order.get('items', []))
+    }
 
 # Root endpoint
 @api_router.get("/")
