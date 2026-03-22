@@ -400,7 +400,7 @@ export default function AdminProducts() {
 
           <form onSubmit={handleSubmit}>
             <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="basic">Temel</TabsTrigger>
                 <TabsTrigger value="pricing">Fiyat</TabsTrigger>
                 <TabsTrigger value="images">Görseller</TabsTrigger>
