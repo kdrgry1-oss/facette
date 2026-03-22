@@ -1,7 +1,7 @@
 # FACETTE E-Commerce Platform PRD
 
 ## Original Problem Statement
-Kullanıcı, facette.com.tr, zara.com, suudcollection.com ve fahhar.com'dan ilham alan kapsamlı bir e-ticaret platformu istemektedir. Platform, ticimax.com/e-ticaret-paketleri/ adresindeki özellikleri içermeli ve tam kapsamlı bir admin paneli ile yönetilebilir olmalıdır.
+Kullanıcı, facette.com.tr, zara.com, suudcollection.com ve fahhar.com'dan ilham alan kapsamlı bir e-ticaret platformu istemektedir. Platform facette.com.tr ile birebir aynı görünüme sahip olmalı.
 
 ## Tech Stack
 - **Frontend**: React 18, Tailwind CSS, Shadcn/UI, Lucide Icons, React Router v6
@@ -9,133 +9,122 @@ Kullanıcı, facette.com.tr, zara.com, suudcollection.com ve fahhar.com'dan ilha
 - **Database**: MongoDB
 - **Authentication**: JWT-based auth
 
-## Core Requirements
+## Current Status: MVP COMPLETE ✅
 
-### P0 - MVP Features (COMPLETED)
-- [x] Homepage with hero slider, category banners, product grids
-- [x] Product listing with filters and search
-- [x] Product detail page with size selection, gallery, add to cart
-- [x] Shopping cart with drawer functionality
-- [x] User authentication (login/register)
-- [x] Admin panel with dashboard
-- [x] Admin product management (CRUD, XML import)
-- [x] Admin category, banner, campaign, pages management
+### What's Been Implemented (2026-03-22)
+
+#### Phase 1 - Core E-commerce (COMPLETE)
 - [x] 246 products imported from facette.com.tr XML
+- [x] Product listing, filtering, search
+- [x] Shopping cart with drawer
+- [x] User authentication (login/register)
+- [x] Admin panel with CRUD operations
 
-### P1 - Next Phase
-- [ ] Advanced search with autocomplete
-- [ ] Mega menu with images
-- [ ] Checkout flow with address management
-- [ ] Order management for customers
-- [ ] "Complete the Look" product combinations
-- [ ] Similar products recommendations
-- [ ] Social proof notifications (recent purchases)
-
-### P2 - Future Integrations
-- [ ] Iyzico payment integration
-- [ ] MNG/DHL shipping integration
-- [ ] Netgsm SMS integration
-- [ ] Trendyol API (product sync, reviews)
-- [ ] GIB e-invoice integration
-- [ ] Email notifications for orders
+#### Phase 2 - facette.com.tr Style UI (COMPLETE)
+- [x] **Header**: Menü solda (EN YENİLER, GİYİM, AKSESUAR, SALE), logo ortada, ikonlar sağda
+- [x] **SALE linki kırmızı** renk
+- [x] **Hero Slider**: facette.com.tr CDN'inden görseller
+- [x] **Kategori Banner'ları**: 3 sütun grid görünüm
+- [x] **Ürün Kartları**: Bookmark ikonu, resim noktaları, quick add butonu
+- [x] **Arama**: 
+  - "EN ÇOK ARANANLAR" popup gösterimi
+  - Canlı arama sonuçları (yazarken)
+  - Arama terimleri loglama
+- [x] **Kategori Sayfası**:
+  - Sol filtre sidebar
+  - Sıralama seçenekleri
+  - Grid değiştirme (2, 3, 4 sütun)
+  - Fiyat filtresi
+- [x] **Ürün Detay**:
+  - Thumbnail galeri (sol taraf)
+  - Son görsel beden tablosu olarak ayrılmış
+  - "Beden Tablosu" popup açılması
+  - Beden seçimi (XS, S, M, L, XL)
+  - Adet kontrolü
+  - Accordion bilgiler (Ürün Özellikleri, Kargo, İade)
+- [x] **Mobil Responsive**: Hamburger menü, touch-friendly
 
 ## API Endpoints
 
 ### Authentication
-- POST /api/auth/register - User registration
-- POST /api/auth/login - User login
-- GET /api/auth/me - Get current user
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
 
 ### Products
-- GET /api/products - List products with filters
-- GET /api/products/{slug} - Get product by slug
-- POST /api/products - Create product (admin)
-- PUT /api/products/{id} - Update product (admin)
-- DELETE /api/products/{id} - Delete product (admin)
+- GET /api/products (with filters: category, search, min_price, max_price, sort, order)
+- GET /api/products/{slug}
+- POST /api/products (admin)
+- PUT /api/products/{id} (admin)
+- DELETE /api/products/{id} (admin)
+
+### Search
+- GET /api/search/popular - En çok aranan terimler
+- POST /api/search/log - Arama terimi loglama
 
 ### Categories
-- GET /api/categories - List all categories
-- POST /api/categories - Create category (admin)
+- GET /api/categories
+- POST /api/categories (admin)
 
 ### Orders
-- GET /api/orders - List orders (admin: all, user: own)
-- POST /api/orders - Create order
-- PUT /api/orders/{id}/status - Update order status (admin)
-
-### Banners
-- GET /api/banners - List banners
-- POST /api/banners - Create banner (admin)
-
-### Reports
-- GET /api/reports/dashboard - Admin dashboard stats
+- GET /api/orders
+- POST /api/orders
+- PUT /api/orders/{id}/status (admin)
 
 ### Import
-- POST /api/import/xml - Import products from XML URL (admin)
-
-## Database Collections
-- users
-- products
-- categories
-- orders
-- banners
-- menu_items
-- pages
-- campaigns
-- settings
+- POST /api/import/xml (admin)
 
 ## Test Credentials
 - Admin: admin@facette.com / admin123
+- URL: https://fashion-ecom-mvp.preview.emergentagent.com
 
-## Current Status
-**MVP COMPLETE** - E-commerce platform is fully functional with:
-- 246 products imported and displayed
-- Working shopping cart
-- Admin panel with full CRUD operations
-- Hero slider with 3 banners
-- Category navigation
-- Search functionality
+## Test Results (2026-03-22)
+- Backend: 100% (25/25 tests passed)
+- Frontend: 100% (all facette.com.tr style features working)
 
-## Known Issues
-1. Category banner images need to be uploaded (currently showing gray placeholders)
-2. Search URL redirect: /ara should redirect to /arama
+## P1 - Next Phase (Upcoming Tasks)
+- [ ] Checkout flow (adres yönetimi, ödeme sayfası)
+- [ ] Sipariş takibi müşteri paneli
+- [ ] "Kombini Tamamla" özelliği
+- [ ] Benzer ürünler önerileri
+- [ ] Favoriler listesi
 
-## Files Structure
+## P2 - Future Integrations
+- [ ] Iyzico ödeme entegrasyonu
+- [ ] MNG/DHL kargo entegrasyonu
+- [ ] Netgsm SMS entegrasyonu
+- [ ] Trendyol API senkronizasyonu
+- [ ] GIB e-fatura entegrasyonu
+- [ ] Sosyal kanıt bildirimleri
+- [ ] Otomatik e-posta/SMS bildirimleri
+
+## File Structure
 ```
 /app/
 ├── backend/
-│   ├── server.py - Main FastAPI application
-│   ├── models.py - Pydantic models
+│   ├── server.py          # FastAPI + all routes
+│   ├── models.py          # Pydantic models
 │   └── requirements.txt
 ├── frontend/
-│   ├── src/
-│   │   ├── App.js - Main React app with routing
-│   │   ├── pages/
-│   │   │   ├── Home.jsx
-│   │   │   ├── Category.jsx
-│   │   │   ├── ProductDetail.jsx
-│   │   │   ├── Cart.jsx
-│   │   │   ├── Checkout.jsx
-│   │   │   ├── Search.jsx
-│   │   │   ├── Login.jsx
-│   │   │   ├── Account.jsx
-│   │   │   └── admin/
-│   │   │       ├── AdminLayout.jsx
-│   │   │       ├── Dashboard.jsx
-│   │   │       ├── Products.jsx
-│   │   │       ├── Orders.jsx
-│   │   │       └── ...
-│   │   ├── components/
-│   │   │   ├── Header.jsx
-│   │   │   ├── Footer.jsx
-│   │   │   ├── ProductCard.jsx
-│   │   │   └── CartDrawer.jsx
-│   │   └── context/
-│   │       ├── AuthContext.jsx
-│   │       └── CartContext.jsx
-│   └── package.json
+│   └── src/
+│       ├── App.js
+│       ├── components/
+│       │   ├── Header.jsx      # facette.com.tr style
+│       │   ├── ProductCard.jsx # bookmark, image dots
+│       │   ├── CartDrawer.jsx
+│       │   └── Footer.jsx
+│       ├── pages/
+│       │   ├── Home.jsx        # Hero, banners, products
+│       │   ├── Category.jsx    # Filter, grid options
+│       │   ├── ProductDetail.jsx # Size chart popup
+│       │   ├── Search.jsx
+│       │   └── admin/
+│       └── context/
+│           ├── AuthContext.jsx
+│           └── CartContext.jsx
 └── memory/
     └── PRD.md
 ```
 
 ## Last Updated
-2026-03-22
+2026-03-22 - facette.com.tr style UI complete
