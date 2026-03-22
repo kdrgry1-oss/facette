@@ -26,6 +26,7 @@ import AdminSettings from "./pages/admin/Settings";
 import AdminCampaigns from "./pages/admin/Campaigns";
 import AdminPages from "./pages/admin/Pages";
 import AdminPageDesign from "./pages/admin/PageDesign";
+import AdminIntegrations from "./pages/admin/Integrations";
 
 import "./App.css";
 
@@ -58,6 +59,7 @@ function App() {
               <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
               <Route path="bannerlar" element={<AdminBanners />} />
               <Route path="kampanyalar" element={<AdminCampaigns />} />
+              <Route path="entegrasyonlar" element={<AdminIntegrations />} />
               <Route path="sayfalar" element={<AdminPages />} />
               <Route path="ayarlar" element={<AdminSettings />} />
             </Route>

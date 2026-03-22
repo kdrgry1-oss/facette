@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation, Navigate } from "react-router-dom";
 import { 
   LayoutDashboard, Package, ShoppingCart, Tags, Image, 
-  Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown, Palette
+  Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown, Palette, Plug
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -14,6 +14,7 @@ const menuItems = [
   { icon: Palette, label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi" },
   { icon: Image, label: "Bannerlar", path: "/admin/bannerlar" },
   { icon: Megaphone, label: "Kampanyalar", path: "/admin/kampanyalar" },
+  { icon: Plug, label: "Entegrasyonlar", path: "/admin/entegrasyonlar" },
   { icon: FileText, label: "Sayfalar", path: "/admin/sayfalar" },
   { icon: Settings, label: "Ayarlar", path: "/admin/ayarlar" },
 ];

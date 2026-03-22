@@ -13,9 +13,47 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.3 - CMS Sayfa Tasarımı ✅
+## Current Status: v9.5 - Homepage CMS Render ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.5 - Ana Sayfada CMS Bloklarını Render Etme
+- [x] **Dinamik Blok Render Sistemi**
+  - Admin panelde oluşturulan bloklar ana sayfada otomatik görünüyor
+  - sort_order'a göre sıralı gösterim
+  - Sadece is_active=true bloklar görünüyor
+- [x] **Desteklenen Blok Tipleri**
+  - Hero Slider - Dönen banner görselleri
+  - Full Banner - Tam genişlik tek görsel
+  - Half Banners - İki görsel yan yana
+  - Product Slider - Ürün grid'i
+  - InstaShop - Instagram tarzı görseller
+  - Text Block - Başlık ve açıklama
+  - Video Banner - Video arka planlı banner
+  - Rotating Text - Dönen metin banner'ı
+- [x] **Fallback Mekanizması**
+  - CMS bloğu yoksa varsayılan içerik gösteriliyor
+  - Her blok tipi için default değerler
+
+#### v9.4 - Iyzico & Trendyol Entegrasyonları (Production-Ready)
+- [x] **Iyzico Ödeme Entegrasyonu**
+  - Sandbox/Live mod desteği (IYZICO_MODE env)
+  - CheckoutForm Initialize ve Callback API'leri
+  - 3DS güvenli ödeme desteği
+  - Ödeme durumu kontrolü (/api/payment/status)
+- [x] **Trendyol Marketplace Entegrasyonu**
+  - Ürün senkronizasyonu (/api/trendyol/products/sync)
+  - Batch request status kontrolü
+  - Stok ve fiyat güncelleme (/api/trendyol/inventory/update)
+  - Sipariş çekme (/api/trendyol/orders)
+  - Sipariş durumu güncelleme
+  - Sipariş içe aktarma (/api/trendyol/orders/import)
+  - Kategori ve marka listesi API'leri
+- [x] **Admin Entegrasyonlar Sayfası**
+  - Tüm entegrasyonların durum gösterimi
+  - Gerekli env değişkenleri listesi
+  - "Ürünleri Gönder" ve "Siparişleri Al" butonları
+  - Yapılandırma talimatları
 
 #### v9.3 - CMS (Sayfa Tasarımı) Sürükle-Bırak
 - [x] **Sürükle & Bırak Sıralama**
@@ -107,22 +145,20 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - URL: https://fashion-shop-156.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
-- [ ] **Iyzico Ödeme** - Mock'tan canlıya geçiş (playbook mevcut)
+- [ ] **Checkout sayfasında varyant bilgisi** - Seçilen beden gösterimi
 
 ## P1 - Yaklaşan Görevler
-- [ ] Checkout sayfasında varyant bilgisi gösterimi
-- [ ] Ana sayfada CMS bloklarını render etme
+- [ ] Trendyol kategori ve marka eşleştirmesi
+- [ ] Müşteri hesap yönetimi (sipariş geçmişi)
 
 ## P2 - Backlog
-- [ ] Trendyol marketplace
-- [ ] GIB e-fatura
-- [ ] Netgsm SMS (canlı)
-- [ ] Gelişmiş raporlama
-- [ ] Müşteri hesap yönetimi
+- [ ] GIB e-fatura entegrasyonu
+- [ ] Netgsm SMS (canlı credentials)
+- [ ] Gelişmiş raporlama ve analitik
 
 ## Teknik Borç
 - [ ] server.py 2000+ satır - modüler yapıya bölünmeli (routes klasörü)
 - [ ] Eski import scriptleri temizlenmeli
 
 ## Last Updated
-2026-03-22 - v9.3 CMS Sayfa Tasarımı (Sürükle-Bırak)
+2026-03-22 - v9.5 Homepage CMS Render

@@ -13,6 +13,7 @@ import jwt
 import bcrypt
 import re
 import json
+import uuid
 
 from models import (
     User, UserCreate, Product, ProductCreate, Category, CategoryCreate,
@@ -979,15 +980,37 @@ async def seed_data():
 # ==================== IYZICO PAYMENT ====================
 import iyzipay
 
+# Iyzico configuration - set IYZICO_MODE to 'live' in production
+IYZICO_MODE = os.environ.get('IYZICO_MODE', 'sandbox')  # 'sandbox' or 'live'
 IYZICO_API_KEY = os.environ.get('IYZICO_API_KEY', 'sandbox-api-key')
 IYZICO_SECRET_KEY = os.environ.get('IYZICO_SECRET_KEY', 'sandbox-secret-key')
-IYZICO_BASE_URL = os.environ.get('IYZICO_BASE_URL', 'https://sandbox-api.iyzipay.com')
+IYZICO_BASE_URL = os.environ.get('IYZICO_BASE_URL', 
+    'https://api.iyzipay.com' if IYZICO_MODE == 'live' else 'https://sandbox-api.iyzipay.com'
+)
 
 def get_iyzico_options():
     return {
         'api_key': IYZICO_API_KEY,
         'secret_key': IYZICO_SECRET_KEY,
         'base_url': IYZICO_BASE_URL
+    }
+
+def is_iyzico_configured():
+    """Check if Iyzico is properly configured for production"""
+    return (
+        IYZICO_API_KEY and 
+        IYZICO_API_KEY != 'sandbox-api-key' and 
+        IYZICO_SECRET_KEY and 
+        IYZICO_SECRET_KEY != 'sandbox-secret-key'
+    )
+
+@api_router.get("/payment/status")
+async def get_payment_status():
+    """Get Iyzico configuration status"""
+    return {
+        "mode": IYZICO_MODE,
+        "configured": is_iyzico_configured(),
+        "base_url": IYZICO_BASE_URL
     }
 
 @api_router.post("/payment/initialize")
@@ -2240,6 +2263,386 @@ async def public_order_tracking(tracking_code: str):
         "total": order.get('total'),
         "item_count": len(order.get('items', []))
     }
+
+# ==================== TRENDYOL MARKETPLACE INTEGRATION ====================
+import base64
+import httpx
+
+# Trendyol configuration
+TRENDYOL_MODE = os.environ.get('TRENDYOL_MODE', 'sandbox')  # 'sandbox' or 'live'
+TRENDYOL_API_KEY = os.environ.get('TRENDYOL_API_KEY', '')
+TRENDYOL_API_SECRET = os.environ.get('TRENDYOL_API_SECRET', '')
+TRENDYOL_SUPPLIER_ID = os.environ.get('TRENDYOL_SUPPLIER_ID', '')
+TRENDYOL_BASE_URL = os.environ.get('TRENDYOL_BASE_URL', 
+    'https://api.trendyol.com' if TRENDYOL_MODE == 'live' else 'https://stageapigw.trendyol.com'
+)
+
+def get_trendyol_headers():
+    """Build Trendyol API headers with authentication"""
+    if not TRENDYOL_API_KEY or not TRENDYOL_API_SECRET:
+        return None
+    
+    credentials = f"{TRENDYOL_API_KEY}:{TRENDYOL_API_SECRET}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    
+    return {
+        "Authorization": f"Basic {encoded}",
+        "User-Agent": f"{TRENDYOL_SUPPLIER_ID} - FacetteIntegration",
+        "Content-Type": "application/json"
+    }
+
+def is_trendyol_configured():
+    """Check if Trendyol is properly configured"""
+    return bool(TRENDYOL_API_KEY and TRENDYOL_API_SECRET and TRENDYOL_SUPPLIER_ID)
+
+@api_router.get("/trendyol/status")
+async def get_trendyol_status():
+    """Get Trendyol integration status"""
+    return {
+        "configured": is_trendyol_configured(),
+        "mode": TRENDYOL_MODE,
+        "supplier_id": TRENDYOL_SUPPLIER_ID if is_trendyol_configured() else None
+    }
+
+@api_router.get("/trendyol/categories")
+async def get_trendyol_categories(current_user: dict = Depends(get_current_user)):
+    """Get Trendyol product categories"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{TRENDYOL_BASE_URL}/sapigw/product-categories",
+                headers=get_trendyol_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Trendyol categories error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/trendyol/brands")
+async def get_trendyol_brands(
+    name: str = Query(None, description="Brand name to search"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get Trendyol brands"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        params = {}
+        if name:
+            params["name"] = name
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{TRENDYOL_BASE_URL}/sapigw/brands",
+                headers=get_trendyol_headers(),
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Trendyol brands error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/trendyol/products/sync")
+async def sync_products_to_trendyol(
+    product_ids: List[str] = Query(None, description="Product IDs to sync, or all if empty"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Sync products from Facette to Trendyol"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        # Fetch products from database
+        query = {}
+        if product_ids:
+            query["id"] = {"$in": product_ids}
+        
+        products = await db.products.find(query, {"_id": 0}).to_list(1000)
+        
+        if not products:
+            raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+        
+        # Transform products to Trendyol format
+        trendyol_items = []
+        for product in products:
+            # Basic transformation - would need category mapping and brand ID in production
+            item = {
+                "barcode": product.get("barcode") or product.get("stock_code") or product.get("id"),
+                "title": product.get("name", "")[:100],
+                "productMainId": product.get("stock_code") or product.get("id"),
+                "brandId": 1,  # Would need mapping
+                "categoryId": 1,  # Would need mapping
+                "quantity": product.get("stock", 0),
+                "stockCode": product.get("stock_code", ""),
+                "dimensionalWeight": product.get("cargo_weight", 1) or 1,
+                "description": product.get("description", product.get("name", "")),
+                "currencyType": "TRY",
+                "listPrice": float(product.get("price", 0)),
+                "salePrice": float(product.get("sale_price") or product.get("price", 0)),
+                "vatRate": product.get("vat_rate", 20),
+                "cargoCompanyId": 10,  # MNG Kargo
+                "images": [{"url": img} for img in product.get("images", [])[:8]],
+                "attributes": []
+            }
+            
+            # Add variant quantities
+            total_stock = product.get("stock", 0)
+            for variant in product.get("variants", []):
+                total_stock += variant.get("stock", 0)
+            item["quantity"] = total_stock
+            
+            trendyol_items.append(item)
+        
+        # Send to Trendyol
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/v2/products",
+                headers=get_trendyol_headers(),
+                json={"items": trendyol_items}
+            )
+            
+            result = response.json()
+            
+            if response.status_code == 200:
+                batch_id = result.get("batchRequestId")
+                logger.info(f"Products sent to Trendyol, batch ID: {batch_id}")
+                return {
+                    "success": True,
+                    "batch_request_id": batch_id,
+                    "products_sent": len(trendyol_items),
+                    "message": f"{len(trendyol_items)} ürün Trendyol'a gönderildi"
+                }
+            else:
+                logger.error(f"Trendyol sync error: {result}")
+                return {
+                    "success": False,
+                    "error": result.get("errors", result),
+                    "products_attempted": len(trendyol_items)
+                }
+                
+    except Exception as e:
+        logger.error(f"Trendyol sync error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/trendyol/products/batch/{batch_id}")
+async def get_trendyol_batch_status(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Check Trendyol batch request status"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/products/batch-requests/{batch_id}",
+                headers=get_trendyol_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Trendyol batch status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/trendyol/inventory/update")
+async def update_trendyol_inventory(
+    items: List[dict],
+    current_user: dict = Depends(get_current_user)
+):
+    """Update stock and price on Trendyol"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    if len(items) > 1000:
+        raise HTTPException(status_code=400, detail="Maksimum 1000 ürün güncellenebilir")
+    
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/products/price-and-inventory",
+                headers=get_trendyol_headers(),
+                json={"items": items}
+            )
+            
+            result = response.json()
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "batch_request_id": result.get("batchRequestId"),
+                    "message": f"{len(items)} ürün stok/fiyat güncellendi"
+                }
+            else:
+                return {"success": False, "error": result}
+                
+    except Exception as e:
+        logger.error(f"Trendyol inventory update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/trendyol/orders")
+async def get_trendyol_orders(
+    status: str = Query(None, description="Order status filter"),
+    page: int = Query(0),
+    size: int = Query(50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get orders from Trendyol"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        params = {"page": page, "size": size}
+        if status:
+            params["status"] = status
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/orders",
+                headers=get_trendyol_headers(),
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Trendyol orders error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.put("/trendyol/orders/{package_id}/status")
+async def update_trendyol_order_status(
+    package_id: int,
+    status: str = Query(..., description="New status: Picking, Invoiced, Shipped"),
+    tracking_number: str = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Update Trendyol order status"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        body = {"status": status}
+        if tracking_number and status == "Shipped":
+            body["trackingNumber"] = tracking_number
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.put(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/shipment-packages/{package_id}",
+                headers=get_trendyol_headers(),
+                json=body
+            )
+            
+            if response.status_code == 200:
+                return {"success": True, "message": "Sipariş durumu güncellendi"}
+            else:
+                return {"success": False, "error": response.json()}
+                
+    except Exception as e:
+        logger.error(f"Trendyol order update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/trendyol/orders/import")
+async def import_trendyol_orders(
+    current_user: dict = Depends(get_current_user)
+):
+    """Import pending orders from Trendyol to local system"""
+    if not current_user or not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    if not is_trendyol_configured():
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    
+    try:
+        # Fetch Created orders from Trendyol
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{TRENDYOL_BASE_URL}/sapigw/suppliers/{TRENDYOL_SUPPLIER_ID}/orders",
+                headers=get_trendyol_headers(),
+                params={"status": "Created", "size": 100}
+            )
+            response.raise_for_status()
+            data = response.json()
+        
+        packages = data.get("content", [])
+        imported = 0
+        
+        for pkg in packages:
+            order_number = pkg.get("orderNumber")
+            
+            # Check if already imported
+            existing = await db.orders.find_one({"trendyol_order_number": order_number})
+            if existing:
+                continue
+            
+            # Create local order
+            order_items = []
+            for item in pkg.get("lines", []):
+                order_items.append({
+                    "product_id": item.get("productContentId"),
+                    "barcode": item.get("barcode"),
+                    "name": item.get("productName"),
+                    "quantity": item.get("quantity"),
+                    "price": item.get("price"),
+                    "size": item.get("productSize"),
+                    "color": item.get("productColor"),
+                })
+            
+            shipping = pkg.get("shipmentAddress", {})
+            
+            new_order = {
+                "id": str(uuid.uuid4()),
+                "order_number": f"TY-{order_number}",
+                "trendyol_order_number": order_number,
+                "trendyol_package_id": pkg.get("id"),
+                "source": "trendyol",
+                "items": order_items,
+                "shipping_address": {
+                    "first_name": shipping.get("firstName", ""),
+                    "last_name": shipping.get("lastName", ""),
+                    "address": shipping.get("fullAddress", ""),
+                    "city": shipping.get("city", ""),
+                    "district": shipping.get("district", ""),
+                    "phone": shipping.get("phoneNumber", ""),
+                },
+                "subtotal": pkg.get("totalPrice", 0),
+                "total": pkg.get("totalPrice", 0),
+                "status": "confirmed",
+                "payment_status": "paid",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            await db.orders.insert_one(new_order)
+            imported += 1
+        
+        return {
+            "success": True,
+            "imported": imported,
+            "total_found": len(packages),
+            "message": f"{imported} yeni sipariş içe aktarıldı"
+        }
+        
+    except Exception as e:
+        logger.error(f"Trendyol import error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Root endpoint
 @api_router.get("/")
