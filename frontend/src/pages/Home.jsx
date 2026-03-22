@@ -36,7 +36,7 @@ export default function Home() {
     }
   };
 
-  const heroSliders = banners.filter(b => b.position === "hero_slider");
+  const heroSliders = banners.filter(b => b.position === "hero_slider" || b.position === "hero");
   const singleBanner = banners.find(b => b.position === "single_banner");
   const doubleBanners = banners.filter(b => b.position === "double_banner").slice(0, 2);
   const instashopBanners = banners.filter(b => b.position === "instashop");

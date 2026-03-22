@@ -31,7 +31,7 @@ app = FastAPI(title="Facette E-Commerce API")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'facette-secret-key-2024')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'facette-secure-secret-key-2024-extended-32bytes!')
 JWT_ALGORITHM = "HS256"
 
 # Logging
@@ -277,6 +277,7 @@ async def create_banner(banner_data: BannerCreate):
     doc = banner.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.banners.insert_one(doc)
+    doc.pop('_id', None)
     return serialize_doc(doc)
 
 @api_router.put("/banners/{banner_id}", dependencies=[Depends(require_admin)])
@@ -592,6 +593,18 @@ async def seed_data():
         doc = p.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
         await db.pages.insert_one(doc)
+    
+    # Create banners
+    banners = [
+        {"title": "Yeni Sezon", "image_url": "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1920&h=800&fit=crop", "link": "/kategori/en-yeniler", "position": "hero", "sort_order": 1, "is_active": True},
+        {"title": "Elbise Koleksiyonu", "image_url": "https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=1920&h=800&fit=crop", "link": "/kategori/elbise", "position": "hero", "sort_order": 2, "is_active": True},
+        {"title": "Günlük Stil", "image_url": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1920&h=800&fit=crop", "link": "/kategori/bluz", "position": "hero", "sort_order": 3, "is_active": True},
+    ]
+    for banner in banners:
+        b = Banner(**banner)
+        doc = b.model_dump()
+        doc['created_at'] = doc['created_at'].isoformat()
+        await db.banners.insert_one(doc)
     
     return {"message": "Seed veriler oluşturuldu", "admin_email": "admin@facette.com", "admin_password": "admin123"}
 
