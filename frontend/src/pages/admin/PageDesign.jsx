@@ -1,7 +1,23 @@
 import { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, GripVertical, Image, Upload, X } from "lucide-react";
+import { Plus, Edit, Trash2, GripVertical, Image, Upload, X, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Dialog,
   DialogContent,
@@ -12,20 +28,131 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const BLOCK_TYPES = [
-  { value: "hero_slider", label: "Hero Slider", description: "Ana sayfa slider" },
-  { value: "full_banner", label: "Tam Genişlik Banner", description: "Tek görsel tam genişlik" },
-  { value: "half_banners", label: "Yarı Yarıya Banner", description: "İki görsel yan yana" },
-  { value: "product_grid", label: "Ürün Grid", description: "Ürün listesi" },
-  { value: "instashop", label: "InstaShop", description: "Instagram tarzı görseller" },
-  { value: "text_block", label: "Yazı Bloğu", description: "Başlık ve açıklama" },
+  { value: "hero_slider", label: "Hero Slider", icon: "🎠", description: "Ana sayfa slider - Dönen görseller" },
+  { value: "rotating_text", label: "Dönen Yazı", icon: "📢", description: "Üst banner'da dönen metin" },
+  { value: "full_banner", label: "Tam Genişlik Banner", icon: "🖼️", description: "Tek görsel tam genişlik" },
+  { value: "half_banners", label: "Yarı Yarıya Banner", icon: "◧", description: "İki görsel yan yana" },
+  { value: "product_slider", label: "Ürün Slider", icon: "🛍️", description: "Yatay ürün listesi" },
+  { value: "instashop", label: "InstaShop", icon: "📸", description: "Instagram tarzı görseller" },
+  { value: "text_block", label: "Yazı Bloğu", icon: "📝", description: "Başlık ve açıklama" },
+  { value: "video_banner", label: "Video Banner", icon: "🎬", description: "Video arka planlı banner" },
 ];
+
+// Sortable Block Item Component
+function SortableBlockItem({ block, onEdit, onDelete, onToggleActive, getBlockTypeInfo }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: block.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 1,
+  };
+
+  const typeInfo = getBlockTypeInfo(block.type);
+
+  return (
+    <div 
+      ref={setNodeRef}
+      style={style}
+      className={`bg-white rounded-lg shadow-sm border-2 transition-all ${
+        isDragging ? 'border-blue-500 shadow-lg' : 'border-transparent hover:border-gray-200'
+      } ${!block.is_active ? 'opacity-60' : ''}`}
+    >
+      <div className="flex items-start p-4 gap-4">
+        {/* Drag Handle */}
+        <div 
+          {...attributes} 
+          {...listeners}
+          className="pt-2 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600"
+        >
+          <GripVertical size={20} />
+        </div>
+
+        {/* Preview */}
+        <div className="flex-shrink-0 w-40">
+          {block.images?.[0] ? (
+            <img 
+              src={block.images[0]} 
+              alt="" 
+              className="w-full h-20 object-cover rounded"
+            />
+          ) : (
+            <div className="w-full h-20 bg-gray-100 rounded flex items-center justify-center text-2xl">
+              {typeInfo.icon || "📦"}
+            </div>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-xs bg-gray-100 px-2 py-0.5 rounded font-medium">
+              {typeInfo.icon} {typeInfo.label}
+            </span>
+            <span className={`text-xs px-2 py-0.5 rounded ${
+              block.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+            }`}>
+              {block.is_active ? 'Aktif' : 'Pasif'}
+            </span>
+          </div>
+          <h3 className="font-medium truncate">{block.title || "Başlıksız"}</h3>
+          <p className="text-sm text-gray-500">
+            {block.images?.length || 0} görsel
+          </p>
+          {block.links?.[0] && (
+            <p className="text-xs text-gray-400 mt-1 truncate">
+              → {block.links[0]}
+            </p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-1">
+          <button 
+            onClick={() => onToggleActive(block)}
+            className={`p-2 rounded transition-colors ${
+              block.is_active ? 'hover:bg-gray-100' : 'hover:bg-green-50 text-green-600'
+            }`}
+            title={block.is_active ? 'Pasife Al' : 'Aktifleştir'}
+          >
+            {block.is_active ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <button 
+            onClick={() => onEdit(block)}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="Düzenle"
+          >
+            <Edit size={16} />
+          </button>
+          <button 
+            onClick={() => onDelete(block.id)}
+            className="p-2 hover:bg-red-50 rounded text-red-600"
+            title="Sil"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function PageDesign() {
   const [blocks, setBlocks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
   
   const [formData, setFormData] = useState({
     type: "hero_slider",
@@ -38,6 +165,17 @@ export default function PageDesign() {
     page: "home"
   });
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   useEffect(() => {
     fetchBlocks();
   }, []);
@@ -46,12 +184,14 @@ export default function PageDesign() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/page-blocks`, {
+      const res = await axios.get(`${API}/page-blocks?page=home`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setBlocks(res.data || []);
+      // Sort by sort_order
+      const sorted = (res.data || []).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      setBlocks(sorted);
     } catch (err) {
-      // If API doesn't exist yet, use default blocks
+      // Default blocks if API fails
       setBlocks([
         {
           id: "hero",
@@ -89,6 +229,44 @@ export default function PageDesign() {
       ]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      setBlocks((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over.id);
+        const newItems = arrayMove(items, oldIndex, newIndex);
+        // Update sort_order
+        return newItems.map((item, index) => ({ ...item, sort_order: index + 1 }));
+      });
+      setHasChanges(true);
+    }
+  };
+
+  const handleSaveOrder = async () => {
+    setSaving(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      
+      // Update each block's sort_order
+      await Promise.all(blocks.map((block, index) => 
+        axios.put(`${API}/page-blocks/${block.id}`, {
+          ...block,
+          sort_order: index + 1
+        }, { headers }).catch(() => {})
+      ));
+      
+      toast.success("Sıralama kaydedildi");
+      setHasChanges(false);
+    } catch (err) {
+      toast.error("Kaydetme başarısız");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -144,11 +322,16 @@ export default function PageDesign() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
+      const payload = {
+        ...formData,
+        sort_order: editingBlock ? formData.sort_order : blocks.length + 1
+      };
+      
       if (editingBlock) {
-        await axios.put(`${API}/page-blocks/${editingBlock.id}`, formData, { headers });
+        await axios.put(`${API}/page-blocks/${editingBlock.id}`, payload, { headers });
         toast.success("Blok güncellendi");
       } else {
-        await axios.post(`${API}/page-blocks`, formData, { headers });
+        await axios.post(`${API}/page-blocks`, payload, { headers });
         toast.success("Blok eklendi");
       }
       setModalOpen(false);
@@ -171,6 +354,35 @@ export default function PageDesign() {
     } catch (err) {
       toast.error("Silme başarısız");
     }
+  };
+
+  const handleToggleActive = async (block) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(`${API}/page-blocks/${block.id}`, {
+        ...block,
+        is_active: !block.is_active
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      
+      setBlocks(blocks.map(b => 
+        b.id === block.id ? { ...b, is_active: !b.is_active } : b
+      ));
+      toast.success(block.is_active ? "Blok pasife alındı" : "Blok aktifleştirildi");
+    } catch (err) {
+      toast.error("İşlem başarısız");
+    }
+  };
+
+  const moveBlock = (index, direction) => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= blocks.length) return;
+    
+    const newBlocks = arrayMove(blocks, index, newIndex).map((item, i) => ({
+      ...item,
+      sort_order: i + 1
+    }));
+    setBlocks(newBlocks);
+    setHasChanges(true);
   };
 
   const openEditModal = (block) => {
@@ -203,176 +415,178 @@ export default function PageDesign() {
   };
 
   const getBlockTypeInfo = (type) => {
-    return BLOCK_TYPES.find(t => t.value === type) || { label: type };
+    return BLOCK_TYPES.find(t => t.value === type) || { label: type, icon: "📦" };
   };
 
   return (
     <div data-testid="page-design">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Sayfa Tasarımı</h1>
-        <button 
-          onClick={() => { resetForm(); setModalOpen(true); }}
-          className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
-        >
-          <Plus size={18} />
-          Yeni Blok
-        </button>
-      </div>
-
-      {/* Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded p-4 mb-6">
-        <p className="text-sm text-blue-800">
-          Sayfa tasarımını buradan yönetebilirsiniz. Blokları sürükle-bırak ile sıralayabilir, 
-          görselleri değiştirebilir ve bağlantıları düzenleyebilirsiniz.
-        </p>
-      </div>
-
-      {/* Blocks List */}
-      <div className="space-y-4">
-        {loading ? (
-          <div className="text-center py-8">Yükleniyor...</div>
-        ) : blocks.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">Henüz blok eklenmemiş</div>
-        ) : (
-          blocks.map((block, index) => (
-            <div 
-              key={block.id} 
-              className={`bg-white rounded-lg shadow-sm border ${!block.is_active ? 'opacity-50' : ''}`}
+        <div>
+          <h1 className="text-2xl font-bold">Sayfa Tasarımı</h1>
+          <p className="text-sm text-gray-500 mt-1">Ana sayfa blokları - Sürükle bırak ile sırala</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {hasChanges && (
+            <button 
+              onClick={handleSaveOrder}
+              disabled={saving}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
             >
-              <div className="flex items-start p-4 gap-4">
-                {/* Drag Handle */}
-                <div className="pt-2 cursor-move text-gray-400">
-                  <GripVertical size={20} />
-                </div>
-
-                {/* Preview */}
-                <div className="flex-shrink-0 w-48">
-                  {block.images?.[0] ? (
-                    <img 
-                      src={block.images[0]} 
-                      alt="" 
-                      className="w-full h-24 object-cover rounded"
-                    />
-                  ) : (
-                    <div className="w-full h-24 bg-gray-100 rounded flex items-center justify-center">
-                      <Image size={24} className="text-gray-400" />
-                    </div>
-                  )}
-                </div>
-
-                {/* Info */}
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">
-                      {getBlockTypeInfo(block.type).label}
-                    </span>
-                    {!block.is_active && (
-                      <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded">
-                        Pasif
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-medium">{block.title || "Başlıksız"}</h3>
-                  <p className="text-sm text-gray-500">
-                    {block.images?.length || 0} görsel • Sıra: {block.sort_order}
-                  </p>
-                  {block.links?.[0] && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      Bağlantı: {block.links[0]}
-                    </p>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => openEditModal(block)}
-                    className="p-2 hover:bg-gray-100 rounded"
-                    title="Düzenle"
-                  >
-                    <Edit size={18} />
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(block.id)}
-                    className="p-2 hover:bg-gray-100 rounded text-red-600"
-                    title="Sil"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
+              {saving ? "Kaydediliyor..." : "Sıralamayı Kaydet"}
+            </button>
+          )}
+          <button 
+            onClick={() => { resetForm(); setModalOpen(true); }}
+            className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
+          >
+            <Plus size={18} />
+            Yeni Blok
+          </button>
+        </div>
       </div>
+
+      {/* Info Box */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div className="flex items-start gap-3">
+          <div className="text-2xl">💡</div>
+          <div>
+            <p className="text-sm font-medium text-blue-900">Sürükle & Bırak ile Düzenle</p>
+            <p className="text-xs text-blue-700 mt-1">
+              Blokları sol taraftaki tutma noktasından sürükleyerek sıralayabilirsiniz. 
+              Değişikliklerinizi kaydetmek için yeşil "Sıralamayı Kaydet" butonuna tıklayın.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Blocks List with Drag & Drop */}
+      <DndContext 
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext 
+          items={blocks.map(b => b.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-3">
+            {loading ? (
+              <div className="text-center py-8">Yükleniyor...</div>
+            ) : blocks.length === 0 ? (
+              <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                <div className="text-4xl mb-3">📦</div>
+                <p className="text-gray-500 mb-4">Henüz blok eklenmemiş</p>
+                <button 
+                  onClick={() => { resetForm(); setModalOpen(true); }}
+                  className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
+                >
+                  <Plus size={16} /> İlk Bloğu Ekle
+                </button>
+              </div>
+            ) : (
+              blocks.map((block, index) => (
+                <SortableBlockItem
+                  key={block.id}
+                  block={block}
+                  onEdit={openEditModal}
+                  onDelete={handleDelete}
+                  onToggleActive={handleToggleActive}
+                  getBlockTypeInfo={getBlockTypeInfo}
+                />
+              ))
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      {/* Block Types Legend */}
+      {blocks.length > 0 && (
+        <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-sm font-medium mb-3">Blok Tipleri</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {BLOCK_TYPES.map(type => (
+              <div key={type.value} className="flex items-center gap-2 text-xs text-gray-600">
+                <span>{type.icon}</span>
+                <span>{type.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Block Modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingBlock ? "Blok Düzenle" : "Yeni Blok"}</DialogTitle>
+            <DialogTitle>{editingBlock ? "Blok Düzenle" : "Yeni Blok Ekle"}</DialogTitle>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Blok Tipi</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  className="w-full border px-3 py-2 rounded"
-                >
-                  {BLOCK_TYPES.map(type => (
-                    <option key={type.value} value={type.value}>{type.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Başlık</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full border px-3 py-2 rounded"
-                />
+            {/* Block Type Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">Blok Tipi</label>
+              <div className="grid grid-cols-2 gap-2">
+                {BLOCK_TYPES.map(type => (
+                  <button
+                    key={type.value}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, type: type.value })}
+                    className={`p-3 border rounded-lg text-left transition-all ${
+                      formData.type === type.value 
+                        ? 'border-black bg-gray-50 ring-1 ring-black' 
+                        : 'border-gray-200 hover:border-gray-400'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{type.icon}</span>
+                      <div>
+                        <p className="text-sm font-medium">{type.label}</p>
+                        <p className="text-xs text-gray-500">{type.description}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Sıra</label>
+            {/* Title */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Başlık</label>
+              <input
+                type="text"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="Blok başlığı (opsiyonel)"
+                className="w-full border px-3 py-2 rounded"
+              />
+            </div>
+
+            {/* Active Toggle */}
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  type="number"
-                  value={formData.sort_order}
-                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
-                  className="w-full border px-3 py-2 rounded"
+                  type="checkbox"
+                  checked={formData.is_active}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                  className="w-4 h-4"
                 />
-              </div>
-              <div className="flex items-end">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                  />
-                  <span className="text-sm">Aktif</span>
-                </label>
-              </div>
+                <span className="text-sm">Aktif (ana sayfada göster)</span>
+              </label>
             </div>
 
             {/* Images */}
             <div>
               <label className="block text-sm font-medium mb-2">Görseller</label>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {formData.images.map((img, index) => (
-                  <div key={index} className="relative">
-                    <img src={img} alt="" className="w-full aspect-video object-cover rounded" />
+                  <div key={index} className="relative group">
+                    <img src={img} alt="" className="w-full aspect-video object-cover rounded border" />
                     <button
                       type="button"
                       onClick={() => removeImage(index)}
-                      className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
+                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <X size={12} />
+                      <X size={14} />
                     </button>
                     <input
                       type="text"
@@ -382,14 +596,14 @@ export default function PageDesign() {
                         newLinks[index] = e.target.value;
                         setFormData({ ...formData, links: newLinks });
                       }}
-                      placeholder="Bağlantı"
-                      className="w-full text-xs border px-2 py-1 rounded mt-1"
+                      placeholder="/kategori/..."
+                      className="w-full text-xs border px-2 py-1.5 rounded mt-2"
                     />
                   </div>
                 ))}
                 
                 {/* Upload */}
-                <label className="aspect-video border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-black rounded">
+                <label className="aspect-video border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-black hover:bg-gray-50 rounded transition-colors">
                   <input
                     type="file"
                     accept="image/*"
@@ -397,17 +611,21 @@ export default function PageDesign() {
                     className="hidden"
                   />
                   {uploading ? (
-                    <span className="text-xs text-gray-500">Yükleniyor...</span>
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-black mx-auto mb-2"></div>
+                      <span className="text-xs text-gray-500">Yükleniyor...</span>
+                    </div>
                   ) : (
                     <>
-                      <Upload size={20} className="text-gray-400 mb-1" />
-                      <span className="text-xs text-gray-500">Ekle</span>
+                      <Upload size={24} className="text-gray-400 mb-1" />
+                      <span className="text-xs text-gray-500">Görsel Ekle</span>
                     </>
                   )}
                 </label>
               </div>
             </div>
 
+            {/* Footer */}
             <div className="flex justify-end gap-2 pt-4 border-t">
               <button
                 type="button"
@@ -420,7 +638,7 @@ export default function PageDesign() {
                 type="submit"
                 className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800"
               >
-                {editingBlock ? "Güncelle" : "Kaydet"}
+                {editingBlock ? "Güncelle" : "Ekle"}
               </button>
             </div>
           </form>

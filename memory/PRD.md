@@ -13,9 +13,34 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - Cargo: MNG Kargo (SOAP API)
 - SMS: Netgsm API
 
-## Current Status: v9.2 - Frontend Beden Seçimi ✅
+## Current Status: v9.3 - CMS Sayfa Tasarımı ✅
 
 ### Tamamlanan Özellikler (2026-03-22)
+
+#### v9.3 - CMS (Sayfa Tasarımı) Sürükle-Bırak
+- [x] **Sürükle & Bırak Sıralama**
+  - @dnd-kit/core ve @dnd-kit/sortable entegrasyonu
+  - Sol tarafta 6 noktalı GripVertical sürükleme ikonu
+  - Blokları sürükleyerek yeniden sıralama
+  - "Sıralamayı Kaydet" butonu
+- [x] **8 Farklı Blok Tipi**
+  - 🎠 Hero Slider - Ana sayfa slider
+  - 📢 Dönen Yazı - Üst banner'da dönen metin
+  - 🖼️ Tam Genişlik Banner - Tek görsel tam genişlik
+  - ◧ Yarı Yarıya Banner - İki görsel yan yana
+  - 🛍️ Ürün Slider - Yatay ürün listesi
+  - 📸 InstaShop - Instagram tarzı görseller
+  - 📝 Yazı Bloğu - Başlık ve açıklama
+  - 🎬 Video Banner - Video arka planlı banner
+- [x] **Blok Yönetimi**
+  - Ekleme, düzenleme, silme
+  - Aktif/Pasif toggle
+  - Görsel yükleme ve bağlantı ayarlama
+  - Önizleme görseli
+- [x] **Kullanıcı Dostu UI**
+  - Her blok için tip etiketi ve emoji ikonu
+  - Görsel sayısı ve bağlantı bilgisi
+  - Blok Tipleri legend'ı
 
 #### v9.2 - Frontend Ürün Detay Sayfasında Beden Seçimi
 - [x] **Beden Seçimi UI**
@@ -82,13 +107,11 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - URL: https://fashion-shop-156.preview.emergentagent.com
 
 ## P0 - Sonraki Görevler
-- [ ] **CMS (Sayfa Tasarımı)** - Sürükle-bırak ile blok sıralama
-- [ ] **Iyzico Ödeme** - Mock'tan canlıya geçiş
+- [ ] **Iyzico Ödeme** - Mock'tan canlıya geçiş (playbook mevcut)
 
 ## P1 - Yaklaşan Görevler
-- [x] ~~Sepete varyant bazlı ekleme~~ ✅
-- [x] ~~Stok kontrolü varyant bazlı~~ ✅
 - [ ] Checkout sayfasında varyant bilgisi gösterimi
+- [ ] Ana sayfada CMS bloklarını render etme
 
 ## P2 - Backlog
 - [ ] Trendyol marketplace
@@ -102,4 +125,4 @@ facette.com.tr ile birebir aynı görünüme sahip kapsamlı e-ticaret platformu
 - [ ] Eski import scriptleri temizlenmeli
 
 ## Last Updated
-2026-03-22 - v9.2 Frontend Beden Seçimi
+2026-03-22 - v9.3 CMS Sayfa Tasarımı (Sürükle-Bırak)
