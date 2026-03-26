@@ -51,6 +51,7 @@ export default function Integrations() {
   const [integrationLogs, setIntegrationLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logFilters, setLogFilters] = useState({ platform: "", status: "" });
+  const [doganTesting, setDoganTesting] = useState(false);
 
   const fetchLogs = async () => {
     setLogsLoading(true);
@@ -93,7 +94,7 @@ export default function Integrations() {
       const [paymentRes, trendyolRes, gibRes, ticimaxRes, xmlRes] = await Promise.all([
         axios.get(`${API}/integrations/payment/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/trendyol/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
-        axios.get(`${API}/integrations/gib/status`, { headers }).catch(() => ({ data: { configured: false, mode: "test" } })),
+        axios.get(`${API}/integrations/dogan/settings`, { headers }).catch(() => ({ data: { enabled: false } })),
         axios.get(`${API}/integrations/ticimax/status`, { headers }).catch(() => ({ data: { configured: true, mode: "live", last_sync: null } })),
         axios.get(`${API}/integrations/xml/status`, { headers }).catch(() => ({ data: { last_sync: null } }))
       ]);
@@ -102,7 +103,7 @@ export default function Integrations() {
         ...prev,
         iyzico: paymentRes.data,
         trendyol: trendyolRes.data,
-        gib: gibRes.data
+        gib: { configured: gibRes.data?.enabled || false, mode: gibRes.data?.is_test ? "test" : "live" }
       }));
       setTicimaxStatus(ticimaxRes.data);
       setXmlLastSync(xmlRes.data?.last_sync || null);
@@ -371,13 +372,25 @@ export default function Integrations() {
     },
     {
       id: "gib",
-      name: "GIB E-Fatura / E-Arşiv",
-      description: "Elektronik fatura ve e-arşiv fatura oluşturma, GIB entegrasyonu",
+      name: "Doğan e-Dönüşüm",
+      description: "E-Fatura, E-Arşiv, E-İrsaliye - Doğan e-Dönüşüm entegrasyonu",
       icon: <FileText className="w-8 h-8" />,
       status: statuses.gib,
       color: "blue",
-      instructions: "GIB entegrasyonu için Mali Mühür (dijital imza sertifikası) gereklidir. VKN ve şirket bilgilerini .env dosyasına ekleyiniz.",
-      envKeys: ["GIB_USERNAME", "GIB_PASSWORD", "GIB_VKN", "GIB_COMPANY_NAME", "GIB_MODE"]
+      instructions: "Doğan e-Dönüşüm test ortamı yapılandırıldı. Bağlantı test edildi.",
+      envKeys: [],
+      actions: [
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: async () => {
+          setDoganTesting(true);
+          try {
+            const token = localStorage.getItem("token");
+            const res = await axios.post(`${API}/integrations/dogan/test-connection`, {}, { headers: { Authorization: `Bearer ${token}` } });
+            if (res.data.success) toast.success(res.data.message || "Bağlantı başarılı");
+            else toast.error(res.data.message || "Bağlantı hatası");
+          } catch (err) { toast.error(err.response?.data?.detail || "Test hatası"); }
+          finally { setDoganTesting(false); }
+        }, loading: doganTesting },
+      ]
     },
     {
       id: "netgsm",

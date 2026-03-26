@@ -252,6 +252,52 @@ export default function AdminSettings() {
           </div>
         </div>
 
+        {/* Company Info */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-blue-500">
+          <h2 className="text-lg font-medium mb-4 flex items-center gap-2">
+            <span className="w-2 h-6 bg-blue-500 rounded-full inline-block"></span>
+            Şirket Bilgileri
+          </h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Firma Ünvanı</label>
+              <input type="text" value={settings.company_info?.company_name || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), company_name: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="FACETTE DIŞ. TİC.A.Ş" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Vergi Kimlik No (VKN)</label>
+              <input type="text" value={settings.company_info?.tax_number || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), tax_number: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm font-mono" placeholder="7810816779" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Vergi Dairesi</label>
+              <input type="text" value={settings.company_info?.tax_office || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), tax_office: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="HALKALI VERGİ DAİRESİ BAŞKANLIĞI" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Web Sitesi</label>
+              <input type="text" value={settings.company_info?.website || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), website: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="facette.com.tr" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">Adres</label>
+              <input type="text" value={settings.company_info?.address || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), address: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">İl / İlçe</label>
+              <input type="text" value={settings.company_info?.city || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), city: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="KÜÇÜKÇEKMECE/ İstanbul" />
+            </div>
+          </div>
+        </div>
+
         {/* Barcode Settings */}
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h2 className="text-lg font-medium mb-1">Barkod Aralığı (GTIN-13)</h2>
