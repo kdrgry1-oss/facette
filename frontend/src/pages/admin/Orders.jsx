@@ -162,7 +162,7 @@ export default function AdminOrders() {
     setUploadingInvoice(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/trendyol/invoices/${orderNumber}`, {
+      const res = await axios.post(`${API}/integrations/trendyol/invoices/${orderNumber}`, {
         invoice_link: invoiceLinkInput,
         invoice_number: invoiceNumberInput
       }, {
@@ -236,7 +236,7 @@ export default function AdminOrders() {
   const handleTrendyolPrintLabel = async (cargoTrackingNumber) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/trendyol/orders/label/${cargoTrackingNumber}`, {
+      const res = await axios.get(`${API}/integrations/trendyol/orders/label/${cargoTrackingNumber}`, {
         headers: { Authorization: `Bearer ${token}` },
         responseType: 'blob'
       });
@@ -375,7 +375,7 @@ export default function AdminOrders() {
         payload.end_date_ms = new Date(trendyolEndDate).getTime();
       }
       
-      const res = await axios.post(`${API}/trendyol/orders/preview`, payload, {
+      const res = await axios.post(`${API}/integrations/trendyol/orders/preview`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {
@@ -398,7 +398,7 @@ export default function AdminOrders() {
     try {
       const token = localStorage.getItem('token');
       const ordersToImport = trendyolPreviewOrders.filter(o => trendyolSelectedOrders.includes(o.orderNumber));
-      const res = await axios.post(`${API}/trendyol/orders/import-selected`, { orders: ordersToImport }, {
+      const res = await axios.post(`${API}/integrations/trendyol/orders/import-selected`, { orders: ordersToImport }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       

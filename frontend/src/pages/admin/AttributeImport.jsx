@@ -101,7 +101,7 @@ export default function AttributeImport() {
     // Fetch Trendyol categories to find attributes - we'll use the cached DB categories
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/categories`, {
+      const res = await axios.get(`${API}/integrations/trendyol/categories`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       // We get top-level categories; user can then pick one to fetch attrs
@@ -123,7 +123,7 @@ export default function AttributeImport() {
     setTrendyolAttrValues([]);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/categories/${catId}/attributes`, {
+      const res = await axios.get(`${API}/integrations/trendyol/categories/${catId}/attributes`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setCatAttrList(res.data?.categoryAttributes || []);

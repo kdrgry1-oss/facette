@@ -33,7 +33,7 @@ export default function AdminQuestions() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      let url = `${API}/trendyol/questions?page=${page}&size=20`;
+      let url = `${API}/integrations/trendyol/questions?page=${page}&size=20`;
       if (statusFilter) url += `&status=${statusFilter}`;
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       setQuestions(res.data?.questions || []);
@@ -50,7 +50,7 @@ export default function AdminQuestions() {
     setSyncing(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/questions/sync`, {
+      const res = await axios.get(`${API}/integrations/trendyol/questions/sync`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success(`${res.data.synced} yeni soru çekildi`);
@@ -68,7 +68,7 @@ export default function AdminQuestions() {
     try {
       const token = localStorage.getItem("token");
       await axios.post(
-        `${API}/trendyol/questions/${selectedQuestion.question_id}/answer`,
+        `${API}/integrations/trendyol/questions/${selectedQuestion.question_id}/answer`,
         { answer: answerText },
         { headers: { Authorization: `Bearer ${token}` } }
       );

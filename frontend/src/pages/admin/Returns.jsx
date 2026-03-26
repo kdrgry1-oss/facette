@@ -41,7 +41,7 @@ export default function AdminReturns() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      let url = `${API}/trendyol/claims?page=${page}&limit=20`;
+      let url = `${API}/integrations/trendyol/claims?page=${page}&limit=20`;
       if (typeFilter) url += `&claim_type=${typeFilter}`;
       if (search) url += `&search=${search}`;
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -59,7 +59,7 @@ export default function AdminReturns() {
   const fetchIssueReasons = async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/claims/issue-reasons`, {
+      const res = await axios.get(`${API}/integrations/trendyol/claims/issue-reasons`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setIssueReasons(res.data || []);
@@ -72,7 +72,7 @@ export default function AdminReturns() {
     setSyncing(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/claims/sync?days_back=${daysBack}`, {
+      const res = await axios.get(`${API}/integrations/trendyol/claims/sync?days_back=${daysBack}`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 120000
       });
@@ -94,7 +94,7 @@ export default function AdminReturns() {
   const openDetail = async (claim) => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/trendyol/claims/${claim.claim_id}`, {
+      const res = await axios.get(`${API}/integrations/trendyol/claims/${claim.claim_id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setSelectedClaim(res.data);
@@ -111,7 +111,7 @@ export default function AdminReturns() {
     setActionLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.post(`${API}/trendyol/claims/${selectedClaim.claim_id}/approve`, {
+      const res = await axios.post(`${API}/integrations/trendyol/claims/${selectedClaim.claim_id}/approve`, {
         claim_item_ids: [item.claim_item_id]
       }, {
         headers: { Authorization: `Bearer ${token}` }
@@ -139,7 +139,7 @@ export default function AdminReturns() {
     setActionLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.post(`${API}/trendyol/claims/${selectedClaim.claim_id}/issue`, {
+      const res = await axios.post(`${API}/integrations/trendyol/claims/${selectedClaim.claim_id}/issue`, {
         claim_item_ids: [actionItem.claim_item_id],
         issue_reason_id: parseInt(issueReasonId),
         description: issueDesc

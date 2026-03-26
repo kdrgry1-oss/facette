@@ -34,7 +34,7 @@ function AttributeMatchModal({ open, onClose, category }) {
 
     Promise.all([
       axios
-        .get(`${API}/trendyol/categories/${category.trendyol_category_id}/attributes`, {
+        .get(`${API}/integrations/trendyol/categories/${category.trendyol_category_id}/attributes`, {
           headers: authHeaders(),
         })
         .catch(() => ({ data: { attributes: [] } })),
@@ -70,7 +70,7 @@ function AttributeMatchModal({ open, onClose, category }) {
         .filter((m) => !isNaN(m.trendyol_attr_id));
         
       await axios.post(
-        `${API}/trendyol/category-mappings/${category?.id}/attributes`,
+        `${API}/integrations/trendyol/category-mappings/${category?.id}/attributes`,
         { attribute_mappings: payload, default_mappings: defaultMappings },
         { headers: authHeaders() }
       );
@@ -254,7 +254,7 @@ function CategoryMatchModal({ open, onClose, category }) {
     setSearch("");
     setLoading(true);
     axios
-      .get(`${API}/trendyol/categories?limit=5000`, { headers: authHeaders() })
+      .get(`${API}/integrations/trendyol/categories?limit=5000`, { headers: authHeaders() })
       .then((res) => setAllCats(res.data?.categories || res.data || []))
       .catch(() => toast.error("Kategoriler alınamadı"))
       .finally(() => setLoading(false));
@@ -272,7 +272,7 @@ function CategoryMatchModal({ open, onClose, category }) {
     setSaving(true);
     try {
       await axios.post(
-        `${API}/trendyol/category-mappings`,
+        `${API}/integrations/trendyol/category-mappings`,
         {
           local_category_id: category?.id,
           local_name: category?.local_name,
@@ -408,8 +408,8 @@ function ValueMatchModal({ open, onClose, category }) {
     
     try {
       const [tyRes, lvRes] = await Promise.all([
-        axios.get(`${API}/trendyol/categories/${category.trendyol_category_id}/attributes`, { headers: authHeaders() }).catch(() => ({ data: { categoryAttributes: [] } })),
-        axios.get(`${API}/trendyol/category-values/${category.id}`, { headers: authHeaders() }).catch(() => ({ data: { local_values: [] } }))
+        axios.get(`${API}/integrations/trendyol/categories/${category.trendyol_category_id}/attributes`, { headers: authHeaders() }).catch(() => ({ data: { categoryAttributes: [] } })),
+        axios.get(`${API}/integrations/trendyol/category-values/${category.id}`, { headers: authHeaders() }).catch(() => ({ data: { local_values: [] } }))
       ]);
 
       const tyAtts = tyRes.data?.categoryAttributes || tyRes.data?.attributes || [];
@@ -483,7 +483,7 @@ function ValueMatchModal({ open, onClose, category }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await axios.post(`${API}/trendyol/category-mappings/${category.id}/value-mappings`, {
+      await axios.post(`${API}/integrations/trendyol/category-mappings/${category.id}/value-mappings`, {
         value_mappings: valueMappings,
         default_mappings: defaultMappings
       }, { headers: authHeaders() });
@@ -713,7 +713,7 @@ export default function TrendyolEslestir() {
   const fetchCategories = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/trendyol/category-mappings`, {
+      const res = await axios.get(`${API}/integrations/trendyol/category-mappings`, {
         headers: authHeaders(),
       });
       setCategories(res.data?.mappings || res.data || []);
@@ -783,7 +783,7 @@ export default function TrendyolEslestir() {
         onClick: async () => {
           try {
             await axios.delete(
-              `${API}/trendyol/category-mappings/${cat.id}`,
+              `${API}/integrations/trendyol/category-mappings/${cat.id}`,
               { headers: authHeaders() }
             );
             setCategories((prev) => prev.filter((c) => c.id !== cat.id));
@@ -807,7 +807,7 @@ export default function TrendyolEslestir() {
           setLoading(true);
           try {
             await axios.post(
-              `${API}/trendyol/category-mappings/bulk-delete`,
+              `${API}/integrations/trendyol/category-mappings/bulk-delete`,
               { category_ids: Array.from(selectedRows) },
               { headers: authHeaders() }
             );
