@@ -174,8 +174,21 @@ function AttributeMatchModal({ open, onClose, category }) {
                           <option value="Renk" />
                           <option value="Beden" />
                         </datalist>
+                        {(attr.allowCustom || attr.attribute?.allowCustom) ? (
+                          <div className="space-y-1 p-1 bg-blue-50/50 rounded border border-blue-100 mt-2">
+                             <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer (Serbest Yazı):</div>
+                             <input
+                               type="text"
+                               placeholder="Varsayılan metin girin..."
+                               value={defaultMappings[attrId] || ""}
+                               onChange={(e) => setDefaultMappings((prev) => ({...prev, [attrId]: e.target.value}))}
+                               className="border border-blue-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                             />
+                          </div>
+                        ) : null}
                         {hasVals && (
-                          <div className="space-y-1 p-1 bg-orange-50/50 rounded border border-orange-100">
+                          <div className="space-y-1 p-1 bg-orange-50/50 rounded border border-orange-100 mt-2">
+                            <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Listeden Seçin:</div>
                             <div className="relative">
                               <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
                               <input
@@ -591,41 +604,66 @@ function ValueMatchModal({ open, onClose, category }) {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
-                        <th className="px-4 py-2 text-left font-medium text-gray-500 w-1/2">Yerel Değer</th>
-                        <th className="px-4 py-2 text-left font-medium text-gray-500 w-1/2">Trendyol Değeri</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 w-2/5">Yerel Değer</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 w-2/5">Trendyol Değeri</th>
+                        <th className="px-4 py-2 text-left font-medium text-blue-500 w-1/5 bg-blue-50/30">Gönderilecek Veri</th>
                       </tr>
                     </thead>
                     <tbody>
                       {/* Default value row ALWAYS visible */}
                       <tr className="bg-orange-50/50">
-                        <td className="px-4 py-3 font-bold text-orange-700 italic flex items-center gap-2">
+                        <td className="px-4 py-3 font-bold text-orange-700 italic flex items-center gap-2 border-r border-orange-100">
                           <Store size={14} /> VARSAYILAN DEĞER (FALLBACK)
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <div className="relative">
-                              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input 
-                                type="text"
-                                placeholder="Filtrele..."
-                                value={optionSearch[selectedAttrId + "_def"] || ""}
-                                onChange={(e) => setOptionSearch({...optionSearch, [selectedAttrId + "_def"]: e.target.value})}
-                                className="w-full pl-7 pr-2 py-1 text-[10px] border-b outline-none bg-transparent"
-                              />
+                        <td className="px-4 py-3 border-r border-orange-100">
+                          <div className="space-y-2">
+                            {(activeAttr?.allowCustom || activeAttr?.attribute?.allowCustom) && (
+                              <div className="bg-blue-50/80 p-1.5 rounded border border-blue-200">
+                                <span className="text-[10px] font-bold text-blue-700 block mb-1">Özel Değer (Yazıyla):</span>
+                                <input 
+                                  type="text"
+                                  placeholder="Varsayılan metin girin..."
+                                  value={defaultMappings[selectedAttrId] || ""}
+                                  onChange={(e) => setDefaultMappings({...defaultMappings, [selectedAttrId]: e.target.value})}
+                                  className="w-full border rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-300"
+                                />
+                              </div>
+                            )}
+                            <div className="bg-white p-1.5 rounded border border-gray-200">
+                              <span className="text-[10px] font-bold text-gray-500 block mb-1">Listeden Seçin:</span>
+                              <div className="relative mb-1">
+                                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input 
+                                  type="text"
+                                  placeholder="Seçenek ara..."
+                                  value={optionSearch[selectedAttrId + "_def"] || ""}
+                                  onChange={(e) => setOptionSearch({...optionSearch, [selectedAttrId + "_def"]: e.target.value})}
+                                  className="w-full pl-7 pr-2 py-1 text-[10px] border-b outline-none bg-transparent"
+                                />
+                              </div>
+                              <select
+                                className="w-full border rounded px-2 py-1 text-xs font-bold bg-white"
+                                value={defaultMappings[selectedAttrId] || ""}
+                                onChange={(e) => setDefaultMappings({...defaultMappings, [selectedAttrId]: e.target.value})}
+                              >
+                                <option value="">--- Varsayılan Seçilmedi ---</option>
+                                {activeAttr?.attributeValues
+                                  ?.filter(tv => tv.name.toLowerCase().includes((optionSearch[selectedAttrId + "_def"] || "").toLowerCase()))
+                                  ?.map(tv => (
+                                    <option key={tv.id} value={tv.id}>{tv.name}</option>
+                                  ))}
+                              </select>
                             </div>
-                            <select
-                              className="w-full border rounded px-2 py-1 text-xs font-bold bg-white"
-                              value={defaultMappings[selectedAttrId] || ""}
-                              onChange={(e) => setDefaultMappings({...defaultMappings, [selectedAttrId]: e.target.value})}
-                            >
-                              <option value="">--- Varsayılan Seçilmedi ---</option>
-                              {activeAttr?.attributeValues
-                                ?.filter(tv => tv.name.toLowerCase().includes((optionSearch[selectedAttrId + "_def"] || "").toLowerCase()))
-                                ?.map(tv => (
-                                  <option key={tv.id} value={tv.id}>{tv.name}</option>
-                                ))}
-                            </select>
                           </div>
+                        </td>
+                        <td className="px-4 py-3 bg-blue-50/30 text-xs font-mono break-all text-blue-900 border-b border-orange-100">
+                           {(() => {
+                             const sel = defaultMappings[selectedAttrId];
+                             if(!sel) return <span className="text-gray-400">Yok</span>;
+                             const matched = activeAttr?.attributeValues?.find(tv => String(tv.id) === String(sel));
+                             if(matched) return `ID: ${sel} (${matched.name})`;
+                             return `Text: "${sel}"`;
+                           })()}
                         </td>
                       </tr>
 
@@ -640,40 +678,70 @@ function ValueMatchModal({ open, onClose, category }) {
                       ) : (
                         activeLocalValues.map(lv => (
                           <tr key={lv} className="border-t hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-3 font-medium">{lv}</td>
-                            <td className="px-4 py-3">
-                              <div className="space-y-1">
-                                <div className="relative">
-                                  <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                                  <input 
-                                    type="text"
-                                    placeholder="Seçenek ara..."
-                                    value={optionSearch[selectedAttrId + "_" + lv] || ""}
-                                    onChange={(e) => setOptionSearch({...optionSearch, [selectedAttrId + "_" + lv]: e.target.value})}
-                                    className="w-full pl-6 pr-2 py-0.5 text-[9px] border-b outline-none bg-transparent"
-                                  />
+                            <td className="px-4 py-3 font-medium border-r border-gray-100">{lv}</td>
+                            <td className="px-4 py-3 border-r border-gray-100">
+                              <div className="space-y-2">
+                                {(activeAttr?.allowCustom || activeAttr?.attribute?.allowCustom) && (
+                                  <div className="bg-blue-50/80 p-1.5 rounded border border-blue-200">
+                                    <input 
+                                      type="text"
+                                      placeholder="Serbest metin yazın..."
+                                      value={valueMappings[selectedAttrId]?.[lv] || ""}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setValueMappings(prev => {
+                                          const next = {...prev};
+                                          if(!next[selectedAttrId]) next[selectedAttrId] = {};
+                                          next[selectedAttrId][lv] = val;
+                                          return next;
+                                        });
+                                      }}
+                                      className="w-full border rounded px-2 py-1 text-[11px] focus:ring-1 focus:ring-blue-300"
+                                    />
+                                  </div>
+                                )}
+                                <div className="bg-white p-1.5 rounded border border-gray-200">
+                                  <div className="relative mb-1">
+                                    <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input 
+                                      type="text"
+                                      placeholder="Listeden ara..."
+                                      value={optionSearch[selectedAttrId + "_" + lv] || ""}
+                                      onChange={(e) => setOptionSearch({...optionSearch, [selectedAttrId + "_" + lv]: e.target.value})}
+                                      className="w-full pl-6 pr-2 py-0.5 text-[9px] border-b outline-none bg-transparent"
+                                    />
+                                  </div>
+                                  <select
+                                    className={`w-full border rounded px-2 py-1 text-[11px] transition-all focus:ring-1 focus:ring-orange-300 ${valueMappings[selectedAttrId]?.[lv] ? 'border-green-500 bg-green-50/20 font-semibold text-green-800' : ''}`}
+                                    value={valueMappings[selectedAttrId]?.[lv] || ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setValueMappings(prev => {
+                                        const next = {...prev};
+                                        if(!next[selectedAttrId]) next[selectedAttrId] = {};
+                                        next[selectedAttrId][lv] = val;
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    <option value="">--- Seçiniz ---</option>
+                                    {activeAttr?.attributeValues
+                                      ?.filter(tv => tv.name.toLowerCase().includes((optionSearch[selectedAttrId + "_" + lv] || "").toLowerCase()))
+                                      ?.map(tv => (
+                                        <option key={tv.id} value={tv.id}>{tv.name}</option>
+                                      ))}
+                                  </select>
                                 </div>
-                                <select
-                                  className={`w-full border rounded px-2 py-1.5 text-sm transition-all focus:ring-1 focus:ring-orange-300 ${valueMappings[selectedAttrId]?.[lv] ? 'border-green-500 bg-green-50/20' : ''}`}
-                                  value={valueMappings[selectedAttrId]?.[lv] || ""}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setValueMappings(prev => {
-                                      const next = {...prev};
-                                      if(!next[selectedAttrId]) next[selectedAttrId] = {};
-                                      next[selectedAttrId][lv] = val;
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  <option value="">--- Seçiniz ---</option>
-                                  {activeAttr?.attributeValues
-                                    ?.filter(tv => tv.name.toLowerCase().includes((optionSearch[selectedAttrId + "_" + lv] || "").toLowerCase()))
-                                    ?.map(tv => (
-                                      <option key={tv.id} value={tv.id}>{tv.name}</option>
-                                    ))}
-                                </select>
                               </div>
+                            </td>
+                            <td className="px-4 py-3 bg-blue-50/30 text-xs font-mono break-all text-blue-900 border-b border-gray-100">
+                               {(() => {
+                                 const sel = valueMappings[selectedAttrId]?.[lv];
+                                 if(!sel) return <span className="text-gray-400">Boş (Varsayılan Gönderilir)</span>;
+                                 const matched = activeAttr?.attributeValues?.find(tv => String(tv.id) === String(sel));
+                                 if(matched) return `ID: ${sel} (${matched.name})`;
+                                 return `Text: "${sel}"`;
+                               })()}
                             </td>
                           </tr>
                         ))
