@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, require_admin, generate_id
+from .deps import db, logger, require_admin, generate_id, generate_short_id
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -69,7 +69,7 @@ async def create_category(
 ):
     """Create category (admin only)"""
     category = {
-        "id": generate_id(),
+        "id": await generate_short_id("categories"),
         "name": category_data.get("name", ""),
         "slug": category_data.get("slug") or generate_slug(category_data.get("name", "")),
         "description": category_data.get("description", ""),
