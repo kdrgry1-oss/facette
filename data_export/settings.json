@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "id": "ticimax",
+    "last_sync": "2026-03-23T01:45:55.822394+00:00"
+  },
+  {
+    "id": "trendyol",
+    "api_key": "ERet4fsWtkfxAPWPunGR",
+    "api_secret": "49Qp0GDAZG1TCrrKojv9",
+    "is_active": true,
+    "supplier_id": "157840",
+    "updated_at": "2026-03-24T02:47:52.774195+00:00",
+    "mode": "live"
+  },
+  {
+    "id": "main",
+    "site_name": "FACETTE",
+    "logo_url": "",
+    "free_shipping_limit": 3000,
+    "rotating_texts": [],
+    "contact_email": "",
+    "contact_phone": "",
+    "address": "",
+    "payment_methods": {
+      "credit_card": true,
+      "bank_transfer": true,
+      "cash_on_delivery": true
+    },
+    "barcode_range_start": "8685151453675",
+    "barcode_range_end": "8685151463675"
+  }
+]

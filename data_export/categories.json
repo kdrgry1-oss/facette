@@ -1,308 +1,628 @@
 [
   {
-    "id": "csv-en-yeni-ler",
-    "is_active": true,
+    "id": "2867",
     "name": "EN YENİLER",
-    "parent_id": null,
     "slug": "en-yeni-ler",
+    "parent_id": null,
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896221+00:00"
+    "updated_at": "2026-03-23T02:01:18.647814+00:00",
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m",
-    "is_active": true,
+    "id": "7175",
     "name": "GİYİM",
-    "parent_id": null,
     "slug": "gi-yi-m",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897504+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-dis-giyim",
-    "is_active": true,
-    "name": "Dış Giyim",
-    "parent_id": "csv-gi-yi-m",
-    "slug": "gi-yi-m-dis-giyim",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896804+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-dis-giyim-trenckot",
-    "is_active": true,
-    "name": "Trençkot",
-    "parent_id": "csv-gi-yi-m-dis-giyim",
-    "slug": "gi-yi-m-dis-giyim-trenckot",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896309+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-dis-giyim-ceket",
-    "is_active": true,
-    "name": "Ceket",
-    "parent_id": "csv-gi-yi-m-dis-giyim",
-    "slug": "gi-yi-m-dis-giyim-ceket",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896357+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-alt-giyim",
-    "is_active": true,
-    "name": "Alt Giyim",
-    "parent_id": "csv-gi-yi-m",
-    "slug": "gi-yi-m-alt-giyim",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897376+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-alt-giyim-pantolon",
-    "is_active": true,
-    "name": "Pantolon",
-    "parent_id": "csv-gi-yi-m-alt-giyim",
-    "slug": "gi-yi-m-alt-giyim-pantolon",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896404+00:00"
-  },
-  {
-    "id": "csv-aksesuar",
-    "is_active": true,
-    "name": "AKSESUAR",
     "parent_id": null,
-    "slug": "aksesuar",
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897556+00:00"
+    "updated_at": "2026-03-23T02:01:18.647836+00:00",
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-aksesuar-corap",
+    "id": "5211",
+    "name": "Dış Giyim",
+    "slug": "dis-giyim",
+    "parent_id": "7175",
     "is_active": true,
-    "name": "Çorap",
-    "parent_id": "csv-aksesuar",
-    "slug": "aksesuar-corap",
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896434+00:00"
+    "updated_at": "2026-03-24T01:38:04.052237+00:00",
+    "description": "",
+    "image_url": "",
+    "sort_order": 0,
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m-dis-giyim-kaban",
+    "id": "3047",
+    "name": "Trençkot",
+    "slug": "trenckot",
+    "parent_id": "5211",
     "is_active": true,
-    "name": "Kaban",
-    "parent_id": "csv-gi-yi-m-dis-giyim",
-    "slug": "gi-yi-m-dis-giyim-kaban",
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896484+00:00"
+    "updated_at": "2026-03-24T01:38:35.792362+00:00",
+    "description": "",
+    "image_url": "",
+    "sort_order": 0,
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m-ust-giyim",
-    "is_active": true,
-    "name": "Üst Giyim",
-    "parent_id": "csv-gi-yi-m",
-    "slug": "gi-yi-m-ust-giyim",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897522+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-bluz",
-    "is_active": true,
-    "name": "Bluz",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-bluz",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896531+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-dis-giyim-mont",
-    "is_active": true,
-    "name": "Mont",
-    "parent_id": "csv-gi-yi-m-dis-giyim",
-    "slug": "gi-yi-m-dis-giyim-mont",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896581+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-alt-giyim-etek",
-    "is_active": true,
-    "name": "Etek",
-    "parent_id": "csv-gi-yi-m-alt-giyim",
-    "slug": "gi-yi-m-alt-giyim-etek",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896629+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-body",
-    "is_active": true,
-    "name": "Body",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-body",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896678+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-gomlek",
-    "is_active": true,
-    "name": "Gömlek",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-gomlek",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896728+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-elbise",
-    "is_active": true,
-    "name": "Elbise",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-elbise",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896774+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-dis-giyim-hirka",
-    "is_active": true,
-    "name": "Hırka",
-    "parent_id": "csv-gi-yi-m-dis-giyim",
-    "slug": "gi-yi-m-dis-giyim-hirka",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896826+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-alt-giyim-jean",
-    "is_active": true,
-    "name": "Jean",
-    "parent_id": "csv-gi-yi-m-alt-giyim",
-    "slug": "gi-yi-m-alt-giyim-jean",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896872+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-kazak",
-    "is_active": true,
-    "name": "Kazak",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-kazak",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.896957+00:00"
-  },
-  {
-    "id": "csv-aksesuar-aksesuar",
-    "is_active": true,
-    "name": "Aksesuar",
-    "parent_id": "csv-aksesuar",
-    "slug": "aksesuar-aksesuar",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897569+00:00"
-  },
-  {
-    "id": "csv-aksesuar-aksesuar-panco",
-    "is_active": true,
-    "name": "Panço",
-    "parent_id": "csv-aksesuar-aksesuar",
-    "slug": "aksesuar-aksesuar-panco",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897004+00:00"
-  },
-  {
-    "id": "csv-aksesuar-aksesuar-balaclava",
-    "is_active": true,
-    "name": "Balaclava",
-    "parent_id": "csv-aksesuar-aksesuar",
-    "slug": "aksesuar-aksesuar-balaclava",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897049+00:00"
-  },
-  {
-    "id": "csv-aksesuar-aksesuar-fular",
-    "is_active": true,
-    "name": "Fular",
-    "parent_id": "csv-aksesuar-aksesuar",
-    "slug": "aksesuar-aksesuar-fular",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897096+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-hirka",
-    "is_active": true,
-    "name": "Hırka",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-hirka",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897149+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-suveter",
-    "is_active": true,
-    "name": "Süveter",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-suveter",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897196+00:00"
-  },
-  {
-    "id": "csv-aksesuar-aksesuar-atki",
-    "is_active": true,
-    "name": "Atkı",
-    "parent_id": "csv-aksesuar-aksesuar",
-    "slug": "aksesuar-aksesuar-atki",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897241+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-ceket",
-    "is_active": true,
+    "id": "6846",
     "name": "Ceket",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-ceket",
+    "slug": "gi-yi-m-dis-giyim-ceket",
+    "parent_id": "5211",
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897295+00:00"
+    "updated_at": "2026-03-23T02:01:18.647910+00:00",
+    "value_mappings": {
+      "48": {
+        "Ekstra Kısa / Süper Mini": "10623287",
+        "Tek Ebat": "997239"
+      },
+      "179": {
+        "Bornoz": "7199",
+        "Boxy": "666280"
+      },
+      "200": {
+        "Fransız Havlu Kumaşı": "10619791",
+        "Örme": "2191"
+      },
+      "338": {
+        "L": "3959",
+        "L/XL": "7112",
+        "M": "3960",
+        "M/L": "6801",
+        "S": "3961",
+        "S/M": "7117",
+        "STD": "144271",
+        "XL": "3962",
+        "XS": "6964",
+        "XS/S": "8505",
+        "XXL": "5367"
+      },
+      "348": {
+        "Ekru": "7014",
+        "Lacivert": "7003"
+      }
+    },
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m-ust-giyim-sweatshirt",
+    "id": "1266",
+    "name": "Alt Giyim",
+    "slug": "alt-giyim",
+    "parent_id": "7175",
     "is_active": true,
-    "name": "Sweatshirt",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-sweatshirt",
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897346+00:00"
+    "updated_at": "2026-03-24T01:41:25.068489+00:00",
+    "description": "",
+    "image_url": "",
+    "sort_order": 0,
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m-alt-giyim-sort",
-    "is_active": true,
-    "name": "Şort",
-    "parent_id": "csv-gi-yi-m-alt-giyim",
-    "slug": "gi-yi-m-alt-giyim-sort",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897395+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-tisort",
-    "is_active": true,
-    "name": "Tişört",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
-    "slug": "gi-yi-m-ust-giyim-tisort",
-    "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897442+00:00"
-  },
-  {
-    "id": "csv-gi-yi-m-ust-giyim-pantolon",
-    "is_active": true,
+    "id": "7022",
     "name": "Pantolon",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-alt-giyim-pantolon",
+    "parent_id": "1266",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.647949+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "4035",
+    "name": "AKSESUAR",
+    "slug": "aksesuar",
+    "parent_id": null,
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.647960+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8207",
+    "name": "Çorap",
+    "slug": "corap",
+    "parent_id": "4035",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-24T03:07:16.399198+00:00",
+    "amazon_category_id": null,
+    "hepsiburada_category_id": null,
+    "image_url": "",
+    "sort_order": 0,
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8968",
+    "name": "Kaban",
+    "slug": "gi-yi-m-dis-giyim-kaban",
+    "parent_id": "5211",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648009+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "9432",
+    "name": "Üst Giyim",
+    "slug": "gi-yi-m-ust-giyim",
+    "parent_id": "7175",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648039+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "4910",
+    "name": "Bluz",
+    "slug": "gi-yi-m-ust-giyim-bluz",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648055+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8149",
+    "name": "Mont",
+    "slug": "gi-yi-m-dis-giyim-mont",
+    "parent_id": "5211",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648091+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2496",
+    "name": "Etek",
+    "slug": "etek",
+    "parent_id": "1266",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-24T07:13:46.187415+00:00",
+    "description": "",
+    "image_url": "",
+    "sort_order": 0,
+    "amazon_category_id": null,
+    "hepsiburada_category_id": null,
+    "attribute_mapping": {
+      "48": "Boy"
+    },
+    "trendyol_hidden": true
+  },
+  {
+    "id": "5378",
+    "name": "Body",
+    "slug": "gi-yi-m-ust-giyim-body",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648212+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8135",
+    "name": "Gömlek",
+    "slug": "gi-yi-m-ust-giyim-gomlek",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648250+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2839",
+    "name": "Elbise",
+    "slug": "gi-yi-m-ust-giyim-elbise",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648286+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "9074",
+    "name": "Hırka",
+    "slug": "gi-yi-m-dis-giyim-hirka",
+    "parent_id": "5211",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648322+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "3531",
+    "name": "Jean",
+    "slug": "gi-yi-m-alt-giyim-jean",
+    "parent_id": "1266",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648388+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2313",
+    "name": "Kazak",
+    "slug": "kazak",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-24T01:48:06.654299+00:00",
+    "amazon_category_id": null,
+    "hepsiburada_category_id": null,
+    "image_url": "",
+    "sort_order": 0,
+    "trendyol_hidden": true
+  },
+  {
+    "id": "5398",
+    "name": "Aksesuar",
+    "slug": "aksesuar-aksesuar",
+    "parent_id": "4035",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648514+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8078",
+    "name": "Panço",
+    "slug": "aksesuar-aksesuar-panco",
+    "parent_id": "5398",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648551+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "4226",
+    "name": "Balaclava",
+    "slug": "aksesuar-aksesuar-balaclava",
+    "parent_id": "5398",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648661+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "5087",
+    "name": "Fular",
+    "slug": "aksesuar-aksesuar-fular",
+    "parent_id": "5398",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648691+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "8335",
+    "name": "Hırka",
+    "slug": "gi-yi-m-ust-giyim-hirka",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648730+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2314",
+    "name": "Süveter",
+    "slug": "gi-yi-m-ust-giyim-suveter",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648766+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "5751",
+    "name": "Atkı",
+    "slug": "aksesuar-aksesuar-atki",
+    "parent_id": "5398",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648797+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2104",
+    "name": "Ceket",
+    "slug": "gi-yi-m-ust-giyim-ceket",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648832+00:00",
+    "trendyol_category_id": 594,
+    "trendyol_category_name": "Giyim > Dış Giyim > Ceket & Yelek > Ceket",
+    "attribute_mappings": [
+      {
+        "local_attr": "Kol Tipi",
+        "trendyol_attr_id": 12
+      },
+      {
+        "local_attr": "Materyal",
+        "trendyol_attr_id": 14
+      },
+      {
+        "local_attr": "Yaka Tipi",
+        "trendyol_attr_id": 22
+      },
+      {
+        "local_attr": "Desen",
+        "trendyol_attr_id": 33
+      },
+      {
+        "local_attr": "Renk",
+        "trendyol_attr_id": 47
+      },
+      {
+        "local_attr": "Boy",
+        "trendyol_attr_id": 48
+      },
+      {
+        "local_attr": "Cep",
+        "trendyol_attr_id": 101
+      },
+      {
+        "local_attr": "Dokuma Tipi",
+        "trendyol_attr_id": 117
+      },
+      {
+        "local_attr": "Kalınlık",
+        "trendyol_attr_id": 178
+      },
+      {
+        "local_attr": "Kalıp",
+        "trendyol_attr_id": 179
+      },
+      {
+        "local_attr": "Kapama Şekli",
+        "trendyol_attr_id": 183
+      },
+      {
+        "local_attr": "Kol Boyu",
+        "trendyol_attr_id": 191
+      },
+      {
+        "local_attr": "Kumaş Tipi",
+        "trendyol_attr_id": 200
+      },
+      {
+        "local_attr": "Beden",
+        "trendyol_attr_id": 338
+      },
+      {
+        "local_attr": "Ürün Tipi",
+        "trendyol_attr_id": 342
+      },
+      {
+        "local_attr": "Cinsiyet",
+        "trendyol_attr_id": 343
+      },
+      {
+        "local_attr": "Yaş Grubu",
+        "trendyol_attr_id": 346
+      },
+      {
+        "local_attr": "Web Color",
+        "trendyol_attr_id": 348
+      },
+      {
+        "local_attr": "Astar Durumu",
+        "trendyol_attr_id": 473
+      },
+      {
+        "local_attr": "Ürün Detayı",
+        "trendyol_attr_id": 635
+      },
+      {
+        "local_attr": "Koleksiyon",
+        "trendyol_attr_id": 710
+      },
+      {
+        "local_attr": "Persona",
+        "trendyol_attr_id": 870
+      },
+      {
+        "local_attr": "Siluet",
+        "trendyol_attr_id": 880
+      },
+      {
+        "local_attr": "Ortam",
+        "trendyol_attr_id": 881
+      },
+      {
+        "local_attr": "Sürdürülebilirlik Detayı",
+        "trendyol_attr_id": 892
+      },
+      {
+        "local_attr": "kemer",
+        "trendyol_attr_id": 893
+      },
+      {
+        "local_attr": "Sezon",
+        "trendyol_attr_id": 1108
+      },
+      {
+        "local_attr": "Kutu Durumu",
+        "trendyol_attr_id": 1186
+      },
+      {
+        "local_attr": "Menşei",
+        "trendyol_attr_id": 1192
+      }
+    ],
+    "default_mappings": {},
+    "value_mappings": {
+      "12": {
+        "Kolsuz": "65"
+      },
+      "14": {
+        "Mikrofiber": "997994",
+        "Naylon": "1256806"
+      },
+      "22": {
+        "Boğazlı": "786",
+        "Straplez": "188"
+      },
+      "33": {
+        "Düz": "261977",
+        "Varaklı": "197052"
+      },
+      "48": {
+        "Ekstra Kısa / Süper Mini": "10623287",
+        "Tek Ebat": "997239"
+      },
+      "101": {
+        "Gizli": "175921",
+        "Sahte": "175920"
+      },
+      "117": {
+        "3 İplik Şardonsuz": "1178343"
+      },
+      "178": {
+        "Kalın": "3942",
+        "Çok Kalın": "296112"
+      },
+      "179": {
+        "Boxy": "1178483",
+        "Bornoz": "10623280"
+      },
+      "183": {
+        "Kanca": "2054",
+        "Kruvaze": "1178497"
+      },
+      "191": {
+        "Askılı": "2144",
+        "Truvakar Kol": "2148"
+      },
+      "200": {
+        "Örme": "2191",
+        "Fransız Havlu Kumaşı": "2192"
+      },
+      "338": {
+        "L": "3959",
+        "L/XL": "7112",
+        "M": "3960",
+        "M/L": "6801",
+        "S": "3961",
+        "S/M": "7117",
+        "STD": "144271",
+        "XL": "3962",
+        "XS": "6964",
+        "XS/S": "8505",
+        "XXL": "5367"
+      },
+      "342": {
+        "Squash Topu": "137100"
+      },
+      "343": {
+        "Kadın / Kız": "4295"
+      },
+      "346": {
+        "Yetişkin": "4293"
+      },
+      "348": {
+        "Ekru": "7014",
+        "Lacivert": "7003"
+      },
+      "473": {
+        "Astarlı": "23523"
+      },
+      "635": {
+        "Nervürlü": "197173",
+        "Suni Deri": "1208675"
+      },
+      "710": {
+        "Ramadan": "10622900"
+      },
+      "870": {
+        "Childish": "10614151",
+        "None Persona": "1178763"
+      },
+      "880": {
+        "Trucker": "10628042"
+      },
+      "881": {
+        "Gece": "1214341"
+      },
+      "892": {
+        "Organik": "1178725",
+        "Recycle": "1178727"
+      },
+      "893": {},
+      "1108": {
+        "Tüm Sezonlar": "1210663",
+        "SPRİNG-SUMMER": "1210664"
+      },
+      "1186": {
+        "Kutu yok": "10559446",
+        "Kutulu": "10559445"
+      },
+      "1192": {
+        "TR": "10617344"
+      }
+    }
+  },
+  {
+    "id": "7365",
+    "name": "Sweatshirt",
+    "slug": "gi-yi-m-ust-giyim-sweatshirt",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648867+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "9287",
+    "name": "Şort",
+    "slug": "gi-yi-m-alt-giyim-sort",
+    "parent_id": "1266",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648956+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "5221",
+    "name": "Tişört",
+    "slug": "gi-yi-m-ust-giyim-tisort",
+    "parent_id": "9432",
+    "is_active": true,
+    "source": "csv",
+    "updated_at": "2026-03-23T02:01:18.648992+00:00",
+    "trendyol_hidden": true
+  },
+  {
+    "id": "2328",
+    "name": "Pantolon",
     "slug": "gi-yi-m-ust-giyim-pantolon",
+    "parent_id": "9432",
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897488+00:00"
+    "updated_at": "2026-03-23T02:01:18.649030+00:00",
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-gi-yi-m-ust-giyim-takim",
-    "is_active": true,
+    "id": "4294",
     "name": "Takım",
-    "parent_id": "csv-gi-yi-m-ust-giyim",
     "slug": "gi-yi-m-ust-giyim-takim",
+    "parent_id": "9432",
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897542+00:00"
+    "updated_at": "2026-03-23T02:01:18.649066+00:00",
+    "trendyol_hidden": true
   },
   {
-    "id": "csv-aksesuar-aksesuar-canta",
-    "is_active": true,
+    "id": "4907",
     "name": "Çanta",
-    "parent_id": "csv-aksesuar-aksesuar",
     "slug": "aksesuar-aksesuar-canta",
+    "parent_id": "5398",
+    "is_active": true,
     "source": "csv",
-    "updated_at": "2026-03-23T01:52:27.897588+00:00"
+    "updated_at": "2026-03-23T02:01:18.649097+00:00",
+    "trendyol_hidden": true
   }
 ]

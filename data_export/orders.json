@@ -1,1 +1,990 @@
-[]
+[
+  {
+    "id": "2b834b01-6f1c-4cc5-a10b-14c97d2df655",
+    "order_number": "TY-1774317755",
+    "user_id": null,
+    "items": [],
+    "shipping_address": {
+      "first_name": "Trendyol",
+      "last_name": "Müşterisi",
+      "phone": "5550000000",
+      "email": "musteri@trendyol.com",
+      "address": "Trendyol Siparişi",
+      "city": "İstanbul",
+      "district": "Şişli"
+    },
+    "subtotal": 100,
+    "shipping_cost": 0,
+    "total": 100,
+    "payment_method": "credit_card",
+    "payment_status": "paid",
+    "status": "pending",
+    "platform": "trendyol",
+    "created_at": "2026-03-24T02:02:35.428418+00:00",
+    "updated_at": "2026-03-24T02:02:35.428426+00:00"
+  },
+  {
+    "order_number": "11053838413",
+    "platform": "trendyol",
+    "trendyol_package_id": 3693912695,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1414891635,
+        "product_name": "Fermuarlı Oversize Ceket Kırmızı FCFW0400002, Standart",
+        "quantity": 1,
+        "price": 2640.0,
+        "size": "Standart",
+        "color": "Kırmızı"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Pelin",
+      "last_name": "Özden",
+      "phone": null,
+      "email": "pf+8ya2ljen@trendyolmail.com",
+      "address": "PUDO-AHMET YESEVİ CAMİİ-YUNUS EMRE MAH. BİLAL HABEŞİ SOK. SİNCAN/ANKARA     Sincan Ankara",
+      "city": "Ankara",
+      "district": "Sincan"
+    },
+    "billing_address": {
+      "first_name": "Pelin",
+      "last_name": "Özden",
+      "phone": null,
+      "address": "Törekent Mahallesi, 1311. Cadde, Oyak Seyirce Sitesi, No: 5A, 9. kat, İç kapı no:56 SİNCAN/ANKARA     Sincan Ankara",
+      "city": "Ankara",
+      "district": "Sincan",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 2640,
+    "shipping_cost": 0,
+    "total": 2640,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330031210678281,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=f988ebe0-2091-11f1-897c-d6034fba416f",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:48:21.096423+00:00",
+    "id": "d64a0750-bbed-4f87-a129-f6721a8cb99b",
+    "created_at": "2026-03-24T02:48:21.097164+00:00"
+  },
+  {
+    "order_number": "11057850618",
+    "platform": "trendyol",
+    "trendyol_package_id": 3697717621,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 595250657,
+        "product_name": "Kadın 20223394422 Camel Kuşaklı Mevsimlik Ince Trençkot, 111889, Standart",
+        "quantity": 1,
+        "price": 1097.0,
+        "size": "Standart",
+        "color": "CAMEL"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Tex",
+      "last_name": "International",
+      "phone": null,
+      "email": "pf+wzykqyb6@trendyolmail.com",
+      "address": "Akçaburgaz mah 1584. sok no:19 e blok Esenyurt/İstanbul .     Esenyurt İstanbul",
+      "city": "İstanbul",
+      "district": "Esenyurt"
+    },
+    "billing_address": {
+      "first_name": "dana ",
+      "last_name": "iancu",
+      "phone": null,
+      "address": "Strada Randunicii 13 Casa nr 29      Tunari",
+      "city": "Tunari",
+      "district": "Tunari",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1097,
+    "shipping_cost": 0,
+    "total": 1097,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "shipped",
+    "cargo_tracking_number": 7330031249168760,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=df78cfe4-21cc-11f1-aca6-1a032e68cc50",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:48:21.224286+00:00",
+    "id": "da2d8c37-3276-4105-b91a-52272fedfb30",
+    "created_at": "2026-03-24T02:48:21.225182+00:00"
+  },
+  {
+    "order_number": "11032720168",
+    "platform": "trendyol",
+    "trendyol_package_id": 3674246371,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1097141732,
+        "product_name": "Kadın Lacivert Düğmeli Blazer Ceket, 6968557, S",
+        "quantity": 1,
+        "price": 726.0,
+        "size": "S",
+        "color": "LACİVERT"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "PM3-",
+      "last_name": "Arvato",
+      "phone": null,
+      "email": "pf+8y8kbbqy@trendyolmail.com",
+      "address": "Orhanlı mahallesi, Kumpas Cd. 29, 34956 Deri Osb/Tuzla/İstanbul     Tuzla İstanbul",
+      "city": "İstanbul",
+      "district": "Tuzla"
+    },
+    "billing_address": {
+      "first_name": "Tanase ",
+      "last_name": "Andreea ",
+      "phone": null,
+      "address": "Strada Jitariei nr 32      Bogdanesti",
+      "city": "Bogdanesti",
+      "district": "Bogdanesti",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 726,
+    "shipping_cost": 0,
+    "total": 726,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330031015793059,
+    "cargo_tracking_link": "https://tracking.trendyol.com/?id=d0ab418f-03de-3afa-8116-647f4593f733",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:48:21.226168+00:00",
+    "id": "6635538d-149f-4fcc-8190-6fc8c7fc1662",
+    "created_at": "2026-03-24T02:48:21.226733+00:00"
+  },
+  {
+    "order_number": "11020977152",
+    "platform": "trendyol",
+    "trendyol_package_id": 3662895069,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1228813189,
+        "product_name": "Kadın Siyah Düğme Detay Yüksek Bel Palazzo Pantolon, FCFW1800001, S",
+        "quantity": 1,
+        "unit_price": 1800.0,
+        "discount_amount": 270.0,
+        "price": 1530,
+        "size": "S",
+        "color": "SİYAH",
+        "currency": "TRY"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "PM3-",
+      "last_name": "Arvato",
+      "phone": null,
+      "email": "pf+wz4owyz2@trendyolmail.com",
+      "address": "Orhanlı mahallesi, Kumpas Cd. 29, 34956 Deri Osb/Tuzla/İstanbul     Tuzla İstanbul",
+      "city": "İstanbul",
+      "district": "Tuzla"
+    },
+    "billing_address": {
+      "first_name": "Vasile",
+      "last_name": "Corina",
+      "phone": null,
+      "address": "Jimbolia 143, parter, ap 1, sector 1 Bloc alb pe colt      Bucuresti",
+      "city": "Bucuresti",
+      "district": "Bucuresti",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1800,
+    "shipping_cost": 0,
+    "total": 1530,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030900397280,
+    "cargo_tracking_link": "https://tracking.trendyol.com/?id=9cab5eb4-c328-3a8e-adab-606def996a83",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T07:29:18.652483+00:00",
+    "id": "c4cb44a0-1b15-4768-9bc9-422462150b5a",
+    "created_at": "2026-03-24T02:48:21.228260+00:00",
+    "discount_amount": 270,
+    "invoice_link": "https://apigw.trendyol.com/sapigw/customer-invoices-int/fe71ec90-d427-4d81-94e2-2e257565dfac"
+  },
+  {
+    "order_number": "11002427419",
+    "platform": "trendyol",
+    "trendyol_package_id": 3645043788,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1420854139,
+        "product_name": "Şal Detaylı Bluz Acı Kahve FCFW0100003, M",
+        "quantity": 1,
+        "price": 1680.0,
+        "size": "M",
+        "color": "Acı Kahve"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Abdullah",
+      "last_name": "Çolak",
+      "phone": null,
+      "email": "pf+4m2ab2lr@trendyolmail.com",
+      "address": "Zeytinli mahallesi turgut özal bulvarı gaziantep E tipi cezaevi şehitkamil/gaziantep     Şehitkamil Gaziantep",
+      "city": "Gaziantep",
+      "district": "Şehitkamil"
+    },
+    "billing_address": {
+      "first_name": "Abdullah",
+      "last_name": "Çolak",
+      "phone": null,
+      "address": "Zeytinli mahallesi turgut özal bulvarı gaziantep E tipi cezaevi şehitkamil/gaziantep     Şehitkamil Gaziantep",
+      "city": "Gaziantep",
+      "district": "Şehitkamil",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1680,
+    "shipping_cost": 0,
+    "total": 1680,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "cancelled",
+    "cargo_tracking_number": 7330030719725649,
+    "cargo_tracking_link": "",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.331622+00:00",
+    "id": "66cad02f-4c84-44c1-b27b-65340a003324",
+    "created_at": "2026-03-24T02:52:44.332509+00:00"
+  },
+  {
+    "order_number": "11001816902",
+    "platform": "trendyol",
+    "trendyol_package_id": 3644429491,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 499958626,
+        "product_name": "Kadın 202288944 Siyah Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "price": 1190.0,
+        "size": "Standart",
+        "color": "SİYAH"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Büşra",
+      "last_name": "Aslan",
+      "phone": null,
+      "email": "pf+3bxa228b@trendyolmail.com",
+      "address": "Eşref Bitlis caddesi,no:57,kat:1,daire:1     Ümraniye İstanbul",
+      "city": "İstanbul",
+      "district": "Ümraniye"
+    },
+    "billing_address": {
+      "first_name": "Büşra",
+      "last_name": "Aslan",
+      "phone": null,
+      "address": "Eşref Bitlis caddesi,no:57,kat:1,daire:1     Ümraniye İstanbul",
+      "city": "İstanbul",
+      "district": "Ümraniye",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1190,
+    "shipping_cost": 0,
+    "total": 1190,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "cancelled",
+    "cargo_tracking_number": 7330030713736733,
+    "cargo_tracking_link": "",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.334106+00:00",
+    "id": "1d678510-a427-4b4a-a150-d7b466625841",
+    "created_at": "2026-03-24T02:52:44.334918+00:00"
+  },
+  {
+    "order_number": "10996734189",
+    "platform": "trendyol",
+    "trendyol_package_id": 3639780962,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 499958626,
+        "product_name": "Kadın 202288944 Siyah Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "price": 1190.0,
+        "size": "Standart",
+        "color": "SİYAH"
+      },
+      {
+        "product_id": 499983935,
+        "product_name": "Kadın 20227711123 Bej Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "price": 1190.0,
+        "size": "Standart",
+        "color": "BEJ"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Ece",
+      "last_name": "Eke",
+      "phone": null,
+      "email": "pf+j4wyn5py@trendyolmail.com",
+      "address": "816.sokak green life 3 B blok no49 12.kat     Mamak Ankara",
+      "city": "Ankara",
+      "district": "Mamak"
+    },
+    "billing_address": {
+      "first_name": "Ece",
+      "last_name": "Eke",
+      "phone": null,
+      "address": "816.sokak green life 3 B blok no49 12.kat     Mamak Ankara",
+      "city": "Ankara",
+      "district": "Mamak",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 2380,
+    "shipping_cost": 0,
+    "total": 2380,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030665732920,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=6b3c4880-128a-11f1-97a4-4eb62ac0374b",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.336432+00:00",
+    "id": "7e8798da-7e94-4981-82ba-34b66e39faa8",
+    "created_at": "2026-03-24T02:52:44.337246+00:00"
+  },
+  {
+    "order_number": "10995062907",
+    "platform": "trendyol",
+    "trendyol_package_id": 3638306814,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1420861799,
+        "product_name": "Şal Detaylı Bluz Bej FCFW0100003, L",
+        "quantity": 1,
+        "price": 1680.0,
+        "size": "L",
+        "color": "Bej"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Esengül",
+      "last_name": "Süme",
+      "phone": null,
+      "email": "pf+j4k3zqrl@trendyolmail.com",
+      "address": "Fatih mahallesi hikmet sokak no:36 kat:2 daire:6     Sancaktepe İstanbul",
+      "city": "İstanbul",
+      "district": "Sancaktepe"
+    },
+    "billing_address": {
+      "first_name": "Esengül",
+      "last_name": "Süme",
+      "phone": null,
+      "address": "Fatih mahallesi hikmet sokak no:36 kat:2 daire:6     Sancaktepe İstanbul",
+      "city": "İstanbul",
+      "district": "Sancaktepe",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1680,
+    "shipping_cost": 0,
+    "total": 1680,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030651300898,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=d9dcfbb1-1239-11f1-8400-428ef56d2a26",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.338735+00:00",
+    "id": "8e745f9f-612a-4a7a-b476-ba19c858fab2",
+    "created_at": "2026-03-24T02:52:44.339612+00:00"
+  },
+  {
+    "order_number": "10996192276",
+    "platform": "trendyol",
+    "trendyol_package_id": 3639228688,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 499958626,
+        "product_name": "Kadın 202288944 Siyah Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "price": 1190.0,
+        "size": "Standart",
+        "color": "SİYAH"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Reyhan",
+      "last_name": "Akcura",
+      "phone": null,
+      "email": "pf+4m2l6895@trendyolmail.com",
+      "address": "443 sok 58/7     Mamak Ankara",
+      "city": "Ankara",
+      "district": "Mamak"
+    },
+    "billing_address": {
+      "first_name": "Reyhan",
+      "last_name": "Akcura",
+      "phone": null,
+      "address": "443 sok 58/7     Mamak Ankara",
+      "city": "Ankara",
+      "district": "Mamak",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1190,
+    "shipping_cost": 0,
+    "total": 1190,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030660422154,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=5d19a28e-1271-11f1-83b8-ee041549d766",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.341000+00:00",
+    "id": "03e7a02c-cf0f-40d1-b60f-65c71e227714",
+    "created_at": "2026-03-24T02:52:44.341757+00:00"
+  },
+  {
+    "order_number": "10993886622",
+    "platform": "trendyol",
+    "trendyol_package_id": 3637080307,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1420854139,
+        "product_name": "Şal Detaylı Bluz Acı Kahve FCFW0100003, M",
+        "quantity": 1,
+        "price": 1680.0,
+        "size": "M",
+        "color": "Acı Kahve"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Türkan",
+      "last_name": "AKAY",
+      "phone": null,
+      "email": "pf+59q5njw9@trendyolmail.com",
+      "address": "seydili mah seydili cad no:70     Yahyalı Kayseri",
+      "city": "Kayseri",
+      "district": "Yahyalı"
+    },
+    "billing_address": {
+      "first_name": "Türkan",
+      "last_name": "AKAY",
+      "phone": null,
+      "address": "seydili mah seydili cad no:70     Yahyalı Kayseri",
+      "city": "Kayseri",
+      "district": "Yahyalı",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1680,
+    "shipping_cost": 0,
+    "total": 1680,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030638260436,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=9594d0dc-11bf-11f1-8400-428ef56d2a26",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.342915+00:00",
+    "id": "61863d2f-e0cc-46dd-a90b-f250da19d669",
+    "created_at": "2026-03-24T02:52:44.343617+00:00"
+  },
+  {
+    "order_number": "10996814818",
+    "platform": "trendyol",
+    "trendyol_package_id": 3639866062,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 941479822,
+        "product_name": "Kadın Siyah Düğmeli Blazer Ceket 6968557, L",
+        "quantity": 1,
+        "price": 820.66,
+        "size": "L",
+        "color": "SİYAH"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Neslihan",
+      "last_name": "Şen Serbes",
+      "phone": null,
+      "email": "pf+j4wyoer3@trendyolmail.com",
+      "address": "Hürriyet mahallesi Dolu sokak no:14 İktisat Kale Apartmanı Daire:15     Süleymanpaşa Tekirdağ",
+      "city": "Tekirdağ",
+      "district": "Süleymanpaşa"
+    },
+    "billing_address": {
+      "first_name": "Neslihan",
+      "last_name": "Şen Serbes",
+      "phone": null,
+      "address": "Hürriyet mahallesi Dolu sokak no:14 İktisat Kale Apartmanı Daire:15     Süleymanpaşa Tekirdağ",
+      "city": "Tekirdağ",
+      "district": "Süleymanpaşa",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 820.66,
+    "shipping_cost": 0,
+    "total": 820.66,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030666564308,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=b0b06509-128e-11f1-8248-32cb5cd73535",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.344718+00:00",
+    "id": "d1c606ed-1179-4346-b26e-fb3e8ec5402f",
+    "created_at": "2026-03-24T02:52:44.345314+00:00"
+  },
+  {
+    "order_number": "10989481333",
+    "platform": "trendyol",
+    "trendyol_package_id": 3633081097,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1420843757,
+        "product_name": "Şal Detaylı Bluz Acı Kahve FCFW0100003, S",
+        "quantity": 1,
+        "price": 1680.0,
+        "size": "S",
+        "color": "Acı Kahve"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Sarenur",
+      "last_name": "Talanay",
+      "phone": null,
+      "email": "pf+9vx9oem5@trendyolmail.com",
+      "address": "OVAAKÇA MERKEZ MAH. EMİR SULTAN CD. NO:26, 16335 OSMANGAZİ̇/BURSA, TÜRKİYE - ROTA AVM     Osmangazi Bursa",
+      "city": "Bursa",
+      "district": "Osmangazi"
+    },
+    "billing_address": {
+      "first_name": "Sarenur",
+      "last_name": "Talanay",
+      "phone": null,
+      "address": "29.cami sokak no:06     Osmangazi Bursa",
+      "city": "Bursa",
+      "district": "Osmangazi",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1680,
+    "shipping_cost": 0,
+    "total": 1680,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030598137281,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=3aa2ab2e-10a5-11f1-9fa5-1ad9a05e9abe",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T02:52:44.346345+00:00",
+    "id": "069ce96a-911b-41e0-b50e-07dafa9b1b1a",
+    "created_at": "2026-03-24T02:52:44.346922+00:00"
+  },
+  {
+    "order_number": "11059863580",
+    "platform": "trendyol",
+    "trendyol_package_id": 3699389236,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1556001260,
+        "product_name": "Ekose Fular Kırmızı FCFW2800002, one size",
+        "quantity": 1,
+        "unit_price": 1018,
+        "discount_amount": 50.0,
+        "price": 1068.0,
+        "size": "Tek Ebat",
+        "color": "Kırmızı"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Sümeyye",
+      "last_name": "Kılıç",
+      "phone": null,
+      "email": "pf+ero3229v@trendyolmail.com",
+      "address": "Bahçelievler mah. 2813.sokak A Apartmanı Dış Kapı No:8/2 İç Kapı No: 25 Şentürk Park Evleri 2.Etap     Burhaniye Balıkesir",
+      "city": "Balıkesir",
+      "district": "Burhaniye"
+    },
+    "billing_address": {
+      "first_name": "Sümeyye",
+      "last_name": "Kılıç",
+      "phone": null,
+      "address": "Bahçelievler mah. 2813.sokak A Apartmanı Dış Kapı No:8/2 İç Kapı No: 25 Şentürk Park Evleri 2.Etap     Burhaniye Balıkesir",
+      "city": "Balıkesir",
+      "district": "Burhaniye",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1068,
+    "shipping_cost": 0,
+    "total": 1068,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330031266116478,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=13725f30-2227-11f1-897c-d6034fba416f",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "updated_at": "2026-03-24T03:58:00.911545+00:00",
+    "id": "5192c15b-7b74-469c-8f2c-69076ad76856",
+    "created_at": "2026-03-24T03:18:15.723493+00:00",
+    "invoice_link": "https://apigw.trendyol.com/sapigw/customer-invoices/8dacff02-4f8b-41e2-80d3-e2e014b7759c"
+  },
+  {
+    "order_number": "11028471885",
+    "platform": "trendyol",
+    "trendyol_package_id": 3670000307,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 499958626,
+        "product_name": "Kadın 202288944 Siyah Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "unit_price": 1369,
+        "discount_amount": 0,
+        "price": 1369.0,
+        "size": "Standart",
+        "color": "SİYAH"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "ceyda",
+      "last_name": "samur",
+      "phone": null,
+      "email": "pf+59ampo2b@trendyolmail.com",
+      "address": "Harmantepe mah. Dere Sokak 8 / 2     Kağıthane İstanbul",
+      "city": "İstanbul",
+      "district": "Kağıthane"
+    },
+    "billing_address": {
+      "first_name": "ceyda",
+      "last_name": "samur",
+      "phone": null,
+      "address": "Harmantepe mah. Dere Sokak 8 / 2     Kağıthane İstanbul",
+      "city": "İstanbul",
+      "district": "Kağıthane",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1369,
+    "shipping_cost": 0,
+    "total": 1369,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "cancelled",
+    "cargo_tracking_number": 7330030972198204,
+    "cargo_tracking_link": "",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "",
+    "updated_at": "2026-03-24T03:58:35.516953+00:00",
+    "id": "fcc362f2-abfd-4f40-873b-e17d02f07e0f",
+    "created_at": "2026-03-24T03:58:35.517769+00:00"
+  },
+  {
+    "order_number": "11021050627",
+    "platform": "trendyol",
+    "trendyol_package_id": 3662976894,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1053335786,
+        "product_name": "Kadın Antrasit Pile Detay Çıtçıtlı Ceket 756887596, S",
+        "quantity": 1,
+        "unit_price": 733.0,
+        "discount_amount": 36.65,
+        "price": 696.35,
+        "size": "S",
+        "color": "ANTRASİT",
+        "currency": "TRY"
+      },
+      {
+        "product_id": 1053335726,
+        "product_name": "Lacivert Pile Detay Çıtçıtlı Ceket 756887596, S",
+        "quantity": 1,
+        "unit_price": 733.0,
+        "discount_amount": 36.65,
+        "price": 696.35,
+        "size": "S",
+        "color": "LACİVERT",
+        "currency": "TRY"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Selen",
+      "last_name": "Yıldırım",
+      "phone": null,
+      "email": "pf+zzw96kak@trendyolmail.com",
+      "address": "PUDO - 3S FİRÜZE KONAKLARI-Üniversite Mah. Bağlariçi Cad. No:23-İstanbul/Avcılar     Avcılar İstanbul",
+      "city": "İstanbul",
+      "district": "Avcılar"
+    },
+    "billing_address": {
+      "first_name": "Selen",
+      "last_name": "Yıldırım",
+      "phone": null,
+      "address": "Üniversite Mahallesi Sarıgül Sokak Halil Inalcık Kyk Kız Yurdu Avcılar/İstanbul     Avcılar İstanbul",
+      "city": "İstanbul",
+      "district": "Avcılar",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1466,
+    "shipping_cost": 0,
+    "total": 1392.7,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030901205881,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=752cbcf8-18d0-11f1-a82b-d62661f3cac4",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "https://apigw.trendyol.com/sapigw/customer-invoices/80b979fc-65f5-4971-ae8d-7b6f7ca79611",
+    "updated_at": "2026-03-24T04:32:29.529942+00:00",
+    "id": "81953fab-41ec-4aa0-9be6-9eb10770cbcc",
+    "created_at": "2026-03-24T03:58:35.519774+00:00",
+    "discount_amount": 73.3
+  },
+  {
+    "order_number": "11020463767",
+    "platform": "trendyol",
+    "trendyol_package_id": 3662338708,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 941479829,
+        "product_name": "Kadın Siyah Düğmeli Blazer Ceket 6968557, M",
+        "quantity": 1,
+        "unit_price": 722,
+        "discount_amount": 0,
+        "price": 722.0,
+        "size": "M",
+        "color": "SİYAH"
+      },
+      {
+        "product_id": 1228814439,
+        "product_name": "Kadın Acı Kahve Mevsimlik Kısa Kaşe Kaban 223344556, Standart",
+        "quantity": 1,
+        "unit_price": 541.98,
+        "discount_amount": 126.02,
+        "price": 668.0,
+        "size": "Standart",
+        "color": "ACI KAHVE"
+      },
+      {
+        "product_id": 683003900,
+        "product_name": "Kadın 2023458577 Kahverengi Düğmeli Blazer Ceket 6968557, M",
+        "quantity": 1,
+        "unit_price": 671.04,
+        "discount_amount": 30.96,
+        "price": 702.0,
+        "size": "M",
+        "color": "KAHVERENGİ"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Gizem",
+      "last_name": "Akbayır",
+      "phone": null,
+      "email": "pf+pzl2nb2w@trendyolmail.com",
+      "address": "tarmen birlik sitesi 1.blok 2.cadde 23/b kat 3 daire 6 egekent2 Menemen     Menemen İzmir",
+      "city": "İzmir",
+      "district": "Menemen"
+    },
+    "billing_address": {
+      "first_name": "Gizem",
+      "last_name": "Akbayır",
+      "phone": null,
+      "address": "tarmen birlik sitesi 1.blok 2.cadde 23/b kat 3 daire 6 egekent2 Menemen     Menemen İzmir",
+      "city": "İzmir",
+      "district": "Menemen",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 2092,
+    "shipping_cost": 0,
+    "total": 2092,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "delivered",
+    "cargo_tracking_number": 7330030895089559,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=edd2e9a6-18bb-11f1-915c-0a729fd58264",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "https://apigw.trendyol.com/sapigw/customer-invoices/41e952b4-aa38-438f-b956-c766d7281292",
+    "updated_at": "2026-03-24T03:58:35.520865+00:00",
+    "id": "f7a25a49-5c75-4b26-ad09-726b1b560cd9",
+    "created_at": "2026-03-24T03:58:35.521604+00:00"
+  },
+  {
+    "order_number": "11075739274",
+    "platform": "trendyol",
+    "trendyol_package_id": 3712307602,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1228812286,
+        "product_name": "Kadın Acı Kahve Kol Apoletli Rüzgarlıklı Oversize Trençkot 48289894, S/M",
+        "quantity": 1,
+        "unit_price": 2920.0,
+        "discount_amount": 0,
+        "price": 2920,
+        "size": "S/M",
+        "color": "ACI KAHVE"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Beyza",
+      "last_name": "Demir",
+      "phone": null,
+      "email": "pf+ozj2krej@trendyolmail.com",
+      "address": "hacıbey mah. hacıbey toki konutları F/18 A blok no:2Yahşihan/KIRIKKALE     Yahşihan Kırıkkale",
+      "city": "Kırıkkale",
+      "district": "Yahşihan"
+    },
+    "billing_address": {
+      "first_name": "Beyza",
+      "last_name": "Demir",
+      "phone": null,
+      "address": "hacıbey mah. hacıbey toki konutları F/18 A blok no:2Yahşihan/KIRIKKALE     Yahşihan Kırıkkale",
+      "city": "Kırıkkale",
+      "district": "Yahşihan",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 2920,
+    "shipping_cost": 0,
+    "total": 2920,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "pending",
+    "cargo_tracking_number": 7330031392406139,
+    "cargo_tracking_link": "",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "",
+    "updated_at": "2026-03-24T04:09:48.299726+00:00",
+    "id": "40a77f7e-c60c-4442-85fd-87cae531b620",
+    "created_at": "2026-03-24T04:09:48.300679+00:00"
+  },
+  {
+    "order_number": "11075675603",
+    "platform": "trendyol",
+    "trendyol_package_id": 3712239403,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 1389980631,
+        "product_name": "Kol Apoletli Rüzgarlıklı Oversize Trençkot Bej 48289894, S/M",
+        "quantity": 1,
+        "unit_price": 2920.0,
+        "discount_amount": 50.0,
+        "price": 2870,
+        "size": "S/M",
+        "color": "Bej",
+        "currency": "TRY"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Büşra",
+      "last_name": "Özkan",
+      "phone": null,
+      "email": "pf+2knlpa3k@trendyolmail.com",
+      "address": "Hürriyet mahallesi Meşelik caddesi No49 Uludağ inşaat Erol yapı Sayan apartmanı kat1 daire2     Merkez Bilecik",
+      "city": "Bilecik",
+      "district": "Merkez"
+    },
+    "billing_address": {
+      "first_name": "Büşra",
+      "last_name": "Özkan",
+      "phone": null,
+      "address": "Hürriyet mahallesi Meşelik caddesi No49 Uludağ inşaat Erol yapı Sayan apartmanı kat1 daire2     Merkez Bilecik",
+      "city": "Bilecik",
+      "district": "Merkez",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 2920,
+    "shipping_cost": 0,
+    "discount_amount": 50,
+    "total": 2870,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "pending",
+    "cargo_tracking_number": 7330031391764940,
+    "cargo_tracking_link": "",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "",
+    "updated_at": "2026-03-24T04:30:49.225354+00:00",
+    "id": "35e53a1e-6377-48e6-940c-1c429b592d60",
+    "created_at": "2026-03-24T04:30:49.226194+00:00"
+  },
+  {
+    "order_number": "11065175595",
+    "platform": "trendyol",
+    "trendyol_package_id": 3703682468,
+    "user_id": null,
+    "items": [
+      {
+        "product_id": 595250657,
+        "product_name": "Kadın 20223394422 Camel Kuşaklı Mevsimlik Ince Trençkot 111889, Standart",
+        "quantity": 1,
+        "unit_price": 1062.0,
+        "discount_amount": 50.0,
+        "price": 1012,
+        "size": "Standart",
+        "color": "CAMEL",
+        "currency": "TRY"
+      }
+    ],
+    "shipping_address": {
+      "first_name": "Şevval",
+      "last_name": "uygar",
+      "phone": null,
+      "email": "pf+nz4wba8a@trendyolmail.com",
+      "address": "Yeni mahalle ilter sokak no 5     İpekyolu Van",
+      "city": "Van",
+      "district": "İpekyolu"
+    },
+    "billing_address": {
+      "first_name": "Şevval",
+      "last_name": "uygar",
+      "phone": null,
+      "address": "Yeni mahalle ilter sokak no 5     İpekyolu Van",
+      "city": "Van",
+      "district": "İpekyolu",
+      "tax_number": "",
+      "tax_office": ""
+    },
+    "subtotal": 1062,
+    "shipping_cost": 0,
+    "discount_amount": 50,
+    "total": 1012,
+    "payment_method": "marketplace",
+    "payment_status": "paid",
+    "status": "shipped",
+    "cargo_tracking_number": 7330031307451506,
+    "cargo_tracking_link": "https://kargotakip.trendyol.com/?token=b10ebaf5-23e0-11f1-9893-0e4a80a8b58a",
+    "cargo_provider_name": "Trendyol Express Marketplace",
+    "invoice_link": "https://apigw.trendyol.com/sapigw/customer-invoices/7d705366-2033-4ddb-80d4-7d1b071c5984",
+    "updated_at": "2026-03-24T17:23:13.356687+00:00",
+    "id": "5e9260a3-79b5-499e-adc2-c62fbdb1813f",
+    "created_at": "2026-03-24T17:23:13.357424+00:00"
+  }
+]
