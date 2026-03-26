@@ -203,7 +203,7 @@ export default function AdminProducts() {
       if (targetTrendyolCatId) {
         setFetchingAttributes(true);
         const token = localStorage.getItem('token');
-        axios.get(`${API}/trendyol/categories/${targetTrendyolCatId}/attributes`, {
+        axios.get(`${API}/integrations/trendyol/categories/${targetTrendyolCatId}/attributes`, {
           headers: { Authorization: `Bearer ${token}` }
         })
           .then(res => setTrendyolAttributesList(res.data.attributes || []))
@@ -237,7 +237,7 @@ export default function AdminProducts() {
   const fetchTrendyolCategories = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/trendyol/categories`, { headers: { Authorization: `Bearer ${token}` }});
+      const res = await axios.get(`${API}/integrations/trendyol/categories`, { headers: { Authorization: `Bearer ${token}` }});
       if (res.data?.categories) {
         setTrendyolCategories(res.data.categories);
       }
@@ -249,7 +249,7 @@ export default function AdminProducts() {
   const fetchGlobalTrendyolMarkup = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/trendyol/settings`, {
+      const res = await axios.get(`${API}/integrations/trendyol/settings`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data && res.data.default_markup !== undefined) {
