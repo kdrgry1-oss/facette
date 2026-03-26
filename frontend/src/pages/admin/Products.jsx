@@ -422,14 +422,9 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const attributesArray = [];
-      if (formData.attributes) {
-        Object.entries(formData.attributes).forEach(([key, val]) => {
-          if (val !== undefined && val !== null && val.toString().trim() !== "") {
-            attributesArray.push({ type: key, value: val });
-          }
-        });
-      }
+      const attributesArray = Object.entries(formData.attributes || {})
+        .filter(([_, v]) => v !== "" && v !== null && v !== undefined)
+        .map(([k, v]) => ({ type: k, name: k, value: v }));
 
       // User Request: Extract color from name and assign to variants
       const extractColorFromName = (name) => {
@@ -571,7 +566,7 @@ export default function AdminProducts() {
       markup_rate: product.markup_rate || 0,
       trendyol_attributes: product.trendyol_attributes || {},
       variants: product.variants || [],
-      attributes: (product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type]: curr.value}), {}),
+      attributes: (product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}),
     });
     setModalOpen(true);
   };
