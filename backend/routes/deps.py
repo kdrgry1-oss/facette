@@ -84,8 +84,18 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
         raise HTTPException(status_code=401, detail="Geçersiz token")
 
 def generate_id() -> str:
-    """Generate unique ID"""
+    """Generate unique UUID"""
     return str(uuid.uuid4())
+
+async def generate_short_id(collection_name: str) -> str:
+    """Generate a unique 4-digit numeric ID (1000-9999) for a collection"""
+    for _ in range(100):
+        new_id = str(random.randint(1000, 9999))
+        existing = await db[collection_name].find_one({"id": new_id}, {"_id": 1})
+        if not existing:
+            return new_id
+    # Fallback if somehow 9000 IDs are exhausted or we get extremely unlucky
+    return str(uuid.uuid4())[:4]
 
 def generate_order_number() -> str:
     """Generate order number"""
