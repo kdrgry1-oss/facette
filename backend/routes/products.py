@@ -536,10 +536,21 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                 
                 # Parse dynamic attributes from columns
                 parsed_attrs = []
+                import uuid
                 for col in df.columns:
                     if str(col).startswith("Özellik: "):
                         attr_name = str(col).replace("Özellik: ", "").strip()
                         val = str(row.get(col, "")).strip()
+                        
+                        # Ensure attribute exists in global library
+                        existing_global = await db.attributes.find_one({"name": attr_name})
+                        if not existing_global:
+                            await db.attributes.insert_one({
+                                "id": f"attr_{uuid.uuid4().hex[:8]}",
+                                "name": attr_name,
+                                "values": []
+                            })
+                            
                         if val and val != "nan":
                             parsed_attrs.append({"name": attr_name, "value": val})
                 
