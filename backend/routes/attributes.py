@@ -224,3 +224,71 @@ async def sync_attributes_from_products(current_user: dict = Depends(require_adm
     except Exception as e:
         logger.error(f"Error syncing from products: {e}")
         raise HTTPException(status_code=500, detail="Ürün özellikleri taraması başarısız oldu.")
+
+
+@router.post("/cleanup-non-textile")
+async def cleanup_non_textile_attributes(current_user: dict = Depends(require_admin)):
+    """Remove non-textile attributes from the library"""
+    remove_names = [
+        "Kadran Renk", "Kasa Materyali", "Kasa Renk", "Kasa Çapı", "Kordon Materyali", "Kordon Renk",
+        "Mekanizma", "Cam Tipi", "Cam Şekli", "Dönence", "Su Geçirmezlik", "Kutu Durumu",
+        "Batarya Boyutu", "Batarya Türü", "Mp3 Çalar", "CE Uygunluk Sembolu", "Berraklık",
+        "Raf Sayısı", "Sineklik", "Tekerlek", "Taşıma Kapasitesi", "Taşıma Çantası", "Klips Sayısı",
+        "Altın Ayar", "Karat", "Taş Cinsi", "Ayar",
+        "TEST_Attr1", "TEST_Attr2", "Test", "Test Kalıp", "Test Kumaş",
+        "Birincil İthalatçı Adres Bilgisi", "Birincil İthalatçı Adı", "Birincil İthalatçı Mail Adresi",
+        "İkincil İthalatçı Adres Bilgisi", "İkincil İthalatçı Adı", "İkincil İthalatçı Mail Adresi",
+        "Üçüncül İthalatçı Adres Bilgisi", "Üçüncül İthalatçı Adı", "Üçüncül İthalatçı Mail Adresi",
+        "Üretici Adres Bilgisi", "Üretici Adı", "Üretici Mail Adresi",
+        "Paket Derinlik", "Paket Genişlik", "Paket Yükseklik", "Paket İçeriği",
+        "Paket Görseli (arka)", "Paket Görseli (ön)",
+        "Ağırlık", "Boyut/Ebat", "Derinlik", "Genişlik", "Yükseklik", "Ölçü",
+        "Alt Açma Ünitesi", "Bant Stili", "Garanti Süresi", "Kap", "Karakter",
+        "Kullanım Alanı", "Kullanım Talimatı/Uyarıları", "Model", "Parça Sayısı",
+        "Teknik", "Tema / Stil", "Özellik", "Ürün Tipi", "Yaş", "Ara Kat"
+    ]
+    result = await db.attributes.delete_many({"name": {"$in": remove_names}})
+    return {"success": True, "deleted": result.deleted_count, "message": f"{result.deleted_count} alakasız özellik silindi"}
+
+
+@router.post("/bulk-set-defaults")
+async def bulk_set_default_attributes(current_user: dict = Depends(require_admin)):
+    """Set Yaş Grubu=Yetişkin and Menşei=TR for all products that don't have them"""
+    products = await db.products.find({}, {"_id": 0, "id": 1, "attributes": 1}).to_list(None)
+    updated = 0
+    for p in products:
+        attrs = p.get("attributes", [])
+        attr_map = {(a.get("type") or a.get("name")): a for a in attrs}
+        changed = False
+
+        if "Yaş Grubu" not in attr_map:
+            attrs.append({"type": "Yaş Grubu", "name": "Yaş Grubu", "value": "Yetişkin"})
+            changed = True
+        if "Menşei" not in attr_map:
+            attrs.append({"type": "Menşei", "name": "Menşei", "value": "TR"})
+            changed = True
+
+        if changed:
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {"attributes": attrs, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            updated += 1
+
+    # Also ensure these values exist in attribute library
+    for attr_name, val in [("Yaş Grubu", "Yetişkin"), ("Menşei", "TR")]:
+        existing = await db.attributes.find_one({"name": attr_name})
+        if existing:
+            vals = existing.get("values", [])
+            if val not in vals:
+                vals.append(val)
+                await db.attributes.update_one({"name": attr_name}, {"$set": {"values": vals}})
+        else:
+            await db.attributes.insert_one({
+                "id": generate_short_id(),
+                "name": attr_name,
+                "values": [val],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+
+    return {"success": True, "updated": updated, "message": f"{updated} ürüne Yaş Grubu ve Menşei eklendi"}

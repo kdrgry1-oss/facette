@@ -514,23 +514,11 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const attributesArray = Object.entries(formData.attributes || {})
+      // Build attributes array - auto-add Yaş Grubu and Menşei if missing
+      const attrObj = { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(formData.attributes || {}) };
+      const attributesArray = Object.entries(attrObj)
         .filter(([_, v]) => v !== "" && v !== null && v !== undefined)
         .map(([k, v]) => ({ type: k, name: k, value: v }));
-
-      // User Request: Extract color from name and assign to variants
-      const extractColorFromName = (name) => {
-        const words = name.trim().split(" ");
-        if (words.length < 2) return null;
-        const lastWord = words[words.length - 1];
-        const foundColor = globalColors.find(c => 
-          c.value.toLowerCase() === lastWord.toLowerCase() || 
-          lastWord.toLowerCase().includes(c.value.toLowerCase())
-        );
-        return foundColor ? foundColor.value : null;
-      };
-
-      const extractedColor = extractColorFromName(formData.name);
 
       const payload = {
         ...formData,
@@ -538,38 +526,59 @@ export default function AdminProducts() {
         variants: formData.variants?.map(v => ({
           ...v,
           stock_code: formData.stock_code || v.stock_code,
-          color: v.color || extractedColor || ""
         })) || []
       };
-      // Group variants by color
-      const variantsByColor = (payload.variants || []).reduce((acc, v) => {
-        const color = v.color || "Standart";
-        if (!acc[color]) acc[color] = [];
-        acc[color].push(v);
-        return acc;
-      }, {});
 
-      const colors = Object.keys(variantsByColor);
+      // Get unique colors from variants
+      const uniqueColors = [...new Set((payload.variants || []).map(v => v.color).filter(Boolean))];
       
-      if (colors.length > 1 && !editingProduct) {
-        // Multi-color product creation (only for NEW products)
-        toast.info(`${colors.length} farklı renk için ayrı ürünler oluşturuluyor...`);
-        for (const color of colors) {
-          const colorVariants = variantsByColor[color];
-          const colorFormData = {
-            ...payload, // Use payload as base
-            name: `${payload.name} - ${color}`,
-            slug: `${payload.slug}-${color.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+      if (uniqueColors.length > 1 && !editingProduct) {
+        // Multi-color: create a separate product per color
+        toast.info(`${uniqueColors.length} farklı renk için ayrı ürünler oluşturuluyor...`);
+        
+        for (const color of uniqueColors) {
+          const colorVariants = payload.variants.filter(v => v.color === color);
+          // Set Web Color and Renk to this color in attributes
+          const colorAttrs = attributesArray
+            .filter(a => a.type !== "Web Color" && a.type !== "Renk")
+            .concat([
+              { type: "Web Color", name: "Web Color", value: color },
+              { type: "Renk", name: "Renk", value: color }
+            ]);
+          
+          const colorPayload = {
+            ...payload,
+            name: `${formData.name} ${color}`,
+            slug: generateSlug(`${formData.name} ${color}`) + `-${Date.now()}`,
+            attributes: colorAttrs,
             variants: colorVariants,
-            main_image: colorVariants[0]?.image || payload.images[0] || "",
-            images: payload.images
           };
-          delete colorFormData.newVariant;
-          await axios.post(`${API}/products`, colorFormData, { headers });
+          delete colorPayload.newVariant;
+          await axios.post(`${API}/products`, colorPayload, { headers });
         }
-        toast.success(`${colors.length} ürün başarıyla oluşturuldu`);
+        toast.success(`${uniqueColors.length} ürün başarıyla oluşturuldu`);
+      } else if (uniqueColors.length === 1 && !editingProduct) {
+        // Single color: auto-set Web Color and Renk
+        const color = uniqueColors[0];
+        const colorAttrs = attributesArray
+          .filter(a => a.type !== "Web Color" && a.type !== "Renk")
+          .concat([
+            { type: "Web Color", name: "Web Color", value: color },
+            { type: "Renk", name: "Renk", value: color }
+          ]);
+        
+        const singlePayload = {
+          ...payload,
+          name: formData.name.includes(color) ? formData.name : `${formData.name} ${color}`,
+          slug: generateSlug(formData.name.includes(color) ? formData.name : `${formData.name} ${color}`) + `-${Date.now()}`,
+          attributes: colorAttrs,
+        };
+        delete singlePayload.newVariant;
+        await axios.post(`${API}/products`, singlePayload, { headers });
+        toast.success("Ürün oluşturuldu");
       } else {
-        // Standard single product creation or update
+        // Edit mode or no variants
+        delete payload.newVariant;
         if (editingProduct) {
           await axios.put(`${API}/products/${editingProduct.id}`, payload, { headers });
           toast.success("Ürün güncellendi");
@@ -659,13 +668,14 @@ export default function AdminProducts() {
       markup_rate: product.markup_rate || 0,
       trendyol_attributes: product.trendyol_attributes || {},
       variants: product.variants || [],
-      attributes: (product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}),
+      attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}) },
     });
     setModalOpen(true);
   };
 
   const resetForm = () => {
     setEditingProduct(null);
+    setShowAllAttributes(false);
     setFormData({
       name: "", slug: "", description: "", short_description: "",
       price: 0, sale_price: null, category_name: "", brand: "FACETTE",
@@ -681,6 +691,7 @@ export default function AdminProducts() {
       use_default_markup: true, markup_rate: 0,
       trendyol_attributes: {},
       variants: [], newVariant: {},
+      attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR" },
     });
   };
 
@@ -1432,8 +1443,11 @@ export default function AdminProducts() {
                   {(() => {
                     const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
                     const attrMappings = selectedCat?.attribute_mappings || [];
+                    // Hide attributes that are handled by variants or auto-filled
+                    const hiddenAttrNames = ["beden", "renk", "web color"];
 
                     const processedAttributes = globalAttributes
+                      .filter(a => !hiddenAttrNames.includes(a.name.toLowerCase()))
                       .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()))
                       .map(attr => {
                         const mapping = attrMappings.find(m => m.local_attr?.toLowerCase() === attr.name.toLowerCase());
