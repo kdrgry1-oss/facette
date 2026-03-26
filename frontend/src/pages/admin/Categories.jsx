@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Plus, Edit, Trash2, ChevronRight, ChevronDown, RefreshCw } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -13,20 +13,32 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function AdminCategories() {
   const [categories, setCategories] = useState([]);
+  const [trendyolCategories, setTrendyolCategories] = useState([]);
+  const [trendyolCatSearch, setTrendyolCatSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncingTrendyol, setSyncingTrendyol] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
+  const [expandedNodes, setExpandedNodes] = useState(new Set());
+  const [trendyolAttributes, setTrendyolAttributes] = useState([]);
+  const [fetchingAttributes, setFetchingAttributes] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
-    description: "",
     image_url: "",
+    parent_id: "",
+    trendyol_category_id: "",
+    hepsiburada_category_id: "",
+    amazon_category_id: "",
+    attribute_mapping: {},
     is_active: true,
     sort_order: 0,
   });
 
   useEffect(() => {
     fetchCategories();
+    fetchTrendyolCategories();
   }, []);
 
   const fetchCategories = async () => {
@@ -41,14 +53,63 @@ export default function AdminCategories() {
     }
   };
 
+  const fetchTrendyolCategories = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/trendyol/categories`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data?.categories && res.data.categories.length > 0) {
+        setTrendyolCategories(res.data.categories);
+      } else {
+        // Kategoriler boşsa otomatik senkronize et
+        syncTrendyolCategories();
+      }
+    } catch (err) {
+      console.error("Trendyol categories fetch failed", err);
+    }
+  };
+
+  const syncTrendyolCategories = async () => {
+    setSyncingTrendyol(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/trendyol/categories/sync`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 60000
+      });
+      // Tekrar çek
+      const res = await axios.get(`${API}/trendyol/categories`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data?.categories) {
+        setTrendyolCategories(res.data.categories);
+        toast.success(`${res.data.categories.length} Trendyol kategorisi yüklendi`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Trendyol kategorileri çekilemedi");
+    } finally {
+      setSyncingTrendyol(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...formData,
+        parent_id: formData.parent_id || null,
+        trendyol_category_id: formData.trendyol_category_id ? parseInt(formData.trendyol_category_id) : null,
+        hepsiburada_category_id: formData.hepsiburada_category_id ? parseInt(formData.hepsiburada_category_id) : null,
+        amazon_category_id: formData.amazon_category_id ? parseInt(formData.amazon_category_id) : null
+      };
+
       if (editingCategory) {
-        await axios.put(`${API}/categories/${editingCategory.id}`, formData);
+        await axios.put(`${API}/categories/${editingCategory.id}`, payload);
         toast.success("Kategori güncellendi");
       } else {
-        await axios.post(`${API}/categories`, formData);
+        await axios.post(`${API}/categories`, payload);
         toast.success("Kategori eklendi");
       }
       setModalOpen(false);
@@ -60,13 +121,54 @@ export default function AdminCategories() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Kategoriyi silmek istediğinize emin misiniz?")) return;
+    toast('Kategoriyi silmek istediğinize emin misiniz?', {
+      action: {
+        label: 'Sil',
+        onClick: async () => {
+          try {
+            const token = localStorage.getItem('token');
+            await axios.delete(`${API}/categories/${id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            toast.success('Kategori silindi');
+            fetchCategories();
+          } catch (err) {
+            toast.error('Silme başarısız');
+          }
+        }
+      },
+      cancel: { label: 'İptal', onClick: () => {} },
+      duration: 8000,
+    });
+  };
+
+  const fetchTrendyolAttributes = async (trendyolCatId) => {
+    if (!trendyolCatId) { setTrendyolAttributes([]); return; }
+    setFetchingAttributes(true);
     try {
-      await axios.delete(`${API}/categories/${id}`);
-      toast.success("Kategori silindi");
-      fetchCategories();
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/trendyol/categories/${trendyolCatId}/attributes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTrendyolAttributes(res.data?.attributes || []);
     } catch (err) {
-      toast.error("Silme başarısız");
+      console.error(err);
+      setTrendyolAttributes([]);
+    } finally {
+      setFetchingAttributes(false);
+    }
+  };
+
+  const handleTrendyolCategoryStockPrice = async (categoryId, categoryName) => {
+    try {
+      const token = localStorage.getItem('token');
+      toast.info(`${categoryName} kategorisi için stok/fiyat güncelleniyor...`);
+      const res = await axios.post(`${API}/trendyol/categories/${categoryId}/update-stock-price`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(res.data?.message || "Stok/fiyat güncellendi");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Stok/fiyat güncelleme başarısız");
     }
   };
 
@@ -74,19 +176,30 @@ export default function AdminCategories() {
     setEditingCategory(category);
     setFormData({
       name: category.name,
-      slug: category.slug,
-      description: category.description || "",
+      slug: category.slug || "",
       image_url: category.image_url || "",
+      parent_id: category.parent_id || "",
+      trendyol_category_id: category.trendyol_category_id || "",
+      hepsiburada_category_id: category.hepsiburada_category_id || "",
+      amazon_category_id: category.amazon_category_id || "",
+      attribute_mapping: category.attribute_mapping || {},
       is_active: category.is_active,
       sort_order: category.sort_order || 0,
     });
+    if (category.trendyol_category_id) {
+      fetchTrendyolAttributes(category.trendyol_category_id);
+    } else {
+      setTrendyolAttributes([]);
+    }
     setModalOpen(true);
   };
 
   const resetForm = () => {
     setEditingCategory(null);
+    setTrendyolAttributes([]);
     setFormData({
-      name: "", slug: "", description: "", image_url: "", is_active: true, sort_order: 0
+      name: "", slug: "", description: "", image_url: "", parent_id: "", trendyol_category_id: "",
+      hepsiburada_category_id: "", amazon_category_id: "", attribute_mapping: {}, is_active: true, sort_order: 0
     });
   };
 
@@ -97,82 +210,167 @@ export default function AdminCategories() {
       .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   };
 
+  const toggleExpand = (id) => {
+    const newExpanded = new Set(expandedNodes);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedNodes(newExpanded);
+  };
+
+  // Build tree structure - safe version with null parent_id handling
+  const buildTree = (cats, parentId = null, depth = 0) => {
+    if (depth > 10) return []; // prevent infinite recursion
+    return cats
+      .filter((c) => (c.parent_id ?? null) === parentId)
+      .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999))
+      .map((c) => ({
+        ...c,
+        id: c.id || c.ticimax_id || c._id,
+        children: buildTree(cats, c.id || c.ticimax_id, depth + 1),
+      }));
+  };
+
+  const treeData = buildTree(categories);
+
+  const renderTreeRows = (nodes, level = 0) => {
+    return nodes.map((node) => {
+      const hasChildren = node.children && node.children.length > 0;
+      const isExpanded = expandedNodes.has(node.id) || level === 0;
+
+      return (
+        <React.Fragment key={node.id}>
+          <tr className="hover:bg-gray-50 border-b">
+            <td className="py-3 px-4">
+              <div 
+                className="flex items-center gap-2" 
+                style={{ paddingLeft: `${level * 1.5}rem` }}
+              >
+                {hasChildren ? (
+                  <button onClick={() => toggleExpand(node.id)} className="p-1 hover:bg-gray-200 rounded">
+                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
+                ) : (
+                  <span className="w-6 h-6 inline-block"></span>
+                )}
+                {node.image_url ? (
+                  <img src={node.image_url} alt="" className="w-8 h-8 object-cover rounded bg-gray-100" />
+                ) : (
+                  <div className="w-8 h-8 bg-gray-100 rounded" />
+                )}
+                <span className="font-medium">{node.name}</span>
+              </div>
+            </td>
+            <td className="py-3 px-4 text-gray-500">{node.slug}</td>
+            <td className="py-3 px-4">{node.sort_order}</td>
+            <td className="py-3 px-4">
+              <span className={`px-2 py-1 text-xs rounded ${node.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                {node.is_active ? "Aktif" : "Pasif"}
+              </span>
+            </td>
+            <td className="py-3 px-4">
+              <div className="flex items-center gap-2">
+                <button onClick={() => openEditModal(node)} className="p-1 hover:bg-gray-100 rounded text-blue-600" title="Düzenle">
+                  <Edit size={16} />
+                </button>
+                <button 
+                  onClick={() => handleTrendyolCategoryStockPrice(node.id, node.name)} 
+                  className="p-1 hover:bg-orange-50 rounded text-orange-500" 
+                  title="Trendyol Stok/Fiyat Güncelle"
+                >
+                  <RefreshCw size={16} />
+                </button>
+                <button onClick={() => handleDelete(node.id)} className="p-1 hover:bg-gray-100 rounded text-red-500" title="Sil">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </td>
+          </tr>
+          {hasChildren && isExpanded && renderTreeRows(node.children, level + 1)}
+        </React.Fragment>
+      );
+    });
+  };
+
   return (
     <div data-testid="admin-categories">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Kategoriler</h1>
-        <button 
-          onClick={() => { resetForm(); setModalOpen(true); }}
-          className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
-        >
-          <Plus size={18} />
-          Yeni Kategori
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Kategori Yönetimi</h1>
+          <p className="text-gray-500 text-sm mt-1">Hiyerarşik kategori ağacı ve pazaryeri eşleştirmeleri</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={syncTrendyolCategories}
+            disabled={syncingTrendyol}
+            className="flex items-center gap-2 bg-[#F27A1A] text-white px-4 py-2 rounded hover:bg-[#d96a15] disabled:opacity-50"
+          >
+            <RefreshCw size={18} className={syncingTrendyol ? "animate-spin" : ""} />
+            {syncingTrendyol ? "Çekiliyor..." : `Trendyol Kategorileri (${trendyolCategories.length})`}
+          </button>
+          <button 
+            onClick={() => { resetForm(); setModalOpen(true); }}
+            className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
+          >
+            <Plus size={18} />
+            Yeni Kategori
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>Görsel</th>
-              <th>Kategori Adı</th>
-              <th>Slug</th>
-              <th>Sıra</th>
-              <th>Durum</th>
-              <th>İşlemler</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-600 font-medium border-b">
               <tr>
-                <td colSpan={6} className="text-center py-8">Yükleniyor...</td>
+                <th className="py-3 px-4">Kategori Adı</th>
+                <th className="py-3 px-4">Slug</th>
+                <th className="py-3 px-4">Sıra</th>
+                <th className="py-3 px-4">Durum</th>
+                <th className="py-3 px-4">İşlemler</th>
               </tr>
-            ) : categories.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-center py-8 text-gray-500">Kategori bulunamadı</td>
-              </tr>
-            ) : (
-              categories.map((category) => (
-                <tr key={category.id}>
-                  <td>
-                    {category.image_url ? (
-                      <img src={category.image_url} alt="" className="w-12 h-12 object-cover bg-gray-100 rounded" />
-                    ) : (
-                      <div className="w-12 h-12 bg-gray-100 rounded" />
-                    )}
-                  </td>
-                  <td className="font-medium">{category.name}</td>
-                  <td className="text-gray-500">{category.slug}</td>
-                  <td>{category.sort_order}</td>
-                  <td>
-                    <span className={`px-2 py-1 text-xs rounded ${category.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                      {category.is_active ? "Aktif" : "Pasif"}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => openEditModal(category)} className="p-1 hover:bg-gray-100 rounded text-blue-600">
-                        <Edit size={16} />
-                      </button>
-                      <button onClick={() => handleDelete(category.id)} className="p-1 hover:bg-gray-100 rounded text-red-500">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-8">Yükleniyor...</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : categories.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-8 text-gray-500">Kategori bulunamadı</td>
+                </tr>
+              ) : (
+                renderTreeRows(treeData)
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingCategory ? "Kategori Düzenle" : "Yeni Kategori"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Üst Kategori</label>
+              <select
+                value={formData.parent_id}
+                onChange={(e) => setFormData({ ...formData, parent_id: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm"
+              >
+                <option value="">Ana Kategori (Yok)</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id} disabled={editingCategory?.id === cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-sm font-medium mb-1">Kategori Adı *</label>
               <input
@@ -193,6 +391,102 @@ export default function AdminCategories() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Trendyol Kategori Eşleşmesi</label>
+              <input
+                type="text"
+                value={trendyolCatSearch}
+                onChange={(e) => setTrendyolCatSearch(e.target.value)}
+                placeholder="Kategori adı ile filtrele..."
+                className="w-full border px-3 py-2 rounded text-sm mb-1"
+              />
+              <select
+                value={formData.trendyol_category_id}
+                onChange={(e) => {
+                  const newCatId = e.target.value;
+                  setFormData({ ...formData, trendyol_category_id: newCatId, attribute_mapping: {} });
+                  const found = trendyolCategories.find(c => String(c.id) === newCatId);
+                  if (found) setTrendyolCatSearch(found.name);
+                  fetchTrendyolAttributes(newCatId);
+                }}
+                className="w-full border px-3 py-2 rounded text-sm bg-white"
+                size={trendyolCatSearch ? 5 : 1}
+              >
+                <option value="">-- Seçiniz --</option>
+                {trendyolCategories
+                  .filter(cat => !trendyolCatSearch || cat.name.toLowerCase().includes(trendyolCatSearch.toLowerCase()))
+                  .slice(0, 50)
+                  .map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name} (ID: {cat.id})
+                    </option>
+                  ))
+                }
+              </select>
+              {formData.trendyol_category_id && (
+                <p className="text-xs text-green-600 mt-1">Seçili ID: {formData.trendyol_category_id}</p>
+              )}
+
+              {/* Attribute Mapping Section */}
+              {formData.trendyol_category_id && (
+                <div className="mt-4 border-t pt-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <h4 className="text-sm font-semibold text-orange-700">Özellik Eşleştirmesi</h4>
+                    {fetchingAttributes && <span className="text-xs text-gray-500 animate-pulse">Yükleniyor...</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Bu kategorideki ürünlerin özellik anahtarlarını Trendyol özellik ID'leriyle eşleştirin. Böylece ürünleri Trendyol'a gönderirken otomatik doldurmak için kullanılır.
+                  </p>
+                  {trendyolAttributes.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {trendyolAttributes.map((attr) => (
+                        <div key={attr.attribute?.id} className={`p-3 rounded border ${attr.attribute?.required ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
+                          <label className="block text-xs font-semibold mb-1 text-gray-700">
+                            {attr.attribute?.name}
+                            {attr.attribute?.required ? <span className="text-red-500 ml-1">*</span> : <span className="text-gray-400 ml-1">(opsiyonel)</span>}
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.attribute_mapping[attr.attribute?.id] || ""}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              attribute_mapping: { ...prev.attribute_mapping, [attr.attribute?.id]: e.target.value }
+                            }))}
+                            placeholder={`Ürün özellik anahtarı (örn: Kumaş)`}
+                            className="w-full text-xs border px-2 py-1.5 rounded bg-white"
+                          />
+                          {attr.attributeValues?.length > 0 && (
+                            <p className="text-[10px] text-gray-400 mt-1">Geçerli değerler: {attr.attributeValues.slice(0, 4).map(v => v.name).join(", ")}{attr.attributeValues.length > 4 ? "..." : ""}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : !fetchingAttributes ? (
+                    <p className="text-xs text-gray-500 bg-gray-50 rounded p-3">Bu kategori için özellik bulunamadı.</p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Hepsiburada Eşleşmesi (ID Ara)</label>
+              <input
+                type="text"
+                value={formData.hepsiburada_category_id || ""}
+                onChange={(e) => setFormData({ ...formData, hepsiburada_category_id: e.target.value })}
+                placeholder="Örn: 12345"
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Amazon Eşleşmesi (ID Ara)</label>
+              <input
+                type="text"
+                value={formData.amazon_category_id || ""}
+                onChange={(e) => setFormData({ ...formData, amazon_category_id: e.target.value })}
+                placeholder="Örn: 98765"
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">Görsel URL</label>
               <input
                 type="url"
@@ -206,7 +500,7 @@ export default function AdminCategories() {
               <input
                 type="number"
                 value={formData.sort_order}
-                onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
                 className="w-full border px-3 py-2 rounded text-sm"
               />
             </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Eye, Truck, FileText, Package, CheckSquare, Square, Printer, Tag, MessageSquare } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -41,14 +41,38 @@ export default function AdminOrders() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState("");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    search: "", phone: "", email: "", order_number: "", 
+    cargo_tracking: "", start_date: "", end_date: "", 
+    payment_method: "", platform: ""
+  });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState([]);
   const [bulkAction, setBulkAction] = useState("");
   const [selectedCargo, setSelectedCargo] = useState("MNG");
   const [shipModalOpen, setShipModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [cargoTrackingNumbers, setCargoTrackingNumbers] = useState({});
+
+  // Trendyol Manual Import State
+  const [trendyolModalOpen, setTrendyolModalOpen] = useState(false);
+  const [trendyolQueryType, setTrendyolQueryType] = useState('order_number');
+  const [trendyolOrderNumber, setTrendyolOrderNumber] = useState("");
+  const [trendyolStartDate, setTrendyolStartDate] = useState("");
+  const [trendyolEndDate, setTrendyolEndDate] = useState("");
+  const [trendyolPreviewOrders, setTrendyolPreviewOrders] = useState([]);
+  const [trendyolSelectedOrders, setTrendyolSelectedOrders] = useState([]);
+  const [trendyolPreviewing, setTrendyolPreviewing] = useState(false);
+  const [trendyolImporting, setTrendyolImporting] = useState(false);
   const [shipOrderId, setShipOrderId] = useState(null);
   const [trackingNumber, setTrackingNumber] = useState("");
+
+  // Trendyol Invoice Upload State
+  const [invoiceLinkInput, setInvoiceLinkInput] = useState("");
+  const [invoiceNumberInput, setInvoiceNumberInput] = useState("");
+  const [uploadingInvoice, setUploadingInvoice] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -60,6 +84,9 @@ export default function AdminOrders() {
       const token = localStorage.getItem('token');
       let url = `${API}/orders?page=${page}&limit=20`;
       if (statusFilter) url += `&status=${statusFilter}`;
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) url += `&${key}=${filters[key]}`;
+      });
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       setOrders(res.data?.orders || []);
       setTotal(res.data?.total || 0);
@@ -127,6 +154,38 @@ export default function AdminOrders() {
     setShipModalOpen(true);
   };
 
+  const handleUploadTrendyolInvoice = async (orderNumber) => {
+    if (!invoiceLinkInput) {
+      toast.error("Lütfen fatura linkini girin");
+      return;
+    }
+    setUploadingInvoice(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/trendyol/invoices/${orderNumber}`, {
+        invoice_link: invoiceLinkInput,
+        invoice_number: invoiceNumberInput
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(res.data.message || "Fatura Trendyol'a yüklendi");
+      setInvoiceLinkInput("");
+      setInvoiceNumberInput("");
+      fetchOrders();
+      // Update selected order view without closing modal
+      setSelectedOrder(prev => ({
+        ...prev,
+        invoice_link: invoiceLinkInput,
+        invoice_number: invoiceNumberInput
+      }));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Fatura yüklenemedi");
+    } finally {
+      setUploadingInvoice(false);
+    }
+  };
+
+
   const handleShipOrder = async () => {
     if (!trackingNumber.trim()) {
       toast.error("Lütfen takip numarası giriniz");
@@ -171,6 +230,20 @@ export default function AdminOrders() {
           printWindow.print();
         }, 500);
       };
+    }
+  };
+
+  const handleTrendyolPrintLabel = async (cargoTrackingNumber) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/trendyol/orders/label/${cargoTrackingNumber}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      window.open(url, '_blank');
+    } catch (err) {
+      toast.error("Trendyol kargo etiketi alınamadı");
     }
   };
 
@@ -278,6 +351,72 @@ export default function AdminOrders() {
     }
   };
 
+  const handleTrendyolPreview = async () => {
+    setTrendyolPreviewing(true);
+    setTrendyolPreviewOrders([]);
+    setTrendyolSelectedOrders([]);
+    try {
+      const token = localStorage.getItem('token');
+      const payload = {};
+      if (trendyolQueryType === 'order_number') {
+        if (!trendyolOrderNumber) {
+          toast.error("Lütfen sipariş numarası giriniz.");
+          setTrendyolPreviewing(false);
+          return;
+        }
+        payload.order_number = trendyolOrderNumber;
+      } else {
+        if (!trendyolStartDate || !trendyolEndDate) {
+          toast.error("Lütfen tarih aralığı seçiniz.");
+          setTrendyolPreviewing(false);
+          return;
+        }
+        payload.start_date_ms = new Date(trendyolStartDate).getTime();
+        payload.end_date_ms = new Date(trendyolEndDate).getTime();
+      }
+      
+      const res = await axios.post(`${API}/trendyol/orders/preview`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data.success) {
+        setTrendyolPreviewOrders(res.data.orders);
+        if (res.data.orders.length === 0) toast.info("Belirtilen kriterlerde sipariş bulunamadı.");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Trendyol siparişleri sorgulanamadı.");
+    } finally {
+      setTrendyolPreviewing(false);
+    }
+  };
+
+  const handleTrendyolImportSelected = async () => {
+    if (trendyolSelectedOrders.length === 0) {
+      toast.error("Lütfen aktarılacak siparişleri seçin.");
+      return;
+    }
+    setTrendyolImporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const ordersToImport = trendyolPreviewOrders.filter(o => trendyolSelectedOrders.includes(o.orderNumber));
+      const res = await axios.post(`${API}/trendyol/orders/import-selected`, { orders: ordersToImport }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (res.data.success) {
+        toast.success(`${res.data.imported} sipariş aktarıldı, ${res.data.updated} güncellendi.`);
+        if (res.data.errors && res.data.errors.length > 0) {
+           toast.error(`${res.data.errors.length} sipariş aktarılamadı. Hataları loglardan inceleyin.`);
+        }
+        setTrendyolModalOpen(false);
+        fetchOrders();
+      }
+    } catch (err) {
+      toast.error("Aktarım başarısız oldu.");
+    } finally {
+      setTrendyolImporting(false);
+    }
+  };
+
   const toggleSelectOrder = (orderId) => {
     setSelectedOrders(prev => 
       prev.includes(orderId) 
@@ -318,9 +457,22 @@ export default function AdminOrders() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Siparişler</h1>
         <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setTrendyolModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-600 border border-orange-200 rounded hover:bg-orange-100 text-sm font-medium transition-colors"
+            title="Trendyol Sipariş Sorgula ve Aktar"
+          >
+            <Store size={16} /> <Info size={14} className="opacity-70" /> Trendyol Sipariş Çek
+          </button>
+          <button 
+            onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
+            className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
+          >
+            <Filter size={16} /> Gelişmiş Filtreler
+          </button>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             className="border px-3 py-2 rounded text-sm"
           >
             <option value="">Tüm Durumlar</option>
@@ -330,6 +482,52 @@ export default function AdminOrders() {
           </select>
         </div>
       </div>
+
+      {/* Advanced Filters Pane */}
+      {advancedFiltersOpen && (
+        <div className="bg-white border rounded-lg p-4 mb-6 shadow-sm">
+          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <input type="text" placeholder="Genel Arama" className="border px-3 py-1.5 rounded text-sm" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} />
+            <input type="text" placeholder="Sipariş No" className="border px-3 py-1.5 rounded text-sm" value={filters.order_number} onChange={e => setFilters({...filters, order_number: e.target.value})} />
+            <input type="text" placeholder="Telefon" className="border px-3 py-1.5 rounded text-sm" value={filters.phone} onChange={e => setFilters({...filters, phone: e.target.value})} />
+            <input type="text" placeholder="E-posta" className="border px-3 py-1.5 rounded text-sm" value={filters.email} onChange={e => setFilters({...filters, email: e.target.value})} />
+            <input type="text" placeholder="Kargo Takip No" className="border px-3 py-1.5 rounded text-sm" value={filters.cargo_tracking} onChange={e => setFilters({...filters, cargo_tracking: e.target.value})} />
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.platform} onChange={e => setFilters({...filters, platform: e.target.value})}>
+              <option value="">Tüm Platformlar</option>
+              <option value="facette">Web (Facette)</option>
+              <option value="trendyol">Trendyol</option>
+            </select>
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_method} onChange={e => setFilters({...filters, payment_method: e.target.value})}>
+              <option value="">Tüm Ödeme Tipleri</option>
+              <option value="credit_card">Kredi Kartı</option>
+              <option value="bank_transfer">Havale/EFT</option>
+              <option value="cash_on_delivery">Kapıda Ödeme</option>
+            </select>
+            <div className="flex gap-2 items-center text-sm text-gray-500">
+              <span className="shrink-0">Tarih:</span>
+              <input type="date" title="Başlangıç Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.start_date} onChange={e => setFilters({...filters, start_date: e.target.value})} />
+              <span>-</span>
+              <input type="date" title="Bitiş Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.end_date} onChange={e => setFilters({...filters, end_date: e.target.value})} />
+            </div>
+            <div className="flex gap-2 xl:col-span-2">
+              <button onClick={() => { setPage(1); fetchOrders(); }} className="w-1/2 bg-black text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 flex justify-center items-center gap-1">
+                <Search size={14} /> Ara
+              </button>
+              <button 
+                onClick={() => {
+                  setFilters({ search: "", phone: "", email: "", order_number: "", cargo_tracking: "", start_date: "", end_date: "", payment_method: "", platform: "" });
+                  setPage(1);
+                  setTimeout(fetchOrders, 0); // Need to wait for filters to clear before fetching
+                }} 
+                className="w-1/2 px-3 py-1.5 border hover:border-gray-400 rounded text-sm bg-gray-50 hover:bg-white transition-colors"
+                type="button"
+              >
+                Sıfırla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Actions Bar */}
       {selectedOrders.length > 0 && (
@@ -419,6 +617,7 @@ export default function AdminOrders() {
               <th>Müşteri</th>
               <th>Ürünler</th>
               <th>Tutar</th>
+              <th>Platform</th>
               <th>Kargo</th>
               <th>Fatura</th>
               <th>Durum</th>
@@ -457,18 +656,66 @@ export default function AdminOrders() {
                       </div>
                     </td>
                     <td>
-                      <div className="flex -space-x-2">
-                        {order.items?.slice(0, 3).map((item, i) => (
-                          <img key={i} src={item.image} alt="" className="w-8 h-10 object-cover border-2 border-white bg-gray-100" />
+                      <div className="flex flex-col gap-0.5">
+                        {/* Trendyol stores items in 'lines', web orders in 'items' */}
+                        {(order.lines?.length > 0 ? order.lines : order.items)?.slice(0, 2).map((item, i) => (
+                          <div key={i} className="flex items-center gap-1 text-xs">
+                            {item.image && <img src={item.image} alt="" className="w-6 h-6 object-cover bg-gray-100 rounded shrink-0" />}
+                            <span className="truncate max-w-[120px]">{item.productName || item.name || 'Ürün'}</span>
+                            {item.quantity > 1 && <span className="text-gray-500">x{item.quantity}</span>}
+                          </div>
                         ))}
-                        {order.items?.length > 3 && (
-                          <span className="w-8 h-10 bg-gray-200 flex items-center justify-center text-xs">+{order.items.length - 3}</span>
+                        {((order.lines?.length > 0 ? order.lines : order.items)?.length || 0) > 2 && (
+                          <span className="text-xs text-gray-500">+{(order.lines?.length || order.items?.length || 0) - 2} daha</span>
+                        )}
+                        {!order.lines?.length && !order.items?.length && (
+                          <span className="text-xs text-gray-400">—</span>
                         )}
                       </div>
                     </td>
-                    <td className="font-medium">{order.total?.toFixed(2)} TL</td>
                     <td>
-                      {order.cargo?.tracking_number ? (
+                      <div className="flex flex-col">
+                        <span className="font-medium">{order.total?.toFixed(2)} TL</span>
+                        {order.platform === 'trendyol' && order.discount_amount > 0 && (
+                          <>
+                            <span className="text-xs text-gray-400">{order.subtotal?.toFixed(2)} TL (Liste)</span>
+                            <span className="text-xs text-red-500 font-medium">-{order.discount_amount?.toFixed(2)} TL (İskonto)</span>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {order.platform === 'trendyol' ? (
+                        <span className="inline-block px-2 py-0.5 bg-[#F27A1A] text-white text-[10px] uppercase font-bold tracking-wider rounded">Trendyol</span>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 bg-gray-800 text-white text-[10px] uppercase font-bold tracking-wider rounded">Web</span>
+                      )}
+                    </td>
+                    <td>
+                      {order.platform === 'trendyol' ? (
+                        order.cargo_tracking_number ? (
+                          <div className="text-xs">
+                            <p className="font-medium text-orange-600">{order.cargo_provider_name || 'Trendyol Kargo'}</p>
+                            <a 
+                              href={order.cargo_tracking_link || '#'} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {order.cargo_tracking_number}
+                            </a>
+                            <button 
+                              onClick={() => handleTrendyolPrintLabel(order.cargo_tracking_number)}
+                              className="ml-2 text-purple-600 hover:text-purple-800"
+                              title="Trendyol Etiketi Yazdır"
+                            >
+                              <Tag size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-500">Kargo Bekleniyor</span>
+                        )
+                      ) : order.cargo?.tracking_number ? (
                         <div className="text-xs">
                           <p className="font-medium text-green-600">{order.cargo.company_name || order.cargo.company}</p>
                           <a 
@@ -508,7 +755,20 @@ export default function AdminOrders() {
                       )}
                     </td>
                     <td>
-                      {order.invoice?.invoice_number ? (
+                      {order.platform === 'trendyol' && order.invoice_link ? (
+                        <div className="text-xs">
+                          <a 
+                            href={order.invoice_link} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-blue-600 hover:underline"
+                            title="Trendyol Faturası"
+                          >
+                            <FileText size={14} />
+                            Fatura Gör
+                          </a>
+                        </div>
+                      ) : order.invoice?.invoice_number ? (
                         <div className="text-xs">
                           <p className="text-green-600">{order.invoice.invoice_number}</p>
                         </div>
@@ -541,13 +801,67 @@ export default function AdminOrders() {
                     </td>
                     <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
                     <td>
-                      <button 
-                        onClick={() => openDetail(order)}
-                        className="p-1 hover:bg-gray-100 rounded text-blue-600"
-                        title="Detayları Gör"
-                      >
-                        <Eye size={18} />
-                      </button>
+                      {/* Ticimax benzeri işlem butonları */}
+                      <div className="flex items-center gap-0.5">
+                        {/* 1. Detay - Ticimax: mavi klasör */}
+                        <button
+                          onClick={() => openDetail(order)}
+                          title="Sipariş Detayı"
+                          className="tci-btn tci-btn-blue"
+                        >
+                          <FolderOpen size={15} />
+                        </button>
+                        {/* 2. Kargo Durum Yenile */}
+                        <button
+                          onClick={() => handleCreateMngShipment(order.id)}
+                          title="MNG ile Kargoya Ver / Güncelle"
+                          className="tci-btn tci-btn-orange"
+                        >
+                          <RefreshCw size={15} />
+                        </button>
+                        {/* 3. Fatura Yazdır - gri yazıcı */}
+                        <button
+                          onClick={() => handlePrintInvoice(order.id)}
+                          title="Fatura Yazdır"
+                          className="tci-btn tci-btn-gray"
+                        >
+                          <Printer size={15} />
+                        </button>
+                        {/* 4. E-Arşiv Fatura Oluştur - yeşil */}
+                        <button
+                          onClick={() => handleGenerateInvoice(order.id)}
+                          title={order.invoice?.invoice_number ? `Fatura: ${order.invoice.invoice_number}` : "E-Arşiv Fatura Oluştur"}
+                          className={`tci-btn ${order.invoice?.invoice_number ? 'tci-btn-green-active' : 'tci-btn-green'}`}
+                        >
+                          <FileText size={15} />
+                        </button>
+                        {/* 5. Kargo Etiketi - yeşil çift */}
+                        {order.platform === 'trendyol' && order.cargo_tracking_number ? (
+                          <button
+                            onClick={() => handleTrendyolPrintLabel(order.cargo_tracking_number)}
+                            title={`Trendyol Etiketi: ${order.cargo_tracking_number}`}
+                            className="tci-btn tci-btn-orange"
+                          >
+                            <Copy size={15} />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => order.cargo?.tracking_number ? handlePrintLabel(order.id) : openShipModal(order.id)}
+                            title={order.cargo?.tracking_number ? `Kargo Etiketi: ${order.cargo.tracking_number}` : "Kargoya Ver / Etiket"}
+                            className={`tci-btn ${order.cargo?.tracking_number ? 'tci-btn-green-active' : 'tci-btn-gray'}`}
+                          >
+                            <Copy size={15} />
+                          </button>
+                        )}
+                        {/* 6. SMS Gönder */}
+                        <button
+                          onClick={() => order.cargo?.tracking_number ? handleSendShippingSMS(order.id) : handleSendConfirmationSMS(order.id)}
+                          title={order.cargo?.tracking_number ? "Kargo SMS Gönder" : "Onay SMS Gönder"}
+                          className="tci-btn tci-btn-gray"
+                        >
+                          <MessageSquare size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -594,7 +908,7 @@ export default function AdminOrders() {
                     Fatura Kes
                   </button>
                 )}
-                {!selectedOrder.cargo?.tracking_number ? (
+                {!selectedOrder.cargo?.tracking_number && !selectedOrder.cargo_tracking_number ? (
                   <>
                     <button 
                       onClick={() => handleCreateMngShipment(selectedOrder.id)}
@@ -613,13 +927,23 @@ export default function AdminOrders() {
                   </>
                 ) : (
                   <>
-                    <button 
-                      onClick={() => handlePrintLabel(selectedOrder.id)}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
-                    >
-                      <Tag size={16} />
-                      Etiket Yazdır
-                    </button>
+                    {selectedOrder.platform === 'trendyol' && selectedOrder.cargo_tracking_number ? (
+                      <button 
+                        onClick={() => handleTrendyolPrintLabel(selectedOrder.cargo_tracking_number)}
+                        className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
+                      >
+                        <Tag size={16} />
+                        Trendyol Etiketi Yazdır
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handlePrintLabel(selectedOrder.id)}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                      >
+                        <Tag size={16} />
+                        Etiket Yazdır
+                      </button>
+                    )}
                     <button 
                       onClick={() => handleSendShippingSMS(selectedOrder.id)}
                       className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
@@ -648,14 +972,46 @@ export default function AdminOrders() {
               </div>
 
               {/* Invoice & Cargo Info */}
-              {(selectedOrder.invoice || selectedOrder.cargo) && (
+              {(selectedOrder.invoice || selectedOrder.cargo || selectedOrder.invoice_link || selectedOrder.platform === 'trendyol') && (
                 <div className="grid md:grid-cols-2 gap-4">
-                  {selectedOrder.invoice && (
+                  {(selectedOrder.invoice || selectedOrder.invoice_link) ? (
                     <div className="p-4 bg-green-50 border border-green-200 rounded">
                       <h3 className="font-medium text-green-800 mb-2">Fatura Bilgileri</h3>
-                      <p className="text-sm">Fatura No: <span className="font-medium">{selectedOrder.invoice.invoice_number}</span></p>
-                      <p className="text-sm text-gray-600">Tarih: {formatDate(selectedOrder.invoice.invoice_date)}</p>
+                      <p className="text-sm">Fatura No: <span className="font-medium">{selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number}</span></p>
+                      {selectedOrder.invoice?.invoice_date && <p className="text-sm text-gray-600">Tarih: {formatDate(selectedOrder.invoice.invoice_date)}</p>}
+                      {selectedOrder.invoice_link && (
+                        <a href={selectedOrder.invoice_link} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline mt-2 inline-block">Faturayı Görüntüle</a>
+                      )}
                     </div>
+                  ) : (
+                    selectedOrder.platform === 'trendyol' && (
+                      <div className="p-4 border rounded">
+                        <h3 className="font-medium mb-2">Trendyol'a Fatura Yükle</h3>
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Fatura Numarası (Opsiyonel)"
+                            className="w-full text-sm border rounded px-2 py-1"
+                            value={invoiceNumberInput}
+                            onChange={e => setInvoiceNumberInput(e.target.value)}
+                          />
+                          <input
+                            type="url"
+                            placeholder="PDF Linki (Zorunlu)"
+                            className="w-full text-sm border rounded px-2 py-1"
+                            value={invoiceLinkInput}
+                            onChange={e => setInvoiceLinkInput(e.target.value)}
+                          />
+                          <button
+                            onClick={() => handleUploadTrendyolInvoice(selectedOrder.order_number)}
+                            disabled={uploadingInvoice || !invoiceLinkInput.trim()}
+                            className="w-full px-3 py-1.5 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:opacity-50"
+                          >
+                            {uploadingInvoice ? "Yükleniyor..." : "Faturayı İlet"}
+                          </button>
+                        </div>
+                      </div>
+                    )
                   )}
                   {selectedOrder.cargo && (
                     <div className="p-4 bg-blue-50 border border-blue-200 rounded">
@@ -709,15 +1065,27 @@ export default function AdminOrders() {
               <div className="border rounded">
                 <h3 className="font-medium p-4 border-b">Sipariş Kalemleri</h3>
                 <div className="divide-y">
-                  {selectedOrder.items?.map((item, i) => (
-                    <div key={i} className="flex items-center gap-4 p-4">
-                      <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100" />
-                      <div className="flex-1">
-                        <p className="font-medium">{item.name}</p>
-                        {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
-                        <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
+                  {(selectedOrder.lines?.length > 0 ? selectedOrder.lines : selectedOrder.items)?.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-4">
+                        {item.image && <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100" />}
+                        <div>
+                          <p className="font-medium">{item.productName || item.name || "Ürün"}</p>
+                          {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
+                          <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
+                        </div>
                       </div>
-                      <p className="font-medium">{(item.price * item.quantity).toFixed(2)} TL</p>
+                      <div className="text-right text-sm">
+                        {item.unit_price > 0 && typeof item.unit_price !== 'undefined' && (
+                          <p className="text-gray-400 line-through text-xs">{item.unit_price.toFixed(2)} TL</p>
+                        )}
+                        {item.discount_amount > 0 && (
+                          <p className="text-orange-500 text-xs">İndirim: -{item.discount_amount.toFixed(2)} TL</p>
+                        )}
+                        <p className="font-medium">
+                          {((item.price || item.amount) * (item.quantity === 1 ? 1 : (item.price ? item.quantity : 1))).toFixed(2)} TL
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -791,6 +1159,153 @@ export default function AdminOrders() {
               >
                 Kargoya Ver
               </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Trendyol Import Modal */}
+      <Dialog open={trendyolModalOpen} onOpenChange={setTrendyolModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600">
+              <Store size={20} /> Trendyol Manuel Sipariş Aktarımı
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 overflow-hidden h-full mt-4">
+            <div className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg bg-orange-50/30">
+              <div className="flex flex-col gap-2 w-full sm:w-1/3">
+                <label className="text-sm font-medium">Sorgulama Tipi</label>
+                <select 
+                  className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none"
+                  value={trendyolQueryType}
+                  onChange={e => setTrendyolQueryType(e.target.value)}
+                >
+                  <option value="order_number">Sipariş Numarası İle</option>
+                  <option value="date_range">Tarih Aralığı İle</option>
+                </select>
+              </div>
+              
+              {trendyolQueryType === 'order_number' ? (
+                <div className="flex flex-col gap-2 w-full sm:w-1/2">
+                  <label className="text-sm font-medium">Trendyol Sipariş No</label>
+                  <input 
+                    type="text" 
+                    value={trendyolOrderNumber}
+                    onChange={e => setTrendyolOrderNumber(e.target.value)}
+                    className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none"
+                    placeholder="Örn: 921381293"
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 w-full sm:w-2/3">
+                  <label className="text-sm font-medium">Tarih Aralığı</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="date" 
+                      value={trendyolStartDate}
+                      onChange={e => setTrendyolStartDate(e.target.value)}
+                      className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none flex-1"
+                    />
+                    <span>-</span>
+                    <input 
+                      type="date" 
+                      value={trendyolEndDate}
+                      onChange={e => setTrendyolEndDate(e.target.value)}
+                      className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none flex-1"
+                    />
+                  </div>
+                </div>
+              )}
+              
+              <div className="flex items-end flex-1 sm:w-auto">
+                <button 
+                  onClick={handleTrendyolPreview}
+                  disabled={trendyolPreviewing}
+                  className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {trendyolPreviewing ? "Sorgulanıyor..." : <><Search size={16} /> Sorgula</>}
+                </button>
+              </div>
+            </div>
+
+            {/* Preview Results */}
+            <div className="flex-1 overflow-auto border rounded-lg bg-white relative">
+              <table className="w-full text-sm text-left relative">
+                <thead className="bg-gray-50 text-gray-600 font-medium border-b sticky top-0 z-10 shadow-sm">
+                  <tr>
+                    <th className="py-3 px-4 w-12 text-center">
+                      <input 
+                        type="checkbox" 
+                        onChange={(e) => {
+                          if (e.target.checked) setTrendyolSelectedOrders(trendyolPreviewOrders.map(o => o.orderNumber));
+                          else setTrendyolSelectedOrders([]);
+                        }}
+                        checked={trendyolPreviewOrders.length > 0 && trendyolSelectedOrders.length === trendyolPreviewOrders.length}
+                        className="rounded text-orange-600 focus:ring-orange-500"
+                      />
+                    </th>
+                    <th className="py-3 px-4">Sipariş No</th>
+                    <th className="py-3 px-4">Tarih</th>
+                    <th className="py-3 px-4">Müşteri</th>
+                    <th className="py-3 px-4">Tutar</th>
+                    <th className="py-3 px-4">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trendyolPreviewOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-12 text-gray-500">
+                        Henüz arama yapılmadı veya sonuç bulunamadı.
+                      </td>
+                    </tr>
+                  ) : (
+                    trendyolPreviewOrders.map((o) => (
+                      <tr key={o.orderNumber} className="border-b hover:bg-gray-50 transition-colors">
+                        <td className="py-2 px-4 text-center">
+                          <input 
+                            type="checkbox" 
+                            checked={trendyolSelectedOrders.includes(o.orderNumber)}
+                            onChange={(e) => {
+                              if (e.target.checked) setTrendyolSelectedOrders([...trendyolSelectedOrders, o.orderNumber]);
+                              else setTrendyolSelectedOrders(trendyolSelectedOrders.filter(id => id !== o.orderNumber));
+                            }}
+                            className="rounded text-orange-600 focus:ring-orange-500"
+                          />
+                        </td>
+                        <td className="py-2 px-4 font-medium">{o.orderNumber}</td>
+                        <td className="py-2 px-4 text-gray-500"> {new Date(o.orderDate).toLocaleString('tr-TR')} </td>
+                        <td className="py-2 px-4">{o.shipmentAddress?.firstName} {o.shipmentAddress?.lastName}</td>
+                        <td className="py-2 px-4 font-semibold">{o.totalPrice?.toFixed(2)} ₺</td>
+                        <td className="py-2 px-4">
+                           <span className="px-2 py-1 bg-gray-100 rounded text-xs">{o.status}</span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border">
+              <div className="text-sm font-medium text-gray-600">
+                Seçilen: {trendyolSelectedOrders.length} / {trendyolPreviewOrders.length}
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setTrendyolModalOpen(false)}
+                  className="px-4 py-2 border rounded hover:bg-gray-100 text-sm transition-colors"
+                >
+                  İptal
+                </button>
+                <button 
+                  onClick={handleTrendyolImportSelected}
+                  disabled={trendyolImporting || trendyolSelectedOrders.length === 0}
+                  className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded text-sm transition-colors disabled:opacity-50"
+                >
+                  {trendyolImporting ? "Aktarılıyor..." : "Seçili Olanları Aktar"}
+                </button>
+              </div>
             </div>
           </div>
         </DialogContent>

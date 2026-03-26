@@ -70,14 +70,25 @@ export default function AdminBanners() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Banner'ı silmek istediğinize emin misiniz?")) return;
-    try {
-      await axios.delete(`${API}/banners/${id}`);
-      toast.success("Banner silindi");
-      fetchBanners();
-    } catch (err) {
-      toast.error("Silme başarısız");
-    }
+    toast("Banner'ı silmek istediğinize emin misiniz?", {
+      action: {
+        label: 'Sil',
+        onClick: async () => {
+          try {
+            const token = localStorage.getItem("token");
+            await axios.delete(`${API}/banners/${id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            toast.success("Banner silindi");
+            fetchBanners();
+          } catch (err) {
+            toast.error("Silme başarısız");
+          }
+        }
+      },
+      cancel: { label: 'İptal', onClick: () => {} },
+      duration: 8000,
+    });
   };
 
   const openEditModal = (banner) => {

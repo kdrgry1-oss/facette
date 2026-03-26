@@ -21,12 +21,20 @@ import AdminDashboard from "./pages/admin/Dashboard";
 import AdminProducts from "./pages/admin/Products";
 import AdminOrders from "./pages/admin/Orders";
 import AdminCategories from "./pages/admin/Categories";
+import AdminVariants from "./pages/admin/Variants";
 import AdminBanners from "./pages/admin/Banners";
 import AdminSettings from "./pages/admin/Settings";
 import AdminCampaigns from "./pages/admin/Campaigns";
 import AdminPages from "./pages/admin/Pages";
 import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
+import AdminLogin from "./pages/admin/AdminLogin";
+import AdminReturns from "./pages/admin/Returns";
+import AttributeImport from "./pages/admin/AttributeImport";
+import AdminQuestions from "./pages/admin/Questions";
+import TrendyolEslestir from "./pages/admin/TrendyolEslestir";
+import TrendyolLogs from "./pages/admin/TrendyolLogs";
+import ProductAttributes from "./pages/admin/ProductAttributes";
 
 import "./App.css";
 
@@ -51,17 +59,25 @@ function App() {
             <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
             
             {/* Admin */}
+            <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="urunler" element={<AdminProducts />} />
               <Route path="siparisler" element={<AdminOrders />} />
               <Route path="kategoriler" element={<AdminCategories />} />
+              <Route path="varyantlar" element={<AdminVariants />} />
+              <Route path="ozellik-import" element={<AttributeImport />} />
+              <Route path="sorular" element={<AdminQuestions />} />
               <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
               <Route path="bannerlar" element={<AdminBanners />} />
               <Route path="kampanyalar" element={<AdminCampaigns />} />
               <Route path="entegrasyonlar" element={<AdminIntegrations />} />
+              <Route path="iadeler" element={<AdminReturns />} />
               <Route path="sayfalar" element={<AdminPages />} />
               <Route path="ayarlar" element={<AdminSettings />} />
+              <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
+              <Route path="trendyol-loglar" element={<TrendyolLogs />} />
+              <Route path="urun-ozellikleri" element={<ProductAttributes />} />
             </Route>
           </Routes>
         </BrowserRouter>

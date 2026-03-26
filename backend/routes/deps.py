@@ -10,12 +10,21 @@ import bcrypt
 import os
 import logging
 import uuid
+import random
 
-# Get database connection from environment
-mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+# Persistent database
+MONGO_URL = os.environ.get('MONGO_URL')
+if not MONGO_URL:
+    # Try unix socket first (works with OS sandbox), fallback to TCP
+    import pathlib
+    sock = pathlib.Path('/tmp/mongodb-27017.sock')
+    if sock.exists():
+        MONGO_URL = 'mongodb://%2Ftmp%2Fmongodb-27017.sock'
+    else:
+        MONGO_URL = 'mongodb://127.0.0.1:27017'
 db_name = os.environ.get('DB_NAME', 'test_database')
 
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(MONGO_URL)
 db = client[db_name]
 
 # Security
@@ -92,3 +101,42 @@ def serialize_doc(doc):
     if isinstance(doc.get('updated_at'), datetime):
         doc['updated_at'] = doc['updated_at'].isoformat()
     return doc
+
+async def generate_barcode_from_range(used_barcodes_set=None) -> str:
+    """Generate a unique 13-digit GTIN barcode within the configured range"""
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0})
+    if not settings:
+        return None
+    
+    range_start = settings.get("barcode_range_start", "")
+    range_end = settings.get("barcode_range_end", "")
+    
+    if not range_start or not range_end:
+        return None
+    
+    try:
+        start_num = int(range_start)
+        end_num = int(range_end)
+    except ValueError:
+        return None
+    
+    # If set not provided, fetch it once
+    if used_barcodes_set is None:
+        used_barcodes_set = set()
+        async for p in db.products.find({}, {"_id": 0, "barcode": 1, "all_barcodes": 1, "variants": 1}):
+            # Check variants
+            for var in p.get("variants", []):
+                bc = var.get("barcode", "")
+                if bc: used_barcodes_set.add(str(bc))
+            # Check main
+            pbc = p.get("barcode", "")
+            if pbc: used_barcodes_set.add(str(pbc))
+    
+    for _ in range(5000):
+        num = random.randint(start_num, end_num)
+        barcode = str(num).zfill(13)
+        if barcode not in used_barcodes_set:
+            used_barcodes_set.add(barcode) # For sequential calls in same request
+            return barcode
+    
+    return None

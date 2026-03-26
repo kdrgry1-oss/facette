@@ -8,6 +8,11 @@ from .cms import router as cms_router
 from .integrations import router as integrations_router
 from .admin import router as admin_router
 from .customer import router as customer_router
+from .variants import router as variants_router
+from .webhooks import router as webhooks_router
+from .attributes import router as attributes_router
+from .upload import router as upload_router
+from .settings import router as settings_router
 
 __all__ = [
     "auth_router",
@@ -19,4 +24,9 @@ __all__ = [
     "integrations_router",
     "admin_router",
     "customer_router",
+    "variants_router",
+    "webhooks_router",
+    "attributes_router",
+    "upload_router",
+    "settings_router",
 ]

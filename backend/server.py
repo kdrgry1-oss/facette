@@ -24,6 +24,11 @@ from routes import (
     integrations_router,
     admin_router,
     customer_router,
+    variants_router,
+    webhooks_router,
+    attributes_router,
+    upload_router,
+    settings_router,
 )
 
 # Database
@@ -35,31 +40,34 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Facette E-Commerce API...")
     
-    # Create admin user if not exists
-    admin = await db.users.find_one({"email": "admin@facette.com"})
-    if not admin:
-        from routes.deps import hash_password, generate_id
-        from datetime import datetime, timezone
-        await db.users.insert_one({
-            "id": generate_id(),
-            "email": "admin@facette.com",
-            "password": hash_password("admin123"),
-            "first_name": "Admin",
-            "last_name": "User",
-            "is_admin": True,
-            "is_active": True,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        logger.info("Admin user created: admin@facette.com / admin123")
-    
-    # Create indexes
-    await db.products.create_index("slug")
-    await db.products.create_index("stock_code")
-    await db.orders.create_index("order_number")
-    await db.orders.create_index("user_id")
-    await db.users.create_index("email", unique=True)
-    
-    logger.info("Database indexes created")
+    try:
+        # Create admin user if not exists
+        admin = await db.users.find_one({"email": "admin@facette.com"})
+        if not admin:
+            from routes.deps import hash_password, generate_id
+            from datetime import datetime, timezone
+            await db.users.insert_one({
+                "id": generate_id(),
+                "email": "admin@facette.com",
+                "password": hash_password("admin123"),
+                "first_name": "Admin",
+                "last_name": "User",
+                "is_admin": True,
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            logger.info("Admin user created: admin@facette.com / admin123")
+        
+        # Create indexes
+        await db.products.create_index("slug")
+        await db.products.create_index("stock_code")
+        await db.orders.create_index("order_number")
+        await db.orders.create_index("user_id")
+        await db.users.create_index("email", unique=True)
+        
+        logger.info("Database indexes created")
+    except Exception as e:
+        logger.warning(f"Database initialization warning (server will still start): {e}")
     
     yield
     
@@ -95,9 +103,14 @@ api_router.include_router(orders_router)
 api_router.include_router(categories_router)
 api_router.include_router(banners_router)
 api_router.include_router(cms_router)
-api_router.include_router(integrations_router)
+api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(admin_router)
 api_router.include_router(customer_router)
+api_router.include_router(variants_router)
+api_router.include_router(webhooks_router)
+api_router.include_router(attributes_router)
+api_router.include_router(upload_router)
+api_router.include_router(settings_router)
 
 # Root endpoint
 @api_router.get("/")

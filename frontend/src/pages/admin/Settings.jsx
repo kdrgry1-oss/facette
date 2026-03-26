@@ -17,7 +17,11 @@ export default function AdminSettings() {
       credit_card: true,
       bank_transfer: true,
       cash_on_delivery: true,
-    }
+    },
+    barcode_range_start: "",
+    barcode_range_end: "",
+    default_vat_rate: 10,
+    trendyol_markup: 0,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,10 +44,13 @@ export default function AdminSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await axios.put(`${API}/settings`, settings);
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/settings`, settings, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       toast.success("Ayarlar kaydedildi");
     } catch (err) {
-      toast.error("Kayıt başarısız");
+      toast.error("Kayıt başarısız: " + (err.response?.data?.detail || err.message));
     } finally {
       setSaving(false);
     }
@@ -97,6 +104,61 @@ export default function AdminSettings() {
                 onChange={(e) => setSettings({ ...settings, free_shipping_limit: parseFloat(e.target.value) })}
                 className="w-full border px-3 py-2 rounded text-sm"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Varsayılan KDV Oranı (%)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={settings.default_vat_rate || 10}
+                  onChange={(e) => setSettings({ ...settings, default_vat_rate: parseInt(e.target.value) || 0 })}
+                  className="flex-1 border px-3 py-2 rounded text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm(`Tüm ürünlerin KDV oranını %${settings.default_vat_rate} olarak güncellemek istediğinize emin misiniz?`)) {
+                      try {
+                        const token = localStorage.getItem('token');
+                        const res = await axios.post(`${API}/products/bulk-update-vat`, { vat_rate: settings.default_vat_rate }, {
+                          headers: { Authorization: `Bearer ${token}` }
+                        });
+                        toast.success(res.data.message);
+                      } catch (err) {
+                        toast.error("İşlem başarısız");
+                      }
+                    }
+                  }}
+                  className="bg-orange-500 text-white px-3 py-2 rounded text-xs font-bold hover:bg-orange-600 transition-colors"
+                >
+                  Tüm Ürünlere Uygula
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trendyol Integration Settings */}
+        <div className="bg-orange-50 p-6 rounded-lg shadow-sm border border-orange-100">
+          <h2 className="text-lg font-medium mb-4 text-orange-900 flex items-center gap-2">
+            <span className="w-2 h-6 bg-orange-500 rounded-full inline-block"></span>
+            Trendyol Entegrasyon Ayarları
+          </h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-orange-900">Global Trendyol Kâr Oranı (%)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={settings.trendyol_markup || 0}
+                  onChange={(e) => setSettings({ ...settings, trendyol_markup: parseFloat(e.target.value) || 0 })}
+                  className="w-full border-orange-200 border px-3 py-2 rounded text-sm focus:outline-none focus:border-orange-500 font-bold text-orange-700"
+                  placeholder="Örn: 20"
+                />
+              </div>
+              <p className="text-xs text-orange-600 mt-2">
+                Trendyol fiyatlamasında "Global oranı kullan" seçilen ürünlerde otomatik eklenecek varsayılan markup (kâr / komisyon) yüzdesi.
+              </p>
             </div>
           </div>
         </div>
@@ -187,6 +249,41 @@ export default function AdminSettings() {
               />
               <span className="text-sm">Kapıda Ödeme</span>
             </label>
+          </div>
+        </div>
+
+        {/* Barcode Settings */}
+        <div className="bg-white p-6 rounded-lg shadow-sm">
+          <h2 className="text-lg font-medium mb-1">Barkod Aralığı (GTIN-13)</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Varyant kaydederken "Oluştur" butonuna basıldığında, sistem bu aralık içinden çakışmayan 13 haneli benzersiz bir barkod üretir.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Aralık Başlangıcı</label>
+              <input
+                type="text"
+                value={settings.barcode_range_start || ""}
+                onChange={(e) => setSettings({ ...settings, barcode_range_start: e.target.value })}
+                placeholder="Örn: 8680000000001"
+                className="w-full border px-3 py-2 rounded text-sm font-mono"
+                maxLength={13}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Aralık Sonu</label>
+              <input
+                type="text"
+                value={settings.barcode_range_end || ""}
+                onChange={(e) => setSettings({ ...settings, barcode_range_end: e.target.value })}
+                placeholder="Örn: 8689999999999"
+                className="w-full border px-3 py-2 rounded text-sm font-mono"
+                maxLength={13}
+              />
+            </div>
+          </div>
+          <div className="mt-3 p-3 bg-blue-50 rounded text-xs text-blue-700">
+            <strong>Not:</strong> Bu aralığa 13 haneli sayısal değerler giriniz. Sistem, sistemdeki diğer ürünlerin barkodlarıyla çakışmayacak şekilde otomatik olarak bir değer seçtiren bir barkod atar.
           </div>
         </div>
       </div>

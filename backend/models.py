@@ -37,6 +37,8 @@ class CategoryBase(BaseModel):
     image_url: Optional[str] = None
     is_active: bool = True
     sort_order: int = 0
+    trendyol_category_id: Optional[int] = None
+    trendyol_attributes: Dict[str, Any] = Field(default_factory=dict)
 
 class CategoryCreate(CategoryBase):
     pass
@@ -96,6 +98,9 @@ class ProductBase(BaseModel):
     custom_field_1: Optional[str] = None
     custom_field_2: Optional[str] = None
     custom_field_3: Optional[str] = None
+    # Trendyol Markup fields
+    use_default_markup: bool = True
+    markup_rate: float = 0  # Percentage multiplier (e.g. 20 for +20%)
     custom_field_4: Optional[str] = None
     custom_field_5: Optional[str] = None
     supplier: Optional[str] = None  # TEDARIKCI
@@ -119,6 +124,8 @@ class ProductBase(BaseModel):
     estimated_delivery: Optional[str] = None  # TAHMINITESLIMSURESI
     marketplace_active: bool = False  # MARKETPLACEAKTIF
     publish_date: Optional[datetime] = None  # YAYINTARIHI
+    trendyol_product_id: Optional[str] = None
+    trendyol_status: Optional[str] = None
 
 class ProductCreate(ProductBase):
     pass
@@ -163,6 +170,7 @@ class OrderBase(BaseModel):
     total: float
     payment_method: str  # credit_card, bank_transfer, cash_on_delivery
     notes: Optional[str] = None
+    platform: str = "facette"  # facette, trendyol, etc.
 
 class OrderCreate(OrderBase):
     pass
@@ -234,6 +242,8 @@ class SiteSettings(BaseModel):
     address: str = ""
     social_links: Dict[str, str] = {}
     payment_methods: Dict[str, bool] = {"credit_card": True, "bank_transfer": True, "cash_on_delivery": True}
+    barcode_range_start: str = ""
+    barcode_range_end: str = ""
 
 # Campaign
 class Campaign(BaseModel):
@@ -261,3 +271,29 @@ class StaticPage(BaseModel):
     meta_description: Optional[str] = None
     is_active: bool = True
     created_at: datetime = Field(default_factory=utc_now)
+
+# Integration Settings
+class TrendyolSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "trendyol"
+    supplier_id: str = ""
+    api_key: str = ""
+    api_secret: str = ""
+    is_active: bool = False
+    updated_at: datetime = Field(default_factory=utc_now)
+
+# Variant Option Models
+class VariantOptionBase(BaseModel):
+    type: str  # e.g., 'size', 'color'
+    value: str # e.g., 'S', 'M', 'L'
+    sort_order: int = 0
+    is_active: bool = True
+
+class VariantOptionCreate(VariantOptionBase):
+    pass
+
+class VariantOption(VariantOptionBase):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=generate_id)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

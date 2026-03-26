@@ -31,7 +31,24 @@ async def get_categories(
     if is_active is not None:
         query["is_active"] = is_active
     
-    categories = await db.categories.find(query, {"_id": 0}).sort("sort_order", 1).to_list(100)
+    categories = await db.categories.find(query, {"_id": 0}).to_list(500)
+    
+    # Build hierarchical full_name
+    cat_dict = {c["id"]: c for c in categories}
+    for c in categories:
+        path = []
+        curr = c
+        while curr:
+            path.append(curr.get("name", ""))
+            parent_id = curr.get("parent_id")
+            if parent_id and parent_id in cat_dict and parent_id != curr.get("id"):
+                curr = cat_dict[parent_id]
+            else:
+                curr = None
+        c["full_name"] = " > ".join(reversed(path))
+
+    # Sort: by sort_order if available, else by full_name
+    categories.sort(key=lambda c: (c.get("sort_order") or 999, c.get("full_name", "")))
     return categories
 
 @router.get("/{category_id}")
@@ -57,7 +74,12 @@ async def create_category(
         "slug": category_data.get("slug") or generate_slug(category_data.get("name", "")),
         "description": category_data.get("description", ""),
         "image": category_data.get("image", ""),
+        "image_url": category_data.get("image_url", ""),
         "parent_id": category_data.get("parent_id"),
+        "trendyol_category_id": category_data.get("trendyol_category_id"),
+        "hepsiburada_category_id": category_data.get("hepsiburada_category_id"),
+        "amazon_category_id": category_data.get("amazon_category_id"),
+        "attribute_mapping": category_data.get("attribute_mapping", {}),
         "sort_order": category_data.get("sort_order", 0),
         "is_active": category_data.get("is_active", True),
         "created_at": datetime.now(timezone.utc).isoformat()

@@ -83,7 +83,26 @@ frontend/node_modules/.cache/default-development/0.pack
 # Environment files
 *.env
 *.env.*
--e 
-# Environment files
-*.env
-*.env.*
+
+# Custom logs
+*.log
+backend/*.log
+frontend/*.log
+*.log*
+
+# Custom Venvs
+custom-venv/
+rootvenv/
+.venv/
+venv/
+
+# Temporary / Test files
+test_*.py
+setup_*.py
+fix_*.py
+test_attributes.xlsx
+dump/
+memory/
+# Nested or Duplicate Repos
+frontend/fcc/
+backend/uploads/

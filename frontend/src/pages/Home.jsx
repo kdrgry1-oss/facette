@@ -97,7 +97,16 @@ function HalfBanners({ block }) {
 }
 
 function ProductSlider({ block, products }) {
-  const displayProducts = products?.slice(0, block?.settings?.limit || 8) || [];
+  const selectedIds = block?.settings?.product_ids;
+  let displayProducts;
+  if (selectedIds && selectedIds.length > 0) {
+    // Show only the selected products in the configured order
+    displayProducts = selectedIds
+      .map(id => products?.find(p => p._id === id || p.id === id))
+      .filter(Boolean);
+  } else {
+    displayProducts = products?.slice(0, block?.settings?.limit || 8) || [];
+  }
   
   if (displayProducts.length === 0) return null;
 
@@ -263,15 +272,17 @@ export default function Home() {
   const fetchData = async () => {
     try {
       const [productsRes, blocksRes] = await Promise.all([
-        axios.get(`${API}/products?limit=20&sort=created_at&order=desc`),
+        axios.get(`${API}/products?limit=100&sort=created_at&order=desc`),
         axios.get(`${API}/page-blocks?page=home`).catch(() => ({ data: [] }))
       ]);
       
       setProducts(productsRes.data?.products || []);
       
+      const isPreview = new URLSearchParams(window.location.search).get('preview') === 'true';
+      
       // Sort blocks by sort_order and filter active ones
       const activeBlocks = (blocksRes.data || [])
-        .filter(b => b.is_active)
+        .filter(b => isPreview || b.is_active)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       
       setBlocks(activeBlocks);

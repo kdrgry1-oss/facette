@@ -49,6 +49,14 @@ export default function ProductDetail() {
       const res = await axios.get(`${API}/products/${slug}`);
       setProduct(res.data);
       
+      if (res.data?.variants?.length > 0) {
+        const firstAvailable = res.data.variants.find(v => v.stock > 0);
+        if (firstAvailable) {
+          setSelectedVariant(firstAvailable);
+          setSelectedSize(firstAvailable.size);
+        }
+      }
+      
       // Fetch similar products
       try {
         const similarRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
@@ -136,7 +144,7 @@ export default function ProductDetail() {
     );
   }
 
-  const hasDiscount = product.sale_price && product.sale_price < product.price;
+  const hasDiscount = Boolean(product.sale_price && product.sale_price < product.price);
   const basePrice = product.sale_price || product.price;
   const variantPriceDiff = selectedVariant?.price_diff || 0;
   const displayPrice = basePrice + variantPriceDiff;
@@ -216,9 +224,9 @@ export default function ProductDetail() {
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
-        <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
+        <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
           {/* All Images in 2 Column Grid - facette.com.tr style */}
-          <div className="space-y-2">
+          <div className="lg:col-span-8 space-y-2">
             <div className="grid grid-cols-2 gap-2">
               {displayImages.map((img, index) => (
                 <div key={index} className="relative aspect-[3/4] bg-gray-50">
@@ -233,7 +241,7 @@ export default function ProductDetail() {
           </div>
 
           {/* Product Info */}
-          <div className="lg:max-w-md">
+          <div className="lg:col-span-4 lg:max-w-md lg:sticky lg:top-24">
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}
@@ -246,22 +254,14 @@ export default function ProductDetail() {
               )}
             </div>
 
-            {/* Product Info - Stock code, barcode etc */}
-            {(product.stock_code || product.barcode) && (
-              <div className="text-xs text-gray-500 space-y-1 mb-4 pb-4 border-b">
-                {product.stock_code && <p>Stok Kodu: {product.stock_code}</p>}
-                {product.barcode && <p>Barkod: {product.barcode}</p>}
-              </div>
-            )}
+
 
             {/* Size Selection */}
             <div className="mb-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs">Beden Seçiniz</span>
-                {selectedVariant && (
-                  <span className={`text-xs ${selectedVariant.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {selectedVariant.stock > 0 ? `Stokta: ${selectedVariant.stock} adet` : 'Tükendi'}
-                  </span>
+                {selectedVariant && selectedVariant.stock === 0 && (
+                  <span className="text-xs text-red-600">Tükendi</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2">

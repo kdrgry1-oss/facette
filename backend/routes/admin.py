@@ -4,7 +4,7 @@ Admin routes - Dashboard, stats, settings
 from fastapi import APIRouter, HTTPException, Query, Depends
 from datetime import datetime, timezone, timedelta
 
-from .deps import db, logger, require_admin
+from .deps import db, require_admin, generate_barcode_from_range, logger, generate_id
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -133,3 +133,40 @@ async def get_users(
         "page": page,
         "pages": (total + limit - 1) // limit
     }
+
+import random
+
+@router.get("/generate-stock-code")
+async def generate_stock_code(
+    prefix: str = Query("FCSS"),
+    current_user: dict = Depends(require_admin)
+):
+    """Generate a unique 7-digit stock code suffix under the given prefix"""
+    existing = await db.products.distinct("stock_code")
+    for v_doc in await db.products.find({}, {"variants": 1}).to_list(None):
+        for var in v_doc.get("variants", []):
+            sc = var.get("stock_code", "")
+            if sc:
+                existing.append(sc)
+    existing_set = set(existing)
+
+    for _ in range(1000):
+        suffix = str(random.randint(1000000, 9999999))
+        code = f"{prefix}{suffix}"
+        if code not in existing_set:
+            return {"stock_code": code}
+    
+    raise HTTPException(status_code=500, detail="Benzersiz stok kodu üretilemedi")
+
+@router.get("/generate-barcode")
+async def generate_barcode(
+    current_user: dict = Depends(require_admin)
+):
+    """Generate a unique 13-digit GTIN barcode within the configured range"""
+    barcode = await generate_barcode_from_range()
+    if not barcode:
+        raise HTTPException(
+            status_code=400, 
+            detail="Barkod üretilemedi. Lütfen Ayarlar sayfasında barkod aralığınızı kontrol edin ve ürünlerinizde çakışma olmadığından emin olun."
+        )
+    return {"barcode": barcode}

@@ -1,28 +1,161 @@
-import { useState, useEffect } from "react";
-import { Outlet, Link, useLocation, Navigate } from "react-router-dom";
-import { 
-  LayoutDashboard, Package, ShoppingCart, Tags, Image, 
-  Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown, Palette, Plug
+import { useState, useEffect, useRef } from "react";
+import { Outlet, Link, NavLink, useLocation, Navigate } from "react-router-dom";
+import {
+  LayoutDashboard, Package, ShoppingCart, Tags, Image,
+  Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
+  Palette, Plug, RotateCcw, Store, GitMerge, Cable
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-const menuItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
-  { icon: Package, label: "Ürünler", path: "/admin/urunler" },
-  { icon: ShoppingCart, label: "Siparişler", path: "/admin/siparisler" },
-  { icon: Tags, label: "Kategoriler", path: "/admin/kategoriler" },
-  { icon: Palette, label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi" },
-  { icon: Image, label: "Bannerlar", path: "/admin/bannerlar" },
-  { icon: Megaphone, label: "Kampanyalar", path: "/admin/kampanyalar" },
-  { icon: Plug, label: "Entegrasyonlar", path: "/admin/entegrasyonlar" },
-  { icon: FileText, label: "Sayfalar", path: "/admin/sayfalar" },
-  { icon: Settings, label: "Ayarlar", path: "/admin/ayarlar" },
+// Navigation structure with dropdowns
+const navigation = [
+  {
+    label: "Dashboard",
+    path: "/admin",
+    icon: LayoutDashboard,
+    exact: true,
+  },
+  {
+    label: "Ürünler",
+    icon: Package,
+    children: [
+      { label: "Tüm Ürünler", path: "/admin/urunler", icon: Package },
+      { label: "Kategoriler", path: "/admin/kategoriler", icon: Tags },
+      { label: "Ürün Özellikleri", path: "/admin/urun-ozellikleri", icon: Tags },
+      { label: "Varyantlar", path: "/admin/varyantlar", icon: GitMerge },
+      { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
+      { label: "Bannerlar", path: "/admin/bannerlar", icon: Image },
+      { label: "Sayfalar", path: "/admin/sayfalar", icon: FileText },
+    ],
+  },
+  {
+    label: "Siparişler",
+    icon: ShoppingCart,
+    children: [
+      { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
+      { label: "İadeler & İptaller", path: "/admin/iadeler", icon: RotateCcw },
+    ],
+  },
+  {
+    label: "Müşteri Soruları",
+    path: "/admin/sorular",
+    icon: Megaphone,
+  },
+  {
+    label: "Kampanyalar",
+    path: "/admin/kampanyalar",
+    icon: Megaphone,
+  },
+  {
+    label: "Ayarlar",
+    icon: Settings,
+    children: [
+      { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
+      { label: "Entegrasyonlar", path: "/admin/entegrasyonlar", icon: Cable },
+      { label: "Trendyol", path: "/admin/trendyol-eslestir", icon: Store },
+      { label: "Trendyol Logları", path: "/admin/trendyol-loglar", icon: Store },
+    ],
+  },
 ];
+
+function NavItem({ item, closeMobile }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const location = useLocation();
+
+  const isChildActive = item.children?.some((c) =>
+    c.path === location.pathname || location.pathname.startsWith(c.path + "/")
+  );
+
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  if (!item.children) {
+    return (
+      <NavLink
+        to={item.path}
+        end={item.exact}
+        onClick={closeMobile}
+        className={({ isActive }) =>
+          `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            isActive ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"
+          }`
+        }
+      >
+        <item.icon size={16} />
+        {item.label}
+      </NavLink>
+    );
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors outline-none ${
+          isChildActive || open ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"
+        }`}
+      >
+        <item.icon size={16} />
+        {item.label}
+        <ChevronDown size={13} className={`ml-0.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {/* Desktop dropdown */}
+      {open && (
+        <div className="hidden lg:block absolute left-0 mt-1 w-52 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+          {item.children.map((child) => {
+            const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
+            return (
+              <Link
+                key={child.path}
+                to={child.path}
+                onClick={() => { setOpen(false); }}
+                className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                  isActive ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                }`}
+              >
+                <child.icon size={15} className={isActive ? "text-orange-400" : "text-gray-600"} />
+                {child.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Mobile inline expansion */}
+      {open && (
+        <div className="lg:hidden ml-4 mt-1 space-y-1">
+          {item.children.map((child) => {
+            const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
+            return (
+              <Link
+                key={child.path}
+                to={child.path}
+                onClick={() => { setOpen(false); if (closeMobile) closeMobile(); }}
+                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                  isActive ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                }`}
+              >
+                <child.icon size={15} />
+                {child.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AdminLayout() {
   const { user, isAdmin, logout, loading } = useAuth();
-  const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   if (loading) {
     return (
@@ -33,70 +166,70 @@ export default function AdminLayout() {
   }
 
   if (!user || !isAdmin) {
-    return <Navigate to="/giris" />;
+    return <Navigate to="/admin/login" />;
   }
 
   return (
-    <div className="min-h-screen bg-gray-100" data-testid="admin-layout">
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-gray-900 text-white flex items-center justify-between px-4 z-50">
-        <button onClick={() => setSidebarOpen(!sidebarOpen)}>
-          {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
-        <span className="font-bold tracking-wider">FACETTE ADMIN</span>
-        <div />
-      </div>
+    <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="admin-layout">
+      {/* Top Navigation Bar */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-gray-900 text-white border-b border-gray-800 flex items-center px-4 gap-6">
+        {/* Logo */}
+        <Link to="/admin" className="text-lg font-bold tracking-[0.2em] shrink-0">
+          FACETTE
+        </Link>
 
-      {/* Sidebar */}
-      <aside className={`admin-sidebar ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"} transition-transform z-40`}>
-        <div className="h-16 flex items-center justify-center border-b border-gray-800">
-          <Link to="/admin" className="text-lg font-bold tracking-[0.2em]">FACETTE</Link>
-        </div>
-
-        <nav className="py-4">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path || 
-              (item.path !== "/admin" && location.pathname.startsWith(item.path));
-            
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`admin-sidebar-item ${isActive ? "active" : ""}`}
-                onClick={() => setSidebarOpen(false)}
-              >
-                <Icon size={20} />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+        {/* Desktop Nav */}
+        <nav className="hidden lg:flex items-center gap-1 flex-1">
+          {navigation.map((item) => (
+            <NavItem key={item.label} item={item} />
+          ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-800">
-          <div className="flex items-center justify-between text-sm">
+        {/* User area */}
+        <div className="hidden lg:flex items-center gap-3 ml-auto shrink-0 border-l border-gray-800 pl-5">
+          <div className="text-right">
+            <p className="text-xs text-white font-medium leading-tight">{user.email}</p>
+            <p className="text-xs text-gray-500">Admin</p>
+          </div>
+          <button
+            onClick={logout}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-red-500/10"
+          >
+            <LogOut size={15} />
+            Çıkış
+          </button>
+        </div>
+
+        {/* Mobile menu toggle */}
+        <button
+          className="lg:hidden ml-auto text-gray-400 hover:text-white"
+          onClick={() => setMobileOpen(!mobileOpen)}
+        >
+          {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+      </header>
+
+      {/* Mobile Menu */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed top-14 left-0 right-0 z-40 bg-gray-900 border-b border-gray-800 px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto shadow-2xl">
+          {navigation.map((item) => (
+            <NavItem key={item.label} item={item} closeMobile={() => setMobileOpen(false)} />
+          ))}
+          <div className="pt-4 mt-4 border-t border-gray-800 flex items-center justify-between">
             <div>
-              <p className="text-white">{user.email}</p>
-              <p className="text-gray-500 text-xs">Admin</p>
+              <p className="text-sm text-white">{user.email}</p>
+              <p className="text-xs text-gray-500">Admin</p>
             </div>
-            <button onClick={logout} className="text-gray-400 hover:text-white">
+            <button onClick={logout} className="text-gray-400 hover:text-red-400">
               <LogOut size={18} />
             </button>
           </div>
         </div>
-      </aside>
-
-      {/* Mobile Overlay */}
-      {sidebarOpen && (
-        <div 
-          className="lg:hidden fixed inset-0 bg-black/50 z-30"
-          onClick={() => setSidebarOpen(false)}
-        />
       )}
 
-      {/* Main Content */}
-      <main className="lg:ml-64 pt-16 lg:pt-0 min-h-screen">
-        <div className="p-4 md:p-6 lg:p-8">
+      {/* Page Content */}
+      <main className="pt-14 flex-1">
+        <div className="p-4 md:p-6 lg:p-8 max-w-full">
           <Outlet />
         </div>
       </main>

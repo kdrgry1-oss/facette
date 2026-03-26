@@ -19,6 +19,14 @@ async def get_orders(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = None,
     search: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
+    order_number: Optional[str] = None,
+    cargo_tracking: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    platform: Optional[str] = None,
     current_user: dict = Depends(require_admin)
 ):
     """Get orders with pagination (admin only)"""
@@ -27,13 +35,34 @@ async def get_orders(
     
     if status:
         query["status"] = status
+    if phone:
+        query["shipping_address.phone"] = {"$regex": phone, "$options": "i"}
+    if email:
+        query["shipping_address.email"] = {"$regex": email, "$options": "i"}
+    if order_number:
+        query["order_number"] = {"$regex": order_number, "$options": "i"}
+    if cargo_tracking:
+        query["cargo_tracking"] = {"$regex": cargo_tracking, "$options": "i"}
+    if payment_method:
+        query["payment_method"] = payment_method
+    if platform:
+        query["platform"] = platform
+        
+    date_query = {}
+    if start_date:
+        date_query["$gte"] = start_date
+    if end_date:
+        date_query["$lte"] = end_date
+    if date_query:
+        query["created_at"] = date_query
     
     if search:
         query["$or"] = [
             {"order_number": {"$regex": search, "$options": "i"}},
             {"shipping_address.first_name": {"$regex": search, "$options": "i"}},
             {"shipping_address.last_name": {"$regex": search, "$options": "i"}},
-            {"shipping_address.phone": {"$regex": search, "$options": "i"}}
+            {"shipping_address.phone": {"$regex": search, "$options": "i"}},
+            {"shipping_address.email": {"$regex": search, "$options": "i"}}
         ]
     
     orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
@@ -84,7 +113,7 @@ async def create_order(
         "payment_status": "pending",
         "status": "pending",
         "notes": order_data.get("notes", ""),
-        "source": order_data.get("source", "web"),
+        "platform": order_data.get("platform", "facette"),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }

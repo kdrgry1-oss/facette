@@ -17,7 +17,7 @@ export default function ProductCard({ product }) {
     : allImages;
   
   const hasMultipleImages = images.length > 1;
-  const hasDiscount = product.sale_price && product.sale_price < product.price;
+  const hasDiscount = Boolean(product.sale_price && product.sale_price < product.price);
   const displayPrice = product.sale_price || product.price;
 
   const handleQuickAdd = (e) => {
