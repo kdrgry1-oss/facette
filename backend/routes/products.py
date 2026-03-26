@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 import re
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_barcode_from_range
+from fastapi import Response, UploadFile, File
+import pandas as pd
+import io
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -439,3 +442,145 @@ async def bulk_update_vat(
     
     result = await db.products.update_many({}, {"$set": {"vat_rate": vat_rate}})
     return {"message": f"{result.modified_count} ürünün KDV oranı %{vat_rate} olarak güncellendi."}
+
+@router.get("/export/excel")
+async def export_products_excel(current_user: dict = Depends(require_admin)):
+    """Export all products to an Excel file (variants as rows)"""
+    try:
+        products = await db.products.find({}, {"_id": 0}).to_list(None)
+        
+        rows = []
+        for p in products:
+            variants = p.get("variants", [])
+            if not variants:
+                # Add a dummy variant to represent the product if no variants exist
+                variants = [{
+                    "barcode": p.get("barcode", ""),
+                    "stock_code": p.get("stock_code", ""),
+                    "price": p.get("price", 0),
+                    "sale_price": p.get("sale_price"),
+                    "stock": p.get("stock", 0),
+                    "size": "",
+                    "color": ""
+                }]
+            
+            for v in variants:
+                rows.append({
+                    "ID": p.get("id"),
+                    "Ürün Adı": p.get("name"),
+                    "Kategori": p.get("category_name"),
+                    "Marka": p.get("brand"),
+                    "Stok Kodu": v.get("stock_code") or p.get("stock_code"),
+                    "Barkod": v.get("barcode") or p.get("barcode"),
+                    "Beden": v.get("size", ""),
+                    "Renk": v.get("color", ""),
+                    "Piyasa Fiyatı": v.get("price") or p.get("price", 0),
+                    "Satış Fiyatı": v.get("sale_price") or p.get("sale_price") or p.get("price", 0),
+                    "Stok": v.get("stock", 0),
+                    "Açıklama": p.get("description", ""),
+                    "Aktif": "Evet" if p.get("is_active") else "Hayır"
+                })
+        
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Ürünler')
+        
+        headers = {
+            'Content-Disposition': 'attachment; filename="urunler.xlsx"',
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        }
+        return Response(content=output.getvalue(), headers=headers)
+        
+    except Exception as e:
+        logger.error(f"Excel export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Dışa aktarma hatası: {str(e)}")
+
+@router.post("/import/excel")
+async def import_products_excel(file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
+    """Import or update products from an Excel file"""
+    try:
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+        
+        # Validation
+        required = ["Ürün Adı", "Kategori", "Satış Fiyatı"]
+        for col in required:
+            if col not in df.columns:
+                raise Exception(f"Eksik sütun: {col}")
+        
+        stats = {"created": 0, "updated": 0, "errors": 0}
+        
+        for _, row in df.iterrows():
+            try:
+                barcode = str(row.get("Barkod", "")).strip()
+                if not barcode or barcode == "nan":
+                    continue
+                
+                # Try finding product by variant barcode
+                existing = await db.products.find_one({"variants.barcode": barcode})
+                
+                if existing:
+                    # Update variant in existing product
+                    await db.products.update_one(
+                        {"id": existing["id"], "variants.barcode": barcode},
+                        {"$set": {
+                            "variants.$.stock": int(row.get("Stok", 0)),
+                            "variants.$.price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))),
+                            "variants.$.sale_price": float(row.get("Satış Fiyatı", 0)),
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }}
+                    )
+                    stats["updated"] += 1
+                else:
+                    # Create new product or add as variant to existing product with same name
+                    name = str(row.get("Ürün Adı"))
+                    prod_by_name = await db.products.find_one({"name": name})
+                    
+                    variant = {
+                        "barcode": barcode,
+                        "stock_code": str(row.get("Stok Kodu", "")),
+                        "size": str(row.get("Beden", "")).replace("nan", ""),
+                        "color": str(row.get("Renk", "")).replace("nan", ""),
+                        "price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))),
+                        "sale_price": float(row.get("Satış Fiyatı", 0)),
+                        "stock": int(row.get("Stok", 0))
+                    }
+                    
+                    if prod_by_name:
+                        # Add as new variant
+                        await db.products.update_one(
+                            {"id": prod_by_name["id"]},
+                            {"$push": {"variants": variant}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+                        )
+                        stats["updated"] += 1
+                    else:
+                        # Create full new product
+                        new_p = {
+                            "id": generate_id(),
+                            "name": name,
+                            "slug": generate_slug(name),
+                            "category_name": str(row.get("Kategori")),
+                            "brand": str(row.get("Marka", "")).replace("nan", ""),
+                            "description": str(row.get("Açıklama", "")).replace("nan", ""),
+                            "price": variant["price"],
+                            "sale_price": variant["sale_price"],
+                            "stock": variant["stock"],
+                            "is_active": True,
+                            "variants": [variant],
+                            "images": [],
+                            "attributes": [],
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        await db.products.insert_one(new_p)
+                        stats["created"] += 1
+            except Exception as row_err:
+                logger.error(f"Import row error: {row_err}")
+                stats["errors"] += 1
+                
+        return {"success": True, "stats": stats}
+        
+    except Exception as e:
+        logger.error(f"Excel import error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

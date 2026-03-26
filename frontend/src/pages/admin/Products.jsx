@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -143,6 +143,8 @@ export default function AdminProducts() {
   const [colorSearchOpen, setColorSearchOpen] = useState(false);
   const [colorSearchTerm, setColorSearchTerm] = useState("");
   const fileInputRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const [filters, setFilters] = useState({
     status: "all",
@@ -255,6 +257,64 @@ export default function AdminProducts() {
       }
     } catch (err) {
       console.error("Global markup fetch error:", err);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    toast.info("Excel dosyası hazırlanıyor...");
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${API}/products/export/excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `urunler_${new Date().toISOString().split('T')[0]}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success("Excel başarıyla indirildi");
+    } catch (err) {
+      console.error("Export error:", err);
+      toast.error("Dosya indirilemedi");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImporting(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const toastId = toast.loading("Excel içeriği aktarılıyor...");
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.post(`${API}/products/import/excel`, formData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      if (response.data.success) {
+        const { stats } = response.data;
+        toast.success(`Aktarım tamamlandı! (${stats.created} yeni, ${stats.updated} güncellendi, ${stats.errors} hata)`, { id: toastId });
+        fetchProducts();
+      }
+    } catch (err) {
+      console.error("Import error:", err);
+      toast.error(err.response?.data?.detail || "Dosya aktarılamadı", { id: toastId });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -607,13 +667,38 @@ export default function AdminProducts() {
     <div data-testid="admin-products">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Ürünler ({total})</h1>
-        <button 
-          onClick={() => { resetForm(); setModalOpen(true); }}
-          className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
-        >
-          <Plus size={18} />
-          Yeni Ürün
-        </button>
+        <div className="flex items-center gap-3">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImport}
+            accept=".xlsx, .xls"
+            className="hidden"
+          />
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-all font-medium text-sm shadow-sm disabled:opacity-50"
+          >
+            {exporting ? <RefreshCw className="animate-spin" size={16} /> : <Download size={16} />}
+            Excel İndir
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-all font-medium text-sm shadow-sm disabled:opacity-50"
+          >
+            {importing ? <RefreshCw className="animate-spin" size={16} /> : <Upload size={16} />}
+            Excel Yükle
+          </button>
+          <button 
+            onClick={() => { resetForm(); setModalOpen(true); }}
+            className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800 transition-all font-medium text-sm shadow-sm"
+          >
+            <Plus size={18} />
+            Yeni Ürün
+          </button>
+        </div>
       </div>
 
       {/* Search & Filter Top Bar */}
