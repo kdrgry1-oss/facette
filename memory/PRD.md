@@ -32,6 +32,10 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - [2026-03-26] Excel Technical Details Import - Upload xlsx, match products by name, apply attributes (126/126 matched)
 - [2026-03-26] Attributes tab reorganized: Filled attrs at top, required empty in middle, other empty hidden by default
 - [2026-03-26] Fixed false-positive required attribute matching (watch attrs no longer shown for textile categories)
+- [2026-03-26] Auto-fill Yaş Grubu=Yetişkin, Menşei=TR for all 289 products
+- [2026-03-26] Hidden Beden/Renk/Web Color from attributes tab (managed via variants)
+- [2026-03-26] Cleaned 71 non-textile attributes from library (saat, mücevher, elektronik vb.) → 44 textile attrs remaining
+- [2026-03-26] Multi-color variant system: each color creates separate product with auto Web Color/Renk
 
 ## Credentials
 - Admin: admin@facette.com / admin123
