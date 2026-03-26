@@ -1,0 +1,308 @@
+[
+  {
+    "id": "csv-en-yeni-ler",
+    "is_active": true,
+    "name": "EN YENİLER",
+    "parent_id": null,
+    "slug": "en-yeni-ler",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896221+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m",
+    "is_active": true,
+    "name": "GİYİM",
+    "parent_id": null,
+    "slug": "gi-yi-m",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897504+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim",
+    "is_active": true,
+    "name": "Dış Giyim",
+    "parent_id": "csv-gi-yi-m",
+    "slug": "gi-yi-m-dis-giyim",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896804+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim-trenckot",
+    "is_active": true,
+    "name": "Trençkot",
+    "parent_id": "csv-gi-yi-m-dis-giyim",
+    "slug": "gi-yi-m-dis-giyim-trenckot",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896309+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim-ceket",
+    "is_active": true,
+    "name": "Ceket",
+    "parent_id": "csv-gi-yi-m-dis-giyim",
+    "slug": "gi-yi-m-dis-giyim-ceket",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896357+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-alt-giyim",
+    "is_active": true,
+    "name": "Alt Giyim",
+    "parent_id": "csv-gi-yi-m",
+    "slug": "gi-yi-m-alt-giyim",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897376+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-alt-giyim-pantolon",
+    "is_active": true,
+    "name": "Pantolon",
+    "parent_id": "csv-gi-yi-m-alt-giyim",
+    "slug": "gi-yi-m-alt-giyim-pantolon",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896404+00:00"
+  },
+  {
+    "id": "csv-aksesuar",
+    "is_active": true,
+    "name": "AKSESUAR",
+    "parent_id": null,
+    "slug": "aksesuar",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897556+00:00"
+  },
+  {
+    "id": "csv-aksesuar-corap",
+    "is_active": true,
+    "name": "Çorap",
+    "parent_id": "csv-aksesuar",
+    "slug": "aksesuar-corap",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896434+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim-kaban",
+    "is_active": true,
+    "name": "Kaban",
+    "parent_id": "csv-gi-yi-m-dis-giyim",
+    "slug": "gi-yi-m-dis-giyim-kaban",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896484+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim",
+    "is_active": true,
+    "name": "Üst Giyim",
+    "parent_id": "csv-gi-yi-m",
+    "slug": "gi-yi-m-ust-giyim",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897522+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-bluz",
+    "is_active": true,
+    "name": "Bluz",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-bluz",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896531+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim-mont",
+    "is_active": true,
+    "name": "Mont",
+    "parent_id": "csv-gi-yi-m-dis-giyim",
+    "slug": "gi-yi-m-dis-giyim-mont",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896581+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-alt-giyim-etek",
+    "is_active": true,
+    "name": "Etek",
+    "parent_id": "csv-gi-yi-m-alt-giyim",
+    "slug": "gi-yi-m-alt-giyim-etek",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896629+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-body",
+    "is_active": true,
+    "name": "Body",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-body",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896678+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-gomlek",
+    "is_active": true,
+    "name": "Gömlek",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-gomlek",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896728+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-elbise",
+    "is_active": true,
+    "name": "Elbise",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-elbise",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896774+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-dis-giyim-hirka",
+    "is_active": true,
+    "name": "Hırka",
+    "parent_id": "csv-gi-yi-m-dis-giyim",
+    "slug": "gi-yi-m-dis-giyim-hirka",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896826+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-alt-giyim-jean",
+    "is_active": true,
+    "name": "Jean",
+    "parent_id": "csv-gi-yi-m-alt-giyim",
+    "slug": "gi-yi-m-alt-giyim-jean",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896872+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-kazak",
+    "is_active": true,
+    "name": "Kazak",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-kazak",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.896957+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar",
+    "is_active": true,
+    "name": "Aksesuar",
+    "parent_id": "csv-aksesuar",
+    "slug": "aksesuar-aksesuar",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897569+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar-panco",
+    "is_active": true,
+    "name": "Panço",
+    "parent_id": "csv-aksesuar-aksesuar",
+    "slug": "aksesuar-aksesuar-panco",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897004+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar-balaclava",
+    "is_active": true,
+    "name": "Balaclava",
+    "parent_id": "csv-aksesuar-aksesuar",
+    "slug": "aksesuar-aksesuar-balaclava",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897049+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar-fular",
+    "is_active": true,
+    "name": "Fular",
+    "parent_id": "csv-aksesuar-aksesuar",
+    "slug": "aksesuar-aksesuar-fular",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897096+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-hirka",
+    "is_active": true,
+    "name": "Hırka",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-hirka",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897149+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-suveter",
+    "is_active": true,
+    "name": "Süveter",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-suveter",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897196+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar-atki",
+    "is_active": true,
+    "name": "Atkı",
+    "parent_id": "csv-aksesuar-aksesuar",
+    "slug": "aksesuar-aksesuar-atki",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897241+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-ceket",
+    "is_active": true,
+    "name": "Ceket",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-ceket",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897295+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-sweatshirt",
+    "is_active": true,
+    "name": "Sweatshirt",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-sweatshirt",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897346+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-alt-giyim-sort",
+    "is_active": true,
+    "name": "Şort",
+    "parent_id": "csv-gi-yi-m-alt-giyim",
+    "slug": "gi-yi-m-alt-giyim-sort",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897395+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-tisort",
+    "is_active": true,
+    "name": "Tişört",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-tisort",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897442+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-pantolon",
+    "is_active": true,
+    "name": "Pantolon",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-pantolon",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897488+00:00"
+  },
+  {
+    "id": "csv-gi-yi-m-ust-giyim-takim",
+    "is_active": true,
+    "name": "Takım",
+    "parent_id": "csv-gi-yi-m-ust-giyim",
+    "slug": "gi-yi-m-ust-giyim-takim",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897542+00:00"
+  },
+  {
+    "id": "csv-aksesuar-aksesuar-canta",
+    "is_active": true,
+    "name": "Çanta",
+    "parent_id": "csv-aksesuar-aksesuar",
+    "slug": "aksesuar-aksesuar-canta",
+    "source": "csv",
+    "updated_at": "2026-03-23T01:52:27.897588+00:00"
+  }
+]
