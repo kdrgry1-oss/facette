@@ -56,7 +56,7 @@ export default function AdminCategories() {
   const fetchTrendyolCategories = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/trendyol/categories`, {
+      const res = await axios.get(`${API}/integrations/trendyol/categories`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data?.categories && res.data.categories.length > 0) {
@@ -74,12 +74,12 @@ export default function AdminCategories() {
     setSyncingTrendyol(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${API}/trendyol/categories/sync`, {}, {
+      await axios.post(`${API}/integrations/trendyol/categories/sync`, {}, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 60000
       });
       // Tekrar çek
-      const res = await axios.get(`${API}/trendyol/categories`, {
+      const res = await axios.get(`${API}/integrations/trendyol/categories`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data?.categories) {
@@ -147,7 +147,7 @@ export default function AdminCategories() {
     setFetchingAttributes(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/trendyol/categories/${trendyolCatId}/attributes`, {
+      const res = await axios.get(`${API}/integrations/trendyol/categories/${trendyolCatId}/attributes`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTrendyolAttributes(res.data?.attributes || []);
@@ -163,7 +163,7 @@ export default function AdminCategories() {
     try {
       const token = localStorage.getItem('token');
       toast.info(`${categoryName} kategorisi için stok/fiyat güncelleniyor...`);
-      const res = await axios.post(`${API}/trendyol/categories/${categoryId}/update-stock-price`, {}, {
+      const res = await axios.post(`${API}/integrations/trendyol/categories/${categoryId}/update-stock-price`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success(res.data?.message || "Stok/fiyat güncellendi");
