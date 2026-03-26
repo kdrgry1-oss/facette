@@ -90,6 +90,14 @@ def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_con
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
     config = await get_trendyol_config()
+    
+    # Also check main settings for trendyol_markup as fallback
+    default_markup = config.get("default_markup", 0)
+    if default_markup == 0:
+        main_settings = await db.settings.find_one({"id": "main"})
+        if main_settings and main_settings.get("trendyol_markup"):
+            default_markup = main_settings.get("trendyol_markup", 0)
+    
     # Mask secrets
     return {
         "supplier_id": config.get("supplier_id", ""),
@@ -97,7 +105,7 @@ async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
         "api_secret": "********" if config.get("api_secret") else "",
         "mode": config.get("mode", "sandbox"),
         "is_active": config.get("is_active", False),
-        "default_markup": config.get("default_markup", 0)
+        "default_markup": default_markup
     }
 
 @router.post("/trendyol/settings")

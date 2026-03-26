@@ -216,6 +216,8 @@ async def create_product(
         "stock_code": product_data.get("stock_code", ""),
         "barcode": product_data.get("barcode", ""),
         "sku": product_data.get("sku", ""),
+        "supplier": product_data.get("supplier", ""),
+        "manufacturer": product_data.get("manufacturer", "FACETTE"),
         "is_active": product_data.get("is_active", True),
         "is_featured": product_data.get("is_featured", False),
         "is_new": product_data.get("is_new", False),

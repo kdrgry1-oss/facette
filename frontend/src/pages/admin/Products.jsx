@@ -55,14 +55,14 @@ const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
   }
 
   return (
-    <div className="space-y-2 relative" ref={dropdownRef}>
+    <div className={`space-y-2 relative ${isRequired && !hasValue ? 'p-3 bg-red-50 rounded-xl border-2 border-red-200' : ''}`} ref={dropdownRef}>
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-1">
           <label className={`block text-[10px] font-black uppercase tracking-widest ${isRequired ? 'text-white bg-red-600 px-1 rounded' : 'text-gray-900'}`}>{attr.name}</label>
           {hasValue && <Check size={12} className="text-green-500 font-bold" strokeWidth={4} />}
-          {isRequired && <span className="text-red-600 font-bold animate-pulse">*</span>}
+          {isRequired && !hasValue && <span className="text-red-600 font-bold animate-pulse">*</span>}
         </div>
-        {isRequired && (
+        {isRequired && !hasValue && (
           <span className="text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full uppercase animate-pulse shadow-lg shadow-red-200 ring-2 ring-red-300">
              ZORUNLU (TRENDYOL)
           </span>
@@ -71,7 +71,7 @@ const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
       
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 cursor-pointer flex justify-between items-center transition-all ${hasValue ? 'border-green-500' : 'border-gray-100'}`}
+        className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 cursor-pointer flex justify-between items-center transition-all ${hasValue ? 'border-green-500' : isRequired ? 'border-red-300' : 'border-gray-100'}`}
       >
         <div className="flex items-center gap-2 overflow-hidden flex-1">
           <Search size={14} className="text-gray-400 shrink-0" />
@@ -170,9 +170,9 @@ export default function AdminProducts() {
     stock: 0, stock_code: "", barcode: "", sku: "",
     // Ticimax fields
     variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
-    supplier: "FACETTE", max_installment: 9, purchase_price: 0,
+    supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
     vat_rate: 10,
-    market_price: 0, vat_rate: 20, vat_included: true, currency: "TRY",
+    market_price: 0, vat_included: true, currency: "TRY",
     cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
     min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
     is_free_shipping: false, is_showcase: false,
@@ -543,6 +543,7 @@ export default function AdminProducts() {
       unit: product.unit || "ADET",
       keywords: product.keywords || "",
       supplier: product.supplier || "",
+      manufacturer: product.manufacturer || "FACETTE",
       max_installment: product.max_installment || 9,
       purchase_price: product.purchase_price || 0,
       market_price: product.market_price || 0,
@@ -579,7 +580,7 @@ export default function AdminProducts() {
       images: [], is_active: true, is_featured: false, is_new: false,
       stock: 0, stock_code: "", barcode: "", sku: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
-      supplier: "", max_installment: 9, purchase_price: 0,
+      supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
       market_price: 0, vat_rate: 10, vat_included: true, currency: "TRY",
       cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
       min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
@@ -830,7 +831,7 @@ export default function AdminProducts() {
                     </a>
                     <p className="text-xs text-gray-500">{product.category_name}</p>
                   </td>
-                  <td className="text-sm">{product.stock_code || '-'}</td>
+                  <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || '-'}</td>
                   <td className="text-xs text-gray-600 font-mono">
                     {product.variants?.find(v => v.barcode)?.barcode || '-'}
                   </td>
@@ -1118,6 +1119,17 @@ export default function AdminProducts() {
                           type="text"
                           value={formData.supplier}
                           onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                          placeholder="Boş bırakılabilir"
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Üretici</label>
+                        <input
+                          type="text"
+                          value={formData.manufacturer}
+                          onChange={(e) => setFormData({ ...formData, manufacturer: e.target.value })}
+                          placeholder="FACETTE"
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
                         />
                       </div>
