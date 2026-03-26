@@ -453,8 +453,9 @@ async def export_products_excel(current_user: dict = Depends(require_admin)):
         all_attr_names = set()
         for p in products:
             for attr in p.get("attributes", []):
-                if attr.get("name"):
-                    all_attr_names.add(attr["name"])
+                attr_name = attr.get("name") or attr.get("type")
+                if attr_name:
+                    all_attr_names.add(attr_name)
         
         rows = []
         for p in products:
@@ -493,8 +494,9 @@ async def export_products_excel(current_user: dict = Depends(require_admin)):
                     
                 # apply product attributes
                 for attr in p.get("attributes", []):
-                    if attr.get("name") and attr.get("value"):
-                        row[f"Özellik: {attr['name']}"] = attr["value"]
+                    attr_name = attr.get("name") or attr.get("type")
+                    if attr_name and attr.get("value"):
+                        row[f"Özellik: {attr_name}"] = attr["value"]
                         
                 rows.append(row)
         
@@ -552,7 +554,7 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                             })
                             
                         if val and val != "nan":
-                            parsed_attrs.append({"name": attr_name, "value": val})
+                            parsed_attrs.append({"type": attr_name, "name": attr_name, "value": val})
                 
                 # Try finding product by variant barcode
                 existing = await db.products.find_one({"variants.barcode": barcode})
