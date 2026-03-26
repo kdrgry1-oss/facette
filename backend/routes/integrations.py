@@ -10,7 +10,7 @@ import uuid
 import re
 import xml.etree.ElementTree as ET
 
-from .deps import db, logger, get_current_user, require_admin, generate_id
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
 
 router = APIRouter(tags=["Integrations"])
 
@@ -357,21 +357,34 @@ async def sync_products_to_trendyol(
             if local_val:
                 str_ty_id = str(ty_id)
                 if str_ty_id in val_mappings and str(local_val) in val_mappings[str_ty_id]:
-                    mapped_val_id = val_mappings[str_ty_id][str(local_val)]
-                    if mapped_val_id:
-                        item_attrs.append({
-                            "attributeId": ty_id,
-                            "attributeValueId": int(mapped_val_id)
-                        })
+                    mapped_val = val_mappings[str_ty_id][str(local_val)]
+                    if mapped_val:
+                        if str(mapped_val).isdigit():
+                            item_attrs.append({
+                                "attributeId": ty_id,
+                                "attributeValueId": int(mapped_val)
+                            })
+                        else:
+                            item_attrs.append({
+                                "attributeId": ty_id,
+                                "customAttributeValue": str(mapped_val)
+                            })
                         processed.add(ty_id)
                         continue
                 
             str_ty_id = str(ty_id)
             if str_ty_id in default_mappings and default_mappings[str_ty_id]:
-                item_attrs.append({
-                    "attributeId": ty_id,
-                    "attributeValueId": int(default_mappings[str_ty_id])
-                })
+                def_val = default_mappings[str_ty_id]
+                if str(def_val).isdigit():
+                    item_attrs.append({
+                        "attributeId": ty_id,
+                        "attributeValueId": int(def_val)
+                    })
+                else:
+                    item_attrs.append({
+                        "attributeId": ty_id,
+                        "customAttributeValue": str(def_val)
+                    })
                 processed.add(ty_id)
 
         for ty_str, def_val in default_mappings.items():
@@ -379,10 +392,16 @@ async def sync_products_to_trendyol(
             try: ty_id = int(ty_str)
             except: continue
             if ty_id not in processed:
-                item_attrs.append({
-                    "attributeId": ty_id,
-                    "attributeValueId": int(def_val)
-                })
+                if str(def_val).isdigit():
+                    item_attrs.append({
+                        "attributeId": ty_id,
+                        "attributeValueId": int(def_val)
+                    })
+                else:
+                    item_attrs.append({
+                        "attributeId": ty_id,
+                        "customAttributeValue": str(def_val)
+                    })
                 processed.add(ty_id)
                 
         return item_attrs
@@ -1296,7 +1315,6 @@ async def import_ticimax_categories(
 
         doc = {
             "ticimax_id": cat_id,
-            "id": f"tc-{cat_id}",
             "name": name,
             "slug": _generate_slug(name),
             "parent_id": parent_id,
@@ -1322,6 +1340,7 @@ async def import_ticimax_categories(
             await db.categories.update_one({"ticimax_id": cat_id}, {"$set": doc})
             updated += 1
         else:
+            doc["id"] = await generate_short_id("categories")
             await db.categories.insert_one(doc)
             imported += 1
 
@@ -1607,7 +1626,7 @@ async def import_ticimax_products(
                 await db.products.update_one({"ticimax_id": ticimax_id}, {"$set": doc})
                 updated += 1
             else:
-                doc["id"] = generate_id()
+                doc["id"] = await generate_short_id("products")
                 doc["created_at"] = datetime.now(timezone.utc).isoformat()
                 await db.products.insert_one(doc)
                 imported += 1
