@@ -83,6 +83,41 @@ function AttributeMatchModal({ open, onClose, category }) {
     }
   };
 
+  // Otomatik eşleştir - isimleri eşleşenleri otomatik eşleştir
+  const handleAutoMatch = () => {
+    const newMappings = { ...mappings };
+    let matchCount = 0;
+    
+    trendyolAttrs.forEach((attr) => {
+      const attrName = (attr.name || attr.attribute?.name || "").toLowerCase().trim();
+      const attrId = attr.id || attr.attribute?.id;
+      
+      // Zaten eşleştirilmişse atla
+      if (newMappings[attrId]) return;
+      
+      // Global attributes'da aynı isimde olanı bul
+      const matched = globalAttributes.find((gAttr) => {
+        const gName = (gAttr.name || "").toLowerCase().trim();
+        // Tam eşleşme veya benzer isimler (örn: "Renk" = "renk", "Beden" = "beden")
+        return gName === attrName || 
+               gName.includes(attrName) || 
+               attrName.includes(gName) ||
+               // Yaygın eşleşmeler
+               (attrName === "web color" && gName === "renk") ||
+               (attrName === "color" && gName === "renk") ||
+               (attrName === "size" && gName === "beden");
+      });
+      
+      if (matched) {
+        newMappings[attrId] = matched.name;
+        matchCount++;
+      }
+    });
+    
+    setMappings(newMappings);
+    toast.success(`${matchCount} özellik otomatik eşleştirildi`);
+  };
+
   const requiredAttrs = trendyolAttrs.filter((a) => a.required);
   const optionalAttrs = trendyolAttrs.filter((a) => !a.required);
   const allRows = [...requiredAttrs, ...optionalAttrs];
@@ -91,16 +126,25 @@ function AttributeMatchModal({ open, onClose, category }) {
     <Dialog open={open} onOpenChange={() => onClose(false)}>
       <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Store size={18} className="text-orange-500" />
-            Özellik Eşleştirme — {category?.local_name}
-            {category?.trendyol_category_name && (
-              <>
-                <ArrowRight size={14} className="text-gray-400" />
-                <span className="text-gray-500">{category.trendyol_category_name}</span>
-              </>
-            )}
-          </DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Store size={18} className="text-orange-500" />
+              Özellik Eşleştirme — {category?.local_name}
+              {category?.trendyol_category_name && (
+                <>
+                  <ArrowRight size={14} className="text-gray-400" />
+                  <span className="text-gray-500">{category.trendyol_category_name}</span>
+                </>
+              )}
+            </DialogTitle>
+            <button
+              onClick={handleAutoMatch}
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+            >
+              <Link size={14} />
+              Otomatik Eşleştir
+            </button>
+          </div>
         </DialogHeader>
 
         {/* Warning banner */}
