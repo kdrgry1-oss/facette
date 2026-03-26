@@ -312,8 +312,6 @@ async def get_popular_searches():
 
 
 # ==================== PRODUCT ATTRIBUTE IMPORT ====================
-import io
-from fastapi import UploadFile, File
 
 @router.post("/attributes/import-xlsx")
 async def import_attributes_from_xlsx(
@@ -654,3 +652,206 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
     except Exception as e:
         logger.error(f"Excel import error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/attributes/import-technical-xlsx")
+async def import_technical_details_xlsx(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Import technical details from Excel in format:
+    UrunKartID | StokKodu | UrunAdi | Ozellik | Deger
+    Groups by UrunAdi, fuzzy matches with existing products, returns preview.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl yüklenmemiş")
+
+    content = await file.read()
+    wb = openpyxl.load_workbook(io.BytesIO(content))
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="Dosya boş veya başlık satırı eksik")
+
+    headers = [str(h).strip() if h else "" for h in rows[0]]
+
+    # Find column indices
+    name_col = None
+    ozellik_col = None
+    deger_col = None
+    stok_kodu_col = None
+
+    for i, h in enumerate(headers):
+        hl = h.lower().replace("ı", "i").replace("ö", "o").replace("ü", "u")
+        if "urunadi" in hl.replace(" ", "") or "ürün adı" in h.lower() or "urun adi" in h.lower():
+            name_col = i
+        elif "ozellik" in hl.replace(" ", "") or "özellik" in h.lower():
+            ozellik_col = i
+        elif "deger" in hl.replace(" ", "") or "değer" in h.lower():
+            deger_col = i
+        elif "stokkodu" in hl.replace(" ", "") or "stok kodu" in h.lower():
+            stok_kodu_col = i
+
+    if name_col is None:
+        raise HTTPException(status_code=400, detail="UrunAdi sütunu bulunamadı")
+    if deger_col is None:
+        raise HTTPException(status_code=400, detail="Deger sütunu bulunamadı")
+
+    # Group by product name - deduplicate attributes (last value wins for same type)
+    product_groups = {}
+    # Metadata column headers that should not be treated as attributes
+    meta_headers_lower = {h.lower().strip() for h in headers if h}
+
+    for row in rows[1:]:
+        name = str(row[name_col]).strip() if row[name_col] else None
+        if not name or name.lower() in ("none", "null", ""):
+            continue
+
+        ozellik = str(row[ozellik_col]).strip() if ozellik_col is not None and row[ozellik_col] else ""
+        deger = str(row[deger_col]).strip() if row[deger_col] else ""
+        stok_kodu = str(row[stok_kodu_col]).strip() if stok_kodu_col is not None and row[stok_kodu_col] else ""
+
+        if not deger or deger.lower() in ("none", "null"):
+            continue
+
+        if name not in product_groups:
+            product_groups[name] = {"stok_kodu": stok_kodu, "attributes": {}, "extra_colors": []}
+
+        if ozellik and ozellik.lower() not in ("none", "null", "") and ozellik.lower() not in meta_headers_lower:
+            # Use dict to deduplicate (last value wins)
+            product_groups[name]["attributes"][ozellik] = deger
+        elif not ozellik or ozellik.lower() in ("none", "null", ""):
+            # Empty ozellik with a deger = extra color variant
+            product_groups[name]["extra_colors"].append(deger)
+
+    # Convert attribute dicts to list format
+    for name, data in product_groups.items():
+        data["attributes_list"] = [{"type": k, "value": v} for k, v in data["attributes"].items()]
+
+    # Now match products by name - one Excel product can match MULTIPLE DB products
+    all_products = await db.products.find({}, {"_id": 0, "id": 1, "name": 1, "stock_code": 1}).to_list(None)
+
+    def normalize(s):
+        return s.lower().replace("ı", "i").replace("ğ", "g").replace("ü", "u").replace("ş", "s").replace("ö", "o").replace("ç", "c").replace("İ", "i").strip()
+
+    results = []
+    used_product_ids = set()
+
+    for excel_name, data in product_groups.items():
+        excel_norm = normalize(excel_name)
+
+        # Find ALL matching products (for color variants)
+        matches = []
+        for p in all_products:
+            p_norm = normalize(p["name"])
+            if p_norm == excel_norm:
+                matches.append((p, 100))
+            elif excel_norm in p_norm:
+                # Excel name is a substring of DB name (e.g., "Basic Triko" in "Basic Triko Siyah")
+                overlap = len(excel_norm.split()) / len(p_norm.split()) * 100
+                if overlap >= 50:
+                    matches.append((p, round(overlap, 1)))
+            elif p_norm in excel_norm:
+                overlap = len(p_norm.split()) / len(excel_norm.split()) * 100
+                if overlap >= 50:
+                    matches.append((p, round(overlap, 1)))
+
+        if matches:
+            matches.sort(key=lambda x: x[1], reverse=True)
+            for match_p, match_score in matches:
+                if match_p["id"] not in used_product_ids:
+                    results.append({
+                        "excel_name": excel_name,
+                        "stok_kodu": data["stok_kodu"],
+                        "attributes": data["attributes_list"],
+                        "extra_colors": data["extra_colors"],
+                        "matched_product_id": match_p["id"],
+                        "matched_product_name": match_p["name"],
+                        "match_score": match_score
+                    })
+                    used_product_ids.add(match_p["id"])
+        else:
+            results.append({
+                "excel_name": excel_name,
+                "stok_kodu": data["stok_kodu"],
+                "attributes": data["attributes_list"],
+                "extra_colors": data["extra_colors"],
+                "matched_product_id": None,
+                "matched_product_name": None,
+                "match_score": 0
+            })
+
+    results.sort(key=lambda r: r["match_score"], reverse=True)
+
+    return {
+        "success": True,
+        "total_excel_products": len(results),
+        "matched": sum(1 for r in results if r["matched_product_id"]),
+        "unmatched": sum(1 for r in results if not r["matched_product_id"]),
+        "results": results
+    }
+
+
+@router.post("/attributes/apply-technical-xlsx")
+async def apply_technical_details(payload: dict, current_user: dict = Depends(require_admin)):
+    """
+    Apply matched technical details to products.
+    Payload: { updates: [{product_id, attributes: [{type, value}], extra_colors: []}] }
+    """
+    updates = payload.get("updates", [])
+    if not updates:
+        raise HTTPException(status_code=400, detail="Güncellenecek ürün yok")
+
+    updated = 0
+    attr_lib_updates = {}
+
+    for update in updates:
+        product_id = update.get("product_id")
+        attributes = update.get("attributes", [])
+        if not product_id or not attributes:
+            continue
+
+        # Replace attributes with Excel data (clean import)
+        new_attrs = [{"type": a["type"], "name": a["type"], "value": a["value"]} for a in attributes]
+
+        # Track for attribute library
+        for new_attr in attributes:
+            if new_attr["type"] not in attr_lib_updates:
+                attr_lib_updates[new_attr["type"]] = set()
+            attr_lib_updates[new_attr["type"]].add(new_attr["value"])
+
+        await db.products.update_one(
+            {"id": product_id},
+            {"$set": {
+                "attributes": new_attrs,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        updated += 1
+
+    # Update global attribute library with new values
+    for attr_name, val_set in attr_lib_updates.items():
+        existing_lib = await db.attributes.find_one({"name": {"$regex": f"^{re.escape(attr_name)}$", "$options": "i"}})
+        if existing_lib:
+            current_vals = set(existing_lib.get("values", []))
+            merged_vals = list(current_vals.union(val_set))
+            if len(merged_vals) > len(current_vals):
+                await db.attributes.update_one(
+                    {"_id": existing_lib["_id"]},
+                    {"$set": {"values": merged_vals, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+        else:
+            await db.attributes.insert_one({
+                "id": generate_id(),
+                "name": attr_name,
+                "values": list(val_set),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+
+    return {"success": True, "updated": updated, "message": f"{updated} ürünün özellikleri güncellendi"}
