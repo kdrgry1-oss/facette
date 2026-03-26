@@ -30,6 +30,7 @@ from routes import (
     upload_router,
     settings_router,
 )
+from routes.vendors import router as vendors_router
 
 # Database
 from routes.deps import client, db
@@ -111,6 +112,7 @@ api_router.include_router(webhooks_router)
 api_router.include_router(attributes_router)
 api_router.include_router(upload_router)
 api_router.include_router(settings_router)
+api_router.include_router(vendors_router, prefix="/vendors")
 
 # Root endpoint
 @api_router.get("/")

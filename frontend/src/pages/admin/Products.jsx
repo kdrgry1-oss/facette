@@ -133,6 +133,7 @@ export default function AdminProducts() {
   const [variantsModalOpen, setVariantsModalOpen] = useState(false);
   const [selectedProductForVariants, setSelectedProductForVariants] = useState(null);
   const [globalTrendyolMarkup, setGlobalTrendyolMarkup] = useState(0);
+  const [globalVatRate, setGlobalVatRate] = useState(10);
   const [activeTab, setActiveTab ] = useState("basic");
   const [attributeSearchTerm, setAttributeSearchTerm] = useState("");
   const [variantSearchTerm, setVariantSearchTerm] = useState("");
@@ -232,6 +233,7 @@ export default function AdminProducts() {
     fetchCategories();
     fetchTrendyolCategories();
     fetchGlobalTrendyolMarkup();
+    fetchGlobalSettings();
   }, [page, search, JSON.stringify(filters)]);
 
   const fetchTrendyolCategories = async () => {
@@ -257,6 +259,20 @@ export default function AdminProducts() {
       }
     } catch (err) {
       console.error("Global markup fetch error:", err);
+    }
+  };
+
+  const fetchGlobalSettings = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/settings`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data && res.data.default_vat_rate !== undefined) {
+        setGlobalVatRate(res.data.default_vat_rate);
+      }
+    } catch (err) {
+      console.error("Global settings fetch error:", err);
     }
   };
 
@@ -581,7 +597,7 @@ export default function AdminProducts() {
       stock: 0, stock_code: "", barcode: "", sku: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
       supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
-      market_price: 0, vat_rate: 10, vat_included: true, currency: "TRY",
+      market_price: 0, vat_rate: globalVatRate, vat_included: true, currency: "TRY",
       cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
       min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
       is_free_shipping: false, is_showcase: false,
@@ -1078,9 +1094,10 @@ export default function AdminProducts() {
                             type="text"
                             value={formData.stock_code}
                             onChange={(e) => setFormData({ ...formData, stock_code: e.target.value })}
-                            className="flex-1 min-w-0 border-gray-200 border px-3 py-2 rounded-lg bg-gray-50 focus:bg-white focus:border-black outline-none transition-all font-mono text-sm uppercase"
-                            maxLength={10}
+                            className="w-full border-gray-200 border px-3 py-2 rounded-lg bg-gray-50 focus:bg-white focus:border-black outline-none transition-all font-mono text-sm uppercase"
                           />
+                        </div>
+                        <div className="flex gap-2 mt-2">
                           <button
                             type="button"
                             onClick={() => {
