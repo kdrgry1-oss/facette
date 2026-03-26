@@ -102,9 +102,27 @@ async def get_products(
             pass
     
     if category:
+        # Türkçe karakter dönüşümü (giyim -> GİYİM, aksesuar -> AKSESUAR)
+        tr_upper_map = {'i': 'İ', 'ı': 'I', 'g': 'G', 'ğ': 'Ğ', 'u': 'U', 'ü': 'Ü', 's': 'S', 'ş': 'Ş', 'o': 'O', 'ö': 'Ö', 'c': 'C', 'ç': 'Ç'}
+        category_upper = category.upper()
+        for lower, upper in tr_upper_map.items():
+            category_upper = category_upper.replace(lower.upper(), upper)
+        
+        # Slug formatını normal metne çevir (en-yeniler -> en yeniler)
+        category_spaced = category.replace('-', ' ')
+        category_spaced_upper = category_spaced.upper()
+        for lower, upper in tr_upper_map.items():
+            category_spaced_upper = category_spaced_upper.replace(lower.upper(), upper)
+        
         query["$or"] = [
             {"category_name": {"$regex": category, "$options": "i"}},
-            {"category_slug": category}
+            {"category_name": {"$regex": category_spaced, "$options": "i"}},
+            {"category_name": {"$regex": category_spaced_upper, "$options": "i"}},
+            {"category_slug": category},
+            {"breadcrumb": {"$regex": category, "$options": "i"}},
+            {"breadcrumb": {"$regex": category_upper, "$options": "i"}},
+            {"breadcrumb": {"$regex": category_spaced, "$options": "i"}},
+            {"breadcrumb": {"$regex": category_spaced_upper, "$options": "i"}}
         ]
     
     if search:
