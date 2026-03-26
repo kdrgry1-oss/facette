@@ -30,6 +30,8 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - [2026-03-25] 4-digit attribute IDs
 - [2026-03-25] Variant (Size/Color) dropdown UX improvements
 - [2026-03-26] Excel Technical Details Import - Upload xlsx, match products by name, apply attributes (126/126 matched)
+- [2026-03-26] Attributes tab reorganized: Filled attrs at top, required empty in middle, other empty hidden by default
+- [2026-03-26] Fixed false-positive required attribute matching (watch attrs no longer shown for textile categories)
 
 ## Credentials
 - Admin: admin@facette.com / admin123

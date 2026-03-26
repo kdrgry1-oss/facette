@@ -136,6 +136,7 @@ export default function AdminProducts() {
   const [globalVatRate, setGlobalVatRate] = useState(10);
   const [activeTab, setActiveTab ] = useState("basic");
   const [attributeSearchTerm, setAttributeSearchTerm] = useState("");
+  const [showAllAttributes, setShowAllAttributes] = useState(false);
   const [variantSearchTerm, setVariantSearchTerm] = useState("");
   const [categorySearchOpen, setCategorySearchOpen] = useState(false);
   const [categorySearchTerm, setCategorySearchTerm] = useState("");
@@ -1408,7 +1409,7 @@ export default function AdminProducts() {
                     <div className="flex-1 mr-4">
                       <h3 className="font-bold text-xl text-orange-900 mb-1">Ürün Özellikleri</h3>
                       <p className="text-xs text-gray-500 leading-relaxed max-w-2xl">
-                        Bu alandaki tüm kütüphane özellikleri otomatik listelenir. Trendyol için zorunlu olan özellikler (seçtiğiniz kategoriye göre) kırmızı uyarı ile belirtilir.
+                        Dolu ve zorunlu özellikler önce gösterilir. Diğer özellikleri görmek için aşağıdaki butonu kullanın.
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -1428,64 +1429,116 @@ export default function AdminProducts() {
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                    {(() => {
-                      const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
-                      const attrMappings = selectedCat?.attribute_mappings || [];
+                  {(() => {
+                    const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
+                    const attrMappings = selectedCat?.attribute_mappings || [];
 
-                      const processedAttributes = globalAttributes
-                        .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()))
-                        .map(attr => {
-                          const mapping = attrMappings.find(m => m.local_attr?.toLowerCase() === attr.name.toLowerCase());
-                          
-                          let tyAttr = null;
-                          if (mapping?.trendyol_attr_id) {
-                            tyAttr = trendyolAttributesList.find(ta => 
-                              (ta.attribute?.id || ta.id) === mapping.trendyol_attr_id
-                            );
-                          }
-                          
-                          if (!tyAttr) {
-                            tyAttr = trendyolAttributesList.find(ta => {
-                              const taName = (ta.attribute?.name || ta.name || "").toLowerCase().trim();
-                              const localName = (attr.name || "").toLowerCase().trim();
-                              return taName === localName || 
-                                     (taName.length > 3 && localName.includes(taName)) || 
-                                     (localName.length > 3 && taName.includes(localName));
-                            });
-                          }
-                          
-                          return { attr, isRequired: !!tyAttr?.required };
-                        })
-                        .sort((a, b) => {
-                          if (a.isRequired && !b.isRequired) return -1;
-                          if (!a.isRequired && b.isRequired) return 1;
-                          return a.attr.name.localeCompare(b.attr.name);
-                        });
+                    const processedAttributes = globalAttributes
+                      .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()))
+                      .map(attr => {
+                        const mapping = attrMappings.find(m => m.local_attr?.toLowerCase() === attr.name.toLowerCase());
+                        
+                        let tyAttr = null;
+                        if (mapping?.trendyol_attr_id) {
+                          tyAttr = trendyolAttributesList.find(ta => 
+                            (ta.attribute?.id || ta.id) === mapping.trendyol_attr_id
+                          );
+                        }
+                        
+                        if (!tyAttr) {
+                          tyAttr = trendyolAttributesList.find(ta => {
+                            const taName = (ta.attribute?.name || ta.name || "").toLowerCase().trim();
+                            const localName = (attr.name || "").toLowerCase().trim();
+                            return taName === localName;
+                          });
+                        }
+                        
+                        const hasVal = !!formData.attributes?.[attr.name];
+                        const isReq = !!tyAttr?.required;
+                        return { attr, isRequired: isReq, hasValue: hasVal };
+                      });
 
-                      return processedAttributes.map(({ attr, isRequired }) => (
-                        <SearchableAttribute
-                          key={attr.id}
-                          attr={attr}
-                          value={formData.attributes?.[attr.name]}
-                          isRequired={isRequired}
-                          onChange={(val) => setFormData({
-                            ...formData,
-                            attributes: {
-                              ...(formData.attributes || {}),
-                              [attr.name]: val
-                            }
-                          })}
-                        />
-                      ));
-                    })()}
-                    {globalAttributes.length === 0 && (
-                      <div className="col-span-full py-20 text-center text-gray-400 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-                        <Layers className="mx-auto mb-4 opacity-10" size={64} />
-                        <p className="text-sm font-bold uppercase tracking-widest">Henüz özellik kütüphanesi boş.</p>
-                      </div>
-                    )}
-                  </div>
+                    const filledAttrs = processedAttributes.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                    const requiredEmpty = processedAttributes.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                    const otherEmpty = processedAttributes.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                    const isSearching = attributeSearchTerm.length > 0;
+
+                    const renderAttr = ({ attr, isRequired }) => (
+                      <SearchableAttribute
+                        key={attr.id}
+                        attr={attr}
+                        value={formData.attributes?.[attr.name]}
+                        isRequired={isRequired}
+                        onChange={(val) => setFormData({
+                          ...formData,
+                          attributes: {
+                            ...(formData.attributes || {}),
+                            [attr.name]: val
+                          }
+                        })}
+                      />
+                    );
+
+                    return (
+                      <>
+                        {filledAttrs.length > 0 && (
+                          <div className="mb-6">
+                            <div className="flex items-center gap-2 mb-4">
+                              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                              <h4 className="text-sm font-bold text-green-700">Dolu Özellikler ({filledAttrs.length})</h4>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+                              {filledAttrs.map(renderAttr)}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {requiredEmpty.length > 0 && (
+                          <div className="mb-6">
+                            <div className="flex items-center gap-2 mb-4">
+                              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                              <h4 className="text-sm font-bold text-red-700">Zorunlu - Boş ({requiredEmpty.length})</h4>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+                              {requiredEmpty.map(renderAttr)}
+                            </div>
+                          </div>
+                        )}
+
+                        {otherEmpty.length > 0 && (isSearching || showAllAttributes) && (
+                          <div className="mb-6">
+                            <div className="flex items-center gap-2 mb-4">
+                              <div className="w-3 h-3 bg-gray-300 rounded-full"></div>
+                              <h4 className="text-sm font-bold text-gray-500">Diğer Özellikler ({otherEmpty.length})</h4>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+                              {otherEmpty.map(renderAttr)}
+                            </div>
+                          </div>
+                        )}
+
+                        {otherEmpty.length > 0 && !isSearching && (
+                          <div className="text-center pt-4 border-t border-dashed border-gray-200">
+                            <button
+                              type="button"
+                              onClick={() => setShowAllAttributes(!showAllAttributes)}
+                              className="px-6 py-2 text-sm font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors"
+                              data-testid="toggle-all-attributes-btn"
+                            >
+                              {showAllAttributes ? `Boş Özellikleri Gizle (${otherEmpty.length})` : `Tüm Özellikleri Göster (+${otherEmpty.length} boş)`}
+                            </button>
+                          </div>
+                        )}
+
+                        {globalAttributes.length === 0 && (
+                          <div className="col-span-full py-20 text-center text-gray-400 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                            <Layers className="mx-auto mb-4 opacity-10" size={64} />
+                            <p className="text-sm font-bold uppercase tracking-widest">Henüz özellik kütüphanesi boş.</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </TabsContent>
 
