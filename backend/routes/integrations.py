@@ -1979,6 +1979,7 @@ async def sync_trendyol_claims(
 
     end_date = datetime.now(timezone.utc)
     total_synced = 0
+    order_cache = {}  # order_number -> order_data cache
 
     # Trendyol max 15 günlük aralık destekliyor, parçalıyoruz
     chunk_days = 15
@@ -2027,11 +2028,46 @@ async def sync_trendyol_claims(
                 if not claim_id:
                     continue
 
+                # Zaten kayıtlı iade varsa atla (sadece yeni olanları işle)
+                existing_claim = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 1, "items": 1})
+                if existing_claim:
+                    total_synced += 1
+                    continue
+
                 # Claim items'dan tip ve sebep çıkar
                 claim_items = []
                 claim_type = ""
                 claim_reason = ""
                 refund_amount = 0
+                
+                # Claims API'sinde iskonto bilgisi yok. Sipariş API'sinden çek.
+                order_number = str(claim.get("orderNumber", ""))
+                order_discount_map = {}  # barcode -> {discount, gross_price, net_price}
+                if order_number:
+                    # Cache kontrolü: aynı sipariş numarasını tekrar çekme
+                    cache_key = f"order_{order_number}"
+                    if cache_key not in order_cache:
+                        try:
+                            order_data = await client.get_orders(order_number=order_number)
+                            order_cache[cache_key] = order_data
+                        except Exception as e:
+                            logger.warning(f"Could not fetch order {order_number} for discount: {e}")
+                            order_cache[cache_key] = {}
+                    
+                    cached = order_cache.get(cache_key, {})
+                    for pkg in cached.get("content", []):
+                        for line in pkg.get("lines", []):
+                            bc = line.get("barcode", "")
+                            line_gross = line.get("lineGrossAmount", line.get("amount", 0))
+                            line_net = line.get("price", 0)
+                            line_disc = line.get("discount", 0)
+                            qty = max(line.get("quantity", 1), 1)
+                            if bc:
+                                order_discount_map[bc] = {
+                                    "gross": line_gross / qty if line_gross else 0,
+                                    "net": line_net / qty if line_net else 0,
+                                    "discount": line_disc / qty if line_disc else 0,
+                                }
 
                 for item in claim.get("items", []):
                     order_line = item.get("orderLine", {})
@@ -2046,30 +2082,32 @@ async def sync_trendyol_claims(
                         if not claim_reason:
                             claim_reason = reason_info.get("name", "")
 
-                        discount = order_line.get("discount", 0)
-                        # Gross price is 'amount' in Trendyol, Net invoiced price is 'price'
-                        gross_price = order_line.get("amount", order_line.get("lineGrossAmount", 0))
-                        net_price = order_line.get("price", order_line.get("lineUnitPrice", 0))
-
-                        # Safeties if one is missing
-                        if not gross_price and net_price:
-                            gross_price = net_price + discount
-                        if not net_price and gross_price:
-                            net_price = gross_price - discount
+                        barcode = order_line.get("barcode", "")
+                        claim_price = order_line.get("price", 0)
+                        
+                        # İskontoyu sipariş verisinden al
+                        order_info = order_discount_map.get(barcode, {})
+                        if order_info:
+                            gross_price = order_info.get("gross", claim_price)
+                            net_price = order_info.get("net", claim_price)
+                            discount = order_info.get("discount", 0)
+                        else:
+                            # Fallback: Claims API verisini kullan (iskonto yok)
+                            gross_price = claim_price
+                            net_price = claim_price
+                            discount = 0
                         
                         claim_items.append({
                             "claim_item_id": str(ci.get("id", "")),
                             "productName": order_line.get("productName", ""),
-                            "barcode": order_line.get("barcode", ""),
-                            "unit_price": gross_price, # İndirimsiz
+                            "barcode": barcode,
+                            "unit_price": gross_price,
                             "discount_amount": discount,
-                            "price": net_price, # Net fiyat / Faturalanan
+                            "price": net_price,
                             "quantity": 1,
                             "reason": reason_info.get("name", "")
                         })
-                        refund_amount += gross_price
-
-                order_number = str(claim.get("orderNumber", ""))
+                        refund_amount += net_price
 
                 # Tarih formatı
                 claim_date = claim.get("claimDate")
@@ -2080,7 +2118,7 @@ async def sync_trendyol_claims(
                     except:
                         created_date_str = str(claim_date)
 
-                # Fatura numarasını çıkar
+                # Fatura numarasını çıkar: sipariş verisinden veya claim'den
                 invoice_number = ""
                 for item in claim.get("items", []):
                     ol = item.get("orderLine", {})
@@ -2090,6 +2128,17 @@ async def sync_trendyol_claims(
                         break
                 if not invoice_number:
                     invoice_number = str(claim.get("invoiceNumber", "") or "")
+                # Sipariş verisinden fatura no çek
+                if not invoice_number and order_discount_map:
+                    try:
+                        _order_data = await client.get_orders(order_number=order_number)
+                        for pkg in _order_data.get("content", []):
+                            inv_no = pkg.get("invoiceNumber", "")
+                            if inv_no:
+                                invoice_number = str(inv_no)
+                                break
+                    except Exception:
+                        pass
 
                 claim_doc = {
                     "claim_id": claim_id,
@@ -2129,6 +2178,80 @@ async def sync_trendyol_claims(
         "total_synced": total_synced,
         "days_back": days_back
     }
+
+
+@router.post("/trendyol/claims/fix-discounts")
+async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
+    """Fix discount data for existing claims by fetching from order API"""
+    settings = await db.settings.find_one({"id": "trendyol"}, {"_id": 0})
+    if not settings or not settings.get("api_key"):
+        raise HTTPException(status_code=400, detail="Trendyol API ayarları eksik")
+    
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(settings["supplier_id"], settings["api_key"], settings["api_secret"])
+    
+    # Get claims that need discount fix (where items have 0 discount)
+    claims = await db.trendyol_claims.find({}, {"_id": 0, "claim_id": 1, "order_number": 1, "items": 1}).to_list(None)
+    
+    order_cache = {}
+    fixed = 0
+    
+    for claim in claims:
+        order_number = claim.get("order_number", "")
+        if not order_number:
+            continue
+        
+        items = claim.get("items", [])
+        needs_fix = any(item.get("discount_amount", 0) == 0 and item.get("unit_price", 0) == item.get("price", 0) for item in items)
+        if not needs_fix:
+            continue
+        
+        # Get order data (cached)
+        if order_number not in order_cache:
+            try:
+                order_cache[order_number] = await client.get_orders(order_number=order_number)
+            except Exception:
+                order_cache[order_number] = {}
+        
+        cached = order_cache.get(order_number, {})
+        discount_map = {}
+        invoice_number = ""
+        for pkg in cached.get("content", []):
+            if not invoice_number:
+                invoice_number = pkg.get("invoiceNumber", "")
+            for line in pkg.get("lines", []):
+                bc = line.get("barcode", "")
+                qty = max(line.get("quantity", 1), 1)
+                if bc:
+                    discount_map[bc] = {
+                        "gross": (line.get("lineGrossAmount", line.get("amount", 0)) or 0) / qty,
+                        "net": (line.get("price", 0) or 0) / qty,
+                        "discount": (line.get("discount", 0) or 0) / qty,
+                    }
+        
+        updated_items = []
+        refund_amount = 0
+        for item in items:
+            bc = item.get("barcode", "")
+            if bc in discount_map:
+                item["unit_price"] = discount_map[bc]["gross"]
+                item["discount_amount"] = discount_map[bc]["discount"]
+                item["price"] = discount_map[bc]["net"]
+            refund_amount += item.get("price", 0)
+            updated_items.append(item)
+        
+        update_set = {"items": updated_items, "refund_amount": refund_amount}
+        if invoice_number:
+            update_set["invoice_number"] = invoice_number
+        
+        await db.trendyol_claims.update_one(
+            {"claim_id": claim["claim_id"]},
+            {"$set": update_set}
+        )
+        fixed += 1
+    
+    return {"success": True, "fixed": fixed, "message": f"{fixed} iadenin iskonto bilgisi güncellendi"}
+
 
 @router.get("/trendyol/claims")
 async def get_trendyol_claims(
@@ -2180,6 +2303,95 @@ async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(
     if not claim:
         raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
     return claim
+
+
+@router.post("/trendyol/claims/{claim_id}/gider-pusulasi")
+async def generate_gider_pusulasi(claim_id: str, current_user: dict = Depends(require_admin)):
+    """Generate expense receipt (gider pusulası) data for a return claim"""
+    claim = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")
+
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0})
+    company = settings.get("company_info", {}) if settings else {}
+
+    items = claim.get("items", [])
+    total_net = sum(item.get("price", 0) * item.get("quantity", 1) for item in items)
+    total_discount = sum(item.get("discount_amount", 0) * item.get("quantity", 1) for item in items)
+    total_gross = sum(item.get("unit_price", 0) * item.get("quantity", 1) for item in items)
+    vat_rate = settings.get("default_vat_rate", 10) if settings else 10
+    vat_amount = round(total_net * vat_rate / (100 + vat_rate), 2)
+    net_without_vat = round(total_net - vat_amount, 2)
+
+    last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
+    gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+
+    gider_pusulasi = {
+        "number": gp_number,
+        "display_number": f"GP-{gp_number:06d}",
+        "claim_id": claim_id,
+        "order_number": claim.get("order_number", ""),
+        "date": datetime.now(timezone.utc).isoformat(),
+        "company": company,
+        "customer": {
+            "name": claim.get("customer_name", ""),
+            "address": claim.get("shipping_address", ""),
+            "city": claim.get("shipping_city", ""),
+        },
+        "items": [{
+            "name": item.get("productName", ""),
+            "barcode": item.get("barcode", ""),
+            "quantity": item.get("quantity", 1),
+            "unit_price": item.get("unit_price", 0),
+            "discount": item.get("discount_amount", 0),
+            "net_price": item.get("price", 0),
+            "reason": item.get("reason", "")
+        } for item in items],
+        "totals": {
+            "gross": total_gross,
+            "discount": total_discount,
+            "net": total_net,
+            "vat_rate": vat_rate,
+            "vat_amount": vat_amount,
+            "net_without_vat": net_without_vat,
+        },
+        "claim_type": claim.get("claim_type", ""),
+        "claim_reason": claim.get("claim_reason", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.gider_pusulasi.update_one(
+        {"claim_id": claim_id},
+        {"$set": gider_pusulasi},
+        upsert=True
+    )
+
+    await db.trendyol_claims.update_one(
+        {"claim_id": claim_id},
+        {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": gider_pusulasi["display_number"]}}
+    )
+
+    return {"success": True, "gider_pusulasi": gider_pusulasi}
+
+
+@router.post("/trendyol/claims/bulk-gider-pusulasi")
+async def bulk_generate_gider_pusulasi(payload: dict, current_user: dict = Depends(require_admin)):
+    """Generate expense receipts for multiple claims"""
+    claim_ids = payload.get("claim_ids", [])
+    if not claim_ids:
+        raise HTTPException(status_code=400, detail="Claim ID listesi boş")
+
+    results = []
+    for cid in claim_ids:
+        try:
+            result = await generate_gider_pusulasi(cid, current_user)
+            results.append(result.get("gider_pusulasi"))
+        except Exception:
+            pass
+
+    return {"success": True, "gider_pusulalari": results, "count": len(results)}
+
+
 
 # ==================== TRENDYOL STOK & FİYAT GÜNCELLEME ====================
 
@@ -2485,6 +2697,18 @@ async def approve_trendyol_claim(
             response.raise_for_status()
             
             await log_integration_event("trendyol", "claim_approve", current_user["email"], claim_id, "success", f"{len(claim_item_ids)} kalem onaylandı", req_data)
+            
+            # Update claim in DB with action status
+            await db.trendyol_claims.update_one(
+                {"claim_id": claim_id},
+                {"$set": {
+                    "panel_action": "approved",
+                    "panel_action_date": datetime.now(timezone.utc).isoformat(),
+                    "panel_action_by": current_user["email"],
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
             return {"success": True, "message": "İade işlemi Trendyol tarafında onaylandı."}
 
     except httpx.HTTPStatusError as e:
@@ -2535,6 +2759,18 @@ async def issue_trendyol_claim(
             response.raise_for_status()
             
             await log_integration_event("trendyol", "claim_issue", current_user["email"], claim_id, "success", f"{len(claim_item_ids)} kalem için itiraz açıldı", req_data)
+            
+            # Update claim in DB with action status
+            await db.trendyol_claims.update_one(
+                {"claim_id": claim_id},
+                {"$set": {
+                    "panel_action": "issued",
+                    "panel_action_date": datetime.now(timezone.utc).isoformat(),
+                    "panel_action_by": current_user["email"],
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            
             return {"success": True, "message": "İade işlemi için Trendyol tarafında itiraz oluşturuldu."}
 
     except httpx.HTTPStatusError as e:
@@ -2932,3 +3168,63 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
         await log_integration_event("trendyol", "product_sync", "product", product_id, "error", str(e))
         raise HTTPException(status_code=400 if "Ürün" in str(e) or "kategori" in str(e).lower() else 500, detail=f"Trendyol senkronizasyon hatası: {str(e)}")
 
+
+
+# ==================== DOĞAN E-DÖNÜŞÜM ENTEGRASYONU ====================
+
+@router.get("/dogan/settings")
+async def get_dogan_settings(current_user: dict = Depends(require_admin)):
+    """Get Doğan e-Dönüşüm settings"""
+    settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0})
+    if not settings:
+        return {"id": "dogan_edonusum", "enabled": False, "username": "", "password": "", "is_test": True}
+    # Mask password
+    if settings.get("password"):
+        settings["password_masked"] = settings["password"][:3] + "***"
+    return settings
+
+
+@router.post("/dogan/settings")
+async def save_dogan_settings(payload: dict, current_user: dict = Depends(require_admin)):
+    """Save Doğan e-Dönüşüm settings"""
+    payload["id"] = "dogan_edonusum"
+    await db.settings.update_one({"id": "dogan_edonusum"}, {"$set": payload}, upsert=True)
+    return {"success": True, "message": "Doğan e-Dönüşüm ayarları kaydedildi"}
+
+
+@router.post("/dogan/test-connection")
+async def test_dogan_connection(current_user: dict = Depends(require_admin)):
+    """Test connection to Doğan e-Dönüşüm"""
+    settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0})
+    if not settings or not settings.get("username"):
+        raise HTTPException(status_code=400, detail="Doğan e-Dönüşüm ayarları eksik")
+
+    from dogan_client import DoganClient
+    client = DoganClient(
+        username=settings["username"],
+        password=settings["password"],
+        is_test=settings.get("is_test", True)
+    )
+    result = client.test_connection()
+    return result
+
+
+@router.post("/dogan/check-user")
+async def check_dogan_user(payload: dict, current_user: dict = Depends(require_admin)):
+    """Check if a VKN is registered for e-Fatura"""
+    vkn = payload.get("vkn", "")
+    if not vkn:
+        raise HTTPException(status_code=400, detail="VKN gerekli")
+
+    settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0})
+    if not settings or not settings.get("username"):
+        raise HTTPException(status_code=400, detail="Doğan e-Dönüşüm ayarları eksik")
+
+    from dogan_client import DoganClient
+    client = DoganClient(
+        username=settings["username"],
+        password=settings["password"],
+        is_test=settings.get("is_test", True)
+    )
+    result = client.check_user(vkn)
+    return result

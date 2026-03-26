@@ -23,7 +23,17 @@ async def get_settings():
             "barcode_range_start": "",
             "barcode_range_end": "",
             "default_vat_rate": 10,
-            "trendyol_markup": 0
+            "trendyol_markup": 0,
+            "company_info": {
+                "company_name": "",
+                "tax_office": "",
+                "tax_number": "",
+                "address": "",
+                "city": "",
+                "website": "",
+                "phone": "",
+                "email": ""
+            }
         }
         await db.settings.insert_one(settings.copy())
     return settings
