@@ -144,8 +144,13 @@ export default function AdminProducts() {
   const [colorSearchOpen, setColorSearchOpen] = useState(false);
   const [colorSearchTerm, setColorSearchTerm] = useState("");
   const fileInputRef = useRef(null);
+  const techFileInputRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [techImportModalOpen, setTechImportModalOpen] = useState(false);
+  const [techImportResults, setTechImportResults] = useState(null);
+  const [techImporting, setTechImporting] = useState(false);
+  const [techApplying, setTechApplying] = useState(false);
 
   const [filters, setFilters] = useState({
     status: "all",
@@ -235,6 +240,22 @@ export default function AdminProducts() {
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
   }, [page, search, JSON.stringify(filters)]);
+
+  // Click outside handler to close dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Close size and color dropdowns when clicking outside
+      if (!event.target.closest('.size-dropdown-container')) {
+        setSizeSearchOpen(false);
+      }
+      if (!event.target.closest('.color-dropdown-container')) {
+        setColorSearchOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const fetchTrendyolCategories = async () => {
     try {
@@ -331,6 +352,60 @@ export default function AdminProducts() {
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleTechImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setTechImporting(true);
+    const toastId = toast.loading("Excel dosyası analiz ediliyor...");
+    try {
+      const token = localStorage.getItem("token");
+      const fd = new FormData();
+      fd.append("file", file);
+      const response = await axios.post(`${API}/products/attributes/import-technical-xlsx`, fd, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
+      });
+      if (response.data.success) {
+        setTechImportResults(response.data);
+        setTechImportModalOpen(true);
+        toast.success(`${response.data.matched} ürün eşleştirildi, ${response.data.unmatched} eşleşmedi`, { id: toastId });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Dosya analiz edilemedi", { id: toastId });
+    } finally {
+      setTechImporting(false);
+      if (techFileInputRef.current) techFileInputRef.current.value = "";
+    }
+  };
+
+  const handleApplyTechImport = async () => {
+    if (!techImportResults?.results) return;
+    setTechApplying(true);
+    const toastId = toast.loading("Özellikler ürünlere uygulanıyor...");
+    try {
+      const token = localStorage.getItem("token");
+      const updates = techImportResults.results
+        .filter(r => r.matched_product_id)
+        .map(r => ({
+          product_id: r.matched_product_id,
+          attributes: r.attributes,
+          extra_colors: r.extra_colors
+        }));
+      const response = await axios.post(`${API}/products/attributes/apply-technical-xlsx`, { updates }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.data.success) {
+        toast.success(response.data.message, { id: toastId });
+        setTechImportModalOpen(false);
+        setTechImportResults(null);
+        fetchProducts();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Uygulama başarısız", { id: toastId });
+    } finally {
+      setTechApplying(false);
     }
   };
 
@@ -687,6 +762,13 @@ export default function AdminProducts() {
             accept=".xlsx, .xls"
             className="hidden"
           />
+          <input
+            type="file"
+            ref={techFileInputRef}
+            onChange={handleTechImport}
+            accept=".xlsx, .xls"
+            className="hidden"
+          />
           <button
             onClick={handleExport}
             disabled={exporting}
@@ -702,6 +784,15 @@ export default function AdminProducts() {
           >
             {importing ? <RefreshCw className="animate-spin" size={16} /> : <Upload size={16} />}
             Excel Yükle
+          </button>
+          <button
+            onClick={() => techFileInputRef.current?.click()}
+            disabled={techImporting}
+            data-testid="tech-import-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-all font-medium text-sm shadow-sm disabled:opacity-50"
+          >
+            {techImporting ? <RefreshCw className="animate-spin" size={16} /> : <FileSpreadsheet size={16} />}
+            Teknik Detay Yükle
           </button>
           <button 
             onClick={() => { resetForm(); setModalOpen(true); }}
@@ -1520,39 +1611,37 @@ export default function AdminProducts() {
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
                       <div>
                         <label className="block text-xs font-bold text-orange-700 mb-1 uppercase">Beden *</label>
-                        <div className="relative">
-                          <div 
-                            className="w-full border-orange-200 border-2 px-3 py-2 rounded-lg focus-within:border-orange-500 bg-white flex items-center justify-between cursor-pointer transition-all"
-                            onClick={() => setSizeSearchOpen(!sizeSearchOpen)}
-                          >
-                            <span className={formData.newVariant?.size ? "text-black text-sm font-bold" : "text-gray-400 text-sm font-bold"}>
-                              {formData.newVariant?.size || "Seçiniz"}
-                            </span>
-                            <ChevronDown size={16} className="text-gray-400" />
-                          </div>
+                        <div className="relative size-dropdown-container">
+                          <input 
+                            type="text" 
+                            placeholder="Beden ara veya seç..." 
+                            className="w-full border-orange-200 border-2 px-3 py-2 rounded-lg focus:border-orange-500 outline-none text-sm font-bold bg-white"
+                            value={sizeSearchTerm || formData.newVariant?.size || ""}
+                            onChange={(e) => { setSizeSearchTerm(e.target.value); setSizeSearchOpen(true); }}
+                            onFocus={() => setSizeSearchOpen(true)}
+                          />
                           {sizeSearchOpen && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                              <div className="p-2 sticky top-0 bg-white border-b">
-                                <input 
-                                  type="text" 
-                                  placeholder="Beden ara..." 
-                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm outline-none focus:border-orange-500 bg-gray-50 focus:bg-white transition-colors"
-                                  value={sizeSearchTerm}
-                                  onChange={(e) => setSizeSearchTerm(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  autoFocus
-                                />
-                              </div>
-                              <div className="p-1">
-                                {globalSizes.filter(s => s.value.toLowerCase().includes(sizeSearchTerm.toLowerCase())).map(s => (
+                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl" style={{maxHeight: '320px', overflowY: 'auto'}}>
+                              <div className="p-2">
+                                {globalSizes
+                                  .filter(s => s.value.toLowerCase().includes((sizeSearchTerm || "").toLowerCase()))
+                                  .slice(0, 30)
+                                  .map(s => (
                                   <div 
                                     key={s.id}
-                                    className="px-3 py-2 text-sm hover:bg-orange-50 cursor-pointer rounded font-medium"
-                                    onClick={() => { setFormData({...formData, newVariant: {...(formData.newVariant || {}), size: s.value}}); setSizeSearchOpen(false); setSizeSearchTerm(""); }}
+                                    className="px-4 py-3 text-sm hover:bg-orange-100 cursor-pointer rounded-lg font-semibold transition-colors border-b border-gray-100 last:border-b-0"
+                                    onClick={() => { 
+                                      setFormData({...formData, newVariant: {...(formData.newVariant || {}), size: s.value}}); 
+                                      setSizeSearchOpen(false); 
+                                      setSizeSearchTerm(""); 
+                                    }}
                                   >
                                     {s.value}
                                   </div>
                                 ))}
+                                {globalSizes.filter(s => s.value.toLowerCase().includes((sizeSearchTerm || "").toLowerCase())).length === 0 && (
+                                  <div className="px-4 py-3 text-sm text-gray-400 italic">Sonuç bulunamadı</div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1560,39 +1649,37 @@ export default function AdminProducts() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-orange-700 mb-1 uppercase">Renk</label>
-                        <div className="relative">
-                          <div 
-                            className="w-full border-orange-200 border-2 px-3 py-2 rounded-lg focus-within:border-orange-500 bg-white flex items-center justify-between cursor-pointer transition-all"
-                            onClick={() => setColorSearchOpen(!colorSearchOpen)}
-                          >
-                            <span className={formData.newVariant?.color ? "text-black text-sm font-bold" : "text-gray-400 text-sm font-bold"}>
-                              {formData.newVariant?.color || "Seçiniz"}
-                            </span>
-                            <ChevronDown size={16} className="text-gray-400" />
-                          </div>
+                        <div className="relative color-dropdown-container">
+                          <input 
+                            type="text" 
+                            placeholder="Renk ara veya seç..." 
+                            className="w-full border-orange-200 border-2 px-3 py-2 rounded-lg focus:border-orange-500 outline-none text-sm font-bold bg-white"
+                            value={colorSearchTerm || formData.newVariant?.color || ""}
+                            onChange={(e) => { setColorSearchTerm(e.target.value); setColorSearchOpen(true); }}
+                            onFocus={() => setColorSearchOpen(true)}
+                          />
                           {colorSearchOpen && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                              <div className="p-2 sticky top-0 bg-white border-b">
-                                <input 
-                                  type="text" 
-                                  placeholder="Renk ara..." 
-                                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm outline-none focus:border-orange-500 bg-gray-50 focus:bg-white transition-colors"
-                                  value={colorSearchTerm}
-                                  onChange={(e) => setColorSearchTerm(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  autoFocus
-                                />
-                              </div>
-                              <div className="p-1">
-                                {globalColors.filter(c => c.value.toLowerCase().includes(colorSearchTerm.toLowerCase())).map(c => (
+                            <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-orange-300 rounded-xl shadow-2xl" style={{maxHeight: '320px', overflowY: 'auto'}}>
+                              <div className="p-2">
+                                {globalColors
+                                  .filter(c => c.value.toLowerCase().includes((colorSearchTerm || "").toLowerCase()))
+                                  .slice(0, 30)
+                                  .map(c => (
                                   <div 
                                     key={c.id}
-                                    className="px-3 py-2 text-sm hover:bg-orange-50 cursor-pointer rounded font-medium"
-                                    onClick={() => { setFormData({...formData, newVariant: {...(formData.newVariant || {}), color: c.value}}); setColorSearchOpen(false); setColorSearchTerm(""); }}
+                                    className="px-4 py-3 text-sm hover:bg-orange-100 cursor-pointer rounded-lg font-semibold transition-colors border-b border-gray-100 last:border-b-0"
+                                    onClick={() => { 
+                                      setFormData({...formData, newVariant: {...(formData.newVariant || {}), color: c.value}}); 
+                                      setColorSearchOpen(false); 
+                                      setColorSearchTerm(""); 
+                                    }}
                                   >
                                     {c.value}
                                   </div>
                                 ))}
+                                {globalColors.filter(c => c.value.toLowerCase().includes((colorSearchTerm || "").toLowerCase())).length === 0 && (
+                                  <div className="px-4 py-3 text-sm text-gray-400 italic">Sonuç bulunamadı</div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -2006,6 +2093,90 @@ export default function AdminProducts() {
               {(!selectedProductForVariants.variants || selectedProductForVariants.variants.length === 0) && (
                 <p className="text-center text-gray-500 py-8">Bu ürünün beden varyantı bulunmuyor</p>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Technical Details Import Modal */}
+      <Dialog open={techImportModalOpen} onOpenChange={setTechImportModalOpen}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto" data-testid="tech-import-modal">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Teknik Detay Eşleştirme Sonuçları</DialogTitle>
+          </DialogHeader>
+          {techImportResults && (
+            <div className="space-y-4">
+              <div className="flex gap-4 text-sm">
+                <div className="bg-green-50 border border-green-200 px-4 py-2 rounded-lg">
+                  <span className="font-bold text-green-700">{techImportResults.matched}</span>
+                  <span className="text-green-600 ml-1">Eşleşen</span>
+                </div>
+                <div className="bg-red-50 border border-red-200 px-4 py-2 rounded-lg">
+                  <span className="font-bold text-red-700">{techImportResults.unmatched}</span>
+                  <span className="text-red-600 ml-1">Eşleşmeyen</span>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 px-4 py-2 rounded-lg">
+                  <span className="font-bold text-gray-700">{techImportResults.total_excel_products}</span>
+                  <span className="text-gray-600 ml-1">Toplam</span>
+                </div>
+              </div>
+
+              <div className="border rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-bold text-gray-600 w-8">#</th>
+                      <th className="text-left px-3 py-2 font-bold text-gray-600">Excel Ürün Adı</th>
+                      <th className="text-left px-3 py-2 font-bold text-gray-600">Eşleşen Ürün</th>
+                      <th className="text-center px-3 py-2 font-bold text-gray-600 w-16">Skor</th>
+                      <th className="text-center px-3 py-2 font-bold text-gray-600 w-20">Özellik</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {techImportResults.results.map((r, idx) => (
+                      <tr key={idx} className={r.matched_product_id ? "bg-white" : "bg-red-50"}>
+                        <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
+                        <td className="px-3 py-2 font-medium">{r.excel_name}</td>
+                        <td className="px-3 py-2">
+                          {r.matched_product_name ? (
+                            <span className="text-green-700 font-medium">{r.matched_product_name}</span>
+                          ) : (
+                            <span className="text-red-500 italic">Eşleşme bulunamadı</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold ${
+                            r.match_score >= 80 ? 'bg-green-100 text-green-700' :
+                            r.match_score >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                            r.match_score > 0 ? 'bg-orange-100 text-orange-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            %{r.match_score}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-600">{r.attributes.length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  onClick={() => { setTechImportModalOpen(false); setTechImportResults(null); }}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm hover:bg-gray-200 transition-colors"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={handleApplyTechImport}
+                  disabled={techApplying || techImportResults.matched === 0}
+                  data-testid="apply-tech-import-btn"
+                  className="px-6 py-2 bg-orange-600 text-white rounded-lg font-bold text-sm hover:bg-orange-700 transition-colors disabled:opacity-50 shadow-sm"
+                >
+                  {techApplying ? "Uygulanıyor..." : `${techImportResults.matched} Ürüne Uygula`}
+                </button>
+              </div>
             </div>
           )}
         </DialogContent>
