@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_barcode_from_range
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range
 from fastapi import Response, UploadFile, File
 import pandas as pd
 import io
@@ -182,7 +182,7 @@ async def create_product(
             product_data["barcode"] = barcode
 
     product = {
-        "id": generate_id(),
+        "id": await generate_short_id("products"),
         "name": product_data.get("name", ""),
         "slug": product_data.get("slug") or generate_slug(product_data.get("name", "")),
         "description": product_data.get("description", ""),
@@ -445,15 +445,21 @@ async def bulk_update_vat(
 
 @router.get("/export/excel")
 async def export_products_excel(current_user: dict = Depends(require_admin)):
-    """Export all products to an Excel file (variants as rows)"""
+    """Export all products to an Excel file (variants as rows with dynamic attributes)"""
     try:
         products = await db.products.find({}, {"_id": 0}).to_list(None)
+        
+        # Collect all unique attribute names
+        all_attr_names = set()
+        for p in products:
+            for attr in p.get("attributes", []):
+                if attr.get("name"):
+                    all_attr_names.add(attr["name"])
         
         rows = []
         for p in products:
             variants = p.get("variants", [])
             if not variants:
-                # Add a dummy variant to represent the product if no variants exist
                 variants = [{
                     "barcode": p.get("barcode", ""),
                     "stock_code": p.get("stock_code", ""),
@@ -465,7 +471,7 @@ async def export_products_excel(current_user: dict = Depends(require_admin)):
                 }]
             
             for v in variants:
-                rows.append({
+                row = {
                     "ID": p.get("id"),
                     "Ürün Adı": p.get("name"),
                     "Kategori": p.get("category_name"),
@@ -479,7 +485,18 @@ async def export_products_excel(current_user: dict = Depends(require_admin)):
                     "Stok": v.get("stock", 0),
                     "Açıklama": p.get("description", ""),
                     "Aktif": "Evet" if p.get("is_active") else "Hayır"
-                })
+                }
+                
+                # pre-fill attributes with empty string
+                for attr_name in all_attr_names:
+                    row[f"Özellik: {attr_name}"] = ""
+                    
+                # apply product attributes
+                for attr in p.get("attributes", []):
+                    if attr.get("name") and attr.get("value"):
+                        row[f"Özellik: {attr['name']}"] = attr["value"]
+                        
+                rows.append(row)
         
         df = pd.DataFrame(rows)
         output = io.BytesIO()
@@ -517,19 +534,32 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                 if not barcode or barcode == "nan":
                     continue
                 
+                # Parse dynamic attributes from columns
+                parsed_attrs = []
+                for col in df.columns:
+                    if str(col).startswith("Özellik: "):
+                        attr_name = str(col).replace("Özellik: ", "").strip()
+                        val = str(row.get(col, "")).strip()
+                        if val and val != "nan":
+                            parsed_attrs.append({"name": attr_name, "value": val})
+                
                 # Try finding product by variant barcode
                 existing = await db.products.find_one({"variants.barcode": barcode})
                 
                 if existing:
                     # Update variant in existing product
+                    update_fields = {
+                        "variants.$.stock": int(row.get("Stok", 0) if pd.notna(row.get("Stok")) else 0),
+                        "variants.$.price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0)) if pd.notna(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))) else 0),
+                        "variants.$.sale_price": float(row.get("Satış Fiyatı", 0) if pd.notna(row.get("Satış Fiyatı")) else 0),
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    if parsed_attrs:
+                        update_fields["attributes"] = parsed_attrs
+
                     await db.products.update_one(
                         {"id": existing["id"], "variants.barcode": barcode},
-                        {"$set": {
-                            "variants.$.stock": int(row.get("Stok", 0)),
-                            "variants.$.price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))),
-                            "variants.$.sale_price": float(row.get("Satış Fiyatı", 0)),
-                            "updated_at": datetime.now(timezone.utc).isoformat()
-                        }}
+                        {"$set": update_fields}
                     )
                     stats["updated"] += 1
                 else:
@@ -539,28 +569,35 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                     
                     variant = {
                         "barcode": barcode,
-                        "stock_code": str(row.get("Stok Kodu", "")),
+                        "stock_code": str(row.get("Stok Kodu", "")).replace("nan", ""),
                         "size": str(row.get("Beden", "")).replace("nan", ""),
                         "color": str(row.get("Renk", "")).replace("nan", ""),
-                        "price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))),
-                        "sale_price": float(row.get("Satış Fiyatı", 0)),
-                        "stock": int(row.get("Stok", 0))
+                        "price": float(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0)) if pd.notna(row.get("Piyasa Fiyatı", row.get("Satış Fiyatı", 0))) else 0),
+                        "sale_price": float(row.get("Satış Fiyatı", 0) if pd.notna(row.get("Satış Fiyatı")) else 0),
+                        "stock": int(row.get("Stok", 0) if pd.notna(row.get("Stok")) else 0)
                     }
                     
                     if prod_by_name:
                         # Add as new variant
+                        update_fields = {
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        if parsed_attrs:
+                            update_fields["attributes"] = parsed_attrs
+                        
                         await db.products.update_one(
                             {"id": prod_by_name["id"]},
-                            {"$push": {"variants": variant}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+                            {"$push": {"variants": variant}, "$set": update_fields}
                         )
                         stats["updated"] += 1
                     else:
                         # Create full new product
+                        new_id = await generate_short_id("products")
                         new_p = {
-                            "id": generate_id(),
+                            "id": new_id,
                             "name": name,
                             "slug": generate_slug(name),
-                            "category_name": str(row.get("Kategori")),
+                            "category_name": str(row.get("Kategori", "")).replace("nan", ""),
                             "brand": str(row.get("Marka", "")).replace("nan", ""),
                             "description": str(row.get("Açıklama", "")).replace("nan", ""),
                             "price": variant["price"],
@@ -569,7 +606,7 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                             "is_active": True,
                             "variants": [variant],
                             "images": [],
-                            "attributes": [],
+                            "attributes": parsed_attrs,
                             "created_at": datetime.now(timezone.utc).isoformat(),
                             "updated_at": datetime.now(timezone.utc).isoformat()
                         }
