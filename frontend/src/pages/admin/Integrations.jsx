@@ -19,6 +19,8 @@ export default function Integrations() {
   const [statuses, setStatuses] = useState({
     iyzico: { configured: false, mode: "sandbox" },
     trendyol: { configured: false, mode: "sandbox" },
+    hepsiburada: { configured: false, mode: "sandbox" },
+    temu: { configured: false, mode: "sandbox" },
     mng: { configured: true, mode: "live" },
     netgsm: { configured: false, mode: "sandbox" },
     gib: { configured: false, mode: "test" },
@@ -35,6 +37,22 @@ export default function Integrations() {
     is_active: false,
     default_markup: 0
   });
+
+  // Hepsiburada state
+  const [hbModalOpen, setHbModalOpen] = useState(false);
+  const [hbSettings, setHbSettings] = useState({
+    merchant_id: "", username: "", api_key: "", api_secret: "",
+    mode: "sandbox", is_active: false, default_markup: 0
+  });
+  const [hbTesting, setHbTesting] = useState(false);
+
+  // Temu state
+  const [temuModalOpen, setTemuModalOpen] = useState(false);
+  const [temuSettings, setTemuSettings] = useState({
+    merchant_id: "", username: "", api_key: "", api_secret: "",
+    mode: "sandbox", is_active: false, default_markup: 0
+  });
+  const [temuTesting, setTemuTesting] = useState(false);
 
   // Ticimax state
   const [ticimaxImportingProducts, setTicimaxImportingProducts] = useState(false);
@@ -91,18 +109,22 @@ export default function Integrations() {
       const headers = { Authorization: `Bearer ${token}` };
 
       // Fetch integration statuses
-      const [paymentRes, trendyolRes, gibRes, ticimaxRes, xmlRes] = await Promise.all([
+      const [paymentRes, trendyolRes, gibRes, ticimaxRes, xmlRes, hbRes, temuRes] = await Promise.all([
         axios.get(`${API}/integrations/payment/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/trendyol/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/dogan/settings`, { headers }).catch(() => ({ data: { enabled: false } })),
         axios.get(`${API}/integrations/ticimax/status`, { headers }).catch(() => ({ data: { configured: true, mode: "live", last_sync: null } })),
-        axios.get(`${API}/integrations/xml/status`, { headers }).catch(() => ({ data: { last_sync: null } }))
+        axios.get(`${API}/integrations/xml/status`, { headers }).catch(() => ({ data: { last_sync: null } })),
+        axios.get(`${API}/integrations/hepsiburada/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
+        axios.get(`${API}/integrations/temu/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } }))
       ]);
 
       setStatuses(prev => ({
         ...prev,
         iyzico: paymentRes.data,
         trendyol: trendyolRes.data,
+        hepsiburada: hbRes.data,
+        temu: temuRes.data,
         gib: { configured: gibRes.data?.enabled || false, mode: gibRes.data?.is_test ? "test" : "live" }
       }));
       setTicimaxStatus(ticimaxRes.data);
@@ -142,6 +164,53 @@ export default function Integrations() {
       toast.error("Ayarlar kaydedilemedi");
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  // -- Generic marketplace (Hepsiburada / Temu) settings loaders --
+  const fetchMarketplaceSettings = async (mp, setter, openSetter) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/integrations/${mp}/settings?t=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setter(res.data);
+      openSetter(true);
+    } catch (err) {
+      toast.error("Ayarlar alınamadı");
+    }
+  };
+
+  const saveMarketplaceSettings = async (mp, settings, closeFn) => {
+    setSavingSettings(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/integrations/${mp}/settings`, settings, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`${mp === 'hepsiburada' ? 'Hepsiburada' : 'Temu'} ayarları kaydedildi`);
+      closeFn(false);
+      fetchStatuses();
+    } catch (err) {
+      toast.error("Ayarlar kaydedilemedi");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const testMarketplaceConnection = async (mp, setTesting) => {
+    setTesting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/integrations/${mp}/test-connection`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data.success) toast.success(res.data.message);
+      else toast.error(res.data.message);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Test başarısız");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -358,6 +427,34 @@ export default function Integrations() {
         { label: "Ürünleri Gönder", icon: <Upload size={16} />, onClick: handleTrendyolSync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Fiyat/Stok Güncelle", icon: <RefreshCw size={16} />, onClick: handleTrendyolInventorySync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Siparişleri Al", icon: <Download size={16} />, onClick: handleTrendyolImport, loading: importing, disabled: !statuses.trendyol?.configured }
+      ]
+    },
+    {
+      id: "hepsiburada",
+      name: "Hepsiburada Marketplace",
+      description: "Hepsiburada pazaryeri entegrasyonu - ürün, stok, sipariş, müşteri soruları",
+      icon: <ShoppingBag className="w-8 h-8" />,
+      status: statuses.hepsiburada,
+      color: "red",
+      instructions: "Hepsiburada Merchant panelinden API Key, API Secret ve Merchant ID alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('hepsiburada', setHbSettings, setHbModalOpen), loading: false },
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('hepsiburada', setHbTesting), loading: hbTesting, disabled: !statuses.hepsiburada?.configured }
+      ]
+    },
+    {
+      id: "temu",
+      name: "Temu Marketplace",
+      description: "Temu pazaryeri entegrasyonu - ürün, stok, sipariş, müşteri soruları",
+      icon: <Store className="w-8 h-8" />,
+      status: statuses.temu,
+      color: "orange",
+      instructions: "Temu Seller Center'dan API Key, API Secret ve Merchant ID alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('temu', setTemuSettings, setTemuModalOpen), loading: false },
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('temu', setTemuTesting), loading: temuTesting, disabled: !statuses.temu?.configured }
       ]
     },
     {
@@ -622,6 +719,126 @@ export default function Integrations() {
           </div>
         </div>
       </div>
+
+      {/* Hepsiburada Settings Modal */}
+      <Dialog open={hbModalOpen} onOpenChange={setHbModalOpen}>
+        <DialogContent data-testid="hepsiburada-settings-modal">
+          <DialogHeader>
+            <DialogTitle>Hepsiburada API Ayarları</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('hepsiburada', hbSettings, setHbModalOpen); }} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Merchant ID</label>
+              <input data-testid="hb-merchant-id" type="text" required value={hbSettings.merchant_id}
+                onChange={(e) => setHbSettings({ ...hbSettings, merchant_id: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Kullanıcı Adı</label>
+              <input data-testid="hb-username" type="text" value={hbSettings.username || ''}
+                onChange={(e) => setHbSettings({ ...hbSettings, username: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">API Key</label>
+              <input data-testid="hb-api-key" type="text" required value={hbSettings.api_key}
+                onChange={(e) => setHbSettings({ ...hbSettings, api_key: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">API Secret</label>
+              <input data-testid="hb-api-secret" type="password" value={hbSettings.api_secret || ''}
+                onChange={(e) => setHbSettings({ ...hbSettings, api_secret: e.target.value })}
+                placeholder={hbSettings.api_secret === "********" ? "********" : "Yeni API Secret"}
+                className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Sadece güncellemek istediğinizde doldurun</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mod</label>
+              <select value={hbSettings.mode || "sandbox"}
+                onChange={e => setHbSettings({ ...hbSettings, mode: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm bg-white">
+                <option value="sandbox">Test Modu</option>
+                <option value="live">Canlı Mod</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Varsayılan Fiyat Farkı (%)</label>
+              <input type="number" value={hbSettings.default_markup}
+                onChange={(e) => setHbSettings({ ...hbSettings, default_markup: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="Örn: 15" />
+            </div>
+            <label className="flex items-center gap-2 mt-2">
+              <input data-testid="hb-is-active" type="checkbox" checked={!!hbSettings.is_active}
+                onChange={(e) => setHbSettings({ ...hbSettings, is_active: e.target.checked })} />
+              <span className="text-sm">Entegrasyon Aktif</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <button type="button" onClick={() => setHbModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
+              <button data-testid="hb-save-btn" type="submit" disabled={savingSettings} className="px-4 py-2 bg-[#FF6000] text-white rounded hover:bg-[#cc4e00] disabled:opacity-50">
+                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Temu Settings Modal */}
+      <Dialog open={temuModalOpen} onOpenChange={setTemuModalOpen}>
+        <DialogContent data-testid="temu-settings-modal">
+          <DialogHeader>
+            <DialogTitle>Temu API Ayarları</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('temu', temuSettings, setTemuModalOpen); }} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Merchant ID</label>
+              <input data-testid="temu-merchant-id" type="text" required value={temuSettings.merchant_id}
+                onChange={(e) => setTemuSettings({ ...temuSettings, merchant_id: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">API Key</label>
+              <input data-testid="temu-api-key" type="text" required value={temuSettings.api_key}
+                onChange={(e) => setTemuSettings({ ...temuSettings, api_key: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">API Secret</label>
+              <input data-testid="temu-api-secret" type="password" value={temuSettings.api_secret || ''}
+                onChange={(e) => setTemuSettings({ ...temuSettings, api_secret: e.target.value })}
+                placeholder={temuSettings.api_secret === "********" ? "********" : "Yeni API Secret"}
+                className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Sadece güncellemek istediğinizde doldurun</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mod</label>
+              <select value={temuSettings.mode || "sandbox"}
+                onChange={e => setTemuSettings({ ...temuSettings, mode: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm bg-white">
+                <option value="sandbox">Test Modu</option>
+                <option value="live">Canlı Mod</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Varsayılan Fiyat Farkı (%)</label>
+              <input type="number" value={temuSettings.default_markup}
+                onChange={(e) => setTemuSettings({ ...temuSettings, default_markup: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="Örn: 20" />
+            </div>
+            <label className="flex items-center gap-2 mt-2">
+              <input data-testid="temu-is-active" type="checkbox" checked={!!temuSettings.is_active}
+                onChange={(e) => setTemuSettings({ ...temuSettings, is_active: e.target.checked })} />
+              <span className="text-sm">Entegrasyon Aktif</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <button type="button" onClick={() => setTemuModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
+              <button data-testid="temu-save-btn" type="submit" disabled={savingSettings} className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50">
+                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={trendyolModalOpen} onOpenChange={setTrendyolModalOpen}>
         <DialogContent>

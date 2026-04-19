@@ -191,7 +191,9 @@ export default function AdminProducts() {
     trendyol_category_id: "",
     trendyol_multiplier: 0,
     use_default_markup: true,
-    markup_rate: 0
+    markup_rate: 0,
+    hepsiburada_attributes: {},
+    temu_attributes: {}
   });
 
   const [trendyolAttributesList, setTrendyolAttributesList] = useState([]);
@@ -667,6 +669,8 @@ export default function AdminProducts() {
       use_default_markup: product.use_default_markup ?? true,
       markup_rate: product.markup_rate || 0,
       trendyol_attributes: product.trendyol_attributes || {},
+      hepsiburada_attributes: product.hepsiburada_attributes || {},
+      temu_attributes: product.temu_attributes || {},
       variants: product.variants || [],
       attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}) },
     });
@@ -690,6 +694,8 @@ export default function AdminProducts() {
       meta_title: "", meta_description: "", meta_keywords: "",
       use_default_markup: true, markup_rate: 0,
       trendyol_attributes: {},
+      hepsiburada_attributes: {},
+      temu_attributes: {},
       variants: [], newVariant: {},
       attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR" },
     });
@@ -1415,86 +1421,123 @@ export default function AdminProducts() {
 
               {/* Attributes Tab */}
               <TabsContent value="attributes" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="bg-white p-8 rounded-xl border shadow-sm">
-                  <div className="flex justify-between items-center mb-6">
-                    <div className="flex-1 mr-4">
-                      <h3 className="font-bold text-xl text-orange-900 mb-1">Ürün Özellikleri</h3>
-                      <p className="text-xs text-gray-500 leading-relaxed max-w-2xl">
-                        Dolu ve zorunlu özellikler önce gösterilir. Diğer özellikleri görmek için aşağıdaki butonu kullanın.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <input 
-                          type="text"
-                          placeholder="Özellik ara..."
-                          className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-orange-500 focus:bg-white transition-all w-48"
-                          value={attributeSearchTerm}
-                          onChange={(e) => setAttributeSearchTerm(e.target.value)}
-                        />
-                      </div>
-                      <button type="button" className="px-4 py-2 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-700 transition-colors shadow-sm shrink-0">
-                        Özel Özellik Ekle
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {(() => {
-                    const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
-                    const attrMappings = selectedCat?.attribute_mappings || [];
-                    // Hide attributes that are handled by variants or auto-filled
-                    const hiddenAttrNames = ["beden", "renk", "web color"];
+                {(() => {
+                  const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
+                  const attrMappings = selectedCat?.attribute_mappings || [];
+                  const hiddenAttrNames = ["beden", "renk", "web color"];
 
-                    const processedAttributes = globalAttributes
-                      .filter(a => !hiddenAttrNames.includes(a.name.toLowerCase()))
-                      .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()))
-                      .map(attr => {
-                        const mapping = attrMappings.find(m => m.local_attr?.toLowerCase() === attr.name.toLowerCase());
-                        
-                        let tyAttr = null;
-                        if (mapping?.trendyol_attr_id) {
-                          tyAttr = trendyolAttributesList.find(ta => 
-                            (ta.attribute?.id || ta.id) === mapping.trendyol_attr_id
-                          );
-                        }
-                        
-                        if (!tyAttr) {
-                          tyAttr = trendyolAttributesList.find(ta => {
-                            const taName = (ta.attribute?.name || ta.name || "").toLowerCase().trim();
-                            const localName = (attr.name || "").toLowerCase().trim();
-                            return taName === localName;
-                          });
-                        }
-                        
-                        const hasVal = !!formData.attributes?.[attr.name];
-                        const isReq = !!tyAttr?.required;
-                        return { attr, isRequired: isReq, hasValue: hasVal };
+                  const baseList = globalAttributes
+                    .filter(a => !hiddenAttrNames.includes(a.name.toLowerCase()))
+                    .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()));
+
+                  // Determine required attrs from Trendyol mapping
+                  const getIsRequired = (attr) => {
+                    const mapping = attrMappings.find(m => m.local_attr?.toLowerCase() === attr.name.toLowerCase());
+                    let tyAttr = null;
+                    if (mapping?.trendyol_attr_id) {
+                      tyAttr = trendyolAttributesList.find(ta => (ta.attribute?.id || ta.id) === mapping.trendyol_attr_id);
+                    }
+                    if (!tyAttr) {
+                      tyAttr = trendyolAttributesList.find(ta => {
+                        const taName = (ta.attribute?.name || ta.name || "").toLowerCase().trim();
+                        return taName === (attr.name || "").toLowerCase().trim();
                       });
+                    }
+                    return !!tyAttr?.required;
+                  };
 
-                    const filledAttrs = processedAttributes.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
-                    const requiredEmpty = processedAttributes.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
-                    const otherEmpty = processedAttributes.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                  // Auto-sync: when Trendyol attribute changes, if value matches an allowed value
+                  // in that attribute's value library, auto-apply to HB + Temu maps (only if those
+                  // are currently empty for that attr, to respect manual overrides).
+                  const setTrendyolAttr = (attr, val) => {
+                    const newAttrs = { ...(formData.attributes || {}), [attr.name]: val };
+                    const newHb = { ...(formData.hepsiburada_attributes || {}) };
+                    const newTemu = { ...(formData.temu_attributes || {}) };
+                    const valuesLower = (attr.values || []).map(v => (v || "").toLowerCase());
+                    const valOk = !val || !attr.values?.length || valuesLower.includes((val || "").toLowerCase());
+                    if (valOk) {
+                      if (!newHb[attr.name]) newHb[attr.name] = val;
+                      if (!newTemu[attr.name]) newTemu[attr.name] = val;
+                    }
+                    setFormData({ ...formData, attributes: newAttrs, hepsiburada_attributes: newHb, temu_attributes: newTemu });
+                  };
+
+                  const renderSection = (marketplace, title, accent, logo) => {
+                    const mapKey = marketplace === 'trendyol' ? 'attributes'
+                                 : marketplace === 'hepsiburada' ? 'hepsiburada_attributes'
+                                 : 'temu_attributes';
+                    const valuesMap = formData[mapKey] || {};
+
+                    const processed = baseList.map(attr => {
+                      const isReq = marketplace === 'trendyol' ? getIsRequired(attr) : false;
+                      const hasVal = !!valuesMap[attr.name];
+                      return { attr, isRequired: isReq, hasValue: hasVal };
+                    });
+                    const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                    const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
+                    const otherEmpty = processed.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const isSearching = attributeSearchTerm.length > 0;
+
+                    const handleChange = (attr, val) => {
+                      if (marketplace === 'trendyol') {
+                        setTrendyolAttr(attr, val);
+                      } else {
+                        setFormData({
+                          ...formData,
+                          [mapKey]: { ...(formData[mapKey] || {}), [attr.name]: val }
+                        });
+                      }
+                    };
 
                     const renderAttr = ({ attr, isRequired }) => (
                       <SearchableAttribute
-                        key={attr.id}
+                        key={`${marketplace}-${attr.id}`}
                         attr={attr}
-                        value={formData.attributes?.[attr.name]}
+                        value={valuesMap[attr.name]}
                         isRequired={isRequired}
-                        onChange={(val) => setFormData({
-                          ...formData,
-                          attributes: {
-                            ...(formData.attributes || {}),
-                            [attr.name]: val
-                          }
-                        })}
+                        onChange={(val) => handleChange(attr, val)}
                       />
                     );
 
                     return (
-                      <>
+                      <div
+                        data-testid={`attributes-section-${marketplace}`}
+                        className={`bg-white p-8 rounded-xl border-2 shadow-sm`}
+                        style={{ borderColor: accent.border }}
+                      >
+                        <div className="flex justify-between items-center mb-6">
+                          <div className="flex items-center gap-3 flex-1 mr-4">
+                            <span
+                              className="inline-flex items-center justify-center text-white text-xs font-black px-3 py-1.5 rounded-md tracking-wider"
+                              style={{ background: accent.bg }}
+                            >
+                              {logo}
+                            </span>
+                            <div>
+                              <h3 className="font-bold text-xl mb-0" style={{ color: accent.text }}>{title}</h3>
+                              <p className="text-xs text-gray-500 leading-relaxed max-w-2xl">
+                                {marketplace === 'trendyol'
+                                  ? "Trendyol için ürün özellikleri. Seçilen değer HB ve Temu'da da otomatik set edilir (boş ise)."
+                                  : `${marketplace === 'hepsiburada' ? 'Hepsiburada' : 'Temu'} için ürün özellikleri. Gerekirse Trendyol'dan bağımsız düzenleyin.`}
+                              </p>
+                            </div>
+                          </div>
+                          {marketplace === 'trendyol' && (
+                            <div className="flex items-center gap-3">
+                              <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                                <input
+                                  type="text"
+                                  placeholder="Özellik ara..."
+                                  className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-orange-500 focus:bg-white transition-all w-48"
+                                  value={attributeSearchTerm}
+                                  onChange={(e) => setAttributeSearchTerm(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {filledAttrs.length > 0 && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
@@ -1506,7 +1549,7 @@ export default function AdminProducts() {
                             </div>
                           </div>
                         )}
-                        
+
                         {requiredEmpty.length > 0 && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
@@ -1531,7 +1574,7 @@ export default function AdminProducts() {
                           </div>
                         )}
 
-                        {otherEmpty.length > 0 && !isSearching && (
+                        {otherEmpty.length > 0 && !isSearching && marketplace === 'trendyol' && (
                           <div className="text-center pt-4 border-t border-dashed border-gray-200">
                             <button
                               type="button"
@@ -1550,10 +1593,18 @@ export default function AdminProducts() {
                             <p className="text-sm font-bold uppercase tracking-widest">Henüz özellik kütüphanesi boş.</p>
                           </div>
                         )}
-                      </>
+                      </div>
                     );
-                  })()}
-                </div>
+                  };
+
+                  return (
+                    <div className="space-y-6">
+                      {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#F27A1A', bg: '#F27A1A', text: '#9A3412' }, 'TRENDYOL')}
+                      {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#FF6000', bg: '#FF6000', text: '#7F1D1D' }, 'HEPSIBURADA')}
+                      {renderSection('temu', 'Temu için Özellikler', { border: '#111827', bg: '#111827', text: '#111827' }, 'TEMU')}
+                    </div>
+                  );
+                })()}
               </TabsContent>
 
               {/* Variants Tab */}

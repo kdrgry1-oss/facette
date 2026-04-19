@@ -35,12 +35,21 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - [2026-03-26] İade sayfası yeniden yapılandırma (checkbox, pasifizasyon, toplu yazdırma, 5dk auto-refresh)
 - [2026-03-26] Ayarlara Şirket Bilgileri bölümü eklendi
 - [2026-03-26] Doğan e-Dönüşüm entegrasyonu (bağlantı test, CheckUser) temel yapı
+- [2026-04-19] Hepsiburada & Temu marketplace scaffolding:
+  - Backend: `/api/integrations/{hepsiburada|temu}/settings|status|test-connection`, unified `/api/integrations/marketplace/questions` + stub sync/answer endpoints
+  - Frontend Entegrasyonlar: Hepsiburada + Temu kartları, settings dialogları
+  - Frontend Products Özellikler: Trendyol altında Hepsiburada & Temu için bağımsız özellik bölümleri (Trendyol'da seçilen değer boş ise HB/Temu'ya otomatik kopyalama)
+  - Frontend Questions: marketplace filtresi, sol kenarlıkta renkli çerçeve, sağ üst köşede pazaryeri rozeti, pazaryeri bazlı senkron butonları
+  - Products modeli `hepsiburada_attributes` + `temu_attributes` alanlarını destekler
 
 ## Credentials
 - Admin: admin@facette.com / admin123
 - Doğan e-Dönüşüm: dogantest / dgn2024@!
 
 ## Backlog
+- P0: Hepsiburada gerçek API entegrasyonu (Listing Products, Orders, QNA) — credentials alındığında
+- P0: Temu gerçek API entegrasyonu (Products, Orders, QNA) — credentials alındığında
+- P0: Trendyol ürün aktarım detaylı sonuç ekranı (stok kodu, barkod, başarı/hata + hata nedeni)
 - P0: Doğan e-Dönüşüm üzerinden e-Fatura kesme (tam entegrasyon)
 - P0: Fatura numarası çıkarma (PDF parsing veya API)
 - P1: Mevcut tüm claim'lerin iskontolarını düzeltme (fix-discounts devam ediyor)
