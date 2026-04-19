@@ -228,6 +228,8 @@ async def create_product(
         "use_default_markup": product_data.get("use_default_markup", True),
         "markup_rate": float(product_data.get("markup_rate", 0)),
         "trendyol_attributes": product_data.get("trendyol_attributes", {}),
+        "hepsiburada_attributes": product_data.get("hepsiburada_attributes", {}),
+        "temu_attributes": product_data.get("temu_attributes", {}),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }

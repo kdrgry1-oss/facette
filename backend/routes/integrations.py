@@ -3228,3 +3228,182 @@ async def check_dogan_user(payload: dict, current_user: dict = Depends(require_a
     )
     result = client.check_user(vkn)
     return result
+
+
+
+# ==================== HEPSIBURADA & TEMU (Marketplace) ====================
+# Generic marketplace settings + questions endpoints.
+# Real API calls can be filled in later; UI scaffolding is ready.
+
+ALLOWED_MARKETPLACES = {"hepsiburada", "temu"}
+
+@router.get("/{marketplace}/settings")
+async def get_marketplace_settings(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Get Hepsiburada / Temu settings (generic)."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+    settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
+    if not settings:
+        return {
+            "id": marketplace,
+            "merchant_id": "",
+            "username": "",
+            "api_key": "",
+            "api_secret": "",
+            "mode": "sandbox",
+            "is_active": False,
+            "default_markup": 0
+        }
+    # Mask secret
+    if settings.get("api_secret"):
+        settings["api_secret"] = "********"
+    if settings.get("password"):
+        settings["password"] = "********"
+    return settings
+
+
+@router.post("/{marketplace}/settings")
+async def save_marketplace_settings(marketplace: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """Save Hepsiburada / Temu settings (generic)."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+
+    update_data = {
+        "id": marketplace,
+        "merchant_id": payload.get("merchant_id", ""),
+        "username": payload.get("username", ""),
+        "api_key": payload.get("api_key", ""),
+        "mode": payload.get("mode", "sandbox"),
+        "is_active": payload.get("is_active", False),
+        "default_markup": payload.get("default_markup", 0),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    # Only update secret if provided
+    if payload.get("api_secret") and payload.get("api_secret") != "********":
+        update_data["api_secret"] = payload.get("api_secret")
+    if payload.get("password") and payload.get("password") != "********":
+        update_data["password"] = payload.get("password")
+
+    await db.settings.update_one({"id": marketplace}, {"$set": update_data}, upsert=True)
+    return {"success": True, "message": f"{marketplace.capitalize()} ayarları kaydedildi"}
+
+
+@router.get("/{marketplace}/status")
+async def get_marketplace_status(marketplace: str):
+    """Get Hepsiburada / Temu integration status."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+    settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
+    if not settings:
+        return {"configured": False, "mode": "sandbox"}
+    return {
+        "configured": bool(settings.get("is_active") and settings.get("api_key")),
+        "mode": settings.get("mode", "sandbox"),
+        "merchant_id": settings.get("merchant_id", "") if settings.get("is_active") else None
+    }
+
+
+@router.post("/{marketplace}/test-connection")
+async def test_marketplace_connection(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Stub test for Hepsiburada / Temu – validates required fields only."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+    settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
+    if not settings or not settings.get("api_key") or not settings.get("merchant_id"):
+        return {"success": False, "message": f"{marketplace.capitalize()} kimlik bilgileri eksik"}
+    return {"success": True, "message": f"{marketplace.capitalize()} kimlik bilgileri geçerli görünüyor (stub test)"}
+
+
+# -------- Unified Marketplace Questions (Trendyol + Hepsiburada + Temu) --------
+
+QUESTIONS_COLLECTIONS = {
+    "trendyol": "trendyol_questions",
+    "hepsiburada": "hepsiburada_questions",
+    "temu": "temu_questions",
+}
+
+
+@router.get("/marketplace/questions")
+async def get_marketplace_questions(
+    marketplace: Optional[str] = "all",
+    status: Optional[str] = None,
+    page: int = 0,
+    size: int = 20,
+    current_user: dict = Depends(require_admin)
+):
+    """Unified endpoint returning questions tagged with their marketplace."""
+    query = {}
+    if status:
+        query["status"] = status
+
+    skip = page * size
+    sources = []
+    if marketplace and marketplace != "all":
+        if marketplace not in QUESTIONS_COLLECTIONS:
+            raise HTTPException(status_code=400, detail="Bilinmeyen pazaryeri")
+        sources = [marketplace]
+    else:
+        sources = list(QUESTIONS_COLLECTIONS.keys())
+
+    all_items = []
+    totals = {}
+    for mp in sources:
+        coll = db[QUESTIONS_COLLECTIONS[mp]]
+        # Pull enough for merge+sort; cap per marketplace to avoid huge reads
+        items = await coll.find(query, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+        for it in items:
+            it["marketplace"] = mp
+        all_items.extend(items)
+        totals[mp] = await coll.count_documents(query)
+
+    # Sort merged by created_at desc
+    def _key(x):
+        return x.get("created_at") or ""
+    all_items.sort(key=_key, reverse=True)
+    total = sum(totals.values())
+    paginated = all_items[skip: skip + size]
+
+    return {
+        "questions": paginated,
+        "total": total,
+        "totals": totals,
+        "page": page,
+        "size": size,
+    }
+
+
+@router.post("/{marketplace}/questions/sync")
+async def sync_marketplace_questions_stub(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Stub sync for HB/Temu until real API integration is wired up."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+    settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
+    if not settings or not settings.get("is_active"):
+        raise HTTPException(status_code=400, detail=f"{marketplace.capitalize()} entegrasyonu yapılandırılmamış")
+    # Real implementation: call HB / Temu QNA API and upsert into respective collection
+    return {"success": True, "synced": 0, "total_fetched": 0, "message": "API entegrasyonu yapılandırıldığında otomatik çalışacak (stub)"}
+
+
+@router.post("/{marketplace}/questions/{question_id}/answer")
+async def answer_marketplace_question_stub(
+    marketplace: str,
+    question_id: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin)
+):
+    """Answer HB / Temu question – currently stores locally; real API wire-up to follow."""
+    if marketplace not in ALLOWED_MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
+    answer_text = (payload or {}).get("answer", "").strip()
+    if not answer_text:
+        raise HTTPException(status_code=400, detail="Yanıt metni boş olamaz")
+    coll = db[QUESTIONS_COLLECTIONS[marketplace]]
+    await coll.update_one(
+        {"question_id": question_id},
+        {"$set": {
+            "answer": answer_text,
+            "status": "ANSWERED",
+            "answered_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"success": True, "message": "Cevap kaydedildi (yerel). API entegrasyonu tamamlandığında otomatik gönderilecek."}
