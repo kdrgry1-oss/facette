@@ -27,12 +27,60 @@ def is_iyzico_configured():
 
 @router.get("/payment/status")
 async def get_payment_status():
-    """Get Iyzico configuration status"""
+    """Get Iyzico configuration status (DB takes precedence over env)."""
+    db_settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
+    if db_settings and db_settings.get("api_key") and db_settings.get("api_secret"):
+        mode = db_settings.get("mode", "sandbox")
+        base = 'https://api.iyzipay.com' if mode == 'live' else 'https://sandbox-api.iyzipay.com'
+        return {
+            "mode": mode,
+            "configured": bool(db_settings.get("is_active")),
+            "base_url": base,
+        }
     return {
         "mode": IYZICO_MODE,
         "configured": is_iyzico_configured(),
         "base_url": IYZICO_BASE_URL
     }
+
+
+@router.get("/iyzico/settings")
+async def get_iyzico_settings(current_user: dict = Depends(require_admin)):
+    settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
+    if not settings:
+        return {
+            "id": "iyzico",
+            "api_key": "",
+            "api_secret": "",
+            "mode": "sandbox",
+            "is_active": False,
+        }
+    if settings.get("api_secret"):
+        settings["api_secret"] = "********"
+    return settings
+
+
+@router.post("/iyzico/settings")
+async def save_iyzico_settings(payload: dict, current_user: dict = Depends(require_admin)):
+    update_data = {
+        "id": "iyzico",
+        "api_key": payload.get("api_key", ""),
+        "mode": payload.get("mode", "sandbox"),
+        "is_active": payload.get("is_active", False),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if payload.get("api_secret") and payload.get("api_secret") != "********":
+        update_data["api_secret"] = payload.get("api_secret")
+    await db.settings.update_one({"id": "iyzico"}, {"$set": update_data}, upsert=True)
+    return {"success": True, "message": "Iyzico ayarları kaydedildi"}
+
+
+@router.post("/iyzico/test-connection")
+async def test_iyzico_connection(current_user: dict = Depends(require_admin)):
+    settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
+    if not settings or not settings.get("api_key") or not settings.get("api_secret"):
+        return {"success": False, "message": "Iyzico API bilgileri eksik"}
+    return {"success": True, "message": "Iyzico API bilgileri kayıtlı. Refund test siparişle yapılabilir."}
 
 # ==================== TRENDYOL ====================
 import httpx

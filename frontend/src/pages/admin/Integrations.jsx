@@ -54,6 +54,13 @@ export default function Integrations() {
   });
   const [temuTesting, setTemuTesting] = useState(false);
 
+  // Iyzico state
+  const [iyzicoModalOpen, setIyzicoModalOpen] = useState(false);
+  const [iyzicoSettings, setIyzicoSettings] = useState({
+    api_key: "", api_secret: "", mode: "sandbox", is_active: false
+  });
+  const [iyzicoTesting, setIyzicoTesting] = useState(false);
+
   // Ticimax state
   const [ticimaxImportingProducts, setTicimaxImportingProducts] = useState(false);
   const [ticimaxImportingCategories, setTicimaxImportingCategories] = useState(false);
@@ -404,12 +411,16 @@ export default function Integrations() {
     {
       id: "iyzico",
       name: "Iyzico",
-      description: "Online ödeme altyapısı - Kredi kartı, banka kartı ödemeleri",
+      description: "Online ödeme altyapısı - Kredi kartı, banka kartı ödemeleri ve kart iadeleri",
       icon: <CreditCard className="w-8 h-8" />,
       status: statuses.iyzico,
       color: "blue",
-      instructions: "Iyzico panel'den API Key ve Secret Key alınız. .env dosyasına ekleyiniz.",
-      envKeys: ["IYZICO_API_KEY", "IYZICO_SECRET_KEY", "IYZICO_MODE"]
+      instructions: "Iyzico Merchant panelinden API Key ve Secret Key alınız. Kart iadeleri için zorunlu.",
+      envKeys: ["IYZICO_API_KEY", "IYZICO_SECRET_KEY", "IYZICO_MODE"],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <CreditCard size={16} />, onClick: () => fetchMarketplaceSettings('iyzico', setIyzicoSettings, setIyzicoModalOpen), loading: false },
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('iyzico', setIyzicoTesting), loading: iyzicoTesting, disabled: !statuses.iyzico?.configured }
+      ]
     },
     {
       id: "trendyol",
@@ -719,6 +730,55 @@ export default function Integrations() {
           </div>
         </div>
       </div>
+
+      {/* Iyzico Settings Modal */}
+      <Dialog open={iyzicoModalOpen} onOpenChange={setIyzicoModalOpen}>
+        <DialogContent data-testid="iyzico-settings-modal">
+          <DialogHeader>
+            <DialogTitle>Iyzico API Ayarları</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('iyzico', iyzicoSettings, setIyzicoModalOpen); }} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">API Key</label>
+              <input data-testid="iyzico-api-key" type="text" required value={iyzicoSettings.api_key || ''}
+                onChange={(e) => setIyzicoSettings({ ...iyzicoSettings, api_key: e.target.value })}
+                placeholder="sandbox-xxxxxx veya api-xxxxxx"
+                className="w-full border px-3 py-2 rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">API Secret</label>
+              <input data-testid="iyzico-api-secret" type="password" value={iyzicoSettings.api_secret || ''}
+                onChange={(e) => setIyzicoSettings({ ...iyzicoSettings, api_secret: e.target.value })}
+                placeholder={iyzicoSettings.api_secret === "********" ? "********" : "Yeni Secret Key"}
+                className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Sadece güncellemek istediğinizde doldurun</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Mod</label>
+              <select value={iyzicoSettings.mode || "sandbox"}
+                onChange={e => setIyzicoSettings({ ...iyzicoSettings, mode: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm bg-white">
+                <option value="sandbox">Sandbox (Test)</option>
+                <option value="live">Canlı Mod</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 mt-2">
+              <input data-testid="iyzico-is-active" type="checkbox" checked={!!iyzicoSettings.is_active}
+                onChange={(e) => setIyzicoSettings({ ...iyzicoSettings, is_active: e.target.checked })} />
+              <span className="text-sm">Entegrasyon Aktif</span>
+            </label>
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded text-xs text-blue-800">
+              <b>Not:</b> Iyzico entegrasyonu kart ödemeleri ve iade sürecinde kullanılacaktır. Müşterinin Iyzico üzerinden yaptığı ödemelerin kısmi/tam iadesi "Iade" sayfasından tek tıkla yapılabilir.
+            </div>
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <button type="button" onClick={() => setIyzicoModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
+              <button data-testid="iyzico-save-btn" type="submit" disabled={savingSettings} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Hepsiburada Settings Modal */}
       <Dialog open={hbModalOpen} onOpenChange={setHbModalOpen}>
