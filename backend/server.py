@@ -32,6 +32,8 @@ from routes import (
 )
 from routes.vendors import router as vendors_router
 from routes.admin_rbac import router as admin_rbac_router
+from routes.size_tables import router as size_tables_router, public_router as size_tables_public_router
+from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
 
 # Database
 from routes.deps import client, db
@@ -127,6 +129,10 @@ api_router.include_router(upload_router)
 api_router.include_router(settings_router)
 api_router.include_router(vendors_router, prefix="/vendors")
 api_router.include_router(admin_rbac_router)
+api_router.include_router(size_tables_router)
+api_router.include_router(size_tables_public_router)
+api_router.include_router(manufacturing_router)
+api_router.include_router(manufacturing_suppliers_router)
 
 # Root endpoint
 @api_router.get("/")

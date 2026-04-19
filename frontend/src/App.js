@@ -37,6 +37,7 @@ import TrendyolLogs from "./pages/admin/TrendyolLogs";
 import ProductAttributes from "./pages/admin/ProductAttributes";
 import Vendors from "./pages/admin/Vendors";
 import AdminUsersRoles from "./pages/admin/UsersRoles";
+import Manufacturing from "./pages/admin/Manufacturing";
 
 import "./App.css";
 
@@ -82,6 +83,7 @@ function App() {
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />
               <Route path="cariler" element={<Vendors />} />
               <Route path="kullanicilar" element={<AdminUsersRoles />} />
+              <Route path="imalat" element={<Manufacturing />} />
             </Route>
           </Routes>
         </BrowserRouter>

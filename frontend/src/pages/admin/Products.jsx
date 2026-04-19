@@ -20,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
+import SizeTablePanel from "./SizeTablePanel";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -1093,6 +1094,7 @@ export default function AdminProducts() {
                  <TabsTrigger value="variants" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Varyantlar</TabsTrigger>
                  <TabsTrigger value="seo" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">SEO</TabsTrigger>
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
+                 <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
                  <TabsTrigger value="trendyol" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all ml-auto flex gap-2">
                    <Store size={16} /> Trendyol Ayarları
                  </TabsTrigger>
@@ -1605,6 +1607,15 @@ export default function AdminProducts() {
                     </div>
                   );
                 })()}
+              </TabsContent>
+
+              {/* Size Table Tab */}
+              <TabsContent value="sizetable" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <SizeTablePanel
+                  productId={editingProduct?.id}
+                  variants={formData.variants}
+                  onToast={(m, t) => (t === 'err' ? toast.error(m) : toast.success(m))}
+                />
               </TabsContent>
 
               {/* Variants Tab */}
