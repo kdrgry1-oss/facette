@@ -28,6 +28,8 @@ export default function ProductDetail() {
     shipping: false,
     returns: false
   });
+  // Size Table (HTML) - fetched via public endpoint. Hooks must live at top level.
+  const [sizeTableData, setSizeTableData] = useState(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -42,6 +44,15 @@ export default function ProductDetail() {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Fetch HTML size table whenever product loads
+  useEffect(() => {
+    const pid = product?.id;
+    if (!pid) return;
+    axios.get(`${API}/size-tables-public/${pid}`)
+      .then(res => { if (res.data?.exists) setSizeTableData(res.data); })
+      .catch(() => { /* no table */ });
+  }, [product?.id]);
 
   const fetchProduct = async () => {
     setLoading(true);
@@ -149,12 +160,14 @@ export default function ProductDetail() {
   const variantPriceDiff = selectedVariant?.price_diff || 0;
   const displayPrice = basePrice + variantPriceDiff;
 
-  // Remove duplicate images and separate size chart
+  // Remove duplicate images and hide size-table images from customer view
   const allImages = product.images || [];
   const uniqueImages = allImages.length > 1 && allImages[0] === allImages[1] ? allImages.slice(1) : allImages;
-  const hasSizeChart = uniqueImages.length > 1;
-  const sizeChartImage = hasSizeChart ? uniqueImages[uniqueImages.length - 1] : null;
-  const displayImages = hasSizeChart ? uniqueImages.slice(0, -1) : uniqueImages;
+  // Size table images are dict objects with is_size_table flag – strip them out for customer
+  const displayImages = uniqueImages.filter(img => {
+    if (typeof img === 'object' && img !== null) return !img.is_size_table;
+    return true;
+  });
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({
@@ -299,10 +312,10 @@ export default function ProductDetail() {
               </div>
             </div>
 
-            {/* Size Chart Link */}
-            {sizeChartImage && (
+            {/* Size Chart Link – only shown when HTML table exists */}
+            {sizeTableData && (
               <div className="mb-3">
-                <button onClick={() => setShowSizeChart(true)} className="text-xs underline hover:no-underline">
+                <button onClick={() => setShowSizeChart(true)} className="text-xs underline hover:no-underline" data-testid="show-size-table-btn">
                   Beden Tablosu
                 </button>
               </div>
@@ -398,16 +411,39 @@ export default function ProductDetail() {
         )}
       </div>
 
-      {/* Size Chart Modal */}
-      {showSizeChart && sizeChartImage && (
+      {/* Size Chart Modal – HTML table */}
+      {showSizeChart && sizeTableData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowSizeChart(false)}>
-          <div className="bg-white max-w-lg w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white flex justify-between items-center p-3 border-b">
-              <h3 className="text-xs font-medium uppercase tracking-wider">Beden Tablosu</h3>
+          <div className="bg-white max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white flex justify-between items-center p-4 border-b">
+              <h3 className="text-sm font-bold uppercase tracking-wider">Beden Tablosu</h3>
               <button onClick={() => setShowSizeChart(false)} className="p-1"><X size={18} /></button>
             </div>
-            <div className="p-3">
-              <img src={sizeChartImage} alt="Beden tablosu" className="w-full h-auto" />
+            <div className="p-6" data-testid="size-table-html">
+              <p className="text-xs text-gray-500 mb-4">Tüm ölçüler cm cinsindendir.</p>
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider">Beden</th>
+                      {sizeTableData.columns.map(c => (
+                        <th key={c} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider">{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sizeTableData.sizes.map((s, i) => (
+                      <tr key={s} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-4 py-3 font-bold text-gray-900">{s}</td>
+                        {sizeTableData.columns.map(c => (
+                          <td key={c} className="px-4 py-3 text-gray-700">{sizeTableData.values?.[s]?.[c] || '—'}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-gray-400 mt-4">Değerler ± 1-2 cm tolerans taşıyabilir.</p>
             </div>
           </div>
         </div>

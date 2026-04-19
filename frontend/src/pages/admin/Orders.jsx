@@ -685,8 +685,11 @@ export default function AdminOrders() {
                 // FAZ 1 B2/B3/B4 visual logic
                 const pmLower = (order.payment_method || '').toLowerCase();
                 const isHavale = ['transfer', 'havale', 'bank_transfer', 'eft'].includes(pmLower);
-                const isUnpaidHavale = isHavale && order.payment_status !== 'paid' && order.status !== 'cancelled';
-                const isUnpaidPending = order.payment_status === 'pending' && !isHavale && order.status !== 'cancelled';
+                // Kullanıcı onaylandı/ilerisi ise ödeme teyit edilmiş sayılır → kırmızı vurgu kalkar
+                const paymentConfirmed = order.payment_status === 'paid' ||
+                  ['confirmed', 'preparing', 'shipping', 'delivered'].includes(order.status);
+                const isUnpaidHavale = isHavale && !paymentConfirmed && order.status !== 'cancelled';
+                const isUnpaidPending = !paymentConfirmed && !isHavale && order.status === 'pending';
                 const isInvoiceIssued = !!order.invoice_issued;
                 const rowClass = isInvoiceIssued
                   ? 'opacity-60 bg-gray-50'
@@ -750,7 +753,8 @@ export default function AdminOrders() {
                     <td>
                       {(() => {
                         const pm = (order.payment_method || '').toLowerCase();
-                        const paid = order.payment_status === 'paid';
+                        const paid = order.payment_status === 'paid' ||
+                          ['confirmed', 'preparing', 'shipping', 'delivered'].includes(order.status);
                         if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') {
                           return (
                             <span className={`inline-flex flex-col items-start`}>

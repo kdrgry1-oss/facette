@@ -3,7 +3,7 @@ import { Outlet, Link, NavLink, useLocation, Navigate } from "react-router-dom";
 import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
-  Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield
+  Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -34,6 +34,7 @@ const navigation = [
     children: [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
       { label: "İadeler & İptaller", path: "/admin/iadeler", icon: RotateCcw },
+      { label: "İmalat Takip", path: "/admin/imalat", icon: Factory },
     ],
   },
   {
