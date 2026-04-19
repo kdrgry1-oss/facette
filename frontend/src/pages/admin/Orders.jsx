@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info, X } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -103,20 +103,6 @@ export default function AdminOrders() {
       toast.error(err.response?.data?.detail || "Not eklenemedi");
     } finally {
       setSavingNote(false);
-    }
-  };
-
-  const runAutoCancelExpired = async () => {
-    if (!window.confirm("48 saat içinde ödenmemiş siparişleri iptal etmek istediğinize emin misiniz? Bu işlem stoğa geri ekler.")) return;
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/orders/auto-cancel-expired?hours=48`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      toast.success(`${res.data.cancelled} sipariş iptal edildi`);
-      fetchOrders();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "İşlem başarısız");
     }
   };
 
@@ -510,14 +496,6 @@ export default function AdminOrders() {
           >
             <Store size={16} /> <Info size={14} className="opacity-70" /> Trendyol Sipariş Çek
           </button>
-          <button
-            onClick={runAutoCancelExpired}
-            data-testid="auto-cancel-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 text-sm font-medium transition-colors"
-            title="48 saat içinde ödenmemiş siparişleri iptal et + stok iade"
-          >
-            <X size={16} /> 48h+ Ödenmemişleri İptal Et
-          </button>
           <button 
             onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
             className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
@@ -631,7 +609,7 @@ export default function AdminOrders() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-6">
         <div 
           onClick={() => setStatusFilter("")}
           className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${!statusFilter ? "ring-2 ring-black" : ""}`}
@@ -639,10 +617,11 @@ export default function AdminOrders() {
           <p className="text-2xl font-bold">{total}</p>
           <p className="text-sm text-gray-500">Toplam</p>
         </div>
-        {statusOptions.slice(0, 5).map((status) => (
+        {statusOptions.filter(s => s.value !== 'cancelled').map((status) => (
           <div 
             key={status.value}
             onClick={() => setStatusFilter(status.value)}
+            data-testid={`status-card-${status.value}`}
             className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${statusFilter === status.value ? "ring-2 ring-black" : ""}`}
           >
             <p className="text-2xl font-bold">
@@ -651,6 +630,17 @@ export default function AdminOrders() {
             <p className="text-sm text-gray-500">{status.label}</p>
           </div>
         ))}
+        {/* İptal Edilen Siparişler – kullanıcı tarafından istendi (ayrı sekme) */}
+        <div
+          onClick={() => setStatusFilter('cancelled')}
+          data-testid="status-card-cancelled"
+          className={`bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${statusFilter === 'cancelled' ? "ring-2 ring-red-500" : ""}`}
+        >
+          <p className="text-2xl font-bold text-red-700">
+            {orders.filter(o => o.status === 'cancelled').length}
+          </p>
+          <p className="text-sm text-red-600 font-medium">İptal Edilen</p>
+        </div>
       </div>
 
       {/* Orders Table */}
@@ -671,6 +661,7 @@ export default function AdminOrders() {
               <th>Müşteri</th>
               <th>Ürünler</th>
               <th>Tutar</th>
+              <th>Ödeme Tipi</th>
               <th>Platform</th>
               <th>Kargo</th>
               <th>Fatura</th>
@@ -682,18 +673,20 @@ export default function AdminOrders() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="text-center py-8">Yükleniyor...</td>
+                <td colSpan={11} className="text-center py-8">Yükleniyor...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
+                <td colSpan={11} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
               </tr>
             ) : (
               orders.map((order) => {
                 const statusInfo = getStatusInfo(order.status);
                 // FAZ 1 B2/B3/B4 visual logic
-                const isUnpaidHavale = (order.payment_method === 'transfer' || order.payment_method === 'havale') && order.payment_status !== 'paid' && order.status !== 'cancelled';
-                const isUnpaidPending = order.payment_status === 'pending' && order.status !== 'cancelled';
+                const pmLower = (order.payment_method || '').toLowerCase();
+                const isHavale = ['transfer', 'havale', 'bank_transfer', 'eft'].includes(pmLower);
+                const isUnpaidHavale = isHavale && order.payment_status !== 'paid' && order.status !== 'cancelled';
+                const isUnpaidPending = order.payment_status === 'pending' && !isHavale && order.status !== 'cancelled';
                 const isInvoiceIssued = !!order.invoice_issued;
                 const rowClass = isInvoiceIssued
                   ? 'opacity-60 bg-gray-50'
@@ -740,14 +733,51 @@ export default function AdminOrders() {
                     </td>
                     <td>
                       <div className="flex flex-col">
-                        <span className="font-medium">{order.total?.toFixed(2)} TL</span>
+                        <span className={`font-medium ${isUnpaidHavale ? 'text-red-600 font-bold' : ''}`} data-testid={`amount-${order.id}`}>
+                          {order.total?.toFixed(2)} TL
+                        </span>
                         {order.platform === 'trendyol' && order.discount_amount > 0 && (
                           <>
                             <span className="text-xs text-gray-400">{order.subtotal?.toFixed(2)} TL (Liste)</span>
                             <span className="text-xs text-red-500 font-medium">-{order.discount_amount?.toFixed(2)} TL (İskonto)</span>
                           </>
                         )}
+                        {isUnpaidHavale && (
+                          <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider">Ödeme Bekliyor</span>
+                        )}
                       </div>
+                    </td>
+                    <td>
+                      {(() => {
+                        const pm = (order.payment_method || '').toLowerCase();
+                        const paid = order.payment_status === 'paid';
+                        if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') {
+                          return (
+                            <span className={`inline-flex flex-col items-start`}>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${paid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                Havale/EFT
+                              </span>
+                              <span className={`text-[9px] mt-0.5 ${paid ? 'text-green-600' : 'text-red-600 font-bold'}`}>
+                                {paid ? 'Ödendi' : 'Beklemede'}
+                              </span>
+                            </span>
+                          );
+                        }
+                        if (pm === 'credit_card' || pm === 'card' || pm === 'iyzico' || pm === 'cc') {
+                          return (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${paid ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              Kredi Kartı
+                            </span>
+                          );
+                        }
+                        if (pm === 'cod' || pm === 'kapida') {
+                          return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700">Kapıda</span>;
+                        }
+                        if (order.platform === 'trendyol') {
+                          return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-700">Marketplace</span>;
+                        }
+                        return <span className="text-xs text-gray-400">—</span>;
+                      })()}
                     </td>
                     <td>
                       {order.platform === 'trendyol' ? (
@@ -866,8 +896,8 @@ export default function AdminOrders() {
                     </td>
                     <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
                     <td>
-                      {/* Ticimax benzeri işlem butonları */}
-                      <div className="flex items-center gap-0.5">
+                      {/* Ticimax benzeri işlem butonları - daha belirgin ve ayrık */}
+                      <div className="flex items-center gap-1 flex-wrap">
                         {/* 1. Detay - Ticimax: mavi klasör */}
                         <button
                           onClick={() => openDetail(order)}

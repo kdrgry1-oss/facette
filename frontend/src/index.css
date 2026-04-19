@@ -258,6 +258,22 @@ body {
 .status-delivered { @apply bg-green-100 text-green-700 px-2 py-1 text-xs rounded; }
 .status-cancelled { @apply bg-red-100 text-red-700 px-2 py-1 text-xs rounded; }
 
+/* Action buttons for orders/products tables (Ticimax-like pills) */
+.tci-btn {
+  @apply relative inline-flex items-center justify-center w-8 h-8 rounded-md transition-all duration-150 active:scale-95 shrink-0;
+  margin-right: 4px;
+}
+.tci-btn-blue       { @apply bg-blue-100 text-blue-700 hover:bg-blue-200 hover:shadow; }
+.tci-btn-orange     { @apply bg-orange-100 text-orange-700 hover:bg-orange-200 hover:shadow; }
+.tci-btn-gray       { @apply bg-gray-100 text-gray-600 hover:bg-gray-200 hover:shadow; }
+.tci-btn-green      { @apply bg-green-50 text-green-700 hover:bg-green-100 hover:shadow; }
+.tci-btn-green-active { @apply bg-green-600 text-white hover:bg-green-700 shadow; }
+.tci-btn-red        { @apply bg-red-100 text-red-700 hover:bg-red-200 hover:shadow; }
+.tci-btn-red-active { @apply bg-red-600 text-white hover:bg-red-700 shadow; }
+.tci-btn-yellow     { @apply bg-yellow-100 text-yellow-700 hover:bg-yellow-200 hover:shadow; }
+.tci-btn-yellow-active { @apply bg-yellow-400 text-white hover:bg-yellow-500 shadow; }
+.tci-btn-purple     { @apply bg-purple-100 text-purple-700 hover:bg-purple-200 hover:shadow; }
+
 @layer base {
   * {
     @apply border-border;

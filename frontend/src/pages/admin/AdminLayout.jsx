@@ -3,7 +3,7 @@ import { Outlet, Link, NavLink, useLocation, Navigate } from "react-router-dom";
 import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
-  Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2
+  Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -51,6 +51,7 @@ const navigation = [
     icon: Settings,
     children: [
       { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
+      { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },
       { label: "Entegrasyonlar", path: "/admin/entegrasyonlar", icon: Cable },
       { label: "Trendyol", path: "/admin/trendyol-eslestir", icon: Store },

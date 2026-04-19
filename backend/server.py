@@ -31,6 +31,7 @@ from routes import (
     settings_router,
 )
 from routes.vendors import router as vendors_router
+from routes.admin_rbac import router as admin_rbac_router
 
 # Database
 from routes.deps import client, db
@@ -69,11 +70,23 @@ async def lifespan(app: FastAPI):
         logger.info("Database indexes created")
     except Exception as e:
         logger.warning(f"Database initialization warning (server will still start): {e}")
-    
+
+    # Start background scheduler (auto-cancel 48h unpaid havale orders)
+    try:
+        from scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        logger.warning(f"Scheduler start warning: {e}")
+
     yield
     
     # Shutdown
     logger.info("Shutting down...")
+    try:
+        from scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
     client.close()
 
 # Create FastAPI app
@@ -113,6 +126,7 @@ api_router.include_router(attributes_router)
 api_router.include_router(upload_router)
 api_router.include_router(settings_router)
 api_router.include_router(vendors_router, prefix="/vendors")
+api_router.include_router(admin_rbac_router)
 
 # Root endpoint
 @api_router.get("/")
