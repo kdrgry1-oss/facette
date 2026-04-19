@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info, X } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -73,6 +73,52 @@ export default function AdminOrders() {
   const [invoiceLinkInput, setInvoiceLinkInput] = useState("");
   const [invoiceNumberInput, setInvoiceNumberInput] = useState("");
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
+
+  // FAZ 1 B3 - Order Note Modal
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [noteTargetOrder, setNoteTargetOrder] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  const openNoteModal = (order) => {
+    setNoteTargetOrder(order);
+    setNoteText("");
+    setNoteModalOpen(true);
+  };
+
+  const saveNote = async () => {
+    if (!noteTargetOrder || !noteText.trim()) return;
+    setSavingNote(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/orders/${noteTargetOrder.id}/note`,
+        { note: noteText.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success("Not eklendi");
+      setNoteModalOpen(false);
+      setNoteText("");
+      fetchOrders();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Not eklenemedi");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const runAutoCancelExpired = async () => {
+    if (!window.confirm("48 saat içinde ödenmemiş siparişleri iptal etmek istediğinize emin misiniz? Bu işlem stoğa geri ekler.")) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/auto-cancel-expired?hours=48`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`${res.data.cancelled} sipariş iptal edildi`);
+      fetchOrders();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "İşlem başarısız");
+    }
+  };
 
   useEffect(() => {
     fetchOrders();
@@ -464,6 +510,14 @@ export default function AdminOrders() {
           >
             <Store size={16} /> <Info size={14} className="opacity-70" /> Trendyol Sipariş Çek
           </button>
+          <button
+            onClick={runAutoCancelExpired}
+            data-testid="auto-cancel-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 text-sm font-medium transition-colors"
+            title="48 saat içinde ödenmemiş siparişleri iptal et + stok iade"
+          >
+            <X size={16} /> 48h+ Ödenmemişleri İptal Et
+          </button>
           <button 
             onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
             className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
@@ -637,8 +691,19 @@ export default function AdminOrders() {
             ) : (
               orders.map((order) => {
                 const statusInfo = getStatusInfo(order.status);
+                // FAZ 1 B2/B3/B4 visual logic
+                const isUnpaidHavale = (order.payment_method === 'transfer' || order.payment_method === 'havale') && order.payment_status !== 'paid' && order.status !== 'cancelled';
+                const isUnpaidPending = order.payment_status === 'pending' && order.status !== 'cancelled';
+                const isInvoiceIssued = !!order.invoice_issued;
+                const rowClass = isInvoiceIssued
+                  ? 'opacity-60 bg-gray-50'
+                  : isUnpaidHavale
+                  ? 'bg-red-50 border-l-4 border-red-400'
+                  : isUnpaidPending
+                  ? 'bg-yellow-50'
+                  : '';
                 return (
-                  <tr key={order.id}>
+                  <tr key={order.id} className={rowClass} data-testid={`order-row-${order.id}`}>
                     <td>
                       <button onClick={() => toggleSelectOrder(order.id)} className="p-1">
                         {selectedOrders.includes(order.id) ? (
@@ -860,6 +925,18 @@ export default function AdminOrders() {
                           className="tci-btn tci-btn-gray"
                         >
                           <MessageSquare size={15} />
+                        </button>
+                        {/* FAZ 1 B3 - Not butonu */}
+                        <button
+                          onClick={() => openNoteModal(order)}
+                          title={order.admin_notes?.length ? `${order.admin_notes.length} not` : "Not Ekle"}
+                          data-testid={`note-btn-${order.id}`}
+                          className={`tci-btn ${order.admin_notes?.length ? 'tci-btn-yellow-active' : 'tci-btn-gray'}`}
+                        >
+                          <FileCheck size={15} />
+                          {order.admin_notes?.length > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">{order.admin_notes.length}</span>
+                          )}
                         </button>
                       </div>
                     </td>
@@ -1306,6 +1383,49 @@ export default function AdminOrders() {
                   {trendyolImporting ? "Aktarılıyor..." : "Seçili Olanları Aktar"}
                 </button>
               </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* FAZ 1 B3 - Admin Note Modal (Havale takip için) */}
+      <Dialog open={noteModalOpen} onOpenChange={(o) => { setNoteModalOpen(o); if (!o) setNoteTargetOrder(null); }}>
+        <DialogContent data-testid="order-note-modal">
+          <DialogHeader>
+            <DialogTitle>Sipariş Notu {noteTargetOrder?.order_number ? `- ${noteTargetOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {noteTargetOrder?.admin_notes?.length > 0 && (
+              <div className="space-y-2 max-h-[240px] overflow-y-auto">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Önceki Notlar</p>
+                {noteTargetOrder.admin_notes.map(n => (
+                  <div key={n.id || n.at} className="bg-yellow-50 border-l-4 border-yellow-400 p-2 rounded text-sm">
+                    <p className="text-gray-800">{n.text}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">{n.by} · {new Date(n.at).toLocaleString('tr-TR')}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium mb-1">Yeni Not</label>
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Örn: Müşteri 12:00'de havale attığını bildirdi, 14:00 sonrası kontrol et..."
+                className="w-full border rounded-lg p-3 text-sm min-h-[120px]"
+                data-testid="note-textarea"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button onClick={() => setNoteModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">İptal</button>
+              <button
+                onClick={saveNote}
+                disabled={savingNote || !noteText.trim()}
+                data-testid="save-note-btn"
+                className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50 text-sm font-bold"
+              >
+                {savingNote ? "Kaydediliyor..." : "Not Ekle"}
+              </button>
             </div>
           </div>
         </DialogContent>

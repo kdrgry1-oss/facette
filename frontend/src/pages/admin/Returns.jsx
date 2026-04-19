@@ -38,6 +38,12 @@ export default function Returns() {
   const [gpLoading, setGpLoading] = useState(false);
   const [bulkPrintData, setBulkPrintData] = useState(null);
   const autoRefreshRef = useRef(null);
+
+  // A2 - Ret sebebi modal state
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectTargetClaim, setRejectTargetClaim] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectReasonId, setRejectReasonId] = useState(1);
   const limit = 20;
 
   const fetchClaims = useCallback(async () => {
@@ -109,16 +115,26 @@ export default function Returns() {
   };
 
   const handleIssue = async (claim) => {
-    const desc = window.prompt("İtiraz açıklaması:");
-    if (desc === null) return;
+    // A2 - open reject reason modal instead of prompt
+    setRejectTargetClaim(claim);
+    setRejectReason("");
+    setRejectReasonId(1);
+    setRejectModalOpen(true);
+  };
+
+  const submitReject = async () => {
+    if (!rejectTargetClaim) return;
+    if (!rejectReason.trim()) { toast.error("Ret sebebi boş olamaz"); return; }
     try {
       const token = localStorage.getItem("token");
-      const claimItemIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
-      await axios.post(`${API}/integrations/trendyol/claims/${claim.claim_id}/issue`,
-        { claim_item_ids: claimItemIds, issue_reason_id: 1, description: desc || "İtiraz" },
+      const claimItemIds = (rejectTargetClaim.items || []).map(i => i.claim_item_id).filter(Boolean);
+      await axios.post(`${API}/integrations/trendyol/claims/${rejectTargetClaim.claim_id}/issue`,
+        { claim_item_ids: claimItemIds, issue_reason_id: Number(rejectReasonId) || 1, description: rejectReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success("İtiraz oluşturuldu");
+      setRejectModalOpen(false);
+      setRejectTargetClaim(null);
       fetchClaims();
     } catch (err) {
       toast.error(err.response?.data?.detail || "İtiraz hatası");
@@ -262,6 +278,8 @@ export default function Returns() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Müşteri</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tür</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sebep</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kargo</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Brüt</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">İskonto</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Net (Fatura)</th>
@@ -272,9 +290,9 @@ export default function Returns() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={11} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
               ) : claims.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
+                <tr><td colSpan={13} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
               ) : claims.map(claim => {
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
@@ -317,6 +335,24 @@ export default function Returns() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[140px] truncate">{claim.claim_reason || "-"}</td>
+                    <td className="px-3 py-3 text-xs">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        (claim.payment_type || 'credit_card') === 'credit_card' ? 'bg-blue-100 text-blue-700' :
+                        claim.payment_type === 'transfer' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {claim.payment_type === 'transfer' ? 'Havale' : claim.payment_type === 'cod' ? 'Kapıda' : 'Kredi Kartı'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {claim.cargo_tracking_number ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium text-orange-600 text-[11px]">{claim.cargo_provider_name || 'Trendyol'}</span>
+                          <span className="font-mono text-[10px] text-gray-500 truncate max-w-[110px]" title={claim.cargo_tracking_number}>{claim.cargo_tracking_number}</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-right font-mono text-gray-500 line-through text-xs">{totalDiscount > 0 ? formatCurrency(totalGross) : ""}</td>
                     <td className="px-3 py-3 text-right font-mono text-orange-600 text-xs font-bold">{totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : "-"}</td>
                     <td className="px-3 py-3 text-right font-mono font-bold">{formatCurrency(totalNet)}</td>
@@ -411,6 +447,67 @@ export default function Returns() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* A2 - Reject/Issue Reason Modal */}
+      <Dialog open={rejectModalOpen} onOpenChange={(o) => { setRejectModalOpen(o); if (!o) setRejectTargetClaim(null); }}>
+        <DialogContent data-testid="reject-reason-modal">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <X size={18} className="text-red-600" />
+              İade Reddet / İtiraz
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {rejectTargetClaim && (
+              <div className="bg-gray-50 border rounded-lg p-3 text-sm">
+                <p className="font-bold text-gray-900">Sipariş: {rejectTargetClaim.order_number}</p>
+                <p className="text-xs text-gray-500 mt-1">{rejectTargetClaim.customer_name || "-"} · {rejectTargetClaim.claim_reason || ""}</p>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium mb-1">İtiraz Sebep Kodu</label>
+              <select
+                value={rejectReasonId}
+                onChange={(e) => setRejectReasonId(e.target.value)}
+                data-testid="reject-reason-id"
+                className="w-full border px-3 py-2 rounded text-sm bg-white"
+              >
+                <option value="1">1 - Ürün eksiksiz/hasarsız</option>
+                <option value="2">2 - Ürün kullanılmış</option>
+                <option value="3">3 - İade süresi aşıldı</option>
+                <option value="4">4 - Ürün orijinalinden farklı</option>
+                <option value="99">99 - Diğer</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Ret Sebebi Açıklaması <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Müşteriye iletilecek itiraz nedenini detaylı yazın..."
+                className="w-full border rounded-lg p-3 text-sm min-h-[120px]"
+                data-testid="reject-reason-text"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button onClick={() => setRejectModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">
+                İptal
+              </button>
+              <button
+                onClick={submitReject}
+                disabled={!rejectReason.trim()}
+                data-testid="submit-reject-btn"
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-bold"
+              >
+                <X size={14} className="inline mr-1" /> Reddet ve Gönder
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
