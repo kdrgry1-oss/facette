@@ -1,0 +1,65 @@
+{
+  "summary": "Iteration 11 — catalog_extras: 16 yeni router + 12 yeni admin sayfası test edildi. Backend 22/23 pytest passed (95.6%). Frontend 12/12 sayfa yükleniyor, başlıklar ve menü entegrasyonu doğru. TEK KRİTİK HATA: GET /api/admin/reports-extra/profit 500 dönüyor (KeyError 'name') — bu aynı zamanda /admin/raporlar/gelismis sayfasında uncaught runtime errors overlay'ine neden oluyor çünkü frontend Promise.all kullanıyor ve tek reddi tüm sayfayı devirir.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/admin/reports-extra/profit",
+        "issue": "500 Internal Server Error — KeyError: 'name' in catalog_extras.py:388. $group _id={'pid','name'} içindeki 'name' alanı, siparişin items.name eksik olduğunda MongoDB tarafından _id sözlüğüne dahil edilmiyor ve r['_id']['name'] KeyError atıyor. Fix: r['_id'].get('name', '') veya $group öncesi $addFields ile name fallback.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/admin/currency/refresh",
+        "issue": "exchangerate.host artık ücretsiz tier'da access_key zorunlu olabilir; success=false dönebilir. Try/except içinde sessiz fail iyi ama UI'a gerçek hata gösterilmiyor; şu an GET /rates hâlâ 200 dönüyor (boş doc). Kullanıcı Resend API key vermeden önce alternatif kaynak (TCMB XML) eklenmesi düşünülebilir."
+      },
+      {
+        "endpoint": "/api/admin/email/send-bulk",
+        "issue": "RESEND_API_KEY boşken endpoint 200 döner ama result.failed=recipient_count ve errors=['RESEND_API_KEY tanımlı değil']. Davranış beklentiye uygun — sadece UI'da uyarı mesajı renderlenmesi iyileşebilir."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ExtraReports (/admin/raporlar/gelismis)",
+        "issue": "Backend /profit 500 dönünce Promise.all tüm fetch'leri düşürüyor ve sayfada 'Uncaught runtime errors: Request failed with status code 500' overlay'i gösteriyor. Diğer 3 rapor (hourly/city/stock) başarılı dönmesine rağmen hiçbiri render edilmiyor. Fix: Promise.allSettled kullan ve her raporu ayrı try/catch ile state'e yaz.",
+        "selector": "pages/admin/CatalogExtras.jsx ExtraReports component",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_catalog_extras.py",
+    "/app/test_reports/pytest/iteration11_results.xml"
+  ],
+  "action_items": [
+    "1) FIX catalog_extras.py line 388 — `r['_id'].get('name', '—')` kullan ya da $group _id sadece pid olsun ve name $first ile toplansın.",
+    "2) FIX ExtraReports.jsx — Promise.all yerine Promise.allSettled; tek endpoint hatasında sayfanın diğer tabloları da render olsun.",
+    "3) (Opsiyonel) Currency refresh için TCMB today.xml fallback ekle (exchangerate.host ücretsiz tier kısıtlaması)."
+  ],
+  "critical_code_review_comments": [
+    "catalog_extras.py 583 satır tek dosyada — hâlâ makul; ancak gelecekte ticket/email/currency kendi modülüne split edilebilir.",
+    "_simple_crud update() fonksiyonunda değişken adı 'update' builtin ile çakışıyor (update = {k: v ...}); shadowing.",
+    "profit aggregation'unda _id dict kullanımı KeyError'a açık — _id olarak sadece pid bırakıp name'i $first ile toplamak daha güvenli: {'_id': '$items.product_id', 'name': {'$first': '$items.name'}}.",
+    "tickets POST endpoint'inde require_auth zorunlu — misafir kullanıcıların (satın almadan önce sormak isteyen) ticket açamaması UX engelidir; public variant + email zorunlu alternatif önerilir.",
+    "Havale confirm sonrası order update'inde order_number tekrar MNL-... regex kontrolü yok; manual sipariş kurulumu FC{timestamp} order'lar ile karışabilir (sorun değil ama audit için source flag'ini UI filtresine ekleyin).",
+    "currency refresh try/except tüm exception'ı yutup success=false döndürüyor — exchangerate.host API key gerektirmeye başladıysa sessizce boş rates kalacak; kullanıcı 'neden güncellemiyor' anlayamaz. Log ile birlikte UI'a hata mesajı geçirin.",
+    "send-bulk recipients set'i büyük müşteri listesinde tüm emailleri belleğe çeker; cursor + batch generator tercih edilmeli."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration11_catalog_extras.py"
+  ],
+  "success_rate": {
+    "backend": "95.6% (22/23 pytest passed)",
+    "frontend": "92% (12/12 sayfa yükleniyor, 1 sayfa backend-kaynaklı overlay gösteriyor)"
+  },
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Oluşturulan test verileri temizlendi: TEST_Brand1, TEST_Tag1, TEST_Group1, TEST_Ann1, TEST_Popup1, 1 stock alert, 1 ticket, TEST_Free500 shipping rule, TEST_havale5 payment discount. NOT temizlenen: 1 manual order (MNL-YYMMDD-XXXXXX) + 1 havale_notification (confirmed — order'a payment_status=paid uygulandı). Bu iki kayıt gerçek akışı test ettiği için bırakıldı; main agent isterse silebilir.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regression file: /app/backend/tests/test_iteration11_catalog_extras.py. BASE env REACT_APP_BACKEND_URL. Admin token: POST /api/auth/login?email=&password= query params, response.token. 16 yeni router catalog_extras.py içinde: brands, product-tags, admin/member-groups, admin/announcements, admin/popups, alerts (+admin/alerts), payments/havale-notify (+admin/havale-notifications), admin/orders/create-manual|deleted|restore, admin/rules/shipping|payment-discounts|shipping/resolve (public), admin/reports-extra/hourly|by-city|profit|stock-movements, tickets (+admin/tickets), admin/email/send-bulk|campaigns, admin/currency/rates|refresh. Frontend routes hepsi çalışıyor: markalar, etiketler, uye-gruplari, duyurular, popuplar, stok-alarm, havale-bildirimleri, tickets, kargo-odeme-kurallari, doviz, toplu-mail, raporlar/gelismis. Profit endpoint fix edildikten sonra ExtraReports Promise.allSettled'a geçirilmeli.",
+  "rca_of_the_issue": "Profit 500 RCA: MongoDB $group _id'si composite dict iken, sipariş items'ında 'name' alanı yoksa _id sadece {'pid': ...} şeklinde dönüyor (name missing). Kod r['_id']['name'] ile erişince KeyError. Backend log kanıtı: /var/log/supervisor/backend.err.log → 'File /app/backend/routes/catalog_extras.py line 388, KeyError: name'. Reproduce: POST /api/admin/orders/create-manual ile items'ta name'siz kayıt var (test senaryomuzda da name vardı, ama DB'de seed edilmiş başka order items'ları name'siz olabilir). Mitigation: _id = '$items.product_id' + name'i $first accumulator olarak gruplamak, veya r['_id'].get('name','—') defansif okuma."
+}

@@ -48,6 +48,11 @@ import ProductReviews from "./pages/admin/ProductReviews";
 import AbandonedCarts from "./pages/admin/AbandonedCarts";
 import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
 import { SeoRedirects, SeoMeta } from "./pages/admin/SeoAdmin";
+import {
+  Brands, ProductTags, MemberGroups, Announcements, Popups,
+  StockAlerts, HavaleNotifications, Tickets, ShippingPaymentRules,
+  CurrencyRates, BulkMail, ExtraReports,
+} from "./pages/admin/CatalogExtras";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -114,6 +119,18 @@ function App() {
               <Route path="raporlar/uye" element={<MembersReport />} />
               <Route path="seo/meta" element={<SeoMeta />} />
               <Route path="seo/yonlendirmeler" element={<SeoRedirects />} />
+              <Route path="markalar" element={<Brands />} />
+              <Route path="etiketler" element={<ProductTags />} />
+              <Route path="uye-gruplari" element={<MemberGroups />} />
+              <Route path="duyurular" element={<Announcements />} />
+              <Route path="popuplar" element={<Popups />} />
+              <Route path="stok-alarm" element={<StockAlerts />} />
+              <Route path="havale-bildirimleri" element={<HavaleNotifications />} />
+              <Route path="tickets" element={<Tickets />} />
+              <Route path="kargo-odeme-kurallari" element={<ShippingPaymentRules />} />
+              <Route path="doviz" element={<CurrencyRates />} />
+              <Route path="toplu-mail" element={<BulkMail />} />
+              <Route path="raporlar/gelismis" element={<ExtraReports />} />
             </Route>
           </Routes>
         </BrowserRouter>

@@ -5,6 +5,7 @@ import {
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
   Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory,
   Users, Ruler, MessageSquare, PenTool, Truck, CreditCard, TrendingUp, Link2,
+  BellRing,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -22,9 +23,12 @@ const navigation = [
     children: [
       { label: "Tüm Ürünler", path: "/admin/urunler", icon: Package },
       { label: "Kategoriler", path: "/admin/kategoriler", icon: Tags },
+      { label: "Markalar", path: "/admin/markalar", icon: Store },
+      { label: "Etiketler", path: "/admin/etiketler", icon: Tags },
       { label: "Ürün Özellikleri", path: "/admin/urun-ozellikleri", icon: Tags },
       { label: "Varyantlar", path: "/admin/varyantlar", icon: GitMerge },
       { label: "Ölçü Tabloları", path: "/admin/olcu-tablolari", icon: Ruler },
+      { label: "Stok & Fiyat Alarm", path: "/admin/stok-alarm", icon: BellRing },
     ],
   },
   {
@@ -33,6 +37,7 @@ const navigation = [
     children: [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
       { label: "İadeler & İptaller", path: "/admin/iadeler", icon: RotateCcw },
+      { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },
     ],
   },
   {
@@ -47,7 +52,9 @@ const navigation = [
     icon: Users,
     children: [
       { label: "Üye Listesi", path: "/admin/uyeler", icon: Users },
+      { label: "Üye Grupları (B2B)", path: "/admin/uye-gruplari", icon: Users },
       { label: "Müşteri Soruları", path: "/admin/sorular", icon: MessageSquare },
+      { label: "Destek Talepleri", path: "/admin/tickets", icon: MessageSquare },
     ],
   },
   {
@@ -55,6 +62,8 @@ const navigation = [
     icon: PenTool,
     children: [
       { label: "Bannerlar & Sliderlar", path: "/admin/bannerlar", icon: Image },
+      { label: "Popuplar", path: "/admin/popuplar", icon: BellRing },
+      { label: "Duyurular", path: "/admin/duyurular", icon: BellRing },
       { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
       { label: "Sayfalar (CMS)", path: "/admin/sayfalar", icon: FileText },
     ],
@@ -64,7 +73,9 @@ const navigation = [
     icon: Megaphone,
     children: [
       { label: "Kampanyalar", path: "/admin/kampanyalar", icon: Megaphone },
+      { label: "Kargo/Ödeme Kuralları", path: "/admin/kargo-odeme-kurallari", icon: Truck },
       { label: "Kuponlar", path: "/admin/kuponlar", icon: Tags },
+      { label: "Toplu Mail", path: "/admin/toplu-mail", icon: MessageSquare },
       { label: "Ürün Yorumları", path: "/admin/yorumlar", icon: MessageSquare },
       { label: "Terkedilmiş Sepetler", path: "/admin/terkedilmis-sepet", icon: ShoppingCart },
       { label: "Kaynak & Funnel", path: "/admin/kaynak", icon: TrendingUp },
@@ -78,6 +89,7 @@ const navigation = [
       { label: "Ürün Raporları", path: "/admin/raporlar/urun", icon: Package },
       { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
       { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
+      { label: "Gelişmiş Raporlar", path: "/admin/raporlar/gelismis", icon: TrendingUp },
     ],
   },
   {
@@ -104,6 +116,7 @@ const navigation = [
     icon: Settings,
     children: [
       { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
+      { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },
     ],

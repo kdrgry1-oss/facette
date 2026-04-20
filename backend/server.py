@@ -56,6 +56,17 @@ from routes.extras import (
     seo_public_router,
     seo_admin_router,
 )
+from routes.catalog_extras import (
+    brands_router, tags_router, member_groups_router, announcements_router, popups_router,
+    alerts_public_router, alerts_admin_router,
+    havale_public_router, havale_admin_router,
+    admin_orders_router,
+    rules_router,
+    extra_reports_router,
+    tickets_public_router, tickets_admin_router,
+    email_admin_router,
+    currency_router,
+)
 
 # Database
 from routes.deps import client, db
@@ -168,6 +179,19 @@ api_router.include_router(reviews_public_router)
 api_router.include_router(reviews_admin_router)
 api_router.include_router(seo_public_router)
 api_router.include_router(seo_admin_router)
+# Ticimax P1 — catalog extras, ops, reports, communications
+for _r in (
+    brands_router, tags_router, member_groups_router, announcements_router, popups_router,
+    alerts_public_router, alerts_admin_router,
+    havale_public_router, havale_admin_router,
+    admin_orders_router,
+    rules_router,
+    extra_reports_router,
+    tickets_public_router, tickets_admin_router,
+    email_admin_router,
+    currency_router,
+):
+    api_router.include_router(_r)
 
 # Root endpoint
 @api_router.get("/")
