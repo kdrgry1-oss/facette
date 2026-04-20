@@ -164,7 +164,7 @@ export default function Dashboard() {
           color="bg-purple-500"
         />
         <StatCard
-          title="Toplam Müşteri"
+          title="Toplam Üye"
           value={stats.total_customers}
           icon={Users}
           color="bg-orange-500"

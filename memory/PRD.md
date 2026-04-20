@@ -20,6 +20,18 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 ## Completed Features
+- [2026-04-20] **Büyük admin restructure (Iteration 9)**:
+  - **Menü 9 ana gruba bölündü**: Dashboard | Katalog | Siparişler | Üretim | Üyeler | İçerik | Pazarlama | Entegrasyonlar | Ayarlar (İmalat Üretim altına, Banner/Sayfalar İçerik altına taşındı)
+  - **Üyeler modülü (YENİ)**: `/api/admin/members` CRUD + stats (VIP/Sadık/Yeni/Aday segmentleri, edinim kanalları), `/admin/uyeler` sayfası (drawer detay, segment filtresi, UTM kaynakları görünümü)
+  - **Attribution / Funnel takibi (YENİ)**: `/api/attribution/track-visit` (public, UTM + referrer + gclid/fbclid), `/api/attribution/stats` (admin). Otomatik kanal algılama: instagram_ads, google_ads, instagram_organic, google_organic, email, influencer, direct, referral, trendyol, hepsiburada, vs. `/admin/kaynak` sayfası: Kanal Bazında Gelir/Ziyaret grafikleri, en iyi kampanyalar tablosu, dönüşüm oranı
+  - **Sipariş Kaynağı**: Order detay modalında attribution kartı (kanal, UTM source/medium/campaign, referrer, landing page, device)
+  - **Storefront UTM tracker**: `lib/attribution.js` App.js'te otomatik çağrılır, facette_sid localStorage'a yazılır, Checkout'ta siparişe iliştirilir
+  - **Hepsiburada Eşleştir (YENİ sayfa)**: Basic Auth (Merchant ID + Username + Password) ayar formu + kategori ID/ad eşleştirme tablosu. Integrations.jsx HB modalı da Basic Auth'a düzeltildi
+  - **Temu Eşleştir (YENİ sayfa)**: Shop ID + App Key + App Secret + kategori eşleştirme
+  - **Test-connection artık GERÇEK**: Hepsiburada'ya httpx ile Basic Auth listing endpoint ping'i atılır, 200/401/403/timeout mesajları açıkça döner
+  - **Ölçü Tabloları listesi**: `/admin/olcu-tablolari` ürün bazlı gezinti
+  - **Dashboard**: "Toplam Müşteri" → "Toplam Üye"
+  - Backend testing iteration 9: 19/19 backend + frontend 5 yeni sayfa doğrulandı
 - [2026-03-25] MongoDB data restore (290 products, 34 categories)
 - [2026-03-25] Stock code visibility, Global Markup & VAT, Vendors module
 - [2026-03-25] Trendyol category/attribute sync, auto-match, 4-digit IDs
