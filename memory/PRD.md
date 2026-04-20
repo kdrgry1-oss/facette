@@ -41,6 +41,20 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
   - Frontend Products Özellikler: Trendyol altında Hepsiburada & Temu için bağımsız özellik bölümleri (Trendyol'da seçilen değer boş ise HB/Temu'ya otomatik kopyalama)
   - Frontend Questions: marketplace filtresi, sol kenarlıkta renkli çerçeve, sağ üst köşede pazaryeri rozeti, pazaryeri bazlı senkron butonları
   - Products modeli `hepsiburada_attributes` + `temu_attributes` alanlarını destekler
+- [2026-04-20] Kapsamlı Admin Panel Genişletme (Fork devamı):
+  - **RBAC (Rol & Yetki)**: `/api/admin/roles` + `UsersRoles.jsx`, 64 permission ağacı
+  - **APScheduler**: `scheduler.py` 30dk'da bir çalışır, 48 saati geçmiş ödenmemiş Havale siparişlerini iptal eder ve stokları iade eder
+  - **İmalat Takip**: 12 aşamalı pipeline (`manufacturing.py`), `Manufacturing.jsx`, tedarikçi yönetimi, F7-F11 (maliyet/fire/satınalma emri), size_distribution opsiyonel (bedenler artık default gelmiyor)
+  - **Ölçü Tablosu**: `size_tables.py` + Pillow ile 1200x1800 PNG render, `SizeTablePanel.jsx`, storefront HTML tablo
+  - **AI Chatbot**: `ai_chatbot.py` — Emergent LLM (GPT-5.2) ile 7 kanal (WhatsApp, Instagram, Messenger, Web, Trendyol, Hepsiburada, Temu) cevap taslağı ve RAG knowledge base
+  - **Kampanya Şablonları**: 10 hazır şablon kart (Campaigns.jsx)
+  - **Konum API**: `/api/locations/countries` (pycountry 249 ülke, TR ilk), `/api/locations/tr/provinces` (81 il), `/api/locations/tr/districts?province=`, `/api/locations/tr/search?q=`
+  - **7 Kargo Entegrasyon Kartı**: MNG, Aras, Yurtiçi, PTT, HepsiJet, Trendyol Express, Sürat — `/api/integrations/{provider}/settings` (generic, scaffolding; gerçek API keys bekleniyor)
+  - **Iyzico Ayar UI**: `/api/integrations/iyzico/settings` (kısmi iade mantığı P1 backlog)
+  - **HB/Temu Kategori ID**: Products modeli ve formuna `hepsiburada_category_id`, `temu_category_id` alanları
+  - **Sipariş Renklendirme**: Havale bekleyen kırmızı/onaylanan normal, fatura kesilmiş pasif
+  - **İade Geliştirmeleri**: Ret Sebebi modalı, Kargo & Ödeme Tipi sütunları
+  - Backend testing iteration 8: 24/24 backend test geçti (locations, cargo settings, manufacturing CRUD+advance, products HB/Temu, AI settings, RBAC, size tables)
 
 ## Credentials
 - Admin: admin@facette.com / admin123
@@ -52,7 +66,13 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P0: Trendyol ürün aktarım detaylı sonuç ekranı (stok kodu, barkod, başarı/hata + hata nedeni)
 - P0: Doğan e-Dönüşüm üzerinden e-Fatura kesme (tam entegrasyon)
 - P0: Fatura numarası çıkarma (PDF parsing veya API)
-- P1: Mevcut tüm claim'lerin iskontolarını düzeltme (fix-discounts devam ediyor)
+- P1: **Iyzico Kısmi İade + Kargo Ücreti Düşme + Kampanya Oransal Hesap** (UI+backend mantığı)
+- P1: **Checkout/Sipariş adres formlarında İl/İlçe dropdown bağlama** (`/api/locations/tr/*` endpoint'leri frontend'e bağla)
+- P1: **Ticimax panel özellik analizi** — kullanıcı bilgi paylaştığında eksikleri ekle
+- P1: 7 Kargo firması gerçek API entegrasyonu (kullanıcı API keys verince)
+- P1: Mevcut tüm claim'lerin iskontolarını düzeltme
 - P1: Tüm search/dropdown UX tutarlılığı
+- P2: Trendyol Mikro İhracat ayrı faturalandırma altyapısı
 - P2: Trendyol ürün export testi
-- P2: Products.jsx modülerleştirme
+- P2: Products.jsx (2000+ satır) ve Orders.jsx (1400+ satır) modülerleştirme
+- P2: integrations.py (3500+ satır) provider'a göre bölme
