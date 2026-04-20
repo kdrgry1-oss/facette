@@ -1,142 +1,164 @@
-<analysis>**original_problem_statement:**
-Kullanıcı, facette e-ticaret uygulamasının çalıştırılmasını, kaybolan ürün verilerinin geri yüklenmesini ve admin panelinde çeşitli UI/UX ve iş mantığı düzeltmelerinin yapılmasını talep etti. 
-Temel istekler:
-1. Kaybolan ürünlerin (özellikle Basic Uzun Kol Triko Kazak Siyah) sisteme geri yüklenmesi.
-2. Trendyol kategori eşleştirme sayfasının çalışır hale getirilmesi.
-3. Ürün listesinde stok kodunun tam görünmesi.
-4. Ayarlardaki Global Kâr Oranı (%20) ve KDV Oranının (%10) ürün formuna doğru yansıması.
-5. Ürün formunda Tedarikçi ve Üretici (Varsayılan: FACETTE) alanlarının düzenlenmesi; Cariler (Tedarikçi/Üretici) için vergi no/şirket bilgileri tutacak yeni bir alan/modül oluşturulması.
-6. Trendyol zorunlu ürün özelliklerinin formda en üstte ve kırmızı uyarı ile gösterilmesi.
-7. Özellik eşleştirme ekranına Otomatik Eşleştir butonu eklenmesi ve özellik ID'lerinin 4 haneli yapılması.
-8. Varyant/Renk arama açılır pencerelerinin (dropdown) uzatılması ve arama yapıldığında sonuçların direkt gösterilmesi (tıklama zorunluluğunun kaldırılması).
+<analysis>**original_problem_statement:** 
+Kullanıcı, facette e-ticaret uygulamasının admin panelini kapsamlı bir şekilde genişletmeyi talep etti. Yapılan son talepler arasında:
+1. Hepsiburada ve Temu entegrasyon altyapısı (kategori eşleştirme, ürün özellikleri ve müşteri soruları için rozetler).
+2. Havale/EFT siparişlerinin ödeme durumuna göre kırmızı/siyah renklendirilmesi ve 48 saat ödenmeyenlerin otomatik iptal edilip stoğa geri alınması (cron job).
+3. Gelişmiş İmalat Takip (Manufacturing Tracking) modülü (Aşama aşama: Anlaşma, Numune, Kumaş, Dikim, Fatura vs.).
+4. Ürünler için Ölçü Tablosu (Size Table) modülü (Arka planda 1200x1800 px görsel üretilip ürün görseli olarak eklenmesi, müşteriye HTML tablo olarak gösterilmesi).
+5. Müşteri Soruları (Questions) alanının 7 kanallı (WhatsApp, Instagram, FB Messenger, Web, Trendyol, Hepsiburada, Temu) Omnichannel bir AI Chatbot'a dönüştürülmesi (Emergent LLM ile GPT-5.2 üzerinden cevap taslağı oluşturma ve RAG/Knowledge base yönetimi).
+6. Iyzico ve 7 farklı Kargo firması (MNG, Aras, Yurtiçi, PTT, HepsiJet, Trendyol Express, Sürat) için ayarlar/entegrasyon kartları.
+7. Türkiye (İl/İlçe) ve Dünya ülkeleri için konum API altyapısı.
+8. Gelişmiş RBAC (Rol ve Yetki) yönetimi.
+9. Hazır Kampanya Şablonları (Campaigns sayfası).
+
+**PRODUCT REQUIREMENTS:**
+- Siparişler, ürünler, iadeler ve entegrasyonlar çok kanallı (omnichannel) olacak şekilde güncellenmeli.
+- Üretim sürecini uçtan uca takip edecek bir İmalat Takip sistemi olmalı.
+- Yapay zeka müşteri temsilcisi; sistemdeki ürün, stok ve kampanya verilerini RAG mantığıyla kullanarak cevap üretmeli.
 
 **User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only).
 
 **what currently exists?** 
-React (Frontend), FastAPI (Backend) ve MongoDB tabanlı tam yığın (full-stack) bir e-ticaret uygulaması. Sistemde  klasöründen restore edilmiş 290 ürün, 34 kategori ve ayarlar bulunmaktadır. Admin panelinde detaylı ürün yönetimi, yeni eklenen Cariler (Vendors) modülü ve Trendyol entegrasyonu (kategori/özellik çekme ve eşleştirme) aktif olarak çalışmaktadır.
+React ve FastAPI tabanlı, MongoDB kullanan modüler bir e-ticaret paneli. Trendyol, Hepsiburada, Temu, Iyzico ve Kargo firmaları için entegrasyon arayüzleri oluşturuldu. Gelişmiş RBAC (Rol bazlı yetkilendirme), İmalat Takip, Ölçü Tablosu, otomatik sipariş iptali için APScheduler ve Emergent LLM entegreli (GPT-5.2) yapay zeka destekli Müşteri Mesajları modülü aktiftir.
 
 **Last working item**:
-- **Last item agent was working**: Ürün ekleme/düzenleme formundaki Beden (Size) ve Renk (Color) varyant seçimi dropdown'larının UX iyileştirmesi. Dropdown'ların  değeri artırıldı, arama yapıldığında otomatik açılması sağlandı ve dışarı tıklandığında kapanması (click-outside) için  eklendi. Ayrıca boş olan  veritabanına 33 beden ve 39 renk eklendi.
-- **Status**: USER VERIFICATION PENDING
-- **Agent Testing Done**: Y (Ekran görüntüleri ile test edildi, açılır pencerelerin çalıştığı ve verilerin geldiği doğrulandı).
-- **Which testing method agent to use?**: Frontend testing agent / Screenshot tool.
+- **Last item agent was working**: Kullanıcının son mesajındaki hataları (İmalat kaydı kaydedilemiyor, bedenler default gelmesin) ve yeni eklentileri (7 Kargo firması için ayar modalları, İl/İlçe/Ülke endpointleri, HB ve Temu Kategori eşleştirme) kodluyordu. Arka planda Python ile  oluşturuldu, frontend tarafında  (Kargo kartları ve modalları) ile  (HB/Temu kategori eşleştirme) dosyalarında  işlemleri yeni tamamlandı.
+- **Status**: IN PROGRESS
+- **Agent Testing Done**: N (Son frontend eklemeleri henüz test edilmedi)
+- **Which testing method agent to use?**: both (Backend curl for locations API, Frontend screenshot for Integrations and Products pages).
 - **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
-Issue 1: Sistemdeki Diğer Arama (Search) Dropdown'larının UX Kontrolü (P1)
-- **Attempted fixes**: Sadece ürün formundaki Beden ve Renk dropdown'ları için arama yapınca direkt açılma ve listeyi uzun gösterme UX'i düzeltildi.
-- **Next debug checklist**:  ve diğer sayfalardaki (örn. Kategori seçimi, Marka seçimi) tüm search bar/dropdown'ları kontrol et. Kullanıcının sistemdeki *tüm* searchler biraz garip çalışıyor talebi tam olarak kapsanmış olmayabilir.
-- **Why fix this issue and what will be achieved with the fix?**: Kullanıcı deneyimi tutarlılığı. Arama yapıldığında sonuçların tıklamaya gerek kalmadan direkt filtrelenip gösterilmesi isteniyor.
-- **Status**: IN PROGRESS
-- **Is recurring issue?**: N
-- **Should Test frontend/backend/both after fix?**: Frontend (Screenshot tool)
-- **Blocked on other issue**: None
+  - Issue 1: Son yapılan Kargo UI modalları ve İmalat formu düzeltmelerinin testi
+     - **Attempted fixes**:  ve  güncellendi,  içerisine HB/Temu kategori ID alanları eklendi.
+     - **Next debug checklist**: Frontend'i derleyip  sayfasındaki kargo modallarının (MNG, Aras vb.) açıldığından ve  sayfasında Hepsiburada Kategori Eşleştirme alanlarının geldiğinden emin olun. İmalat Ekle formunun sorunsuz çalıştığını UI üzerinden test edin.
+     - **Why fix this issue and what will be achieved with the fix?**: Kullanıcının talep ettiği son UI yapı taşlarının tamamlanması.
+     - **Status**: TESTING PENDING
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: Frontend
+  - Issue 2: Iyzico Kısmi İade (Partial Return) ve Kargo Düşme Mantığı (P1)
+     - **Attempted fixes**: Henüz başlanmadı. Iyzico için sadece Ayarlar UI'ı yapıldı.
+     - **Next debug checklist**: İade onay ekranında Iyzico ile ödenmiş siparişler için kısmi iade tutarı belirleme, kargo kesintisi yapma ve kampanya oransal hesaplamasını frontend/backend tarafında entegre edin.
+     - **Status**: NOT STARTED
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: Both
+  - Issue 3: Checkout ve Sipariş Ekranlarında İl/İlçe Kullanımı (P1)
+     - **Next debug checklist**: Backend'e eklenen  endpoint'lerini kullanarak  (yeni sipariş ekleme) veya adres formlarında il/ilçe dropdown'larını bağlayın.
+     - **Status**: NOT STARTED
 
 **In progress Task List**:
-- Yok (Tüm spesifik talepler teknik olarak uygulandı, son UX iyileştirmeleri kullanıcı doğrulamasında).
+  - Task 1: Hepsiburada ve Temu Kategori Eşleştirme Kayıt İşlemi
+     - **Where to resume**:  içinde state'e eklenen  ve  alanlarının backend  /  modelleri tarafından alınıp MongoDB'ye doğru kaydedildiğini doğrulayın.
+     - **What will be achieved with this?**: Ürünlerin pazaryeri bazlı kategorizasyonu.
+     - **Status**: TESTING PENDING
+     - **Should Test frontend/backend/both after fix?**: Both
 
 **Upcoming and Future Tasks**:
-Future Tasks:
-- Kullanıcı testinden sonra tespit edilebilecek diğer dropdown/search input UX düzeltmeleri. (P1)
-- Trendyol'a ürün aktarımı senaryosunun (Şimdi Trendyol'a Aktar butonu) uçtan uca test edilmesi. (P2)
+    Upcoming Tasks:
+    - Ticimax Admin Panel Özellik Analizi (Kullanıcı Ticimax'ten geçiş yaptığını belirtti, eksik özelliklerin sorulup eklenmesi gerekiyor) (P1).
+    - Trendyol Mikro İhracat siparişlerinin tespit edilip ayrı faturalandırılması altyapısı (P2).
+    - 7 Kargo Firmasının gerçek API entegrasyonu (Kullanıcı API key'leri verince yapılacak) (P2).
 
 **Completed work in this session**:
-- GitHub memory/data_export içinden , ,  vb. MongoDB'ye import edildi. (DONE)
-- Ürün listesinde stok kodu sütununun kesilme sorunu UI genişletilerek çözüldü. (DONE)
-- Ayarlardan alınan Global Markup (Kâr Oranı) ve KDV'nin frontend ürün formuna yansıması sağlandı (, , ). (DONE)
-- Cariler (Vendors) modülü sıfırdan oluşturuldu (, ). Menüye eklendi. (DONE)
-- Ürün formuna Tedarikçi ve Üretici alanları eklendi. (DONE)
-- Trendyol API'sinden kategoriler ve özellikler (attributes) çekildi. Kategori eşleştirme sayfasındaki  engeli kaldırıldı. (DONE)
--  içindeki özellik çekme hatası () düzeltildi. (DONE)
-- Trendyol zorunlu ürün özelliklerinin kırmızı çerçeveli ve en üstte gösterilmesi sağlandı (). (DONE)
-- Kategori eşleştirme sayfasına Otomatik Eşleştir butonu eklendi (String eşleşmesine göre). (DONE)
-- Özellik ID'leri 8 haneli UUID'den 4 haneli ID'lere dönüştürüldü. (DONE)
-- Varyant (Renk/Beden) dropdown'larının uzunluğu artırıldı ve otomatik açılma eklendi. (DONE)
+- Hepsiburada ve Temu için özellik eşleştirme sekmeleri eklendi (DONE).
+-  ile 48 saat ödenmeyen Havale siparişlerini iptal eden APScheduler sistemi kuruldu (DONE).
+- RBAC (Users & Roles) modülü sıfırdan yaratıldı, 64 yetkili ağaç yapısı eklendi (DONE).
+- Siparişler sayfasında Havale bekleyenlerin kırmızı yapılması, fatura kesilmişlerin pasifleşmesi ve UI iyileştirmeleri (DONE).
+- İade sayfasına Ret Sebebi modalı, Kargo ve Ödeme Tipi sütunları eklendi (DONE).
+- İmalat Takip (Manufacturing) modülü eklendi (DONE).
+- Ölçü Tablosu (Size Tables) modülü (Pillow ile arka planda 1200x1800 görsel üretimi) yapıldı (DONE).
+- Müşteri Soruları (Questions) modülü, Emergent LLM (GPT-5.2) kullanılarak 7 kanallı AI Chatbot paneline dönüştürüldü (DONE).
+- Kampanyalar sekmesine 10 adet hazır şablon kartı eklendi (DONE).
+- Türkiye İl/İlçe API endpointleri () sisteme dahil edildi (DONE).
 
 **Earlier issues found/mentioned but not fixed**:
-- Yok. Kullanıcının belirttiği tüm buglar ve feature requestler ele alındı.
+   - Issue 1:  ve  dosya boyutları çok büyük (2000 ve 1400+ satır). Refactor edilmeleri önerilir.
+   - Issue 2: Kullanıcı ticimax panel bilgisini versem eksikleri ekler misin dedi, bu onaylanıp veri istendiğinde üzerine çalışılmalı.
 
 **Known issue recurrence from previous fork**:
-- N/A (İlk fork veya önceki veri yok).
+  - N/A
 
 **Code Architecture**:
-- : Ürün yönetimi, varyantlar, özellikler (En çok değiştirilen dosya).
-- : Trendyol kategori ve özellik eşleştirme, Otomatik Eşleştir.
-- : Yeni Cariler (Tedarikçi/Üretici) yönetimi.
-- : Cariler API endpoint'leri (CRUD).
-- : Trendyol kategori senkronizasyonu, ayarlar.
-- : Trendyol API ile haberleşen core servis.
+- : FastAPI ana giriş noktası, lifespan içinde  başlatılıyor.
+- : , , , ,  gibi yeni modüller.
+- : Yeni modüller için , ,  dosyaları eklendi.
 
 **Key Technical Concepts**:
-- Frontend: React, Tailwind CSS, Axios, Sonner (Toast).
-- Backend: FastAPI, Motor (Async MongoDB).
-- Architecture: Modüler FastAPI router yapısı (routes klasörü).
-- State: Frontend tarafında geniş form state'leri ( in ).
+- Backend: FastAPI, MongoDB (Motor), APScheduler (Cron jobs), Pillow (Görsel manüpülasyonu), RAG (AI Chatbot için).
+- Frontend: React, Tailwind, Lucide Icons, Çoklu Modal ve Tab yönetimi.
 
 **key DB schema**:
-- : {name, stock_code, category_name, attributes: {}, trendyol_attributes: {}, manufacturer, vendor...}
-- : {id: main, trendyol_markup, default_vat_rate...}
-- : {name, full_name, trendyol_category_id, attribute_mappings: []}
-- : {id, name, parentId, subCategories...}
-- : {id (4-digit), name, values: [], category_ids: []}
-- : {id (4-digit), type, name, tax_number, company_title...}
-- : {type (size/color), value, sort_order}
+  - : ,  alanları renklendirme ve cron iptali için kritik.
+  - : , , ,  eklendi.
+  -  & : RBAC yetkileri için.
+  - : İmalat takip pipeliner'ı için.
+  -  & : Chatbot ayarları için.
 
 **changes in tech stack**:
-- Yok.
+  -  ve  arka plan zamanlanmış görevleri (otomatik iptal) için eklendi.
+  -  ölçü tablosu görsellerini oluşturmak için eklendi.
+  -  paketi LLM bot altyapısı için eklendi.
+  -  dünya ülkeleri verisi için eklendi.
 
 **All files of reference**:
-1.  (Yeni oluşturuldu - Cariler backend işlemleri)
-2.  (Yeni oluşturuldu - Cariler frontend UI)
-3.  (Güncellendi - KDV, Kâr oranı, UX dropdown'lar, Üretici/Tedarikçi)
-4.  (Güncellendi - Otomatik Eşleştir butonu)
-5.  (Güncellendi - API parse hatası düzeltildi)
-6.  (Güncellendi -  router eklendi)
-7.  &  (Güncellendi - Cariler route eklendi)
+1.  (Yeni)
+2.  &  (Yeni)
+3.  (Yeni)
+4.  &  (Yeni)
+5.  &  (Yeni)
+6.  (Yeni)
+7.  (Yeni)
+8. , , ,  (Kapsamlı değişiklikler).
 
 **Areas that need refactoring**:
--  dosyası 2000 satırı aştı. Gelecekte Tab içeriklerinin (Genel, Fiyat, Özellikler, Trendyol vb.) ayrı componentlere bölünmesi okunabilirliği artıracaktır.
+-  ve  bileşenleri acilen alt component'lere (örneğin modal içerikleri ayrı dosyalara) ayrılmalıdır.
 
 **key api endpoints**:
-- : Cariler (Tedarikçi/Üretici) yönetimi.
-- : Ana ayarları (KDV, Kâr Oranı) getirir.
-- : Trendyol'dan güncel kategorileri çeker.
-- : Trendyol kategori özelliklerini yerel DB'ye kopyalar.
--  & : Dropdown'lar için global varyant listesini getirir.
+-  (APScheduler tarafından tetiklenir)
+-  & 
+-  (Emergent LLM anahtarı kullanır)
+-  (İmalat akışı)
 
 **Critical Info for New Agent**:
-- **Veritabanı Durumu:** MongoDB içindeki  kullanılmaktadır. Ürünler, kategoriler ve trendyol ayarları buradadır.  flag'i manuel olarak temizlenmiştir, yeni kategori eklendiğinde bu flag'in davranışına dikkat edilmelidir.
-- **ID Yapısı:** Kategori ve özellik ID'leri frontend'de karmaşa yaratmaması için 8 haneli UUID yerine **4 haneli** custom ID üreten  fonksiyonuna geçirilmiştir.
-- **Zorunlu Alanlar:** Trendyol'a ait zorunlu alanlar  içinde dinamik olarak en üste sıralanıp kırmızı ile render edilmektedir. Bu mantık bozulmamalıdır.
+- **Otomatik İptal Cron**:  her 30 dakikada bir çalışarak 48 saati geçmiş, ödenmemiş Havale siparişlerini iptal eder ve stokları iade eder.
+- **AI Chatbot Modülü**:  içerisinde  paketi üzerinden **Emergent LLM Key** ( modeli) kullanılmaktadır. Bu yapıyı standart OpenAI API anahtarına değiştirmeyin.
+- **Kargo & Iyzico API'leri**: Şu an Integrations sayfasında sadece **scaffolding (Arayüz Kartları)** yapılmıştır. Kullanıcı API key'leri sağladığında entegrasyon kodları yazılacaktır.
+- Hepsiburada, Temu ve Trendyol özellikleri için veriler Products modeline doğrudan  olarak basılmaktadır.
+- Kullanıcıya Türkçe yanıt verin.
 
-**documents and test reports created in this job**:
-- Yok (Testler ekran görüntüsü aracı ile loglara bakılarak manuel yapıldı).
+**documents and test reports created in this job**
+  - /app/memory/test_credentials.md (Updated - Admin credentials explicitly added)
+  - /app/memory/PRD.md (Updated)
 
-**Last 10 User Messages and any pending HUMAN messages**:
-1. *User*: bu pencere renk ve varyant serach ederken aşağıya doğru kısa geliyor. daha uzun bi pencere yap. bir de sistemdeki tüm searchler biraz garip çalışıyor...
-2. *User*: ekran altısındaki kısmın sağ üst kçşesine otomatik eşleştir diye bir seçenk koy ve metin olarak eşlelenleri otomatik eşleştir...
-3. *User*: kalan işleri yap
-4. *User*: trendyol apisini daha önce eklemiştim ve o api şu an soruları falan çekiyor kategorileri nasıl çekmyor. ürün özelliklerini falan da muhtemelen apiden dolayı çekmiyor . çöz şu işi...
-5. *User*: Stok Kodu Görünürlüğü dzüelmemiş KDV Oranı düzelmemiş ürün zellikleri gelmemiş bekleyenleri de yap
-*(All user requests have been addressed, waiting for verification on the dropdown UX fix).*
+**Last 10 User Messages and any pending HUMAN messages** 
+1. *User*: İki adet el yazısı fotoğraf atarak İyzico kısmi iade, İmalat Takip, Ölçü Tablosu, Mikro ihracat entegrasyonu talep etti. -> *Agent: İhtiyaçları analiz edip FAZ 1'e başladı.*
+2. *User*: Havale ödemelerinde süreci anlattı (Ödenmeyenler kırmızı olsun, 48 saatte iptal edilsin, Rol ve Yetkiler eklensin vb.). -> *Agent: Scheduler ve RBAC ekleyip UI'ı güncelledi.*
+3. *User*: Havale siparişi onaylanınca kırmızının normale dönmesini istedi. -> *Agent: Bug'ı fixledi.*
+4. *User*: Fatura Kes sütununu kaldır, kampanya şablonları ekle, Omnichannel (7 kanallı) AI destekli chatbot entegrasyonu yap. -> *Agent: Emergent LLM ile GPT-5.2 botunu entegre etti, kanalları güncelledi.*
+5. *User*: İmalat kayıt olmuyor bug'ı, bedenler otomatik gelmesin, 7 Kargo entegrasyon kartı ekle, il/ilçe konum araması ekle, HB ve Temu Kategori eşleştirme ekle. -> *Agent: İmalat hatasını düzeltti, konum modülünü kurdu, arayüz güncellemelerini search_replace ile koda gömdü.*
+*(Pending Human Action: Ajan güncellemeleri tamamlayıp testlerini bitiremeden kesildi. En son yapılan  ve  arayüz değişikliklerinin test edilip kullanıcıya sunulması gerekiyor).*
 
-**Project Health Check**:
-- Broken: None
-- Mocked: None (Real DB data and Live Trendyol API are being used).
+**Project Health Check:**
+- Broken: None apparent, but latest generic cargo modal replacements need UI verification.
+- Mocked: Cargo APIs, Iyzico API (Arayüzleri var, iş mantıkları key bekleniyor).
 
-**3rd Party Integrations**:
-- **Trendyol API** — requires User API Key (Sistemde  koleksiyonunda  belgesi altında kullanıcının girdiği Supplier ID ve API Key mevcuttur. İstekler başarıyla atılmaktadır).
+**3rd Party Integrations** 
+- **OpenAI GPT-5.2** — uses Emergent LLM Key (for omnichannel auto-responses)
+- Trendyol, Hepsiburada, Temu — requires User API Key
+- Iyzico (Payments) — requires User API Key
+- MNG, Aras, Yurtiçi vb. 7 Kargo — requires User API Key
+- Doğan e-Dönüşüm (SOAP) — requires User Credentials
 
-**Testing status**:
-- Testing agent used after significant changes: NO (Screenshot tool extensively used).
-- Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: None
-- Known regressions: None
+**Testing status**
+  - Testing agent used after significant changes: NO (Self-tested via screenshot & curl thoroughly).
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: None
+  - Known regressions: None
 
-**Credentials to test flow**:
-- Frontend Admin URL: (Bulunduğun preview ortamındaki  yolu)
-- Email: 
-- Password: 
+**Credentials to test flow:**
+- Admin Paneli:  / 
+- Doğan e-Dönüşüm Test:  / 
 
-**What agent forgot to execute**:
-- Kullanıcının sistemdeki tüm searchler biraz garip çalışıyor uyarısındaki tüm searchler kısmı için sadece varyant (Beden/Renk) search'leri optimize edildi. Admin panelindeki (örneğin Ürünler sayfasındaki genel arama veya Kategori eşleştirmedeki arama) diğer search alanları da kontrol edilmelidir.</analysis>
+**What agent forgot to execute**
+- Son adımda frontend değişiklikleri (Kargo ayar kartları ve HB/Temu kategori eşleştirme alanları) kodlandı fakat **uygulamanın ayağa kalktığını teyit eden son Screenshot testi alınamadı**.
+- Yeni yazılan  altyapısı frontend tarafındaki sipariş ekleme/müşteri adres formlarına bağlanmadı.
+- Iyzico kısmi iade ve kargo ücreti düşme algoritmalarının backend kodlamasına henüz başlanmadı.</analysis>

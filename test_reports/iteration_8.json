@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 8 backend testing for Facette admin panel. 24/24 pytest cases passed covering locations API (pycountry 249 ülke, 81 il, İstanbul 39 ilçe, search), 7 kargo firmaları generic settings (MNG/Aras/Yurtiçi/PTT/HepsiJet/Trendyol Express/Sürat), MNG save+masked secret+test-connection, Iyzico default settings, manufacturing (12 stages, create without size_distribution returns empty {} and total_units=0, list, advance), Products HB/Temu category_id CRUD, AI settings, RBAC roles, size tables CRUD. All tested APIs return 200 with correct Turkish messages. No critical or minor backend issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_features.py",
+    "/app/test_reports/pytest/iteration8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/manufacturing response shape is {\"success\": true, \"record\": {...}} while POST /api/products returns {\"id\": ..., \"message\": ...}. Non-uniform create-response shapes may confuse UI clients; consider standardising to always include top-level `id`.",
+    "integrations.py is ~3500 lines — should be split by provider for maintainability (violates 700-line guideline).",
+    "ALLOWED_MARKETPLACES mixes customer message channels (whatsapp, instagram, messenger, site) with cargo providers and marketplaces. Access control is identical for all, which is fine today but could be namespaced (e.g. /api/integrations/cargo/{mng}/settings vs /api/integrations/marketplace/{hepsiburada}/settings) to prevent route collision in future.",
+    "Manufacturing `size_distribution` correctly defaults to empty dict {} (bug fix verified — bedenler artık default gelmiyor)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8_features.py"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 tests passed)",
+    "frontend": "not tested (backend-only per request)"
+  },
+  "test_credentials": {
+    "admin": "admin@facette.com / admin123 (login via query params)"
+  },
+  "seed_data_creation": "Created ephemeral records: 1 manufacturing record (IMLT-2026-000X, cleaned up at end by not persisting), 2 products (TEST_PRD_* + TEST_SZ_*) – products cleaned up via DELETE. MNG settings written with TEST_MNG_123 then reset to empty state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend public URL in frontend/.env. Auth is POST /api/auth/login with email/password as query params. Manufacturing POST returns {success, record:{id, code, ...}} NOT flat {id}. Products POST returns {id, message}. ALLOWED_MARKETPLACES set in integrations.py L3335 includes cargo providers (mng, aras, yurtici, ptt, hepsijet, trendyol_express, surat) + marketplaces (hepsiburada, temu) + message channels. Iyzico has its own /iyzico/settings endpoint at L47 of integrations.py. Locations endpoints use /api/locations/tr/provinces (not /provinces). pycountry loaded lazily; TR pinned first. Turkey provinces loaded from /app/backend/data/tr_locations.json.",
+  "rca_of_the_issue": "No active bugs. Earlier main agent bugfix for manufacturing size_distribution default verified: payload without size_distribution yields rec.size_distribution == {} and total_units == 0, confirming 'bedenler default gelmesin' requirement is met."
+}

@@ -48,7 +48,7 @@ export default function Manufacturing() {
       responsible_user: "",
       agreement_date: new Date().toISOString().substring(0, 10),
       expected_delivery_date: "",
-      size_distribution: { S: 0, M: 0, L: 0, XL: 0 },
+      size_distribution: {},
       unit_price: 0,
       agreed_total: 0,
       payments: [],
@@ -317,7 +317,7 @@ export default function Manufacturing() {
               {editing ? `İmalat Kaydı: ${editing.code}` : "Yeni İmalat Kaydı"}
             </DialogTitle>
           </DialogHeader>
-          <form onSubmit={saveRecord} className="space-y-5">
+          <form onSubmit={(e) => { e.preventDefault(); saveRecord(); }} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">Ürün Adı / Model <span className="text-red-500">*</span></label>
@@ -351,21 +351,43 @@ export default function Manufacturing() {
               </div>
             </div>
 
-            {/* Size distribution */}
+            {/* Size distribution - kullanıcı kendi ekler */}
             <div>
-              <label className="block text-xs font-bold text-gray-600 mb-2 flex items-center gap-2">
-                <Package size={12} /> Beden Dağılımı
+              <label className="block text-xs font-bold text-gray-600 mb-2 flex items-center gap-2 justify-between">
+                <span className="flex items-center gap-2"><Package size={12} /> Beden Dağılımı</span>
+                <button type="button" onClick={() => {
+                  const s = window.prompt("Beden adı (örn: M, 42, 3XL):");
+                  if (!s || !s.trim()) return;
+                  setForm(f => ({ ...f, size_distribution: { ...(f.size_distribution || {}), [s.trim()]: 0 } }));
+                }} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded normal-case">
+                  <Plus size={12} className="inline" /> Beden Ekle
+                </button>
               </label>
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 bg-rose-50 border border-rose-200 rounded-lg p-3">
-                {["XS", "S", "M", "L", "XL", "XXL"].map(s => (
-                  <div key={s}>
-                    <label className="text-[10px] font-bold text-rose-700">{s}</label>
-                    <input type="number" min={0} value={form.size_distribution?.[s] || 0}
-                      onChange={e => updateSize(s, e.target.value)}
-                      className="w-full border px-2 py-1 rounded text-sm" />
-                  </div>
-                ))}
-              </div>
+              {Object.keys(form.size_distribution || {}).length === 0 ? (
+                <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
+                  Henüz beden eklenmedi. "Beden Ekle" ile istediğiniz bedenleri tanımlayın.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2 bg-rose-50 border border-rose-200 rounded-lg p-3">
+                  {Object.keys(form.size_distribution).map(s => (
+                    <div key={s} className="relative">
+                      <label className="text-[10px] font-bold text-rose-700">{s}</label>
+                      <input type="number" min={0} value={form.size_distribution[s] || 0}
+                        onChange={e => updateSize(s, e.target.value)}
+                        className="w-full border px-2 py-1 rounded text-sm pr-6" />
+                      <button type="button" onClick={() => {
+                        setForm(f => {
+                          const sd = { ...f.size_distribution };
+                          delete sd[s];
+                          return { ...f, size_distribution: sd };
+                        });
+                      }} className="absolute top-5 right-1 text-red-400 hover:text-red-600" title="Kaldır">
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 Toplam: <b>{Object.values(form.size_distribution || {}).reduce((a, b) => Number(a) + Number(b), 0)}</b> adet
               </p>
@@ -459,7 +481,7 @@ export default function Manufacturing() {
 
             <div className="flex justify-end gap-2 pt-4 border-t">
               <button type="button" onClick={() => setModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">İptal</button>
-              <button type="submit" disabled={saving} data-testid="save-mfg-btn"
+              <button type="button" onClick={saveRecord} disabled={saving} data-testid="save-mfg-btn"
                 className="px-4 py-2 bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50 text-sm font-bold">
                 <Save size={14} className="inline mr-1" /> {saving ? "Kaydediliyor..." : "Kaydet"}
               </button>

@@ -61,6 +61,14 @@ export default function Integrations() {
   });
   const [iyzicoTesting, setIyzicoTesting] = useState(false);
 
+  // Cargo providers state (generic)
+  const [cargoModalOpen, setCargoModalOpen] = useState(false);
+  const [activeCargoProvider, setActiveCargoProvider] = useState(null);
+  const [cargoSettings, setCargoSettings] = useState({
+    username: "", password: "", api_key: "", customer_code: "",
+    api_secret: "", mode: "sandbox", is_active: false
+  });
+
   // Ticimax state
   const [ticimaxImportingProducts, setTicimaxImportingProducts] = useState(false);
   const [ticimaxImportingCategories, setTicimaxImportingCategories] = useState(false);
@@ -475,8 +483,89 @@ export default function Integrations() {
       icon: <Truck className="w-8 h-8" />,
       status: statuses.mng,
       color: "green",
-      instructions: "MNG Kargo API entegrasyonu aktif. Kargo etiketi basımı Siparişler sayfasından yapılabilir.",
-      envKeys: []
+      instructions: "MNG Kargo Müşteri Portalı'ndan API kullanıcı + şifresi alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('mng', setCargoSettings, (v) => { setActiveCargoProvider('mng'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "aras",
+      name: "Aras Kargo",
+      description: "Aras Kargo API - gönderi oluşturma, takip, etiket",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.aras || { configured: false, mode: "sandbox" },
+      color: "blue",
+      instructions: "Aras Kargo Entegrasyon Merkezi'nden kullanıcı adı, şifre ve müşteri kodu alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('aras', setCargoSettings, (v) => { setActiveCargoProvider('aras'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "yurtici",
+      name: "Yurtiçi Kargo",
+      description: "Yurtiçi Kargo entegrasyonu - etiket, takip, teslimat",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.yurtici || { configured: false, mode: "sandbox" },
+      color: "red",
+      instructions: "Yurtiçi Kargo API hesabınızdan WS User/Password alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('yurtici', setCargoSettings, (v) => { setActiveCargoProvider('yurtici'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "ptt",
+      name: "PTT Kargo",
+      description: "PTT Kargo - devlet entegrasyonu, en ekonomik gönderi",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.ptt || { configured: false, mode: "sandbox" },
+      color: "yellow",
+      instructions: "PTT Kargo Müşteri Hesap Sözleşmesi kurumsal müşteri numarası ile aktif olur.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('ptt', setCargoSettings, (v) => { setActiveCargoProvider('ptt'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "hepsijet",
+      name: "HepsiJet",
+      description: "HepsiJet Hızlı Teslimat - Hepsiburada'nın kargosu",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.hepsijet || { configured: false, mode: "sandbox" },
+      color: "orange",
+      instructions: "HepsiJet Merchant Panel > API Sayfası > Key/Secret alınız.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('hepsijet', setCargoSettings, (v) => { setActiveCargoProvider('hepsijet'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "trendyol_express",
+      name: "Trendyol Express",
+      description: "Trendyol Express - Marketplace ve kendi siteniz için",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.trendyol_express || { configured: false, mode: "sandbox" },
+      color: "orange",
+      instructions: "Trendyol Satıcı Paneli > Entegrasyon Bilgileri'nden alınabilir.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('trendyol_express', setCargoSettings, (v) => { setActiveCargoProvider('trendyol_express'); setCargoModalOpen(v); }) },
+      ]
+    },
+    {
+      id: "surat",
+      name: "Sürat Kargo",
+      description: "Sürat Kargo - etiket basımı, takip",
+      icon: <Truck className="w-8 h-8" />,
+      status: statuses.surat || { configured: false, mode: "sandbox" },
+      color: "purple",
+      instructions: "Sürat Kargo Kurumsal Müşteri Hesabı ile API erişimi sağlanır.",
+      envKeys: [],
+      actions: [
+        { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('surat', setCargoSettings, (v) => { setActiveCargoProvider('surat'); setCargoModalOpen(v); }) },
+      ]
     },
     {
       id: "gib",
@@ -730,6 +819,77 @@ export default function Integrations() {
           </div>
         </div>
       </div>
+
+      {/* Generic Cargo Provider Modal (MNG/Aras/Yurtiçi/PTT/HepsiJet/Trendyol Express/SürAt) */}
+      <Dialog open={cargoModalOpen} onOpenChange={(o) => { setCargoModalOpen(o); if (!o) setActiveCargoProvider(null); }}>
+        <DialogContent data-testid="cargo-settings-modal">
+          <DialogHeader>
+            <DialogTitle>
+              {activeCargoProvider ? `${activeCargoProvider.toUpperCase()} Kargo API Ayarları` : "Kargo Ayarları"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings(activeCargoProvider, cargoSettings, setCargoModalOpen); }} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Kullanıcı Adı</label>
+                <input data-testid="cargo-username" type="text" value={cargoSettings.username || ''}
+                  onChange={(e) => setCargoSettings({ ...cargoSettings, username: e.target.value })}
+                  className="w-full border px-3 py-2 rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Şifre</label>
+                <input data-testid="cargo-password" type="password" value={cargoSettings.password || ''}
+                  onChange={(e) => setCargoSettings({ ...cargoSettings, password: e.target.value })}
+                  placeholder={cargoSettings.password === "********" ? "********" : ""}
+                  className="w-full border px-3 py-2 rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Müşteri/Merchant Kodu</label>
+                <input data-testid="cargo-merchant" type="text" value={cargoSettings.merchant_id || cargoSettings.customer_code || ''}
+                  onChange={(e) => setCargoSettings({ ...cargoSettings, merchant_id: e.target.value, customer_code: e.target.value })}
+                  className="w-full border px-3 py-2 rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">API Key (varsa)</label>
+                <input type="text" value={cargoSettings.api_key || ''}
+                  onChange={(e) => setCargoSettings({ ...cargoSettings, api_key: e.target.value })}
+                  className="w-full border px-3 py-2 rounded text-sm" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-gray-600 mb-1">API Secret (varsa)</label>
+                <input type="password" value={cargoSettings.api_secret || ''}
+                  onChange={(e) => setCargoSettings({ ...cargoSettings, api_secret: e.target.value })}
+                  placeholder={cargoSettings.api_secret === "********" ? "********" : ""}
+                  className="w-full border px-3 py-2 rounded text-sm" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Mod</label>
+              <select value={cargoSettings.mode || "sandbox"}
+                onChange={e => setCargoSettings({ ...cargoSettings, mode: e.target.value })}
+                className="w-full border px-3 py-2 rounded text-sm bg-white">
+                <option value="sandbox">Test Modu</option>
+                <option value="live">Canlı Mod</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={!!cargoSettings.is_active}
+                onChange={(e) => setCargoSettings({ ...cargoSettings, is_active: e.target.checked })} />
+              <span className="text-sm">Entegrasyon Aktif</span>
+            </label>
+            <div className="bg-blue-50 border border-blue-200 p-3 rounded text-xs text-blue-800">
+              Kargo API'si yapılandırıldıktan sonra: sipariş onayında otomatik etiket basımı, takip numarası ataması ve müşteri SMS bildirimi aktif olur.
+            </div>
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <button type="button" onClick={() => setCargoModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
+              <button type="submit" disabled={savingSettings} data-testid="cargo-save-btn"
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50">
+                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Iyzico Settings Modal */}
       <Dialog open={iyzicoModalOpen} onOpenChange={setIyzicoModalOpen}>
