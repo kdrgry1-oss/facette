@@ -106,3 +106,12 @@ memory/
 # Nested or Duplicate Repos
 frontend/fcc/
 backend/uploads/
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
