@@ -664,7 +664,6 @@ export default function AdminOrders() {
               <th>Ödeme Tipi</th>
               <th>Platform</th>
               <th>Kargo</th>
-              <th>Fatura</th>
               <th>Durum</th>
               <th>Tarih</th>
               <th>İşlemler</th>
@@ -673,11 +672,11 @@ export default function AdminOrders() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="text-center py-8">Yükleniyor...</td>
+                <td colSpan={10} className="text-center py-8">Yükleniyor...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={11} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
+                <td colSpan={10} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
               </tr>
             ) : (
               orders.map((order) => {
@@ -851,34 +850,6 @@ export default function AdminOrders() {
                             Manuel
                           </button>
                         </div>
-                      )}
-                    </td>
-                    <td>
-                      {order.platform === 'trendyol' && order.invoice_link ? (
-                        <div className="text-xs">
-                          <a 
-                            href={order.invoice_link} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-blue-600 hover:underline"
-                            title="Trendyol Faturası"
-                          >
-                            <FileText size={14} />
-                            Fatura Gör
-                          </a>
-                        </div>
-                      ) : order.invoice?.invoice_number ? (
-                        <div className="text-xs">
-                          <p className="text-green-600">{order.invoice.invoice_number}</p>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => handleGenerateInvoice(order.id)}
-                          className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                        >
-                          <FileText size={14} />
-                          Fatura Kes
-                        </button>
                       )}
                     </td>
                     <td>

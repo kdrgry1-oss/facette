@@ -8,6 +8,14 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 import logging
+from pathlib import Path
+
+# Load .env early so env-based integrations (EMERGENT_LLM_KEY etc.) are available
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except Exception:
+    pass
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +42,7 @@ from routes.vendors import router as vendors_router
 from routes.admin_rbac import router as admin_rbac_router
 from routes.size_tables import router as size_tables_router, public_router as size_tables_public_router
 from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
+from routes.ai_chatbot import router as ai_chatbot_router
 
 # Database
 from routes.deps import client, db
@@ -133,6 +142,7 @@ api_router.include_router(size_tables_router)
 api_router.include_router(size_tables_public_router)
 api_router.include_router(manufacturing_router)
 api_router.include_router(manufacturing_suppliers_router)
+api_router.include_router(ai_chatbot_router)
 
 # Root endpoint
 @api_router.get("/")
