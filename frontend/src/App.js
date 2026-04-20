@@ -43,6 +43,11 @@ import Attribution from "./pages/admin/Attribution";
 import HepsiburadaEslestir from "./pages/admin/HepsiburadaEslestir";
 import TemuEslestir from "./pages/admin/TemuEslestir";
 import SizeTablesList from "./pages/admin/SizeTablesList";
+import Coupons from "./pages/admin/Coupons";
+import ProductReviews from "./pages/admin/ProductReviews";
+import AbandonedCarts from "./pages/admin/AbandonedCarts";
+import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
+import { SeoRedirects, SeoMeta } from "./pages/admin/SeoAdmin";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -100,6 +105,15 @@ function App() {
               <Route path="hepsiburada-eslestir" element={<HepsiburadaEslestir />} />
               <Route path="temu-eslestir" element={<TemuEslestir />} />
               <Route path="olcu-tablolari" element={<SizeTablesList />} />
+              <Route path="kuponlar" element={<Coupons />} />
+              <Route path="yorumlar" element={<ProductReviews />} />
+              <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
+              <Route path="raporlar/satis" element={<SalesReport />} />
+              <Route path="raporlar/urun" element={<ProductsReport />} />
+              <Route path="raporlar/stok" element={<StockReport />} />
+              <Route path="raporlar/uye" element={<MembersReport />} />
+              <Route path="seo/meta" element={<SeoMeta />} />
+              <Route path="seo/yonlendirmeler" element={<SeoRedirects />} />
             </Route>
           </Routes>
         </BrowserRouter>
