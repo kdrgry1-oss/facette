@@ -622,16 +622,17 @@ export function ExtraReports() {
   const [moves, setMoves] = useState([]);
   useEffect(() => {
     (async () => {
-      const [h_, c_, p_, m_] = await Promise.all([
+      const results = await Promise.allSettled([
         axios.get(`${API}/admin/reports-extra/hourly`, { headers: h() }),
         axios.get(`${API}/admin/reports-extra/by-city`, { headers: h() }),
         axios.get(`${API}/admin/reports-extra/profit`, { headers: h() }),
         axios.get(`${API}/admin/reports-extra/stock-movements`, { headers: h() }),
       ]);
-      setHourly(h_.data.rows || []);
-      setCities(c_.data.rows || []);
-      setProfit(p_.data.rows || []);
-      setMoves(m_.data.rows || []);
+      const pick = (r) => (r.status === "fulfilled" ? r.value.data : null);
+      setHourly(pick(results[0])?.rows || []);
+      setCities(pick(results[1])?.rows || []);
+      setProfit(pick(results[2])?.rows || []);
+      setMoves(pick(results[3])?.rows || []);
     })();
   }, []);
   return (

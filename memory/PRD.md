@@ -20,6 +20,20 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 ## Completed Features
+- [2026-04-20] **Ticimax P1 — 20 yeni modül (Iteration 11)**:
+  - **Katalog**: Marka Yönetimi (brands), Etiket Yönetimi (product_tags, bg_color+text_color), Stok & Fiyat Alarm Hatırlatma (public /alerts POST, admin liste/delete)
+  - **Siparişler**: Admin Manuel Sipariş Oluştur (MNL-YYMMDD-XXXXXX, stok düşer), Silinmiş Siparişler arşivi + restore, Havale/EFT Bildirimleri (müşteri /payments/havale-notify; admin onay → siparişe payment_status=paid işler)
+  - **Üyeler**: Üye Grupları (B2B/VIP), Destek Talepleri (Tickets — ticket_number, reply thread)
+  - **İçerik**: Duyuru Yönetimi, Süreli Popup Yönetimi (delay_seconds, trigger)
+  - **Pazarlama**: Kargo Kuralları (min_cart, free_shipping), Ödeme Tipi İndirimleri, Toplu Mail Gönderme (Resend API — segment=all/newsletter/abandoned, batch 100, email_campaigns log)
+  - **Raporlar Gelişmiş**: Saatlik Satış (BarChart), İl Bazında Satış, Ürün Karlılık (margin), Stok Hareket
+  - **Ayarlar**: Döviz Kurları (exchangerate.host)
+  - **Resend entegrasyonu**: RESEND_API_KEY env'de boş (kullanıcı verince aktif)
+  - Backend 16 yeni router (catalog_extras.py tek dosya), Frontend 12 yeni admin sayfası
+  - Test 23/23 backend + 12/12 frontend (profit KeyError fix + Promise.allSettled)
+- [2026-04-20] **Iteration 10 Ticimax P0** (6 modül): Kuponlar, Ürün Yorumları, Terkedilmiş Sepet, 4 Rapor (satış/ürün/stok/üye), SEO Meta + 301 Yönlendirmeler
+- [2026-04-20] **Iteration 9 Büyük restructure**: Menü 9 gruba bölündü, Üyeler modülü, Attribution/Funnel takibi, HB/Temu Eşleştir sayfaları, HB Basic Auth düzeltildi
+
 - [2026-04-20] **Büyük admin restructure (Iteration 9)**:
   - **Menü 9 ana gruba bölündü**: Dashboard | Katalog | Siparişler | Üretim | Üyeler | İçerik | Pazarlama | Entegrasyonlar | Ayarlar (İmalat Üretim altına, Banner/Sayfalar İçerik altına taşındı)
   - **Üyeler modülü (YENİ)**: `/api/admin/members` CRUD + stats (VIP/Sadık/Yeni/Aday segmentleri, edinim kanalları), `/admin/uyeler` sayfası (drawer detay, segment filtresi, UTM kaynakları görünümü)
