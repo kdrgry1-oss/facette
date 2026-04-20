@@ -53,6 +53,7 @@ import {
   StockAlerts, HavaleNotifications, Tickets, ShippingPaymentRules,
   CurrencyRates, BulkMail, ExtraReports,
 } from "./pages/admin/CatalogExtras";
+import AdminTasks from "./pages/admin/AdminTasks";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -131,6 +132,7 @@ function App() {
               <Route path="doviz" element={<CurrencyRates />} />
               <Route path="toplu-mail" element={<BulkMail />} />
               <Route path="raporlar/gelismis" element={<ExtraReports />} />
+              <Route path="gorevler" element={<AdminTasks />} />
             </Route>
           </Routes>
         </BrowserRouter>

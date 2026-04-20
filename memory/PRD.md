@@ -20,6 +20,15 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 ## Completed Features
+- [2026-04-20] **Görevler & Haftalık Checklist Modülü (Iteration 12)**:
+  - `/api/admin/tasks` CRUD + `/complete` (tekrar kur) + `/snooze` + `/seed-defaults` (16 hazır görev) + `/summary` + `/history`
+  - Tekrar tipleri: once, daily, weekly, biweekly, monthly, quarterly, yearly, custom
+  - Tamamlandığında `last_completed_at` + `completion_count++` + `due_at = next_period`; log `admin_task_logs` koleksiyonuna yazılır
+  - 16 varsayılan görev (kullanıcının liste verdiği): müşteri sorularını kontrol, havale onayla, yorum moderasyonu, terkedilmiş sepet mail at, haftalık bülten, kampanya kurgula, satış raporu, stok ikmali, banner güncelle vb.
+  - `/admin/gorevler` sayfası: 4 özet kartı (bugün/gecikmiş/bu hafta/son 30 gün), kategori rozetleri (müşteri/sipariş/stok/pazarlama/rapor/içerik/SEO/ayar/entegrasyon), öncelik noktaları (acil/yüksek/normal/düşük), "Git" (ilgili admin sayfasına) + "Tamamla" + "+1g ertele" butonları, tamamlanma ısı haritası (son 30 gün)
+  - **Dashboard widget**: "Bugün Yapılacaklar" paneli (6 görev + tek tıkla tamamla + gecikmiş/bekleyen/bu hafta özeti) Sipariş Durumu Dağılımı yanında
+  - Menüde "Görevler" ana link Dashboard'dan sonra
+
 - [2026-04-20] **Ticimax P1 — 20 yeni modül (Iteration 11)**:
   - **Katalog**: Marka Yönetimi (brands), Etiket Yönetimi (product_tags, bg_color+text_color), Stok & Fiyat Alarm Hatırlatma (public /alerts POST, admin liste/delete)
   - **Siparişler**: Admin Manuel Sipariş Oluştur (MNL-YYMMDD-XXXXXX, stok düşer), Silinmiş Siparişler arşivi + restore, Havale/EFT Bildirimleri (müşteri /payments/havale-notify; admin onay → siparişe payment_status=paid işler)

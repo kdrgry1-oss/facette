@@ -5,7 +5,7 @@ import {
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
   Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory,
   Users, Ruler, MessageSquare, PenTool, Truck, CreditCard, TrendingUp, Link2,
-  BellRing,
+  BellRing, CheckSquare,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -16,6 +16,11 @@ const navigation = [
     path: "/admin",
     icon: LayoutDashboard,
     exact: true,
+  },
+  {
+    label: "Görevler",
+    path: "/admin/gorevler",
+    icon: CheckSquare,
   },
   {
     label: "Katalog",

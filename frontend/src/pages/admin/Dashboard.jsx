@@ -1,12 +1,65 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { 
   TrendingUp, Package, ShoppingCart, Users, DollarSign, 
-  BarChart3, Calendar, ArrowUp, ArrowDown, RefreshCw 
+  BarChart3, Calendar, ArrowUp, ArrowDown, RefreshCw,
+  CheckSquare, AlertCircle, ChevronRight
 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const authH = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+
+function TasksWidget() {
+  const [data, setData] = useState({ due_now: [], totals: {} });
+  const [summary, setSummary] = useState({ due_now: 0, overdue: 0, completed_this_week: 0 });
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, s] = await Promise.all([
+          axios.get(`${API}/admin/tasks`, { headers: authH(), params: { include_future: false } }),
+          axios.get(`${API}/admin/tasks/summary`, { headers: authH() }),
+        ]);
+        setData(a.data); setSummary(s.data);
+      } catch (_) {}
+    })();
+  }, []);
+  const complete = async (id) => {
+    try {
+      await axios.post(`${API}/admin/tasks/${id}/complete`, {}, { headers: authH() });
+      toast.success("Tamamlandı");
+      setData((d) => ({ ...d, due_now: d.due_now.filter((t) => t.id !== id) }));
+    } catch (_) {}
+  };
+  return (
+    <div className="bg-white rounded-xl border p-5" data-testid="dashboard-tasks-widget">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold flex items-center gap-2"><CheckSquare size={16} className="text-emerald-600" /> Bugün Yapılacaklar</h3>
+        <Link to="/admin/gorevler" className="text-xs text-blue-600 hover:underline inline-flex items-center">Tümü <ChevronRight size={12} /></Link>
+      </div>
+      <div className="flex gap-3 text-xs mb-3">
+        <span className="flex items-center gap-1 text-red-600"><AlertCircle size={12} /> {summary.overdue} gecikmiş</span>
+        <span className="text-gray-600">· {summary.due_now} bekliyor</span>
+        <span className="text-emerald-700">· ✓ {summary.completed_this_week} bu hafta</span>
+      </div>
+      <div className="space-y-1.5 max-h-64 overflow-y-auto">
+        {(data.due_now || []).length === 0 ? (
+          <div className="text-center text-gray-400 py-4 text-sm">🎉 Tüm görevler tamam!</div>
+        ) : data.due_now.slice(0, 6).map((t) => (
+          <div key={t.id} className="flex items-center justify-between gap-2 p-2 bg-gray-50 rounded text-sm">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium truncate">{t.title}</div>
+              <div className="text-[10px] text-gray-500">{t.frequency === "daily" ? "Günlük" : t.frequency === "weekly" ? "Haftalık" : t.frequency}</div>
+            </div>
+            {t.action_path && <Link to={t.action_path} className="text-xs text-blue-600 hover:underline">Git</Link>}
+            <button onClick={() => complete(t.id)} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700">✓</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
@@ -208,9 +261,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Order Status Breakdown */}
-        <div className="bg-white rounded-xl border p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <TasksWidget />
+        <div className="lg:col-span-2 bg-white rounded-xl border p-6">
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <BarChart3 size={18} />
             Sipariş Durumu Dağılımı
