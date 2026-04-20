@@ -191,6 +191,10 @@ export default function AdminProducts() {
     trendyol_attributes: {},
     trendyol_category_id: "",
     trendyol_multiplier: 0,
+    hepsiburada_category_id: "",
+    hepsiburada_category_name: "",
+    temu_category_id: "",
+    temu_category_name: "",
     use_default_markup: true,
     markup_rate: 0,
     hepsiburada_attributes: {},
@@ -1902,6 +1906,53 @@ export default function AdminProducts() {
                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                           ))}
                         </select>
+                      </div>
+
+                      {/* Hepsiburada Category Mapping */}
+                      <div className="space-y-2">
+                        <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">
+                          <span className="inline-block w-2 h-2 bg-[#FF6000] rounded-full mr-1.5"></span>
+                          Hepsiburada Kategorisi
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.hepsiburada_category_id || ""}
+                          onChange={(e) => setFormData({ ...formData, hepsiburada_category_id: e.target.value })}
+                          data-testid="hb-category-id"
+                          placeholder="Hepsiburada Category ID (örn: 18021982)"
+                          className="w-full border-gray-200 border-2 px-4 py-3 rounded-xl focus:border-red-500 outline-none transition-all font-bold text-gray-700 bg-gray-50 focus:bg-white"
+                        />
+                        <input
+                          type="text"
+                          value={formData.hepsiburada_category_name || ""}
+                          onChange={(e) => setFormData({ ...formData, hepsiburada_category_name: e.target.value })}
+                          placeholder="HB Kategori Adı (örn: Giyim > Kadın > Kazak)"
+                          className="w-full border-gray-200 border px-4 py-2 rounded-xl focus:border-red-500 outline-none text-xs text-gray-600 bg-gray-50 focus:bg-white"
+                        />
+                        <p className="text-[10px] text-gray-400">HB Merchant panelinden kategori ID'sini alıp yapıştırın.</p>
+                      </div>
+
+                      {/* Temu Category Mapping */}
+                      <div className="space-y-2">
+                        <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">
+                          <span className="inline-block w-2 h-2 bg-black rounded-full mr-1.5"></span>
+                          Temu Kategorisi
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.temu_category_id || ""}
+                          onChange={(e) => setFormData({ ...formData, temu_category_id: e.target.value })}
+                          data-testid="temu-category-id"
+                          placeholder="Temu Category ID"
+                          className="w-full border-gray-200 border-2 px-4 py-3 rounded-xl focus:border-gray-900 outline-none transition-all font-bold text-gray-700 bg-gray-50 focus:bg-white"
+                        />
+                        <input
+                          type="text"
+                          value={formData.temu_category_name || ""}
+                          onChange={(e) => setFormData({ ...formData, temu_category_name: e.target.value })}
+                          placeholder="Temu Kategori Adı"
+                          className="w-full border-gray-200 border px-4 py-2 rounded-xl focus:border-gray-900 outline-none text-xs text-gray-600 bg-gray-50 focus:bg-white"
+                        />
                       </div>
 
                       <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 space-y-4">

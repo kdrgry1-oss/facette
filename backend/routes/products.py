@@ -230,6 +230,10 @@ async def create_product(
         "trendyol_attributes": product_data.get("trendyol_attributes", {}),
         "hepsiburada_attributes": product_data.get("hepsiburada_attributes", {}),
         "temu_attributes": product_data.get("temu_attributes", {}),
+        "hepsiburada_category_id": product_data.get("hepsiburada_category_id", ""),
+        "hepsiburada_category_name": product_data.get("hepsiburada_category_name", ""),
+        "temu_category_id": product_data.get("temu_category_id", ""),
+        "temu_category_name": product_data.get("temu_category_name", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }

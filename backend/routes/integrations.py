@@ -3332,7 +3332,12 @@ async def check_dogan_user(payload: dict, current_user: dict = Depends(require_a
 # Generic marketplace settings + questions endpoints.
 # Real API calls can be filled in later; UI scaffolding is ready.
 
-ALLOWED_MARKETPLACES = {"hepsiburada", "temu", "whatsapp", "instagram", "messenger", "site"}
+ALLOWED_MARKETPLACES = {
+    # customer message channels
+    "hepsiburada", "temu", "whatsapp", "instagram", "messenger", "site",
+    # cargo providers
+    "mng", "aras", "yurtici", "ptt", "hepsijet", "trendyol_express", "surat", "ups", "dhl",
+}
 
 @router.get("/{marketplace}/settings")
 async def get_marketplace_settings(marketplace: str, current_user: dict = Depends(require_admin)):
