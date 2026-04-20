@@ -38,10 +38,21 @@ import ProductAttributes from "./pages/admin/ProductAttributes";
 import Vendors from "./pages/admin/Vendors";
 import AdminUsersRoles from "./pages/admin/UsersRoles";
 import Manufacturing from "./pages/admin/Manufacturing";
+import Members from "./pages/admin/Members";
+import Attribution from "./pages/admin/Attribution";
+import HepsiburadaEslestir from "./pages/admin/HepsiburadaEslestir";
+import TemuEslestir from "./pages/admin/TemuEslestir";
+import SizeTablesList from "./pages/admin/SizeTablesList";
+import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
 
 function App() {
+  // Fire-and-forget: capture utm/referrer on first paint.
+  if (typeof window !== "undefined" && !window.__FACETTE_TRACKED__) {
+    window.__FACETTE_TRACKED__ = true;
+    trackVisit();
+  }
   return (
     <AuthProvider>
       <CartProvider>
@@ -60,7 +71,7 @@ function App() {
             <Route path="/giris" element={<Login />} />
             <Route path="/siparis-takip" element={<TrackOrder />} />
             <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
-            
+
             {/* Admin */}
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>
@@ -84,6 +95,11 @@ function App() {
               <Route path="cariler" element={<Vendors />} />
               <Route path="kullanicilar" element={<AdminUsersRoles />} />
               <Route path="imalat" element={<Manufacturing />} />
+              <Route path="uyeler" element={<Members />} />
+              <Route path="kaynak" element={<Attribution />} />
+              <Route path="hepsiburada-eslestir" element={<HepsiburadaEslestir />} />
+              <Route path="temu-eslestir" element={<TemuEslestir />} />
+              <Route path="olcu-tablolari" element={<SizeTablesList />} />
             </Route>
           </Routes>
         </BrowserRouter>

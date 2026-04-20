@@ -947,39 +947,39 @@ export default function Integrations() {
             <DialogTitle>Hepsiburada API Ayarları</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('hepsiburada', hbSettings, setHbModalOpen); }} className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-xs text-blue-800">
+              Hepsiburada <strong>Basic Auth</strong> kullanır: Merchant ID + Kullanıcı Adı + Şifre. API Key/Secret yoktur.
+              Bilgileri HB Merchant Panel → <em>API Bilgileri</em> ekranından alırsınız.
+            </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Merchant ID</label>
+              <label className="block text-sm font-medium mb-1">Merchant ID *</label>
               <input data-testid="hb-merchant-id" type="text" required value={hbSettings.merchant_id}
                 onChange={(e) => setHbSettings({ ...hbSettings, merchant_id: e.target.value })}
+                placeholder="örn: 54321abc"
                 className="w-full border px-3 py-2 rounded text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Kullanıcı Adı</label>
-              <input data-testid="hb-username" type="text" value={hbSettings.username || ''}
+              <label className="block text-sm font-medium mb-1">API Kullanıcı Adı *</label>
+              <input data-testid="hb-username" type="text" required value={hbSettings.username || ''}
                 onChange={(e) => setHbSettings({ ...hbSettings, username: e.target.value })}
+                placeholder="hbseller_api_user"
                 className="w-full border px-3 py-2 rounded text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Key</label>
-              <input data-testid="hb-api-key" type="text" required value={hbSettings.api_key}
-                onChange={(e) => setHbSettings({ ...hbSettings, api_key: e.target.value })}
+              <label className="block text-sm font-medium mb-1">API Şifre *</label>
+              <input data-testid="hb-password" type="password" value={hbSettings.password || ''}
+                onChange={(e) => setHbSettings({ ...hbSettings, password: e.target.value })}
+                placeholder={hbSettings.password === "********" ? "********" : "API şifresi"}
                 className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Mevcut şifre güvenlik için maskelenir. Değiştirmek için yeni girin.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Secret</label>
-              <input data-testid="hb-api-secret" type="password" value={hbSettings.api_secret || ''}
-                onChange={(e) => setHbSettings({ ...hbSettings, api_secret: e.target.value })}
-                placeholder={hbSettings.api_secret === "********" ? "********" : "Yeni API Secret"}
-                className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Sadece güncellemek istediğinizde doldurun</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Mod</label>
+              <label className="block text-sm font-medium mb-1">Ortam</label>
               <select value={hbSettings.mode || "sandbox"}
                 onChange={e => setHbSettings({ ...hbSettings, mode: e.target.value })}
                 className="w-full border px-3 py-2 rounded text-sm bg-white">
-                <option value="sandbox">Test Modu</option>
-                <option value="live">Canlı Mod</option>
+                <option value="sandbox">Sandbox (SIT Test)</option>
+                <option value="production">Production (Canlı)</option>
               </select>
             </div>
             <div>
@@ -1010,33 +1010,38 @@ export default function Integrations() {
             <DialogTitle>Temu API Ayarları</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('temu', temuSettings, setTemuModalOpen); }} className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-900">
+              Temu Seller Central → Developer → App menüsünden <strong>Shop ID, App Key, App Secret</strong> bilgilerinizi alın.
+            </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Merchant ID</label>
+              <label className="block text-sm font-medium mb-1">Shop ID *</label>
               <input data-testid="temu-merchant-id" type="text" required value={temuSettings.merchant_id}
                 onChange={(e) => setTemuSettings({ ...temuSettings, merchant_id: e.target.value })}
+                placeholder="110000123456"
                 className="w-full border px-3 py-2 rounded text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Key</label>
+              <label className="block text-sm font-medium mb-1">App Key *</label>
               <input data-testid="temu-api-key" type="text" required value={temuSettings.api_key}
                 onChange={(e) => setTemuSettings({ ...temuSettings, api_key: e.target.value })}
+                placeholder="temu_app_xxxxx"
                 className="w-full border px-3 py-2 rounded text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Secret</label>
+              <label className="block text-sm font-medium mb-1">App Secret *</label>
               <input data-testid="temu-api-secret" type="password" value={temuSettings.api_secret || ''}
                 onChange={(e) => setTemuSettings({ ...temuSettings, api_secret: e.target.value })}
-                placeholder={temuSettings.api_secret === "********" ? "********" : "Yeni API Secret"}
+                placeholder={temuSettings.api_secret === "********" ? "********" : "App Secret"}
                 className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Sadece güncellemek istediğinizde doldurun</p>
+              <p className="text-xs text-gray-500 mt-1">Güncellemek için yenisini girin.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Mod</label>
+              <label className="block text-sm font-medium mb-1">Ortam</label>
               <select value={temuSettings.mode || "sandbox"}
                 onChange={e => setTemuSettings({ ...temuSettings, mode: e.target.value })}
                 className="w-full border px-3 py-2 rounded text-sm bg-white">
-                <option value="sandbox">Test Modu</option>
-                <option value="live">Canlı Mod</option>
+                <option value="sandbox">Sandbox</option>
+                <option value="production">Production</option>
               </select>
             </div>
             <div>

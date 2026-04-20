@@ -44,6 +44,8 @@ from routes.size_tables import router as size_tables_router, public_router as si
 from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
 from routes.ai_chatbot import router as ai_chatbot_router
 from routes.locations import router as locations_router
+from routes.attribution import router as attribution_router
+from routes.members import router as members_router
 
 # Database
 from routes.deps import client, db
@@ -145,6 +147,8 @@ api_router.include_router(manufacturing_router)
 api_router.include_router(manufacturing_suppliers_router)
 api_router.include_router(ai_chatbot_router)
 api_router.include_router(locations_router)
+api_router.include_router(attribution_router)
+api_router.include_router(members_router)
 
 # Root endpoint
 @api_router.get("/")

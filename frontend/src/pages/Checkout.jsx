@@ -119,6 +119,8 @@ export default function Checkout() {
         discount: discount,
         total: grandTotal + (paymentMethod === "cash_on_delivery" ? 10 : 0),
         payment_method: paymentMethod,
+        attribution_session_id:
+          (typeof window !== "undefined" && (window.__FACETTE_SID__ || localStorage.getItem("facette_sid"))) || null,
       };
 
       const orderRes = await axios.post(`${API}/orders`, orderData);
