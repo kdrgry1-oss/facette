@@ -67,6 +67,7 @@ from routes.catalog_extras import (
     email_admin_router,
     currency_router,
 )
+from routes.admin_tasks import router as admin_tasks_router
 
 # Database
 from routes.deps import client, db
@@ -192,6 +193,7 @@ for _r in (
     currency_router,
 ):
     api_router.include_router(_r)
+api_router.include_router(admin_tasks_router)
 
 # Root endpoint
 @api_router.get("/")
