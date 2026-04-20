@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 9 backend+frontend testing. Attribution module (track-visit channel detection for instagram_ads/google_ads/instagram_organic/direct + /stats admin + admin guard), Orders persist attribution snapshot on create, Members CRUD + /stats (segments vip/returning/new/prospect, acquisition_by_channel), Hepsiburada settings save + masked password + test-connection Turkish error on missing creds, Temu/MNG test-connection Turkish errors, Categories HB/Temu ID+name persistence. 19/19 pytest cases PASSED. Frontend: login OK, new 9-group menu (Dashboard|Katalog|Siparisler|Uretim|Uyeler|Icerik|Pazarlama|Entegrasyonlar|Ayarlar) renders, /admin/uyeler shows 6 stat cards (TOPLAM UYE/SON 30 GUN/VIP/SADIK/YENI/ADAY) + member list + Yeni Uye button, /admin/kaynak renders 4 totals + Kanal Bazinda Gelir/Ziyaret charts + Kampanyalar table + UTM how-to help block, /admin/hepsiburada-eslestir shows Basic Auth form (Merchant ID + API Kullanici Adi + API Sifre) + Kaydet + Baglantiyi Test Et + Kategori Eslestirme table, /admin/temu-eslestir loads with Shop/App/Secret fields.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard", "issues": ["Stat card label still says 'Toplam Musteri' (customer) but user explicitly requested 'uye' (member) terminology. All other pages correctly use Uye. Consider renaming Dashboard card to 'Toplam Uye' for consistency."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9_attribution_members.py",
+    "/app/test_reports/pytest/iteration9_results.xml"
+  ],
+  "action_items": [
+    "Minor: Rename Dashboard 'Toplam Musteri' card -> 'Toplam Uye' for terminology consistency (user wanted 'uye' everywhere)."
+  ],
+  "critical_code_review_comments": [
+    "members.py /stats performs per-user aggregation loop over orders collection (N+1 pattern). For large member base this will be slow; consider single $facet/group pipeline joining orders->user_id.",
+    "attribution.detect_channel maps utm_medium='social' (without 'paid_') to *_organic which is counter-intuitive for 'utm_medium=social' usually meaning paid social; document or align with GA4 semantics.",
+    "orders.create returns {order_id, order_number, message} but attribution-only flows like POST /api/orders are exposed without auth (user_id falls back to None); consider rate-limiting or CAPTCHA on the public endpoint to prevent order spam.",
+    "integrations.py still ~3500 lines (iteration 8 comment still valid) - should be split by provider.",
+    "attribution.stats 'by_channel' uses {$ifNull: ['$total', 0]} but does not filter out cancelled/refunded orders, inflating revenue figures."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration9_attribution_members.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19)",
+    "frontend": "100% (all 5 new pages + menu + login verified via Playwright)"
+  },
+  "test_credentials": {"admin": "admin@facette.com / admin123"},
+  "seed_data_creation": "Ephemeral test data cleaned up in-test: 1 attribution order (deleted), 2 members test_mem_*/test_dup_* (deleted). HB settings reset to empty strings after mask test. Attribution sessions remain in DB (track-visit is public - by design).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iteration9 regression file: /app/backend/tests/test_iteration9_attribution_members.py. BASE read from REACT_APP_BACKEND_URL or /app/frontend/.env. Login via query params. POST /api/orders is PUBLIC (no auth required) - stores attribution from session_id. Channel detection: utm_source=instagram+utm_medium=paid_social -> instagram_ads; utm_source=google+utm_medium=cpc -> google_ads; referrer=instagram.com -> instagram_organic; nothing -> direct. HB settings endpoint returns password='********' when set, '' when empty. Members endpoint lowercases emails on create. Pages verified: /admin/uyeler, /admin/kaynak, /admin/hepsiburada-eslestir, /admin/temu-eslestir.",
+  "rca_of_the_issue": "None - all requested endpoints and pages working correctly. One minor UX inconsistency (Dashboard still uses 'Toplam Musteri' while project-wide terminology should be 'Uye')."
+}

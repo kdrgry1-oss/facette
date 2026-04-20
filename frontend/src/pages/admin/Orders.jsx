@@ -1143,6 +1143,46 @@ export default function AdminOrders() {
                 </div>
               </div>
 
+              {/* Attribution / Order Source */}
+              {selectedOrder.attribution && (
+                <div className="p-4 border rounded bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
+                  <h3 className="font-medium mb-2 flex items-center gap-1 text-indigo-900">
+                    📡 Sipariş Kaynağı
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase">Kanal</div>
+                      <div className="font-semibold text-indigo-900">{selectedOrder.attribution.channel || "direct"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase">Kaynak (utm_source)</div>
+                      <div className="font-medium">{selectedOrder.attribution.source || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase">Medium</div>
+                      <div className="font-medium">{selectedOrder.attribution.medium || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 uppercase">Kampanya</div>
+                      <div className="font-medium">{selectedOrder.attribution.campaign || "—"}</div>
+                    </div>
+                    {selectedOrder.attribution.referrer && (
+                      <div className="col-span-2 md:col-span-4 text-xs text-gray-500 break-all">
+                        Referrer: <span className="text-gray-700">{selectedOrder.attribution.referrer}</span>
+                      </div>
+                    )}
+                    {selectedOrder.attribution.landing_page && (
+                      <div className="col-span-2 md:col-span-4 text-xs text-gray-500 break-all">
+                        İniş Sayfası: <span className="text-gray-700">{selectedOrder.attribution.landing_page}</span>
+                      </div>
+                    )}
+                    {selectedOrder.attribution.device && (
+                      <div className="text-xs text-gray-500">Cihaz: <span className="text-gray-700 font-medium">{selectedOrder.attribution.device}</span></div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Items */}
               <div className="border rounded">
                 <h3 className="font-medium p-4 border-b">Sipariş Kalemleri</h3>

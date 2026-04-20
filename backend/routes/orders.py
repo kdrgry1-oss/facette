@@ -8,6 +8,7 @@ import time
 import uuid
 
 from .deps import db, logger, get_current_user, require_admin, generate_id
+from .attribution import resolve_attribution_for_order
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -118,7 +119,16 @@ async def create_order(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
+    # Attribution snapshot (source of the sale)
+    try:
+        sid = order_data.get("attribution_session_id") or order_data.get("session_id")
+        inline = order_data.get("attribution") if isinstance(order_data.get("attribution"), dict) else None
+        order["attribution"] = await resolve_attribution_for_order(sid, inline)
+    except Exception as att_err:
+        logger.warning(f"Attribution resolve failed: {att_err}")
+        order["attribution"] = {"channel": "direct", "source": "", "medium": "", "campaign": "", "session_id": ""}
+
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 
