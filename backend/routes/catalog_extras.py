@@ -373,7 +373,8 @@ async def profit(current_user: dict = Depends(require_admin)):
         {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
         {
             "$group": {
-                "_id": {"pid": "$items.product_id", "name": "$items.name"},
+                "_id": "$items.product_id",
+                "name": {"$first": {"$ifNull": ["$items.name", "$p.name"]}},
                 "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
                 "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
                 "cost": {"$sum": {"$multiply": [{"$ifNull": ["$p.cost_price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
@@ -385,7 +386,7 @@ async def profit(current_user: dict = Depends(require_admin)):
     ]
     rows = []
     async for r in db.orders.aggregate(pipeline):
-        rows.append({"product_id": r["_id"]["pid"], "name": r["_id"]["name"], "qty": r["qty"], "revenue": round(r["revenue"], 2), "cost": round(r["cost"], 2), "profit": round(r["profit"], 2), "margin_pct": round(r["margin_pct"], 1)})
+        rows.append({"product_id": r.get("_id"), "name": r.get("name") or "—", "qty": r["qty"], "revenue": round(r["revenue"], 2), "cost": round(r["cost"], 2), "profit": round(r["profit"], 2), "margin_pct": round(r["margin_pct"], 1)})
     return {"rows": rows}
 
 
