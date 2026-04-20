@@ -1564,7 +1564,7 @@ export default function AdminProducts() {
                           </div>
                         )}
 
-                        {otherEmpty.length > 0 && (isSearching || showAllAttributes) && (
+                        {otherEmpty.length > 0 && (isSearching || showAllAttributes || marketplace !== 'trendyol') && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
                               <div className="w-3 h-3 bg-gray-300 rounded-full"></div>

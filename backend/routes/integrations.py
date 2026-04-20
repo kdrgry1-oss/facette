@@ -3332,7 +3332,7 @@ async def check_dogan_user(payload: dict, current_user: dict = Depends(require_a
 # Generic marketplace settings + questions endpoints.
 # Real API calls can be filled in later; UI scaffolding is ready.
 
-ALLOWED_MARKETPLACES = {"hepsiburada", "temu"}
+ALLOWED_MARKETPLACES = {"hepsiburada", "temu", "whatsapp", "instagram", "messenger", "site"}
 
 @router.get("/{marketplace}/settings")
 async def get_marketplace_settings(marketplace: str, current_user: dict = Depends(require_admin)):
@@ -3417,7 +3417,23 @@ QUESTIONS_COLLECTIONS = {
     "trendyol": "trendyol_questions",
     "hepsiburada": "hepsiburada_questions",
     "temu": "temu_questions",
+    "whatsapp": "whatsapp_messages",
+    "instagram": "instagram_messages",
+    "messenger": "messenger_messages",
+    "site": "site_messages",
 }
+
+
+@router.delete("/{marketplace}/questions/{question_id}")
+async def delete_marketplace_question(marketplace: str, question_id: str, current_user: dict = Depends(require_admin)):
+    """Delete a question/message (e.g., expired unanswered)."""
+    if marketplace not in QUESTIONS_COLLECTIONS:
+        raise HTTPException(status_code=404, detail="Bilinmeyen kanal")
+    coll = db[QUESTIONS_COLLECTIONS[marketplace]]
+    res = await coll.delete_one({"question_id": question_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Mesaj bulunamadı")
+    return {"success": True}
 
 
 @router.get("/marketplace/questions")
