@@ -64,7 +64,28 @@ const navigation = [
     icon: Megaphone,
     children: [
       { label: "Kampanyalar", path: "/admin/kampanyalar", icon: Megaphone },
+      { label: "Kuponlar", path: "/admin/kuponlar", icon: Tags },
+      { label: "Ürün Yorumları", path: "/admin/yorumlar", icon: MessageSquare },
+      { label: "Terkedilmiş Sepetler", path: "/admin/terkedilmis-sepet", icon: ShoppingCart },
       { label: "Kaynak & Funnel", path: "/admin/kaynak", icon: TrendingUp },
+    ],
+  },
+  {
+    label: "Raporlar",
+    icon: LayoutDashboard,
+    children: [
+      { label: "Satış Raporları", path: "/admin/raporlar/satis", icon: TrendingUp },
+      { label: "Ürün Raporları", path: "/admin/raporlar/urun", icon: Package },
+      { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
+      { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
+    ],
+  },
+  {
+    label: "SEO",
+    icon: FileText,
+    children: [
+      { label: "Meta Yönetimi", path: "/admin/seo/meta", icon: FileText },
+      { label: "301 Yönlendirmeler", path: "/admin/seo/yonlendirmeler", icon: Link2 },
     ],
   },
   {
