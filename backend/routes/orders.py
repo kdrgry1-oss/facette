@@ -190,9 +190,14 @@ async def update_order_status(
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
     # Bildirim tetikleme: status → event eşlemesi
-    try:
-        order_doc = await db.orders.find_one({"id": order_id}, {"_id": 0})
-        if order_doc:
+    # NOT: Provider'lara gidiş yavaş olabilir — fire-and-forget task ile UI yanıtını
+    # bloklamadan arka planda tetikliyoruz.
+    import asyncio as _asyncio
+    async def _dispatch_notif():
+        try:
+            order_doc = await db.orders.find_one({"id": order_id}, {"_id": 0})
+            if not order_doc:
+                return
             status_to_event = {
                 "confirmed": "order_confirmed",
                 "processing": "order_packed",
@@ -201,26 +206,29 @@ async def update_order_status(
                 "cancelled": "order_cancelled",
             }
             ev = status_to_event.get(status)
-            if ev:
-                import sys, os
-                sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-                from notification_service import send_notification
-                addr = order_doc.get("shipping_address") or {}
-                variables = {
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": order_doc.get("order_number", ""),
-                    "amount": f"{order_doc.get('total', 0):.2f} TL",
-                    "tracking_number": order_doc.get("cargo_tracking_number", ""),
-                    "status_label": status,
-                }
-                await send_notification(
-                    db, ev,
-                    to_phone=addr.get("phone") or order_doc.get("phone"),
-                    to_email=addr.get("email") or order_doc.get("email"),
-                    variables=variables,
-                )
-    except Exception as _notif_err:
-        logger.warning(f"notification dispatch failed for order {order_id}: {_notif_err}")
+            if not ev:
+                return
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+            addr = order_doc.get("shipping_address") or {}
+            variables = {
+                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                "order_number": order_doc.get("order_number", ""),
+                "amount": f"{order_doc.get('total', 0):.2f} TL",
+                "tracking_number": order_doc.get("cargo_tracking_number", ""),
+                "status_label": status,
+            }
+            await send_notification(
+                db, ev,
+                to_phone=addr.get("phone") or order_doc.get("phone"),
+                to_email=addr.get("email") or order_doc.get("email"),
+                variables=variables,
+            )
+        except Exception as _notif_err:
+            logger.warning(f"notification dispatch failed for order {order_id}: {_notif_err}")
+
+    _asyncio.create_task(_dispatch_notif())
 
     # FAZ 1 - C1: Status değişikliğinde stok düzenlemesi
     try:

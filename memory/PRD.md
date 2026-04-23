@@ -19,6 +19,43 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Routes: /api prefix, Turkish URL slugs (/admin/urunler, /admin/iadeler)
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
+
+## Completed in Iteration 14 (2026-04-23) — FAZ 1 + FAZ 2 + FAZ 3
+
+### FAZ 1 — TR Lokasyon (İl/İlçe)
+- `ProvinceDistrictSelect.jsx` — iki dropdown, `/api/locations/tr/provinces` (81 il) + `/api/locations/tr/districts?province=` (973 ilçe)
+- `Checkout.jsx` ve `Account.jsx` adres formları serbest metin inputlarından dropdown'a geçirildi
+- Modül içi cache ile sayfa geçişlerinde tekrar fetch etmiyor
+
+### FAZ 2 — Bildirim Altyapısı (SMS + WhatsApp + E-posta)
+- **Backend servis**: `/app/backend/notification_service.py`
+  - 8 SMS sağlayıcı slot (Netgsm, İletiMerkezi, Twilio, VatanSMS + 4 mock slot)
+  - WhatsApp Meta Cloud API (text + template mesaj desteği)
+  - Resend e-posta
+  - `{variable}` tabanlı template render + TR telefon normalizasyonu
+  - `notification_logs` koleksiyonu (her gönderim log'lanır)
+- **Admin CRUD**: `/api/notifications/*` endpoint'leri
+  - `GET /providers/catalog` — sağlayıcı listesi + event listesi
+  - `GET/POST /providers` — credential yönetimi (**secret maskeleme** + UI'den maskeli değer dönünce eski değer korunur)
+  - `GET/POST /templates` + `POST /templates/seed` (default 30 şablon)
+  - `POST /test` — canlı test gönderimi
+  - `GET /logs` — son gönderim geçmişi
+- **Admin UI**:
+  - `/admin/ayarlar/bildirim` → sağlayıcı seçimi + credential + test paneli
+  - `/admin/ayarlar/bildirim/sablonlar` → 10 event × 3 kanal şablon editörü
+- **Order hook**: `PUT /api/orders/{id}/status` durum değişikliğinde `asyncio.create_task` ile fire-and-forget bildirim tetikler (UI bloklamıyor)
+
+### FAZ 3 (kısmi) — SMS OTP Şifre Sıfırlama
+- `POST /api/auth/forgot-password/request-otp` — 6 haneli OTP, SHA256 hash, 5 dk ömür, **60 sn rate limit** (aynı telefon), eski kodlar yeni OTP üretilince iptal
+- `POST /api/auth/forgot-password/verify-otp` — 5 yanlış deneme → 429, başarılı doğrulamada 10 dk ömürlü `reset_token`
+- `POST /api/auth/forgot-password/reset` — reset_token ile şifre değiştirme
+- Enumeration önlemi: bilinmeyen numara için de aynı başarılı cevap
+
+### Testing
+- `/app/backend/tests/test_iteration14_notifications_locations_otp.py` — 18/18 PASS
+- `/app/test_reports/iteration_14.json` — başarı oranı %100 (backend)
+
+
 ## Completed Features
 - [2026-04-20] **Görevler & Haftalık Checklist Modülü (Iteration 12)**:
   - `/api/admin/tasks` CRUD + `/complete` (tekrar kur) + `/snooze` + `/seed-defaults` (16 hazır görev) + `/summary` + `/history`
