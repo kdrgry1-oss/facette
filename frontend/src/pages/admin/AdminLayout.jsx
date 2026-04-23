@@ -61,6 +61,8 @@ const navigation = [
     children: [
       { label: "Üye Listesi", path: "/admin/uyeler", icon: Users },
       { label: "Üye Grupları (B2B)", path: "/admin/uye-gruplari", icon: Users },
+      // RFM bazlı segmentasyon (VIP / Sadık / Risk altında ...)
+      { label: "Müşteri Segmentleri (RFM)", path: "/admin/musteri-segmentleri", icon: Users },
       { label: "Müşteri Soruları", path: "/admin/sorular", icon: MessageSquare },
       { label: "Destek Talepleri", path: "/admin/tickets", icon: MessageSquare },
     ],
@@ -98,6 +100,8 @@ const navigation = [
       { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
       { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
       { label: "Gelişmiş Raporlar", path: "/admin/raporlar/gelismis", icon: TrendingUp },
+      // Pazaryeri bazlı net kâr raporu (komisyon + kargo + iade düşülmüş)
+      { label: "Pazaryeri Karlılık", path: "/admin/pazaryeri-karlilik", icon: TrendingUp },
     ],
   },
   {
@@ -113,20 +117,20 @@ const navigation = [
     icon: Cable,
     children: [
       // Çoklu pazaryeri merkezi — Ticimax Marketplace v2 benzeri tek ekran
+      // (Credential + Transfer Rules + Auto-Sync, her pazaryeri için tek ekran)
       { label: "Pazaryerleri Hub", path: "/admin/pazaryerleri", icon: Store },
+      // Ürün aktarımı, sipariş çekme, attribute eşleştirme için detaylı operasyon
+      // ekranı (eski Trendyol/HB/Temu eşleştirme sayfaları buraya merkezileşti)
+      { label: "Detaylı Aktarım & Eşleştirme", path: "/admin/entegrasyonlar", icon: Cable },
       // Tüm pazaryerlerindeki API aktarım kayıtları (filtre + export)
+      // Eski Trendyol Logları da bu ekrandan filtreli görüntülenir.
       { label: "Entegrasyon Logları", path: "/admin/entegrasyon-loglari", icon: FileText },
       // Aktarılamayan sipariş/ürün kayıtları (failed logs) + tekrar aktar
       { label: "Aktarılamayanlar", path: "/admin/aktarilamayanlar", icon: FileText },
       // Multi-marketplace marka eşleştirme
-      { label: "Marka Eşleştir", path: "/admin/marka-eslestir", icon: Store },
+      { label: "Marka Eşleştirme", path: "/admin/marka-eslestir", icon: Store },
       // Multi-marketplace kategori eşleştirme
-      { label: "Kategori Eşleştir", path: "/admin/kategori-eslestir", icon: Store },
-      { label: "Tüm Entegrasyonlar", path: "/admin/entegrasyonlar", icon: Cable },
-      { label: "Trendyol Eşleştir", path: "/admin/trendyol-eslestir", icon: Store },
-      { label: "Hepsiburada Eşleştir", path: "/admin/hepsiburada-eslestir", icon: Store },
-      { label: "Temu Eşleştir", path: "/admin/temu-eslestir", icon: Store },
-      { label: "Trendyol Logları", path: "/admin/trendyol-loglar", icon: FileText },
+      { label: "Kategori Eşleştirme", path: "/admin/kategori-eslestir", icon: Store },
     ],
   },
   {

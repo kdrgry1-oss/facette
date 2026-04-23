@@ -445,7 +445,9 @@ export default function Integrations() {
         { label: "Markaları İndir", icon: <Download size={16} />, onClick: handleTrendyolBrandsSync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Ürünleri Gönder", icon: <Upload size={16} />, onClick: handleTrendyolSync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Fiyat/Stok Güncelle", icon: <RefreshCw size={16} />, onClick: handleTrendyolInventorySync, loading: syncing, disabled: !statuses.trendyol?.configured },
-        { label: "Siparişleri Al", icon: <Download size={16} />, onClick: handleTrendyolImport, loading: importing, disabled: !statuses.trendyol?.configured }
+        { label: "Siparişleri Al", icon: <Download size={16} />, onClick: handleTrendyolImport, loading: importing, disabled: !statuses.trendyol?.configured },
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/trendyol-eslestir" },
+        { label: "Trendyol Logları", icon: <Download size={16} />, href: "/admin/entegrasyon-loglari?marketplace=trendyol" }
       ]
     },
     {
@@ -459,7 +461,8 @@ export default function Integrations() {
       envKeys: [],
       actions: [
         { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('hepsiburada', setHbSettings, setHbModalOpen), loading: false },
-        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('hepsiburada', setHbTesting), loading: hbTesting, disabled: !statuses.hepsiburada?.configured }
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('hepsiburada', setHbTesting), loading: hbTesting, disabled: !statuses.hepsiburada?.configured },
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/hepsiburada-eslestir" }
       ]
     },
     {
@@ -473,7 +476,8 @@ export default function Integrations() {
       envKeys: [],
       actions: [
         { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('temu', setTemuSettings, setTemuModalOpen), loading: false },
-        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('temu', setTemuTesting), loading: temuTesting, disabled: !statuses.temu?.configured }
+        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('temu', setTemuTesting), loading: temuTesting, disabled: !statuses.temu?.configured },
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/temu-eslestir" }
       ]
     },
     {
@@ -703,25 +707,42 @@ export default function Integrations() {
                 {/* Actions */}
                 {integration.actions && (
                   <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t">
-                    {integration.actions.map((action, idx) => (
-                      <button
-                        key={idx}
-                        onClick={action.onClick}
-                        disabled={action.loading || action.disabled}
-                        className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                           integration.id === 'trendyol' && action.label.includes('Ayarlar') 
-                            ? 'bg-gray-100 text-gray-800 hover:bg-gray-200 border border-gray-300'
-                            : 'bg-black text-white hover:bg-gray-800'
-                        }`}
-                      >
-                        {action.loading ? (
-                          <RefreshCw size={14} className="animate-spin" />
-                        ) : (
-                          action.icon
-                        )}
-                        {action.label}
-                      </button>
-                    ))}
+                    {integration.actions.map((action, idx) => {
+                      const btnClass = `flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                         integration.id === 'trendyol' && action.label.includes('Ayarlar')
+                          ? 'bg-gray-100 text-gray-800 hover:bg-gray-200 border border-gray-300'
+                          : 'bg-black text-white hover:bg-gray-800'
+                      }`;
+                      if (action.href) {
+                        return (
+                          <a
+                            key={idx}
+                            href={action.href}
+                            className={btnClass}
+                            data-testid={`integration-action-${integration.id}-${idx}`}
+                          >
+                            {action.icon}
+                            {action.label}
+                          </a>
+                        );
+                      }
+                      return (
+                        <button
+                          key={idx}
+                          onClick={action.onClick}
+                          disabled={action.loading || action.disabled}
+                          className={btnClass}
+                          data-testid={`integration-action-${integration.id}-${idx}`}
+                        >
+                          {action.loading ? (
+                            <RefreshCw size={14} className="animate-spin" />
+                          ) : (
+                            action.icon
+                          )}
+                          {action.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 

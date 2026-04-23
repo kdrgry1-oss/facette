@@ -9,6 +9,7 @@ import base64
 import uuid
 import re
 import xml.etree.ElementTree as ET
+import httpx
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
 
@@ -81,6 +82,115 @@ async def test_iyzico_connection(current_user: dict = Depends(require_admin)):
     if not settings or not settings.get("api_key") or not settings.get("api_secret"):
         return {"success": False, "message": "Iyzico API bilgileri eksik"}
     return {"success": True, "message": "Iyzico API bilgileri kayıtlı. Refund test siparişle yapılabilir."}
+
+
+# ---------- Iyzico Refund (partial / shipping-deducted) ----------
+def _iyzico_auth_header(settings: dict, uri: str, body: dict) -> dict:
+    """Iyzico v1 auth header builder (PKI string)."""
+    import hashlib, base64, random, json
+    api_key = settings.get("api_key", "")
+    secret = settings.get("api_secret", "")
+    rnd = str(random.randint(10**15, 10**16 - 1))
+    payload = api_key + rnd + secret
+    h = hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    token = base64.b64encode((api_key + ":" + h).encode("utf-8")).decode("utf-8")
+    return {
+        "Authorization": f"IYZWSv2 {token}",
+        "x-iyzi-rnd": rnd,
+        "Content-Type": "application/json",
+    }
+
+
+@router.post("/iyzico/refund")
+async def iyzico_refund(payload: dict, current_user: dict = Depends(require_admin)):
+    """
+    Iyzico kısmi iade. Kargo bedeli düşülerek iade yapılır.
+
+    Body: {
+      order_id: str,
+      amount: float (iadesi yapılacak ürün tutarı, KDV dahil),
+      shipping_deduction: float (opsiyonel, müşteriden kesilecek kargo bedeli),
+      reason: str (opsiyonel)
+    }
+
+    Notlar:
+      • Iyzico'da `paymentTransactionId` item bazlıdır. Biz tek bir ürün
+        kalemi için değilse, toplam tutar üzerinden `payment/refund` kullanırız.
+      • Kargo kesintisi = müşteriye aktarılacak iade tutarından düşülür.
+      • Entegrasyon log kaydı düşülür.
+    """
+    order_id = payload.get("order_id")
+    amount = float(payload.get("amount") or 0)
+    shipping_deduction = float(payload.get("shipping_deduction") or 0)
+    reason = payload.get("reason", "Kısmi iade")
+    if not order_id or amount <= 0:
+        raise HTTPException(status_code=400, detail="order_id ve amount zorunlu")
+
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    pid = order.get("payment_id") or order.get("iyzico_payment_id")
+    if not pid:
+        raise HTTPException(status_code=400, detail="Bu sipariş Iyzico ödemesi içermiyor veya payment_id yok")
+
+    net_refund = round(amount - shipping_deduction, 2)
+    if net_refund <= 0:
+        raise HTTPException(status_code=400, detail="Kargo kesintisi sonrası iade tutarı 0 ya da negatif")
+
+    settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
+    if not settings or not settings.get("api_key"):
+        raise HTTPException(status_code=400, detail="Iyzico API bilgileri eksik")
+    base = ('https://api.iyzipay.com'
+            if settings.get("mode") == "live"
+            else 'https://sandbox-api.iyzipay.com')
+
+    body = {
+        "locale": "tr",
+        "conversationId": f"refund-{order_id}",
+        "paymentId": pid,
+        "price": f"{net_refund:.2f}",
+        "ip": "85.34.78.112",
+        "currency": "TRY",
+        "reason": reason,
+    }
+    uri = "/payment/refund"
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            headers = _iyzico_auth_header(settings, uri, body)
+            resp = await c.post(f"{base}{uri}", json=body, headers=headers)
+            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"raw": resp.text}
+        ok = (resp.status_code == 200) and (data.get("status") == "success")
+        # Log & Order update (yerel log_integration_event kullan)
+        await log_integration_event(
+            "iyzico", "refund", "order", order_id,
+            "success" if ok else "error",
+            f"Iyzico iade: gross={amount} kargo_kesinti={shipping_deduction} net={net_refund} → {data.get('status','?')}",
+            {"response": data, "request": body},
+        )
+        if ok:
+            await db.orders.update_one(
+                {"id": order_id},
+                {"$push": {"refunds": {
+                    "amount": amount,
+                    "shipping_deduction": shipping_deduction,
+                    "net_refund": net_refund,
+                    "reason": reason,
+                    "refunded_at": datetime.now(timezone.utc).isoformat(),
+                    "refunded_by": current_user.get("email", ""),
+                    "provider": "iyzico",
+                    "payment_id": pid,
+                }}}
+            )
+        return {
+            "success": ok,
+            "net_refund": net_refund,
+            "message": data.get("errorMessage") or ("Iade başarılı" if ok else "Iade başarısız"),
+            "provider_response": data,
+        }
+    except Exception as e:
+        logger.error(f"Iyzico refund error: {e}")
+        raise HTTPException(status_code=500, detail=f"Iyzico iade hatası: {e}")
+
 
 # ==================== TRENDYOL ====================
 import httpx
@@ -798,6 +908,21 @@ def map_trendyol_order(t_order: dict) -> dict:
 
     shipment_address = t_order.get("shipmentAddress", {})
     invoice_address = t_order.get("invoiceAddress", {})
+
+    # --- Mikro İhracat Tespiti ---
+    # Trendyol uluslararası/mikro ihracat siparişlerinde country != "Türkiye"
+    # veya `deliveryType` / `originShipmentDate` ile birlikte "InternationalMicroExport"
+    # bayrağı görülür. Bu tür siparişler Türkiye içi e-arşiv yerine gümrük
+    # beyannamesi / ETGB ile faturalandırılır.
+    country = (shipment_address.get("country") or "").lower()
+    is_intl = bool(country) and country not in ("turkey", "türkiye", "tr", "")
+    delivery_type = (t_order.get("deliveryType") or "").lower()
+    is_micro_export = (
+        is_intl
+        or "micro" in delivery_type
+        or "international" in delivery_type
+        or bool(t_order.get("micro"))
+    )
     
     status_map = {
         "Created": "pending",
@@ -846,6 +971,10 @@ def map_trendyol_order(t_order: dict) -> dict:
         "cargo_tracking_link": t_order.get("cargoTrackingLink", ""),
         "cargo_provider_name": t_order.get("cargoProviderName", ""),
         "invoice_link": t_order.get("invoiceLink", ""),
+        # Mikro ihracat bilgileri — ayrı faturalama/ETGB akışı için
+        "is_micro_export": is_micro_export,
+        "shipment_country": shipment_address.get("country", ""),
+        "delivery_type": t_order.get("deliveryType", ""),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     

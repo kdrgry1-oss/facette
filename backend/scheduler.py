@@ -60,6 +60,100 @@ async def auto_cancel_unpaid_havale_orders():
         logger.exception(f"[scheduler] auto_cancel_unpaid_havale_orders failed: {e}")
 
 
+async def _run_trendyol_auto_products_sync():
+    """Scheduler tarafından Trendyol fiyat/stok senkronunu tetikler.
+    HTTPException'ı yutar, log bırakır. Trendyol konfigürasyonu yoksa sessizce atlar.
+    """
+    from routes.deps import db
+    from routes.marketplace_hub import log_integration_event
+    try:
+        from routes.integrations import _sync_inventory_to_trendyol, get_trendyol_config
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
+        res = await _sync_inventory_to_trendyol(products)
+        await log_integration_event(
+            marketplace="trendyol", action="stock_update",
+            status=("success" if res.get("success") else "failed"),
+            direction="outbound",
+            message=f"[cron] Trendyol stok/fiyat senkronu: {res.get('message', '')}"
+        )
+    except Exception as e:
+        try:
+            await log_integration_event(
+                marketplace="trendyol", action="stock_update", status="failed",
+                direction="outbound",
+                message=f"[cron] Trendyol ürün senkron hatası: {e}"
+            )
+        except Exception:
+            pass
+
+
+async def _run_trendyol_auto_orders_pull():
+    """Scheduler tarafından Trendyol sipariş çekmeyi tetikler."""
+    from routes.marketplace_hub import log_integration_event
+    try:
+        from routes.integrations import get_trendyol_config
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        # Doğrudan route fonksiyonunu çağırmıyoruz (require_admin için);
+        # onun yerine mantığı burada çoğaltmadan, küçük bir internal job tetikliyoruz.
+        import sys, os
+        from datetime import datetime as _dt, timedelta as _td
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from trendyol_client import TrendyolClient
+        from routes.deps import db as _db, generate_id
+        from routes.integrations import map_trendyol_order
+
+        client = TrendyolClient(
+            supplier_id=cfg["supplier_id"],
+            api_key=cfg["api_key"],
+            api_secret=cfg["api_secret"],
+            mode=cfg["mode"],
+        )
+        now_ = _dt.now()
+        start = now_ - _td(days=15)
+        resp = await client.get_orders(
+            start_date_ms=int(start.timestamp() * 1000),
+            end_date_ms=int(now_.timestamp() * 1000),
+            size=200,
+        )
+        content = resp.get("content", [])
+        imported = 0
+        updated = 0
+        for t_order in content:
+            try:
+                number = str(t_order.get("orderNumber"))
+                existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
+                data = map_trendyol_order(t_order)
+                if existing:
+                    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": data})
+                    updated += 1
+                else:
+                    data["id"] = generate_id()
+                    data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    await _db.orders.insert_one(data)
+                    imported += 1
+            except Exception as _ex:
+                logger.error(f"[cron] Trendyol order import hata: {_ex}")
+        await log_integration_event(
+            marketplace="trendyol", action="order_pull", status="success",
+            direction="inbound",
+            message=f"[cron] Trendyol sipariş çekildi: +{imported} yeni / {updated} güncellendi"
+        )
+    except Exception as e:
+        try:
+            await log_integration_event(
+                marketplace="trendyol", action="order_pull", status="failed",
+                direction="inbound",
+                message=f"[cron] Trendyol sipariş çekme hatası: {e}"
+            )
+        except Exception:
+            pass
+
+
 async def _marketplace_sync_tick():
     """
     Her dk'da bir çalışır; her marketplace_account'un auto_sync ayarlarına
@@ -99,6 +193,9 @@ async def _marketplace_sync_tick():
                         direction="outbound",
                         message=f"[cron] Otomatik ürün senkron tetiklendi (her {interval} dk)"
                     )
+                    # Trendyol için gerçek push'u arka planda kuyruğa al
+                    if key == "trendyol":
+                        asyncio.create_task(_run_trendyol_auto_products_sync())
                     await db.marketplace_accounts.update_one(
                         {"key": key}, {"$set": {"_last_products_sync": now.isoformat()}}
                     )
@@ -119,11 +216,63 @@ async def _marketplace_sync_tick():
                         direction="inbound",
                         message=f"[cron] Otomatik sipariş çek tetiklendi (her {interval} dk, son {lookback} saat)"
                     )
+                    if key == "trendyol":
+                        asyncio.create_task(_run_trendyol_auto_orders_pull())
                     await db.marketplace_accounts.update_one(
                         {"key": key}, {"$set": {"_last_orders_sync": now.isoformat()}}
                     )
     except Exception as e:
         logger.exception(f"[scheduler] marketplace sync tick failed: {e}")
+
+
+async def _send_abandoned_cart_reminders():
+    """Her gün 10:00 UTC'de, son 2-48 saat içinde aktif olup sipariş vermemiş
+    e-posta sahibi sepetlere 1 kez hatırlatma maili gönderir. İşaretlenmiş
+    sepetlere tekrar gönderilmez.
+    """
+    from routes.deps import db
+    try:
+        from routes.catalog_extras import _send_email_via_resend  # lazy
+    except Exception as e:
+        logger.warning(f"[scheduler] abandoned cart mail skip (import): {e}")
+        return
+    import os
+    if not os.environ.get("RESEND_API_KEY", "").strip():
+        return  # no key → skip silently
+    now = datetime.now(timezone.utc)
+    # 2 saatten eski, 48 saatten yeni aktif sepetler
+    start = (now - timedelta(hours=48)).isoformat()
+    end = (now - timedelta(hours=2)).isoformat()
+    q = {
+        "updated_at": {"$gte": start, "$lte": end},
+        "total": {"$gt": 0},
+        "email": {"$ne": ""},
+        "abandoned_reminder_sent": {"$ne": True},
+    }
+    try:
+        carts = await db.cart_sessions.find(q, {"_id": 0}).to_list(500)
+        if not carts:
+            return
+        recipients = list({c.get("email") for c in carts if c.get("email")})
+        if not recipients:
+            return
+        subject = "Sepetinizi unutmayın ✨ Favori ürünleriniz sizi bekliyor"
+        html = (
+            "<h2>Sepetinizdeki ürünler tükeniyor!</h2>"
+            "<p>Seçtiğiniz ürünleri tamamlamak için hazır bir alışveriş sepetiniz var.</p>"
+            "<p><a href=\"https://facette.com\" style=\"background:#000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Sepete Dön</a></p>"
+            "<p style=\"font-size:12px;color:#888;margin-top:24px\">Bu e-posta otomatik gönderilmiştir.</p>"
+        )
+        ok, failed, errs = await _send_email_via_resend(recipients, subject, html)
+        # işaretle
+        for c in carts:
+            await db.cart_sessions.update_one(
+                {"session_id": c.get("session_id")},
+                {"$set": {"abandoned_reminder_sent": True, "abandoned_reminder_at": now.isoformat()}},
+            )
+        logger.info(f"[scheduler] Abandoned cart reminders: sent={ok} failed={failed} errs={errs[:1]}")
+    except Exception as e:
+        logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
 
 
 def start_scheduler():
@@ -153,8 +302,18 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Günde bir, terkedilmiş sepet mail hatırlatmaları (Resend key varsa çalışır).
+    _scheduler.add_job(
+        _send_abandoned_cart_reminders,
+        "interval",
+        hours=24,
+        id="abandoned_cart_reminders",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
-    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min)")
+    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily)")
     return _scheduler
 
 

@@ -27,7 +27,8 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Save, ExternalLink, Search, Power, Zap, Eye, EyeOff } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Save, ExternalLink, Search, Power, Zap, Eye, EyeOff, Cable, SlidersHorizontal } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -274,6 +275,37 @@ export default function MarketplaceHub() {
                       </span>
                     </label>
                   </div>
+                </div>
+                {/* Quick Links: Detaylı sayfalar */}
+                <div className="mt-4 pt-4 border-t flex flex-wrap gap-2">
+                  <Link
+                    to="/admin/entegrasyonlar"
+                    data-testid="quick-link-integrations"
+                    className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
+                  >
+                    <Cable size={13} /> Aktarım İşlemleri (Ürün Gönder / Sipariş Al)
+                  </Link>
+                  <Link
+                    to="/admin/marka-eslestir"
+                    data-testid="quick-link-brand-map"
+                    className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
+                  >
+                    <SlidersHorizontal size={13} /> Marka Eşleştirme
+                  </Link>
+                  <Link
+                    to="/admin/kategori-eslestir"
+                    data-testid="quick-link-category-map"
+                    className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
+                  >
+                    <SlidersHorizontal size={13} /> Kategori Eşleştirme
+                  </Link>
+                  <Link
+                    to={`/admin/entegrasyon-loglari?marketplace=${active}`}
+                    data-testid="quick-link-logs"
+                    className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
+                  >
+                    <ExternalLink size={13} /> Bu Pazaryerinin Logları
+                  </Link>
                 </div>
               </div>
 
