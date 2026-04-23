@@ -218,4 +218,30 @@ Kullanıcının "karıştı" geribildirimi üzerine yapılan büyük temizlik ve
 - Mikro ihracat ETGB için gerçek gümrük beyannamesi PDF üretimi (şu an sadece belge numarası).
 - A/B test altyapısı, push notification altyapısı (gelecek).
 
+## [2026-04-23] Entegrasyon Denetimi + 10 Fix (iteration_12 & 13)
+
+Kullanıcı "tüm entegrasyonların test API'larıyla kontrol edilmesi — canlıya alırken sadece credential girmesi yeterli olsun" istedi. `testing_agent_v3_fork` ile 2 iterasyon denetimi yapıldı:
+- iteration_12: 46/46 pytest → 1 CRITICAL + 4 HIGH + 3 MEDIUM + 1 LOW bug bulundu
+- iteration_13 (retest): **77/77 pytest geçti, 0 critical, 3 minor iyileştirme (tümü fix edildi)**
+
+### Yapılan Fix'ler
+- **[CRITICAL] Sessiz pasifleme hatası**: `integrations.py:798` `update_inventory` → `update_price_and_inventory`. `bulk_ops.py` dönüş `success` artık `total_fail==0` bazlı.
+- **[HIGH] Settings required-field validasyonu** (5 endpoint): Iyzico/Trendyol/HB/Temu/Doğan — `is_active`/`enabled` true iken zorunlu alanlar eksikse 400 döner.
+- **[HIGH] Doğan password leak**: `GET /dogan/settings` artık `password: '********'` maskeli. Payload'da `********` gelirse mevcut değer korunur.
+- **[HIGH] Webhooks HMAC signature**: `X-Trendyol-Signature` HMAC-SHA256 (hex + base64) `TRENDYOL_WEBHOOK_SECRET` env ile doğrulanıyor.
+- **[MEDIUM] Trendyol özel test-connection**: YENİ endpoint `POST /api/integrations/trendyol/test-connection` — `TrendyolClient.get_brands` probe ile 401/403/HTTP hata net.
+- **[MEDIUM] Temu gerçek probe**: `bg.auth.access_token.info.get` MD5 signed çağrı; sandbox `openapi-b-global-stg.temu.com`, live `openapi-b-us.temu.com`.
+- **[LOW] HB 400 errorCode parse**: Hepsiburada 400 body'sinden errorCode/errorMessage parse ediliyor.
+- **[MINOR] Doğan sync SOAP → threadpool**: event loop bloklanmasın.
+
+### Canlıya Hazır Checklist (iteration_13)
+- ✅ **HAZIR**: Iyzico settings + refund, Trendyol settings + test-connection, HB/Temu settings + gerçek probe, Doğan settings + mask, bulk-ops pasifleme, webhooks HMAC, 13 MP Hub + 11 E-fatura + 13 Kargo şeması, create-invoice + ETGB.
+- ⏳ **CREDENTIAL BEKLİYOR**: Iyzico live key, Trendyol supplier_id/key/secret, HB merchant_id/user/pass, Temu shop_id/app_key/secret, Doğan prod, `TRENDYOL_WEBHOOK_SECRET` env, 10 einvoice provider SDK (sadece Doğan SDK hazır).
+
+### Canlıya Geçiş Adımları
+1. Admin panelden her entegrasyon Ayarlar → credential gir, `is_active=true`.
+2. "Test Et" butonu → 401/403/timeout/errorCode mesajı net görünür.
+3. Prod'da `TRENDYOL_WEBHOOK_SECRET` env set et.
+4. Trendyol `mode: live` seçildiğinde otomatik `https://api.trendyol.com` host.
+
 

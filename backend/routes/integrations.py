@@ -3490,6 +3490,7 @@ async def save_dogan_settings(payload: dict, current_user: dict = Depends(requir
 @router.post("/dogan/test-connection")
 async def test_dogan_connection(current_user: dict = Depends(require_admin)):
     """Test connection to Doğan e-Dönüşüm"""
+    from fastapi.concurrency import run_in_threadpool
     settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0})
     if not settings or not settings.get("username"):
         raise HTTPException(status_code=400, detail="Doğan e-Dönüşüm ayarları eksik")
@@ -3500,7 +3501,8 @@ async def test_dogan_connection(current_user: dict = Depends(require_admin)):
         password=settings["password"],
         is_test=settings.get("is_test", True)
     )
-    result = client.test_connection()
+    # Sync SOAP çağrısı event loop'u bloklamasın diye threadpool'da çalıştır
+    result = await run_in_threadpool(client.test_connection)
     return result
 
 
@@ -3673,7 +3675,12 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
             # Gerçek Temu Open Platform probe — bg.temu.com /api/v1/seller/info endpoint'i
             import time, json as _json
             mode_ = settings.get("mode", "sandbox")
-            host = "https://openapi-b-us.temu.com" if mode_ == "live" else "https://openapi-b-us.temu.com"
+            # Temu Open Platform hostları — sandbox vs live farklı
+            host = (
+                "https://openapi-b-us.temu.com"
+                if mode_ == "live"
+                else "https://openapi-b-global-stg.temu.com"
+            )
             ts = str(int(time.time()))
             body = {
                 "type": "bg.auth.access_token.info.get",
