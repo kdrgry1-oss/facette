@@ -11,8 +11,12 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2 } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders } from "lucide-react";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
+import {
+  AdvancedAttributeMatchModal,
+  AdvancedValueMatchModal,
+} from "../../components/admin/MarketplaceAdvancedMatch";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -25,6 +29,8 @@ export default function CategoryMapping() {
   const [editRow, setEditRow] = useState(null);
   const [editVal, setEditVal] = useState({ id: "", name: "" });
   const [selected, setSelected] = useState(new Set());
+  const [attrMatchFor, setAttrMatchFor] = useState(null);
+  const [valueMatchFor, setValueMatchFor] = useState(null);
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -194,7 +200,7 @@ export default function CategoryMapping() {
               <th>Durum</th>
               <th>Sistem Kategorisi</th>
               <th>Pazaryeri Kategorisi</th>
-              <th className="w-36">İşlemler</th>
+              <th className="w-56">İşlemler</th>
             </tr>
           </thead>
           <tbody>
@@ -252,12 +258,33 @@ export default function CategoryMapping() {
                           <button onClick={() => setEditRow(null)} className="px-2 text-xs text-gray-500 hover:text-black">İptal</button>
                         </div>
                       ) : (
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap">
                           <button onClick={() => {
                             setEditRow(row.category_id);
                             setEditVal({ id: row.marketplace_category_id || "", name: row.marketplace_category_name || "" });
                           }} className="text-xs text-orange-600 hover:underline"
                             data-testid={`cat-edit-${row.category_id}`}>Düzenle</button>
+
+                          {row.status === "matched" && row.marketplace_category_id && (
+                            <>
+                              <button
+                                onClick={() => setAttrMatchFor(row)}
+                                className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+                                title="Özellik Eşle (Zorunlu Trendyol özellikleri ile sistem özelliklerinin bağlanması)"
+                                data-testid={`cat-attr-${row.category_id}`}
+                              >
+                                <Settings size={10} /> Özellik
+                              </button>
+                              <button
+                                onClick={() => setValueMatchFor(row)}
+                                className="text-xs text-purple-600 hover:underline flex items-center gap-0.5"
+                                title="Değer Eşle (Kırmızı ↔ Red gibi)"
+                                data-testid={`cat-val-${row.category_id}`}
+                              >
+                                <Sliders size={10} /> Değer
+                              </button>
+                            </>
+                          )}
                           <button onClick={() => clearRow(row)}
                             className="text-xs text-red-600 hover:underline"
                             data-testid={`cat-clear-${row.category_id}`}>Sil</button>
@@ -271,6 +298,20 @@ export default function CategoryMapping() {
           </tbody>
         </table>
       </div>
+
+      {/* Gelişmiş Eşleştirme Modalları — tüm pazaryerleri için çalışır */}
+      <AdvancedAttributeMatchModal
+        open={!!attrMatchFor}
+        onClose={(ok) => { setAttrMatchFor(null); if (ok) load(); }}
+        marketplace={active}
+        category={attrMatchFor}
+      />
+      <AdvancedValueMatchModal
+        open={!!valueMatchFor}
+        onClose={(ok) => { setValueMatchFor(null); if (ok) load(); }}
+        marketplace={active}
+        category={valueMatchFor}
+      />
     </div>
   );
 }

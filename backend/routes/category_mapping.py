@@ -158,3 +158,160 @@ async def clear_mapping(marketplace: str, category_id: str,
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     await db.category_mappings.delete_one({"category_id": category_id, "marketplace": marketplace})
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# GELİŞMİŞ EŞLEŞTİRME (tüm pazaryerleri için generic)
+# ---------------------------------------------------------------------------
+# `/category-mapping/{mp}/{local_cat_id}/attributes`     → MP'nin bu kategori için
+#                                                         zorunlu/opsiyonel özellikleri
+# `/category-mapping/{mp}/{local_cat_id}/attribute-map`  → attribute mapping kaydet
+# `/category-mapping/{mp}/{local_cat_id}/values`         → sistem ürünlerindeki distinct
+#                                                         değerler + mapping
+# `/category-mapping/{mp}/{local_cat_id}/value-map`      → değer mapping kaydet
+#
+# Trendyol için gerçek Trendyol API'lerinden veri çekilir (cache DB'de).
+# Diğer pazaryerleri için placeholder veri + hint döner — kullanıcı manuel girebilir,
+# ileride her MP için benzer API entegrasyonu yapılır.
+
+
+@router.get("/{marketplace}/{local_category_id}/attributes")
+async def get_advanced_attributes(
+    marketplace: str,
+    local_category_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Sistem kategorisinin MP'deki karşılığı için zorunlu/opsiyonel özellikler."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    mapping = await db.category_mappings.find_one(
+        {"category_id": local_category_id, "marketplace": marketplace}, {"_id": 0}
+    )
+    if not mapping or not mapping.get("marketplace_category_id"):
+        return {
+            "attributes": [],
+            "attribute_mappings": [],
+            "default_mappings": {},
+            "hint": "Önce sistem kategorisini pazaryeri kategorisiyle eşleştirin",
+        }
+    mp_cat_id = mapping["marketplace_category_id"]
+
+    # Trendyol için gerçek attribute listesini Trendyol API'sinden çek
+    if marketplace == "trendyol":
+        try:
+            from .integrations import get_trendyol_config
+            from trendyol_client import TrendyolClient
+            cfg = await get_trendyol_config()
+            if cfg.get("is_active") and cfg.get("api_key"):
+                client = TrendyolClient(
+                    supplier_id=cfg["supplier_id"],
+                    api_key=cfg["api_key"],
+                    api_secret=cfg["api_secret"],
+                    mode=cfg.get("mode", "sandbox"),
+                )
+                data = await client.get_category_attributes(int(mp_cat_id))
+                attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                # Cache'le
+                await db.trendyol_category_attributes.update_one(
+                    {"category_id": int(mp_cat_id)},
+                    {"$set": {"category_id": int(mp_cat_id), "attributes": attrs,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True,
+                )
+                return {
+                    "attributes": attrs,
+                    "attribute_mappings": mapping.get("attribute_mappings", []),
+                    "default_mappings": mapping.get("default_mappings", {}),
+                    "value_mappings": mapping.get("value_mappings", {}),
+                }
+        except Exception:
+            # DB cache'den dene
+            pass
+        cached = await db.trendyol_category_attributes.find_one(
+            {"category_id": int(mp_cat_id)}, {"_id": 0}
+        )
+        return {
+            "attributes": (cached or {}).get("attributes", []),
+            "attribute_mappings": mapping.get("attribute_mappings", []),
+            "default_mappings": mapping.get("default_mappings", {}),
+            "value_mappings": mapping.get("value_mappings", {}),
+            "from_cache": bool(cached),
+        }
+
+    # Diğer MP'ler — yerel cache (varsa) veya boş + hint
+    coll_name = f"{marketplace}_category_attributes"
+    cached = await db[coll_name].find_one({"category_id": str(mp_cat_id)}, {"_id": 0})
+    return {
+        "attributes": (cached or {}).get("attributes", []),
+        "attribute_mappings": mapping.get("attribute_mappings", []),
+        "default_mappings": mapping.get("default_mappings", {}),
+        "value_mappings": mapping.get("value_mappings", {}),
+        "hint": f"{marketplace} için canlı attribute listesi henüz entegre değil — manuel ad-ad eşleştirebilir veya Trendyol'daki ortak attribute'ları kullanabilirsiniz",
+    }
+
+
+@router.post("/{marketplace}/{local_category_id}/attribute-map")
+async def save_attribute_mappings(
+    marketplace: str,
+    local_category_id: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Body: {attribute_mappings: [{local_attr, mp_attr_id}], default_mappings: {}}"""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    update = {}
+    if "attribute_mappings" in payload:
+        update["attribute_mappings"] = payload["attribute_mappings"] or []
+    if "default_mappings" in payload:
+        update["default_mappings"] = payload["default_mappings"] or {}
+    if "value_mappings" in payload:
+        update["value_mappings"] = payload["value_mappings"] or {}
+    if not update:
+        return {"success": True, "message": "Güncellenecek alan yok"}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.category_mappings.update_one(
+        {"category_id": local_category_id, "marketplace": marketplace},
+        {"$set": update},
+    )
+    return {"success": True, "message": "Özellik eşleştirmesi kaydedildi"}
+
+
+@router.get("/{marketplace}/{local_category_id}/values")
+async def get_advanced_values(
+    marketplace: str,
+    local_category_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Bu sistem kategorisindeki ürünlerin attribute değerleri (distinct)."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    # Ürünlerden distinct attribute değerlerini topla
+    local_values = {}
+    cursor = db.products.find(
+        {"category_id": local_category_id}, {"_id": 0, "attributes": 1, "variants": 1}
+    )
+    async for p in cursor:
+        # üst seviye attributes: {name, value}
+        for a in p.get("attributes", []) or []:
+            nm = a.get("name") or a.get("attribute_name")
+            vv = a.get("value") or a.get("attribute_value")
+            if not nm or not vv:
+                continue
+            local_values.setdefault(nm, set()).add(str(vv))
+        for v in p.get("variants", []) or []:
+            for a in v.get("attributes", []) or []:
+                nm = a.get("name") or a.get("attribute_name")
+                vv = a.get("value") or a.get("attribute_value")
+                if not nm or not vv:
+                    continue
+                local_values.setdefault(nm, set()).add(str(vv))
+
+    out = {k: sorted(list(v)) for k, v in local_values.items()}
+    mapping = await db.category_mappings.find_one(
+        {"category_id": local_category_id, "marketplace": marketplace}, {"_id": 0}
+    ) or {}
+    return {
+        "local_values": out,
+        "value_mappings": mapping.get("value_mappings", {}),
+    }

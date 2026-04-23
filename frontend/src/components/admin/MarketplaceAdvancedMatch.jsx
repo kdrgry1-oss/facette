@@ -1,0 +1,454 @@
+/**
+ * MarketplaceAdvancedMatch.jsx — Tüm pazaryerleri için çalışan
+ * "Gelişmiş Eşleştirme" modal grubudur (kategori/attribute/değer).
+ *
+ * TrendyolEslestir.jsx içindeki ~1200 satır MP-spesifik kodun generic hali.
+ * Tek fark: endpoint'ler `/api/category-mapping/{mp}/...` altında toplanmıştır
+ * (bkz. backend/routes/category_mapping.py > get_advanced_attributes/values).
+ *
+ * Kullanım:
+ *   <AdvancedAttributeMatchModal
+ *      open={...} onClose={...}
+ *      marketplace="trendyol"
+ *      category={row}  // category_id, category_name, marketplace_category_id
+ *   />
+ */
+import { useEffect, useState, useCallback } from "react";
+import axios from "axios";
+import { toast } from "sonner";
+import {
+  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon,
+} from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "../ui/dialog";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+
+const MP_COLORS = {
+  trendyol: "orange",
+  hepsiburada: "red",
+  temu: "orange",
+  n11: "purple",
+  "amazon-tr": "yellow",
+  "amazon-de": "yellow",
+  aliexpress: "red",
+  etsy: "red",
+  "hepsi-global": "red",
+  fruugo: "blue",
+  emag: "blue",
+  "trendyol-ihracat": "orange",
+  ciceksepeti: "pink",
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Advanced Attribute Match Modal (MP'nin zorunlu/opsiyonel özellikleri ↔ sistem)
+// ═══════════════════════════════════════════════════════════════════════════
+export function AdvancedAttributeMatchModal({ open, onClose, marketplace, category }) {
+  const [mpAttrs, setMpAttrs] = useState([]);
+  const [globalAttrs, setGlobalAttrs] = useState([]);
+  const [mappings, setMappings] = useState({});
+  const [defaults, setDefaults] = useState({});
+  const [searchTerms, setSearchTerms] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [hint, setHint] = useState("");
+
+  const color = MP_COLORS[marketplace] || "orange";
+
+  useEffect(() => {
+    if (!open || !category) return;
+    setLoading(true);
+    Promise.all([
+      axios
+        .get(`${API}/category-mapping/${marketplace}/${category.category_id}/attributes`, { headers: auth() })
+        .catch(() => ({ data: { attributes: [], attribute_mappings: [], default_mappings: {} } })),
+      axios
+        .get(`${API}/attributes`, { headers: auth() })
+        .catch(() => ({ data: { attributes: [] } })),
+    ]).then(([mpRes, gRes]) => {
+      setMpAttrs(mpRes.data?.attributes || []);
+      setGlobalAttrs(gRes.data?.attributes || []);
+      const savedMap = {};
+      (mpRes.data?.attribute_mappings || []).forEach((m) => {
+        if (m.mp_attr_id || m.trendyol_attr_id) {
+          savedMap[String(m.mp_attr_id ?? m.trendyol_attr_id)] = m.local_attr;
+        }
+      });
+      setMappings(savedMap);
+      setDefaults(mpRes.data?.default_mappings || {});
+      setHint(mpRes.data?.hint || "");
+    }).finally(() => setLoading(false));
+  }, [open, marketplace, category]);
+
+  const handleAutoMatch = () => {
+    const next = { ...mappings };
+    let count = 0;
+    mpAttrs.forEach((a) => {
+      const id = String(a.id ?? a.attribute?.id ?? "");
+      const name = (a.name || a.attribute?.name || "").toLowerCase().trim();
+      if (next[id]) return;
+      const g = globalAttrs.find((ga) => {
+        const gn = (ga.name || "").toLowerCase().trim();
+        return (
+          gn === name ||
+          gn.includes(name) ||
+          name.includes(gn) ||
+          (name === "web color" && gn === "renk") ||
+          (name === "color" && gn === "renk") ||
+          (name === "size" && gn === "beden")
+        );
+      });
+      if (g) { next[id] = g.name; count++; }
+    });
+    setMappings(next);
+    toast.success(`${count} özellik otomatik eşleştirildi`);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = Object.entries(mappings)
+        .filter(([, v]) => v !== "" && v != null)
+        .map(([id, v]) => ({ local_attr: v, mp_attr_id: isNaN(Number(id)) ? id : Number(id) }));
+      await axios.post(
+        `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
+        { attribute_mappings: payload, default_mappings: defaults },
+        { headers: auth() }
+      );
+      toast.success("Eşleştirmeler kaydedildi");
+      onClose(true);
+    } catch {
+      toast.error("Kaydedilemedi");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const required = mpAttrs.filter((a) => a.required);
+  const optional = mpAttrs.filter((a) => !a.required);
+  const rows = [...required, ...optional];
+
+  return (
+    <Dialog open={open} onOpenChange={() => onClose(false)}>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Store size={18} className={`text-${color}-500`} />
+              Özellik Eşleştirme — {category?.category_name}
+              {category?.marketplace_category_name && (
+                <>
+                  <ArrowRight size={14} className="text-gray-400" />
+                  <span className="text-gray-500">{category.marketplace_category_name}</span>
+                </>
+              )}
+              <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
+                {marketplace}
+              </span>
+            </DialogTitle>
+            <button
+              onClick={handleAutoMatch}
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
+              data-testid="adv-auto-match-btn"
+            >
+              <LinkIcon size={14} /> Otomatik Eşleştir
+            </button>
+          </div>
+        </DialogHeader>
+
+        {hint && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+            <AlertCircle size={12} className="inline mr-1" /> {hint}
+          </div>
+        )}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800 space-y-1">
+          <p className="font-semibold flex items-center gap-1"><AlertCircle size={14} /> Dikkat</p>
+          <p>• Zorunlu alanları mutlaka eşleştirmeniz gerekir.</p>
+          <p>• Eşleştirilen yerel değerler ürünlerinizde karşılığı olmalıdır.</p>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center py-12">
+            <RefreshCw size={22} className="animate-spin text-gray-400" />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center py-12 text-gray-400 text-sm gap-2">
+            <AlertCircle size={32} />
+            <p>Bu kategori için özellik bulunamadı.</p>
+            <p className="text-xs">Önce pazaryeri kategori eşleştirmesi yapın.</p>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2.5 w-16 text-xs text-gray-500">Zorunlu</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-gray-500">{marketplace} Özelliği</th>
+                  <th className="text-left px-4 py-2.5 text-xs text-gray-500">Yerel Özellik (Eşleştir)</th>
+                  <th className="text-left px-4 py-2.5 w-20 text-xs text-gray-500">Durum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((attr) => {
+                  const name = attr.name || attr.attribute?.name || "Bilinmeyen";
+                  const id = String(attr.id ?? attr.attribute?.id ?? name);
+                  const hasVals = attr.attributeValues?.length > 0;
+                  const mapped = mappings[id];
+                  return (
+                    <tr key={id} className="border-b hover:bg-gray-50">
+                      <td className="px-4 py-2.5">
+                        {attr.required ? (
+                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Evet</span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <p className="font-medium text-gray-800">{name}</p>
+                        {attr.attributeType && (
+                          <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 space-y-2">
+                        <input
+                          type="text"
+                          list={`gattr-${id}`}
+                          value={mapped || ""}
+                          onChange={(e) => setMappings((p) => ({ ...p, [id]: e.target.value }))}
+                          placeholder="Yerel özellik (ör. Renk, Beden)"
+                          className="border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-orange-300"
+                          data-testid={`adv-mapinput-${id}`}
+                        />
+                        <datalist id={`gattr-${id}`}>
+                          {globalAttrs.map((g) => <option key={g.id || g.name} value={g.name} />)}
+                          <option value="Renk" />
+                          <option value="Beden" />
+                        </datalist>
+                        {(attr.allowCustom || attr.attribute?.allowCustom) && (
+                          <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
+                            <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer:</div>
+                            <input
+                              type="text"
+                              placeholder="Varsayılan metin..."
+                              value={defaults[id] || ""}
+                              onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                              className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
+                            />
+                          </div>
+                        )}
+                        {hasVals && (
+                          <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
+                            <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Listeden Seçin:</div>
+                            <div className="relative">
+                              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
+                              <input
+                                type="text"
+                                placeholder="Değer ara..."
+                                value={searchTerms[id] || ""}
+                                onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
+                                className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
+                              />
+                            </div>
+                            <select
+                              value={defaults[id] || ""}
+                              onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                              className="border rounded px-2 py-1 text-xs w-full bg-white"
+                            >
+                              <option value="">Varsayılan Seçilmedi</option>
+                              {attr.attributeValues
+                                .filter((v) => v.name.toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
+                                .map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        {mapped || defaults[id] ? (
+                          <Check size={16} className="text-green-500 mx-auto" />
+                        ) : attr.required ? (
+                          <X size={16} className="text-red-400 mx-auto" />
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-3 border-t">
+          <button onClick={() => onClose(false)}
+            className="px-4 py-2 border rounded text-sm hover:bg-gray-50">İptal</button>
+          <button onClick={handleSave} disabled={saving}
+            className={`flex items-center gap-2 px-4 py-2 bg-${color}-500 text-white rounded text-sm hover:bg-${color}-600 disabled:opacity-50`}
+            data-testid="adv-attr-save">
+            {saving && <RefreshCw size={14} className="animate-spin" />}
+            Eşleştirmeleri Kaydet
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Advanced Value Match Modal (ürünlerdeki değerler ↔ MP değerleri)
+// ═══════════════════════════════════════════════════════════════════════════
+export function AdvancedValueMatchModal({ open, onClose, marketplace, category }) {
+  const [mpAttrs, setMpAttrs] = useState([]);
+  const [localValues, setLocalValues] = useState({});
+  const [valueMappings, setValueMappings] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedAttrId, setSelectedAttrId] = useState("");
+  const [hint, setHint] = useState("");
+  const color = MP_COLORS[marketplace] || "orange";
+
+  const load = useCallback(async () => {
+    if (!category) return;
+    setLoading(true);
+    try {
+      const [a, v] = await Promise.all([
+        axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/attributes`, { headers: auth() }),
+        axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/values`, { headers: auth() }),
+      ]);
+      const attrs = (a.data?.attributes || []).filter((x) => x.attributeValues?.length > 0);
+      setMpAttrs(attrs);
+      setLocalValues(v.data?.local_values || {});
+      setValueMappings(v.data?.value_mappings || {});
+      setHint(a.data?.hint || "");
+      if (attrs.length && !selectedAttrId) setSelectedAttrId(String(attrs[0].id || attrs[0].attribute?.id));
+    } catch {
+      toast.error("Değerler yüklenemedi");
+    } finally {
+      setLoading(false);
+    }
+  }, [marketplace, category, selectedAttrId]);
+
+  useEffect(() => { if (open && category) load(); }, [open, category, load]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.post(
+        `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
+        { value_mappings: valueMappings },
+        { headers: auth() }
+      );
+      toast.success("Değer eşleştirmeleri kaydedildi");
+      onClose(true);
+    } catch {
+      toast.error("Kaydedilemedi");
+    } finally { setSaving(false); }
+  };
+
+  const currentAttr = mpAttrs.find((a) => String(a.id ?? a.attribute?.id) === String(selectedAttrId));
+  const attrName = currentAttr?.name || currentAttr?.attribute?.name;
+
+  return (
+    <Dialog open={open} onOpenChange={() => onClose(false)}>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base flex items-center gap-2">
+            <Store size={18} className={`text-${color}-500`} />
+            Değer Eşleştirme — {category?.category_name}
+            <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
+              {marketplace}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+
+        {hint && <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+          <AlertCircle size={12} className="inline mr-1" /> {hint}
+        </div>}
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center py-12">
+            <RefreshCw size={22} className="animate-spin text-gray-400" />
+          </div>
+        ) : mpAttrs.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-400">
+            Bu kategori için değer eşleştirmeye uygun özellik (listeden seçilen) yok.
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2 flex-wrap pb-2 border-b">
+              {mpAttrs.map((a) => {
+                const id = String(a.id ?? a.attribute?.id);
+                const name = a.name || a.attribute?.name;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setSelectedAttrId(id)}
+                    className={`px-3 py-1.5 text-xs rounded-full transition ${
+                      id === String(selectedAttrId)
+                        ? `bg-${color}-500 text-white`
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                    data-testid={`adv-attr-tab-${id}`}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex-1 overflow-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2 text-xs text-gray-500">Sistem Değeri</th>
+                    <th className="text-left px-4 py-2 text-xs text-gray-500">{marketplace} Değeri</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(localValues[attrName] || []).length === 0 ? (
+                    <tr><td colSpan={2} className="py-8 text-center text-xs text-gray-400">
+                      Bu kategorideki ürünlerde "{attrName}" özelliği için değer yok.
+                    </td></tr>
+                  ) : (
+                    (localValues[attrName] || []).map((lv) => (
+                      <tr key={lv} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-2 font-medium">{lv}</td>
+                        <td className="px-4 py-2">
+                          <select
+                            value={valueMappings[`${selectedAttrId}|${lv}`] || ""}
+                            onChange={(e) =>
+                              setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
+                            }
+                            className="border rounded px-2 py-1 text-sm w-full bg-white"
+                            data-testid={`adv-valmap-${lv}`}
+                          >
+                            <option value="">— seçilmemiş —</option>
+                            {(currentAttr?.attributeValues || []).map((v) => (
+                              <option key={v.id} value={v.id}>{v.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 pt-3 border-t">
+          <button onClick={() => onClose(false)} className="px-4 py-2 border rounded text-sm hover:bg-gray-50">İptal</button>
+          <button onClick={save} disabled={saving}
+            className={`flex items-center gap-2 px-4 py-2 bg-${color}-500 text-white rounded text-sm hover:bg-${color}-600 disabled:opacity-50`}
+            data-testid="adv-val-save">
+            {saving && <RefreshCw size={14} className="animate-spin" />}
+            Değerleri Kaydet
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
@@ -32,7 +32,6 @@ import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
 import AttributeImport from "./pages/admin/AttributeImport";
 import AdminQuestions from "./pages/admin/Questions";
-import TrendyolEslestir from "./pages/admin/TrendyolEslestir";
 import TrendyolLogs from "./pages/admin/TrendyolLogs";
 import ProductAttributes from "./pages/admin/ProductAttributes";
 import Vendors from "./pages/admin/Vendors";
@@ -135,7 +134,7 @@ function App() {
               <Route path="musteri-segmentleri" element={<CustomerSegments />} />
               {/* Marketplace başına net kâr raporu (komisyon + kargo + iade çıkarılmış) */}
               <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
-              <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
+              <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />
               <Route path="cariler" element={<Vendors />} />
