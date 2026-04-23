@@ -154,8 +154,9 @@ async def create_plan_row(req: PlanRowReq, current_user: dict = Depends(require_
         if vendor:
             data["manufacturer_name"] = vendor.get("name", "")
 
-    # Seq no
-    seq_no = (await db.production_plan.count_documents({})) + 1
+    # Seq no — mevcut en yüksek seq_no + 1 (silme sonrası boşluk kapatmaz, uniqueness korunur)
+    last = await db.production_plan.find_one({}, {"_id": 0, "seq_no": 1}, sort=[("seq_no", -1)])
+    seq_no = ((last or {}).get("seq_no") or 0) + 1
 
     doc = {
         "id": generate_id(),

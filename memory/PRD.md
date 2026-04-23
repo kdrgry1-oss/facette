@@ -129,6 +129,37 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - [2026-03-25] Variant dropdown UX improvements
 - [2026-03-26] Excel Technical Details Import (126 products matched)
 - [2026-03-26] Attributes tab reorganization (filled > required > hidden)
+
+## Iteration 16 (2026-04-23) — FAZ 7 İmalat Planı 18 Sütunlu Tablo
+
+### Ürün kartı
+- Yeni alanlar: `collection` (ör. "2026 İlkbahar/Yaz"), `color` (ana renk), `purchase_price` (mevcut — imalat ile entegre)
+- Admin "Ürün Ekle/Düzenle" formunda yeni 2 input (datalist ile koleksiyon önerisi)
+
+### İmalat Planı (`/api/production-plan`)
+- 18 sütunluk spreadsheet-style CRUD endpoint'leri:
+  - `GET /api/production-plan?search=&manufacturer_id=&collection=`
+  - `POST /api/production-plan` — seq_no = `max(seq_no)+1` (silme sonrası uniqueness), ürün seçilirse collection/price/color/product_description otomatik dolum
+  - `PUT /api/production-plan/{id}` — payment_date → planned_delivery (+21 gün) otomatik hesap; delay_days + qty_diff_pct türetilir
+  - `DELETE /api/production-plan/{id}`
+  - `GET /api/production-plan/collections` — distinct koleksiyonlar (product + plan)
+- Türetilmiş alanlar:
+  - `planned_delivery` = payment_date + 21 gün
+  - `delay_days` = actual_delivery − planned_delivery (pozitif=gecikme kırmızı, negatif/0=zamanında yeşil)
+  - `qty_diff_pct` = ((delivered − order) / order) × 100 (pozitif yeşil, negatif kırmızı; delivered=0 ise null)
+
+### Admin UI — `/admin/uretim-plani` (yeni sayfa)
+- 18 sütunluk tablo, satır bazlı 800 ms debounced auto-save
+- Üretici dropdown (vendors/manufacturer), koleksiyon datalist, ürün select (autofill)
+- Inline QC + Final QC: Geçti (yeşil) / Kaldı (kırmızı) butonlu + **resim upload** (base64 önizleme)
+- Gecikme ve +/-% göstergesi hücre altında
+- Menü: Üretim → İmalat Planı (Tablo)
+
+### Testing
+- `test_iteration16_production_plan.py` — 16/16 PASS (%100)
+- Minor: seq_no race condition fix eklendi (max-based), PUT Pydantic validation optional iyileştirme
+
+
 - [2026-03-26] Fixed Trendyol attribute matching (strict name match)
 - [2026-03-26] Auto-fill Yaş Grubu=Yetişkin, Menşei=TR for all products
 - [2026-03-26] Cleaned 71 non-textile attributes, hidden Beden/Renk/Web Color
