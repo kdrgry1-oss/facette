@@ -56,6 +56,8 @@ import {
 import AdminTasks from "./pages/admin/AdminTasks";
 import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
+import MarketplaceHub from "./pages/admin/MarketplaceHub";
+import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -106,6 +108,12 @@ function App() {
                   ile aynı mantık. Çoklu entegratör şeması backend'de tanımlı. */}
               <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
               <Route path="ayarlar/kargo" element={<CargoSettings />} />
+              {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
+                  aktarım kuralları + otomatik senkron ayarları. */}
+              <Route path="pazaryerleri" element={<MarketplaceHub />} />
+              {/* Entegrasyon Logları — ürün/sipariş/stok/fiyat aktarımlarının
+                  kayıtları, filtreli arama, Excel export. */}
+              <Route path="entegrasyon-loglari" element={<IntegrationLogs />} />
               <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />
