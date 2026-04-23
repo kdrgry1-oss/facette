@@ -116,5 +116,10 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - **UI**: Ürünler ve Siparişler tablolarına `.admin-table-compact` CSS varyantı uygulandı → bir ekranda daha çok kayıt sığıyor. Products thumbnail w-12→w-10 küçültüldü.
 - **UI**: Products ve Orders sayfalarına ÜST (compact) + ALT (full) pagination eklendi. Sağ üstte `Sayfa X / Y · 1-20 / 248 · Git:[#]` minimal satırı, altta klasik numaralı düğmeler.
 - **DX**: Products.jsx ve Orders.jsx dosya başlarına modül amacı + backend endpoint haritası + bağlı modül açıklaması eklendi. Kritik fonksiyonlar (fetchProducts, fetchCategories, handleSubmit, handleDelete, handleTrendyolSync/Update, openEditModal, fetchOrders, handleStatusChange, handleGenerateInvoice, handleShipOrder, handleBulkStatusChange, handleTrendyolPreview, SearchableAttribute) JSDoc blokları ile belgelendi.
-- **Test**: UI smoke test başarılı — Ürünler (248 kayıt, 13 sayfa) ve Siparişler (24 kayıt, 2 sayfa) ekranlarında hem üst minimal hem alt full pagination çalışıyor, "Git: 5" akışı doğrulandı.
+- **Refactor (P2 start)**: Products.jsx 2543→2362 satıra düştü. Yeni dosyalar:
+  - `components/admin/product-form/SearchableAttribute.jsx` (166 satır)
+  - `components/admin/product-form/SeoTab.jsx` (65 satır)
+  - `components/admin/product-form/StockTab.jsx` (101 satır)
+- **Test**: UI smoke test başarılı — Ürünler (248 kayıt, 13 sayfa) ve Siparişler (24 kayıt, 2 sayfa) ekranlarında hem üst minimal hem alt full pagination çalışıyor, "Git: 5" akışı doğrulandı. Ürün düzenleme modalında SEO, Stok ve Özellikler sekmeleri ayrı componentlerden doğru render ediliyor.
+
 

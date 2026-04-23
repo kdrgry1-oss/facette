@@ -57,125 +57,15 @@ import {
 } from "../../components/ui/dropdown-menu";
 import SizeTablePanel from "./SizeTablePanel";
 import Pagination from "../../components/admin/Pagination";
+import SearchableAttribute from "../../components/admin/product-form/SearchableAttribute";
+import SeoTab from "../../components/admin/product-form/SeoTab";
+import StockTab from "../../components/admin/product-form/StockTab";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-/**
- * SearchableAttribute — Aranabilir özellik seçici (ürün formu içinde kullanılır).
- *
- * AMAÇ:
- *   Trendyol başta olmak üzere pazaryerlerinin zorunlu tuttuğu özelliklerin
- *   (Kumaş Tipi, Yaka, Boy, Desen vb.) kütüphaneden aranarak hızlıca
- *   seçilmesini sağlar. Kütüphanede değeri olmayan (serbest metin) özellikler
- *   için düz input'a düşer.
- *
- * PROPS:
- *   - attr       : { id, name, values: string[] } — /api/attributes'tan gelir.
- *   - value      : Mevcut seçili değer.
- *   - onChange   : Yeni değer üst forma aktarılır (setFormData ile bağlanır).
- *   - isRequired : Trendyol zorunlu → kırmızı "ZORUNLU" rozetiyle vurgulanır.
- *
- * NEREDEN ÇAĞRILIR?
- *   Products.jsx içindeki ürün düzenleme/oluşturma modalının "Özellikler"
- *   sekmesinde render edilir. useEffect ile ayrı fetch edilen attribute
- *   listesinin map'inde kullanılır.
- */
-const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const dropdownRef = useRef(null);
-  
-  const hasValue = !!value;
-  const filteredValues = attr.values?.filter(v => v.toLowerCase().includes(searchTerm.toLowerCase())) || [];
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) setIsOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  if (!attr.values || attr.values.length === 0) {
-    return (
-      <div className="space-y-2">
-        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">{attr.name}</label>
-        <input 
-          type="text" 
-          value={value || ""} 
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Serbest değer yazın..."
-          className="w-full border-gray-100 border-2 px-4 py-3 rounded-lg bg-gray-50 focus:bg-white focus:border-orange-300 outline-none transition-all text-sm font-medium"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={`space-y-2 relative ${isRequired && !hasValue ? 'p-3 bg-red-50 rounded-xl border-2 border-red-200' : ''}`} ref={dropdownRef}>
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-1">
-          <label className={`block text-[10px] font-black uppercase tracking-widest ${isRequired ? 'text-white bg-red-600 px-1 rounded' : 'text-gray-900'}`}>{attr.name}</label>
-          {hasValue && <Check size={12} className="text-green-500 font-bold" strokeWidth={4} />}
-          {isRequired && !hasValue && <span className="text-red-600 font-bold animate-pulse">*</span>}
-        </div>
-        {isRequired && !hasValue && (
-          <span className="text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full uppercase animate-pulse shadow-lg shadow-red-200 ring-2 ring-red-300">
-             ZORUNLU (TRENDYOL)
-          </span>
-        )}
-      </div>
-      
-      <div 
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 cursor-pointer flex justify-between items-center transition-all ${hasValue ? 'border-green-500' : isRequired ? 'border-red-300' : 'border-gray-100'}`}
-      >
-        <div className="flex items-center gap-2 overflow-hidden flex-1">
-          <Search size={14} className="text-gray-400 shrink-0" />
-          <span className={`text-sm truncate ${hasValue ? 'text-black font-bold' : 'text-gray-400 font-medium'}`}>
-            {value || "Seçiniz..."}
-          </span>
-        </div>
-        <ChevronDown size={14} className={`transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
-      </div>
-
-      {isOpen && (
-        <div className="absolute z-[100] top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200">
-          <div className="p-2 border-b bg-gray-50 flex items-center gap-2">
-            <Search size={14} className="text-gray-400" />
-            <input 
-              autoFocus
-              className="bg-transparent border-none outline-none text-xs w-full py-1 font-bold"
-              placeholder="Kütüphanede ara..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-          <div className="max-h-60 overflow-y-auto">
-            {filteredValues.map((v, idx) => (
-              <div 
-                key={idx}
-                className="px-4 py-3 text-sm hover:bg-orange-50 cursor-pointer border-b last:border-0 border-gray-50 transition-colors font-medium text-gray-700"
-                onClick={() => {
-                  onChange(v);
-                  setIsOpen(false);
-                }}
-              >
-                {v}
-              </div>
-            ))}
-            {filteredValues.length === 0 && (
-              <div className="px-4 py-8 text-center text-xs text-gray-400 uppercase font-bold tracking-widest">
-                Sonuç bulunamadı
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+// SearchableAttribute, SeoTab, StockTab artık ayrı dosyalarda:
+//   /app/frontend/src/components/admin/product-form/*
+// (Products.jsx'i kısaltma refactor'unun 1. adımı).
 
 export default function AdminProducts() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2241,82 +2131,12 @@ export default function AdminProducts() {
 
               {/* SEO Tab */}
               <TabsContent value="seo" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="bg-white p-8 rounded-xl border shadow-sm space-y-6">
-                  <h3 className="font-semibold text-lg text-gray-900 border-b pb-4 mb-6 flex items-center gap-2">
-                    <Globe size={20} className="text-purple-500" />
-                    Google Arama Görünümü (SEO)
-                  </h3>
-                  <div className="space-y-6 max-w-2xl">
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Meta Başlık</label>
-                      <input
-                        type="text"
-                        value={formData.meta_title}
-                        onChange={(e) => setFormData({ ...formData, meta_title: e.target.value })}
-                        className="w-full border-gray-200 border-2 px-4 py-3 rounded-xl focus:border-black outline-none font-bold"
-                        placeholder="Örn: En Şık Gece Elbiseleri | Facette"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Meta Açıklama</label>
-                      <textarea
-                        value={formData.meta_description}
-                        onChange={(e) => setFormData({ ...formData, meta_description: e.target.value })}
-                        rows={4}
-                        className="w-full border-gray-200 border-2 px-4 py-3 rounded-xl focus:border-black outline-none font-medium text-sm"
-                        placeholder="Sayfa açıklamasını buraya yazın..."
-                      />
-                    </div>
-                  </div>
-                </div>
+                <SeoTab formData={formData} setFormData={setFormData} />
               </TabsContent>
 
-              {/* Stock Tab */}
+              {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}
               <TabsContent value="stock" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="bg-white p-8 rounded-xl border shadow-sm">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-bold text-xl text-gray-900 uppercase">Hızlı Stok Yönetimi</h3>
-                    <div className="flex items-center gap-4">
-                      <span className="text-xs font-bold text-gray-400 uppercase">Toplam Stok:</span>
-                      <span className="px-4 py-1 bg-black text-white rounded-full text-lg font-black">
-                        {formData.variants.reduce((sum, v) => sum + (v.stock || 0), 0)}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="border rounded-2xl overflow-hidden shadow-sm">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>
-                          <th className="text-left px-6 py-4 font-black text-gray-500 uppercase tracking-widest">Varyant</th>
-                          <th className="text-left px-6 py-4 font-black text-gray-500 uppercase tracking-widest">Stok</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {formData.variants.map((v, idx) => (
-                          <tr key={idx} className="hover:bg-orange-50/20 transition-colors">
-                            <td className="px-6 py-4">
-                              <span className="font-bold text-black">{v.size} {v.color && `/ ${v.color}`}</span>
-                              <p className="text-[10px] text-gray-400 font-mono mt-1">{v.stock_code || v.barcode}</p>
-                            </td>
-                            <td className="px-6 py-4">
-                              <input
-                                type="number"
-                                value={v.stock || 0}
-                                onChange={(e) => {
-                                  const updated = [...formData.variants];
-                                  updated[idx].stock = parseInt(e.target.value) || 0;
-                                  setFormData({...formData, variants: updated});
-                                }}
-                                className="w-24 text-center border-2 border-gray-100 px-4 py-2 rounded-xl text-lg font-black"
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                <StockTab formData={formData} setFormData={setFormData} />
               </TabsContent>
             </Tabs>
           </div>
