@@ -1,4 +1,39 @@
+/**
+ * =============================================================================
+ * Products.jsx — Admin Ürün Listesi & Düzenleme Sayfası
+ * =============================================================================
+ *
+ * NE İŞE YARAR?
+ *   Facette admin panelinde ürünlerin listelenmesi, filtrelenmesi, oluşturulması,
+ *   düzenlenmesi, çoğaltılması, silinmesi ve pazaryerlerine (Trendyol) aktarılması
+ *   için kullanılan ana ekran. Ürüne bağlı varyantlar, özellikler (attributes),
+ *   görseller, ölçü tablosu ve SEO alanları da bu ekrandaki modal üzerinden
+ *   yönetilir.
+ *
+ * BAĞLANTILI BACKEND UÇLARI:
+ *   - GET  /api/products                → Listeleme (search, filters, page)
+ *   - POST /api/products                → Yeni ürün
+ *   - PUT  /api/products/{id}           → Güncelleme
+ *   - DELETE /api/products/{id}         → Silme
+ *   - POST /api/products/{id}/duplicate → Kopyalama
+ *   - GET  /api/categories              → Kategori listesi (filtre + form)
+ *   - GET  /api/attributes              → Varyant/özellik kütüphanesi
+ *   - GET  /api/size-tables/{product_id}→ Ölçü tablosu
+ *   - POST /api/trendyol/push-product   → Trendyol'a gönderim
+ *
+ * BAĞLANTILI DİĞER DOSYALAR:
+ *   - SizeTablePanel.jsx  → Ürün modalında "Ölçü Tablosu" sekmesinde gömülü açılır.
+ *   - SearchableAttribute (aşağıda) → Zorunlu/opsiyonel Trendyol özelliklerini
+ *                                      arayarak seçmeyi sağlayan küçük bileşen.
+ *   - components/admin/Pagination.jsx  → Üst (compact) ve alt (full) sayfalama.
+ *
+ * PERFORMANS NOTU:
+ *   Bu dosya büyüktür (~2300 satır). İleride modalın sekmelerinin ayrı
+ *   componentlere bölünmesi planlanıyor (areas_that_need_refactoring).
+ * =============================================================================
+ */
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -21,9 +56,30 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import SizeTablePanel from "./SizeTablePanel";
+import Pagination from "../../components/admin/Pagination";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+/**
+ * SearchableAttribute — Aranabilir özellik seçici (ürün formu içinde kullanılır).
+ *
+ * AMAÇ:
+ *   Trendyol başta olmak üzere pazaryerlerinin zorunlu tuttuğu özelliklerin
+ *   (Kumaş Tipi, Yaka, Boy, Desen vb.) kütüphaneden aranarak hızlıca
+ *   seçilmesini sağlar. Kütüphanede değeri olmayan (serbest metin) özellikler
+ *   için düz input'a düşer.
+ *
+ * PROPS:
+ *   - attr       : { id, name, values: string[] } — /api/attributes'tan gelir.
+ *   - value      : Mevcut seçili değer.
+ *   - onChange   : Yeni değer üst forma aktarılır (setFormData ile bağlanır).
+ *   - isRequired : Trendyol zorunlu → kırmızı "ZORUNLU" rozetiyle vurgulanır.
+ *
+ * NEREDEN ÇAĞRILIR?
+ *   Products.jsx içindeki ürün düzenleme/oluşturma modalının "Özellikler"
+ *   sekmesinde render edilir. useEffect ile ayrı fetch edilen attribute
+ *   listesinin map'inde kullanılır.
+ */
 const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -122,6 +178,7 @@ const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
 };
 
 export default function AdminProducts() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -248,6 +305,25 @@ export default function AdminProducts() {
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
   }, [page, search, JSON.stringify(filters)]);
+
+  // Open size-table editor when deep-linked from /admin/olcu-tablolari
+  useEffect(() => {
+    const stId = searchParams.get("sizeTable");
+    const editId = searchParams.get("edit");
+    const targetId = stId || editId;
+    if (!targetId || products.length === 0) return;
+    const p = products.find((x) => x.id === targetId);
+    if (p) {
+      openEditModal(p);
+      if (stId) setActiveTab("sizetable");
+      // Clean URL so refresh doesn't reopen endlessly
+      const next = new URLSearchParams(searchParams);
+      next.delete("sizeTable");
+      next.delete("edit");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, searchParams]);
 
   // Click outside handler to close dropdowns
   useEffect(() => {
@@ -417,6 +493,21 @@ export default function AdminProducts() {
     }
   };
 
+  /**
+   * fetchProducts — Ürünleri arka uçtan çeker.
+   *
+   * TETİKLEYİCİLER: useEffect([page, search, filters]) içinde otomatik çağrılır.
+   *                 Arama kutusu / filtre değişimlerinde setPage(1) ile baştan
+   *                 yüklenir. Pagination componentinden onChange(newPage) geldiğinde
+   *                 page state'i güncellenir ve bu fonksiyon yeniden çalışır.
+   *
+   * BACKEND: GET /api/products (limit=20 ile sabit; Pagination componentinin
+   *          pageSize={20} prop'u ile birebir eşleşir).
+   *
+   * DÖNÜŞ: { products, total } — `total` Pagination için toplam sayfa hesabında
+   *        kullanılır; aynı değer hem üst (compact) hem alt (full) pagination'a
+   *        beslenir.
+   */
   const fetchProducts = async () => {
     setLoading(true);
     try {
@@ -439,19 +530,40 @@ export default function AdminProducts() {
     }
   };
 
+  /**
+   * fetchCategories — Form alanlarını besleyen referans verileri çeker.
+   *
+   * NEDEN Promise.allSettled?
+   *   Kullanıcının raporladığı "Ürün özellikleri çekilmiyor" bug'ının kök
+   *   nedeni: Daha önce ardışık await kullanıldığında /api/attributes hata
+   *   verdiğinde /api/variants/size ve /color çağrıları hiç yapılmıyordu.
+   *   allSettled ile HER endpoint bağımsız çalışır → biri fail olsa bile
+   *   diğerleri forma yüklenir.
+   *
+   * BESLEDİĞİ STATE'LER:
+   *   - categories       → Kategori seçici dropdown (sol filtre + form).
+   *   - globalAttributes → Ürün modalı "Özellikler" sekmesi (SearchableAttribute).
+   *   - globalSizes      → Varyant bedenleri.
+   *   - globalColors     → Varyant renkleri.
+   */
   const fetchCategories = async () => {
     try {
-      const res = await axios.get(`${API}/categories`);
-      setCategories(res.data || []);
-      
       const token = localStorage.getItem('token');
-      const attrRes = await axios.get(`${API}/attributes`, { headers: { Authorization: `Bearer ${token}` } });
-      setGlobalAttributes(attrRes.data.attributes || []);
-      
-      const sizesRes = await axios.get(`${API}/variants/size`, { headers: { Authorization: `Bearer ${token}` } });
-      const colorsRes = await axios.get(`${API}/variants/color`, { headers: { Authorization: `Bearer ${token}` } });
-      setGlobalSizes(sizesRes.data.sort((a,b) => a.sort_order - b.sort_order) || []);
-      setGlobalColors(colorsRes.data.sort((a,b) => a.sort_order - b.sort_order) || []);
+      const auth = { headers: { Authorization: `Bearer ${token}` } };
+      // Fetch each independently so one failure doesn't block the others
+      const results = await Promise.allSettled([
+        axios.get(`${API}/categories`),
+        axios.get(`${API}/attributes`, auth),
+        axios.get(`${API}/variants/size`, auth),
+        axios.get(`${API}/variants/color`, auth),
+      ]);
+      const pick = (r) => (r.status === "fulfilled" ? r.value.data : null);
+      setCategories(pick(results[0]) || []);
+      setGlobalAttributes((pick(results[1]) || {}).attributes || []);
+      const sizes = pick(results[2]) || [];
+      const colors = pick(results[3]) || [];
+      setGlobalSizes([...sizes].sort((a,b) => (a.sort_order||0) - (b.sort_order||0)));
+      setGlobalColors([...colors].sort((a,b) => (a.sort_order||0) - (b.sort_order||0)));
     } catch (err) {
       console.error(err);
     }
@@ -494,6 +606,12 @@ export default function AdminProducts() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  /**
+   * handleTrendyolSync — Tek bir ürünü Trendyol'a YENİ ürün olarak gönderir.
+   *   Zorunlu attributes (SearchableAttribute'ın "ZORUNLU" rozetiyle gösterdiği
+   *   alanlar) backend tarafında kontrol edilir; eksikse 400 döner.
+   *   BACKEND: POST /api/integrations/trendyol/products/{id}/sync
+   */
   const handleTrendyolSync = async (productId) => {
     try {
       const token = localStorage.getItem('token');
@@ -515,6 +633,23 @@ export default function AdminProducts() {
     setFormData({ ...formData, images: newImages });
   };
 
+  /**
+   * handleSubmit — Ürün kaydetme / güncelleme işlemi.
+   *
+   * AKIŞ:
+   *   1) Form'daki attributes objesini backend'in beklediği diziye çevirir.
+   *      Varsayılan olarak "Yaş Grubu: Yetişkin" ve "Menşei: TR" eklenir
+   *      (Trendyol için zorunlu minimumlar).
+   *   2) Oluşturma modunda, varyantlarda birden fazla renk varsa HER RENK
+   *      için AYRI ürün oluşturur → Trendyol aynı renk grubunu tek ürün
+   *      olarak kabul eder; bu ayrım orada zorunludur.
+   *   3) Tek renkte "Web Color" ve "Renk" özellikleri otomatik set edilir.
+   *   4) Edit modunda tüm payload doğrudan PUT edilir.
+   *
+   * BAĞLANTILAR:
+   *   - POST/PUT /api/products
+   *   - Başarı sonrası fetchProducts ile liste tazelenir, modal kapanır.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -602,6 +737,12 @@ export default function AdminProducts() {
     }
   };
 
+  /**
+   * handleDelete — Ürünü kalıcı olarak siler.
+   *   Geriye dönük silmeyi önlemek için JS confirm ile onay alır. Silme başarılı
+   *   olduğunda liste tazelenir. Trendyol'da da hâlâ varsa oradan ayrıca
+   *   kaldırılması gerekir (P2 backlog).
+   */
   const handleDelete = async (id) => {
     if (!window.confirm("Ürünü silmek istediğinize emin misiniz?")) return;
     try {
@@ -615,6 +756,12 @@ export default function AdminProducts() {
     }
   };
 
+  /**
+   * handleTrendyolUpdate — Mevcut Trendyol ürününün STOK/FİYAT bilgisini günceller.
+   *   (Yeni ürün göndermek için handleTrendyolSync kullanılır; bu fonksiyon
+   *    sadece envanter/price güncellemesi yapar.)
+   *   BACKEND: POST /api/integrations/trendyol/products/{id}/sync-inventory
+   */
   const handleTrendyolUpdate = async (product) => {
     try {
       const token = localStorage.getItem('token');
@@ -627,6 +774,12 @@ export default function AdminProducts() {
     }
   };
 
+  /**
+   * openEditModal — Seçili ürünü düzenleme modunda modala doldurur.
+   *   formData'ya tüm ürün alanlarını + attributes dizisini Object map'e çevirerek
+   *   yerleştirir. Ölçü Tablosu sekmesinde SizeTablePanel bileşeni
+   *   `product.id`'yi kullanarak kendi verisini çeker.
+   */
   const openEditModal = (product) => {
     setEditingProduct(product);
     setFormData({
@@ -917,9 +1070,35 @@ export default function AdminProducts() {
         </div>
       )}
 
+      {/* =================================================================
+          ÜRÜN TABLOSU
+          -----------------------------------------------------------------
+          - .admin-table-compact: Satırları daraltıp bir sayfaya daha çok
+            ürün sığdırmak için uygulanıyor (index.css'de tanımlı).
+          - ÜST Pagination (compact): Tablo başlığından ÖNCE durur, minimal
+            tek satır "Sayfa X / Y" + ok + git kutusu — tasarımı bozmaz.
+          - ALT Pagination (full)  : Numaralı düğmeler + ilk/son + git.
+          - Her iki pagination da aynı `page/total/onChange` state'ini
+            paylaşır → birinden yapılan değişiklik diğerinde yansır.
+          ================================================================= */}
+
+      {/* Üst (compact) pagination — listeyi açan kullanıcı aşağı inmeden
+          sayfa değiştirebilsin diye eklendi. Tablo sağına hizalı. */}
+      {total > 20 && (
+        <div className="flex justify-end mb-2" data-testid="products-top-pagination">
+          <Pagination
+            page={page}
+            total={total}
+            pageSize={20}
+            onChange={setPage}
+            variant="compact"
+          />
+        </div>
+      )}
+
       {/* Products Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <table className="admin-table">
+        <table className="admin-table admin-table-compact">
           <thead>
             <tr>
               <th>Görsel</th>
@@ -946,12 +1125,12 @@ export default function AdminProducts() {
                         <img 
                           src={product.images[0]} 
                           alt="" 
-                          className="w-12 h-16 object-cover rounded shadow-sm border border-gray-100 transition-all duration-300 group-hover/img:scale-[3.0] group-hover/img:shadow-xl group-hover/img:border-orange-200 cursor-zoom-in" 
+                          className="w-10 h-14 object-cover rounded shadow-sm border border-gray-100 transition-all duration-300 group-hover/img:scale-[3.0] group-hover/img:shadow-xl group-hover/img:border-orange-200 cursor-zoom-in" 
                         />
                       </div>
                     ) : (
-                      <div className="w-12 h-16 bg-gray-100 flex items-center justify-center rounded border border-gray-50 text-gray-400">
-                        <Image size={16} />
+                      <div className="w-10 h-14 bg-gray-100 flex items-center justify-center rounded border border-gray-50 text-gray-400">
+                        <Image size={14} />
                       </div>
                     )}
                   </td>
@@ -1048,20 +1227,17 @@ export default function AdminProducts() {
         </table>
       </div>
 
-      {/* Pagination */}
-      {total > 20 && (
-        <div className="flex justify-center gap-2 mt-4">
-          {[...Array(Math.ceil(total / 20))].map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setPage(i + 1)}
-              className={`w-8 h-8 rounded ${page === i + 1 ? "bg-black text-white" : "bg-white hover:bg-gray-100"}`}
-            >
-              {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Pagination (alt — full numaralı).
+          Not: Üst (compact) pagination yukarıda tablonun başlığından önce
+          render edilir; her ikisi de aynı `setPage` setter'ını çağırır ve
+          fetch useEffect'i [page] değiştiğinde tetiklenir. */}
+      <Pagination
+        page={page}
+        total={total}
+        pageSize={20}
+        onChange={setPage}
+        variant="full"
+      />
 
       {/* Product Modal with Tabs */}
       <Dialog open={modalOpen} onOpenChange={(open) => { setModalOpen(open); if(!open) resetForm(); }}>

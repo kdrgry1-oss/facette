@@ -233,7 +233,17 @@ body {
   @apply opacity-100;
 }
 
-/* Table */
+/* =========================================================================
+ * Admin Panel Tabloları
+ * -------------------------------------------------------------------------
+ * .admin-table         : Standart yoğunluk (geniş formlar, az satır).
+ * .admin-table-compact : Sıklaştırılmış satırlar. Products ve Orders gibi
+ *                        büyük listeleme sayfalarında kullanılır; amaç bir
+ *                        ekrana daha çok ürün/sipariş sığdırmak. Row hover'ı
+ *                        aynı kalır; yalnızca dikey padding ve yükseklikler
+ *                        daralır.
+ *   Kullanımı: <table className="admin-table admin-table-compact">
+ * ========================================================================= */
 .admin-table {
   @apply w-full text-sm;
 }
@@ -248,6 +258,23 @@ body {
 
 .admin-table tr:hover td {
   @apply bg-gray-50;
+}
+
+/* Compact variant — daha sıkı satırlar, daha küçük görsel thumbnail hover'lı alanlar.
+   Products.jsx ve Orders.jsx tablolarında uygulanır. Hücre içi padding düşer
+   ancak hover ve çerçeve davranışı korunur. */
+.admin-table-compact th {
+  @apply py-2 px-3 text-[11px];
+}
+
+.admin-table-compact td {
+  @apply py-1.5 px-3;
+}
+
+/* Ürün satırında görsel thumbnail için daha küçük tercih edilebilecek boyut.
+   Products.jsx'de "w-12 h-16" yerine compact kullanacağımız yardımcı: */
+.admin-thumb-sm {
+  @apply w-9 h-12 object-cover rounded border border-gray-100;
 }
 
 /* Status badges */

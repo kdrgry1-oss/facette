@@ -1,3 +1,32 @@
+/**
+ * =============================================================================
+ * Orders.jsx — Admin Sipariş Yönetim Sayfası
+ * =============================================================================
+ *
+ * NE İŞE YARAR?
+ *   Tüm kanallardan (web site, Trendyol, Hepsiburada, Temu) gelen siparişlerin
+ *   listelenmesi, filtrelenmesi, detaylarının görüntülenmesi, durumlarının
+ *   güncellenmesi (onay, hazırlık, kargo, teslim, iptal), kargo çıkışı,
+ *   fatura yüklenmesi, Trendyol'dan manuel içe aktarım ve toplu işlemlerin
+ *   yapıldığı ana admin ekranıdır.
+ *
+ * BAĞLANTILI BACKEND UÇLARI:
+ *   - GET  /api/orders                     → Listeleme (filtre, sayfa)
+ *   - GET  /api/orders/{id}                → Detay
+ *   - PUT  /api/orders/{id}/status         → Durum güncelleme
+ *   - POST /api/orders/{id}/ship           → Kargoya verme
+ *   - POST /api/orders/bulk                → Toplu durum değiştirme
+ *   - POST /api/trendyol/import            → Trendyol manuel içe aktarım
+ *   - GET  /api/orders/{id}/attribution    → Sipariş kaynağı/funnel
+ *
+ * BAĞLANTILI MODÜLLER:
+ *   - /app/frontend/src/lib/attribution.js → UTM toplanan verileri gösterme.
+ *   - components/admin/Pagination.jsx      → Üst/alt sayfalama bileşeni.
+ *   - Returns.jsx                          → İade başlatma (sipariş detayından).
+ *   - Campaigns.jsx                        → İade/iptal'de kampanya oransal
+ *                                            hesabı (P1 backlog).
+ * =============================================================================
+ */
 import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info } from "lucide-react";
 import axios from "axios";
@@ -15,6 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import Pagination from "../../components/admin/Pagination";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -110,6 +140,15 @@ export default function AdminOrders() {
     fetchOrders();
   }, [page, statusFilter]);
 
+  /**
+   * fetchOrders — Siparişleri arka uçtan çeker.
+   *
+   * TETİKLEYİCİ: useEffect([page, statusFilter, filters]) ile otomatik.
+   *              Üst ve alt Pagination componentleri `onChange={setPage}` ile
+   *              bu state'i günceller.
+   * BACKEND    : GET /api/orders?page=&limit=20&status=&...
+   * BESLER     : orders listesi + total (Pagination sayfa hesabı için).
+   */
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -129,6 +168,11 @@ export default function AdminOrders() {
     }
   };
 
+  /**
+   * handleStatusChange — Tek bir siparişin durumunu değiştirir (pending→confirmed vs).
+   *   Backend tarafında durum akışı doğrulanır (örn: delivered'dan pending'e dönüş
+   *   engellenir). Güncelleme sonrası liste ve (açıksa) detay modal tazelenir.
+   */
   const handleStatusChange = async (orderId, newStatus) => {
     try {
       const token = localStorage.getItem('token');
@@ -145,6 +189,12 @@ export default function AdminOrders() {
     }
   };
 
+  /**
+   * handleGenerateInvoice — Seçili sipariş için e-Arşiv fatura oluşturur.
+   *   BACKEND: POST /api/orders/{id}/create-invoice?invoice_type=e-arsiv
+   *   Başarılı olursa `invoice_number` dönerek satırda görünür; fatura
+   *   oluşturulmuş siparişler tabloda opaklık azaltılarak pasifleştirilir.
+   */
   const handleGenerateInvoice = async (orderId) => {
     try {
       const token = localStorage.getItem('token');
@@ -218,6 +268,12 @@ export default function AdminOrders() {
   };
 
 
+  /**
+   * handleShipOrder — Siparişi "Kargoda" durumuna alıp kargo takip numarasını
+   *   kaydeder. Seçilen kargo firması `selectedCargo` state'indendir. Başarı
+   *   sonrası liste tazelenir; müşteriye SMS göndermek için ayrı
+   *   handleSendShippingSMS kullanılır (canlı API gerektirir).
+   */
   const handleShipOrder = async () => {
     if (!trackingNumber.trim()) {
       toast.error("Lütfen takip numarası giriniz");
@@ -364,6 +420,12 @@ export default function AdminOrders() {
     }
   };
 
+  /**
+   * handleBulkStatusChange — Seçili siparişlerin TOPLU durum değişimi.
+   *   Üst checkbox ile tümünü seçip alt seçici ile "Hazırlanıyor" / "Kargoda"
+   *   gibi toplu güncelleme yapılır. Backend tek tek gezinir, hata olursa
+   *   bireysel olarak raporlar; frontend sonunda listeyi yeniler.
+   */
   const handleBulkStatusChange = async (status) => {
     if (selectedOrders.length === 0) {
       toast.error("Lütfen sipariş seçiniz");
@@ -383,6 +445,14 @@ export default function AdminOrders() {
     }
   };
 
+  /**
+   * handleTrendyolPreview — Trendyol'dan sipariş önizlemesi çeker.
+   *   Kullanıcı ya sipariş numarası ya da tarih aralığı girer, backend
+   *   Trendyol API'ına sorgu atar ve henüz sisteme çekilmemiş olanları
+   *   listeler. Ardından `handleTrendyolImportSelected` ile seçilenler
+   *   içe aktarılır. Bu, canlıya bağlı olan tek Trendyol akışıdır
+   *   (webhook kaçarsa manuel kurtarma için).
+   */
   const handleTrendyolPreview = async () => {
     setTrendyolPreviewing(true);
     setTrendyolPreviewOrders([]);
@@ -643,9 +713,34 @@ export default function AdminOrders() {
         </div>
       </div>
 
+      {/* =================================================================
+          SİPARİŞLER TABLOSU
+          -----------------------------------------------------------------
+          - .admin-table-compact ile satır yüksekliği azaltıldı → bir
+            sayfada daha çok sipariş görünür.
+          - ÜST (compact) Pagination: özet kartlarının hemen altında,
+            minimal tek satır. Filtre barı ve tabloyu birbirinden ayıran
+            ince bir navigasyon katmanı olarak çalışır.
+          - ALT (full) Pagination: tam numaralı + git kutusu.
+          ================================================================= */}
+
+      {/* Üst (compact) pagination — sipariş listesi uzadığında tasarımı
+          bozmayan, sadece ok+bilgi+git kutusu gösteren minimal versiyon. */}
+      {total > 20 && (
+        <div className="flex justify-end mb-2" data-testid="orders-top-pagination">
+          <Pagination
+            page={page}
+            total={total}
+            pageSize={20}
+            onChange={setPage}
+            variant="compact"
+          />
+        </div>
+      )}
+
       {/* Orders Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <table className="admin-table">
+        <table className="admin-table admin-table-compact">
           <thead>
             <tr>
               <th className="w-10">
@@ -953,20 +1048,15 @@ export default function AdminOrders() {
         </table>
       </div>
 
-      {/* Pagination */}
-      {total > 20 && (
-        <div className="flex justify-center gap-2 mt-4">
-          {[...Array(Math.ceil(total / 20))].map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setPage(i + 1)}
-              className={`w-8 h-8 rounded ${page === i + 1 ? "bg-black text-white" : "bg-white hover:bg-gray-100"}`}
-            >
-              {i + 1}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Pagination (alt — full numaralı).
+          Üst compact pagination ile aynı state'i paylaşır. */}
+      <Pagination
+        page={page}
+        total={total}
+        pageSize={20}
+        onChange={setPage}
+        variant="full"
+      />
 
       {/* Order Detail Modal */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
