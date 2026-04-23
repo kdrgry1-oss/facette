@@ -325,4 +325,17 @@ Kullanıcı şikayetleri: (1) "Ürün özellikleri sekmesinde değerler görünm
 - `/values` 51 grup, 10-100+ değer ✅
 - Lint: MarketplaceAdvancedMatch.jsx, ProductAttributes.jsx, category_mapping.py — 3/3 temiz.
 
+## [2026-04-23] Modal Özellik Autocomplete — Datalist Yerine Görünür Dropdown
+
+Kullanıcı şikayeti: "Kategori eşleştirme ayarlarında ürünlerin özellik alanlarını sistemden çekmiyor." Arka planda `GET /api/attributes` doğru şekilde 53 attribute çekiyordu ama UI `<datalist>` kullanıyordu — bu element çoğu browser'da input boşken açılmaz, kullanıcı sistem özelliklerini göremezdi.
+
+### Fix
+- **Yeni `LocalAttrAutoComplete` bileşeni**: `MarketplaceAdvancedMatch.jsx` içinde standalone autocomplete. Focus'ta sistem özelliklerinin tamamını (53 tane, "Beden — 100 değer" gibi) gösterir, yazdıkça filtreler.
+- **Banner bilgisi**: "Sistemde tanımlı **N** özellik var — kutuya tıkladığınızda öneri listesi açılır."
+- **Fallback**: Global attrs boşsa (yeni kurulum) banner'da "Ürünlerden Yükle" butonu → `POST /api/attributes/sync-from-products` çağırır, liste yeniler.
+
+### Test
+- `/api/attributes` 53 attribute döner, değer sayılarıyla birlikte autocomplete'de görünür ✅
+- Lint temiz ✅
+
 
