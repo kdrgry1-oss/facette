@@ -71,6 +71,7 @@ from routes.admin_tasks import router as admin_tasks_router
 from routes.barcode_cards import router as barcode_cards_router
 from routes.provider_settings import router as provider_settings_router
 from routes.marketplace_hub import router as marketplace_hub_router
+from routes.brand_mapping import router as brand_mapping_router
 
 # Database
 from routes.deps import client, db
@@ -146,6 +147,98 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------------------------------
+# INTEGRATION LOGGING MIDDLEWARE
+# ---------------------------------------------------------------------------
+# /api/integrations/{marketplace}/... altındaki tüm çağrıları otomatik olarak
+# `integration_logs` koleksiyonuna kaydeder. Bu sayede main agent'ın her
+# endpoint'i manuel sarmalamasına gerek kalmaz.
+#
+# Marketplace, URL path'inin 3. segmentinden (trendyol / hepsiburada / temu /
+# iyzico vb.) alınır. iyzico/gib/cargo gibi non-marketplace olanlar atlanır.
+# Action, URL path'in kalanından türetilir (products/sync → product_push vb.).
+# ---------------------------------------------------------------------------
+import time as _time
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+MARKETPLACE_PATH_KEYS = {"trendyol", "hepsiburada", "temu", "n11", "amazon-tr",
+                         "amazon-de", "aliexpress", "etsy", "hepsi-global",
+                         "fruugo", "emag", "trendyol-ihracat", "ciceksepeti"}
+
+
+def _action_from_path(path: str) -> str:
+    """
+    URL'den kaba bir "action" çıkarır. Örn:
+      /api/integrations/trendyol/products/sync        → product_push
+      /api/integrations/trendyol/orders/import        → order_pull
+      /api/integrations/trendyol/products/inventory-sync → stock_update
+      /api/integrations/hepsiburada/products/push     → product_push
+    """
+    p = path.lower()
+    if "inventory" in p or "stock" in p: return "stock_update"
+    if "price" in p: return "price_update"
+    if "category" in p or "categories" in p: return "category_sync"
+    if "brand" in p: return "brand_sync"
+    if "claim" in p or "return" in p: return "return_pull"
+    if "/orders/import" in p or "/orders/pull" in p or "/orders/sync" in p or "/orders/fetch" in p: return "order_pull"
+    if "/orders/" in p: return "order_update"
+    if "/products/" in p: return "product_push"
+    if "webhook" in p: return "webhook_receive"
+    if "settings" in p or "status" in p or "debug" in p: return "config_read"
+    return "api_call"
+
+
+class IntegrationLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        # Sadece /api/integrations/{marketplace}/... yollarını ilgilendir
+        if not path.startswith("/api/integrations/"):
+            return await call_next(request)
+
+        parts = [p for p in path.split("/") if p]
+        # parts: ["api","integrations","<marketplace>","..."]
+        mk = parts[2] if len(parts) > 2 else None
+        # non-marketplace veya ayar/okuma ise log atla
+        if mk not in MARKETPLACE_PATH_KEYS:
+            return await call_next(request)
+        # GET = config_read — çok gürültü yapar, atla
+        if request.method.upper() == "GET":
+            return await call_next(request)
+
+        start = _time.time()
+        status = "success"
+        msg = ""
+        response = None
+        try:
+            response = await call_next(request)
+            if response.status_code >= 500: status = "failed"
+            elif response.status_code >= 400: status = "failed"
+            msg = f"{request.method} {path} → HTTP {response.status_code}"
+        except Exception as e:
+            status = "failed"
+            msg = f"{request.method} {path} → EX {type(e).__name__}: {e}"
+            raise
+        finally:
+            try:
+                duration = int((_time.time() - start) * 1000)
+                # Lazy import — circular dependency'yi önler
+                from routes.marketplace_hub import log_integration_event
+                await log_integration_event(
+                    marketplace=mk,
+                    action=_action_from_path(path),
+                    status=status,
+                    direction="outbound",
+                    message=msg,
+                    duration_ms=duration,
+                )
+            except Exception:
+                pass
+        return response
+
+
+app.add_middleware(IntegrationLoggingMiddleware)
+
 # Main API Router
 api_router = APIRouter(prefix="/api")
 
@@ -207,6 +300,8 @@ api_router.include_router(provider_settings_router)
 # Amazon, AliExpress, Etsy, ...) merkezi yönetimi: credentials, transfer_rules,
 # auto_sync ayarları + integration_logs.
 api_router.include_router(marketplace_hub_router)
+# Marka Eşleştirme (multi-marketplace)
+api_router.include_router(brand_mapping_router)
 
 # Root endpoint
 @api_router.get("/")

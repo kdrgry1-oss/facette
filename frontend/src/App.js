@@ -58,6 +58,8 @@ import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
+import FailedTransfers from "./pages/admin/FailedTransfers";
+import BrandMapping from "./pages/admin/BrandMapping";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -114,6 +116,10 @@ function App() {
               {/* Entegrasyon Logları — ürün/sipariş/stok/fiyat aktarımlarının
                   kayıtları, filtreli arama, Excel export. */}
               <Route path="entegrasyon-loglari" element={<IntegrationLogs />} />
+              {/* Aktarılamayan sipariş/ürün kayıtları + toplu tekrar-aktar. */}
+              <Route path="aktarilamayanlar" element={<FailedTransfers />} />
+              {/* Multi-marketplace marka eşleştirme. */}
+              <Route path="marka-eslestir" element={<BrandMapping />} />
               <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />

@@ -111,6 +111,11 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P2: Products.jsx (2500+ satır) ve Orders.jsx (1500+ satır) modal/sekme componentlerine bölme
 - P2: integrations.py (3500+ satır) provider'a göre bölme
 
+## Changelog — 23 Nis 2026 (Oturum 3)
+- **Integration Logging Middleware**: `server.py`'ye otomatik logging middleware eklendi. `/api/integrations/{marketplace}/...` altındaki tüm POST/PUT/DELETE çağrıları `integration_logs` koleksiyonuna otomatik kaydediliyor (marketplace + action + status + HTTP kod + süre). Manuel wrapping gereksiz.
+- **Aktarılamayanlar sayfası** (`/admin/aktarilamayanlar`): integration_logs'tan `status=failed` kayıtları; tek satır veya seçili satırlarda "Tekrar Aktar" butonu uygun endpoint'e (product_push → /integrations/{mp}/products/{id}/sync, stock_update → /sync-inventory, order_pull → /orders/import) yönlendirir.
+- **Marka Eşleştirme** (`/admin/marka-eslestir`): Multi-marketplace tek ekran. 13 pazaryeri sekmesi, özet kartlar (toplam/eşleşti/eşleşmedi), arama + filtre (tümü/eşleşti/eşleşmedi), satır başına manuel "Düzenle/Sil", toplu "Otomatik Eşleştir" (isim bazlı upsert) + "Hepsini Sıfırla". Backend `brand_mapping.py` + `brand_mappings` koleksiyonu. Brand koleksiyonu boşsa `products.distinct("brand")` fallback ile sistem markalarını türetir.
+
 ## Changelog — 23 Nis 2026 (Oturum 2)
 - **Marketplace Hub (yeni)**: `routes/marketplace_hub.py` — 13 pazaryeri (Trendyol, Hepsiburada, Temu, N11, Amazon TR/DE, AliExpress, Etsy, Hepsi Global, Fruugo, eMAG, Trendyol İhracat, Çiçek Sepeti) için tek merkezli yönetim. Her biri için:
   - Credential şeması (Supplier ID, API Key/Secret, Username/Password, vb.)
