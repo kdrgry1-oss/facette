@@ -72,6 +72,8 @@ from routes.barcode_cards import router as barcode_cards_router
 from routes.provider_settings import router as provider_settings_router
 from routes.marketplace_hub import router as marketplace_hub_router
 from routes.brand_mapping import router as brand_mapping_router
+from routes.category_mapping import router as category_mapping_router
+from routes.bulk_ops import router as bulk_ops_router
 
 # Database
 from routes.deps import client, db
@@ -302,6 +304,10 @@ api_router.include_router(provider_settings_router)
 api_router.include_router(marketplace_hub_router)
 # Marka Eşleştirme (multi-marketplace)
 api_router.include_router(brand_mapping_router)
+# Kategori Eşleştirme (multi-marketplace)
+api_router.include_router(category_mapping_router)
+# Toplu fiyat/stok Excel ops + stok uyarı + yeniden sipariş önerisi
+api_router.include_router(bulk_ops_router)
 
 # Root endpoint
 @api_router.get("/")

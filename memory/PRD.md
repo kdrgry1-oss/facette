@@ -111,6 +111,22 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P2: Products.jsx (2500+ satır) ve Orders.jsx (1500+ satır) modal/sekme componentlerine bölme
 - P2: integrations.py (3500+ satır) provider'a göre bölme
 
+## Changelog — 23 Nis 2026 (Oturum 4)
+**Piyasa araştırması (ideaSoft/T-Soft/Akinon) sonucu eksik modüller:**
+- **Toplu Fiyat/Stok Excel** (`/admin/toplu-fiyat-stok`): 3 adım (şablon indir → preview dry-run → apply). `bulk_ops.py` + openpyxl. Ürün stock_code VEYA barcode ile eşleştirme, varyant seviyesi stok güncellemesi.
+- **Stok Uyarıları + Reorder Önerileri** (`/admin/stok-uyarilari`): Kritik Stok sekmesi (threshold ayarlanabilir) + Yeniden Sipariş Önerileri (son 60 gündeki sipariş kalemlerinden stok=0 ama satılanlar, agg pipeline).
+- **Multi-Marketplace Kategori Eşleştirme** (`/admin/kategori-eslestir`): BrandMapping ile aynı üst yapı. `category_mapping.py` + `category_mappings` koleksiyonu. 13 pazaryeri sekmesi.
+- **Scheduled Auto-Sync** (scheduler.py): `_marketplace_sync_tick()` her dk çalışır; her enabled marketplace_account için `products_interval_min` ve `orders_interval_min`'e göre queued log atar (`_last_products_sync` / `_last_orders_sync` zaman damgalarıyla). İlerde gerçek integrations.py servisleri bu cron'a bağlanacak.
+- **AddressFields** component (`components/admin/AddressFields.jsx`): İl/İlçe dropdown (backend `/api/locations/tr/{provinces,districts}`) — Siparişler/Checkout adres formlarında kullanılmak üzere yeniden kullanılabilir bileşen.
+
+**Test edildi**:
+- stock-alerts threshold=3 → 230 kritik varyant ✅
+- reorder-suggestions → 0 (son 60 günde hiç sipariş yok) ✅
+- Template download (.xlsx) → 4971 bytes ✅
+- category-mapping/trendyol → 33 kategori / 0 eşleşme ✅
+- locations/tr/provinces → 81 il ✅
+- UI: Stok Uyarıları tablosu (Haki Trençkot, Gri Blazer, vb. 230 varyant) + Toplu Fiyat/Stok 3 adım kart + Kategori Eşleştirme 13 sekme ✅
+
 ## Changelog — 23 Nis 2026 (Oturum 3)
 - **Integration Logging Middleware**: `server.py`'ye otomatik logging middleware eklendi. `/api/integrations/{marketplace}/...` altındaki tüm POST/PUT/DELETE çağrıları `integration_logs` koleksiyonuna otomatik kaydediliyor (marketplace + action + status + HTTP kod + süre). Manuel wrapping gereksiz.
 - **Aktarılamayanlar sayfası** (`/admin/aktarilamayanlar`): integration_logs'tan `status=failed` kayıtları; tek satır veya seçili satırlarda "Tekrar Aktar" butonu uygun endpoint'e (product_push → /integrations/{mp}/products/{id}/sync, stock_update → /sync-inventory, order_pull → /orders/import) yönlendirir.

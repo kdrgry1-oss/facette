@@ -60,6 +60,9 @@ import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import FailedTransfers from "./pages/admin/FailedTransfers";
 import BrandMapping from "./pages/admin/BrandMapping";
+import CategoryMapping from "./pages/admin/CategoryMapping";
+import BulkPriceStock from "./pages/admin/BulkPriceStock";
+import StockAlerts2 from "./pages/admin/StockAlerts";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -120,6 +123,12 @@ function App() {
               <Route path="aktarilamayanlar" element={<FailedTransfers />} />
               {/* Multi-marketplace marka eşleştirme. */}
               <Route path="marka-eslestir" element={<BrandMapping />} />
+              {/* Multi-marketplace kategori eşleştirme */}
+              <Route path="kategori-eslestir" element={<CategoryMapping />} />
+              {/* Toplu Excel ile fiyat/stok güncelleme */}
+              <Route path="toplu-fiyat-stok" element={<BulkPriceStock />} />
+              {/* Kritik stok uyarıları + yeniden sipariş önerileri */}
+              <Route path="stok-uyarilari" element={<StockAlerts2 />} />
               <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />
