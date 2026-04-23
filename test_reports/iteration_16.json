@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 16 backend smoke — FAZ 7 (İmalat Planı 18-col CRUD + product autofill + derived fields). Created pytest suite with 16 tests, all pass. Verified: seq_no auto-increment, planned_delivery = payment_date+21 (both on create and on PUT payment_date change), product autofill (collection/color/purchase_price/name → description), manufacturer_name lookup by id, delay_days (negative / zero / positive), qty_diff_pct (20.0 for 120/100, None when delivered_qty=0 — fix verified, no more -100), 404 on unknown PUT/DELETE, search by model_no, manufacturer_id filter, /production-plan/collections distinct (product + plan merged, sorted, no dupes), delete removal verified via GET list, product autofill reflects latest values after PUT /products.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/production-plan",
+        "issue": "seq_no is computed as count_documents({}) + 1. After DELETEs, newly inserted rows will reuse the seq_no of previously-deleted rows, producing duplicates. Prefer max(seq_no)+1 or a dedicated counters collection."
+      },
+      {
+        "endpoint": "PUT /api/production-plan/{id}",
+        "issue": "product_id is in the 'allowed' update set but no re-autofill runs on PUT. If UI lets user change product on an existing row, the row's collection/price/color/product_description will not refresh from the new product. Consider replaying the autofill block when product_id changes (and empty fields are to be refilled) or document as client-side responsibility."
+      },
+      {
+        "endpoint": "PUT /api/production-plan/{id}",
+        "issue": "Accepts arbitrary dict (payload: dict) with only allow-list filtering — no Pydantic validation, so type errors (e.g. order_qty='abc') can persist strings into the doc and break _compute_derived downstream. Suggest Pydantic PlanRowUpdate with Optional fields."
+      },
+      {
+        "endpoint": "POST /api/production-plan",
+        "issue": "Empty-payload row accepted with order_qty=0, price=0. Acceptable for UX (spreadsheet rows added empty and filled later), but there's no server-side minimum (e.g. at least model_no) — flag for product decision."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration16_production_plan.py",
+    "/app/test_reports/pytest/iteration16.xml"
+  ],
+  "action_items": [
+    "Change seq_no generation from count_documents+1 to max(seq_no)+1 (or use a counters doc) to avoid duplicates after deletes.",
+    "Optional: re-run product autofill on PUT /production-plan when product_id changes, or document that the UI must resend collection/color/price fields.",
+    "Optional: replace raw dict payload on PUT /production-plan/{id} with a Pydantic update model to enforce types on order_qty/delivered_qty/cut_qty."
+  ],
+  "critical_code_review_comments": [
+    "routes/production_plan.py::create_plan_row uses count_documents+1 for seq_no → non-unique after deletes; under concurrent POSTs this is also race-prone.",
+    "routes/production_plan.py::update_plan_row accepts plain dict with only allow-list filter; no Pydantic validation. A string order_qty would survive and blow up _compute_derived math silently (returns None via except).",
+    "routes/production_plan.py::_compute_derived: planned_delivery is only auto-computed when doc.get('planned_delivery') is falsy. That's correct on CREATE. On UPDATE the endpoint explicitly recomputes when payment_date is in payload & planned_delivery is not — verified via test. Note: if the client sends both payment_date AND planned_delivery='', the empty string will be overwritten correctly. OK.",
+    "routes/production_plan.py::qty_diff_pct: now returns None when delivered_qty<=0 instead of -100%. Matches iteration 16 fix. Confirmed.",
+    "routes/products.py::create_product: correctly stores collection/purchase_price/color with safe float coercion. update_product does a blind $set of the entire payload dict — no whitelist — which means a client could overwrite 'id', 'created_at', etc. Not a FAZ 7 regression but worth flagging."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration16_production_plan.py"],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "N/A (not requested)"},
+  "test_credentials": "admin@facette.com / admin123 (query-param login)",
+  "seed_data_creation": "One TEST_Manufacturer_* vendor and one TEST_Prod_* product; multiple production_plan rows — all removed via fixture teardown (module scope).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration16_production_plan.py covers all FAZ 7 acceptance points for /api/production-plan (CRUD, search, filter, collections, autofill-from-product) and for POST/PUT /api/products with new fields (collection, color, purchase_price). Uses module-scoped fixtures with teardown. Safe to rerun. If re-running, note vendor endpoint returns vendor id in different shapes — fixture probes nested 'vendor.id' too.",
+  "rca of the issue": "N/A — all feature acceptance tests pass. Minor concerns logged above (seq_no uniqueness, PUT payload validation, product_id re-autofill on update) are non-blocking."
+}
