@@ -13,7 +13,7 @@
  *      category={row}  // category_id, category_name, marketplace_category_id
  *   />
  */
-import { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -189,7 +189,18 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
 
   const required = mpAttrs.filter((a) => a.required);
   const optional = mpAttrs.filter((a) => !a.required);
-  const rows = [...required, ...optional];
+  // mpAttrs boşsa, kullanıcı yine de sistem özelliklerinden seçebilsin diye
+  // globalAttrs'ı manuel eşleştirme rowları olarak sun (pseudo MP attributes).
+  const manualRows = mpAttrs.length === 0
+    ? globalAttrs.map((g) => ({
+        id: `local:${g.name}`,
+        name: g.name,
+        required: false,
+        manual: true,
+        attributeValues: (g.values || []).map((v) => ({ id: v, name: v })),
+      }))
+    : [];
+  const rows = mpAttrs.length > 0 ? [...required, ...optional] : manualRows;
 
   return (
     <Dialog open={open} onOpenChange={() => onClose(false)}>
@@ -258,104 +269,138 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
         ) : rows.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center py-12 text-gray-400 text-sm gap-2">
             <AlertCircle size={32} />
-            <p>Bu kategori için özellik bulunamadı.</p>
-            <p className="text-xs">Önce pazaryeri kategori eşleştirmesi yapın.</p>
+            <p>Hem pazaryeri özellik listesi hem de sistem özellikleri boş.</p>
+            <p className="text-xs">"Ürünlerden Yükle" butonuyla sistemdeki özellikleri senkronize edebilirsiniz.</p>
           </div>
         ) : (
-          <div className="flex-1 overflow-auto border rounded-lg">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2.5 w-16 text-xs text-gray-500">Zorunlu</th>
-                  <th className="text-left px-4 py-2.5 text-xs text-gray-500">{marketplace} Özelliği</th>
-                  <th className="text-left px-4 py-2.5 text-xs text-gray-500">Yerel Özellik (Eşleştir)</th>
-                  <th className="text-left px-4 py-2.5 w-20 text-xs text-gray-500">Durum</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((attr) => {
+          <>
+            {mpAttrs.length === 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-900 flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <div>
+                  <b>{marketplace} canlı özellik listesi yüklenemedi</b> (credential yok ya da cache boş).
+                  Bu arada <b>{globalAttrs.length} sistem özelliğinden</b> manuel seçim yapabilirsiniz.
+                  Credential eklendikten sonra "Tümünü Otomatik Eşleştir" ile zenginleştirilecektir.
+                </div>
+              </div>
+            )}
+            <div className="flex-1 overflow-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 w-16 text-xs text-gray-500">Zorunlu</th>
+                    <th className="text-left px-4 py-2.5 text-xs text-gray-500">
+                      {mpAttrs.length === 0 ? "Sistem Özelliği" : `${marketplace} Özelliği`}
+                    </th>
+                    <th className="text-left px-4 py-2.5 text-xs text-gray-500">Yerel Özellik (Eşleştir)</th>
+                    <th className="text-left px-4 py-2.5 w-20 text-xs text-gray-500">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                {rows.map((attr, idx) => {
                   const name = attr.name || attr.attribute?.name || "Bilinmeyen";
                   const id = String(attr.id ?? attr.attribute?.id ?? name);
                   const hasVals = attr.attributeValues?.length > 0;
                   const mapped = mappings[id];
+                  const isReq = !!attr.required;
+                  // Zorunlu/opsiyonel geçişinde küçük başlık satırı
+                  const showReqHeader = idx === 0 && isReq;
+                  const showOptHeader = !isReq && idx > 0 && rows[idx - 1]?.required;
                   return (
-                    <tr key={id} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-2.5">
-                        {attr.required ? (
-                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Evet</span>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <p className="font-medium text-gray-800">{name}</p>
-                        {attr.attributeType && (
-                          <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 space-y-2">
-                        <LocalAttrAutoComplete
-                          value={mapped || ""}
-                          onChange={(v) => setMappings((p) => ({ ...p, [id]: v }))}
-                          options={globalAttrs}
-                          placeholder={globalAttrs.length
-                            ? `Sistem özelliği seç veya yazın (${globalAttrs.length} adet)`
-                            : "Sistem özelliği henüz yok"}
-                          testId={`adv-mapinput-${id}`}
-                        />
-                        {(attr.allowCustom || attr.attribute?.allowCustom) && (
-                          <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
-                            <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer:</div>
-                            <input
-                              type="text"
-                              placeholder="Varsayılan metin..."
-                              value={defaults[id] || ""}
-                              onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                              className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
-                            />
-                          </div>
-                        )}
-                        {hasVals && (
-                          <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
-                            <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Listeden Seçin:</div>
-                            <div className="relative">
-                              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
+                    <React.Fragment key={id}>
+                      {showReqHeader && (
+                        <tr className="bg-red-50">
+                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-red-700 uppercase tracking-wide">
+                            Zorunlu Alanlar ({required.length})
+                          </td>
+                        </tr>
+                      )}
+                      {showOptHeader && (
+                        <tr className="bg-gray-50">
+                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wide">
+                            Opsiyonel Alanlar ({mpAttrs.length > 0 ? optional.length : rows.length})
+                          </td>
+                        </tr>
+                      )}
+                      <tr className={`border-b hover:bg-gray-50 ${isReq ? "bg-red-50/40" : ""}`}>
+                        <td className="px-4 py-2.5">
+                          {isReq ? (
+                            <span className="text-[10px] font-bold bg-red-500 text-white px-2 py-0.5 rounded uppercase">Zorunlu</span>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <p className={`font-medium ${isReq ? "text-red-900" : "text-gray-800"}`}>{name}</p>
+                          {attr.attributeType && (
+                            <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 space-y-2">
+                          <LocalAttrAutoComplete
+                            value={mapped || ""}
+                            onChange={(v) => setMappings((p) => ({ ...p, [id]: v }))}
+                            options={globalAttrs}
+                            placeholder={globalAttrs.length
+                              ? `Sistem özelliği seç veya yazın (${globalAttrs.length} adet)`
+                              : "Sistem özelliği henüz yok"}
+                            testId={`adv-mapinput-${id}`}
+                          />
+                          {(attr.allowCustom || attr.attribute?.allowCustom) && (
+                            <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
+                              <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer:</div>
                               <input
                                 type="text"
-                                placeholder="Değer ara..."
-                                value={searchTerms[id] || ""}
-                                onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
-                                className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
+                                placeholder="Varsayılan metin..."
+                                value={defaults[id] || ""}
+                                onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                                className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
                               />
                             </div>
-                            <select
-                              value={defaults[id] || ""}
-                              onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                              className="border rounded px-2 py-1 text-xs w-full bg-white"
-                            >
-                              <option value="">Varsayılan Seçilmedi</option>
-                              {attr.attributeValues
-                                .filter((v) => v.name.toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
-                                .map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                            </select>
-                          </div>
+                          )}
+                          {hasVals && (
+                            <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
+                              <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Listeden Seçin:</div>
+                              <div className="relative">
+                                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Değer ara..."
+                                  value={searchTerms[id] || ""}
+                                  onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
+                                  className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
+                                />
+                              </div>
+                              <select
+                                value={defaults[id] || ""}
+                                onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
+                                className="border rounded px-2 py-1 text-xs w-full bg-white"
+                              >
+                                <option value="">Varsayılan Seçilmedi</option>
+                                {attr.attributeValues
+                                  .filter((v) => v.name.toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
+                                  .map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                              </select>
+                            </div>
                         )}
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        {mapped || defaults[id] ? (
-                          <Check size={16} className="text-green-500 mx-auto" />
-                        ) : attr.required ? (
-                          <X size={16} className="text-red-400 mx-auto" />
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          {mapped || defaults[id] ? (
+                            <Check size={16} className="text-green-500 mx-auto" />
+                          ) : isReq ? (
+                            <X size={16} className="text-red-400 mx-auto" />
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         <div className="flex justify-end gap-2 pt-3 border-t">
