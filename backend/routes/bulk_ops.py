@@ -320,3 +320,93 @@ async def reorder_suggestions(current_user: dict = Depends(require_admin)):
                 "current_stock": total_stock,
             })
     return {"total": len(out), "items": out}
+
+
+# ---------------------------------------------------------------------------
+# Stokta biten ürünleri pazaryerlerinde pasife alma
+# ---------------------------------------------------------------------------
+@router.post("/stock-alerts/deactivate-on-marketplaces")
+async def deactivate_out_of_stock_on_marketplaces(
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Stokta `threshold` (vars.: 0) olan seçili ürünleri ya da tüm out-of-stock
+    ürünleri, aktif pazaryerlerindeki envanter update endpoint'ini (qty=0
+    göndererek) çağırır. Canlı API yoksa sadece `integration_logs` düşer.
+    """
+    from .marketplace_hub import log_integration_event
+    payload = payload or {}
+    product_ids = payload.get("product_ids") or []
+    threshold = int(payload.get("threshold", 0))
+
+    # Hedef ürünleri topla
+    q = {"is_active": True}
+    if product_ids:
+        q["id"] = {"$in": product_ids}
+    targets = []
+    async for p in db.products.find(q, {"_id": 0}):
+        variants = p.get("variants") or []
+        total_stock = sum((v.get("stock") or 0) for v in variants) if variants else (p.get("stock") or 0)
+        if total_stock <= threshold:
+            targets.append(p)
+
+    if not targets:
+        return {"success": True, "message": "Pasife alınacak stoksuz ürün yok", "processed": 0}
+
+    # Aktif pazaryerleri
+    accounts = await db.marketplace_accounts.find(
+        {"enabled": True}, {"_id": 0, "key": 1}
+    ).to_list(100)
+    active_mps = [a["key"] for a in accounts]
+
+    results = {"processed": 0, "marketplaces": {}}
+
+    for mp in active_mps:
+        mp_ok = 0
+        mp_fail = 0
+        # Trendyol için gerçek push
+        if mp == "trendyol":
+            try:
+                from .integrations import _sync_inventory_to_trendyol, get_trendyol_config
+                cfg = await get_trendyol_config()
+                if cfg.get("is_active"):
+                    # qty=0 göndermek için product listesini kopyala ve stock=0 zorla
+                    patched = []
+                    for p in targets:
+                        pc = {**p, "stock": 0, "variants": [{**v, "stock": 0} for v in (p.get("variants") or [])]}
+                        patched.append(pc)
+                    res = await _sync_inventory_to_trendyol(patched)
+                    mp_ok = len(targets) if res.get("success") else 0
+                    mp_fail = 0 if res.get("success") else len(targets)
+                    await log_integration_event(
+                        marketplace="trendyol", action="stock_update",
+                        status=("success" if res.get("success") else "failed"),
+                        direction="outbound",
+                        message=f"Stoksuz {len(targets)} ürün Trendyol'da pasifleştirildi (qty=0)"
+                    )
+                else:
+                    await log_integration_event(
+                        marketplace="trendyol", action="stock_update", status="failed",
+                        direction="outbound",
+                        message="Trendyol konfigürasyonu yok — pasifleme atlandı"
+                    )
+                    mp_fail = len(targets)
+            except Exception as e:
+                mp_fail = len(targets)
+                await log_integration_event(
+                    marketplace="trendyol", action="stock_update", status="failed",
+                    direction="outbound", message=f"Pasifleme hatası: {e}"
+                )
+        else:
+            # Diğer pazaryerleri (hepsiburada/temu/..): şu an log ile kaydedilir
+            await log_integration_event(
+                marketplace=mp, action="stock_update", status="queued",
+                direction="outbound",
+                message=f"{len(targets)} ürün için pazaryerinde pasifleme kuyruğa alındı (canlı API bağlandığında uygulanır)"
+            )
+            mp_ok = len(targets)
+        results["marketplaces"][mp] = {"success": mp_ok, "failed": mp_fail}
+
+    results["processed"] = len(targets)
+    return {"success": True, "result": results, "message": f"{len(targets)} ürün için pasifleme işlemi tetiklendi"}

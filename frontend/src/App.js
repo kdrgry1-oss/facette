@@ -63,6 +63,8 @@ import BrandMapping from "./pages/admin/BrandMapping";
 import CategoryMapping from "./pages/admin/CategoryMapping";
 import BulkPriceStock from "./pages/admin/BulkPriceStock";
 import StockAlerts2 from "./pages/admin/StockAlerts";
+import CustomerSegments from "./pages/admin/CustomerSegments";
+import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -129,6 +131,10 @@ function App() {
               <Route path="toplu-fiyat-stok" element={<BulkPriceStock />} />
               {/* Kritik stok uyarıları + yeniden sipariş önerileri */}
               <Route path="stok-uyarilari" element={<StockAlerts2 />} />
+              {/* RFM müşteri segmentasyonu — hedefli pazarlama için */}
+              <Route path="musteri-segmentleri" element={<CustomerSegments />} />
+              {/* Marketplace başına net kâr raporu (komisyon + kargo + iade çıkarılmış) */}
+              <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
               <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />

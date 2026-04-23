@@ -111,6 +111,12 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P2: Products.jsx (2500+ satır) ve Orders.jsx (1500+ satır) modal/sekme componentlerine bölme
 - P2: integrations.py (3500+ satır) provider'a göre bölme
 
+## Changelog — 23 Nis 2026 (Oturum 5)
+- **RFM Müşteri Segmentasyonu** (`/admin/musteri-segmentleri`): `analytics_extra.py`. Recency/Frequency/Monetary quintile puanları (1-5) + klasik pazarlama segmentleri (VIP, Sadık, Yeni, Risk Altında, Kaybedilen, Hibernasyon). Renkli segment kartları filter olarak tıklanabilir, CSV export. Test: 18 müşteri (10 Hibernasyon, 6 Kaybedilen, 2 Yeni).
+- **Pazaryeri Karlılık Raporu** (`/admin/pazaryeri-karlilik`): Brüt ciro - komisyon - kargo - iade = net kâr. Komisyon oranı `marketplace_accounts.transfer_rules.commission_{type,value}`'dan otomatik okunur. Kanal bazlı ağırlıklı kıyaslama, net marj renkli badge (yeşil ≥%20, sarı ≥%10, kırmızı <%10). Test: web 5 sipariş/6742₺ net.
+- **Google Merchant XML Feed** (`/api/feeds/google-merchant.xml` — **public**, Google Merchant Center tarafından otomatik çekilir): 248 ürün aktarıldı, g:gtin/g:mpn/g:brand/g:availability/g:price alanlarıyla.
+- **Menü güncellemeleri**: Üyeler altına "Müşteri Segmentleri (RFM)", Raporlar altına "Pazaryeri Karlılık".
+
 ## Changelog — 23 Nis 2026 (Oturum 4)
 **Piyasa araştırması (ideaSoft/T-Soft/Akinon) sonucu eksik modüller:**
 - **Toplu Fiyat/Stok Excel** (`/admin/toplu-fiyat-stok`): 3 adım (şablon indir → preview dry-run → apply). `bulk_ops.py` + openpyxl. Ürün stock_code VEYA barcode ile eşleştirme, varyant seviyesi stok güncellemesi.
@@ -163,5 +169,53 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
   - `components/admin/product-form/SeoTab.jsx` (65 satır)
   - `components/admin/product-form/StockTab.jsx` (101 satır)
 - **Test**: Backend curl testleri başarılı — 11 e-fatura + 13 kargo provider schemas/config/test endpoint'leri çalışıyor. UI smoke testi: sol liste + sağ dinamik form + bulk checkbox'lar + pagination size selector hepsi render ediliyor. Ürün attributes PUT→GET roundtrip doğru (Yaka: V Yaka, Kumaş: Pamuk test edildi).
+
+## [2026-04-23] Pazaryeri Konsolidasyon + Otomasyon + İade Motoru
+
+Kullanıcının "karıştı" geribildirimi üzerine yapılan büyük temizlik ve otomasyon işi:
+
+### Sidebar konsolidasyonu (AdminLayout.jsx)
+- "Entegrasyonlar" menüsü 10 kalemden 6 kaleme indi. Ayrı Trendyol/Hepsiburada/Temu Eşleştir ve Trendyol Logları kalemleri kaldırıldı — artık detaylı sayfalar "Detaylı Aktarım & Eşleştirme" (`/admin/entegrasyonlar`) ve "Entegrasyon Logları" (`/admin/entegrasyon-loglari?marketplace=...`) içinden erişilir.
+- `MarketplaceHub.jsx` header kartına 4 quick-link eklendi: Aktarım İşlemleri, Marka Eşleştirme, Kategori Eşleştirme, Bu Pazaryerinin Logları.
+- `Integrations.jsx` Trendyol/HB/Temu kartlarına "Gelişmiş Eşleştirme" ve "Trendyol Logları" butonları (href destekli) eklendi.
+- `IntegrationLogs.jsx` URL `?marketplace=trendyol` query parametresini okuyor, filtre otomatik set ediliyor.
+
+### APScheduler gerçek bağlantı (scheduler.py)
+- `_run_trendyol_auto_products_sync` → Trendyol config varsa aktif ürünleri `_sync_inventory_to_trendyol` ile gerçek push.
+- `_run_trendyol_auto_orders_pull` → Trendyol'dan son 15 günlük siparişleri çekip `map_trendyol_order` ile DB'ye yazar.
+- `_marketplace_sync_tick` artık Trendyol için gerçek fonksiyonu `asyncio.create_task` ile arka plan kuyruğuna alıyor (her 1 dk).
+- `_send_abandoned_cart_reminders` → 24 saatte bir, RESEND_API_KEY varsa 2–48 saatlik sepetlere "Sepetinizi unutmayın" maili gönderir (tekrar göndermez).
+
+### Stok pasifleme (bulk_ops.py + StockAlerts.jsx)
+- `POST /api/bulk-ops/stock-alerts/deactivate-on-marketplaces` — stoku threshold altı olan aktif ürünleri tüm etkin pazaryerlerinde pasife alır (Trendyol'a qty=0 güncelleme; diğer MP'lere log kuyruğa alır).
+- Frontend'de StockAlerts sayfasına "Pazaryerinde Pasife Al" butonu + onay modalı. Test: 14 ürün için başarıyla tetiklendi.
+
+### Iyzico kısmi iade + kargo kesintisi (integrations.py)
+- `POST /api/integrations/iyzico/refund` — body: `{order_id, amount, shipping_deduction, reason}`. Kargo bedeli iade tutarından düşülüp Iyzico `/payment/refund` çağrısı yapılır. `_iyzico_auth_header` PKI Base64 auth builder eklendi.
+- Siparişe `refunds[]` array'i push edilir; integration_logs'a `iyzico.refund` event yazılır.
+- Validasyonlar: zorunlu alanlar, geçersiz sipariş, payment_id yoksa, net iade ≤ 0 hataları doğrulandı.
+
+### Trendyol Mikro İhracat faturalandırma (integrations.py + orders.py)
+- `map_trendyol_order` artık `is_micro_export`, `shipment_country`, `delivery_type` alanlarını ekliyor (country≠TR veya deliveryType=international/micro olan siparişler).
+- `POST /api/orders/{id}/create-invoice` — sipariş `is_micro_export` ise e-arşiv yerine `ETGB00000001` formatında ETGB beyannamesi üretilir, provider `etgb-micro-export` olarak işaretlenir.
+
+### Test durumu
+- Backend e2e curl: ✅ login, stock-alerts deactivate (14 ürün), marketplace-hub/logs filtreli çekim, iyzico/refund (zorunlu alan + 404 sipariş).
+- Frontend konsolide sidebar canlı önizlemede (preview uyku modu dışında) beklendiği gibi render ediliyor; eski eşleştirme sayfaları route olarak korundu, Integrations ve MarketplaceHub üzerinden erişilebilir.
+
+## Pending / Backlog
+
+### P0 (Kullanıcı Credential Bekliyor)
+- **Pazaryeri Canlı API testleri**: Trendyol/HB/Temu gerçek credential'larla uçtan uca ürün push + sipariş pull doğrulaması.
+- **E-Fatura/Kargo Canlı Entegrasyonları**: Doğan e-Dönüşüm SOAP + Yurtiçi Kargo REST için gerçek payload gönderimi ve dönen PDF/URL'in siparişe yazılması.
+
+### P1
+- **Hepsiburada / Temu / Pazarama auto-sync**: Scheduler hook'u var (log ile kuyruğa alınıyor) — canlı API entegrasyonu için `_run_hepsiburada_*`, `_run_temu_*` fonksiyonları eklenecek.
+- **integrations.py refactoring**: 3700+ satır, pazaryeri bazlı modüllere (integrations_trendyol.py, integrations_hepsiburada.py, integrations_temu.py) bölünmeli.
+
+### P2
+- Iyzico refund için UI entegrasyonu (iade detay sayfasına "Kısmi İade + Kargo Kesintisi" modalı).
+- Mikro ihracat ETGB için gerçek gümrük beyannamesi PDF üretimi (şu an sadece belge numarası).
+- A/B test altyapısı, push notification altyapısı (gelecek).
 
 

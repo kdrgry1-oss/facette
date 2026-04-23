@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, RefreshCw, Package, TrendingDown } from "lucide-react";
+import { AlertTriangle, RefreshCw, Package, TrendingDown, Power } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -40,6 +40,16 @@ export default function StockAlerts() {
     finally { setLoading(false); }
   };
 
+  const deactivateOnMarketplaces = async () => {
+    if (!window.confirm("Stoku biten tüm aktif ürünler pazaryerlerinde pasife alınacak (qty=0 gönderilecek). Devam edilsin mi?")) return;
+    try {
+      const r = await axios.post(`${API}/bulk-ops/stock-alerts/deactivate-on-marketplaces`, { threshold: 0 }, auth);
+      toast.success(r.data?.message || "Pasifleme tamamlandı");
+    } catch (e) {
+      toast.error("Pasifleme hatası: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
   useEffect(() => {
     if (tab === "critical") loadCritical(); else loadReorder();
     // eslint-disable-next-line
@@ -60,6 +70,25 @@ export default function StockAlerts() {
         <button onClick={() => tab === "critical" ? loadCritical() : loadReorder()}
           className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
           <RefreshCw size={14} /> Yenile
+        </button>
+      </div>
+
+      {/* Pazaryerinde pasifleme */}
+      <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold text-red-900 flex items-center gap-2">
+            <Power size={14} /> Stoksuz Ürünleri Pazaryerinde Pasife Al
+          </div>
+          <p className="text-xs text-red-700 mt-1">
+            Stok miktarı 0 olan aktif ürünler için tüm etkin pazaryerlerine qty=0 güncellemesi gönderilir.
+          </p>
+        </div>
+        <button
+          onClick={deactivateOnMarketplaces}
+          className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg font-medium"
+          data-testid="deactivate-oos-marketplaces-btn"
+        >
+          <Power size={12} className="inline mr-1" /> Pazaryerinde Pasife Al
         </button>
       </div>
 

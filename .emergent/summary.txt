@@ -1,164 +1,163 @@
-<analysis>**original_problem_statement:** 
-Kullanıcı, facette e-ticaret uygulamasının admin panelini kapsamlı bir şekilde genişletmeyi talep etti. Yapılan son talepler arasında:
-1. Hepsiburada ve Temu entegrasyon altyapısı (kategori eşleştirme, ürün özellikleri ve müşteri soruları için rozetler).
-2. Havale/EFT siparişlerinin ödeme durumuna göre kırmızı/siyah renklendirilmesi ve 48 saat ödenmeyenlerin otomatik iptal edilip stoğa geri alınması (cron job).
-3. Gelişmiş İmalat Takip (Manufacturing Tracking) modülü (Aşama aşama: Anlaşma, Numune, Kumaş, Dikim, Fatura vs.).
-4. Ürünler için Ölçü Tablosu (Size Table) modülü (Arka planda 1200x1800 px görsel üretilip ürün görseli olarak eklenmesi, müşteriye HTML tablo olarak gösterilmesi).
-5. Müşteri Soruları (Questions) alanının 7 kanallı (WhatsApp, Instagram, FB Messenger, Web, Trendyol, Hepsiburada, Temu) Omnichannel bir AI Chatbot'a dönüştürülmesi (Emergent LLM ile GPT-5.2 üzerinden cevap taslağı oluşturma ve RAG/Knowledge base yönetimi).
-6. Iyzico ve 7 farklı Kargo firması (MNG, Aras, Yurtiçi, PTT, HepsiJet, Trendyol Express, Sürat) için ayarlar/entegrasyon kartları.
-7. Türkiye (İl/İlçe) ve Dünya ülkeleri için konum API altyapısı.
-8. Gelişmiş RBAC (Rol ve Yetki) yönetimi.
-9. Hazır Kampanya Şablonları (Campaigns sayfası).
+<analysis>**original_problem_statement**: 
+Kullanıcı, Ticimax'ten göç eden facette e-ticaret markası için kapsamlı, çok pazaryerli (Trendyol, Hepsiburada, Temu vb.) çalışan, kendi fatura ve kargo entegratörlerini yönetebildiği bir admin paneli ve ERP sistemi istemektedir.
+PRODUCT REQUIREMENTS: 
+- Ürün ve Sipariş tablolarının kompakt hale getirilmesi, gelişmiş pagination (sayfa boyutu seçimi).
+- Ürün özelliklerinin senkronizasyon hatalarının giderilmesi.
+- Tekli ve çoklu barkod yazdırma.
+- Toplu sipariş faturası kesme ve kargo etiketi yazdırma.
+- E-Fatura/E-Arşiv ve Kargo firmaları için Ticimax benzeri ayar ve credential sayfaları (Doğan e-Dönüşüm, Yurtiçi vb. firmaların seçimi ve yapılandırılması).
+- Pazaryeri (Marketplace) Hub: API bilgileri, eşleştirme ayarları, detaylı entegrasyon logları, marka ve kategori eşleştirme, aktarılamayan siparişlerin yönetimi.
+- Excel ile Toplu Fiyat/Stok güncelleme, Stok Uyarısı sistemi.
+- Müşteri segmentasyonu (RFM), Pazaryeri Karlılık raporları ve Google Merchant XML Feed oluşturulması.
 
-**PRODUCT REQUIREMENTS:**
-- Siparişler, ürünler, iadeler ve entegrasyonlar çok kanallı (omnichannel) olacak şekilde güncellenmeli.
-- Üretim sürecini uçtan uca takip edecek bir İmalat Takip sistemi olmalı.
-- Yapay zeka müşteri temsilcisi; sistemdeki ürün, stok ve kampanya verilerini RAG mantığıyla kullanarak cevap üretmeli.
-
-**User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only).
+**User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only / Sonraki ajan kullanıcıya SADECE Türkçe yanıt vermelidir).
 
 **what currently exists?** 
-React ve FastAPI tabanlı, MongoDB kullanan modüler bir e-ticaret paneli. Trendyol, Hepsiburada, Temu, Iyzico ve Kargo firmaları için entegrasyon arayüzleri oluşturuldu. Gelişmiş RBAC (Rol bazlı yetkilendirme), İmalat Takip, Ölçü Tablosu, otomatik sipariş iptali için APScheduler ve Emergent LLM entegreli (GPT-5.2) yapay zeka destekli Müşteri Mesajları modülü aktiftir.
+Gelişmiş bir React + FastAPI + MongoDB e-ticaret admin paneli. Ticimax Marketplace v2 özelliklerinin çoğu klonlandı (Marketplace Hub, Entegrasyon Logları, Marka/Kategori Eşleştirme, Başarısız Aktarımlar). 11 E-fatura ve 13 Kargo firması için jenerik ayar arayüzü eklendi. Gelişmiş RFM Segmentasyon, Karlılık Raporları, Toplu Excel İşlemleri, Barkod yazdırma, Stok uyarı modülleri ve tüm API çağrılarını otomatik loglayan bir Middleware mevcuttur. Arayüzde kompakt tablolar, sayfalama ve modüler ürün düzenleme bileşenleri kullanılmaktadır.
 
 **Last working item**:
-- **Last item agent was working**: Kullanıcının son mesajındaki hataları (İmalat kaydı kaydedilemiyor, bedenler default gelmesin) ve yeni eklentileri (7 Kargo firması için ayar modalları, İl/İlçe/Ülke endpointleri, HB ve Temu Kategori eşleştirme) kodluyordu. Arka planda Python ile  oluşturuldu, frontend tarafında  (Kargo kartları ve modalları) ile  (HB/Temu kategori eşleştirme) dosyalarında  işlemleri yeni tamamlandı.
-- **Status**: IN PROGRESS
-- **Agent Testing Done**: N (Son frontend eklemeleri henüz test edilmedi)
-- **Which testing method agent to use?**: both (Backend curl for locations API, Frontend screenshot for Integrations and Products pages).
-- **User Testing Done**: N
+    - **Last item agent was working**: Müşteri Segmentasyonu (RFM), Pazaryeri Karlılık Raporu, Google Merchant XML Feed oluşturulması ve AddressFields modülünün Siparişler sayfasına bağlanması.
+    - **Status**: USER VERIFICATION PENDING (Ajan tarafında tüm testler yapıldı ve başarılı oldu, ancak kullanıcının sistemde verileri teyit etmesi bekleniyor).
+    - **Agent Testing Done**: Y
+    - **Which testing method agent to use?**: NA (Testing was successfully completed via curl and screenshot tools).
+    - **User Testing Done**: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Son yapılan Kargo UI modalları ve İmalat formu düzeltmelerinin testi
-     - **Attempted fixes**:  ve  güncellendi,  içerisine HB/Temu kategori ID alanları eklendi.
-     - **Next debug checklist**: Frontend'i derleyip  sayfasındaki kargo modallarının (MNG, Aras vb.) açıldığından ve  sayfasında Hepsiburada Kategori Eşleştirme alanlarının geldiğinden emin olun. İmalat Ekle formunun sorunsuz çalıştığını UI üzerinden test edin.
-     - **Why fix this issue and what will be achieved with the fix?**: Kullanıcının talep ettiği son UI yapı taşlarının tamamlanması.
-     - **Status**: TESTING PENDING
-     - **Is recurring issue?**: N
-     - **Should Test frontend/backend/both after fix?**: Frontend
-  - Issue 2: Iyzico Kısmi İade (Partial Return) ve Kargo Düşme Mantığı (P1)
-     - **Attempted fixes**: Henüz başlanmadı. Iyzico için sadece Ayarlar UI'ı yapıldı.
-     - **Next debug checklist**: İade onay ekranında Iyzico ile ödenmiş siparişler için kısmi iade tutarı belirleme, kargo kesintisi yapma ve kampanya oransal hesaplamasını frontend/backend tarafında entegre edin.
+  - Issue 1: Pazaryeri (Marketplace) Canlı API Entegrasyonları ve Testleri (P0)
+     - **Attempted fixes**: Backend ve frontend altyapısı (Marketplace Hub, eşleştirme kuralları, otomatik loglama) tamamen kuruldu ancak gerçek Trendyol/HB/Temu API'lerine canlı isteklerin (ürün basma, sipariş çekme) kullanıcı credential'ları ile uçtan uca test edilmesi gerekiyor.
+     - **Next debug checklist**: Kullanıcıdan test/canlı API key'lerini isteyin,  üzerinden bir ürün yükleme veya sipariş çekme işlemi tetikleyerek  sayfasına yansımasını ve pazaryeri paneline düşmesini doğrulayın. Mutlaka  kullanın.
+     - **Why fix this issue and what will be achieved with the fix?**: Sistem çift yönlü gerçek zamanlı senkronizasyon vadettiği için, bu bağlantıların operasyonel olarak çalıştığının kanıtlanması şarttır.
      - **Status**: NOT STARTED
      - **Is recurring issue?**: N
      - **Should Test frontend/backend/both after fix?**: Both
-  - Issue 3: Checkout ve Sipariş Ekranlarında İl/İlçe Kullanımı (P1)
-     - **Next debug checklist**: Backend'e eklenen  endpoint'lerini kullanarak  (yeni sipariş ekleme) veya adres formlarında il/ilçe dropdown'larını bağlayın.
+  - Issue 2: E-Fatura ve Kargo Canlı Entegrasyonları (P1)
+     - **Next debug checklist**: Ayar sayfaları yapıldı, aktif entegratör üzerinden fatura numarası üretiliyor () ancak gerçek SOAP/REST endpoint'lerine (örn. Doğan e-Dönüşüm, Yurtiçi Kargo) payload gönderimi ve dönen PDF/URL'in kaydedilmesi henüz mock/html üzerinden yürüyor. Gerçek entegrasyonlar yapılmalı.
      - **Status**: NOT STARTED
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: Both
 
 **In progress Task List**:
-  - Task 1: Hepsiburada ve Temu Kategori Eşleştirme Kayıt İşlemi
-     - **Where to resume**:  içinde state'e eklenen  ve  alanlarının backend  /  modelleri tarafından alınıp MongoDB'ye doğru kaydedildiğini doğrulayın.
-     - **What will be achieved with this?**: Ürünlerin pazaryeri bazlı kategorizasyonu.
-     - **Status**: TESTING PENDING
-     - **Should Test frontend/backend/both after fix?**: Both
+  - Task 1: APScheduler Otomatik Senkronizasyon (Auto-Sync) Job'larının Aktifleştirilmesi (P1)
+     - **Where to resume**:  içerisine Auto-cancel unpaid orders eklendi. Sync Products ve Pull Orders işlemleri için, kullanıcının belirlediği periyotlarda (örn. 15 dakikada bir) çalışacak zamanlanmış görevlerin (cron jobs) tanımlanması gerekiyor.
+     - **What will be achieved with this?**: Kullanıcının manuel senkronizasyon tuşuna basmasına gerek kalmadan, pazaryerleri ile arka planda sürekli eşitleme sağlanacak.
+     - **Status**: NOT STARTED
+     - **Should Test frontend/backend/both after fix?**: Backend
+     - **Blocked on something**: Canlı API entegrasyonlarının (Issue 1) tamamlanması ve test edilmesi.
 
 **Upcoming and Future Tasks**:
     Upcoming Tasks:
-    - Ticimax Admin Panel Özellik Analizi (Kullanıcı Ticimax'ten geçiş yaptığını belirtti, eksik özelliklerin sorulup eklenmesi gerekiyor) (P1).
-    - Trendyol Mikro İhracat siparişlerinin tespit edilip ayrı faturalandırılması altyapısı (P2).
-    - 7 Kargo Firmasının gerçek API entegrasyonu (Kullanıcı API key'leri verince yapılacak) (P2).
+    - P1: Iyzico ve Kargo Firmalarının gerçek API entegrasyon iş mantıkları (Kullanıcı onay verdiğinde yapılacak).
+    - P2: Terkedilmiş Sepet (Abandoned Cart) hatırlatmalarının Resend API (Mail) ile otomatikleştirilmesi (şu an Görevler paneline manuel iş olarak düşüyor).
+    - P2: Stok uyarı sayfasında stoku biten ürünlerin tek tıkla pazaryerlerinde pasife alınması butonu (Deactivate on marketplaces).
+    Future Tasks:
+    - P2: Trendyol Mikro İhracat siparişlerinin tespit edilip ayrı faturalandırılması altyapısı.
 
 **Completed work in this session**:
-- Hepsiburada ve Temu için özellik eşleştirme sekmeleri eklendi (DONE).
--  ile 48 saat ödenmeyen Havale siparişlerini iptal eden APScheduler sistemi kuruldu (DONE).
-- RBAC (Users & Roles) modülü sıfırdan yaratıldı, 64 yetkili ağaç yapısı eklendi (DONE).
-- Siparişler sayfasında Havale bekleyenlerin kırmızı yapılması, fatura kesilmişlerin pasifleşmesi ve UI iyileştirmeleri (DONE).
-- İade sayfasına Ret Sebebi modalı, Kargo ve Ödeme Tipi sütunları eklendi (DONE).
-- İmalat Takip (Manufacturing) modülü eklendi (DONE).
-- Ölçü Tablosu (Size Tables) modülü (Pillow ile arka planda 1200x1800 görsel üretimi) yapıldı (DONE).
-- Müşteri Soruları (Questions) modülü, Emergent LLM (GPT-5.2) kullanılarak 7 kanallı AI Chatbot paneline dönüştürüldü (DONE).
-- Kampanyalar sekmesine 10 adet hazır şablon kartı eklendi (DONE).
-- Türkiye İl/İlçe API endpointleri () sisteme dahil edildi (DONE).
+-  eklendi, tablolar kompakt hale getirildi (DONE).
+-  modüllere bölündü (, , ) (DONE).
+- Ürün tablosunda çoklu seçim (checkbox) ve toplu sayfa boyutu ayarlama (20/50/100) eklendi (DONE).
+- Tekli ve çoklu barkod kartı oluşturma () eklendi (DONE).
+- Siparişler için Toplu Fatura Kesme ve Toplu Etiket Yazdırma eklendi (DONE).
+- E-Fatura ve Kargo sağlayıcıları ayar arayüzleri (, 11 Fatura, 13 Kargo firması) eklendi (DONE).
+-  (Pazaryerleri ayar hub'ı) ve  (Detaylı log tablosu) yapıldı (DONE).
+- Marka ve Kategori eşleştirme sayfaları (, ) eklendi (DONE).
+-  ile backend'deki tüm entegrasyon çağrıları otomatik loglanmaya başlandı (DONE).
+- Excel ile Toplu Fiyat/Stok güncelleme () eklendi (DONE).
+- Kritik Stok Uyarıları () eklendi (DONE).
+- Müşteri RFM Segmentasyonu () eklendi (DONE).
+- Pazaryeri Karlılık Raporu () eklendi (DONE).
+- Google Merchant XML Feed API oluşturuldu (DONE).
 
 **Earlier issues found/mentioned but not fixed**:
-   - Issue 1:  ve  dosya boyutları çok büyük (2000 ve 1400+ satır). Refactor edilmeleri önerilir.
-   - Issue 2: Kullanıcı ticimax panel bilgisini versem eksikleri ekler misin dedi, bu onaylanıp veri istendiğinde üzerine çalışılmalı.
+   - Issue 1: Sipariş iade sürecinde Iyzico kısmi iade ve kargo kesinti hesaplamaları
+     - **Debug checklist**: Backend'de iade endpointlerini kontrol et, iade işleminde kargo bedeli düşülecekse Iyzico API'sine gönderilen tutarı güncelle.
+     - **Why to solve this issue and what will be achieved with this?**: Kullanıcının daha önceki oturumlarda talep ettiği muhasebesel doğruluk ve otomatik para iadesi.
+     - **Should Test frontend/backend/both after fix**: Both
+     - **Is recurring issue?**: N
 
 **Known issue recurrence from previous fork**:
-  - N/A
+  - Recurrence count: 0
+  - Status: RESOLVED (Products.jsx'teki attributes sync sorunu başarıyla düzeltildi).
 
 **Code Architecture**:
-- : FastAPI ana giriş noktası, lifespan içinde  başlatılıyor.
-- : , , , ,  gibi yeni modüller.
-- : Yeni modüller için , ,  dosyaları eklendi.
+- Backend API Routes:  altında , , , , , ,  gibi birçok spesifik modül oluşturuldu.
+- Frontend Admin Pages:  altında Ticimax yapısını taklit eden onlarca modüler sayfa mevcut.
+- Ortak Frontend Componentleri:  altında form ve paginasyon araçları (, , ).
 
 **Key Technical Concepts**:
-- Backend: FastAPI, MongoDB (Motor), APScheduler (Cron jobs), Pillow (Görsel manüpülasyonu), RAG (AI Chatbot için).
-- Frontend: React, Tailwind, Lucide Icons, Çoklu Modal ve Tab yönetimi.
+- Frontend: React, Tailwind CSS, Shadcn UI, Context API
+- Backend: FastAPI, Motor (MongoDB), APScheduler (Arka plan görevleri), Custom Middleware ().
+- Veri İletişimi: Çoklu Pazaryeri eşzamanlama mimarisi, Provider Pattern (fatura ve kargo için dinamik provider yönlendirme).
 
 **key DB schema**:
-  - : ,  alanları renklendirme ve cron iptali için kritik.
-  - : , , ,  eklendi.
-  -  & : RBAC yetkileri için.
-  - : İmalat takip pipeliner'ı için.
-  -  & : Chatbot ayarları için.
+  - : Pazaryeri API credential'ları ve eşleştirme ayarları.
+  - : Middleware üzerinden otomatik kaydedilen HTTP entegrasyon logları.
+  - : Zamanlanmış pazaryeri güncelleme görevlerinin (cron) konfigürasyonları.
+  - : Aktif E-Fatura ve Kargo entegratörlerinin bilgileri.
 
 **changes in tech stack**:
-  -  ve  arka plan zamanlanmış görevleri (otomatik iptal) için eklendi.
-  -  ölçü tablosu görsellerini oluşturmak için eklendi.
-  -  paketi LLM bot altyapısı için eklendi.
-  -  dünya ülkeleri verisi için eklendi.
+  -  ve  kütüphaneleri Excel toplu ürün/stok yükleme/indirme işlemleri için eklendi.
+  -  kütüphanesi ile EAN-13 formatında barkod görselleri HTML olarak oluşturuluyor.
 
-**All files of reference**:
-1.  (Yeni)
-2.  &  (Yeni)
-3.  (Yeni)
-4.  &  (Yeni)
-5.  &  (Yeni)
-6.  (Yeni)
-7.  (Yeni)
-8. , , ,  (Kapsamlı değişiklikler).
+**All files of reference**: 
+Aşağıdaki dosyalar bu oturumda yoğun olarak oluşturuldu/güncellendi:
+-  (Middleware eklendi, yeni router'lar dahil edildi)
+-  ve  (Modülerleştirme ve checkbox eklentileri)
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- İlgili tüm backend routerları ( içerisindeki yeni dosyalar).
 
 **Areas that need refactoring**:
--  ve  bileşenleri acilen alt component'lere (örneğin modal içerikleri ayrı dosyalara) ayrılmalıdır.
+-  dosyası hala 3500+ satır. Pazaryerine göre (Trendyol, Hepsiburada, Temu vb.) parçalanması (,  şeklinde) sürdürülebilirlik açısından büyük avantaj sağlayacaktır.
 
 **key api endpoints**:
--  (APScheduler tarafından tetiklenir)
--  & 
--  (Emergent LLM anahtarı kullanır)
--  (İmalat akışı)
+-  (Toplu barkod)
+-  (Aktif entegratöre göre fatura kesimi)
+-  (Müşteri Segmentasyonu)
+-  (Pazaryeri kârlılık)
+-  (XML ürün feed'i)
 
 **Critical Info for New Agent**:
-- **Otomatik İptal Cron**:  her 30 dakikada bir çalışarak 48 saati geçmiş, ödenmemiş Havale siparişlerini iptal eder ve stokları iade eder.
-- **AI Chatbot Modülü**:  içerisinde  paketi üzerinden **Emergent LLM Key** ( modeli) kullanılmaktadır. Bu yapıyı standart OpenAI API anahtarına değiştirmeyin.
-- **Kargo & Iyzico API'leri**: Şu an Integrations sayfasında sadece **scaffolding (Arayüz Kartları)** yapılmıştır. Kullanıcı API key'leri sağladığında entegrasyon kodları yazılacaktır.
-- Hepsiburada, Temu ve Trendyol özellikleri için veriler Products modeline doğrudan  olarak basılmaktadır.
-- Kullanıcıya Türkçe yanıt verin.
+- **DİL**: MUTLAKA Türkçe yanıt verin.
+- **Entegrasyonlar**: E-Fatura, Kargo ve Pazaryeri entegrasyonlarının UI ve temel DB kısımları hazır. Ancak gerçek API entegrasyon kodlamaları (örneğin Trendyol'a gerçekten ürün basmak veya Doğan e-Dönüşüm API'sine SOAP ile bağlanmak) yapılacağı zaman, MUTLAKA  subagent'ını kullanın.
+- **Loglama**:  sayesinde  altındaki tüm dış servis istekleri  tablosuna otomatik düşüyor. Custom bir log insert'üne genelde gerek kalmamıştır.
 
 **documents and test reports created in this job**
-  - /app/memory/test_credentials.md (Updated - Admin credentials explicitly added)
-  - /app/memory/PRD.md (Updated)
+  - /app/memory/PRD.md (Kapsamlı pazar araştırması özellikleri ve mevcut durum ile güncellendi).
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. *User*: İki adet el yazısı fotoğraf atarak İyzico kısmi iade, İmalat Takip, Ölçü Tablosu, Mikro ihracat entegrasyonu talep etti. -> *Agent: İhtiyaçları analiz edip FAZ 1'e başladı.*
-2. *User*: Havale ödemelerinde süreci anlattı (Ödenmeyenler kırmızı olsun, 48 saatte iptal edilsin, Rol ve Yetkiler eklensin vb.). -> *Agent: Scheduler ve RBAC ekleyip UI'ı güncelledi.*
-3. *User*: Havale siparişi onaylanınca kırmızının normale dönmesini istedi. -> *Agent: Bug'ı fixledi.*
-4. *User*: Fatura Kes sütununu kaldır, kampanya şablonları ekle, Omnichannel (7 kanallı) AI destekli chatbot entegrasyonu yap. -> *Agent: Emergent LLM ile GPT-5.2 botunu entegre etti, kanalları güncelledi.*
-5. *User*: İmalat kayıt olmuyor bug'ı, bedenler otomatik gelmesin, 7 Kargo entegrasyon kartı ekle, il/ilçe konum araması ekle, HB ve Temu Kategori eşleştirme ekle. -> *Agent: İmalat hatasını düzeltti, konum modülünü kurdu, arayüz güncellemelerini search_replace ile koda gömdü.*
-*(Pending Human Action: Ajan güncellemeleri tamamlayıp testlerini bitiremeden kesildi. En son yapılan  ve  arayüz değişikliklerinin test edilip kullanıcıya sunulması gerekiyor).*
+1. *User*: Ürün özellikleri senkron olmuyor, siparişlerdeki gibi soldan tiklerle seçebilmek istiyorum... Toplu fatura kesebilmek, barkod yazdırabilmek istiyorum. -> *Agent: Paginasyon, barkod yazdırma, toplu fatura ve ürün senkronizasyon hatalarını çözdü.*
+2. *User*: E arşiv fatura ayarları ve Kargo firması ayarları sayfalarını Ticimax'teki gibi oluştur. -> *Agent: 11 E-fatura ve 13 kargo firması için Provider Settings yapılarını kurdu.*
+3. *User*: (Ekran görüntüleri göndererek) Sistem Trendyol, Hepsiburada, Temu ile çift yönlü çalışsın, ayar ekranları ve log kayıtlarını da tut. -> *Agent: Marketplace Hub, Entegrasyon Logları sayfalarını ve otomatik loglama (Middleware) sistemini kurdu.*
+4. *User*: Sonraki adımlara başla, marka eşleştirme vb. potansiyel iyileştirmeleri de yap. -> *Agent: Aktarılamayan işlemler, Marka eşleştirme ve Middleware kayıtlarını test edip bitirdi.*
+5. *User*: Genel sistemi tara, piyasadaki diğer sistemlerde olması gereken özellikleri araştır ve plana dahil et. -> *Agent: Toplu Fiyat/Stok Yükleme, Stok Uyarıları, Kategori Eşleştirme, İl/İlçe dropdowns ve Scheduler özelliklerini kurdu.*
+6. *User*: Sonraki adımlara devam et. -> *Agent: RFM Müşteri Segmentasyonu, Pazaryeri Karlılık Raporu ve Google Merchant XML Feed oluşturma özelliklerini kurdu ve başarıyla test etti.*
+*(Pending Human Action: Ajan en son RFM ve Karlılık ekranlarının çalıştığını raporlayıp süreci bitirdi. Kullanıcıdan onay veya yeni bir yönlendirme bekleniyor).*
 
 **Project Health Check:**
-- Broken: None apparent, but latest generic cargo modal replacements need UI verification.
-- Mocked: Cargo APIs, Iyzico API (Arayüzleri var, iş mantıkları key bekleniyor).
+- Broken: Yok (Son iterasyonda test edilen tüm özellikler çalışıyor).
+- Mocked: Fatura üretimi () şu an aktif provider'ın ismini alıp HTML şablon basıyor. Pazaryeri ürün aktarım fonksiyonları başarılı yanıt dönüyor ama gerçek hesap testleri eksik.
 
 **3rd Party Integrations** 
-- **OpenAI GPT-5.2** — uses Emergent LLM Key (for omnichannel auto-responses)
-- Trendyol, Hepsiburada, Temu — requires User API Key
-- Iyzico (Payments) — requires User API Key
-- MNG, Aras, Yurtiçi vb. 7 Kargo — requires User API Key
-- Doğan e-Dönüşüm (SOAP) — requires User Credentials
+- **OpenAI GPT-5.2** — uses Emergent LLM Key
+- Doğan e-Dönüşüm, Uyumsoft vb. (11 E-Fatura Provider) — Mocked / Kullanıcı Credential Bekliyor
+- Yurtiçi, MNG vb. (13 Kargo Provider) — Mocked / Kullanıcı Credential Bekliyor
+- Trendyol, Hepsiburada, Temu vb. (13 Pazaryeri) — Requires User API Key 
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Self-tested via screenshot & curl thoroughly).
+  - Testing agent used after significant changes: NO (Tüm geliştirmeler ajan tarafından cURL ve screenshot aracı ile kapsamlı şekilde bizzat doğrulanarak ilerledi).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None
-  - Known regressions: None
+  - Test files created: Yok
+  - Known regressions: Yok
 
 **Credentials to test flow:**
-- Admin Paneli:  / 
-- Doğan e-Dönüşüm Test:  / 
+- Facette Admin Paneli:  / 
 
 **What agent forgot to execute**
-- Son adımda frontend değişiklikleri (Kargo ayar kartları ve HB/Temu kategori eşleştirme alanları) kodlandı fakat **uygulamanın ayağa kalktığını teyit eden son Screenshot testi alınamadı**.
-- Yeni yazılan  altyapısı frontend tarafındaki sipariş ekleme/müşteri adres formlarına bağlanmadı.
-- Iyzico kısmi iade ve kargo ücreti düşme algoritmalarının backend kodlamasına henüz başlanmadı.</analysis>
+- Son oturumda her şey plana uygun şekilde uygulandı. Sadece kargo ve e-fatura sistemlerinin gerçek dış servis (API/SOAP) implementasyonlarına başlanmadı çünkü UI ve konfigürasyon altyapısının kurulması önceliklendirildi.</analysis>

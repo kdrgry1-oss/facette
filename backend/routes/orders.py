@@ -405,6 +405,44 @@ async def create_invoice_for_order(
         return {"success": True, "message": "Fatura zaten kesilmiş",
                 "invoice_number": order.get("invoice_number", "")}
 
+    # Mikro ihracat siparişleri ayrı ETGB beyannamesi ile faturalanır;
+    # normal e-arşiv/e-fatura yerine ETGB-placeholder bir belge numarası oluştur.
+    if order.get("is_micro_export"):
+        count = await db.orders.count_documents({"invoice_type": "etgb"})
+        invoice_number = f"ETGB{(count + 1):08d}"
+        now = datetime.now(timezone.utc).isoformat()
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {
+                "invoice_issued": True,
+                "invoice_number": invoice_number,
+                "invoice_type": "etgb",
+                "invoice_provider": "etgb-micro-export",
+                "invoice_issued_at": now,
+                "invoice_issued_by": current_user.get("email", ""),
+                "updated_at": now,
+            }}
+        )
+        try:
+            from .marketplace_hub import log_integration_event
+            await log_integration_event(
+                marketplace="einvoice:etgb",
+                action="invoice_create",
+                status="success",
+                direction="outbound",
+                ref_id=order_id,
+                message=f"Mikro İhracat ETGB beyannamesi oluşturuldu: {invoice_number}",
+            )
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "message": "Mikro ihracat ETGB beyannamesi oluşturuldu",
+            "invoice_number": invoice_number,
+            "invoice_type": "etgb",
+            "provider": "etgb-micro-export",
+        }
+
     cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0})
     active = (cfg or {}).get("active_provider")
     providers = (cfg or {}).get("providers") or {}

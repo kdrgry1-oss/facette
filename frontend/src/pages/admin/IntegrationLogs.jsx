@@ -25,6 +25,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, Download } from "lucide-react";
 import Pagination from "../../components/admin/Pagination";
@@ -50,6 +51,8 @@ const STATUS_STYLES = {
 };
 
 export default function IntegrationLogs() {
+  const [searchParams] = useSearchParams();
+  const initialMarketplace = searchParams.get("marketplace") || "";
   const [marketplaces, setMarketplaces] = useState([]);
   const [summary, setSummary] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -59,7 +62,7 @@ export default function IntegrationLogs() {
   const [pageSize, setPageSize] = useState(50);
 
   const [filters, setFilters] = useState({
-    marketplace: "",
+    marketplace: initialMarketplace,
     action: "",
     status: "",
     ref_id: "",
