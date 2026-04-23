@@ -5,6 +5,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -283,26 +284,12 @@ export default function Checkout() {
                       className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black resize-none"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm mb-1">İl *</label>
-                    <input
-                      type="text"
-                      name="city"
-                      value={formData.city}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm mb-1">İlçe *</label>
-                    <input
-                      type="text"
-                      name="district"
-                      value={formData.district}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
+                  <div className="md:col-span-2">
+                    <ProvinceDistrictSelect
+                      city={formData.city}
+                      district={formData.district}
+                      onChange={({ city, district }) => setFormData((p) => ({ ...p, city, district }))}
+                      testIdPrefix="checkout-addr"
                     />
                   </div>
                 </div>

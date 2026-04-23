@@ -143,6 +143,9 @@ const navigation = [
       { label: "E-Arşiv / E-Fatura", path: "/admin/ayarlar/e-fatura", icon: FileText },
       // Kargo firması seçimi ve credential yönetimi
       { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },
+      // Bildirim (SMS / Mail / WhatsApp) sağlayıcı ve şablon yönetimi
+      { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
+      { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },
