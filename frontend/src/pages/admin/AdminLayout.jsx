@@ -66,6 +66,8 @@ const navigation = [
       { label: "Müşteri Segmentleri (RFM)", path: "/admin/musteri-segmentleri", icon: Users },
       { label: "Müşteri Soruları", path: "/admin/sorular", icon: MessageSquare },
       { label: "Destek Talepleri", path: "/admin/tickets", icon: MessageSquare },
+      // FAZ 6 — Şüpheli / yüksek iade oranlı müşteri blok yönetimi
+      { label: "Bloklu Müşteriler", path: "/admin/bloklu-musteriler", icon: Users },
     ],
   },
   {
