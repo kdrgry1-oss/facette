@@ -66,7 +66,7 @@ export default function BrandMapping() {
   useEffect(() => { if (active) load(); /* eslint-disable-next-line */ }, [active]);
 
   const autoMatch = async () => {
-    if (!window.confirm(`${active} için tüm markaları otomatik eşleştirmek üzeresiniz. Devam?`)) return;
+    if (!await window.appConfirm(`${active} için tüm markaları otomatik eşleştirmek üzeresiniz. Devam?`)) return;
     try {
       const r = await axios.post(`${API}/brand-mapping/${active}/auto-match`, {}, auth);
       toast.success(r.data?.message || "Otomatik eşleştirildi");
@@ -77,7 +77,7 @@ export default function BrandMapping() {
   };
 
   const resetAll = async () => {
-    if (!window.confirm(`${active} için TÜM eşleşmeler silinecek. Devam?`)) return;
+    if (!await window.appConfirm(`${active} için TÜM eşleşmeler silinecek. Devam?`)) return;
     try {
       const r = await axios.post(`${API}/brand-mapping/${active}/reset-all`, {}, auth);
       toast.success(`${r.data?.deleted || 0} eşleşme silindi`);
@@ -104,7 +104,7 @@ export default function BrandMapping() {
   };
 
   const clearRow = async (row) => {
-    if (!window.confirm(`"${row.brand_name}" eşleşmesi silinsin mi?`)) return;
+    if (!await window.appConfirm(`"${row.brand_name}" eşleşmesi silinsin mi?`)) return;
     try {
       await axios.delete(`${API}/brand-mapping/${active}/${row.brand_id}`, auth);
       toast.success("Eşleşme silindi");
@@ -117,7 +117,7 @@ export default function BrandMapping() {
   const bulkDelete = async () => {
     const ids = Array.from(selected);
     if (!ids.length) { toast.info("Kayıt seçin"); return; }
-    if (!window.confirm(`${ids.length} marka eşleşmesi silinsin mi?`)) return;
+    if (!await window.appConfirm(`${ids.length} marka eşleşmesi silinsin mi?`)) return;
     try {
       const r = await axios.post(`${API}/brand-mapping/${active}/bulk-delete`, { brand_ids: ids }, auth);
       toast.success(`${r.data?.deleted || 0} eşleşme silindi`);

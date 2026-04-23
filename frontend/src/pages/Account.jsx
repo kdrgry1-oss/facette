@@ -154,7 +154,7 @@ export default function Account() {
   };
 
   const handleDeleteAddress = async (id) => {
-    if (!window.confirm("Adresi silmek istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Adresi silmek istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API}/addresses/${id}`, {

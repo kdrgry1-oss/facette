@@ -649,7 +649,7 @@ export default function AdminProducts() {
    *   kaldırılması gerekir (P2 backlog).
    */
   const handleDelete = async (id) => {
-    if (!window.confirm("Ürünü silmek istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Ürünü silmek istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API}/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -721,6 +721,36 @@ export default function AdminProducts() {
     } catch (err) {
       toast.error("Barkod kartları oluşturulamadı: " + (err.response?.data?.detail || err.message));
     }
+  };
+
+  /**
+   * handleBulkDeleteProducts — Seçili ürünleri toplu sil (onaylı).
+   */
+  const handleBulkDeleteProducts = async () => {
+    if (selectedProducts.length === 0) {
+      toast.error("Lütfen ürün seçiniz");
+      return;
+    }
+    const ok = await window.appConfirm({
+      title: `${selectedProducts.length} ürün silinsin mi?`,
+      description: "Bu işlem geri alınamaz. Ürünler kalıcı olarak silinecek ve varsa pazaryerlerindeki eşleşmeleri de etkilenebilir.",
+      confirmText: `Evet, ${selectedProducts.length} Ürünü Sil`,
+      cancelText: "Vazgeç",
+      variant: "danger",
+    });
+    if (!ok) return;
+    const token = localStorage.getItem('token');
+    let success = 0, failed = 0;
+    for (const id of selectedProducts) {
+      try {
+        await axios.delete(`${API}/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+        success++;
+      } catch { failed++; }
+    }
+    if (success) toast.success(`${success} ürün silindi${failed ? `, ${failed} başarısız` : ""}`);
+    else toast.error(`Silme başarısız (${failed})`);
+    setSelectedProducts([]);
+    fetchProducts();
   };
 
   /**
@@ -1061,6 +1091,14 @@ export default function AdminProducts() {
             >
               <Printer size={16} />
               Seçili Barkod Kartlarını Yazdır
+            </button>
+            <button
+              onClick={handleBulkDeleteProducts}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+              data-testid="products-bulk-delete-btn"
+            >
+              <Trash2 size={16} />
+              Seçili Ürünleri Sil
             </button>
             <button
               onClick={() => setSelectedProducts([])}

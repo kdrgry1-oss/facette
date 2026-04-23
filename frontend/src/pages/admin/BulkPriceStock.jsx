@@ -56,7 +56,7 @@ export default function BulkPriceStock() {
 
   const applyChanges = async () => {
     if (!file) return;
-    if (!window.confirm("Değişiklikler veritabanına uygulanacak. Devam?")) return;
+    if (!await window.appConfirm("Değişiklikler veritabanına uygulanacak. Devam?")) return;
     setApplyLoading(true);
     try {
       const fd = new FormData();

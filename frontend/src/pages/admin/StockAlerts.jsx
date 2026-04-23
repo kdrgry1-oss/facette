@@ -41,7 +41,7 @@ export default function StockAlerts() {
   };
 
   const deactivateOnMarketplaces = async () => {
-    if (!window.confirm("Stoku biten tüm aktif ürünler pazaryerlerinde pasife alınacak (qty=0 gönderilecek). Devam edilsin mi?")) return;
+    if (!await window.appConfirm("Stoku biten tüm aktif ürünler pazaryerlerinde pasife alınacak (qty=0 gönderilecek). Devam edilsin mi?")) return;
     try {
       const r = await axios.post(`${API}/bulk-ops/stock-alerts/deactivate-on-marketplaces`, { threshold: 0 }, auth);
       toast.success(r.data?.message || "Pasifleme tamamlandı");

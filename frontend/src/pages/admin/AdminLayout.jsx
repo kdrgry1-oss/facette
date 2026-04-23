@@ -8,6 +8,7 @@ import {
   BellRing, CheckSquare,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { AppConfirmRoot } from "../../components/admin/AppConfirm";
 
 // Navigation structure with dropdowns — organised by functional domain
 const navigation = [
@@ -324,6 +325,7 @@ export default function AdminLayout() {
           <Outlet />
         </div>
       </main>
+      <AppConfirmRoot />
     </div>
   );
 }

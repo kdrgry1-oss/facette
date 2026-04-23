@@ -38,7 +38,7 @@ export default function Coupons() {
   };
 
   const del = async (id) => {
-    if (!window.confirm("Kupon silinsin mi?")) return;
+    if (!await window.appConfirm("Kupon silinsin mi?")) return;
     await axios.delete(`${API}/admin/coupons/${id}`, { headers: authHeaders() });
     toast.success("Silindi"); load();
   };

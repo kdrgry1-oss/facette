@@ -110,7 +110,7 @@ export default function AdminTasks() {
     toast.success("1 gün ertelendi"); load();
   };
   const del = async (id) => {
-    if (!window.confirm("Görev silinsin mi?")) return;
+    if (!await window.appConfirm("Görev silinsin mi?")) return;
     await axios.delete(`${API}/admin/tasks/${id}`, { headers: h() });
     load();
   };
@@ -122,7 +122,7 @@ export default function AdminTasks() {
     load();
   };
   const seedDefaults = async () => {
-    if (!window.confirm("16 standart görev (varsayılanları) eklensin/sıfırlansın mı?")) return;
+    if (!await window.appConfirm("16 standart görev (varsayılanları) eklensin/sıfırlansın mı?")) return;
     await axios.post(`${API}/admin/tasks/seed-defaults`, {}, { headers: h() });
     toast.success("Varsayılan görevler yüklendi"); load();
   };

@@ -117,7 +117,7 @@ export default function AdminSettings() {
                 <button
                   type="button"
                   onClick={async () => {
-                    if (window.confirm(`Tüm ürünlerin KDV oranını %${settings.default_vat_rate} olarak güncellemek istediğinize emin misiniz?`)) {
+                    if (await window.appConfirm(`Tüm ürünlerin KDV oranını %${settings.default_vat_rate} olarak güncellemek istediğinize emin misiniz?`)) {
                       try {
                         const token = localStorage.getItem('token');
                         const res = await axios.post(`${API}/products/bulk-update-vat`, { vat_rate: settings.default_vat_rate }, {

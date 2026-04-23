@@ -68,7 +68,7 @@ export default function CategoryMapping() {
   };
 
   const clearRow = async (row) => {
-    if (!window.confirm(`"${row.category_name}" eşleşmesi silinsin mi?`)) return;
+    if (!await window.appConfirm(`"${row.category_name}" eşleşmesi silinsin mi?`)) return;
     await axios.delete(`${API}/category-mapping/${active}/${row.category_id}`, auth);
     toast.success("Silindi"); load();
   };
@@ -76,7 +76,7 @@ export default function CategoryMapping() {
   const bulkDelete = async () => {
     const ids = Array.from(selected);
     if (!ids.length) { toast.info("Kayıt seçin"); return; }
-    if (!window.confirm(`${ids.length} kategori eşleşmesi silinsin mi?`)) return;
+    if (!await window.appConfirm(`${ids.length} kategori eşleşmesi silinsin mi?`)) return;
     try {
       const r = await axios.post(`${API}/category-mapping/${active}/bulk-delete`, { category_ids: ids }, auth);
       toast.success(`${r.data?.deleted || 0} eşleşme silindi`);
@@ -99,13 +99,13 @@ export default function CategoryMapping() {
   };
 
   const resetAll = async () => {
-    if (!window.confirm(`${active} için TÜM kategori eşleşmeleri silinecek.`)) return;
+    if (!await window.appConfirm(`${active} için TÜM kategori eşleşmeleri silinecek.`)) return;
     const r = await axios.post(`${API}/category-mapping/${active}/reset-all`, {}, auth);
     toast.success(`${r.data.deleted} kayıt silindi`); load();
   };
 
   const bulkAutoMatchAttributes = async () => {
-    if (!window.confirm(
+    if (!await window.appConfirm(
       `${active} için matched tüm kategorilerin özellik eşleştirmesi otomatik yapılacak.\n\n` +
       `• Mevcut manuel eşleştirmeler korunur (ezilmez), sadece BOŞ olanlar doldurulur.\n` +
       `• Trendyol için canlı API'den attribute'lar çekilir, diğer pazaryerleri için yerel cache kullanılır.\n\n` +

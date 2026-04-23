@@ -381,4 +381,22 @@ Kullanıcı şikayeti: "Kategori eşleştirme ayarlarında ürünlerin özellik 
 - `/api/attributes` 53 attribute döner, değer sayılarıyla birlikte autocomplete'de görünür ✅
 - Lint temiz ✅
 
+## [2026-04-23] Bulk Delete + Global AppConfirm Pop-up
+
+Kullanıcı şikayetleri: (1) Ürün sayfasında birden fazla ürün seçince sil butonu aktif olmuyor. (2) Tüm sitede onaylar browser native popup (sekme üstü) çıkıyor, app içinde pop-up istendi.
+
+### 1. Global `appConfirm` Altyapısı
+- Yeni `components/admin/AppConfirm.jsx`: Shadcn AlertDialog tabanlı Promise API.
+- `appConfirm("metin")` veya `appConfirm({title, description, confirmText, cancelText, variant:"danger"|"warning"|"default"})` Promise<boolean> döner.
+- Tek global resolver; `<AppConfirmRoot />` AdminLayout'ta mount, `window.appConfirm` global.
+
+### 2. Migration: `window.confirm` → `await window.appConfirm`
+- 20 admin sayfası (Orders, Products, Returns, Vendors, Coupons, Members, BulkPriceStock, StockAlerts, ProductReviews, Manufacturing, Settings, UsersRoles, PageDesign, SeoAdmin, CatalogExtras, AdminTasks, BrandMapping, CategoryMapping, Questions, Account) sed ile migrated.
+- Sonuç: browser native popup kayboldu; Shadcn app-içi pop-up (temayla uyumlu, variant'lı danger/warning/default).
+- Lint: tüm admin + Account.jsx — temiz ✅.
+
+### 3. Products Bulk Delete
+- Seçili ürünler bar'ına kırmızı **"Seçili Ürünleri Sil"** butonu (Trash2 ikonu).
+- `handleBulkDeleteProducts` → appConfirm `danger` ile "{N} ürün silinsin mi?" → DELETE loop → başarı/fail sayacı toast + liste refresh.
+
 

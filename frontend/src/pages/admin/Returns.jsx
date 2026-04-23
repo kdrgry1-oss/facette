@@ -98,7 +98,7 @@ export default function Returns() {
   };
 
   const handleApprove = async (claim) => {
-    if (!window.confirm("Bu iadeyi onaylamak istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Bu iadeyi onaylamak istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem("token");
       const claimItemIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
