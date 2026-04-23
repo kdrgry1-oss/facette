@@ -34,7 +34,7 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -74,8 +74,23 @@ export default function AdminProducts() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  // ---------------------------------------------------------------------------
+  // Toplu Seçim State'i: siparişler tablosundaki gibi soldaki tiklerle seçilen
+  // ürünlerin id listesi. "Seçilenlerin barkod kartını yazdır" ve gelecekte
+  // "toplu durum değişikliği / toplu Trendyol push" için kullanılır.
+  // ---------------------------------------------------------------------------
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const toggleSelectProduct = (id) =>
+    setSelectedProducts((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  const toggleSelectAllProducts = () => {
+    if (selectedProducts.length === products.length) setSelectedProducts([]);
+    else setSelectedProducts(products.map((p) => p.id));
+  };
   const [editingProduct, setEditingProduct] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [variantsModalOpen, setVariantsModalOpen] = useState(false);
@@ -194,7 +209,7 @@ export default function AdminProducts() {
     fetchTrendyolCategories();
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
-  }, [page, search, JSON.stringify(filters)]);
+  }, [page, pageSize, search, JSON.stringify(filters)]);
 
   // Open size-table editor when deep-linked from /admin/olcu-tablolari
   useEffect(() => {
@@ -402,7 +417,7 @@ export default function AdminProducts() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `${API}/products?page=${page}&limit=20`;
+      let url = `${API}/products?page=${page}&limit=${pageSize}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (filters.status && filters.status !== 'all') url += `&status=${filters.status}`;
       if (filters.category) url += `&category=${encodeURIComponent(filters.category)}`;
@@ -661,6 +676,50 @@ export default function AdminProducts() {
       toast.success(res.data.message || "Trendyol stok/fiyat güncellendi");
     } catch (err) {
       toast.error("Güncelleme başarısız: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  /**
+   * handlePrintBarcode — TEK ürünün barkod/ürün kartını yeni sekmede açar ve
+   *   yazdırma diyalogunu tetikler.
+   *   Backend endpoint'i her varyant için ayrı bir barkod kartı döner
+   *   (giyim firmalarındaki gibi: ürün adı, stok kodu, GTIN barkod, beden, renk).
+   *   BACKEND: GET /api/products/{id}/barcode-card
+   */
+  const handlePrintBarcode = (productId) => {
+    const token = localStorage.getItem('token');
+    const url = `${API}/products/${productId}/barcode-card?token=${token}`;
+    const w = window.open(url, '_blank', 'width=800,height=1000');
+    if (w) {
+      w.onload = () => setTimeout(() => w.print(), 600);
+    }
+  };
+
+  /**
+   * handleBulkPrintBarcodes — Seçili ürünlerin barkod kartlarını TEK bir
+   *   yazdırılabilir sayfada gösterir. A4'e sığacak şekilde 2-4 kart/satır.
+   *   BACKEND: POST /api/products/barcode-cards/bulk (body: { ids: [...] })
+   */
+  const handleBulkPrintBarcodes = async () => {
+    if (selectedProducts.length === 0) {
+      toast.error("Lütfen ürün seçiniz");
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/products/barcode-cards/bulk`,
+        { ids: selectedProducts },
+        { headers: { Authorization: `Bearer ${token}` }, responseType: 'text' }
+      );
+      const w = window.open('', '_blank', 'width=900,height=1100');
+      if (w) {
+        w.document.write(res.data);
+        w.document.close();
+        setTimeout(() => w.print(), 600);
+      }
+    } catch (err) {
+      toast.error("Barkod kartları oluşturulamadı: " + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -973,16 +1032,43 @@ export default function AdminProducts() {
           ================================================================= */}
 
       {/* Üst (compact) pagination — listeyi açan kullanıcı aşağı inmeden
-          sayfa değiştirebilsin diye eklendi. Tablo sağına hizalı. */}
-      {total > 20 && (
+          sayfa değiştirebilsin + sayfa boyutunu değiştirebilsin. */}
+      {total > 0 && (
         <div className="flex justify-end mb-2" data-testid="products-top-pagination">
           <Pagination
             page={page}
             total={total}
-            pageSize={20}
+            pageSize={pageSize}
             onChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
             variant="compact"
           />
+        </div>
+      )}
+
+      {/* Toplu Seçim Bar'ı — en az bir ürün seçiliyken görünür.
+          Buradan seçilen ürünlerin barkod kartları tek dosyada yazdırılır. */}
+      {selectedProducts.length > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3 flex items-center justify-between" data-testid="products-bulk-bar">
+          <span className="text-sm font-medium text-gray-800">
+            <span className="text-orange-600 font-bold">{selectedProducts.length}</span> ürün seçildi
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkPrintBarcodes}
+              className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
+              data-testid="products-bulk-print-barcode-btn"
+            >
+              <Printer size={16} />
+              Seçili Barkod Kartlarını Yazdır
+            </button>
+            <button
+              onClick={() => setSelectedProducts([])}
+              className="px-3 py-1.5 text-sm text-gray-600 hover:bg-white rounded"
+            >
+              Seçimi Temizle
+            </button>
+          </div>
         </div>
       )}
 
@@ -991,6 +1077,15 @@ export default function AdminProducts() {
         <table className="admin-table admin-table-compact">
           <thead>
             <tr>
+              <th className="w-10">
+                <button onClick={toggleSelectAllProducts} className="p-1" title="Tümünü seç" data-testid="products-select-all">
+                  {selectedProducts.length === products.length && products.length > 0 ? (
+                    <CheckSquare size={16} className="text-orange-600" />
+                  ) : (
+                    <Square size={16} />
+                  )}
+                </button>
+              </th>
               <th>Görsel</th>
               <th>Ürün Adı</th>
               <th>Stok Kodu</th>
@@ -1003,12 +1098,25 @@ export default function AdminProducts() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="text-center py-8">Yükleniyor...</td></tr>
+              <tr><td colSpan={9} className="text-center py-8">Yükleniyor...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
             ) : (
               products.map((product) => (
-                <tr key={product.id}>
+                <tr key={product.id} data-testid={`product-row-${product.id}`}>
+                  <td>
+                    <button
+                      onClick={() => toggleSelectProduct(product.id)}
+                      className="p-1"
+                      data-testid={`product-select-${product.id}`}
+                    >
+                      {selectedProducts.includes(product.id) ? (
+                        <CheckSquare size={16} className="text-orange-600" />
+                      ) : (
+                        <Square size={16} />
+                      )}
+                    </button>
+                  </td>
                   <td>
                     {product.images?.[0] ? (
                       <div className="relative group/img overflow-visible z-0 hover:z-50">
@@ -1095,6 +1203,14 @@ export default function AdminProducts() {
                           <RefreshCw size={16} />
                         </button>
                         <button
+                          onClick={() => handlePrintBarcode(product.id)}
+                          className="p-1.5 hover:bg-purple-50 rounded text-purple-600 transition-colors"
+                          title="Barkod Kartı Yazdır"
+                          data-testid={`product-print-barcode-${product.id}`}
+                        >
+                          <Printer size={16} />
+                        </button>
+                        <button
                           onClick={() => handleDelete(product.id)}
                           className="p-1.5 hover:bg-red-50 rounded text-red-500"
                           title="Sil"
@@ -1117,15 +1233,13 @@ export default function AdminProducts() {
         </table>
       </div>
 
-      {/* Pagination (alt — full numaralı).
-          Not: Üst (compact) pagination yukarıda tablonun başlığından önce
-          render edilir; her ikisi de aynı `setPage` setter'ını çağırır ve
-          fetch useEffect'i [page] değiştiğinde tetiklenir. */}
+      {/* Pagination (alt — full numaralı). */}
       <Pagination
         page={page}
         total={total}
-        pageSize={20}
+        pageSize={pageSize}
         onChange={setPage}
+        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         variant="full"
       />
 

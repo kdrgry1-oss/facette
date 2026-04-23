@@ -54,6 +54,8 @@ import {
   CurrencyRates, BulkMail, ExtraReports,
 } from "./pages/admin/CatalogExtras";
 import AdminTasks from "./pages/admin/AdminTasks";
+import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
+import CargoSettings from "./pages/admin/CargoSettings";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -100,6 +102,10 @@ function App() {
               <Route path="iadeler" element={<AdminReturns />} />
               <Route path="sayfalar" element={<AdminPages />} />
               <Route path="ayarlar" element={<AdminSettings />} />
+              {/* Provider ayarları — Ticimax'teki "E-Arşiv/E-Fatura Ayarları"
+                  ile aynı mantık. Çoklu entegratör şeması backend'de tanımlı. */}
+              <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
+              <Route path="ayarlar/kargo" element={<CargoSettings />} />
               <Route path="trendyol-eslestir" element={<TrendyolEslestir />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />

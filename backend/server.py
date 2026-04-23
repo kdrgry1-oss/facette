@@ -68,6 +68,8 @@ from routes.catalog_extras import (
     currency_router,
 )
 from routes.admin_tasks import router as admin_tasks_router
+from routes.barcode_cards import router as barcode_cards_router
+from routes.provider_settings import router as provider_settings_router
 
 # Database
 from routes.deps import client, db
@@ -194,6 +196,12 @@ for _r in (
 ):
     api_router.include_router(_r)
 api_router.include_router(admin_tasks_router)
+# Barcode cards (products & variants) — tek tek veya toplu yazdırılabilir HTML
+# kartlar. Products.jsx'deki "Barkod Yazdır" akışları buraya bağlıdır.
+api_router.include_router(barcode_cards_router)
+# E-Fatura ve Kargo entegratör ayarları (provider seçimi + credential formu).
+# Frontend: EInvoiceSettings.jsx + CargoSettings.jsx bu endpoint'leri kullanır.
+api_router.include_router(provider_settings_router)
 
 # Root endpoint
 @api_router.get("/")

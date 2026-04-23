@@ -112,14 +112,23 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P2: integrations.py (3500+ satır) provider'a göre bölme
 
 ## Changelog — 23 Nis 2026
-- **UI**: Admin Pagination tekdüze hale getirildi. `/app/frontend/src/components/admin/Pagination.jsx` (compact + full variants, jump-to-page input, ilk/son/prev/next, "..." ellipsis).
-- **UI**: Ürünler ve Siparişler tablolarına `.admin-table-compact` CSS varyantı uygulandı → bir ekranda daha çok kayıt sığıyor. Products thumbnail w-12→w-10 küçültüldü.
-- **UI**: Products ve Orders sayfalarına ÜST (compact) + ALT (full) pagination eklendi. Sağ üstte `Sayfa X / Y · 1-20 / 248 · Git:[#]` minimal satırı, altta klasik numaralı düğmeler.
-- **DX**: Products.jsx ve Orders.jsx dosya başlarına modül amacı + backend endpoint haritası + bağlı modül açıklaması eklendi. Kritik fonksiyonlar (fetchProducts, fetchCategories, handleSubmit, handleDelete, handleTrendyolSync/Update, openEditModal, fetchOrders, handleStatusChange, handleGenerateInvoice, handleShipOrder, handleBulkStatusChange, handleTrendyolPreview, SearchableAttribute) JSDoc blokları ile belgelendi.
-- **Refactor (P2 start)**: Products.jsx 2543→2362 satıra düştü. Yeni dosyalar:
+- **UI**: Admin Pagination tekdüze hale getirildi. `/app/frontend/src/components/admin/Pagination.jsx` (compact + full variants, jump-to-page input, ilk/son/prev/next, "..." ellipsis). Sayfa başına kayıt seçici (20/50/100/200) hem üst hem alt varyantında.
+- **UI**: Ürünler ve Siparişler tablolarına `.admin-table-compact` CSS varyantı → bir ekrana daha çok kayıt sığıyor. Thumbnail w-12→w-10.
+- **UI**: ÜST (compact) + ALT (full) pagination — her ikisi aynı state'i paylaşır.
+- **Products Bulk Select**: Ürünler tablosuna sol checkbox sütunu + "Tümünü seç" + seçilen ürünler için üst turuncu bulk bar eklendi.
+- **Barcode Cards**: Yeni backend router `barcode_cards.py`. Giyim firması ürün kartı (ürün adı, stok kodu, GTIN Code128/EAN-13 barkod, beden, renk, fiyat) — tek ürün `GET /api/products/{id}/barcode-card` + toplu `POST /api/products/barcode-cards/bulk`. A4 2 sütunlu yazdırılabilir HTML.
+- **Orders Bulk Invoices**: `Orders.jsx` bulk bar'a **Toplu Fatura Kes** + **Toplu Fatura Yazdır** butonları eklendi. Toplu yazdırma tüm seçili faturaları tek sayfada iframe grid ile basar (A4 başına bir fatura).
+- **Provider Settings (yeni)**: Ticimax'teki E-Arşiv/E-Fatura ayarları benzeri jenerik altyapı.
+  - Backend: `routes/provider_settings.py` — 11 e-fatura entegratörü (Doğan, Nilvera, Uyumsoft, Logo, Mikro, Foriba/EDM, QNB Finansbank, Turkcell, İzibiz, İdea, Kolaysoft) + 13 kargo firması (MNG, Yurtiçi, Aras, PTT, Sürat, HepsiJet, Trendyol Express, Sendeo, Kolay Gelsin, DHL, UPS, FedEx, TNT). Her biri için alan şeması (field type/required/placeholder) tanımlı.
+  - Endpoints: `/api/provider-settings/{einvoice|cargo}/{schemas|config|test}`.
+  - MongoDB: tek `providers_config` koleksiyonu, `kind` bazlı tek döküman (active_provider + providers map).
+  - Frontend: jenerik `components/admin/ProviderSettings.jsx` (sol liste + sağ dinamik form + arama + şifre toggle + test butonu) → `EInvoiceSettings.jsx` ve `CargoSettings.jsx` sayfaları bu componenti kullanır.
+  - Routes: `/admin/ayarlar/e-fatura` ve `/admin/ayarlar/kargo`.
+  - Sidebar "Ayarlar" altında yeni menü kalemleri.
+- **Refactor (P2 1. adım)**: Products.jsx 2543→2376 satır. Çıkarılan yeni dosyalar:
   - `components/admin/product-form/SearchableAttribute.jsx` (166 satır)
   - `components/admin/product-form/SeoTab.jsx` (65 satır)
   - `components/admin/product-form/StockTab.jsx` (101 satır)
-- **Test**: UI smoke test başarılı — Ürünler (248 kayıt, 13 sayfa) ve Siparişler (24 kayıt, 2 sayfa) ekranlarında hem üst minimal hem alt full pagination çalışıyor, "Git: 5" akışı doğrulandı. Ürün düzenleme modalında SEO, Stok ve Özellikler sekmeleri ayrı componentlerden doğru render ediliyor.
+- **Test**: Backend curl testleri başarılı — 11 e-fatura + 13 kargo provider schemas/config/test endpoint'leri çalışıyor. UI smoke testi: sol liste + sağ dinamik form + bulk checkbox'lar + pagination size selector hepsi render ediliyor. Ürün attributes PUT→GET roundtrip doğru (Yaka: V Yaka, Kumaş: Pamuk test edildi).
 
 
