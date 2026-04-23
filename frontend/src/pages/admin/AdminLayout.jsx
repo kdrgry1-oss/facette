@@ -34,6 +34,9 @@ const navigation = [
       { label: "Varyantlar", path: "/admin/varyantlar", icon: GitMerge },
       { label: "Ölçü Tabloları", path: "/admin/olcu-tablolari", icon: Ruler },
       { label: "Stok & Fiyat Alarm", path: "/admin/stok-alarm", icon: BellRing },
+      // Yeni: Toplu Excel yükleme (fiyat/stok) + stok uyarıları
+      { label: "Toplu Fiyat/Stok (Excel)", path: "/admin/toplu-fiyat-stok", icon: Package },
+      { label: "Stok Uyarıları", path: "/admin/stok-uyarilari", icon: BellRing },
     ],
   },
   {
@@ -117,6 +120,8 @@ const navigation = [
       { label: "Aktarılamayanlar", path: "/admin/aktarilamayanlar", icon: FileText },
       // Multi-marketplace marka eşleştirme
       { label: "Marka Eşleştir", path: "/admin/marka-eslestir", icon: Store },
+      // Multi-marketplace kategori eşleştirme
+      { label: "Kategori Eşleştir", path: "/admin/kategori-eslestir", icon: Store },
       { label: "Tüm Entegrasyonlar", path: "/admin/entegrasyonlar", icon: Cable },
       { label: "Trendyol Eşleştir", path: "/admin/trendyol-eslestir", icon: Store },
       { label: "Hepsiburada Eşleştir", path: "/admin/hepsiburada-eslestir", icon: Store },
