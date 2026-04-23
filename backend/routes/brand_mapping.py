@@ -130,6 +130,59 @@ async def auto_match_brands(marketplace: str,
             "message": f"{count} marka otomatik eşleştirildi ({marketplace})."}
 
 
+# NOTE: Aşağıdaki iki route, generic /{brand_id} route'undan ÖNCE tanımlanmalı;
+# aksi takdirde "bulk-delete" ve "options" path segment'i `brand_id` olarak yakalanır.
+@router.get("/{marketplace}/options")
+async def search_marketplace_brands(
+    marketplace: str,
+    q: str = "",
+    limit: int = 50,
+    current_user: dict = Depends(require_admin),
+):
+    """Pazaryerinin kendi marka listesinden arama."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    coll_map = {"trendyol": "trendyol_brands"}
+    coll_name = coll_map.get(marketplace)
+    if not coll_name:
+        return {"items": [], "hint": f"{marketplace} için marka cache yok, manuel ID girin"}
+    q_ = (q or "").strip()
+    query = {}
+    if q_:
+        query["name"] = {"$regex": q_, "$options": "i"}
+    rows = await db[coll_name].find(query, {"_id": 0}).limit(max(1, min(200, int(limit)))).to_list(length=limit)
+    return {"items": [{"id": r.get("id"), "name": r.get("name", "")} for r in rows], "count": len(rows)}
+
+
+@router.post("/{marketplace}/bulk-delete")
+async def bulk_delete_brand_mappings(
+    marketplace: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Seçili marka eşleşmelerini toplu sil. Body: {brand_ids: [...]}."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    ids = (payload or {}).get("brand_ids") or []
+    if not ids:
+        return {"success": True, "deleted": 0}
+    res = await db.brand_mappings.delete_many({
+        "marketplace": marketplace,
+        "brand_id": {"$in": ids},
+    })
+    return {"success": True, "deleted": res.deleted_count}
+
+
+@router.post("/{marketplace}/reset-all")
+async def reset_all(marketplace: str,
+                    current_user: dict = Depends(require_admin)):
+    """Pazaryerine ait tüm eşleşmeleri siler."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    res = await db.brand_mappings.delete_many({"marketplace": marketplace})
+    return {"success": True, "deleted": res.deleted_count}
+
+
 @router.post("/{marketplace}/{brand_id}")
 async def set_brand_mapping(marketplace: str, brand_id: str, payload: dict,
                              current_user: dict = Depends(require_admin)):
@@ -176,13 +229,3 @@ async def clear_brand_mapping(marketplace: str, brand_id: str,
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     await db.brand_mappings.delete_one({"brand_id": brand_id, "marketplace": marketplace})
     return {"success": True}
-
-
-@router.post("/{marketplace}/reset-all")
-async def reset_all(marketplace: str,
-                    current_user: dict = Depends(require_admin)):
-    """Pazaryerine ait tüm eşleşmeleri siler."""
-    if marketplace not in MARKETPLACES:
-        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
-    res = await db.brand_mappings.delete_many({"marketplace": marketplace})
-    return {"success": True, "deleted": res.deleted_count}

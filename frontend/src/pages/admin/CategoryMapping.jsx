@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2 } from "lucide-react";
+import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -23,6 +24,7 @@ export default function CategoryMapping() {
   const [search, setSearch] = useState("");
   const [editRow, setEditRow] = useState(null);
   const [editVal, setEditVal] = useState({ id: "", name: "" });
+  const [selected, setSelected] = useState(new Set());
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -45,9 +47,10 @@ export default function CategoryMapping() {
   useEffect(() => { if (active) load(); /* eslint-disable-next-line */ }, [active]);
 
   const saveRow = async (row) => {
+    if (!editVal.name) { toast.info("Pazaryeri kategorisi seçin"); return; }
     try {
       await axios.post(`${API}/category-mapping/${active}/${row.category_id}`,
-        { marketplace_category_id: editVal.id, marketplace_category_name: editVal.name }, auth);
+        { marketplace_category_id: editVal.id || null, marketplace_category_name: editVal.name }, auth);
       toast.success("Kaydedildi");
       setEditRow(null); load();
     } catch { toast.error("Kaydedilemedi"); }
@@ -57,6 +60,31 @@ export default function CategoryMapping() {
     if (!window.confirm(`"${row.category_name}" eşleşmesi silinsin mi?`)) return;
     await axios.delete(`${API}/category-mapping/${active}/${row.category_id}`, auth);
     toast.success("Silindi"); load();
+  };
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selected);
+    if (!ids.length) { toast.info("Kayıt seçin"); return; }
+    if (!window.confirm(`${ids.length} kategori eşleşmesi silinsin mi?`)) return;
+    try {
+      const r = await axios.post(`${API}/category-mapping/${active}/bulk-delete`, { category_ids: ids }, auth);
+      toast.success(`${r.data?.deleted || 0} eşleşme silindi`);
+      setSelected(new Set());
+      load();
+    } catch { toast.error("Toplu silme başarısız"); }
+  };
+  const toggleOne = (id) => {
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
+  const toggleAll = (items) => {
+    const allIds = items.map((r) => r.category_id);
+    const allSelected = allIds.every((id) => selected.has(id)) && allIds.length;
+    setSelected((s) => {
+      const n = new Set(s);
+      if (allSelected) allIds.forEach((id) => n.delete(id));
+      else allIds.forEach((id) => n.add(id));
+      return n;
+    });
   };
 
   const resetAll = async () => {
@@ -139,15 +167,34 @@ export default function CategoryMapping() {
           data-testid="cat-search" />
       </div>
 
+      {/* Toplu seçim bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-3">
+          <span className="text-sm font-semibold text-orange-900">{selected.size} seçili</span>
+          <button onClick={bulkDelete}
+            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-medium"
+            data-testid="cat-bulk-delete">
+            <Trash2 size={11} className="inline mr-1" /> Seçilileri Sil
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            className="text-xs text-gray-700 hover:text-black">Seçimi Temizle</button>
+        </div>
+      )}
+
       <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
         <table className="admin-table admin-table-compact">
           <thead>
             <tr>
+              <th className="w-8">
+                <input type="checkbox"
+                  checked={filtered.length > 0 && filtered.every((r) => selected.has(r.category_id))}
+                  onChange={() => toggleAll(filtered)}
+                  data-testid="cat-toggle-all" />
+              </th>
               <th>Durum</th>
               <th>Sistem Kategorisi</th>
-              <th>Pazaryeri Kat. ID</th>
-              <th>Pazaryeri Kat. Adı</th>
-              <th className="w-32">İşlemler</th>
+              <th>Pazaryeri Kategorisi</th>
+              <th className="w-36">İşlemler</th>
             </tr>
           </thead>
           <tbody>
@@ -160,6 +207,12 @@ export default function CategoryMapping() {
                 const isEditing = editRow === row.category_id;
                 return (
                   <tr key={row.category_id}>
+                    <td>
+                      <input type="checkbox"
+                        checked={selected.has(row.category_id)}
+                        onChange={() => toggleOne(row.category_id)}
+                        data-testid={`cat-select-${row.category_id}`} />
+                    </td>
                     <td>
                       {row.status === "matched" ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
@@ -174,17 +227,21 @@ export default function CategoryMapping() {
                     <td className="font-semibold text-sm">{row.category_name}</td>
                     <td>
                       {isEditing ? (
-                        <input value={editVal.id} onChange={(e) => setEditVal({ ...editVal, id: e.target.value })}
-                          placeholder="Kat. ID" className="w-32 border border-gray-200 rounded px-2 py-1 text-sm"
-                          data-testid="cat-edit-id" />
-                      ) : <span className="text-xs font-mono text-gray-600">{row.marketplace_category_id || "-"}</span>}
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <input value={editVal.name} onChange={(e) => setEditVal({ ...editVal, name: e.target.value })}
-                          placeholder="Kat. Adı" className="w-64 border border-gray-200 rounded px-2 py-1 text-sm"
-                          data-testid="cat-edit-name" />
-                      ) : <span className="text-sm">{row.marketplace_category_name || "-"}</span>}
+                        <SearchableMapSelect
+                          optionsUrl={`/category-mapping/${active}/options`}
+                          value={editVal}
+                          onChange={(v) => setEditVal(v)}
+                          placeholder={`${active} kategorisi ara...`}
+                          data-testid={`cat-search-${row.category_id}`}
+                        />
+                      ) : (
+                        <div className="text-sm">
+                          {row.marketplace_category_name || <span className="text-gray-400">-</span>}
+                          {row.marketplace_category_id && (
+                            <span className="text-[10px] text-gray-400 font-mono ml-2">#{row.marketplace_category_id}</span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {isEditing ? (
@@ -198,11 +255,12 @@ export default function CategoryMapping() {
                         <div className="flex gap-1">
                           <button onClick={() => {
                             setEditRow(row.category_id);
-                            setEditVal({ id: row.marketplace_category_id || "", name: row.marketplace_category_name || row.category_name });
-                          }} className="text-xs text-orange-600 hover:underline">Düzenle</button>
-                          {row.status === "matched" && (
-                            <button onClick={() => clearRow(row)} className="text-xs text-red-600 hover:underline">Sil</button>
-                          )}
+                            setEditVal({ id: row.marketplace_category_id || "", name: row.marketplace_category_name || "" });
+                          }} className="text-xs text-orange-600 hover:underline"
+                            data-testid={`cat-edit-${row.category_id}`}>Düzenle</button>
+                          <button onClick={() => clearRow(row)}
+                            className="text-xs text-red-600 hover:underline"
+                            data-testid={`cat-clear-${row.category_id}`}>Sil</button>
                         </div>
                       )}
                     </td>

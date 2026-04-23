@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, CheckCircle2, Circle, Zap, Trash2, Save, Search } from "lucide-react";
+import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -38,6 +39,7 @@ export default function BrandMapping() {
   const [filter, setFilter] = useState("all");  // all | matched | unmatched
   const [editRow, setEditRow] = useState(null);
   const [editVal, setEditVal] = useState({ id: "", name: "" });
+  const [selected, setSelected] = useState(new Set());
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -86,10 +88,11 @@ export default function BrandMapping() {
   };
 
   const saveRow = async (row) => {
+    if (!editVal.name) { toast.info("Pazaryeri markası seçin veya yazın"); return; }
     try {
       await axios.post(
         `${API}/brand-mapping/${active}/${row.brand_id}`,
-        { marketplace_brand_id: editVal.id, marketplace_brand_name: editVal.name },
+        { marketplace_brand_id: editVal.id || null, marketplace_brand_name: editVal.name },
         auth
       );
       toast.success("Eşleşme kaydedildi");
@@ -109,6 +112,36 @@ export default function BrandMapping() {
     } catch {
       toast.error("Silinemedi");
     }
+  };
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selected);
+    if (!ids.length) { toast.info("Kayıt seçin"); return; }
+    if (!window.confirm(`${ids.length} marka eşleşmesi silinsin mi?`)) return;
+    try {
+      const r = await axios.post(`${API}/brand-mapping/${active}/bulk-delete`, { brand_ids: ids }, auth);
+      toast.success(`${r.data?.deleted || 0} eşleşme silindi`);
+      setSelected(new Set());
+      load();
+    } catch { toast.error("Toplu silme başarısız"); }
+  };
+
+  const toggleOne = (id) => {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+  const toggleAll = (items) => {
+    const allIds = items.map((r) => r.brand_id);
+    const allSelected = allIds.every((id) => selected.has(id)) && allIds.length;
+    setSelected((s) => {
+      const n = new Set(s);
+      if (allSelected) allIds.forEach((id) => n.delete(id));
+      else allIds.forEach((id) => n.add(id));
+      return n;
+    });
   };
 
   const filteredItems = useMemo(() => {
@@ -210,15 +243,34 @@ export default function BrandMapping() {
         </select>
       </div>
 
+      {/* Toplu seçim bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-3">
+          <span className="text-sm font-semibold text-orange-900">{selected.size} seçili</span>
+          <button onClick={bulkDelete}
+            className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-medium"
+            data-testid="brand-bulk-delete">
+            <Trash2 size={11} className="inline mr-1" /> Seçilileri Sil
+          </button>
+          <button onClick={() => setSelected(new Set())}
+            className="text-xs text-gray-700 hover:text-black">Seçimi Temizle</button>
+        </div>
+      )}
+
       {/* Tablo */}
       <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
         <table className="admin-table admin-table-compact">
           <thead>
             <tr>
+              <th className="w-8">
+                <input type="checkbox"
+                  checked={filteredItems.length > 0 && filteredItems.every((r) => selected.has(r.brand_id))}
+                  onChange={() => toggleAll(filteredItems)}
+                  data-testid="brand-toggle-all" />
+              </th>
               <th>Durum</th>
               <th>Sistem Markası</th>
-              <th>Pazaryeri Marka ID</th>
-              <th>Pazaryeri Marka Adı</th>
+              <th>Pazaryeri Marka</th>
               <th>Son Güncelleme</th>
               <th className="w-32">İşlemler</th>
             </tr>
@@ -234,6 +286,12 @@ export default function BrandMapping() {
                 return (
                   <tr key={row.brand_id}>
                     <td>
+                      <input type="checkbox"
+                        checked={selected.has(row.brand_id)}
+                        onChange={() => toggleOne(row.brand_id)}
+                        data-testid={`brand-select-${row.brand_id}`} />
+                    </td>
+                    <td>
                       {row.status === "matched" ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
                           <CheckCircle2 size={10} /> Eşleşti
@@ -247,28 +305,20 @@ export default function BrandMapping() {
                     <td className="font-semibold text-sm">{row.brand_name}</td>
                     <td>
                       {isEditing ? (
-                        <input
-                          value={editVal.id}
-                          onChange={(e) => setEditVal({ ...editVal, id: e.target.value })}
-                          placeholder="Pazaryeri Brand ID"
-                          className="w-32 border border-gray-200 rounded px-2 py-1 text-sm"
-                          data-testid="brand-edit-id"
+                        <SearchableMapSelect
+                          optionsUrl={`/brand-mapping/${active}/options`}
+                          value={editVal}
+                          onChange={(v) => setEditVal(v)}
+                          placeholder={`${active} markası ara veya yaz...`}
+                          data-testid={`brand-search-${row.brand_id}`}
                         />
                       ) : (
-                        <span className="text-xs font-mono text-gray-600">{row.marketplace_brand_id || "-"}</span>
-                      )}
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <input
-                          value={editVal.name}
-                          onChange={(e) => setEditVal({ ...editVal, name: e.target.value })}
-                          placeholder="Pazaryeri Brand Adı"
-                          className="w-48 border border-gray-200 rounded px-2 py-1 text-sm"
-                          data-testid="brand-edit-name"
-                        />
-                      ) : (
-                        <span className="text-sm">{row.marketplace_brand_name || "-"}</span>
+                        <div className="text-sm">
+                          {row.marketplace_brand_name || <span className="text-gray-400">-</span>}
+                          {row.marketplace_brand_id && (
+                            <span className="text-[10px] text-gray-400 font-mono ml-2">#{row.marketplace_brand_id}</span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="text-[11px] text-gray-400">

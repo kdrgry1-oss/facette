@@ -28,10 +28,7 @@ class AttributeUpdate(AttributeBase):
 async def get_attributes(current_user: dict = Depends(require_admin)):
     """Get all global product attributes"""
     try:
-        attrs = await db.attributes.find({}).sort("name", 1).to_list(1000)
-        # Convert _id to string or remove it
-        for val in attrs:
-            val["_id"] = str(val["_id"])
+        attrs = await db.attributes.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
         return {"success": True, "attributes": attrs}
     except Exception as e:
         logger.error(f"Error fetching attributes: {e}")
