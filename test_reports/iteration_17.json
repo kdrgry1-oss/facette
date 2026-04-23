@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 17 backend smoke — FAZ 8 (return reports: by-size, by-product, reasons; fast-selling detector), FAZ 9 (marketing pixels CRUD + 8 providers + active-public endpoint), and manufacturer-performance scoring. Pytest suite with 22 tests — all pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/reports/fast-selling",
+        "issue": "Per-item loop does an async db.products.find_one call for every aggregated product. For large result sets this becomes N+1 queries. A single $lookup in the aggregation pipeline would be more efficient."
+      },
+      {
+        "endpoint": "GET /api/admin/reports/manufacturer-performance",
+        "issue": "Score formula '100 - max(0,avg_delay)*3 - |avg_qty_diff|*0.5' is applied to means. If a manufacturer has one delayed row and many on-time rows, the score averages noise and can mask individual bad deliveries. Consider weighting by row count or exposing percentiles. Not a bug — just a modelling caveat."
+      },
+      {
+        "endpoint": "POST /api/marketing-pixels",
+        "issue": "Custom provider allows arbitrary HTML/JS in head_snippet/body_snippet without sanitisation. Because the endpoint is admin-only and the snippets are echoed verbatim via /active-public, an admin could inject any script into every storefront page (XSS vector if an admin account is compromised). Consider a server-side allow-list or at least a length limit + content-security-policy hint on the public endpoint."
+      },
+      {
+        "endpoint": "GET /api/marketing-pixels/active-public",
+        "issue": "Endpoint is intentionally unauthenticated; returns raw HTML strings. Also has no CORS/caching headers set. If the public storefront fetches this on every page load, adding a short Cache-Control (e.g. s-maxage=60) would reduce load."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_faz8_faz9.py",
+    "/app/test_reports/pytest/iteration17.xml"
+  ],
+  "action_items": [
+    "Optional: replace per-item find_one in /fast-selling with a $lookup to reduce round-trips.",
+    "Optional: add length-cap / basic sanitisation for custom head_snippet/body_snippet in POST /marketing-pixels.",
+    "Optional: set Cache-Control on /marketing-pixels/active-public to cut storefront requests."
+  ],
+  "critical_code_review_comments": [
+    "routes/reports.py::returns_by_product joins return volume vs same-period sales for rate%. Correctly returns null when sold=0. Uses datetime.isoformat() ISO strings consistently with other report endpoints — fine.",
+    "routes/reports.py::fast_selling_products: window_days is Query(ge=1, le=90) — validated (422 returned for 0 and 91). recommend_ads = age <= 60 AND sold >= min_sold. Note: when product has no created_at or the parse fails, age defaults to 999, so recommend_ads is False — good fallback.",
+    "routes/reports.py::manufacturer_performance: aggregation filters manufacturer_id not null. Formula applied and clamped to [0,100]. Sorts by -score in Python after Mongo sort. Confirmed score math matches spec.",
+    "routes/marketing_pixels.py::_template_snippet supports 7 providers with templates (ga4, meta, google_ads, tiktok, yandex, hotjar, clarity); 'custom' correctly has no template and passes user snippet through untouched. Good.",
+    "routes/marketing_pixels.py::upsert_pixel strips _id before returning; uses generate_id for new docs, update_one for existing. 404 is raised before update when id is not found — verified by test.",
+    "routes/marketing_pixels.py::list_active_public uses projection that excludes _id and only exposes snippet/provider fields — safe for public consumption."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration17_faz8_faz9.py"],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "N/A (not requested)"},
+  "test_credentials": "admin@facette.com / admin123 (query-param login)",
+  "seed_data_creation": "3 marketing_pixels docs (TEST_GA4, TEST_META, TEST_CUSTOM) created during test and cleaned up in final test via DELETE.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration17_faz8_faz9.py is self-cleaning (deletes all TEST_* pixels at end). Safe to rerun. Covers all FAZ 8/9 acceptance points plus manufacturer score formula verification. If the returns or production_plan collections are empty in a fresh DB, by-size/by-product/manufacturer-performance will return empty lists (tests assert only structure, not contents).",
+  "rca of the issue": "N/A — all acceptance tests pass. Minor observations above (N+1 lookup, custom snippet sanitisation, caching) are non-blocking enhancements."
+}

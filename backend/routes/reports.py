@@ -193,3 +193,203 @@ async def members_report(current_user: dict = Depends(require_admin)):
             "last_order_at": r["last_order"],
         })
     return {"top_members": out}
+
+
+
+# =============================================================================
+# FAZ 8 — İade analizleri + hızlı satış dedektörü
+# =============================================================================
+
+@router.get("/returns/by-size")
+async def returns_by_size(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """En çok iade edilen bedenleri döner (returns koleksiyonu)."""
+    start, end = _iso_range(start_date, end_date, 180)
+    pipeline = [
+        {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$ne": "rejected"}}},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": {"size": {"$ifNull": ["$items.size", "—"]}},
+            "count": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "orders": {"$sum": 1},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 30},
+    ]
+    out = []
+    async for r in db.returns.aggregate(pipeline):
+        out.append({"size": r["_id"]["size"], "count": r["count"], "order_count": r["orders"]})
+    return {"by_size": out, "start": start, "end": end}
+
+
+@router.get("/returns/by-product")
+async def returns_by_product(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(require_admin),
+):
+    """En çok iade edilen ürünler + iade oranları (aynı dönem satışa göre)."""
+    start, end = _iso_range(start_date, end_date, 180)
+    ret_pipe = [
+        {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$ne": "rejected"}}},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "returned": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "product_name": {"$first": "$items.name"},
+        }},
+        {"$sort": {"returned": -1}},
+        {"$limit": limit},
+    ]
+    returns_map = {}
+    async for r in db.returns.aggregate(ret_pipe):
+        returns_map[r["_id"]] = r
+
+    product_ids = list(returns_map.keys())
+    sales_map = {}
+    if product_ids:
+        sales_pipe = [
+            {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$nin": ["cancelled", "pending"]}}},
+            {"$unwind": "$items"},
+            {"$match": {"items.product_id": {"$in": product_ids}}},
+            {"$group": {
+                "_id": "$items.product_id",
+                "sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            }},
+        ]
+        async for r in db.orders.aggregate(sales_pipe):
+            sales_map[r["_id"]] = r["sold"]
+
+    out = []
+    for pid, r in returns_map.items():
+        sold = sales_map.get(pid, 0)
+        rate = (r["returned"] / sold * 100) if sold else None
+        out.append({
+            "product_id": pid,
+            "product_name": r.get("product_name") or "—",
+            "returned": r["returned"],
+            "sold": sold,
+            "return_rate_pct": round(rate, 1) if rate is not None else None,
+        })
+    return {"items": out, "start": start, "end": end}
+
+
+@router.get("/returns/reasons")
+async def returns_by_reason(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """İade sebeplerine göre dağılım."""
+    start, end = _iso_range(start_date, end_date, 180)
+    pipeline = [
+        {"$match": {"created_at": {"$gte": start, "$lte": end}, "status": {"$ne": "rejected"}}},
+        {"$group": {"_id": {"$ifNull": ["$reason", "Belirtilmemiş"]}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    out = []
+    async for r in db.returns.aggregate(pipeline):
+        out.append({"reason": r["_id"], "count": r["count"]})
+    return {"reasons": out, "start": start, "end": end}
+
+
+@router.get("/fast-selling")
+async def fast_selling_products(
+    window_days: int = Query(14, ge=1, le=90),
+    min_sold: int = Query(10, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: dict = Depends(require_admin),
+):
+    """Hızlı satış dedektörü: son N gün içinde ≥ min_sold adet satan ürünler.
+    recommend_ads = true → ilk 60 gün içindeki yeni ürün + min sold'u geçti → reklam önerisi.
+    """
+    now = datetime.now(timezone.utc)
+    start_ts = (now - timedelta(days=window_days)).isoformat()
+    pipeline = [
+        {"$match": {"created_at": {"$gte": start_ts}, "status": {"$nin": ["cancelled", "pending"]}}},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": "$items.product_id",
+            "sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "product_name": {"$first": "$items.name"},
+            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+        }},
+        {"$match": {"sold": {"$gte": min_sold}}},
+        {"$sort": {"sold": -1}},
+        {"$limit": limit},
+    ]
+    out = []
+    async for r in db.orders.aggregate(pipeline):
+        pid = r["_id"]
+        product = await db.products.find_one({"id": pid}, {"_id": 0, "created_at": 1, "name": 1, "sale_price": 1, "images": 1, "stock": 1})
+        product_age_days = None
+        if product and product.get("created_at"):
+            try:
+                c = datetime.fromisoformat(product["created_at"])
+                product_age_days = (now - c).days
+            except Exception:
+                pass
+        age = product_age_days if product_age_days is not None else 999
+        recommend_ads = age <= 60 and r["sold"] >= min_sold
+        out.append({
+            "product_id": pid,
+            "product_name": (product or {}).get("name") or r.get("product_name") or "—",
+            "sold_in_window": r["sold"],
+            "revenue": round(r["revenue"], 2),
+            "product_age_days": product_age_days,
+            "window_days": window_days,
+            "stock": (product or {}).get("stock"),
+            "image": ((product or {}).get("images") or [None])[0] if (product or {}).get("images") else None,
+            "recommend_ads": recommend_ads,
+        })
+    return {"items": out, "window_days": window_days, "min_sold": min_sold}
+
+
+# =============================================================================
+# Üretici performans (FAZ 7 potansiyel iyileştirme)
+# =============================================================================
+
+@router.get("/manufacturer-performance")
+async def manufacturer_performance(current_user: dict = Depends(require_admin)):
+    """Üretici bazında ortalama gecikme, sipariş adedi ve +/-% fark.
+    Skor: 100 başlangıç, her gün gecikme -3, |qty_diff| -0.5.
+    """
+    pipeline = [
+        {"$match": {"manufacturer_id": {"$ne": None, "$exists": True}}},
+        {"$group": {
+            "_id": "$manufacturer_id",
+            "name": {"$first": "$manufacturer_name"},
+            "rows": {"$sum": 1},
+            "avg_delay": {"$avg": "$delay_days"},
+            "max_delay": {"$max": "$delay_days"},
+            "avg_qty_diff": {"$avg": "$qty_diff_pct"},
+            "delivered_count": {"$sum": {"$cond": [{"$ne": ["$delivered_qty", 0]}, 1, 0]}},
+        }},
+        {"$sort": {"avg_delay": 1}},
+    ]
+    out = []
+    async for r in db.production_plan.aggregate(pipeline):
+        avg_delay = r.get("avg_delay")
+        avg_qty = r.get("avg_qty_diff")
+        score = 100
+        if avg_delay is not None:
+            score -= max(0, avg_delay) * 3
+        if avg_qty is not None:
+            score -= abs(avg_qty) * 0.5
+        score = max(0, round(score, 1))
+        out.append({
+            "manufacturer_id": r["_id"],
+            "name": r.get("name") or "—",
+            "rows": r["rows"],
+            "delivered": r.get("delivered_count", 0),
+            "avg_delay_days": round(avg_delay, 1) if avg_delay is not None else None,
+            "max_delay_days": r.get("max_delay"),
+            "avg_qty_diff_pct": round(avg_qty, 1) if avg_qty is not None else None,
+            "score": score,
+        })
+    out.sort(key=lambda x: -x["score"])
+    return {"items": out}
