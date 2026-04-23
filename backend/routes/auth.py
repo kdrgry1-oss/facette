@@ -122,17 +122,38 @@ def _hash_otp(code: str) -> str:
 async def forgot_password_request_otp(req: OTPRequestReq):
     """Telefon numarasına 6 haneli SMS OTP gönderir.
     Privacy: numara sistemde olmasa bile aynı yanıt döner (enumeration önleme).
+    Rate limit: Aynı telefon için 60 sn içinde tek istek.
     """
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from notification_service import normalize_phone_tr, send_notification
 
     phone_norm = normalize_phone_tr(req.phone)
-    user = await db.users.find_one({"phone": {"$regex": phone_norm[-10:], "$options": "i"}}, {"_id": 0, "id": 1, "email": 1, "phone": 1}) if phone_norm else None
 
-    # Her durumda kod üret ve kaydet; sadece gerçek kullanıcıya SMS at
-    code = f"{random.randint(0, 999999):06d}"
+    # Rate limit — aynı numaraya son 60 sn içinde kod atılmışsa sessizce aynı cevabı döndür
     now = datetime.now(timezone.utc)
+    recent = await db.password_reset_otps.find_one(
+        {"phone": phone_norm, "created_at": {"$gt": (now.replace(microsecond=0).isoformat()[:-6])}},
+        sort=[("created_at", -1)],
+    )
+    # Daha güvenli: zaman karşılaştırması timestamp'le
+    if recent:
+        try:
+            prev = datetime.fromisoformat(recent["created_at"])
+            if (now - prev).total_seconds() < 60:
+                return {"success": True, "message": "Eğer numara sistemimizde kayıtlıysa SMS kodu gönderildi."}
+        except Exception:
+            pass
+
+    user = await db.users.find_one({"phone": {"$regex": phone_norm[-10:], "$options": "i"}}, {"_id": 0, "id": 1, "email": 1, "phone": 1, "first_name": 1}) if phone_norm else None
+
+    # Bu telefon için var olan kullanılmamış kodları iptal et
+    await db.password_reset_otps.update_many(
+        {"phone": phone_norm, "used": False},
+        {"$set": {"used": True, "invalidated": True}},
+    )
+
+    code = f"{random.randint(0, 999999):06d}"
     expires = (now.timestamp() + 300)  # 5 dk
     record = {
         "phone": phone_norm,

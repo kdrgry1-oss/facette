@@ -77,19 +77,51 @@ async def get_providers(current_user: dict = Depends(require_admin)):
             "email_active": True,
             "providers": {},
         }
-    # mask secrets
-    out = dict(cfg)
-    return out
+    # Secret alanları maskele (ekranda görünsün ama ham şekilde değil)
+    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret"}
+    masked = dict(cfg)
+    prov = {}
+    for pkey, fields in (cfg.get("providers") or {}).items():
+        prov[pkey] = {}
+        for f, v in (fields or {}).items():
+            if f in SECRET_FIELDS and v:
+                s = str(v)
+                prov[pkey][f] = (s[:2] + "****" + s[-2:]) if len(s) > 6 else "****"
+                prov[pkey][f"__has_{f}"] = True
+            else:
+                prov[pkey][f] = v
+    masked["providers"] = prov
+    return masked
 
 
 @router.post("/providers")
 async def save_providers(req: ProviderConfigReq, current_user: dict = Depends(require_admin)):
+    # Mevcut config (gizli alanlar için). Eğer UI maskeli bir değeri aynen geri gönderdiyse
+    # orijinal değeri koru (yani "xx****yy" gönderilmişse değiştirmiyor sayılır).
+    existing = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
+    existing_provs = existing.get("providers", {})
+    SECRET_FIELDS = {"password", "auth_token", "api_hash", "api_key", "access_token", "api_secret"}
+    merged_provs: Dict[str, Dict[str, Any]] = {}
+    for pkey, fields in req.providers.items():
+        merged = dict(fields or {})
+        old = existing_provs.get(pkey, {}) or {}
+        for f in list(merged.keys()):
+            if f in SECRET_FIELDS:
+                val = merged[f]
+                # UI'den maskeli/boş geldi → eski değeri koru
+                if not val or (isinstance(val, str) and "****" in val):
+                    if old.get(f):
+                        merged[f] = old[f]
+        # __has_ bayraklarını DB'ye yazma
+        merged = {k: v for k, v in merged.items() if not k.startswith("__has_")}
+        merged_provs[pkey] = merged
+
     data = {
         "id": "notification_providers",
         "sms_active": req.sms_active,
         "whatsapp_active": req.whatsapp_active,
         "email_active": req.email_active,
-        "providers": req.providers,
+        "providers": merged_provs,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": current_user.get("email", ""),
     }
