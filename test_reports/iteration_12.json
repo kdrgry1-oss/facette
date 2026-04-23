@@ -1,0 +1,85 @@
+{
+  "summary": "Iteration 12 — Entegrasyonlar (Iyzico/Trendyol/Hepsiburada/Temu/Doğan) + Marketplace Hub + Provider Settings (einvoice+cargo) + Bulk-Ops + Webhooks kapsamlı API testi. 46/46 pytest geçti (%100). Tüm settings GET/POST roundtrip tutarlı, secret alanlar maskeleniyor, _id sızmıyor. Ancak KRİTİK BUG: bulk-ops/stock-alerts/deactivate-on-marketplaces — Trendyol aktif credential varken `TrendyolClient.update_inventory` metodu MEVCUT DEĞİL (kod `update_price_and_inventory` kullanmalı). Hata try/except ile yutuluyor → endpoint 200 döner ama gerçekte pasifleme hiç yapılmaz. Ayrıca YÜKSEK ÖNCELİKLİ GÜVENLİK AÇIĞI: Trendyol/Iyzico/HB/Temu settings POST endpoint'leri boş body kabul ediyor — required alan (api_key, api_secret, vb.) doğrulaması yok; yanlış formu kaydedip 'is_active=true' ile panel 'configured' görünür. Spec'te istenen `required: true` alan validasyonu eksik.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/bulk-ops/stock-alerts/deactivate-on-marketplaces",
+        "issue": "AttributeError: 'TrendyolClient' object has no attribute 'update_inventory' — integrations.py:796 `client.update_inventory(items_to_send)` çağrısı var ama trendyol_client.py'de sadece `update_price_and_inventory` tanımlı. Try/except Exception yakalıyor ve failed log düşüyor ama endpoint dışarıya `success: True` dönüyor → kullanıcı canlıya geçtiğinde pasifleme hiç çalışmayacak ve bunu fark etmeyecek. FIX: integrations.py:796 → `client.update_price_and_inventory(items_to_send)` yap ya da TrendyolClient'a update_inventory alias ekle.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/integrations/{iyzico|trendyol|hepsiburada|temu|dogan}/settings",
+        "issue": "Required alan doğrulaması YOK. Boş body `{}` ile gönderildiğinde 200 + success:True dönüyor. credential_fields şemasındaki `required: true` alanlar (api_key, api_secret, supplier_id, merchant_id, vb.) kontrol edilmeli → eksikse 400 dönmeli. Şu an kullanıcı eksik konfigle kaydedip 'is_active:true' yapabilir. GÜVENLİK/UX riski."
+      },
+      {
+        "endpoint": "POST /api/integrations/trendyol/test-connection",
+        "issue": "Trendyol için özel test-connection endpoint YOK. Generic /{marketplace}/test-connection içinde trendyol ALLOWED_MARKETPLACES setinde değil → 404 'Bilinmeyen pazaryeri'. Kullanıcı panel üzerinden Trendyol bağlantı testini yapamaz (sadece /trendyol/debug sessizce sipariş listesi çeker). FIX: Trendyol özel test-connection endpoint ekle (supplier_id+key ile GET suppliers/{sid}/brands çağır)."
+      },
+      {
+        "endpoint": "POST /api/integrations/hepsiburada/test-connection",
+        "issue": "Dummy merchant_id ile HB listing API çağrısı HTTP 400 dönüyor → mesaj 'beklenmeyen yanıt: HTTP 400'. 401/403 net kimlik hatası dönmüyor çünkü HB 400 ile hatalı merchant_id response veriyor. Mesaj net ama 'kimlik hatalı' değil. Minor — gerçek credential ile test edilmeli."
+      },
+      {
+        "endpoint": "POST /api/integrations/temu/test-connection",
+        "issue": "Temu test sadece key/secret uzunluk kontrolü yapıyor, gerçek API probe yok. 8+ karakter olan herhangi bir string success:True döner → yanıltıcı. Kullanıcıya 'canlı probe yapılmadı' mesajı verilmiş (iyi), ama Temu Open Platform'un gerçek ping endpoint'i eklenmeli."
+      },
+      {
+        "endpoint": "POST /api/integrations/iyzico/refund",
+        "issue": "payment_id olmayan sipariş için 400 doğru döner, ama hata mesajı '.. payment_id yok' — Iyzico sandbox'ta manuel test edilmedi çünkü gerçek payment_id yok. Validasyon zinciri doğru."
+      },
+      {
+        "endpoint": "GET /api/integrations/dogan/settings",
+        "issue": "GET response'unda plain `password` alanı hâlâ dönüyor (sadece `password_masked` ekleniyor, orijinal `password` alanı maskelenmiyor). Adminin de olsa plain password API response'unda dönmemeli. Iyzico/Trendyol gibi '********' ile maskelenmeli."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration12_integrations.py",
+    "/app/test_reports/pytest/iteration12_results.xml"
+  ],
+  "action_items": [
+    "1) [CRITICAL] integrations.py:796 `client.update_inventory(...)` → `client.update_price_and_inventory(...)` olarak düzelt. Test: bulk-ops/stock-alerts/deactivate-on-marketplaces çağrısında Trendyol active iken integration_logs'a 'success' yazmalı.",
+    "2) [HIGH] Her settings POST endpoint'ine required-field validasyonu ekle. marketplace_hub.py MARKETPLACES[key].credential_fields üzerinden doğrulanabilir. Iyzico/Dogan için integrations.py içinde elle kontrol.",
+    "3) [MEDIUM] Trendyol özel test-connection endpoint'i ekle (suppliers/{id}/brands ile 200 kontrol).",
+    "4) [MEDIUM] Doğan GET /settings response'unda password alanını '********' ile maskelle.",
+    "5) [LOW] Temu test-connection için gerçek Open Platform ping endpoint'i entegre et (şu an sadece uzunluk kontrolü).",
+    "6) [LOW] HB test-connection 400 response'larında Hepsiburada API'nin body'sinden errorCode parse edip daha anlamlı mesaj dön."
+  ],
+  "critical_code_review_comments": [
+    "integrations.py 3705 satır tek dosyada — split yapılmalı (iyzico.py, trendyol.py, hepsiburada.py, temu.py, dogan.py). Hot-path bakım zorlaşıyor.",
+    "marketplace_hub.log_integration_event() try/except Exception: pass — log hatasını tamamen yutuyor; en azından logger.warning ile kaydedilmeli.",
+    "ALLOWED_MARKETPLACES = {...} set'i integrations.py:3464 içinde hardcoded; aynı liste marketplace_hub.MARKETPLACES ile çakışıyor. Tek kaynak olmalı (DRY).",
+    "webhooks.py Trendyol webhook signature doğrulaması YAPMIYOR — production'da kritik güvenlik açığı. HMAC-SHA256 X-Trendyol-Signature header kontrol edilmeli.",
+    "bulk_ops.py `deactivate_on_marketplaces` try/except Exception olarak `update_inventory` AttributeError'ı yutuyor; dışarıya başarı mesajı dönüyor ama iş yapılmıyor. Client-side assertion'lar önemli.",
+    "provider_settings.py `/test` endpoint'i mock — dogan-edonusum için canlı SDK çağrısı yok; kullanıcı 'doğrulandı' mesajı görüp production'a geçebilir. UI'da '(mock)' rozeti şart.",
+    "orders.py create-invoice `count_documents({invoice_number: {$regex: prefix}})` sayaç tekniği race-condition'a açık — atomik counter (findOneAndUpdate $inc) tercih edilmeli. Yüksek eşzamanlılıkta duplicate invoice_number riski.",
+    "integrations.py:27 `is_iyzico_configured()` `api_key != 'sandbox-api-key'` string karşılaştırması sihirli değer; env default değişirse kırılır.",
+    "TrendyolClient API surface tutarsız: bazı method'lar `update_price_and_inventory`, `get_orders`, bazıları attribute error atıyor (update_inventory). Interface class + mypy yoksa silent bug'lar kaçar."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration12_integrations.py"
+  ],
+  "success_rate": {"backend": "100% (46/46 pytest passed)", "frontend": "N/A (backend only)"},
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Oluşturulan test kayıtları temizlendi: iyzico/trendyol/hepsiburada/temu/dogan settings boş değerlere reset edildi, marketplace_accounts/trendyol enabled:false yapıldı. 2 webhook event test order'ı (TEST_ORDER_WH_001) orders koleksiyonunda henüz yoksa yaratılmadı. integration_logs'a 2-3 TEST_log kaydı düştü (temizlenmedi, admin manuel silebilir).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression file: /app/backend/tests/test_iteration12_integrations.py (46 test). BASE_URL env yüklenemediyse /app/frontend/.env'den otomatik okur. Token: POST /api/auth/login?email=&password=. Bir sonraki iterasyonda: (1) integrations.py:796 update_price_and_inventory fix sonrası bulk-ops endpoint'i tekrar test edilmeli — integration_logs'a 'success' kaydının düştüğünü doğrula; (2) settings POST required-field validasyonu eklenince boş body'nin 422/400 döndüğünü test et; (3) Trendyol özel test-connection endpoint'i eklenirse test dosyasındaki `test_generic_test_connection_for_trendyol` güncellenmeli.",
+  "canlıya_hazır_mı_checklist": {
+    "HAZIR": ["Iyzico settings GET/POST + refund body validasyonu", "Trendyol settings GET/POST + status", "Hepsiburada settings + test-connection (401/403 yakalama)", "Doğan settings + test-connection 400 validasyon", "Marketplace Hub 13 pazaryeri şema + account roundtrip", "Provider Settings einvoice/cargo schemas + config roundtrip + test", "Orders create-invoice + ETGB mikro ihracat branch", "Webhooks Trendyol OrderStatusChanged + OrderCancelled"],
+    "CREDENTIAL_BEKLIYOR": ["Iyzico live key (sandbox refund canlıda)", "Trendyol api_key/api_secret/supplier_id", "Hepsiburada merchant_id/username/password", "Temu shop_id/api_key/api_secret + canlı probe endpoint", "Doğan e-Dönüşüm username/password (prod env)", "11 einvoice provider credential'ları (dogan dışında QNB, GIB, Nilvera, vb. SDK entegre edilmemiş)"],
+    "YAPISAL_BUG": [
+      "[CRITICAL] bulk-ops stok pasifleme Trendyol: update_inventory yerine update_price_and_inventory kullanılmalı (integrations.py:796)",
+      "[HIGH] settings POST endpoint'lerinde required-field validasyonu YOK → eksik kayıt engellenmeyecek",
+      "[HIGH] Webhooks Trendyol HMAC signature doğrulaması YAPMIYOR — prod'da spoofing riski",
+      "[MEDIUM] Trendyol panel test-connection endpoint'i yok",
+      "[MEDIUM] Doğan settings GET response plain password sızdırıyor (maskelenmeli)",
+      "[LOW] Temu test-connection sadece uzunluk kontrolü — gerçek probe değil",
+      "[LOW] Provider Settings /test mock; 11 einvoice provider için gerçek SDK çağrısı devrede değil"
+    ]
+  },
+  "rca_of_the_issue": "bulk-ops/stock-alerts/deactivate-on-marketplaces 'sessiz başarısızlık' RCA: 1) endpoint db.marketplace_accounts'tan enabled marketplaces'i çeker, 2) trendyol için get_trendyol_config().is_active true ise _sync_inventory_to_trendyol çağırır, 3) bu fonksiyon TrendyolClient instance oluşturur ve `client.update_inventory(items)` çağırır (integrations.py:796), 4) trendyol_client.py'de sadece update_price_and_inventory var → AttributeError, 5) `try/except Exception` yakalıyor, log_integration_event failed kaydediyor, mp_fail = len(targets), 6) endpoint {success:True, result:{processed:N, marketplaces:{trendyol:{success:0, failed:N}}}} dönüyor → dış görünüş: başarılı, gerçek: hiç pasifleme yapılmadı. Log kanıtı: /var/log/supervisor/backend.err.log → 'Trendyol inventory sync error: TrendyolClient object has no attribute update_inventory'. Reproduce: Trendyol settings'e dummy key/secret/supplier_id gir + is_active:true + bulk-ops/stock-alerts/deactivate-on-marketplaces POST. Mitigation: integrations.py:796 çağrısını `await client.update_price_and_inventory(items_to_send)` olarak değiştir veya trendyol_client.py'ye `update_inventory = update_price_and_inventory` alias ekle."
+}
