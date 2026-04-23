@@ -13,7 +13,7 @@
  *      category={row}  // category_id, category_name, marketplace_category_id
  *   />
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -25,6 +25,67 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+
+// ─── Local Attribute AutoComplete (gözle görünür suggestions) ───────────────
+function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }) {
+  const [q, setQ] = useState(value || "");
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => { setQ(value || ""); }, [value]);
+
+  useEffect(() => {
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const qLower = q.toLowerCase().trim();
+  const filtered = qLower
+    ? (options || []).filter((o) => (o.name || "").toLowerCase().includes(qLower))
+    : (options || []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <input
+        type="text"
+        value={q}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => { setQ(e.target.value); onChange(e.target.value); setOpen(true); }}
+        placeholder={placeholder}
+        className="border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-orange-300"
+        data-testid={testId}
+      />
+      {open && (filtered.length > 0 || (options || []).length > 0) && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">
+              "{q}" ile eşleşen özellik yok — serbest yazı olarak kalacak
+            </div>
+          ) : (
+            filtered.map((opt) => {
+              const n = opt.name || "";
+              const vCount = (opt.values || []).length;
+              return (
+                <button
+                  key={opt.id || n}
+                  type="button"
+                  onClick={() => { onChange(n); setQ(n); setOpen(false); }}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-orange-50 border-b last:border-b-0 border-gray-100 flex items-center justify-between gap-2"
+                >
+                  <span className="font-medium">{n}</span>
+                  {vCount > 0 && (
+                    <span className="text-[10px] text-gray-400">{vCount} değer</span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const MP_COLORS = {
   trendyol: "orange",
@@ -164,9 +225,30 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
           </div>
         )}
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800 space-y-1">
-          <p className="font-semibold flex items-center gap-1"><AlertCircle size={14} /> Dikkat</p>
-          <p>• Zorunlu alanları mutlaka eşleştirmeniz gerekir.</p>
-          <p>• Eşleştirilen yerel değerler ürünlerinizde karşılığı olmalıdır.</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1">
+              <p className="font-semibold flex items-center gap-1"><AlertCircle size={14} /> Dikkat</p>
+              <p>• Zorunlu alanları mutlaka eşleştirmeniz gerekir.</p>
+              <p>• Eşleştirilen yerel değerler ürünlerinizde karşılığı olmalıdır.</p>
+              <p>• Sistemde tanımlı <b>{globalAttrs.length}</b> özellik var — "Yerel Özellik" kutusuna tıkladığınızda öneri listesi açılır.</p>
+            </div>
+            {globalAttrs.length === 0 && (
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await axios.post(`${API}/attributes/sync-from-products`, {}, { headers: auth() });
+                    toast.success(r.data?.message || "Sync tamam");
+                    const g = await axios.get(`${API}/attributes`, { headers: auth() });
+                    setGlobalAttrs(g.data?.attributes || []);
+                  } catch { toast.error("Sync başarısız"); }
+                }}
+                className="bg-yellow-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold hover:bg-yellow-600 whitespace-nowrap"
+                data-testid="adv-sync-attrs-btn"
+              >
+                Ürünlerden Yükle
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -212,20 +294,15 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                         )}
                       </td>
                       <td className="px-4 py-2.5 space-y-2">
-                        <input
-                          type="text"
-                          list={`gattr-${id}`}
+                        <LocalAttrAutoComplete
                           value={mapped || ""}
-                          onChange={(e) => setMappings((p) => ({ ...p, [id]: e.target.value }))}
-                          placeholder="Yerel özellik (ör. Renk, Beden)"
-                          className="border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-orange-300"
-                          data-testid={`adv-mapinput-${id}`}
+                          onChange={(v) => setMappings((p) => ({ ...p, [id]: v }))}
+                          options={globalAttrs}
+                          placeholder={globalAttrs.length
+                            ? `Sistem özelliği seç veya yazın (${globalAttrs.length} adet)`
+                            : "Sistem özelliği henüz yok"}
+                          testId={`adv-mapinput-${id}`}
                         />
-                        <datalist id={`gattr-${id}`}>
-                          {globalAttrs.map((g) => <option key={g.id || g.name} value={g.name} />)}
-                          <option value="Renk" />
-                          <option value="Beden" />
-                        </datalist>
                         {(attr.allowCustom || attr.attribute?.allowCustom) && (
                           <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
                             <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer:</div>
