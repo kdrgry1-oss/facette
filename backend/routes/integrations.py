@@ -10,6 +10,7 @@ import uuid
 import re
 import xml.etree.ElementTree as ET
 import httpx
+import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
 
@@ -63,6 +64,18 @@ async def get_iyzico_settings(current_user: dict = Depends(require_admin)):
 
 @router.post("/iyzico/settings")
 async def save_iyzico_settings(payload: dict, current_user: dict = Depends(require_admin)):
+    # Required alan validasyonu — is_active=True ise api_key/api_secret zorunlu
+    if payload.get("is_active"):
+        existing = await db.settings.find_one({"id": "iyzico"}, {"_id": 0}) or {}
+        api_key = payload.get("api_key") or existing.get("api_key")
+        api_secret = payload.get("api_secret")
+        if api_secret in (None, "", "********"):
+            api_secret = existing.get("api_secret")
+        if not api_key or not api_secret:
+            raise HTTPException(
+                status_code=400,
+                detail="Iyzico aktifleştirmek için api_key ve api_secret zorunludur"
+            )
     update_data = {
         "id": "iyzico",
         "api_key": payload.get("api_key", ""),
@@ -273,7 +286,22 @@ async def save_trendyol_settings(
 ):
     """Save Trendyol settings"""
     from datetime import datetime, timezone
-    
+
+    # Required alan validasyonu — is_active=True ise supplier_id/api_key/api_secret zorunlu
+    if settings.get("is_active"):
+        existing = await db.settings.find_one({"id": "trendyol"}, {"_id": 0}) or {}
+        supplier_id = settings.get("supplier_id") or existing.get("supplier_id")
+        api_key = settings.get("api_key") or existing.get("api_key")
+        api_secret = settings.get("api_secret")
+        if api_secret in (None, "", "********"):
+            api_secret = existing.get("api_secret")
+        missing = [k for k, v in {"supplier_id": supplier_id, "api_key": api_key, "api_secret": api_secret}.items() if not v]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Trendyol aktifleştirmek için zorunlu alanlar eksik: {', '.join(missing)}"
+            )
+
     update_data = {
         "supplier_id": settings.get("supplier_id", ""),
         "api_key": settings.get("api_key", ""),
@@ -282,16 +310,41 @@ async def save_trendyol_settings(
         "default_markup": settings.get("default_markup", 0),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
     if settings.get("api_secret") and settings.get("api_secret") != "********":
         update_data["api_secret"] = settings.get("api_secret")
-        
+
     await db.settings.update_one(
         {"id": "trendyol"},
         {"$set": update_data},
         upsert=True
     )
     return {"success": True, "message": "Trendyol ayarları kaydedildi"}
+
+
+@router.post("/trendyol/test-connection")
+async def test_trendyol_connection(current_user: dict = Depends(require_admin)):
+    """Trendyol gerçek bağlantı testi — brands endpoint'i üzerinden."""
+    cfg = await get_trendyol_config()
+    if not cfg.get("api_key") or not cfg.get("api_secret") or not cfg.get("supplier_id"):
+        return {"success": False, "message": "Trendyol API bilgileri eksik (api_key / api_secret / supplier_id zorunlu)"}
+    try:
+        from trendyol_client import TrendyolClient
+        client = TrendyolClient(
+            supplier_id=cfg["supplier_id"],
+            api_key=cfg["api_key"],
+            api_secret=cfg["api_secret"],
+            mode=cfg["mode"],
+        )
+        # Hafif bir probe — ilk 1 marka yeter
+        data = await client.get_brands(size=1, page=0)
+        if isinstance(data, dict) and ("brands" in data or "content" in data or "totalElements" in data):
+            return {"success": True, "message": "Trendyol bağlantısı başarılı", "mode": cfg["mode"]}
+        return {"success": False, "message": f"Beklenmeyen yanıt: {str(data)[:200]}"}
+    except Exception as e:
+        msg = str(e)[:300]
+        status_hint = "401/403 kimlik hatası" if ("401" in msg or "403" in msg or "Unauthorized" in msg) else "HTTP hatası"
+        return {"success": False, "message": f"{status_hint}: {msg}"}
 
 @router.get("/trendyol/status")
 async def get_trendyol_status():
@@ -793,7 +846,7 @@ async def _sync_inventory_to_trendyol(products: list):
         return {"success": False, "message": "Gönderilecek stok/fiyat bilgisi bulunamadı (barkod eksik?)"}
         
     try:
-        res = await client.update_inventory(items_to_send)
+        res = await client.update_price_and_inventory(items_to_send)
         batch_id = res.get("batchRequestId", "")
         
         # Log to the new sync logs screen
@@ -3407,13 +3460,29 @@ async def get_dogan_settings(current_user: dict = Depends(require_admin)):
     # Mask password
     if settings.get("password"):
         settings["password_masked"] = settings["password"][:3] + "***"
+        settings["password"] = "********"
     return settings
 
 
 @router.post("/dogan/settings")
 async def save_dogan_settings(payload: dict, current_user: dict = Depends(require_admin)):
     """Save Doğan e-Dönüşüm settings"""
+    # Required alan validasyonu — enabled=True ise username/password zorunlu
+    if payload.get("enabled"):
+        existing = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+        username = payload.get("username") or existing.get("username")
+        password = payload.get("password")
+        if password in (None, "", "********"):
+            password = existing.get("password")
+        if not username or not password:
+            raise HTTPException(
+                status_code=400,
+                detail="Doğan e-Dönüşüm aktif etmek için username ve password zorunludur"
+            )
     payload["id"] = "dogan_edonusum"
+    # Maskeli değer gelirse mevcut password'ü koru
+    if payload.get("password") in (None, "", "********"):
+        payload.pop("password", None)
     await db.settings.update_one({"id": "dogan_edonusum"}, {"$set": payload}, upsert=True)
     return {"success": True, "message": "Doğan e-Dönüşüm ayarları kaydedildi"}
 
@@ -3499,6 +3568,27 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
     if marketplace not in ALLOWED_MARKETPLACES:
         raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
 
+    # Required alan validasyonu — is_active=True ise pazaryeri bazlı zorunlu alanlar
+    if payload.get("is_active"):
+        existing = await db.settings.find_one({"id": marketplace}, {"_id": 0}) or {}
+        fields_by_mp = {
+            "hepsiburada": ["merchant_id", "username", "password"],
+            "temu": ["api_key", "api_secret"],
+        }
+        required = fields_by_mp.get(marketplace, ["api_key", "api_secret"])
+        missing = []
+        for k in required:
+            v = payload.get(k)
+            if v in (None, "", "********"):
+                v = existing.get(k)
+            if not v:
+                missing.append(k)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{marketplace.capitalize()} aktifleştirmek için zorunlu alanlar eksik: {', '.join(missing)}"
+            )
+
     update_data = {
         "id": marketplace,
         "merchant_id": payload.get("merchant_id", ""),
@@ -3562,7 +3652,15 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
                 return {"success": True, "message": f"Hepsiburada bağlantısı başarılı ({mode})"}
             if r.status_code in (401, 403):
                 return {"success": False, "message": f"Hepsiburada kimlik hatalı (HTTP {r.status_code}). Merchant ID / Kullanıcı Adı / Şifreyi kontrol edin."}
-            return {"success": False, "message": f"Hepsiburada beklenmeyen yanıt: HTTP {r.status_code}"}
+            # 400 body'sinden errorCode parse et
+            try:
+                err_body = r.json()
+                err_msg = err_body.get("message") or err_body.get("errorMessage") or err_body.get("detail") or ""
+                err_code = err_body.get("errorCode") or err_body.get("code") or ""
+                detail_txt = f" — {err_code}: {err_msg}" if (err_code or err_msg) else ""
+            except Exception:
+                detail_txt = f" — {r.text[:120]}"
+            return {"success": False, "message": f"Hepsiburada beklenmeyen yanıt: HTTP {r.status_code}{detail_txt}"}
 
         if marketplace == "temu":
             shop_id = (settings.get("merchant_id") or "").strip()
@@ -3570,10 +3668,32 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
             app_secret = (settings.get("api_secret") or "").strip()
             if not (shop_id and api_key and app_secret):
                 return {"success": False, "message": "Temu için Shop ID, App Key ve App Secret zorunlu"}
-            # Temu does not expose a public ping endpoint; we validate token format only.
             if len(api_key) < 8 or len(app_secret) < 8:
                 return {"success": False, "message": "Temu App Key/Secret çok kısa, doğru girdiğinize emin olun"}
-            return {"success": True, "message": "Temu kimlik bilgileri kaydedildi (canlı probe yapılmadı)"}
+            # Gerçek Temu Open Platform probe — bg.temu.com /api/v1/seller/info endpoint'i
+            import time, json as _json
+            mode_ = settings.get("mode", "sandbox")
+            host = "https://openapi-b-us.temu.com" if mode_ == "live" else "https://openapi-b-us.temu.com"
+            ts = str(int(time.time()))
+            body = {
+                "type": "bg.auth.access_token.info.get",
+                "app_key": api_key,
+                "timestamp": ts,
+            }
+            sign_base = app_secret + "".join(f"{k}{v}" for k, v in sorted(body.items())) + app_secret
+            body["sign"] = hashlib.md5(sign_base.encode()).hexdigest().upper()
+            try:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(f"{host}/openapi/router", json=body)
+                try:
+                    data = r.json()
+                except Exception:
+                    data = {"raw": r.text[:200]}
+                if data.get("success") or data.get("result"):
+                    return {"success": True, "message": f"Temu bağlantısı başarılı ({mode_})"}
+                return {"success": False, "message": f"Temu hata: {data.get('errorMsg') or data.get('errorCode') or str(data)[:200]}"}
+            except Exception as e:
+                return {"success": False, "message": f"Temu probe hatası: {str(e)[:150]}"}
 
         if marketplace in {"mng", "aras", "yurtici", "ptt", "hepsijet", "trendyol_express", "surat"}:
             user = (settings.get("username") or "").strip()

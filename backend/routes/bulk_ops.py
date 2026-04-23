@@ -409,4 +409,10 @@ async def deactivate_out_of_stock_on_marketplaces(
         results["marketplaces"][mp] = {"success": mp_ok, "failed": mp_fail}
 
     results["processed"] = len(targets)
-    return {"success": True, "result": results, "message": f"{len(targets)} ürün için pasifleme işlemi tetiklendi"}
+    # Genel başarı: en az bir pazaryerinde tam başarı ve hiç kritik hata yok
+    total_fail = sum(v.get("failed", 0) for v in results["marketplaces"].values())
+    overall_success = total_fail == 0
+    msg = f"{len(targets)} ürün için pasifleme işlemi tetiklendi"
+    if total_fail:
+        msg += f" — {total_fail} pazaryeri güncelleme başarısız (log detayı)"
+    return {"success": overall_success, "result": results, "message": msg}
