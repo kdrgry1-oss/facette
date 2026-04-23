@@ -69,6 +69,7 @@ export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState("");
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
@@ -138,7 +139,7 @@ export default function AdminOrders() {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, statusFilter]);
+  }, [page, pageSize, statusFilter]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.
@@ -153,7 +154,7 @@ export default function AdminOrders() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `${API}/orders?page=${page}&limit=20`;
+      let url = `${API}/orders?page=${page}&limit=${pageSize}`;
       if (statusFilter) url += `&status=${statusFilter}`;
       Object.keys(filters).forEach(key => {
         if (filters[key]) url += `&${key}=${filters[key]}`;
@@ -421,6 +422,73 @@ export default function AdminOrders() {
   };
 
   /**
+   * handleBulkGenerateInvoice — Seçili siparişlerin HEPSİ için e-Arşiv fatura
+   *   oluşturur. Sıralı çağrı yapar; hata olursa tek tek raporlar.
+   *   BACKEND: POST /api/orders/{id}/create-invoice?invoice_type=e-arsiv
+   */
+  const handleBulkGenerateInvoice = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    if (!window.confirm(`${selectedOrders.length} sipariş için e-Arşiv fatura oluşturulacak. Devam edilsin mi?`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      let ok = 0, fail = 0;
+      for (const id of selectedOrders) {
+        try {
+          const res = await axios.post(`${API}/orders/${id}/create-invoice?invoice_type=e-arsiv`, {}, { headers });
+          if (res.data?.success) ok += 1; else fail += 1;
+        } catch (e) { fail += 1; }
+      }
+      toast.success(`${ok} fatura oluşturuldu, ${fail} başarısız`);
+      setSelectedOrders([]);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Toplu fatura başarısız");
+    }
+  };
+
+  /**
+   * handleBulkPrintInvoices — Seçili siparişlerin faturalarını TEK bir
+   *   yazdırılabilir HTML sayfasında birleştirir. Her fatura için
+   *   `/orders/{id}/invoice/print` endpoint'i çağrılıp iframe ile
+   *   birleştirilir. Pratik: kullanıcı Ctrl+P yaparak hepsini art arda
+   *   yazdırır; A4 başına bir fatura.
+   */
+  const handleBulkPrintInvoices = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    const token = localStorage.getItem('token');
+    // Her biri ayrı bir iframe olarak eklenir; tarayıcı her iframe'in sayfalarını
+    // birbirinin ardına basar (@page break-after: always).
+    const iframes = selectedOrders
+      .map(id => `<iframe src="${API}/orders/${id}/invoice/print?token=${token}" class="f"></iframe>`)
+      .join("\n");
+    const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${selectedOrders.length} Fatura</title>
+      <style>
+        @page { margin: 10mm; }
+        body { margin: 0; font-family: system-ui; }
+        .toolbar { padding: 10px; background:#fff7ed; border-bottom:1px solid #fed7aa; display:flex; justify-content:space-between; align-items:center; }
+        .f { width: 100%; height: 95vh; border: 0; page-break-after: always; }
+        @media print { .toolbar { display: none; } .f { height: 100vh; } }
+        button { padding: 6px 14px; background:#111; color:#fff; border:0; border-radius:6px; cursor:pointer; font-weight:600; }
+      </style></head>
+      <body>
+        <div class="toolbar"><strong>${selectedOrders.length} Fatura</strong><button onclick="window.print()">Tümünü Yazdır</button></div>
+        ${iframes}
+      </body></html>`;
+    const w = window.open('', '_blank', 'width=900,height=1100');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    }
+  };
+
+  /**
    * handleBulkStatusChange — Seçili siparişlerin TOPLU durum değişimi.
    *   Üst checkbox ile tümünü seçip alt seçici ile "Hazırlanıyor" / "Kargoda"
    *   gibi toplu güncelleme yapılır. Backend tek tek gezinir, hata olursa
@@ -633,15 +701,16 @@ export default function AdminOrders() {
 
       {/* Bulk Actions Bar */}
       {selectedOrders.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between flex-wrap gap-3">
           <span className="text-sm font-medium">{selectedOrders.length} sipariş seçildi</span>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <button 
               onClick={handleBulkPrintLabels}
               className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+              data-testid="bulk-print-labels-btn"
             >
               <Tag size={16} />
-              Toplu Etiket Yazdır
+              Toplu Kargo Etiketi
             </button>
             <select
               value={selectedCargo}
@@ -655,9 +724,29 @@ export default function AdminOrders() {
             <button 
               onClick={handleBulkCargoBarcode}
               className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+              data-testid="bulk-cargo-barcode-btn"
             >
               <Package size={16} />
               Toplu Barkod Oluştur
+            </button>
+            {/* Yeni: Toplu fatura oluştur + yazdır */}
+            <button
+              onClick={handleBulkGenerateInvoice}
+              className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700"
+              data-testid="bulk-generate-invoice-btn"
+              title="Seçili siparişlere e-Arşiv fatura oluştur"
+            >
+              <FileText size={16} />
+              Toplu Fatura Kes
+            </button>
+            <button
+              onClick={handleBulkPrintInvoices}
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-white text-sm rounded hover:bg-slate-800"
+              data-testid="bulk-print-invoices-btn"
+              title="Seçili siparişlerin faturalarını tek sayfada yazdır"
+            >
+              <Printer size={16} />
+              Toplu Fatura Yazdır
             </button>
             <select
               onChange={(e) => {
@@ -724,15 +813,15 @@ export default function AdminOrders() {
           - ALT (full) Pagination: tam numaralı + git kutusu.
           ================================================================= */}
 
-      {/* Üst (compact) pagination — sipariş listesi uzadığında tasarımı
-          bozmayan, sadece ok+bilgi+git kutusu gösteren minimal versiyon. */}
-      {total > 20 && (
+      {/* Üst (compact) pagination */}
+      {total > 0 && (
         <div className="flex justify-end mb-2" data-testid="orders-top-pagination">
           <Pagination
             page={page}
             total={total}
-            pageSize={20}
+            pageSize={pageSize}
             onChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
             variant="compact"
           />
         </div>
@@ -1048,13 +1137,13 @@ export default function AdminOrders() {
         </table>
       </div>
 
-      {/* Pagination (alt — full numaralı).
-          Üst compact pagination ile aynı state'i paylaşır. */}
+      {/* Pagination (alt — full numaralı). */}
       <Pagination
         page={page}
         total={total}
-        pageSize={20}
+        pageSize={pageSize}
         onChange={setPage}
+        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         variant="full"
       />
 

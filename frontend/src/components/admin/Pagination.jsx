@@ -112,6 +112,8 @@ export default function Pagination({
   total = 0,
   pageSize = 20,
   onChange,
+  onPageSizeChange,
+  pageSizeOptions = [20, 50, 100, 200],
   variant = "full",
   className = "",
 }) {
@@ -139,13 +141,26 @@ export default function Pagination({
 
   // ------------------------------ COMPACT ------------------------------------
   // Tablonun üst tarafında durur; tasarımı sıkışık tutar, yalnızca prev/next
-  // okları + sayfa bilgisi + jump input bulunur. Numaralı düğme YOKTUR.
+  // okları + sayfa bilgisi + jump input + sayfa boyutu bulunur.
   if (variant === "compact") {
     return (
       <div
         className={`flex items-center gap-2 text-xs ${className}`}
         data-testid="pagination-compact"
       >
+        {onPageSizeChange && (
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(parseInt(e.target.value, 10))}
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs bg-white outline-none focus:border-orange-400"
+            data-testid="pagination-compact-page-size"
+            title="Sayfa başına kayıt"
+          >
+            {pageSizeOptions.map((s) => (
+              <option key={s} value={s}>{s}/sayfa</option>
+            ))}
+          </select>
+        )}
         <button
           onClick={() => go(page - 1)}
           disabled={page <= 1}
@@ -188,9 +203,24 @@ export default function Pagination({
       className={`flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 ${className}`}
       data-testid="pagination-full"
     >
-      <div className="text-xs text-gray-500 tabular-nums">
-        Toplam <span className="font-semibold text-gray-800">{total}</span> kayıt ·
-        Gösterilen <span className="font-semibold text-gray-800">{from}-{to}</span>
+      <div className="text-xs text-gray-500 tabular-nums flex items-center gap-3">
+        <span>
+          Toplam <span className="font-semibold text-gray-800">{total}</span> kayıt ·
+          Gösterilen <span className="font-semibold text-gray-800">{from}-{to}</span>
+        </span>
+        {onPageSizeChange && (
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(parseInt(e.target.value, 10))}
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs bg-white outline-none focus:border-orange-400"
+            data-testid="pagination-full-page-size"
+            title="Sayfa başına kayıt"
+          >
+            {pageSizeOptions.map((s) => (
+              <option key={s} value={s}>{s}/sayfa</option>
+            ))}
+          </select>
+        )}
       </div>
       <div className="flex items-center gap-1 flex-wrap justify-center">
         <button

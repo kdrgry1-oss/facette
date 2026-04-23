@@ -121,6 +121,10 @@ const navigation = [
     icon: Settings,
     children: [
       { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
+      // E-Fatura entegratörü seçimi ve credential yönetimi
+      { label: "E-Arşiv / E-Fatura", path: "/admin/ayarlar/e-fatura", icon: FileText },
+      // Kargo firması seçimi ve credential yönetimi
+      { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },
       { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },

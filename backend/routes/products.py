@@ -28,7 +28,7 @@ def generate_slug(name: str) -> str:
 @router.get("")
 async def get_products(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     category: Optional[str] = None,
     search: Optional[str] = None,
     sort: str = Query("created_at"),
