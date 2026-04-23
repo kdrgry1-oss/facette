@@ -32,7 +32,7 @@ function useCrud(endpoint) {
     toast.success("Güncellendi"); load();
   };
   const del = async (id) => {
-    if (!window.confirm("Silinsin mi?")) return;
+    if (!await window.appConfirm("Silinsin mi?")) return;
     await axios.delete(`${API}${endpoint}/${id}`, { headers: h() });
     toast.success("Silindi"); load();
   };
@@ -192,7 +192,7 @@ export function StockAlerts() {
     setItems(data.items || []);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [type]);
-  const del = async (id) => { if (!window.confirm("Silinsin mi?")) return; await axios.delete(`${API}/admin/alerts/${id}`, { headers: h() }); load(); };
+  const del = async (id) => { if (!await window.appConfirm("Silinsin mi?")) return; await axios.delete(`${API}/admin/alerts/${id}`, { headers: h() }); load(); };
 
   return (
     <div className="space-y-5" data-testid="stock-alerts-page">
@@ -317,7 +317,7 @@ export function Tickets() {
     await axios.put(`${API}/admin/tickets/${sel.id}`, { status: s }, { headers: h() });
     toast.success("Durum güncellendi"); load(); setSel(null);
   };
-  const del = async (id) => { if (!window.confirm("Silinsin mi?")) return; await axios.delete(`${API}/admin/tickets/${id}`, { headers: h() }); load(); };
+  const del = async (id) => { if (!await window.appConfirm("Silinsin mi?")) return; await axios.delete(`${API}/admin/tickets/${id}`, { headers: h() }); load(); };
 
   return (
     <div className="space-y-5" data-testid="tickets-page">
@@ -415,7 +415,7 @@ export function ShippingPaymentRules() {
     toast.success("Kaydedildi"); setShow(false); setForm({}); loadAll();
   };
   const del = async (id) => {
-    if (!window.confirm("Silinsin mi?")) return;
+    if (!await window.appConfirm("Silinsin mi?")) return;
     const ep = tab === "shipping" ? "/admin/rules/shipping" : "/admin/rules/payment-discounts";
     await axios.delete(`${API}${ep}/${id}`, { headers: h() });
     loadAll();

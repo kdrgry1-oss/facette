@@ -117,7 +117,7 @@ export default function Vendors() {
   };
 
   const handleDelete = async (vendor) => {
-    if (!window.confirm(`"${vendor.name}" silinecek. Emin misiniz?`)) return;
+    if (!await window.appConfirm(`"${vendor.name}" silinecek. Emin misiniz?`)) return;
     
     try {
       const token = localStorage.getItem('token');

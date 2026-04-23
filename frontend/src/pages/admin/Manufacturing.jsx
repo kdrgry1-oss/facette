@@ -162,7 +162,7 @@ export default function Manufacturing() {
   };
 
   const deleteRecord = async (item) => {
-    if (!window.confirm(`"${item.code}" kaydını silmek istiyor musunuz?`)) return;
+    if (!await window.appConfirm(`"${item.code}" kaydını silmek istiyor musunuz?`)) return;
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API}/manufacturing/${item.id}`, {

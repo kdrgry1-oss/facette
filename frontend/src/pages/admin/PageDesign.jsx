@@ -438,7 +438,7 @@ export default function PageDesign() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Bloğu silmek istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Bloğu silmek istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API}/page-blocks/${id}`, {

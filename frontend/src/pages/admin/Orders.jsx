@@ -431,7 +431,7 @@ export default function AdminOrders() {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
-    if (!window.confirm(`${selectedOrders.length} sipariş için e-Arşiv fatura oluşturulacak. Devam edilsin mi?`)) return;
+    if (!await window.appConfirm(`${selectedOrders.length} sipariş için e-Arşiv fatura oluşturulacak. Devam edilsin mi?`)) return;
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };

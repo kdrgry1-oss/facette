@@ -184,7 +184,7 @@ export default function AdminUsersRoles() {
 
   const deleteRole = async (role) => {
     if (role.is_system) { toast.error("Sistem rolleri silinemez"); return; }
-    if (!window.confirm(`"${role.name}" rolünü silmek istiyor musunuz?`)) return;
+    if (!await window.appConfirm(`"${role.name}" rolünü silmek istiyor musunuz?`)) return;
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API}/admin/roles/${role.id}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -237,7 +237,7 @@ export default function AdminUsersRoles() {
   };
 
   const deleteUser = async (user) => {
-    if (!window.confirm(`"${user.email}" kullanıcısını silmek istiyor musunuz?`)) return;
+    if (!await window.appConfirm(`"${user.email}" kullanıcısını silmek istiyor musunuz?`)) return;
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API}/admin/users/${user.id}`, { headers: { Authorization: `Bearer ${token}` } });

@@ -29,7 +29,7 @@ export default function ProductReviews() {
   };
 
   const del = async (rid) => {
-    if (!window.confirm("Yorum silinsin mi?")) return;
+    if (!await window.appConfirm("Yorum silinsin mi?")) return;
     await axios.delete(`${API}/admin/reviews/${rid}`, { headers: authHeaders() });
     toast.success("Silindi"); load();
   };

@@ -121,7 +121,7 @@ export default function AdminQuestions() {
   };
 
   const deleteQuestion = async (q) => {
-    if (!window.confirm("Bu soruyu silmek istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Bu soruyu silmek istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem("token");
       const ch = q.marketplace || "trendyol";

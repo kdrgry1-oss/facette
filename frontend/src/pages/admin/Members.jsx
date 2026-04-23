@@ -87,7 +87,7 @@ export default function Members() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Bu üye silinsin mi?")) return;
+    if (!await window.appConfirm("Bu üye silinsin mi?")) return;
     try {
       await axios.delete(`${API}/admin/members/${id}`, { headers: authHeaders() });
       toast.success("Üye silindi");

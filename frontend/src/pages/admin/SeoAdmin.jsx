@@ -22,7 +22,7 @@ export function SeoRedirects() {
     } catch (e) { toast.error(e?.response?.data?.detail || "Hata"); }
   };
   const del = async (id) => {
-    if (!window.confirm("Silinsin mi?")) return;
+    if (!await window.appConfirm("Silinsin mi?")) return;
     await axios.delete(`${API}/admin/seo/redirects/${id}`, { headers: authHeaders() });
     load();
   };
@@ -95,7 +95,7 @@ export function SeoMeta() {
     toast.success("Kaydedildi"); setForm({ path: "", title: "", description: "", og_image: "", noindex: false }); load();
   };
   const del = async (id) => {
-    if (!window.confirm("Silinsin mi?")) return;
+    if (!await window.appConfirm("Silinsin mi?")) return;
     await axios.delete(`${API}/admin/seo/meta/${id}`, { headers: authHeaders() });
     load();
   };
