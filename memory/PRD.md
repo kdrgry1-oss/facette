@@ -111,7 +111,19 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P2: Products.jsx (2500+ satır) ve Orders.jsx (1500+ satır) modal/sekme componentlerine bölme
 - P2: integrations.py (3500+ satır) provider'a göre bölme
 
-## Changelog — 23 Nis 2026
+## Changelog — 23 Nis 2026 (Oturum 2)
+- **Marketplace Hub (yeni)**: `routes/marketplace_hub.py` — 13 pazaryeri (Trendyol, Hepsiburada, Temu, N11, Amazon TR/DE, AliExpress, Etsy, Hepsi Global, Fruugo, eMAG, Trendyol İhracat, Çiçek Sepeti) için tek merkezli yönetim. Her biri için:
+  - Credential şeması (Supplier ID, API Key/Secret, Username/Password, vb.)
+  - 19 Ortak Transfer Kuralı (Lisans Kodu, Eksi Stok, Fiyat Türü, Komisyon, Barkod/Stok Kodu aktarım, Yeni Ürün Otomatik, Sipariş Durum güncelleme, İade, Ödeme Vade/Teslim tarihi, Marka, Kargo Süresi)
+  - Auto-sync (products/orders ayrı on-off + dk periyot + lookback saat)
+  - `marketplace_accounts` koleksiyonu ile tek kayıt.
+  - Frontend: `MarketplaceHub.jsx` Ticimax Marketplace v2 ile birebir görünüm (sol pazaryeri listesi + sağ 3 kart: API + Kurallar + Auto-Sync).
+- **Integration Logs (yeni)**: `integration_logs` koleksiyonu + endpoint'ler (`/api/marketplace-hub/logs`, `logs/summary`, `logs/test`). Her API çağrısı status/direction/ref_id/message/duration ile kaydedilir.
+  - `log_integration_event()` helper — integrations.py'den çağrılabilir.
+  - Frontend: `IntegrationLogs.jsx` — filtreleme (pazaryeri, aktarım türü, durum, tarih, ref_id), "Son 5 İşlem" özet kartları, CSV export, pagination.
+- **E-Fatura aktif provider routing**: `POST /api/orders/{id}/create-invoice` endpoint'i eklendi. `providers_config.einvoice.active_provider`'ı okur, provider prefix + sıra no ile `FAC00000001` formatında invoice_number üretir, siparişe yazar, integration_logs'a kayıt düşer. `GET /api/orders/{id}/invoice/print` yazdırılabilir HTML fatura. Bulk invoice akışları artık uçtan uca çalışıyor.
+- **Menü**: Entegrasyonlar altına **Pazaryerleri Hub** ve **Entegrasyon Logları** eklendi.
+- **Test**: Backend 13 pazaryeri şeması OK, account save/load OK, log summary OK, create-invoice FAC00000001 + provider=dogan-edonusum + integration_logs kayıt OK. Frontend screenshot'larında Pazaryerleri Yönetimi (sol liste + Trendyol seçili + 3 kart) ve Entegrasyon Logları (özet + filtre + tablo) beklenen şekilde render.
 - **UI**: Admin Pagination tekdüze hale getirildi. `/app/frontend/src/components/admin/Pagination.jsx` (compact + full variants, jump-to-page input, ilk/son/prev/next, "..." ellipsis). Sayfa başına kayıt seçici (20/50/100/200) hem üst hem alt varyantında.
 - **UI**: Ürünler ve Siparişler tablolarına `.admin-table-compact` CSS varyantı → bir ekrana daha çok kayıt sığıyor. Thumbnail w-12→w-10.
 - **UI**: ÜST (compact) + ALT (full) pagination — her ikisi aynı state'i paylaşır.

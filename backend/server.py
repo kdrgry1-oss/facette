@@ -70,6 +70,7 @@ from routes.catalog_extras import (
 from routes.admin_tasks import router as admin_tasks_router
 from routes.barcode_cards import router as barcode_cards_router
 from routes.provider_settings import router as provider_settings_router
+from routes.marketplace_hub import router as marketplace_hub_router
 
 # Database
 from routes.deps import client, db
@@ -202,6 +203,10 @@ api_router.include_router(barcode_cards_router)
 # E-Fatura ve Kargo entegratör ayarları (provider seçimi + credential formu).
 # Frontend: EInvoiceSettings.jsx + CargoSettings.jsx bu endpoint'leri kullanır.
 api_router.include_router(provider_settings_router)
+# Marketplace Hub: tüm e-ticaret pazaryerlerinin (Trendyol, HB, Temu, N11,
+# Amazon, AliExpress, Etsy, ...) merkezi yönetimi: credentials, transfer_rules,
+# auto_sync ayarları + integration_logs.
+api_router.include_router(marketplace_hub_router)
 
 # Root endpoint
 @api_router.get("/")

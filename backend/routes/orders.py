@@ -371,3 +371,174 @@ async def mark_order_invoiced(
         update["status"] = "confirmed"
     await db.orders.update_one({"id": order_id}, {"$set": update})
     return {"success": True, "invoice_issued": True}
+
+
+
+# ---------------------------------------------------------------------------
+# E-Fatura oluşturma — aktif e-fatura entegratörünü kullanarak fatura keser.
+# Aktif provider `providers_config` kolleksiyonundan okunur. Canlıda her
+# provider için ayrı SDK çağrısı olacak; şu an mock başarı döner ama doğru
+# provider adı + üretilmiş invoice_number ile kayıt altına alınır.
+#
+# FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
+# ---------------------------------------------------------------------------
+@router.post("/{order_id}/create-invoice")
+async def create_invoice_for_order(
+    order_id: str,
+    invoice_type: str = "e-arsiv",
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Seçili sipariş için e-Arşiv / e-Fatura keser.
+
+    AKIŞ:
+      1) Siparişi ve aktif e-fatura provider config'ini çek.
+      2) Provider config'i yoksa hata dön (kullanıcı Ayarlar > E-Fatura
+         ekranında provider seçmeli).
+      3) Mock: prefix + sayaç ile invoice_number üret, siparişe yaz.
+      4) integration_logs'a "invoice_create" olayı yaz.
+    """
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("invoice_issued"):
+        return {"success": True, "message": "Fatura zaten kesilmiş",
+                "invoice_number": order.get("invoice_number", "")}
+
+    cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0})
+    active = (cfg or {}).get("active_provider")
+    providers = (cfg or {}).get("providers") or {}
+    if not active or not providers.get(active):
+        raise HTTPException(
+            status_code=400,
+            detail="Aktif e-fatura entegratörü yapılandırılmamış. Ayarlar > E-Arşiv / E-Fatura ekranından seçin."
+        )
+
+    pcfg = providers[active]
+    prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
+              else pcfg.get("einvoice_prefix")) or "FAC"
+
+    # Aynı prefix ile kesilmiş fatura sayısına göre sıra numarası üret
+    count = await db.orders.count_documents({
+        "invoice_number": {"$regex": f"^{prefix}"}
+    })
+    invoice_number = f"{prefix}{(count + 1):08d}"
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "invoice_issued": True,
+            "invoice_number": invoice_number,
+            "invoice_type": invoice_type,
+            "invoice_provider": active,
+            "invoice_issued_at": now,
+            "invoice_issued_by": current_user.get("email", ""),
+            "updated_at": now,
+        }}
+    )
+
+    # Log — integration_logs'a ekle
+    try:
+        from .marketplace_hub import log_integration_event
+        await log_integration_event(
+            marketplace=f"einvoice:{active}",
+            action="invoice_create",
+            status="success",
+            direction="outbound",
+            ref_id=order_id,
+            message=f"{invoice_type} fatura oluşturuldu: {invoice_number}",
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "message": "Fatura oluşturuldu",
+        "invoice_number": invoice_number,
+        "invoice_type": invoice_type,
+        "provider": active,
+    }
+
+
+# ---------------------------------------------------------------------------
+# FATURA YAZDIR (HTML) — Orders.jsx handleBulkPrintInvoices iframe src olarak
+# bu endpoint'i kullanır. Basit bir A4 fatura HTML'i döner; gerçek XSL-UBL
+# dönüşümü canlıda provider'dan gelen PDF URL'siyle değiştirilir.
+# ---------------------------------------------------------------------------
+@router.get("/{order_id}/invoice/print")
+async def print_invoice_html(order_id: str, token: str = None):
+    """Basit fatura HTML çıktısı (yazdırılabilir). Bulk print için iframe."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    addr = order.get("shipping_address") or {}
+    items = order.get("items") or []
+    total = order.get("total") or order.get("total_amount") or 0
+
+    rows = "".join(
+        f"<tr><td>{i.get('product_name','')}</td>"
+        f"<td style='text-align:center'>{i.get('quantity',1)}</td>"
+        f"<td style='text-align:right'>{(i.get('price') or 0):.2f} ₺</td>"
+        f"<td style='text-align:right'>{((i.get('price') or 0)*(i.get('quantity') or 1)):.2f} ₺</td></tr>"
+        for i in items
+    )
+
+    from fastapi.responses import HTMLResponse
+    html = f"""
+<!doctype html><html lang="tr"><head><meta charset="utf-8"/>
+<title>Fatura — {order.get('invoice_number') or order.get('order_number','')}</title>
+<style>
+  @page {{ size: A4; margin: 15mm; }}
+  body {{ font-family: -apple-system, Arial, sans-serif; color:#111; margin:0; }}
+  .header {{ display:flex; justify-content:space-between; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:16px; }}
+  .brand {{ font-size:20px; font-weight:800; letter-spacing:.1em; }}
+  h1 {{ font-size:18px; margin:0 0 8px; }}
+  table {{ width:100%; border-collapse:collapse; margin-top:12px; font-size:12px; }}
+  th, td {{ padding:6px 8px; border-bottom:1px solid #eee; }}
+  th {{ background:#f9fafb; text-align:left; }}
+  .totals {{ margin-top:12px; text-align:right; }}
+  .grand {{ font-size:16px; font-weight:800; margin-top:4px; }}
+  .meta {{ font-size:11px; color:#555; }}
+</style></head><body>
+<div class="header">
+  <div>
+    <div class="brand">FACETTE</div>
+    <div class="meta">Facette E-Ticaret · facette.com.tr</div>
+  </div>
+  <div style="text-align:right">
+    <h1>{'E-ARŞİV FATURA' if order.get('invoice_type')=='e-arsiv' else 'E-FATURA'}</h1>
+    <div class="meta">No: <strong>{order.get('invoice_number') or '-'}</strong></div>
+    <div class="meta">Tarih: {(order.get('invoice_issued_at') or order.get('created_at') or '')[:10]}</div>
+    <div class="meta">Sipariş: {order.get('order_number','')}</div>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
+  <div>
+    <div class="meta" style="font-weight:700">Alıcı:</div>
+    <div>{addr.get('full_name','')}</div>
+    <div class="meta">{addr.get('address','')}</div>
+    <div class="meta">{addr.get('district','')} / {addr.get('city','')}</div>
+    <div class="meta">Tel: {addr.get('phone','')}</div>
+  </div>
+  <div>
+    <div class="meta" style="font-weight:700">Sipariş Kanalı:</div>
+    <div>{order.get('channel') or 'web'}</div>
+    <div class="meta">Ödeme: {order.get('payment_method','-')}</div>
+  </div>
+</div>
+<table>
+  <thead><tr><th>Ürün</th><th style="text-align:center">Adet</th><th style="text-align:right">Birim</th><th style="text-align:right">Tutar</th></tr></thead>
+  <tbody>{rows or '<tr><td colspan=4 style="text-align:center">Kalem yok</td></tr>'}</tbody>
+</table>
+<div class="totals">
+  <div class="grand">Toplam: {float(total):.2f} ₺</div>
+</div>
+<p class="meta" style="margin-top:24px;border-top:1px solid #eee;padding-top:10px;">
+  Bu belge e-Arşiv fatura olup, aktif entegratör
+  <strong>{order.get('invoice_provider') or '-'}</strong> üzerinden üretilmiştir.
+</p>
+</body></html>
+"""
+    return HTMLResponse(content=html)
