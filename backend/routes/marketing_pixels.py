@@ -24,7 +24,7 @@ Admin dışında kimse yeni kod ekleyemez.
 """
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .deps import db, require_admin, generate_id
@@ -208,13 +208,15 @@ async def delete_pixel(pid: str, current_user: dict = Depends(require_admin)):
 
 
 @router.get("/active-public")
-async def list_active_public():
+async def list_active_public(response: Response):
     """Frontend'in <head> ve <body> sonuna enjekte edeceği kodlar.
     Auth yok — sadece aktif pixel'lerin önceden kaydedilmiş snippet'leri döner.
+    60 saniye cache edilir (her sayfa yüklemesinde DB yorma).
     """
     rows = await db.marketing_pixels.find(
         {"is_active": True}, {"_id": 0, "provider": 1, "name": 1, "head_snippet": 1, "body_snippet": 1}
     ).to_list(length=50)
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     return {
         "head": "\n".join([r.get("head_snippet") or "" for r in rows if r.get("head_snippet")]),
         "body": "\n".join([r.get("body_snippet") or "" for r in rows if r.get("body_snippet")]),

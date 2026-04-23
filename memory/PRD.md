@@ -174,6 +174,34 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
   - Frontend Entegrasyonlar: Hepsiburada + Temu kartları, settings dialogları
   - Frontend Products Özellikler: Trendyol altında Hepsiburada & Temu için bağımsız özellik bölümleri (Trendyol'da seçilen değer boş ise HB/Temu'ya otomatik kopyalama)
   - Frontend Questions: marketplace filtresi, sol kenarlıkta renkli çerçeve, sağ üst köşede pazaryeri rozeti, pazaryeri bazlı senkron butonları
+
+## Iteration 17 (2026-04-23) — FAZ 8 + FAZ 9 + Üretici Performans
+
+### FAZ 8 — Gelişmiş Raporlar
+Backend (`/api/admin/reports/*`):
+- `GET /returns/by-size` — beden bazlı iade sayısı (en çok iade edilen beden)
+- `GET /returns/by-product` — ürün bazlı iade + satışa oranla `return_rate_pct` (sarı >%20, kırmızı >%50)
+- `GET /returns/reasons` — iade sebebi dağılımı
+- `GET /fast-selling?window_days=14&min_sold=10` — "ilk 14 günde ≥10 satış" dedektörü; `recommend_ads: true` → kartta yeşil "Reklam Öneriliyor" rozeti
+- `GET /manufacturer-performance` — üretici bazında avg_delay, avg_qty_diff, skor (100 - gecikme*3 - |%|*0.5)
+
+Admin UI: `/admin/raporlar/iade-ve-trend` — 5 kart (beden, sebep, ürün, hızlı satış kartları, üretici performans tablosu renk kodlu)
+
+### FAZ 9 — Pazarlama Pixel Yönetimi
+Backend (`/api/marketing-pixels`):
+- `GET /providers` — 8 sağlayıcı (GA4, Meta Pixel, Google Ads, TikTok, Yandex, Hotjar, Clarity, Custom)
+- `GET/POST/DELETE` — CRUD (tag_id → otomatik snippet template; custom için manuel HTML)
+- `GET /active-public` — **AUTH YOK** — frontend site'a inject için head + body snippet birleşimi (60s cache)
+
+Frontend:
+- `MarketingPixelsInjector.jsx` (App.js'e yüklendi) — ilk render'da /active-public'ten pixel'leri çekip `<head>`'e enjekte (script tag'leri yeniden oluşturarak execute olur)
+- Admin sayfası `/admin/ayarlar/pixel` — form + liste, sadece GA4 tag ID yapıştır→aktif
+
+### Testing
+- `test_iteration17_reports_pixels.py` — **22/22 PASS** (%100)
+- Cache-Control eklendi (middleware override'dan etkilenebilir; iyi-bir-çaba)
+
+
   - Products modeli `hepsiburada_attributes` + `temu_attributes` alanlarını destekler
 - [2026-04-20] Kapsamlı Admin Panel Genişletme (Fork devamı):
   - **RBAC (Rol & Yetki)**: `/api/admin/roles` + `UsersRoles.jsx`, 64 permission ağacı
