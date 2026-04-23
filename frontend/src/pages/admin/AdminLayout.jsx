@@ -113,6 +113,10 @@ const navigation = [
       { label: "Pazaryerleri Hub", path: "/admin/pazaryerleri", icon: Store },
       // Tüm pazaryerlerindeki API aktarım kayıtları (filtre + export)
       { label: "Entegrasyon Logları", path: "/admin/entegrasyon-loglari", icon: FileText },
+      // Aktarılamayan sipariş/ürün kayıtları (failed logs) + tekrar aktar
+      { label: "Aktarılamayanlar", path: "/admin/aktarilamayanlar", icon: FileText },
+      // Multi-marketplace marka eşleştirme
+      { label: "Marka Eşleştir", path: "/admin/marka-eslestir", icon: Store },
       { label: "Tüm Entegrasyonlar", path: "/admin/entegrasyonlar", icon: Cable },
       { label: "Trendyol Eşleştir", path: "/admin/trendyol-eslestir", icon: Store },
       { label: "Hepsiburada Eşleştir", path: "/admin/hepsiburada-eslestir", icon: Store },
