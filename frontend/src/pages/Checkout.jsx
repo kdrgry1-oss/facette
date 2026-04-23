@@ -37,6 +37,27 @@ export default function Checkout() {
     postal_code: "",
   });
 
+  // FAZ 4 — hediye notu + hediye paketi + uygulanabilir kupon listesi
+  const GIFT_WRAP_PRICE = 130;
+  const [giftNote, setGiftNote] = useState("");
+  const [giftWrap, setGiftWrap] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+
+  // Uygulanabilir kuponları sepete göre tetikle
+  useEffect(() => {
+    if (items.length === 0) { setAvailableCoupons([]); return; }
+    axios.post(`${API}/coupons/available`, {
+      cart_total: total,
+      user_id: user?.id || null,
+      items: items.map((it) => ({
+        product_id: it.productId, category_id: it.categoryId,
+        price: it.price, qty: it.quantity,
+      })),
+    }).then((r) => setAvailableCoupons(r.data?.items || []))
+      .catch(() => setAvailableCoupons([]));
+  }, [items, total, user?.id]);
+
   // Handle payment callback
   useEffect(() => {
     const token = searchParams.get('token');
@@ -68,7 +89,8 @@ export default function Checkout() {
 
   const freeShippingLimit = 500;
   const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
-  const grandTotal = total + shippingCost - discount;
+  const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
+  const grandTotal = total + shippingCost - discount + giftWrapTotal;
 
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -80,10 +102,25 @@ export default function Checkout() {
     try {
       const res = await axios.post(`${API}/campaigns/validate?code=${couponCode}&total=${total}`);
       setDiscount(res.data.discount);
+      setAppliedCoupon({ code: couponCode.toUpperCase(), discount: res.data.discount });
       toast.success(`Kupon uygulandı: ${res.data.discount.toFixed(2)} TL indirim`);
     } catch (err) {
       toast.error(err.response?.data?.detail || "Kupon geçersiz");
     }
+  };
+
+  // Trendyol Go stili: kart listesinden kupon seçimi
+  const handlePickCoupon = (c) => {
+    setCouponCode(c.code);
+    setDiscount(c.discount);
+    setAppliedCoupon({ code: c.code, discount: c.discount, title: c.title });
+    toast.success(`${c.code} uygulandı: ${c.discount.toFixed(2)} TL indirim`);
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setDiscount(0);
   };
 
   const handleSubmit = async (e) => {
@@ -118,6 +155,10 @@ export default function Checkout() {
         subtotal: total,
         shipping_cost: shippingCost,
         discount: discount,
+        coupon_code: appliedCoupon?.code || "",
+        gift_note: giftNote || "",
+        gift_wrap: giftWrap,
+        gift_wrap_price: giftWrap ? GIFT_WRAP_PRICE : 0,
         total: grandTotal + (paymentMethod === "cash_on_delivery" ? 10 : 0),
         payment_method: paymentMethod,
         attribution_session_id:
@@ -349,6 +390,32 @@ export default function Checkout() {
                 )}
               </div>
 
+              {/* Hediye Seçenekleri — FAZ 4 */}
+              <div className="bg-white p-6" data-testid="gift-options-section">
+                <h2 className="text-lg font-medium mb-4">Hediye Seçenekleri</h2>
+                <label className="flex items-start gap-3 cursor-pointer border rounded p-3 mb-3 hover:border-black transition-colors"
+                  style={{ borderColor: giftWrap ? "#000" : undefined }}>
+                  <input type="checkbox" checked={giftWrap}
+                    onChange={(e) => setGiftWrap(e.target.checked)}
+                    className="mt-1" data-testid="gift-wrap-toggle" />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Hediye paketi</span>
+                      <span className="text-sm font-semibold">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajıyla kurdele ve kartla gönderilir.</p>
+                  </div>
+                </label>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Hediye Notu (opsiyonel)</label>
+                  <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
+                    rows={2} placeholder="Kartta yer almasını istediğiniz mesaj (max 300 karakter)"
+                    className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black resize-none"
+                    data-testid="gift-note-input" />
+                  {giftNote && <div className="text-xs text-gray-400 mt-1">{giftNote.length}/300</div>}
+                </div>
+              </div>
+
               {/* Terms */}
               <div className="bg-white p-6">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -389,6 +456,33 @@ export default function Checkout() {
                   ))}
                 </div>
 
+                {/* Trendyol Go stili uygulanabilir kupon listesi — FAZ 4 */}
+                {availableCoupons.length > 0 && (
+                  <div className="mb-4" data-testid="available-coupons-block">
+                    <div className="text-xs font-medium text-gray-600 mb-2">Kullanılabilir kuponlar</div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {availableCoupons.slice(0, 6).map((c) => {
+                        const selected = appliedCoupon?.code === c.code;
+                        return (
+                          <button type="button" key={c.id} onClick={() => handlePickCoupon(c)}
+                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-black bg-black text-white" : "border-dashed border-gray-300 hover:border-black"}`}
+                            data-testid={`coupon-card-${c.code}`}>
+                            <div className="min-w-0">
+                              <div className={`text-xs font-semibold tracking-wide ${selected ? "text-white" : "text-black"}`}>{c.code}</div>
+                              <div className={`text-[11px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>
+                                {c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}
+                              </div>
+                            </div>
+                            <div className={`text-sm font-semibold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>
+                              -{c.discount.toFixed(2)} TL
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Coupon */}
                 <div className="flex gap-2 mb-4">
                   <input
@@ -397,14 +491,23 @@ export default function Checkout() {
                     onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
                     placeholder="Kupon Kodu"
                     className="flex-1 border px-3 py-2 text-sm"
+                    data-testid="manual-coupon-input"
                   />
-                  <button 
-                    type="button"
-                    onClick={handleApplyCoupon}
-                    className="btn-secondary text-xs px-4"
-                  >
-                    Uygula
-                  </button>
+                  {appliedCoupon ? (
+                    <button type="button" onClick={handleRemoveCoupon}
+                      className="btn-secondary text-xs px-4" data-testid="remove-coupon-btn">
+                      Kaldır
+                    </button>
+                  ) : (
+                    <button 
+                      type="button"
+                      onClick={handleApplyCoupon}
+                      className="btn-secondary text-xs px-4"
+                      data-testid="apply-coupon-btn"
+                    >
+                      Uygula
+                    </button>
+                  )}
                 </div>
 
                 {/* Totals */}
@@ -421,8 +524,14 @@ export default function Checkout() {
                   </div>
                   {discount > 0 && (
                     <div className="flex justify-between text-green-600">
-                      <span>İndirim</span>
+                      <span>İndirim{appliedCoupon ? ` (${appliedCoupon.code})` : ""}</span>
                       <span>-{discount.toFixed(2)} TL</span>
+                    </div>
+                  )}
+                  {giftWrap && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Hediye paketi</span>
+                      <span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
                     </div>
                   )}
                   {paymentMethod === "cash_on_delivery" && (

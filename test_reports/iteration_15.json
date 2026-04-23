@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 15 backend smoke — FAZ 4 (gift fields + /coupons/available), FAZ 5 (ship/undeliver + undelivered status), FAZ 6 (customer risk + block, IP/UA capture) tested end-to-end. Also regression on notification provider masking + merge-preserve. 14/14 pytest tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/customer-risk/users/{user_id} and /api/customer-risk/by-email",
+        "issue": "Fast-path return when total_orders==0 in _compute_risk() omits 'return_rate_pct' key. Main path includes it. Causes response-shape inconsistency which can break UI bindings (e.g., {risk.return_rate_pct?.toFixed(1)}). Suggest adding return_rate_pct: 0.0 to the early return."
+      },
+      {
+        "endpoint": "POST /api/orders/{order_id}/ship",
+        "issue": "tracking_number validation has min_length=3 → returns 422 (Unprocessable Entity) for shorter tracking numbers instead of a friendlier 400. Acceptable, just noting for UI consistency."
+      },
+      {
+        "endpoint": "POST /api/orders",
+        "issue": "coupon_code is stored upper-cased but there is no server-side validation that the code actually exists in /coupons; a bogus 'WELCOME10' is accepted. Consider validating at create time if coupon_code is set."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration15_faz456.py",
+    "/app/test_reports/pytest/iteration15.xml"
+  ],
+  "action_items": [
+    "Add 'return_rate_pct': 0.0 to the zero-order fast-path in backend/routes/customer_risk.py::_compute_risk() for response-shape consistency.",
+    "(Optional) Validate coupon_code against /coupons collection at POST /api/orders time so invalid codes don't end up on the order document."
+  ],
+  "critical_code_review_comments": [
+    "routes/orders.py create_order does a best-effort IP extraction but trusts X-Forwarded-For blindly. This is fine for block enforcement in admin context but could be spoofed by clients. Consider verifying it against a trusted reverse-proxy list or using request.client.host when X-Forwarded-For is absent — already partially done.",
+    "routes/customer_risk.py _compute_risk fast-path response schema differs from full path (missing return_rate_pct). Standardize both returns.",
+    "routes/coupons.py POST /coupons/available builds a time-window query with $and/$or that is correct, but `first_order_only` and per-user limits are still evaluated per-coupon in a Python loop — fine for small coupon counts (max 50) but will not scale if there are hundreds of active coupons; consider pre-filtering via MongoDB pipeline later.",
+    "routes/notifications.py save_providers merge-preserve works: empty string or any value containing '****' is treated as masked and original value is kept. Verified via 3-step test (real save → masked GET → re-save masked → GET masked with same head/tail). Solid implementation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration15_faz456.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (not requested)"},
+  "test_credentials": "admin@facette.com / admin123 (query-param login)",
+  "seed_data_creation": "Two temporary coupons (TEST15A*/TEST15B*) created and auto-deleted via fixture teardown. Temporary orders TEST_FAZ4 / TEST_FAZ5 deleted via fixture teardown. One IP-block record created and removed. One email-block record created and then deactivated via DELETE.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration15_faz456.py exercises: /api/coupons/available, POST /api/orders gift+IP+UA capture, PUT /api/orders/{id}/status?status=undelivered, POST /ship (valid+invalid cargo+404), POST /undeliver, /customer-risk (users/by-email/bulk/block/blocked/DELETE), block-by-IP rejects POST /orders with 403, and notifications provider masking+merge-preserve. Reuses fixtures for auth, coupon seeding, and order creation. All pass. notification_logs assertion is best-effort (logs may be trimmed).",
+  "rca of the issue": "Not applicable — feature tests pass. Two minor consistency issues flagged for E1 to address at its discretion."
+}
