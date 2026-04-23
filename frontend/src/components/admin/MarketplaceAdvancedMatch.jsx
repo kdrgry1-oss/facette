@@ -17,11 +17,12 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon,
+  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon, FileJson,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../ui/dialog";
+import AttrCacheUploadDialog from "./AttrCacheUploadDialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -115,6 +116,7 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hint, setHint] = useState("");
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const color = MP_COLORS[marketplace] || "orange";
 
@@ -312,11 +314,20 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
             {mpAttrs.length === 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-900 flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <div>
+                <div className="flex-1">
                   <b>{marketplace} canlı özellik listesi yüklenemedi</b> (credential yok ya da cache boş).
                   Bu arada <b>{globalAttrs.length} sistem özelliğinden</b> manuel seçim yapabilirsiniz.
                   Credential eklendikten sonra "Tümünü Otomatik Eşleştir" ile zenginleştirilecektir.
                 </div>
+                {marketplace !== "trendyol" && (
+                  <button
+                    onClick={() => setUploadOpen(true)}
+                    className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700 whitespace-nowrap flex items-center gap-1"
+                    data-testid="adv-upload-cache-btn"
+                  >
+                    <FileJson size={12} /> JSON Yükle
+                  </button>
+                )}
               </div>
             )}
             <div className="flex-1 overflow-auto border rounded-lg">
@@ -449,6 +460,26 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
           </button>
         </div>
       </DialogContent>
+      <AttrCacheUploadDialog
+        open={uploadOpen}
+        onClose={async (ok) => {
+          setUploadOpen(false);
+          if (ok && category) {
+            // Modal'ı yeniden yükle
+            setLoading(true);
+            try {
+              const r = await axios.get(
+                `${API}/category-mapping/${marketplace}/${category.category_id}/attributes`,
+                { headers: auth() }
+              );
+              setMpAttrs(r.data?.attributes || []);
+              setHint(r.data?.hint || "");
+            } finally { setLoading(false); }
+          }
+        }}
+        marketplace={marketplace}
+        mpCategoryId={category?.marketplace_category_id}
+      />
     </Dialog>
   );
 }
