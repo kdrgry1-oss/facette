@@ -11,12 +11,15 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap } from "lucide-react";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import {
   AdvancedAttributeMatchModal,
   AdvancedValueMatchModal,
 } from "../../components/admin/MarketplaceAdvancedMatch";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "../../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -31,6 +34,8 @@ export default function CategoryMapping() {
   const [selected, setSelected] = useState(new Set());
   const [attrMatchFor, setAttrMatchFor] = useState(null);
   const [valueMatchFor, setValueMatchFor] = useState(null);
+  const [bulkAttrLoading, setBulkAttrLoading] = useState(false);
+  const [bulkAttrReport, setBulkAttrReport] = useState(null);
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -99,6 +104,27 @@ export default function CategoryMapping() {
     toast.success(`${r.data.deleted} kayıt silindi`); load();
   };
 
+  const bulkAutoMatchAttributes = async () => {
+    if (!window.confirm(
+      `${active} için matched tüm kategorilerin özellik eşleştirmesi otomatik yapılacak.\n\n` +
+      `• Mevcut manuel eşleştirmeler korunur (ezilmez), sadece BOŞ olanlar doldurulur.\n` +
+      `• Trendyol için canlı API'den attribute'lar çekilir, diğer pazaryerleri için yerel cache kullanılır.\n\n` +
+      `Devam edilsin mi?`
+    )) return;
+    setBulkAttrLoading(true);
+    setBulkAttrReport(null);
+    try {
+      const r = await axios.post(`${API}/category-mapping/${active}/bulk-auto-match-attributes`, {}, auth);
+      setBulkAttrReport(r.data);
+      toast.success(r.data?.message || "Otomatik eşleştirme tamamlandı");
+      load();
+    } catch (e) {
+      toast.error("Otomatik eşleştirme hatası: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setBulkAttrLoading(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     if (!search) return data.items;
     const s = search.toLocaleLowerCase("tr");
@@ -118,6 +144,14 @@ export default function CategoryMapping() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={bulkAutoMatchAttributes}
+            disabled={bulkAttrLoading || data.matched === 0}
+            className="flex items-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg text-sm font-semibold hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Matched tüm kategorilerdeki özellikleri sistem özellikleriyle otomatik eşleştir"
+            data-testid="cat-bulk-auto-match">
+            {bulkAttrLoading ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
+            {bulkAttrLoading ? "Eşleşiyor..." : "Tümünü Otomatik Eşleştir"}
+          </button>
           <button onClick={resetAll}
             className="flex items-center gap-1 px-3 py-2 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50"
             data-testid="cat-reset-all">
@@ -312,6 +346,93 @@ export default function CategoryMapping() {
         marketplace={active}
         category={valueMatchFor}
       />
+
+      {/* Bulk Auto-Match Raporu */}
+      <Dialog open={!!bulkAttrReport} onOpenChange={() => setBulkAttrReport(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Zap size={18} className="text-orange-500" />
+              Otomatik Özellik Eşleştirme Raporu — {bulkAttrReport?.marketplace}
+            </DialogTitle>
+          </DialogHeader>
+
+          {bulkAttrReport && (
+            <>
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <div className="bg-white border rounded-lg p-3">
+                  <div className="text-[10px] text-gray-500 uppercase">İşlenen Kategori</div>
+                  <div className="text-xl font-black mt-1">{bulkAttrReport.processed}</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="text-[10px] text-green-700 uppercase">Yeni Eşleşme</div>
+                  <div className="text-xl font-black text-green-800 mt-1">{bulkAttrReport.total_new_mappings}</div>
+                </div>
+                <div className="bg-gray-50 border rounded-lg p-3">
+                  <div className="text-[10px] text-gray-500 uppercase">Toplam Matched</div>
+                  <div className="text-xl font-black mt-1">{bulkAttrReport.total_categories}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+                {bulkAttrReport.message}
+              </div>
+
+              <div className="flex-1 overflow-auto border rounded-lg mt-3">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0 border-b">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600">Kategori</th>
+                      <th className="text-right px-3 py-2 font-medium text-gray-600 w-20">MP Özellik</th>
+                      <th className="text-right px-3 py-2 font-medium text-gray-600 w-20">Yeni</th>
+                      <th className="text-center px-3 py-2 font-medium text-gray-600 w-16">Kaynak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(bulkAttrReport.details || []).length === 0 ? (
+                      <tr><td colSpan={4} className="text-center py-6 text-gray-400">Kayıt yok</td></tr>
+                    ) : (
+                      bulkAttrReport.details.map((d) => (
+                        <tr key={d.category_id} className="border-b hover:bg-gray-50">
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{d.category_name}</div>
+                            {d.note && <div className="text-[10px] text-amber-600">{d.note}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-600">{d.total_mp_attrs}</td>
+                          <td className="px-3 py-2 text-right font-semibold">
+                            {d.new > 0 ? (
+                              <span className="text-green-600">+{d.new}</span>
+                            ) : (
+                              <span className="text-gray-300">0</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {d.fetched ? (
+                              <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">CANLI</span>
+                            ) : d.total_mp_attrs ? (
+                              <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">CACHE</span>
+                            ) : (
+                              <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">YOK</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end pt-3 border-t mt-3">
+                <button onClick={() => setBulkAttrReport(null)}
+                  className="px-4 py-2 bg-black text-white rounded text-sm hover:bg-gray-800"
+                  data-testid="bulk-report-close">
+                  Kapat
+                </button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

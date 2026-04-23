@@ -125,6 +125,166 @@ async def reset_all(marketplace: str, current_user: dict = Depends(require_admin
     return {"success": True, "deleted": res.deleted_count}
 
 
+@router.post("/{marketplace}/bulk-auto-match-attributes")
+async def bulk_auto_match_attributes(
+    marketplace: str,
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Bu MP için matched durumundaki TÜM sistem kategorilerine
+    otomatik attribute eşleştirme uygular.
+
+    Algoritma:
+      1) Global attributes (sistem) bir kez çekilir.
+      2) Her matched kategori için MP attribute'ları alınır.
+      3) İsim eşleştirmesi (exact / contains / yaygın alias: color↔renk, size↔beden) uygulanır.
+      4) Kullanıcının MANUEL yaptığı eşleştirmeler EZİLMEZ — yalnızca boş olanlara eklenir.
+
+    Rapor formatı:
+      {
+        marketplace, total_categories, processed, skipped_no_mp_cat,
+        total_new_mappings, details: [{category_id, category_name, new:int, total_mp_attrs:int, fetched:bool}]
+      }
+    """
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+
+    # 1) Global attributes — sistemdeki tüm tanımlı özellikler
+    global_attrs = await db.attributes.find({}, {"_id": 0}).to_list(length=2000)
+
+    def _match_global(mp_name: str) -> str | None:
+        nm = (mp_name or "").lower().strip()
+        if not nm:
+            return None
+        for ga in global_attrs:
+            gn = (ga.get("name") or "").lower().strip()
+            if not gn:
+                continue
+            if gn == nm or nm in gn or gn in nm:
+                return ga.get("name")
+            if (nm in ("color", "web color", "renk") and gn == "renk") or \
+               (nm in ("size", "beden") and gn == "beden"):
+                return ga.get("name")
+        return None
+
+    # 2) Trendyol için canlı probe hazırlığı
+    tr_client = None
+    if marketplace == "trendyol":
+        try:
+            from .integrations import get_trendyol_config
+            from trendyol_client import TrendyolClient
+            cfg = await get_trendyol_config()
+            if cfg.get("is_active") and cfg.get("api_key"):
+                tr_client = TrendyolClient(
+                    supplier_id=cfg["supplier_id"],
+                    api_key=cfg["api_key"],
+                    api_secret=cfg["api_secret"],
+                    mode=cfg.get("mode", "sandbox"),
+                )
+        except Exception:
+            tr_client = None
+
+    # 3) Matched kategorileri sırayla dolaş
+    matched_cats = await db.category_mappings.find(
+        {"marketplace": marketplace, "marketplace_category_id": {"$nin": [None, ""]}},
+        {"_id": 0}
+    ).to_list(length=3000)
+
+    now = datetime.now(timezone.utc).isoformat()
+    details = []
+    total_new = 0
+    processed = 0
+    skipped = 0
+
+    for cm in matched_cats:
+        cid = cm.get("category_id")
+        cname = cm.get("category_name", "")
+        mp_cat_id = cm.get("marketplace_category_id")
+        if not mp_cat_id:
+            skipped += 1
+            continue
+        processed += 1
+
+        # MP attr listesini al — Trendyol canlı + cache, diğerleri cache
+        mp_attrs = []
+        fetched_live = False
+        if marketplace == "trendyol" and tr_client:
+            try:
+                data = await tr_client.get_category_attributes(int(mp_cat_id))
+                mp_attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                await db.trendyol_category_attributes.update_one(
+                    {"category_id": int(mp_cat_id)},
+                    {"$set": {"category_id": int(mp_cat_id), "attributes": mp_attrs, "updated_at": now}},
+                    upsert=True,
+                )
+                fetched_live = True
+            except Exception:
+                mp_attrs = []
+        if not mp_attrs:
+            coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
+            try:
+                cached = await db[coll].find_one(
+                    {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                    {"_id": 0}
+                )
+                mp_attrs = (cached or {}).get("attributes", [])
+            except Exception:
+                mp_attrs = []
+
+        if not mp_attrs:
+            details.append({
+                "category_id": cid, "category_name": cname,
+                "new": 0, "total_mp_attrs": 0, "fetched": False,
+                "note": "MP attribute listesi boş (cache ya da canlı alınamadı)",
+            })
+            continue
+
+        # Eski mapping'ler — ezilmesin
+        existing = cm.get("attribute_mappings", []) or []
+        existing_ids = {str(m.get("mp_attr_id") or m.get("trendyol_attr_id")) for m in existing}
+        new_mappings = list(existing)
+        matched_now = 0
+
+        for a in mp_attrs:
+            mp_attr_id = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+            if not mp_attr_id or mp_attr_id in existing_ids:
+                continue
+            mp_attr_name = a.get("name") or a.get("attribute", {}).get("name") or ""
+            local = _match_global(mp_attr_name)
+            if local:
+                new_mappings.append({
+                    "local_attr": local,
+                    "mp_attr_id": int(mp_attr_id) if mp_attr_id.isdigit() else mp_attr_id,
+                })
+                matched_now += 1
+
+        if matched_now:
+            await db.category_mappings.update_one(
+                {"category_id": cid, "marketplace": marketplace},
+                {"$set": {"attribute_mappings": new_mappings, "updated_at": now}},
+            )
+            total_new += matched_now
+
+        details.append({
+            "category_id": cid, "category_name": cname,
+            "new": matched_now, "total_mp_attrs": len(mp_attrs), "fetched": fetched_live,
+        })
+
+    return {
+        "success": True,
+        "marketplace": marketplace,
+        "total_categories": len(matched_cats),
+        "processed": processed,
+        "skipped_no_mp_cat": skipped,
+        "total_new_mappings": total_new,
+        "details": details,
+        "message": (
+            f"{processed} kategori işlendi, toplam {total_new} yeni özellik eşleşti"
+            if processed else "Eşleştirilecek matched kategori bulunamadı"
+        ),
+    }
+
+
 @router.post("/{marketplace}/{category_id}")
 async def set_mapping(marketplace: str, category_id: str, payload: dict,
                        current_user: dict = Depends(require_admin)):

@@ -284,4 +284,25 @@ Kullanıcı isteği: "Gelişmiş kategori eşleştirme sayfasına (TrendyolEsles
 ### Test
 Backend curl: `/category-mapping/trendyol/nonexistent/attributes` → hint "Önce eşleştirin" ✅, `/hepsiburada/*/attributes` → hint+boş ✅, `/values` → `{local_values:{},value_mappings:{}}` ✅, `/attribute-map` POST → `{success:true}` ✅. Lint 4/4 temiz.
 
+## [2026-04-23] Tümünü Otomatik Eşleştir (Potansiyel İyileştirme)
+
+Önceki finish'te önerilen potansiyel iyileştirme uygulandı:
+
+### Backend
+`POST /api/category-mapping/{mp}/bulk-auto-match-attributes` — matched tüm kategoriler için toplu otomatik attribute eşleştirme:
+- Global attributes bir kez çekilir.
+- Trendyol için canlı `TrendyolClient.get_category_attributes` + cache write; diğer MP'ler için `{mp}_category_attributes` cache'inden.
+- İsim eşleştirmesi: exact/contains + alias (color↔renk, size↔beden).
+- **Manuel eşleştirmeler korunur**, sadece boşlar doldurulur.
+- Rapor: `{processed, total_new_mappings, details:[{category_name, new, total_mp_attrs, fetched}]}`.
+
+### Frontend
+- CategoryMapping üst barına gradient turuncu-amber "⚡ Tümünü Otomatik Eşleştir" butonu.
+- Sonuç modal'ı: 3 özet kart + kategori bazlı detay tablosu (CANLI/CACHE/YOK rozet).
+
+### Test
+- Credential yokken Trendyol → 1 matched kategori için `{processed:1, new:0, note:"MP attribute listesi boş"}` ✅
+- matched yok iken → `{message:"Eşleştirilecek matched kategori bulunamadı"}` ✅
+- Lint: CategoryMapping + category_mapping.py temiz.
+
 
