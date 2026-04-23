@@ -443,29 +443,43 @@ async def get_advanced_values(
     local_category_id: str,
     current_user: dict = Depends(require_admin),
 ):
-    """Bu sistem kategorisindeki ürünlerin attribute değerleri (distinct)."""
+    """Bu sistem kategorisindeki ürünlerin attribute değerleri (distinct) +
+    sistemdeki global attribute değerleri de birleştirilerek döner.
+    Böylece eşleştirme ekranında "Ürünlerde bu kategoride renk kullanılmamış"
+    olsa bile global attributes (ör. Renk → Kırmızı/Mavi) görünür.
+    """
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
-    # Ürünlerden distinct attribute değerlerini topla
+
+    # 1) Bu kategorideki ürünlerden distinct attribute değerlerini topla
     local_values = {}
     cursor = db.products.find(
         {"category_id": local_category_id}, {"_id": 0, "attributes": 1, "variants": 1}
     )
     async for p in cursor:
-        # üst seviye attributes: {name, value}
         for a in p.get("attributes", []) or []:
-            nm = a.get("name") or a.get("attribute_name")
+            nm = a.get("name") or a.get("type") or a.get("attribute_name")
             vv = a.get("value") or a.get("attribute_value")
             if not nm or not vv:
                 continue
             local_values.setdefault(nm, set()).add(str(vv))
         for v in p.get("variants", []) or []:
             for a in v.get("attributes", []) or []:
-                nm = a.get("name") or a.get("attribute_name")
+                nm = a.get("name") or a.get("type") or a.get("attribute_name")
                 vv = a.get("value") or a.get("attribute_value")
                 if not nm or not vv:
                     continue
                 local_values.setdefault(nm, set()).add(str(vv))
+
+    # 2) Global /api/attributes içerisindeki tüm değerleri de birleştir
+    async for ga in db.attributes.find({}, {"_id": 0, "name": 1, "values": 1}):
+        nm = (ga.get("name") or "").strip()
+        if not nm:
+            continue
+        for val in ga.get("values", []) or []:
+            sv = str(val).strip()
+            if sv:
+                local_values.setdefault(nm, set()).add(sv)
 
     out = {k: sorted(list(v)) for k, v in local_values.items()}
     mapping = await db.category_mappings.find_one(

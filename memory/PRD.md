@@ -305,4 +305,24 @@ Backend curl: `/category-mapping/trendyol/nonexistent/attributes` → hint "Önc
 - matched yok iken → `{message:"Eşleştirilecek matched kategori bulunamadı"}` ✅
 - Lint: CategoryMapping + category_mapping.py temiz.
 
+## [2026-04-23] Ürün Özellikleri Regression + Değer Otomatik Eşleştir
+
+Kullanıcı şikayetleri: (1) "Ürün özellikleri sekmesinde değerler görünmüyor" (2) "Eşleştirme ayarlarında bu değerleri bulmuyor".
+
+### 1. ProductAttributes.jsx — API env regression
+`const API = process.env.REACT_APP_API_URL || 'http://localhost:8001/api'` → Var olmayan env ile production'da `localhost:8001` fallback'ine düşüyor, K8s ingress dışarı yönlendiremiyor → tüm istekler sessiz fail, özellikler boş görünüyor.
+**Fix**: `${process.env.REACT_APP_BACKEND_URL}/api`. DB'de zaten 53 attribute + değerleriyle dolu (sync-from-products ile eklendi).
+
+### 2. AdvancedValueMatchModal — Global attribute değerleri eklendi
+`GET /api/category-mapping/{mp}/{cat_id}/values` artık `db.products` distinct değerlerine ek olarak `db.attributes` koleksiyonundaki tüm global değerleri birleştirerek döner. Ayrıca ürünün `type` alanı okunuyor (önceden sadece `name`). Kategoride ürün olmasa bile sistemde tanımlı "Renk: Kırmızı/Mavi…" vs görünür.
+**Test**: 51 attribute grubu (Renk: 100 değer, Boy: 101, Kol Tipi: 30…) ✅.
+
+### 3. "⚡ Otomatik Değer Eşleştir" Butonu
+`AdvancedValueMatchModal` başlığında yeni yeşil "Otomatik Eşleştir" butonu. İsim benzerliği + alias tablosuyla (Kırmızı↔Red, S↔Small, XL↔X-Large…) otomatik eşleştirir. Manuel eşleştirmeler korunur.
+
+### Test
+- `sync-from-products`: 9 yeni + 3 güncelleme → 53 attribute dolu ✅
+- `/values` 51 grup, 10-100+ değer ✅
+- Lint: MarketplaceAdvancedMatch.jsx, ProductAttributes.jsx, category_mapping.py — 3/3 temiz.
+
 
