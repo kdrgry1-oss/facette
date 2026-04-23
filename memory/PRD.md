@@ -103,11 +103,18 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - P0: Fatura numarası çıkarma (PDF parsing veya API)
 - P1: **Iyzico Kısmi İade + Kargo Ücreti Düşme + Kampanya Oransal Hesap** (UI+backend mantığı)
 - P1: **Checkout/Sipariş adres formlarında İl/İlçe dropdown bağlama** (`/api/locations/tr/*` endpoint'leri frontend'e bağla)
-- P1: **Ticimax panel özellik analizi** — kullanıcı bilgi paylaştığında eksikleri ekle
 - P1: 7 Kargo firması gerçek API entegrasyonu (kullanıcı API keys verince)
 - P1: Mevcut tüm claim'lerin iskontolarını düzeltme
 - P1: Tüm search/dropdown UX tutarlılığı
 - P2: Trendyol Mikro İhracat ayrı faturalandırma altyapısı
 - P2: Trendyol ürün export testi
-- P2: Products.jsx (2000+ satır) ve Orders.jsx (1400+ satır) modülerleştirme
+- P2: Products.jsx (2500+ satır) ve Orders.jsx (1500+ satır) modal/sekme componentlerine bölme
 - P2: integrations.py (3500+ satır) provider'a göre bölme
+
+## Changelog — 23 Nis 2026
+- **UI**: Admin Pagination tekdüze hale getirildi. `/app/frontend/src/components/admin/Pagination.jsx` (compact + full variants, jump-to-page input, ilk/son/prev/next, "..." ellipsis).
+- **UI**: Ürünler ve Siparişler tablolarına `.admin-table-compact` CSS varyantı uygulandı → bir ekranda daha çok kayıt sığıyor. Products thumbnail w-12→w-10 küçültüldü.
+- **UI**: Products ve Orders sayfalarına ÜST (compact) + ALT (full) pagination eklendi. Sağ üstte `Sayfa X / Y · 1-20 / 248 · Git:[#]` minimal satırı, altta klasik numaralı düğmeler.
+- **DX**: Products.jsx ve Orders.jsx dosya başlarına modül amacı + backend endpoint haritası + bağlı modül açıklaması eklendi. Kritik fonksiyonlar (fetchProducts, fetchCategories, handleSubmit, handleDelete, handleTrendyolSync/Update, openEditModal, fetchOrders, handleStatusChange, handleGenerateInvoice, handleShipOrder, handleBulkStatusChange, handleTrendyolPreview, SearchableAttribute) JSDoc blokları ile belgelendi.
+- **Test**: UI smoke test başarılı — Ürünler (248 kayıt, 13 sayfa) ve Siparişler (24 kayıt, 2 sayfa) ekranlarında hem üst minimal hem alt full pagination çalışıyor, "Git: 5" akışı doğrulandı.
+
