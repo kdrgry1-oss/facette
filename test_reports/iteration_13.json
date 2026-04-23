@@ -1,0 +1,73 @@
+{
+  "summary": "Iteration 13 — iteration_12'de tespit edilen 1 CRITICAL + 4 HIGH + 3 MEDIUM + 1 LOW bug'ın tamamı düzeltildiği doğrulandı. 77/77 pytest geçti (%100). Yeni test dosyası /app/backend/tests/test_iteration13_integration_fixes.py ile 30 fix-specific test eklendi; ayrıca iteration_12 regression suite'i (47 test) tekrar koşturuldu — hepsi yeşil. Tüm 10 fix spec'e uygun davranıyor: (FIX-1) bulk-ops Trendyol dummy creds ile 14 ürün için failed=14 döndü ve response.success=False oldu — artık sessiz başarısızlık yok; (FIX-2..5) settings POST is_active/enabled=True iken required alanlar doğrulanıyor, eksikse 400; (FIX-6) Doğan GET password '********' maskeli; (FIX-7) Trendyol /test-connection YENİ endpoint — credential yokken success=false + 'API bilgileri eksik'; dummy credential'la 401/403/HTTP hatası döndürüyor; (FIX-8) Temu test-connection gerçek Open Platform probe yapıyor; (FIX-9) HB 400 response errorCode parse ediyor; (FIX-10) webhook HMAC doğrulaması eklendi, TRENDYOL_WEBHOOK_SECRET env boşken backward-compat korundu. Backend logs temiz — AttributeError yok. Canlıya çıkış için kritik yapısal bug kalmadı.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/integrations/{hepsiburada|temu|trendyol}/settings",
+        "issue": "Boş string ('') api_secret/password payload'tan düşürülmüyor — yalnızca '********' ve None mevcut değeri koruyor. Sonuç: kullanıcı açıkça credential'ı silmek istediğinde silemiyor (sadece masked değer gönderilebilir). Minor UX; güvenlik riski yok ama clear-credential flow için endpoint davranışı tutarsız. İyileştirme: payload'da api_secret == '' ve explicit 'clear=true' flag gelirse $unset ile sil."
+      },
+      {
+        "endpoint": "POST /api/integrations/dogan/test-connection",
+        "issue": "DoganClient.test_connection sync çağrı — async endpoint içinde blocking. Yüksek trafikte event loop'u bloklayabilir. `await run_in_threadpool(...)` önerilir."
+      },
+      {
+        "endpoint": "POST /api/integrations/temu/test-connection",
+        "issue": "host = 'https://openapi-b-us.temu.com' hem sandbox hem live'da aynı kullanılıyor. Gerçekte Temu Open Platform sandbox farklı host (openapi-b-us-stg.temu.com veya benzeri). Live credential'la test edildiğinde yanıltıcı olabilir. TODO: mode='live' için doğru prod host'u koy."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration13_integration_fixes.py",
+    "/app/backend/tests/test_iteration12_integrations.py",
+    "/app/test_reports/pytest/iteration13_results.xml"
+  ],
+  "action_items": [
+    "1) [MINOR] Credential clear flow: empty-string api_secret/password için explicit clear flag ya da $unset davranışı tanımla.",
+    "2) [MINOR] Doğan test_connection sync → async (run_in_threadpool) geçişi.",
+    "3) [MINOR] Temu probe için mode='live' gerçek prod host'unu koy (şu an ikisi de openapi-b-us.temu.com).",
+    "4) [INFO] Canlıya geçiş için: (a) TRENDYOL_WEBHOOK_SECRET env'i prod'da SET EDİLMELİ (test ortamında imza doğrulaması devre dışı), (b) iyzico/trendyol/HB/temu/dogan credential'ları admin panelden kayıt sonrası test-connection ile doğrulanmalı."
+  ],
+  "critical_code_review_comments": [
+    "integrations.py hâlâ 3825 satır tek dosyada — iyzico.py, trendyol.py, hepsiburada_temu.py, dogan.py, marketplace_generic.py şeklinde split ciddi önerimizdir (iteration_12'de de raporlandı, henüz yapılmadı).",
+    "webhooks.py HMAC verification hem hex hem base64 destekliyor — iyi; ancak log mesajında signature prefix (ilk 8 char) eklenip brute-force denemelerinin izlenebilmesi için rate-limit + structured audit log düşünülmeli.",
+    "bulk_ops.py overall_success = total_fail==0 kıstası doğru, ama 'processed' 0 iken de success=True dönüyor (hiç item yok — vacuously true). UI'da 'X ürün pasifleştirildi' mesajı sıfır item için anlamlı değil; frontend'de processed==0 guard'ı olmalı (veya backend 'no_items' flag'ı dönsün).",
+    "Temu test-connection sandbox ve live için aynı host kullanıyor (openapi-b-us.temu.com) — prod'da yanıltıcı sonuç verebilir.",
+    "ALLOWED_MARKETPLACES setinde 'trendyol' YOK (ayrı endpoint'leri var); bu mantıklı ama DRY açısından `MARKETPLACES_WITH_DEDICATED_ENDPOINTS = {'trendyol','iyzico','dogan'}` gibi whitelist/blacklist tek kaynaktan yönetilmeli.",
+    "Test-connection endpoint'lerinin hiçbiri rate-limited değil — brute force credential test'i mümkün (admin-only olduğu için risk düşük ama ekleme önerilir).",
+    "log_integration_event hâlâ try/except Exception: pass ile sessiz; en azından logger.warning eklenmeli (iteration_12'de raporlandı, henüz yapılmadı)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration13_integration_fixes.py",
+    "/app/backend/tests/test_iteration12_integrations.py"
+  ],
+  "success_rate": {"backend": "100% (77/77 pytest passed)", "frontend": "N/A (backend only testing requested)"},
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Oluşturulan test kayıtları cleanup test'inde sıfırlandı: iyzico/trendyol/hepsiburada/temu/dogan settings is_active:false + boş credential'a reset edildi; marketplace_accounts/trendyol enabled:false yapıldı. integration_logs'a test action'ları düştü (admin manuel silebilir).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Regression suite: /app/backend/tests/test_iteration12_integrations.py (47 test) + /app/backend/tests/test_iteration13_integration_fixes.py (30 test) — toplam 77, bir arada koşulduğunda %100 geçiyor. TRENDYOL_WEBHOOK_SECRET env test edilmedi — prod'da ayarlandığında eksik/yanlış X-Trendyol-Signature header'ı 401 döner. Doğan client sync — async dönüşümü yapılırsa test_connection testleri aynı kalır. Temu ve HB gerçek credential ile canlı test geri bildirimi admin panelden yapılmalı (şu an dummy key'ler).",
+  "canlıya_hazır_mı_checklist": {
+    "HAZIR": [
+      "Iyzico settings GET/POST + validasyon + refund body check",
+      "Trendyol settings GET/POST + validasyon + YENİ test-connection probe",
+      "Hepsiburada settings + validasyon + test-connection (401/403/errorCode parse)",
+      "Temu settings + validasyon + gerçek Open Platform probe",
+      "Doğan settings + validasyon + password masking (GET + roundtrip)",
+      "Bulk-ops deactivate-on-marketplaces CRITICAL bug fix — update_price_and_inventory + total_fail-based success",
+      "Webhooks Trendyol HMAC SHA-256 signature verification (hex+base64)",
+      "Marketplace Hub 13 pazaryeri + Provider Settings einvoice/cargo + Orders create-invoice"
+    ],
+    "CREDENTIAL_BEKLIYOR": [
+      "Iyzico live api_key/api_secret",
+      "Trendyol supplier_id/api_key/api_secret",
+      "Hepsiburada merchant_id/username/password",
+      "Temu shop_id/app_key/app_secret + sandbox/live host ayrımı doğrulama",
+      "Doğan username/password (prod)",
+      "TRENDYOL_WEBHOOK_SECRET env (prod)",
+      "11 einvoice provider credential'ları (dogan dışında henüz SDK entegre değil — iteration_12 raporunda yapısal not olarak kalıyor)"
+    ]
+  },
+  "rca_of_the_issue": "Tüm iteration_12 bug'ları doğrulandı: (FIX-1) integrations.py:849 `client.update_price_and_inventory(items_to_send)` — trendyol_client.py:130 mevcut metodu çağırıyor; artık AttributeError yok. Dummy credential ile 14 item processed, 14 failed, response.success=False (doğru). (FIX-2..5) Her settings POST'ta is_active/enabled flag'ı True ise required alanlar (existing DB + payload birleşimi) kontrol ediliyor; eksikse HTTPException(400) fırlatılıyor. '********' ve boş/None değerler mevcut değeri koruyor (partial update pattern). (FIX-6) get_dogan_settings response'unda 'password' alanı '********' ile override ediliyor — plain sızıntısı test edildi ve yok. (FIX-7) YENİ /trendyol/test-connection endpoint'i TrendyolClient.get_brands(size=1, page=0) ile hafif probe yapıyor; 401/403/Unauthorized mesajlarını yakalayıp 'kimlik hatası' olarak dönüyor. (FIX-8) Temu için bg.auth.access_token.info.get Open Platform router POST'u MD5 imzalı yapılıyor (app_secret + sorted(params) + app_secret). (FIX-9) HB 400 response body'si JSON olarak parse edilip errorCode/errorMessage/code/detail alanları mesaja ekleniyor. (FIX-10) webhooks.py:_verify_trendyol_signature hmac.compare_digest ile timing-safe doğrulama; env boşken True döner (backward compat). Backend logs /var/log/supervisor/backend.err.log temiz — AttributeError/TypeError/500 yok."
+}

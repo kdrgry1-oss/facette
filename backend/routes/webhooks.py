@@ -1,29 +1,61 @@
-from fastapi import APIRouter, Request, BackgroundTasks, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Header
+from typing import Dict, Any, Optional
 from routes.deps import logger, db
 import traceback
+import hmac
+import hashlib
+import os
 
 router = APIRouter(tags=["Webhooks"])
 
+
+def _verify_trendyol_signature(body: bytes, signature: Optional[str]) -> bool:
+    """Trendyol webhook HMAC-SHA256 imza doğrulaması.
+    TRENDYOL_WEBHOOK_SECRET env set değilse (ör. test ortamı) True döner.
+    """
+    secret = os.environ.get("TRENDYOL_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        return True  # test/dev — imza zorunlu değil, prod için env ayarla
+    if not signature:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    # Trendyol base64 veya hex formatında gönderebilir; iki karşılaştırma yap
+    import base64
+    expected_b64 = base64.b64encode(
+        hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()
+    ).decode("utf-8")
+    return hmac.compare_digest(signature, expected) or hmac.compare_digest(signature, expected_b64)
+
+
 @router.post("/webhooks/trendyol")
-async def trendyol_webhook(request: Request, background_tasks: BackgroundTasks):
+async def trendyol_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_trendyol_signature: Optional[str] = Header(default=None, alias="X-Trendyol-Signature"),
+):
     """
-    Trendyol Event Notification Webhook
-    Gelen bildirimleri asenkron olarak işler.
+    Trendyol Event Notification Webhook — HMAC-SHA256 imza doğrulamalı.
     """
+    body = await request.body()
+
+    if not _verify_trendyol_signature(body, x_trendyol_signature):
+        logger.warning("Trendyol webhook imza doğrulaması başarısız — istek reddedildi")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
-        payload = await request.json()
-    except:
+        import json
+        payload = json.loads(body.decode("utf-8")) if body else {}
+    except Exception:
         payload = {}
 
     if not payload:
         return {"status": "ok"}
-        
+
     logger.info(f"Received Trendyol Webhook: {payload.get('eventType')} - {payload.get('orderNumber')}")
 
     # Process in background
     background_tasks.add_task(process_trendyol_event, payload)
-    
+
     return {"status": "ok", "message": "Event received"}
 
 async def process_trendyol_event(payload: dict):
