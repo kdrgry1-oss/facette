@@ -39,8 +39,6 @@ import AdminUsersRoles from "./pages/admin/UsersRoles";
 import Manufacturing from "./pages/admin/Manufacturing";
 import Members from "./pages/admin/Members";
 import Attribution from "./pages/admin/Attribution";
-import HepsiburadaEslestir from "./pages/admin/HepsiburadaEslestir";
-import TemuEslestir from "./pages/admin/TemuEslestir";
 import SizeTablesList from "./pages/admin/SizeTablesList";
 import Coupons from "./pages/admin/Coupons";
 import ProductReviews from "./pages/admin/ProductReviews";
@@ -142,8 +140,8 @@ function App() {
               <Route path="imalat" element={<Manufacturing />} />
               <Route path="uyeler" element={<Members />} />
               <Route path="kaynak" element={<Attribution />} />
-              <Route path="hepsiburada-eslestir" element={<HepsiburadaEslestir />} />
-              <Route path="temu-eslestir" element={<TemuEslestir />} />
+              <Route path="hepsiburada-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
+              <Route path="temu-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
               <Route path="olcu-tablolari" element={<SizeTablesList />} />
               <Route path="kuponlar" element={<Coupons />} />
               <Route path="yorumlar" element={<ProductReviews />} />

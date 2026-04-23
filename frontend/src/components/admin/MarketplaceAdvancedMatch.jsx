@@ -187,6 +187,31 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
     }
   };
 
+  const refreshFromMarketplace = async () => {
+    if (!category) return;
+    try {
+      const r = await axios.post(
+        `${API}/category-mapping/${marketplace}/${category.category_id}/refresh-attributes`,
+        {}, { headers: auth() }
+      );
+      if (r.data?.fetched) {
+        toast.success(r.data?.message || "Yenilendi");
+        // Modal'ı yeniden yükle
+        setLoading(true);
+        const mpRes = await axios.get(
+          `${API}/category-mapping/${marketplace}/${category.category_id}/attributes`, { headers: auth() }
+        ).catch(() => ({ data: { attributes: [] } }));
+        setMpAttrs(mpRes.data?.attributes || []);
+        setHint(mpRes.data?.hint || "");
+        setLoading(false);
+      } else {
+        toast.info(r.data?.message || "Bu pazaryeri için canlı API yok");
+      }
+    } catch (e) {
+      toast.error("Yenileme hatası: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
   const required = mpAttrs.filter((a) => a.required);
   const optional = mpAttrs.filter((a) => !a.required);
   // mpAttrs boşsa, kullanıcı yine de sistem özelliklerinden seçebilsin diye
@@ -220,13 +245,23 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                 {marketplace}
               </span>
             </DialogTitle>
-            <button
-              onClick={handleAutoMatch}
-              className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
-              data-testid="adv-auto-match-btn"
-            >
-              <LinkIcon size={14} /> Otomatik Eşleştir
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={refreshFromMarketplace}
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-semibold hover:bg-blue-600"
+                data-testid="adv-refresh-mp-btn"
+                title="Pazaryerinden anlık attribute listesini çek (Trendyol için canlı API)"
+              >
+                <RefreshCw size={14} /> {marketplace} Canlı Çek
+              </button>
+              <button
+                onClick={handleAutoMatch}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
+                data-testid="adv-auto-match-btn"
+              >
+                <LinkIcon size={14} /> Otomatik Eşleştir
+              </button>
+            </div>
           </div>
         </DialogHeader>
 

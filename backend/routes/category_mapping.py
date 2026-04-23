@@ -125,6 +125,41 @@ async def reset_all(marketplace: str, current_user: dict = Depends(require_admin
     return {"success": True, "deleted": res.deleted_count}
 
 
+@router.post("/{marketplace}/attr-cache")
+async def upload_attribute_cache(
+    marketplace: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Hepsiburada/Temu/N11 için manuel attribute cache yükle.
+    Body: {marketplace_category_id: "...", attributes: [{id, name, required, attributeValues:[{id,name}]}]}.
+    Kullanıcı kendi MP panelinden export ettiği listeyi buraya POST eder.
+    """
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    cat_id = payload.get("marketplace_category_id") or payload.get("category_id")
+    attrs = payload.get("attributes")
+    if not cat_id or not isinstance(attrs, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Body: {marketplace_category_id: '...', attributes: [...]}"
+        )
+    coll = f"{marketplace}_category_attributes" if marketplace != "trendyol" else "trendyol_category_attributes"
+    key = int(cat_id) if str(cat_id).isdigit() else str(cat_id)
+    await db[coll].update_one(
+        {"category_id": key},
+        {"$set": {
+            "category_id": key, "attributes": attrs,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source": "manual_upload",
+            "uploaded_by": current_user.get("email"),
+        }},
+        upsert=True,
+    )
+    return {"success": True, "count": len(attrs),
+            "message": f"{marketplace} kategori #{cat_id} için {len(attrs)} özellik cache'e yazıldı"}
+
+
 @router.post("/{marketplace}/bulk-auto-match-attributes")
 async def bulk_auto_match_attributes(
     marketplace: str,
@@ -309,6 +344,63 @@ async def set_mapping(marketplace: str, category_id: str, payload: dict,
         {"$set": doc}, upsert=True
     )
     return {"success": True, "mapping": doc}
+
+
+@router.post("/{marketplace}/{local_category_id}/refresh-attributes")
+async def refresh_attributes(
+    marketplace: str,
+    local_category_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Tek kategori için MP attribute listesini anlık yenile.
+    Trendyol: canlı API çağrısı yapar, cache'i günceller.
+    Diğer MP'ler: cache entry yoksa yok mesajı döner.
+    """
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    mapping = await db.category_mappings.find_one(
+        {"category_id": local_category_id, "marketplace": marketplace}, {"_id": 0}
+    )
+    if not mapping or not mapping.get("marketplace_category_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Önce sistem kategorisini pazaryeri kategorisiyle eşleştirin",
+        )
+    mp_cat_id = mapping["marketplace_category_id"]
+    if marketplace == "trendyol":
+        try:
+            from .integrations import get_trendyol_config
+            from trendyol_client import TrendyolClient
+            cfg = await get_trendyol_config()
+            if not (cfg.get("is_active") and cfg.get("api_key")):
+                raise HTTPException(status_code=400, detail="Trendyol credential girilmemiş (Ayarlar → Trendyol)")
+            client = TrendyolClient(
+                supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+                api_secret=cfg["api_secret"], mode=cfg.get("mode", "sandbox"),
+            )
+            data = await client.get_category_attributes(int(mp_cat_id))
+            attrs = data.get("categoryAttributes") or data.get("attributes") or []
+            await db.trendyol_category_attributes.update_one(
+                {"category_id": int(mp_cat_id)},
+                {"$set": {
+                    "category_id": int(mp_cat_id), "attributes": attrs,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True,
+            )
+            return {"success": True, "fetched": True, "count": len(attrs),
+                    "message": f"Trendyol canlı: {len(attrs)} özellik çekildi"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Trendyol API hatası: {e}")
+    # Diğer pazaryerleri — canlı entegrasyon yok
+    return {
+        "success": False,
+        "fetched": False,
+        "message": f"{marketplace} için canlı API entegrasyonu henüz eklenmedi. "
+                   f"Manuel JSON upload için /attr-cache endpoint'ini kullanın."
+    }
 
 
 @router.delete("/{marketplace}/{category_id}")

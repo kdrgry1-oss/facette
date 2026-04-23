@@ -327,6 +327,49 @@ Kullanıcı şikayetleri: (1) "Ürün özellikleri sekmesinde değerler görünm
 
 ## [2026-04-23] Modal Özellik Autocomplete — Datalist Yerine Görünür Dropdown
 
+Kullanıcı: "kategori eşleştirme ayarlarında ürünlerin özellik alanlarını sistemden çekmiyor." Arka planda `GET /api/attributes` 53 attribute çekiyordu ama UI `<datalist>` kullanıyordu; çoğu browser'da input boşken açılmaz.
+
+### Fix
+- Yeni `LocalAttrAutoComplete` bileşeni: Focus'ta tüm 53 sistem özelliği açılır dropdown'da (değer sayacıyla) görünür, yazdıkça filtreler.
+- Banner: "Sistemde tanımlı **N** özellik var — kutuya tıkladığınızda liste açılır."
+- Boş fallback: globalAttrs=0 ise sarı "Ürünlerden Yükle" → `POST /attributes/sync-from-products`.
+
+## [2026-04-23] Empty State + Zorunlu Ayrımı (Screenshot Sorunu)
+
+Kullanıcı ekran görüntüsü: Trenço kategori modal'ı "özellik bulunamadı" gösteriyordu (Trendyol cache yok).
+
+### Fix
+- mpAttrs boşsa, globalAttrs'ı pseudo-satırlar olarak listeler (kullanıcı manuel seçim yapar).
+- Amber banner "credential/cache eksik — N sistem özelliğinden manuel seç".
+- Zorunlu satırlar: `bg-red-50/40` kırmızı zemin + kırmızı ZORUNLU badge + "ZORUNLU ALANLAR (N)" / "OPSİYONEL ALANLAR (N)" grup başlıkları.
+- React.Fragment key ile header+row çifti, `isReq` hatasız durum sütunu.
+
+## [2026-04-23] P1/P2/P3 — Canlı Çek + Manuel Cache Upload + Eski Sayfa Temizlik
+
+Kullanıcı isteği: önceki "Next Action Items" (P1 Trendyol canlı çek butonu, P1 HB/Temu cache besleme, P2 eski TrendyolEslestir silme).
+
+### 1. "Canlı Çek" Butonu (Modal içinde)
+- Backend: `POST /api/category-mapping/{mp}/{local_cat_id}/refresh-attributes` — tek kategoride MP attribute listesini anlık yeniler.
+  - **Trendyol**: `TrendyolClient.get_category_attributes(mp_cat_id)` canlı çağrı + cache upsert + `{success:true, count:N}` dönüş.
+  - **Diğer MP'ler**: "canlı API yok, manuel upload yap" mesajı.
+- Frontend: AdvancedAttributeMatchModal header'ına mavi **"{marketplace} Canlı Çek"** butonu. İşlem sonrası modal tablosu otomatik yeniden yüklenir.
+
+### 2. HB/Temu için Manuel Attribute Cache Upload
+`POST /api/category-mapping/{mp}/attr-cache` yeni endpoint:
+- Body: `{marketplace_category_id, attributes: [{id, name, required, attributeValues:[...]}]}`
+- Kullanıcı kendi HB/Temu panelinden export ettiği JSON'u buraya POST eder → `{mp}_category_attributes` cache'e yazılır → Modal'da o kategori için attribute listesi görünür hale gelir.
+- Route sıralaması düzeltildi: `attr-cache` `{category_id}` generic'ten ÖNCE tanımlı.
+- Test: HB için 1 attribute (Renk: Kırmızı/Mavi) upload → `{success:true, count:1}` ✅
+
+### 3. Eski Eşleştirme Sayfaları Silindi
+- `TrendyolEslestir.jsx` (1286 satır), `HepsiburadaEslestir.jsx`, `TemuEslestir.jsx` fiziksel olarak silindi.
+- App.js'te 3 route → `<Navigate to="/admin/kategori-eslestir" replace />`
+- Import satırları temizlendi. Lint: temiz.
+
+### Test
+Backend: `/refresh-attributes` → "önce eşleştirin" net hata ✅; `/attr-cache` → manuel 1 attr yüklendi ✅
+Frontend lint: App.js, MarketplaceAdvancedMatch.jsx, category_mapping.py — 3/3 temiz.
+
 Kullanıcı şikayeti: "Kategori eşleştirme ayarlarında ürünlerin özellik alanlarını sistemden çekmiyor." Arka planda `GET /api/attributes` doğru şekilde 53 attribute çekiyordu ama UI `<datalist>` kullanıyordu — bu element çoğu browser'da input boşken açılmaz, kullanıcı sistem özelliklerini göremezdi.
 
 ### Fix
