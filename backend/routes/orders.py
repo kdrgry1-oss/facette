@@ -1,7 +1,7 @@
 """
 Order routes - CRUD, checkout, tracking
 """
-from fastapi import APIRouter, HTTPException, Query, Depends, Response
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, Request
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import time
@@ -97,9 +97,27 @@ async def get_order(
 @router.post("")
 async def create_order(
     order_data: dict,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Create new order"""
+    # FAZ 6 — Kullanıcı IP'sini kayda al (X-Forwarded-For → gerçek IP)
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "")
+
+    # FAZ 6 — Blok kontrolü: kullanıcı veya IP bloklu mu?
+    uid = (current_user.get("id") if current_user else None)
+    block_query = []
+    if uid:
+        block_query.append({"user_id": uid})
+    if client_ip:
+        block_query.append({"ip": client_ip})
+    if block_query:
+        bl = await db.blocked_customers.find_one({"$or": block_query, "active": True}, {"_id": 0})
+        if bl:
+            logger.warning(f"Blocked order attempt: user={uid} ip={client_ip} reason={bl.get('reason')}")
+            raise HTTPException(status_code=403, detail="Hesabınız sipariş veremez. Lütfen destek ile iletişime geçin.")
+
     order = {
         "id": generate_id(),
         "order_number": generate_order_number(),
@@ -116,6 +134,14 @@ async def create_order(
         "status": "pending",
         "notes": order_data.get("notes", ""),
         "platform": order_data.get("platform", "facette"),
+        # FAZ 4 — hediye seçenekleri
+        "gift_note": (order_data.get("gift_note") or "")[:500],
+        "gift_wrap": bool(order_data.get("gift_wrap", False)),
+        "gift_wrap_price": float(order_data.get("gift_wrap_price", 0) or 0),
+        "coupon_code": (order_data.get("coupon_code") or "").upper(),
+        # FAZ 6 — müşteri izleri
+        "customer_ip": client_ip,
+        "user_agent": request.headers.get("user-agent", "")[:300],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -177,7 +203,7 @@ async def update_order_status(
     current_user: dict = Depends(require_admin)
 ):
     """Update order status"""
-    valid_statuses = ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"]
+    valid_statuses = ["pending", "confirmed", "processing", "shipped", "delivered", "undelivered", "cancelled"]
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {valid_statuses}")
     
@@ -203,6 +229,7 @@ async def update_order_status(
                 "processing": "order_packed",
                 "shipped": "order_shipped",
                 "delivered": "order_delivered",
+                "undelivered": "order_undelivered",
                 "cancelled": "order_cancelled",
             }
             ev = status_to_event.get(status)
@@ -388,6 +415,123 @@ async def add_order_note(
         {"$set": {"admin_notes": notes_list, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     return {"success": True, "notes": notes_list}
+
+
+# =============================================================================
+# FAZ 5 — Kargo durum güncellemeleri (ship / undeliver / deliver)
+# =============================================================================
+VALID_CARGO_COMPANIES = {
+    "MNG", "DHL", "Yurtici", "Aras", "PTT", "UPS", "HepsiJet", "Trendyol", "Other"
+}
+
+
+@router.post("/{order_id}/ship")
+async def ship_order(
+    order_id: str,
+    cargo_company: str = Query(..., description="Kargo firması kodu"),
+    tracking_number: str = Query(..., min_length=3, description="Kargo takip numarası"),
+    current_user: dict = Depends(require_admin)
+):
+    """Siparişi kargoya ver: status=shipped + cargo_company + cargo_tracking_number.
+    Bildirim hook'u (order_shipped) otomatik tetiklenir.
+    """
+    if cargo_company not in VALID_CARGO_COMPANIES:
+        raise HTTPException(status_code=400, detail=f"Geçersiz kargo firması. Geçerli: {sorted(VALID_CARGO_COMPANIES)}")
+
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "shipped",
+            "cargo_company": cargo_company,
+            "cargo_tracking_number": tracking_number.strip(),
+            "shipped_at": now_iso,
+            "updated_at": now_iso,
+        }},
+    )
+
+    # Bildirim — fire-and-forget
+    import asyncio as _asyncio
+    async def _notify_ship():
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+            addr = existing.get("shipping_address") or {}
+            await send_notification(
+                db, "order_shipped",
+                to_phone=addr.get("phone") or existing.get("phone"),
+                to_email=addr.get("email") or existing.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": existing.get("order_number", ""),
+                    "tracking_number": tracking_number.strip(),
+                    "cargo_company": cargo_company,
+                },
+            )
+        except Exception as _e:
+            logger.warning(f"order_shipped notification failed: {_e}")
+    _asyncio.create_task(_notify_ship())
+
+    return {
+        "success": True,
+        "message": f"Sipariş {cargo_company} kargosuna verildi ({tracking_number})",
+        "tracking_number": tracking_number,
+    }
+
+
+@router.post("/{order_id}/undeliver")
+async def mark_order_undelivered(
+    order_id: str,
+    reason: str = Query("Kargo teslim edilemedi", description="Teslim edilememe nedeni"),
+    branch_info: str = Query("", description="Şube bilgisi / nerede bekliyor"),
+    current_user: dict = Depends(require_admin)
+):
+    """Kargo teslim edilemedi (şubede bekliyor) durumunu işaretler ve müşteriye bildirim atar."""
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "undelivered",
+            "undelivered_reason": reason,
+            "undelivered_branch": branch_info,
+            "undelivered_at": now_iso,
+            "updated_at": now_iso,
+        }},
+    )
+
+    import asyncio as _asyncio
+    async def _notify_undeliver():
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+            addr = existing.get("shipping_address") or {}
+            await send_notification(
+                db, "order_undelivered",
+                to_phone=addr.get("phone") or existing.get("phone"),
+                to_email=addr.get("email") or existing.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": existing.get("order_number", ""),
+                    "tracking_number": existing.get("cargo_tracking_number", ""),
+                    "reason": reason,
+                    "branch_info": branch_info,
+                },
+            )
+        except Exception as _e:
+            logger.warning(f"order_undelivered notification failed: {_e}")
+    _asyncio.create_task(_notify_undeliver())
+
+    return {"success": True, "message": "Teslim edilemedi olarak işaretlendi"}
 
 
 @router.post("/{order_id}/mark-invoiced")

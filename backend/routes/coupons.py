@@ -112,6 +112,83 @@ async def coupon_redemptions(cid: str, current_user: dict = Depends(require_admi
 
 # ---------------- Public: apply a coupon at checkout ----------------
 
+@public_router.post("/available")
+async def available_coupons(payload: dict):
+    """Trendyol Go benzeri: bu sepet için kullanıcının kullanabileceği aktif kuponları döner.
+    Hesaplanmış discount değerlerini de içerir (tıklanınca sepete direkt uygulanır).
+    Payload: {cart_total, items, user_id?}
+    """
+    cart_total = float(payload.get("cart_total") or 0)
+    user_id = payload.get("user_id")
+    items = payload.get("items") or []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    q: dict = {"is_active": True}
+    # Zaman penceresi (tarih verilmişse)
+    q["$and"] = [
+        {"$or": [{"start_at": None}, {"start_at": {"$lte": now_iso}}, {"start_at": {"$exists": False}}]},
+        {"$or": [{"end_at": None}, {"end_at": {"$gte": now_iso}}, {"end_at": {"$exists": False}}]},
+    ]
+    coupons = await db.coupons.find(q, {"_id": 0}).sort("value", -1).to_list(length=50)
+
+    out = []
+    for c in coupons:
+        # Min tutar
+        min_total = float(c.get("min_cart_total") or 0)
+        if min_total and cart_total < min_total:
+            continue
+        # İlk siparişte limit
+        if user_id and c.get("first_order_only"):
+            prior = await db.orders.count_documents({"user_id": user_id, "status": {"$ne": "cancelled"}})
+            if prior > 0:
+                continue
+        # Kullanım limiti
+        if c.get("usage_limit"):
+            used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
+            if used >= c["usage_limit"]:
+                continue
+        if user_id and c.get("usage_limit_per_user"):
+            used_by = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "user_id": user_id})
+            if used_by >= c["usage_limit_per_user"]:
+                continue
+        # Kategori/ürün filtresi varsa eligible_total hesapla
+        allowed_cats = set(c.get("categories") or [])
+        allowed_pids = set(c.get("products") or [])
+        if allowed_cats or allowed_pids:
+            eligible_total = 0.0
+            for it in items:
+                pid = it.get("product_id")
+                cid_ = it.get("category_id")
+                if (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats):
+                    eligible_total += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
+            base = eligible_total
+            if base <= 0:
+                continue
+        else:
+            base = cart_total
+        # Discount hesapla
+        discount = 0.0
+        if c.get("type") == "percent":
+            discount = base * (c.get("value", 0) / 100.0)
+            if c.get("max_discount"):
+                discount = min(discount, c["max_discount"])
+        else:
+            discount = min(c.get("value", 0), base)
+        discount = round(discount, 2)
+        if discount <= 0 and not c.get("free_shipping"):
+            continue
+        out.append({
+            "id": c["id"], "code": c["code"], "title": c.get("title", ""),
+            "type": c.get("type"), "value": c.get("value"),
+            "min_cart_total": min_total, "discount": discount,
+            "free_shipping": bool(c.get("free_shipping")),
+            "end_at": c.get("end_at"),
+        })
+    # En iyi indirimi yukarı koy
+    out.sort(key=lambda x: x["discount"], reverse=True)
+    return {"items": out, "total": len(out)}
+
+
 @public_router.post("/apply")
 async def apply_coupon(payload: dict):
     code = (payload.get("code") or "").strip().upper()

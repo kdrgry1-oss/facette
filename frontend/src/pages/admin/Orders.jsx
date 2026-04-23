@@ -51,9 +51,10 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const statusOptions = [
   { value: "pending", label: "Bekliyor", class: "status-pending" },
   { value: "confirmed", label: "Onaylandı", class: "status-confirmed" },
-  { value: "preparing", label: "Hazırlanıyor", class: "status-preparing" },
-  { value: "shipping", label: "Kargoda", class: "status-shipped" },
+  { value: "processing", label: "Paketleniyor", class: "status-preparing" },
+  { value: "shipped", label: "Kargoda", class: "status-shipped" },
   { value: "delivered", label: "Teslim Edildi", class: "status-delivered" },
+  { value: "undelivered", label: "Teslim Edilemedi (Şubede)", class: "status-undelivered" },
   { value: "cancelled", label: "İptal Edildi", class: "status-cancelled" },
 ];
 
@@ -67,6 +68,7 @@ const cargoCompanies = [
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
+  const [riskMap, setRiskMap] = useState({});  // FAZ 6 — müşteri risk skorları
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -160,8 +162,22 @@ export default function AdminOrders() {
         if (filters[key]) url += `&${key}=${filters[key]}`;
       });
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-      setOrders(res.data?.orders || []);
+      const list = res.data?.orders || [];
+      setOrders(list);
       setTotal(res.data?.total || 0);
+
+      // FAZ 6 — Yüksek iade oranlı müşterileri bulk'ta çek
+      const uids = [...new Set(list.map((o) => o.user_id).filter(Boolean))].slice(0, 100);
+      const mails = [...new Set(list.map((o) => o.shipping_address?.email).filter(Boolean))].slice(0, 100);
+      if (uids.length || mails.length) {
+        try {
+          const r = await axios.get(`${API}/customer-risk/bulk`, {
+            params: { user_ids: uids.join(","), emails: mails.join(",") },
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          setRiskMap(r.data?.risks || {});
+        } catch { /* risk skoru opsiyonel */ }
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -870,7 +886,7 @@ export default function AdminOrders() {
                 const isHavale = ['transfer', 'havale', 'bank_transfer', 'eft'].includes(pmLower);
                 // Kullanıcı onaylandı/ilerisi ise ödeme teyit edilmiş sayılır → kırmızı vurgu kalkar
                 const paymentConfirmed = order.payment_status === 'paid' ||
-                  ['confirmed', 'preparing', 'shipping', 'delivered'].includes(order.status);
+                  ['confirmed', 'processing', 'shipped', 'delivered', 'undelivered'].includes(order.status);
                 const isUnpaidHavale = isHavale && !paymentConfirmed && order.status !== 'cancelled';
                 const isUnpaidPending = !paymentConfirmed && !isHavale && order.status === 'pending';
                 const isInvoiceIssued = !!order.invoice_issued;
@@ -895,8 +911,35 @@ export default function AdminOrders() {
                     <td className="font-medium">{order.order_number}</td>
                     <td>
                       <div>
-                        <p className="font-medium">{order.shipping_address?.first_name} {order.shipping_address?.last_name}</p>
-                        <p className="text-xs text-gray-500">{order.shipping_address?.phone}</p>
+                        {(() => {
+                          // FAZ 6 — risk rozeti
+                          const key = order.user_id || order.shipping_address?.email;
+                          const risk = key ? riskMap[key] : null;
+                          const high = risk?.risk_level === "high";
+                          const medium = risk?.risk_level === "medium";
+                          return (
+                            <>
+                              <p className={`font-medium flex items-center gap-1.5 ${high ? "text-red-600" : ""}`}>
+                                {order.shipping_address?.first_name} {order.shipping_address?.last_name}
+                                {high && (
+                                  <span title={`İade oranı: %${risk.return_rate_pct} (${risk.returned}/${risk.total_orders})`}
+                                    className="inline-flex items-center gap-0.5 bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                                    data-testid="risk-badge-high">
+                                    ⚠ %{risk.return_rate_pct}
+                                  </span>
+                                )}
+                                {medium && !high && (
+                                  <span title={`İade oranı: %${risk.return_rate_pct}`}
+                                    className="inline-flex items-center gap-0.5 bg-yellow-100 text-yellow-700 text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                                    data-testid="risk-badge-medium">
+                                    %{risk.return_rate_pct}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-gray-500">{order.shipping_address?.phone}</p>
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                     <td>
@@ -937,7 +980,7 @@ export default function AdminOrders() {
                       {(() => {
                         const pm = (order.payment_method || '').toLowerCase();
                         const paid = order.payment_status === 'paid' ||
-                          ['confirmed', 'preparing', 'shipping', 'delivered'].includes(order.status);
+                          ['confirmed', 'processing', 'shipped', 'delivered', 'undelivered'].includes(order.status);
                         if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') {
                           return (
                             <span className={`inline-flex flex-col items-start`}>
