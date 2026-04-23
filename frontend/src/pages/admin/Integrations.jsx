@@ -446,7 +446,7 @@ export default function Integrations() {
         { label: "Ürünleri Gönder", icon: <Upload size={16} />, onClick: handleTrendyolSync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Fiyat/Stok Güncelle", icon: <RefreshCw size={16} />, onClick: handleTrendyolInventorySync, loading: syncing, disabled: !statuses.trendyol?.configured },
         { label: "Siparişleri Al", icon: <Download size={16} />, onClick: handleTrendyolImport, loading: importing, disabled: !statuses.trendyol?.configured },
-        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/trendyol-eslestir" },
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/kategori-eslestir" },
         { label: "Trendyol Logları", icon: <Download size={16} />, href: "/admin/entegrasyon-loglari?marketplace=trendyol" }
       ]
     },
@@ -462,7 +462,7 @@ export default function Integrations() {
       actions: [
         { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('hepsiburada', setHbSettings, setHbModalOpen), loading: false },
         { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('hepsiburada', setHbTesting), loading: hbTesting, disabled: !statuses.hepsiburada?.configured },
-        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/hepsiburada-eslestir" }
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/kategori-eslestir" }
       ]
     },
     {
@@ -477,7 +477,7 @@ export default function Integrations() {
       actions: [
         { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('temu', setTemuSettings, setTemuModalOpen), loading: false },
         { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('temu', setTemuTesting), loading: temuTesting, disabled: !statuses.temu?.configured },
-        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/temu-eslestir" }
+        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/kategori-eslestir" }
       ]
     },
     {

@@ -264,4 +264,24 @@ Kullanıcı "eşleştirmelerde bana ID soruyorsun, search ile seçeyim; kategori
 ### Test
 Backend curl: brand/cat bulk-delete ikisi de `{success:true,deleted:0}` (boş ID), cat options `?q=elbise` → 2+ gerçek sonuç, brand options hepsiburada → hint. Tüm lint temiz.
 
+## [2026-04-23] Gelişmiş Eşleştirme — Tüm Pazaryerleri için Konsolide
+
+Kullanıcı isteği: "Gelişmiş kategori eşleştirme sayfasına (TrendyolEslestir) tıklanınca açılan özellikler, normal kategori eşleştirme sayfasının içinde olsun ve tüm pazaryerleri için çalışsın."
+
+### Backend (generic, MP-agnostic)
+- `GET /api/category-mapping/{mp}/{local_cat_id}/attributes` — MP'nin bu kategori için zorunlu+opsiyonel özellikleri. Trendyol için `TrendyolClient.get_category_attributes` canlı çağrısı + DB cache (`trendyol_category_attributes`). Diğer MP'ler için `{mp}_category_attributes` cache varsa dönüyor, yoksa boş + hint.
+- `POST /api/category-mapping/{mp}/{local_cat_id}/attribute-map` — attribute_mappings + default_mappings + value_mappings kaydeder (mapping doküman alanları).
+- `GET /api/category-mapping/{mp}/{local_cat_id}/values` — bu kategorideki sistem ürünlerinin distinct attribute değerleri (MP'ye gönderirken "Kırmızı ↔ Red" gibi value mapping için).
+
+### Frontend
+- Yeni `components/admin/MarketplaceAdvancedMatch.jsx` — iki ortak modal:
+  - `AdvancedAttributeMatchModal` — Zorunlu/opsiyonel attribute tablosu, otomatik eşleştir, datalist ile global attr öneri, listeden seçme + serbest yazı (allowCustom), default mappings. MP_COLORS map'i ile her pazaryeri kendi rengiyle gösterilir.
+  - `AdvancedValueMatchModal` — attribute tab'ları + değer-bazlı mapping tablosu.
+- `CategoryMapping.jsx` her matched kategori satırına 2 yeni buton: "⚙ Özellik" ve "⇅ Değer" — tıklayınca ilgili modal açılır, kaydedince tablo yenilenir.
+- Route `/admin/trendyol-eslestir` artık `<Navigate to="/admin/kategori-eslestir">` ile redirect. Eski `TrendyolEslestir.jsx` silinmedi ama menü+route bağlantıları kaldırıldı.
+- `Integrations.jsx` içindeki Trendyol/HB/Temu "Gelişmiş Eşleştirme" butonları artık `/admin/kategori-eslestir`'e gider (önceden MP-spesifik ayrı sayfalardı).
+
+### Test
+Backend curl: `/category-mapping/trendyol/nonexistent/attributes` → hint "Önce eşleştirin" ✅, `/hepsiburada/*/attributes` → hint+boş ✅, `/values` → `{local_values:{},value_mappings:{}}` ✅, `/attribute-map` POST → `{success:true}` ✅. Lint 4/4 temiz.
+
 
