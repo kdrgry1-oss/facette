@@ -59,6 +59,72 @@ async def list_mappings(marketplace: str, current_user: dict = Depends(require_a
             "matched": matched, "unmatched": len(rows) - matched, "items": rows}
 
 
+# NOTE: options + bulk-delete + reset-all, generic /{category_id} route'larından
+# ÖNCE tanımlanır; aksi takdirde FastAPI "bulk-delete"/"options" path segment'ini
+# category_id olarak yakalayıp yanlış handler'a yönlendirir.
+@router.get("/{marketplace}/options")
+async def search_marketplace_categories(
+    marketplace: str,
+    q: str = "",
+    limit: int = 100,
+    current_user: dict = Depends(require_admin),
+):
+    """Pazaryeri kategori ağacından arama. Şu an Trendyol cache'i destekli
+    (trendyol_categories — subCategories düzleştirilir)."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    if marketplace != "trendyol":
+        return {"items": [], "hint": f"{marketplace} için kategori cache yok, manuel ID girin"}
+    q_ = (q or "").strip().lower()
+    flat = []
+    def _walk(nodes, path_prefix=""):
+        for n in nodes or []:
+            name = n.get("name", "")
+            full_path = f"{path_prefix} > {name}" if path_prefix else name
+            flat.append({
+                "id": n.get("id"),
+                "name": name,
+                "full_path": full_path,
+                "parent_id": n.get("parentId"),
+                "leaf": not bool(n.get("subCategories")),
+            })
+            _walk(n.get("subCategories") or [], full_path)
+
+    async for top in db.trendyol_categories.find({}, {"_id": 0}):
+        _walk([top])
+
+    if q_:
+        flat = [c for c in flat if q_ in (c["name"] + " " + c["full_path"]).lower()]
+    return {"items": flat[: max(1, min(500, int(limit)))], "count": len(flat)}
+
+
+@router.post("/{marketplace}/bulk-delete")
+async def bulk_delete_category_mappings(
+    marketplace: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Seçili kategori eşleşmelerini toplu sil. Body: {category_ids: [...]}."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    ids = (payload or {}).get("category_ids") or []
+    if not ids:
+        return {"success": True, "deleted": 0}
+    res = await db.category_mappings.delete_many({
+        "marketplace": marketplace,
+        "category_id": {"$in": ids},
+    })
+    return {"success": True, "deleted": res.deleted_count}
+
+
+@router.post("/{marketplace}/reset-all")
+async def reset_all(marketplace: str, current_user: dict = Depends(require_admin)):
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    res = await db.category_mappings.delete_many({"marketplace": marketplace})
+    return {"success": True, "deleted": res.deleted_count}
+
+
 @router.post("/{marketplace}/{category_id}")
 async def set_mapping(marketplace: str, category_id: str, payload: dict,
                        current_user: dict = Depends(require_admin)):
@@ -92,11 +158,3 @@ async def clear_mapping(marketplace: str, category_id: str,
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     await db.category_mappings.delete_one({"category_id": category_id, "marketplace": marketplace})
     return {"success": True}
-
-
-@router.post("/{marketplace}/reset-all")
-async def reset_all(marketplace: str, current_user: dict = Depends(require_admin)):
-    if marketplace not in MARKETPLACES:
-        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
-    res = await db.category_mappings.delete_many({"marketplace": marketplace})
-    return {"success": True, "deleted": res.deleted_count}
