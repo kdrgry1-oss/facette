@@ -5,7 +5,7 @@ import {
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
   Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory,
   Users, Ruler, MessageSquare, PenTool, Truck, CreditCard, TrendingUp, Link2,
-  BellRing, CheckSquare,
+  BellRing, CheckSquare, Code,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppConfirmRoot } from "../../components/admin/AppConfirm";
@@ -105,6 +105,8 @@ const navigation = [
       { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
       { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
       { label: "Gelişmiş Raporlar", path: "/admin/raporlar/gelismis", icon: TrendingUp },
+      // FAZ 8 — İade analizleri, hızlı satış dedektörü, üretici performansı
+      { label: "İade & Trend Analizi", path: "/admin/raporlar/iade-ve-trend", icon: TrendingUp },
       // Pazaryeri bazlı net kâr raporu (komisyon + kargo + iade düşülmüş)
       { label: "Pazaryeri Karlılık", path: "/admin/pazaryeri-karlilik", icon: TrendingUp },
     ],
@@ -150,6 +152,8 @@ const navigation = [
       // Bildirim (SMS / Mail / WhatsApp) sağlayıcı ve şablon yönetimi
       { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
+      // FAZ 9 — Pazarlama pixel & etiket yönetimi (GA4, Meta, Google Ads vb.)
+      { label: "Pazarlama Pixelleri", path: "/admin/ayarlar/pixel", icon: Code },
       { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },

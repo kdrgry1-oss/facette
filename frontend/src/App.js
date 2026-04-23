@@ -57,6 +57,9 @@ import NotificationSettings from "./pages/admin/NotificationSettings";
 import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import BlockedCustomers from "./pages/admin/BlockedCustomers";
 import ProductionPlan from "./pages/admin/ProductionPlan";
+import MarketingPixels from "./pages/admin/MarketingPixels";
+import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
+import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import FailedTransfers from "./pages/admin/FailedTransfers";
@@ -81,6 +84,7 @@ function App() {
       <CartProvider>
         <BrowserRouter>
           <Toaster position="top-center" richColors />
+          <MarketingPixelsInjector />
           <Routes>
             {/* Storefront */}
             <Route path="/" element={<Home />} />
@@ -120,6 +124,8 @@ function App() {
               <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
               <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
               <Route path="uretim-plani" element={<ProductionPlan />} />
+              <Route path="ayarlar/pixel" element={<MarketingPixels />} />
+              <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
               {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
                   aktarım kuralları + otomatik senkron ayarları. */}
               <Route path="pazaryerleri" element={<MarketplaceHub />} />
