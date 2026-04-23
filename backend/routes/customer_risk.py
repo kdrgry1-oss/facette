@@ -42,11 +42,11 @@ async def _compute_risk(user_id: Optional[str] = None, email: Optional[str] = No
             {"email": email},
         ]
     else:
-        return {"total_orders": 0, "returned": 0, "return_rate": 0.0, "risk_level": "low", "suspicious": False}
+        return {"total_orders": 0, "returned": 0, "return_rate": 0.0, "return_rate_pct": 0.0, "risk_level": "low", "suspicious": False}
 
     total_orders = await db.orders.count_documents({**q, "status": {"$ne": "cancelled"}})
     if total_orders == 0:
-        return {"total_orders": 0, "returned": 0, "return_rate": 0.0, "risk_level": "low", "suspicious": False}
+        return {"total_orders": 0, "returned": 0, "return_rate": 0.0, "return_rate_pct": 0.0, "risk_level": "low", "suspicious": False}
 
     # İade sayısı — `returns` koleksiyonu varsa oradan, yoksa orders.has_return bayrağı
     try:

@@ -73,6 +73,37 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
   - **İçerik**: Duyuru Yönetimi, Süreli Popup Yönetimi (delay_seconds, trigger)
   - **Pazarlama**: Kargo Kuralları (min_cart, free_shipping), Ödeme Tipi İndirimleri, Toplu Mail Gönderme (Resend API — segment=all/newsletter/abandoned, batch 100, email_campaigns log)
   - **Raporlar Gelişmiş**: Saatlik Satış (BarChart), İl Bazında Satış, Ürün Karlılık (margin), Stok Hareket
+
+## Iteration 15 (2026-04-23) — FAZ 4 + FAZ 5 + FAZ 6
+
+### FAZ 4 — Checkout İyileştirmeleri
+- **Hediye notu** (300 karaktere kadar) — `orders.gift_note` alanına kaydedilir
+- **Hediye paketi** (+130 TL) — checkbox, toplam tutara eklenir, `orders.gift_wrap`/`gift_wrap_price` ile kayda girer
+- **Trendyol Go stili kupon kutusu**: Yeni endpoint `POST /api/coupons/available` (sepet+kullanıcı için uygun kuponları hesaplanmış discount ile listeler), checkout sepet özetinde kart olarak görünür, tıklayınca otomatik uygulanır
+- Uygulanmış kupon "Kaldır" butonu + kupon kodu order'a kaydolur
+
+### FAZ 5 — Sipariş Durum Zinciri Standardizasyonu
+- Yeni durum: **`undelivered`** (Teslim Edilemedi — Şubede Bekliyor)
+- Durum seçenekleri: `pending → confirmed → processing (Paketleniyor) → shipped (Kargoda) → delivered | undelivered | cancelled`
+- Yeni endpoint'ler:
+  - `POST /api/orders/{id}/ship?cargo_company=&tracking_number=` — 9 geçerli kargo firması whitelist; bildirim fire-and-forget
+  - `POST /api/orders/{id}/undeliver?reason=&branch_info=` — teslim edilemedi bildirimi
+- Status hook `order_undelivered` event'ini notification_service'e taşır
+
+### FAZ 6 — Müşteri Risk & Blok Yönetimi
+- **Sipariş oluştururken IP + User-Agent kaydı** (`customer_ip`, `user_agent` — X-Forwarded-For destekli)
+- **Risk skoru endpoint'leri**: `GET /api/customer-risk/users/{uid}`, `/by-email`, `/bulk?user_ids=&emails=`
+  - Formül: `return_rate = returns / (total_orders - cancelled)`, risk_level: low (<20%) / medium (20-49%) / high (≥50%)
+- **Blok CRUD**: `POST /block`, `GET /blocked`, `DELETE /blocked/{id}` (user_id VEYA ip VEYA email)
+- **Otomatik blok enforcement**: POST /api/orders üzerinde blocked_customers lookup → 403 "sipariş veremez"
+- **Admin UI — `/admin/bloklu-musteriler`** (yeni sayfa): form + liste + kaldır
+- **Sipariş listesinde risk rozeti**: yüksek iadeli müşterilerin adı kırmızı + "⚠ %X" rozeti (medium için sarı)
+
+### Testing (Iteration 15)
+- `/app/backend/tests/test_iteration15_faz456.py` — 14/14 PASS
+- Minor fix: `_compute_risk` fast-path now includes `return_rate_pct: 0.0` for UI consistency
+
+
   - **Ayarlar**: Döviz Kurları (exchangerate.host)
   - **Resend entegrasyonu**: RESEND_API_KEY env'de boş (kullanıcı verince aktif)
   - Backend 16 yeni router (catalog_extras.py tek dosya), Frontend 12 yeni admin sayfası
