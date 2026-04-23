@@ -56,6 +56,7 @@ import CargoSettings from "./pages/admin/CargoSettings";
 import NotificationSettings from "./pages/admin/NotificationSettings";
 import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import BlockedCustomers from "./pages/admin/BlockedCustomers";
+import ProductionPlan from "./pages/admin/ProductionPlan";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import FailedTransfers from "./pages/admin/FailedTransfers";
@@ -118,6 +119,7 @@ function App() {
               <Route path="ayarlar/bildirim" element={<NotificationSettings />} />
               <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
               <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
+              <Route path="uretim-plani" element={<ProductionPlan />} />
               {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
                   aktarım kuralları + otomatik senkron ayarları. */}
               <Route path="pazaryerleri" element={<MarketplaceHub />} />

@@ -54,6 +54,8 @@ const navigation = [
     icon: Factory,
     children: [
       { label: "İmalat Takip", path: "/admin/imalat", icon: Factory },
+      // FAZ 7 — 18 sütunlu üretim planı tablosu
+      { label: "İmalat Planı (Tablo)", path: "/admin/uretim-plani", icon: Factory },
     ],
   },
   {

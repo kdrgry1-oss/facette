@@ -218,6 +218,10 @@ async def create_product(
         "sku": product_data.get("sku", ""),
         "supplier": product_data.get("supplier", ""),
         "manufacturer": product_data.get("manufacturer", "FACETTE"),
+        # FAZ 7 — İmalat modülü için ek alanlar
+        "collection": product_data.get("collection", ""),   # ör. "2026 İlkbahar/Yaz"
+        "purchase_price": float(product_data.get("purchase_price", 0) or 0),  # Alış fiyatı
+        "color": product_data.get("color", ""),  # Renk (varyant dışı global)
         "is_active": product_data.get("is_active", True),
         "is_featured": product_data.get("is_featured", False),
         "is_new": product_data.get("is_new", False),

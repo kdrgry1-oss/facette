@@ -141,6 +141,8 @@ export default function AdminProducts() {
     // Ticimax fields
     variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
     supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
+    // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
+    collection: "", color: "",
     vat_rate: 10,
     market_price: 0, vat_included: true, currency: "TRY",
     cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
@@ -786,6 +788,9 @@ export default function AdminProducts() {
       manufacturer: product.manufacturer || "FACETTE",
       max_installment: product.max_installment || 9,
       purchase_price: product.purchase_price || 0,
+      // FAZ 7 — İmalat planı için ek alanlar (geri yükleme)
+      collection: product.collection || "",
+      color: product.color || "",
       market_price: product.market_price || 0,
       vat_rate: product.vat_rate || 10,
       vat_included: product.vat_included ?? true,
@@ -824,6 +829,8 @@ export default function AdminProducts() {
       stock: 0, stock_code: "", barcode: "", sku: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
       supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
+    // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
+    collection: "", color: "",
       market_price: 0, vat_rate: globalVatRate, vat_included: true, currency: "TRY",
       cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
       min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
@@ -1552,6 +1559,36 @@ export default function AdminProducts() {
                           value={formData.purchase_price}
                           onChange={(e) => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0 })}
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
+                          data-testid="product-purchase-price"
+                        />
+                      </div>
+                      {/* FAZ 7 — İmalat modülü için */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Koleksiyon</label>
+                        <input
+                          type="text" list="product-collections-list"
+                          value={formData.collection || ""}
+                          onChange={(e) => setFormData({ ...formData, collection: e.target.value })}
+                          placeholder="ör. 2026 İlkbahar/Yaz"
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
+                          data-testid="product-collection"
+                        />
+                        <datalist id="product-collections-list">
+                          <option value="2026 İlkbahar/Yaz" />
+                          <option value="2026 Sonbahar/Kış" />
+                          <option value="2025 Sonbahar/Kış" />
+                          <option value="Basic / Sürekli Koleksiyon" />
+                        </datalist>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Renk (Ana)</label>
+                        <input
+                          type="text"
+                          value={formData.color || ""}
+                          onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                          placeholder="ör. Siyah / Ekru / Antrasit"
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
+                          data-testid="product-color"
                         />
                       </div>
                       <div>
