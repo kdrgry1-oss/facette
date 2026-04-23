@@ -347,6 +347,52 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     } finally { setSaving(false); }
   };
 
+  // Otomatik değer eşleştirme — isim benzerliği (Kırmızı ↔ Red, S ↔ Small vb.)
+  const handleAutoMatchValues = () => {
+    const next = { ...valueMappings };
+    let matched = 0;
+    // Alias tablosu — en yaygın Türkçe↔İngilizce & beden kısaltmaları
+    const aliases = {
+      "kırmızı": ["red"], "mavi": ["blue"], "yeşil": ["green"], "sarı": ["yellow"],
+      "siyah": ["black"], "beyaz": ["white"], "gri": ["gray", "grey"], "pembe": ["pink"],
+      "mor": ["purple"], "turuncu": ["orange"], "kahverengi": ["brown"], "bej": ["beige"],
+      "lacivert": ["navy", "dark blue"], "altın": ["gold"], "gümüş": ["silver"],
+      "s": ["small", "küçük"], "m": ["medium", "orta"], "l": ["large", "büyük"],
+      "xl": ["x-large", "extra large"], "xxl": ["xx-large", "2xl"], "xs": ["x-small", "extra small"],
+    };
+
+    mpAttrs.forEach((mpAttr) => {
+      const id = String(mpAttr.id ?? mpAttr.attribute?.id);
+      const mpName = (mpAttr.name || mpAttr.attribute?.name || "").toLowerCase();
+      const mpValues = mpAttr.attributeValues || [];
+      const localVals = localValues[mpAttr.name || mpAttr.attribute?.name] || [];
+
+      localVals.forEach((lv) => {
+        const key = `${id}|${lv}`;
+        if (next[key]) return; // mevcut korunur
+        const lvLower = lv.toLowerCase().trim();
+        const candidates = aliases[lvLower] || [];
+        const found = mpValues.find((mv) => {
+          const mvN = (mv.name || "").toLowerCase().trim();
+          return (
+            mvN === lvLower ||
+            mvN.includes(lvLower) ||
+            lvLower.includes(mvN) ||
+            candidates.some((a) => mvN === a || mvN.includes(a))
+          );
+        });
+        if (found) {
+          next[key] = String(found.id);
+          matched++;
+        }
+      });
+    });
+
+    setValueMappings(next);
+    if (matched) toast.success(`${matched} değer otomatik eşleştirildi`);
+    else toast.info("Eşleştirilecek yeni değer bulunamadı");
+  };
+
   const currentAttr = mpAttrs.find((a) => String(a.id ?? a.attribute?.id) === String(selectedAttrId));
   const attrName = currentAttr?.name || currentAttr?.attribute?.name;
 
@@ -354,13 +400,24 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     <Dialog open={open} onOpenChange={() => onClose(false)}>
       <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle className="text-base flex items-center gap-2">
-            <Store size={18} className={`text-${color}-500`} />
-            Değer Eşleştirme — {category?.category_name}
-            <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
-              {marketplace}
-            </span>
-          </DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Store size={18} className={`text-${color}-500`} />
+              Değer Eşleştirme — {category?.category_name}
+              <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
+                {marketplace}
+              </span>
+            </DialogTitle>
+            {mpAttrs.length > 0 && (
+              <button
+                onClick={handleAutoMatchValues}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
+                data-testid="adv-auto-match-values-btn"
+              >
+                <LinkIcon size={14} /> Otomatik Eşleştir
+              </button>
+            )}
+          </div>
         </DialogHeader>
 
         {hint && <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2">

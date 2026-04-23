@@ -3,7 +3,7 @@ import axios from 'axios';
 import { Plus, Trash2, Edit2, Search, DownloadCloud, RefreshCw, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
-const API = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const authHeaders = () => {
   const token = localStorage.getItem("token");
