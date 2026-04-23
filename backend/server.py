@@ -75,6 +75,7 @@ from routes.brand_mapping import router as brand_mapping_router
 from routes.category_mapping import router as category_mapping_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
+from routes.notifications import router as notifications_router
 
 # Database
 from routes.deps import client, db
@@ -311,6 +312,7 @@ api_router.include_router(category_mapping_router)
 api_router.include_router(bulk_ops_router)
 # RFM müşteri segmentasyonu + marketplace karlılık + Google Merchant feed
 api_router.include_router(analytics_extra_router)
+api_router.include_router(notifications_router)
 
 # Root endpoint
 @api_router.get("/")

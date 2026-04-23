@@ -53,6 +53,8 @@ import {
 import AdminTasks from "./pages/admin/AdminTasks";
 import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
+import NotificationSettings from "./pages/admin/NotificationSettings";
+import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import FailedTransfers from "./pages/admin/FailedTransfers";
@@ -112,6 +114,8 @@ function App() {
                   ile aynı mantık. Çoklu entegratör şeması backend'de tanımlı. */}
               <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
               <Route path="ayarlar/kargo" element={<CargoSettings />} />
+              <Route path="ayarlar/bildirim" element={<NotificationSettings />} />
+              <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
               {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
                   aktarım kuralları + otomatik senkron ayarları. */}
               <Route path="pazaryerleri" element={<MarketplaceHub />} />

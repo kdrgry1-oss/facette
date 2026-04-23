@@ -5,6 +5,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useAuth } from "../context/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -470,24 +471,15 @@ export default function Account() {
                   className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
                 />
               </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Şehir *</label>
-                <input
-                  type="text"
-                  value={addressForm.city}
-                  onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
-                  required
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">İlçe *</label>
-                <input
-                  type="text"
-                  value={addressForm.district}
-                  onChange={(e) => setAddressForm({ ...addressForm, district: e.target.value })}
-                  required
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
+              <div className="md:col-span-2">
+                <ProvinceDistrictSelect
+                  city={addressForm.city}
+                  district={addressForm.district}
+                  onChange={({ city, district }) => setAddressForm({ ...addressForm, city, district })}
+                  selectClass="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black bg-white"
+                  labelClass="block text-sm text-gray-600 mb-1"
+                  cityLabel="Şehir"
+                  testIdPrefix="account-addr"
                 />
               </div>
               <div>

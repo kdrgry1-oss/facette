@@ -90,6 +90,135 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
     return current_user
 
+
+# =============================================================================
+# SMS OTP PASSWORD RESET (FAZ 3)
+# =============================================================================
+import random
+import hashlib
+import secrets
+from pydantic import BaseModel
+
+
+class OTPRequestReq(BaseModel):
+    phone: str
+
+
+class OTPVerifyReq(BaseModel):
+    phone: str
+    code: str
+
+
+class OTPResetReq(BaseModel):
+    reset_token: str
+    new_password: str
+
+
+def _hash_otp(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+@router.post("/forgot-password/request-otp")
+async def forgot_password_request_otp(req: OTPRequestReq):
+    """Telefon numarasına 6 haneli SMS OTP gönderir.
+    Privacy: numara sistemde olmasa bile aynı yanıt döner (enumeration önleme).
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from notification_service import normalize_phone_tr, send_notification
+
+    phone_norm = normalize_phone_tr(req.phone)
+    user = await db.users.find_one({"phone": {"$regex": phone_norm[-10:], "$options": "i"}}, {"_id": 0, "id": 1, "email": 1, "phone": 1}) if phone_norm else None
+
+    # Her durumda kod üret ve kaydet; sadece gerçek kullanıcıya SMS at
+    code = f"{random.randint(0, 999999):06d}"
+    now = datetime.now(timezone.utc)
+    expires = (now.timestamp() + 300)  # 5 dk
+    record = {
+        "phone": phone_norm,
+        "code_hash": _hash_otp(code),
+        "user_id": (user or {}).get("id"),
+        "expires_at": expires,
+        "used": False,
+        "attempts": 0,
+        "created_at": now.isoformat(),
+    }
+    await db.password_reset_otps.insert_one(record)
+
+    if user:
+        try:
+            await send_notification(
+                db, "password_reset_otp",
+                to_phone=phone_norm,
+                variables={"otp_code": code, "customer_name": user.get("first_name", "")},
+                channels=["sms"],
+            )
+        except Exception as e:
+            logger.warning(f"OTP sms failed: {e}")
+    else:
+        logger.info(f"OTP request for unknown phone (silent): {phone_norm}")
+
+    return {"success": True, "message": "Eğer numara sistemimizde kayıtlıysa SMS kodu gönderildi."}
+
+
+@router.post("/forgot-password/verify-otp")
+async def forgot_password_verify_otp(req: OTPVerifyReq):
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from notification_service import normalize_phone_tr
+
+    phone_norm = normalize_phone_tr(req.phone)
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    rec = await db.password_reset_otps.find_one(
+        {"phone": phone_norm, "used": False, "expires_at": {"$gt": now_ts}},
+        sort=[("created_at", -1)],
+    )
+    if not rec:
+        raise HTTPException(status_code=400, detail="Kod geçersiz veya süresi dolmuş")
+
+    if rec.get("attempts", 0) >= 5:
+        raise HTTPException(status_code=429, detail="Çok fazla deneme yaptınız")
+
+    await db.password_reset_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
+
+    if _hash_otp(req.code) != rec.get("code_hash"):
+        raise HTTPException(status_code=400, detail="Kod hatalı")
+
+    if not rec.get("user_id"):
+        raise HTTPException(status_code=400, detail="Kullanıcı bulunamadı")
+
+    reset_token = secrets.token_urlsafe(32)
+    await db.password_reset_otps.update_one(
+        {"_id": rec["_id"]},
+        {"$set": {"used": True, "reset_token": reset_token, "reset_token_expires": now_ts + 600}},
+    )
+    return {"reset_token": reset_token, "expires_in": 600}
+
+
+@router.post("/forgot-password/reset")
+async def forgot_password_reset(req: OTPResetReq):
+    if not req.new_password or len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    rec = await db.password_reset_otps.find_one(
+        {"reset_token": req.reset_token, "reset_token_expires": {"$gt": now_ts}}
+    )
+    if not rec:
+        raise HTTPException(status_code=400, detail="Reset token geçersiz veya süresi dolmuş")
+
+    user_id = rec.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Kullanıcı bulunamadı")
+
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password": hash_password(req.new_password), "password_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    await db.password_reset_otps.delete_one({"_id": rec["_id"]})
+    return {"success": True, "message": "Şifreniz güncellendi"}
+
 @router.get("/google/login")
 async def google_login(request: Request):
     """Initiate Google OAuth login"""
