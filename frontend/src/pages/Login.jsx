@@ -14,6 +14,12 @@ export default function Login() {
   const { login, register, user, setUser } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
+  // FAZ 3+ — Hangi sosyal sağlayıcılar aktif?
+  const [socialProviders, setSocialProviders] = useState({ apple: false, facebook: false });
+  useEffect(() => {
+    fetch(`${API}/auth/social/providers`).then((r) => r.ok && r.json())
+      .then((d) => d && setSocialProviders(d)).catch(() => {});
+  }, []);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -108,6 +114,34 @@ export default function Login() {
             </svg>
             Google ile {isRegister ? "Üye Ol" : "Giriş Yap"}
           </button>
+
+          {/* Apple Sign-In — credential'lar admin tarafından etkinleştirildiyse görünür */}
+          {socialProviders.apple && (
+            <button type="button"
+              onClick={() => toast.info("Apple Sign-In yakında aktif olacak (Developer credential girildi)")}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-3 border border-black bg-black text-white px-4 py-3 text-sm hover:bg-gray-900 transition-colors mb-3"
+              data-testid="apple-login-btn">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.05 12.54c.02 2.8 2.43 3.73 2.46 3.74-.02.07-.38 1.29-1.24 2.55-.75 1.1-1.53 2.19-2.76 2.22-1.21.02-1.59-.71-2.97-.71-1.38 0-1.8.69-2.94.73-1.18.04-2.08-1.18-2.83-2.28C5.2 16.53 4 12.93 5.61 10.54c.8-1.19 2.23-1.94 3.77-1.96 1.15-.02 2.23.78 2.93.78.7 0 2.02-.96 3.41-.82.58.02 2.21.23 3.26 1.77-.08.05-1.94 1.13-1.93 3.37zM14.51 7.34c.63-.76 1.05-1.82.94-2.88-.9.04-2 .6-2.65 1.36-.58.67-1.09 1.75-.95 2.78 1.01.08 2.03-.51 2.66-1.26z"/>
+              </svg>
+              Apple ile {isRegister ? "Üye Ol" : "Giriş Yap"}
+            </button>
+          )}
+
+          {/* Facebook Login */}
+          {socialProviders.facebook && (
+            <button type="button"
+              onClick={() => toast.info("Facebook Login yakında aktif olacak (App ID girildi)")}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-3 border border-blue-600 bg-blue-600 text-white px-4 py-3 text-sm hover:bg-blue-700 transition-colors mb-3"
+              data-testid="facebook-login-btn">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12S0 5.446 0 12.073C0 18.062 4.388 23.027 10.125 23.927v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+              </svg>
+              Facebook ile {isRegister ? "Üye Ol" : "Giriş Yap"}
+            </button>
+          )}
 
           <div className="flex items-center gap-4 mb-6">
             <div className="flex-1 h-px bg-gray-200" />

@@ -8,6 +8,7 @@ import Footer from "../components/Footer";
 import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
+import { trackInitiateCheckout, trackPurchase } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -47,6 +48,14 @@ export default function Checkout() {
   // Uygulanabilir kuponları sepete göre tetikle
   useEffect(() => {
     if (items.length === 0) { setAvailableCoupons([]); return; }
+    // FAZ 9+ — InitiateCheckout pixel event (ilk giriş)
+    trackInitiateCheckout({
+      total,
+      items: items.map((it) => ({
+        product_id: it.productId, name: it.name,
+        price: it.price, quantity: it.quantity,
+      })),
+    });
     axios.post(`${API}/coupons/available`, {
       cart_total: total,
       user_id: user?.id || null,
@@ -71,6 +80,15 @@ export default function Checkout() {
     try {
       const res = await axios.post(`${API}/payment/callback?token=${token}`);
       if (res.data.success) {
+        // FAZ 9+ — Purchase pixel event (callback flow)
+        trackPurchase({
+          order_id: res.data.orderNumber,
+          total: res.data.amount || grandTotal,
+          items: items.map((it) => ({
+            product_id: it.productId, name: it.name,
+            price: it.price, quantity: it.quantity,
+          })),
+        });
         clearCart();
         setPaymentStep("success");
         toast.success("Ödemeniz başarıyla tamamlandı!");
@@ -188,6 +206,16 @@ export default function Checkout() {
         }
       } else {
         // For other payment methods, complete order directly
+        // FAZ 9+ — Purchase conversion event
+        trackPurchase({
+          order_id: orderRes.data.order_number,
+          total: grandTotal,
+          shipping: shippingCost,
+          items: items.map((it) => ({
+            product_id: it.productId, name: it.name,
+            price: it.price, quantity: it.quantity,
+          })),
+        });
         clearCart();
         toast.success("Siparişiniz alındı!");
         navigate(`/hesabim?order=${orderRes.data.order_number}`);

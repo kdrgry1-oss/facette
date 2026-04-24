@@ -5,7 +5,7 @@ import {
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
   Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory,
   Users, Ruler, MessageSquare, PenTool, Truck, CreditCard, TrendingUp, Link2,
-  BellRing, CheckSquare, Code,
+  BellRing, CheckSquare, Code, Lock,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppConfirmRoot } from "../../components/admin/AppConfirm";
@@ -154,6 +154,8 @@ const navigation = [
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       // FAZ 9 — Pazarlama pixel & etiket yönetimi (GA4, Meta, Google Ads vb.)
       { label: "Pazarlama Pixelleri", path: "/admin/ayarlar/pixel", icon: Code },
+      // Apple + Facebook sosyal giriş credential yönetimi
+      { label: "Sosyal Giriş Ayarları", path: "/admin/ayarlar/sosyal-giris", icon: Lock },
       { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },
       { label: "Cariler", path: "/admin/cariler", icon: Building2 },

@@ -7,6 +7,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { useCart } from "../context/CartContext";
+import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -59,6 +60,14 @@ export default function ProductDetail() {
     try {
       const res = await axios.get(`${API}/products/${slug}`);
       setProduct(res.data);
+
+      // FAZ 9+ — Pixel ViewContent event
+      trackViewContent({
+        product_id: res.data.id,
+        name: res.data.name,
+        category: res.data.category_name,
+        price: res.data.sale_price || res.data.price,
+      });
       
       if (res.data?.variants?.length > 0) {
         const firstAvailable = res.data.variants.find(v => v.stock > 0);
@@ -107,6 +116,14 @@ export default function ProductDetail() {
     }
     
     addItem(product, selectedVariant, quantity);
+    // FAZ 9+ — Pixel AddToCart event
+    trackAddToCart({
+      product_id: product.id,
+      name: product.name,
+      category: product.category_name,
+      price: product.sale_price || product.price,
+      quantity,
+    });
     toast.success(selectedVariant 
       ? `${product.name} - ${selectedVariant.size} sepete eklendi` 
       : "Ürün sepete eklendi"
