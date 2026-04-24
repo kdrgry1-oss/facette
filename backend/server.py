@@ -79,6 +79,7 @@ from routes.notifications import router as notifications_router
 from routes.customer_risk import router as customer_risk_router
 from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
+from routes.social_auth import router as social_auth_router
 
 # Database
 from routes.deps import client, db
@@ -319,6 +320,7 @@ api_router.include_router(notifications_router)
 api_router.include_router(customer_risk_router)
 api_router.include_router(production_plan_router)
 api_router.include_router(marketing_pixels_router)
+api_router.include_router(social_auth_router)
 
 # Root endpoint
 @api_router.get("/")

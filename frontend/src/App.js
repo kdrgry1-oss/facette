@@ -59,6 +59,7 @@ import BlockedCustomers from "./pages/admin/BlockedCustomers";
 import ProductionPlan from "./pages/admin/ProductionPlan";
 import MarketingPixels from "./pages/admin/MarketingPixels";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
+import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
@@ -126,6 +127,7 @@ function App() {
               <Route path="uretim-plani" element={<ProductionPlan />} />
               <Route path="ayarlar/pixel" element={<MarketingPixels />} />
               <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
+              <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
               {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
                   aktarım kuralları + otomatik senkron ayarları. */}
               <Route path="pazaryerleri" element={<MarketplaceHub />} />
