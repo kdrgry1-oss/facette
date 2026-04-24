@@ -201,6 +201,32 @@ Frontend:
 - `test_iteration17_reports_pixels.py` — **22/22 PASS** (%100)
 - Cache-Control eklendi (middleware override'dan etkilenebilir; iyi-bir-çaba)
 
+## Iteration 18 (2026-04-23) — Pixel E-commerce Events + Apple/FB Sosyal Login Scaffold
+
+### Pixel E-commerce Events (FAZ 9 potansiyel iyileştirme)
+- `/app/frontend/src/utils/pixelEvents.js` helper — Meta Pixel + GA4 için 6 olay: ViewContent, AddToCart, InitiateCheckout, Purchase, Search, CompleteRegistration
+- `ProductDetail.jsx` → ViewContent (ürün sayfasında) + AddToCart
+- `Checkout.jsx` → InitiateCheckout (mount) + Purchase (direkt ödeme VE iyzico callback)
+- Pixel pasifse sessizce no-op olur — hataya neden olmaz
+
+### Apple + Facebook Sosyal Login (FAZ 3 upcoming)
+Backend (`/api/auth/social/*`):
+- `GET /providers` (public) — UI'nın hangi butonu göstereceğini belirler
+- `GET/POST /settings` (admin) — credential yönetimi, **tam maskeleme** (only `"****"` + `has_*` bayrağı döner, ilk/son karakter sızıntısı yok)
+- `POST /apple` — Apple public key fetch + RS256 verify (aud/iss check) → user upsert → JWT
+- `POST /facebook` — OAuth code → access_token → profile → user upsert → JWT
+- `_upsert_social_user`: 3 aşama (provider_id match → email match → yeni oluştur) + `auth_providers.{provider}` kaydı
+
+Frontend:
+- `Login.jsx` — `/providers` endpoint'ine bağlı Apple + Facebook butonları (credential girilince görünür)
+- `/admin/ayarlar/sosyal-giris` — SocialAuthSettings sayfası (Apple Services ID/Team/Key/Private Key + FB App ID/Secret/Redirect URI)
+
+### Testing
+- `test_iteration18_social_auth.py` — **9/9 PASS** (%100)
+- Minor fix: secret masking güvenliği artırıldı (tam maskeleme)
+
+
+
 
   - Products modeli `hepsiburada_attributes` + `temu_attributes` alanlarını destekler
 - [2026-04-20] Kapsamlı Admin Panel Genişletme (Fork devamı):

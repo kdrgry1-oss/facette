@@ -73,21 +73,20 @@ async def get_providers():
 @router.get("/social/settings")
 async def admin_get_settings(current_user: dict = Depends(require_admin)):
     s = await _get_social_settings()
-    # Mask secrets
-    def mask(v):
-        if not v:
-            return ""
-        s_ = str(v)
-        return (s_[:3] + "****" + s_[-3:]) if len(s_) > 10 else "****"
+    # Secret alanları tamamen maskele (yalnız bayrak döndür, ham değer asla dönmez)
+    has_apple_key = bool(s.get("apple_private_key"))
+    has_fb_secret = bool(s.get("facebook_app_secret"))
     return {
         "apple_enabled": bool(s.get("apple_enabled")),
         "apple_client_id": s.get("apple_client_id", ""),
         "apple_team_id": s.get("apple_team_id", ""),
         "apple_key_id": s.get("apple_key_id", ""),
-        "apple_private_key": mask(s.get("apple_private_key")),
+        "apple_private_key": "****" if has_apple_key else "",
+        "has_apple_private_key": has_apple_key,
         "facebook_enabled": bool(s.get("facebook_enabled")),
         "facebook_app_id": s.get("facebook_app_id", ""),
-        "facebook_app_secret": mask(s.get("facebook_app_secret")),
+        "facebook_app_secret": "****" if has_fb_secret else "",
+        "has_facebook_app_secret": has_fb_secret,
         "facebook_redirect_uri": s.get("facebook_redirect_uri", ""),
     }
 
