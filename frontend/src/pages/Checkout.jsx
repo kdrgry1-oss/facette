@@ -44,6 +44,11 @@ export default function Checkout() {
   const [giftWrap, setGiftWrap] = useState(false);
   const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
+  // FAZ Hızlı Üyelik — guest sipariş sonrası quick signup
+  const [showQuickSignup, setShowQuickSignup] = useState(false);
+  const [guestOrderNumber, setGuestOrderNumber] = useState("");
+  const [quickPassword, setQuickPassword] = useState("");
+  const [quickBusy, setQuickBusy] = useState(false);
 
   // Uygulanabilir kuponları sepete göre tetikle
   useEffect(() => {
@@ -218,7 +223,13 @@ export default function Checkout() {
         });
         clearCart();
         toast.success("Siparişiniz alındı!");
-        navigate(`/hesabim?order=${orderRes.data.order_number}`);
+        // FAZ Hızlı Üyelik — Guest ise quick-signup modalı aç
+        if (!user) {
+          setGuestOrderNumber(orderRes.data.order_number);
+          setShowQuickSignup(true);
+        } else {
+          navigate(`/hesabim?order=${orderRes.data.order_number}`);
+        }
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
@@ -587,6 +598,55 @@ export default function Checkout() {
           </div>
         </form>
       </div>
+
+      {/* Hızlı Üyelik Modal — guest sipariş sonrası */}
+      {showQuickSignup && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" data-testid="quick-signup-modal">
+          <div className="bg-white rounded-lg max-w-md w-full p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Hesap oluşturmak ister misiniz?</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                <b>{guestOrderNumber}</b> numaralı siparişinizin durumunu takip etmek ve hızlı sipariş vermek için bir şifre belirleyin.
+                Adınız ve e-postanız siparişten alınıyor.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Şifre (en az 6 karakter)</label>
+              <input type="password" value={quickPassword}
+                onChange={(e) => setQuickPassword(e.target.value)}
+                className="w-full border px-3 py-2 text-sm rounded"
+                placeholder="••••••"
+                data-testid="quick-password-input" />
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={async () => {
+                if (quickPassword.length < 6) { toast.error("Şifre en az 6 karakter olmalı"); return; }
+                setQuickBusy(true);
+                try {
+                  const r = await axios.post(`${API}/auth/convert-guest-order`, { order_id: guestOrderNumber, password: quickPassword });
+                  localStorage.setItem("token", r.data.token);
+                  toast.success(r.data.existing_account ? "Mevcut hesabınıza bağlandı" : "Hesap oluşturuldu!");
+                  setShowQuickSignup(false);
+                  navigate(`/hesabim?order=${guestOrderNumber}`);
+                } catch (e) {
+                  toast.error(e?.response?.data?.detail || "İşlem başarısız");
+                } finally { setQuickBusy(false); }
+              }} disabled={quickBusy}
+                className="flex-1 bg-black text-white px-4 py-2 rounded text-sm disabled:opacity-60"
+                data-testid="quick-signup-create">
+                {quickBusy ? "Oluşturuluyor..." : "Hesap Oluştur & Giriş Yap"}
+              </button>
+              <button onClick={() => {
+                setShowQuickSignup(false);
+                navigate(`/hesabim?order=${guestOrderNumber}`);
+              }} className="text-sm text-gray-500 hover:text-black px-3"
+                data-testid="quick-signup-skip">
+                Şimdi değil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>

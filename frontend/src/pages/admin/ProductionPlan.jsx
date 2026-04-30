@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Plus, Save, Trash2, Search, Upload, RotateCw } from "lucide-react";
+import { Plus, Save, Trash2, Search, Upload, RotateCw, Download, FileUp } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -267,6 +267,40 @@ export default function ProductionPlan() {
           <button onClick={load} className="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded text-sm" data-testid="pp-refresh">
             <RotateCw size={14} /> Yenile
           </button>
+          <button onClick={async () => {
+            try {
+              const res = await fetch(`${API}/production-plan/export`, { headers: { Authorization: `Bearer ${token}` } });
+              if (!res.ok) { toast.error("Export hatası"); return; }
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `imalat-plani-${Date.now()}.xlsx`;
+              document.body.appendChild(a); a.click();
+              document.body.removeChild(a); URL.revokeObjectURL(url);
+              toast.success("Excel indirildi");
+            } catch { toast.error("Export hatası"); }
+          }} className="inline-flex items-center gap-1 bg-green-600 text-white hover:bg-green-700 px-3 py-1.5 rounded text-sm" data-testid="pp-export">
+            <Download size={14} /> Excel
+          </button>
+          <label className="inline-flex items-center gap-1 bg-blue-600 text-white hover:bg-blue-700 px-3 py-1.5 rounded text-sm cursor-pointer" data-testid="pp-import-label">
+            <FileUp size={14} /> Import
+            <input type="file" accept=".xlsx,.xlsm" className="hidden"
+              data-testid="pp-import-input"
+              onChange={async (e) => {
+                const f = e.target.files?.[0]; if (!f) return;
+                const fd = new FormData(); fd.append("file", f);
+                try {
+                  const r = await axios.post(`${API}/production-plan/import`, fd, {
+                    headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
+                  });
+                  toast.success(`${r.data.created} yeni + ${r.data.updated} güncelleme`);
+                  if (r.data.errors?.length) toast.warning(`${r.data.errors.length} hata — konsolu kontrol edin`);
+                  console.log("Import errors:", r.data.errors);
+                  await load();
+                } catch (err) { toast.error("Import hatası: " + (err?.response?.data?.detail || err.message)); }
+                e.target.value = "";
+              }} />
+          </label>
           <button onClick={addRow} className="inline-flex items-center gap-1 bg-black text-white px-3 py-1.5 rounded text-sm" data-testid="pp-add">
             <Plus size={14} /> Satır Ekle
           </button>

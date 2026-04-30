@@ -83,6 +83,67 @@ async def login(
         }
     }
 
+@router.post("/convert-guest-order")
+async def convert_guest_order(payload: dict):
+    """Checkout sonrası guest sipariş veren kullanıcı için hızlı hesap oluşturma.
+    payload: {order_id: str, password: str}
+    Sipariş bilgilerinden email + first_name + last_name otomatik alınır.
+    Eğer email'de mevcut kullanıcı varsa hesap oluşturulmaz, sadece sipariş bağlanır.
+    """
+    order_id = (payload or {}).get("order_id", "").strip()
+    password = (payload or {}).get("password", "")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id gerekli")
+    if not password or len(password) < 6:
+        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+
+    order = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    if order.get("user_id"):
+        raise HTTPException(status_code=400, detail="Bu sipariş zaten bir hesaba bağlı")
+
+    addr = order.get("shipping_address") or {}
+    email = (addr.get("email") or order.get("email") or "").lower().strip()
+    first_name = addr.get("first_name") or addr.get("full_name", "").split(" ")[0] or ""
+    last_name = addr.get("last_name") or ""
+    phone = addr.get("phone") or order.get("phone") or ""
+    if not email:
+        raise HTTPException(status_code=400, detail="Sipariş e-postası bulunamadı")
+
+    existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+    if existing:
+        # Var olan hesaba bağla
+        user_id = existing["id"]
+        await db.orders.update_one({"id": order["id"]}, {"$set": {"user_id": user_id}})
+        from .deps import create_token as _ct
+        token = _ct(user_id, is_admin=False)
+        return {"token": token, "existing_account": True, "message": "Sipariş mevcut hesabınıza bağlandı"}
+
+    # Yeni hesap oluştur
+    user = {
+        "id": generate_id(),
+        "email": email,
+        "password": hash_password(password),
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone": phone,
+        "role": "customer",
+        "is_active": True,
+        "source": "checkout_guest_convert",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(user)
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"user_id": user["id"]}})
+
+    from .deps import create_token as _ct
+    token = _ct(user["id"], is_admin=False)
+    user.pop("_id", None)
+    user.pop("password", None)
+    return {"token": token, "user": user, "existing_account": False, "message": "Hesabınız oluşturuldu ve sipariş bağlandı"}
+
+
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Get current user info"""
