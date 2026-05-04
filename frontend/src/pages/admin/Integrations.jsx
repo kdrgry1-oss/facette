@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Store, CreditCard, Truck, MessageSquare, FileText, RefreshCw, Check, X, AlertCircle, Upload, Download, Package, Database, ShoppingBag } from "lucide-react";
+import { Store, CreditCard, Truck, MessageSquare, FileText, RefreshCw, Check, X, AlertCircle, Upload, Download, Package, Database, ShoppingBag, Users } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -371,16 +371,16 @@ export default function Integrations() {
 
   const handleTicimaxImportOrders = async () => {
     setTicimaxImportingOrders(true);
-    toast.info("Siparişler çekiliyor...");
+    toast.info("Site siparişleri çekiliyor (pazaryeri hariç)...");
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/orders/import?limit=200`, null, {
+      const res = await axios.post(`${API}/integrations/ticimax/orders/import?days=365&limit=200&pages=5&exclude_marketplace=true&only_with_phone=true`, null, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 180000
+        timeout: 240000
       });
       if (res.data.success) {
         toast.success(res.data.message || `${res.data.total} sipariş aktarıldı`);
-        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString() }));
+        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString(), orders_last_sync: new Date().toISOString() }));
       } else {
         toast.error("Sipariş aktarımı başarısız");
       }
@@ -388,6 +388,30 @@ export default function Integrations() {
       toast.error(err.response?.data?.detail || "Ticimax sipariş hatası");
     } finally {
       setTicimaxImportingOrders(false);
+    }
+  };
+
+  // Ticimax üye importu
+  const [ticimaxImportingMembers, setTicimaxImportingMembers] = useState(false);
+  const handleTicimaxImportMembers = async () => {
+    setTicimaxImportingMembers(true);
+    toast.info("Ticimax üyeleri çekiliyor (telefonlu, aktif)...");
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/integrations/ticimax/members/import?page_size=100&max_pages=50&only_with_phone=true&only_active=true&fetch_addresses=false`, null, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 600000
+      });
+      if (res.data.success) {
+        toast.success(res.data.message || `${res.data.total} üye aktarıldı`);
+        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString(), members_last_sync: new Date().toISOString() }));
+      } else {
+        toast.error("Üye aktarımı başarısız");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Ticimax üye hatası");
+    } finally {
+      setTicimaxImportingMembers(false);
     }
   };
 
@@ -794,12 +818,25 @@ export default function Integrations() {
               <button
                 onClick={handleTicimaxImportOrders}
                 disabled={ticimaxImportingOrders}
+                data-testid="ticimax-import-orders-btn"
                 className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-600 disabled:opacity-50 transition-colors"
               >
                 {ticimaxImportingOrders ? <RefreshCw size={14} className="animate-spin" /> : <ShoppingBag size={14} />}
-                {ticimaxImportingOrders ? "Siparişler Yükleniyor..." : "Siparişleri Aktar (Son 20 Gün)"}
+                {ticimaxImportingOrders ? "Siparişler Yükleniyor..." : "Siparişleri Aktar (Site, Son 365 Gün)"}
+              </button>
+              <button
+                onClick={handleTicimaxImportMembers}
+                disabled={ticimaxImportingMembers}
+                data-testid="ticimax-import-members-btn"
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+              >
+                {ticimaxImportingMembers ? <RefreshCw size={14} className="animate-spin" /> : <Users size={14} />}
+                {ticimaxImportingMembers ? "Üyeler Yükleniyor..." : "Üyeleri Aktar (Telefonlu)"}
               </button>
             </div>
+            <p className="text-xs text-gray-500 mt-3 px-1">
+              <strong>Not:</strong> Sipariş aktarımı yalnızca <em>siteden</em> verilen ve telefon numarası bulunan siparişleri çeker. Trendyol/Hepsiburada/N11/AliExpress siparişleri otomatik olarak hariç tutulur.
+            </p>
           </div>
         </div>
       </div>

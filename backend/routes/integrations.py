@@ -1298,13 +1298,15 @@ async def get_ticimax_status():
     """Check Ticimax connection status"""
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
     domain = settings.get("domain", "www.facette.com.tr")
-    api_key = settings.get("api_key", "HANXFWINXLDBY0WH47WMB6QKTE20T5")
+    api_key = settings.get("api_key", "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V")
     return {
         "configured": True,
         "domain": domain,
         "mode": "live",
         "api_key_set": bool(api_key),
-        "last_sync": settings.get("last_sync")
+        "last_sync": settings.get("last_sync"),
+        "members_last_sync": settings.get("members_last_sync"),
+        "orders_last_sync": settings.get("orders_last_sync"),
     }
 
 @router.post("/ticimax/settings")
@@ -1317,7 +1319,7 @@ async def save_ticimax_settings(
         {"id": "ticimax"},
         {"$set": {
             "domain": settings.get("domain", "www.facette.com.tr"),
-            "api_key": settings.get("api_key", "HANXFWINXLDBY0WH47WMB6QKTE20T5"),
+            "api_key": settings.get("api_key", "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }},
         upsert=True
@@ -1716,40 +1718,61 @@ async def import_ticimax_products(
 async def import_ticimax_orders(
     limit: int = Query(200, ge=1, le=2000),
     days: int = Query(20, ge=1, le=365, description="Son kaç günün siparişleri çekilsin"),
+    exclude_marketplace: bool = Query(True, description="Pazaryeri (Trendyol/HB/N11/AliExpress/Temu) siparişlerini hariç tut"),
+    only_with_phone: bool = Query(True, description="Sadece telefon numarası olan siparişleri çek"),
+    pages: int = Query(1, ge=1, le=20, description="Kaç sayfa çekilecek"),
     current_user: dict = Depends(require_admin)
 ):
-    """Fetch orders from Ticimax (last N days) and upsert into local MongoDB."""
+    """Fetch orders from Ticimax (last N days) and upsert into local MongoDB.
+    
+    Varsayılan: Sadece site siparişleri (pazaryeri hariç) ve telefon numarası olan müşteriler.
+    """
     import sys, os
     from datetime import timedelta
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import get_orders as tc_get_orders, get_order_items
 
-    # Tarih aralığı hesapla (MongoDB filtreleme için)
+    # WS kodu DB'den al
+    settings = await db.settings.find_one({"id": "ticimax"}) or {}
+    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+
+    # Tarih aralığı
     end_dt   = datetime.now(timezone.utc)
     start_dt = end_dt - timedelta(days=days)
     start_date_str = start_dt.strftime("%d.%m.%Y")
     end_date_str   = end_dt.strftime("%d.%m.%Y")
-    logger.info(f"Ticimax sipariş import: son {days} gün ({start_date_str} - {end_date_str})")
+    logger.info(f"Ticimax sipariş import: son {days} gün, {pages} sayfa, exclude_mp={exclude_marketplace}, only_phone={only_with_phone}")
 
-    # Önce tarih filtresiyle dene, hata gelirse filtresiz çek
-    try:
-        orders_raw = tc_get_orders(
-            page=1,
-            page_size=limit,
-            start_date=start_date_str,
-            end_date=end_date_str,
-        )
-        logger.info(f"Tarihli çekim başarılı: {len(orders_raw)} sipariş")
-    except Exception as e:
-        logger.warning(f"Tarih filtreli çekim başarısız ({e}), filtresiz deneniyor...")
+    # Sayfa sayfa çek
+    orders_raw = []
+    for page_no in range(1, pages + 1):
         try:
-            orders_raw = tc_get_orders(page=1, page_size=limit)
-            logger.info(f"Filtresiz çekim başarılı: {len(orders_raw)} sipariş")
-        except Exception as e2:
-            raise HTTPException(status_code=502, detail=f"Ticimax bağlantı hatası: {str(e2)}")
+            page_orders = tc_get_orders(
+                page=page_no,
+                page_size=limit,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                exclude_marketplace=exclude_marketplace,
+                only_with_phone=only_with_phone,
+                wscode=api_key,
+            )
+        except Exception as e:
+            logger.warning(f"Page {page_no} çekim başarısız: {e}")
+            await log_integration_event("ticimax", "import_orders", "order", str(page_no), "error", f"Sayfa çekilemedi: {e}")
+            break
+        if not page_orders:
+            break
+        orders_raw.extend(page_orders)
+        if len(page_orders) < limit:
+            break  # Son sayfa
+        import time as _t; _t.sleep(1)
+
+    logger.info(f"Ticimax: toplam {len(orders_raw)} site siparişi çekildi")
 
     imported = 0
     updated = 0
+    skipped_marketplace = 0
+    skipped_no_phone = 0
 
     for raw in orders_raw:
         if not raw:
@@ -1759,10 +1782,20 @@ async def import_ticimax_orders(
             continue
         ticimax_order_id = int(ticimax_order_id)
 
+        # Ek güvenlik: post-filter
+        if exclude_marketplace and (raw.get("IsMarketplace") or (raw.get("PazaryeriButikId") or 0) > 0):
+            skipped_marketplace += 1
+            continue
+
         # Real Ticimax order field names
         order_number = str(raw.get("SiparisNo") or raw.get("SiparisKodu") or raw.get("SiparisID") or ticimax_order_id)
-        total        = float(raw.get("ToplamTutar") or raw.get("GenelToplam") or raw.get("Tutar") or 0)
-        status_raw   = str(raw.get("SiparisDurumu") or raw.get("Durum") or "Yeni")
+        order_code   = str(raw.get("SiparisKodu") or "")
+        odenen       = float(raw.get("OdenenTutar") or 0)
+        kargo_tutari = float(raw.get("KargoTutari") or 0)
+        indirim      = float(raw.get("IndirimTutari") or 0)
+        kdv_tutari   = float(raw.get("KdvTutari") or 0)
+        total        = float(raw.get("ToplamTutar") or raw.get("GenelToplam") or odenen or 0)
+        status_raw   = str(raw.get("Durum") or raw.get("SiparisDurumu") or "Yeni")
         status_map   = {
             "Yeni": "pending", "Onaylandı": "confirmed", "Hazırlanıyor": "processing",
             "Kargoya Verildi": "shipped", "Teslim Edildi": "delivered",
@@ -1771,37 +1804,77 @@ async def import_ticimax_orders(
         status       = status_map.get(status_raw, "pending")
         created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
                            datetime.now(timezone.utc).isoformat())
+        ip_address   = str(raw.get("IPAdresi") or "")
+        kaynak       = str(raw.get("Kaynak") or "")
+        kargo_takip  = str(raw.get("KargoTakipNo") or "")
+        kargo_link   = str(raw.get("KargoTakipLink") or "")
+        kargo_firma  = str(raw.get("KargoFirmaTanim") or "")
+        fatura_no    = str(raw.get("FaturaNo") or "")
+        adi_soyadi   = str(raw.get("AdiSoyadi") or "")
+        email        = str(raw.get("Mail") or "")
+        uye_id       = raw.get("UyeID") or raw.get("UyeId") or 0
 
-        first_name   = str(raw.get("TeslimatAdi") or raw.get("FaturaAdi") or raw.get("Adi") or "")
-        last_name    = str(raw.get("TeslimatSoyadi") or raw.get("FaturaSoyadi") or raw.get("Soyadi") or "")
-        phone        = str(raw.get("TeslimatTelefon") or raw.get("Telefon") or raw.get("GSM") or "")
-        email        = str(raw.get("Email") or raw.get("EPosta") or raw.get("UyeEmail") or "")
-        address      = str(raw.get("TeslimatAdres") or raw.get("FaturaAdres") or raw.get("Adres") or "")
-        city         = str(raw.get("TeslimatIl") or raw.get("TeslimatSehir") or raw.get("Sehir") or "")
-        district     = str(raw.get("TeslimatIlce") or raw.get("Ilce") or "")
+        # Adres bilgileri (FaturaAdresi / KargoAdresi nested objects)
+        kargo_adresi = raw.get("KargoAdresi") or {}
+        if hasattr(kargo_adresi, "__values__"):
+            kargo_adresi = dict(kargo_adresi.__values__)
+        kargo_adresi = kargo_adresi if isinstance(kargo_adresi, dict) else {}
 
-        # Fetch line items
+        fatura_adresi = raw.get("FaturaAdresi") or {}
+        if hasattr(fatura_adresi, "__values__"):
+            fatura_adresi = dict(fatura_adresi.__values__)
+        fatura_adresi = fatura_adresi if isinstance(fatura_adresi, dict) else {}
+
+        first_name = str(kargo_adresi.get("AliciAdi") or fatura_adresi.get("AliciAdi") or adi_soyadi or "").split(" ")[0]
+        last_name_parts = (kargo_adresi.get("AliciAdi") or fatura_adresi.get("AliciAdi") or adi_soyadi or "").split(" ")
+        last_name = " ".join(last_name_parts[1:]) if len(last_name_parts) > 1 else ""
+        phone = str(raw.get("UyeTelefon") or kargo_adresi.get("AliciTelefon") or kargo_adresi.get("Telefon") or fatura_adresi.get("AliciTelefon") or "").strip()
+
+        if only_with_phone and not phone:
+            skipped_no_phone += 1
+            continue
+
+        address = str(kargo_adresi.get("Adres") or fatura_adresi.get("Adres") or "")
+        city = str(kargo_adresi.get("Sehir") or kargo_adresi.get("Il") or fatura_adresi.get("Sehir") or "")
+        district = str(kargo_adresi.get("Ilce") or fatura_adresi.get("Ilce") or "")
+        posta_kodu = str(kargo_adresi.get("PostaKodu") or fatura_adresi.get("PostaKodu") or "")
+
+        # Fetch line items (UrunGetir=True ile zaten gelmesi lazım, ama yine de fallback)
         items = []
-        try:
-            raw_items = get_order_items(ticimax_order_id)
-            for item in raw_items:
-                if not item:
-                    continue
-                items.append({
-                    "product_name": str(item.get("UrunAdi") or item.get("Adi") or ""),
-                    "stock_code":   str(item.get("StokKodu") or ""),
-                    "barcode":      str(item.get("Barkod") or ""),
-                    "quantity":     int(item.get("Adet") or item.get("Miktar") or 1),
-                    "price":        float(item.get("BirimFiyat") or item.get("Fiyat") or 0),
-                    "size":         str(item.get("Beden") or ""),
-                    "color":        str(item.get("Renk") or ""),
-                })
-        except Exception:
-            pass
+        urunler_raw = raw.get("UrunListesi") or raw.get("Urunler") or []
+        if hasattr(urunler_raw, "__values__"):
+            urunler_raw = list(urunler_raw.__values__.values())[0] if urunler_raw.__values__ else []
+        if not urunler_raw:
+            try:
+                urunler_raw = get_order_items(ticimax_order_id, wscode=api_key)
+            except Exception:
+                urunler_raw = []
+        if not isinstance(urunler_raw, list):
+            urunler_raw = [urunler_raw] if urunler_raw else []
+
+        for item in urunler_raw:
+            if not item:
+                continue
+            if hasattr(item, "__values__"):
+                item = dict(item.__values__)
+            if not isinstance(item, dict):
+                continue
+            items.append({
+                "product_name": str(item.get("UrunAdi") or item.get("Adi") or ""),
+                "stock_code":   str(item.get("StokKodu") or ""),
+                "barcode":      str(item.get("Barkod") or ""),
+                "quantity":     int(item.get("Adet") or item.get("Miktar") or 1),
+                "price":        float(item.get("BirimFiyat") or item.get("Fiyat") or 0),
+                "size":         str(item.get("Beden") or ""),
+                "color":        str(item.get("Renk") or ""),
+                "ticimax_urun_id": item.get("UrunID") or item.get("UrunKartiID"),
+            })
 
         doc = {
             "ticimax_order_id": ticimax_order_id,
+            "ticimax_uye_id": int(uye_id) if uye_id else None,
             "order_number": order_number,
+            "order_code": order_code,
             "items": items,
             "shipping_address": {
                 "first_name": first_name,
@@ -1811,15 +1884,35 @@ async def import_ticimax_orders(
                 "address": address,
                 "city": city,
                 "district": district,
+                "postal_code": posta_kodu,
             },
-            "subtotal": total,
-            "shipping_cost": 0,
+            "billing_address": {
+                "name": fatura_adresi.get("AliciAdi") or adi_soyadi,
+                "phone": fatura_adresi.get("AliciTelefon") or phone,
+                "address": fatura_adresi.get("Adres") or "",
+                "city": fatura_adresi.get("Sehir") or "",
+                "district": fatura_adresi.get("Ilce") or "",
+                "tax_no": fatura_adresi.get("VergiNo") or "",
+                "tax_office": fatura_adresi.get("VergiDairesi") or "",
+            },
+            "subtotal": total - kargo_tutari + indirim,
+            "shipping_cost": kargo_tutari,
+            "discount": indirim,
+            "tax": kdv_tutari,
             "total": total,
+            "paid_amount": odenen,
             "payment_method": "ticimax",
-            "payment_status": "paid",
+            "payment_status": "paid" if odenen >= total else "pending",
             "status": status,
             "platform": "ticimax",
             "source": "ticimax",
+            "channel_source": kaynak,  # Kaynak (web, mobile, etc.)
+            "ip_address": ip_address,
+            "is_marketplace": False,
+            "cargo_tracking_number": kargo_takip,
+            "cargo_tracking_link": kargo_link,
+            "cargo_provider_name": kargo_firma,
+            "invoice_number": fatura_no,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -1836,7 +1929,203 @@ async def import_ticimax_orders(
 
     await db.settings.update_one(
         {"id": "ticimax"},
-        {"$set": {"last_sync": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+            "orders_last_sync": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True
+    )
+
+    msg = f"{imported} yeni sipariş eklendi, {updated} sipariş güncellendi. {skipped_marketplace} pazaryeri siparişi atlandı, {skipped_no_phone} telefonsuz sipariş atlandı."
+    if not orders_raw:
+        msg = "Ticimax'tan sipariş gelmedi. WS yetki kodunuzun 'Sipariş Servisi' iznine sahip olduğundan emin olun."
+    return {
+        "success": True,
+        "imported": imported,
+        "updated": updated,
+        "total": imported + updated,
+        "skipped_marketplace": skipped_marketplace,
+        "skipped_no_phone": skipped_no_phone,
+        "message": msg
+    }
+
+
+@router.post("/ticimax/members/import")
+async def import_ticimax_members(
+    page_size: int = Query(100, ge=10, le=500),
+    max_pages: int = Query(50, ge=1, le=200, description="En fazla kaç sayfa çekilsin"),
+    only_with_phone: bool = Query(True, description="Sadece telefon numarası olan üyeleri çek"),
+    only_active: bool = Query(True, description="Sadece aktif üyeleri çek"),
+    fetch_addresses: bool = Query(False, description="Her üyenin adres bilgisini de çek (yavaştır)"),
+    current_user: dict = Depends(require_admin)
+):
+    """Ticimax üyelerini (UyeServis.SelectUyeler) çek ve `customers` koleksiyonuna kaydet.
+    
+    Aynı zamanda mevcut `users` koleksiyonunda mail veya telefon eşleşirse `ticimax_uye_id`
+    alanı set edilir (auth-side hesap bilgileri korunur).
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from ticimax_client import get_members, get_member_addresses
+
+    settings = await db.settings.find_one({"id": "ticimax"}) or {}
+    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+
+    imported = 0
+    updated = 0
+    linked_users = 0
+    page = 1
+    last_page_count = page_size
+
+    while page <= max_pages and last_page_count >= page_size:
+        try:
+            members = get_members(
+                page=page,
+                page_size=page_size,
+                only_active=only_active,
+                only_with_phone=only_with_phone,
+                wscode=api_key,
+            )
+        except Exception as e:
+            logger.error(f"Ticimax üye çekim hatası page={page}: {e}")
+            await log_integration_event("ticimax", "import_members", "member", str(page), "error", f"Sayfa çekilemedi: {e}")
+            raise HTTPException(status_code=502, detail=f"Ticimax bağlantı hatası: {e}")
+
+        last_page_count = len(members)
+        if not members:
+            break
+
+        for m in members:
+            if not m:
+                continue
+            uye_id = m.get("ID")
+            if not uye_id:
+                continue
+            uye_id = int(uye_id)
+
+            phone = (m.get("CepTelefonu") or m.get("Telefon") or "").strip()
+            mail = (m.get("Mail") or "").strip().lower()
+
+            # KVKK / İzin alanları
+            kvkk = bool(m.get("KVKKSozlesmeOnay"))
+            sms_izin = bool(m.get("SmsIzin"))
+            mail_izin = bool(m.get("MailIzin"))
+
+            # DateTime fields → ISO string
+            def _iso(v):
+                if not v:
+                    return None
+                if isinstance(v, str):
+                    return v
+                try:
+                    return v.isoformat()
+                except Exception:
+                    return str(v)
+
+            customer_doc = {
+                "ticimax_uye_id": uye_id,
+                "first_name": str(m.get("Isim") or "").strip(),
+                "last_name": str(m.get("Soyisim") or "").strip(),
+                "email": mail,
+                "phone": phone,
+                "musteri_kodu": str(m.get("MusteriKodu") or ""),
+                "il": str(m.get("Il") or ""),
+                "ilce": str(m.get("Ilce") or ""),
+                "il_id": int(m.get("IlID") or 0),
+                "ilce_id": int(m.get("IlceID") or 0),
+                "dogum_tarihi": _iso(m.get("DogumTarihi")),
+                "cinsiyet_id": int(m.get("CinsiyetID") or 0),
+                "meslek": str(m.get("Meslek") or ""),
+                "uyelik_tarihi": _iso(m.get("UyelikTarihi")),
+                "son_giris_tarihi": _iso(m.get("SonGirisTarihi")),
+                "son_giris_ip": str(m.get("SonGirisIp") or ""),
+                "para_puan": int(m.get("ParaPuan") or 0),
+                "kredi_limiti": float(m.get("KrediLimiti") or 0),
+                "kvkk_onay": kvkk,
+                "uyelik_sozlesme_onay": bool(m.get("UyelikSozlesmeOnay")),
+                "sms_izin": sms_izin,
+                "mail_izin": mail_izin,
+                "uye_turu": str(m.get("UyeTuru") or ""),
+                "uye_turu_id": int(m.get("UyeTuruID") or 0),
+                "uyelik_tipi": str(m.get("UyelikTipi") or ""),
+                "uyelik_tipi_id": int(m.get("UyelikTipiID") or 0),
+                "uyelik_kaynagi": int(m.get("UyelikKaynagi") or 0),
+                "aktif": bool(m.get("Aktif")),
+                "onay": bool(m.get("Onay")),
+                "source": "ticimax",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Adres bilgisi
+            if fetch_addresses:
+                try:
+                    adrs = get_member_addresses(uye_id, wscode=api_key)
+                    addresses = []
+                    for a in adrs:
+                        if not a:
+                            continue
+                        if hasattr(a, "__values__"):
+                            a = dict(a.__values__)
+                        if not isinstance(a, dict):
+                            continue
+                        addresses.append({
+                            "id": int(a.get("ID") or 0),
+                            "tanim": str(a.get("Tanim") or ""),
+                            "alici_adi": str(a.get("AliciAdi") or ""),
+                            "alici_telefon": str(a.get("AliciTelefon") or ""),
+                            "adres": str(a.get("Adres") or ""),
+                            "sehir": str(a.get("Sehir") or ""),
+                            "ilce": str(a.get("Ilce") or ""),
+                            "ulke": str(a.get("Ulke") or "Türkiye"),
+                            "posta_kodu": str(a.get("PostaKodu") or ""),
+                            "vergi_no": str(a.get("VergiNo") or ""),
+                            "vergi_dairesi": str(a.get("VergiDairesi") or ""),
+                            "is_kurumsal": bool(a.get("IsKurumsal")),
+                            "aktif": bool(a.get("Aktif")),
+                        })
+                    customer_doc["addresses"] = addresses
+                except Exception as ae:
+                    logger.warning(f"Üye adres çekilemedi (UyeID={uye_id}): {ae}")
+
+            existing = await db.customers.find_one({"ticimax_uye_id": uye_id})
+            if existing:
+                await db.customers.update_one({"ticimax_uye_id": uye_id}, {"$set": customer_doc})
+                updated += 1
+            else:
+                customer_doc["id"] = generate_id()
+                customer_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                await db.customers.insert_one(customer_doc)
+                imported += 1
+
+            # users koleksiyonu ile eşleşme (mail veya telefon)
+            if mail or phone:
+                or_clauses = []
+                if mail:
+                    or_clauses.append({"email": mail})
+                if phone:
+                    or_clauses.append({"phone": phone})
+                if or_clauses:
+                    user = await db.users.find_one({"$or": or_clauses})
+                    if user:
+                        await db.users.update_one(
+                            {"id": user["id"]},
+                            {"$set": {
+                                "ticimax_uye_id": uye_id,
+                                "ticimax_synced_at": datetime.now(timezone.utc).isoformat(),
+                            }}
+                        )
+                        linked_users += 1
+
+        page += 1
+        # Rate limit
+        import time as _t; _t.sleep(0.5)
+
+    await db.settings.update_one(
+        {"id": "ticimax"},
+        {"$set": {
+            "last_sync": datetime.now(timezone.utc).isoformat(),
+            "members_last_sync": datetime.now(timezone.utc).isoformat(),
+        }},
         upsert=True
     )
 
@@ -1845,8 +2134,34 @@ async def import_ticimax_orders(
         "imported": imported,
         "updated": updated,
         "total": imported + updated,
-        "message": f"{imported} yeni sipariş eklendi, {updated} sipariş güncellendi"
+        "linked_users": linked_users,
+        "pages_fetched": page - 1,
+        "message": f"{imported} yeni üye, {updated} güncellendi. {linked_users} mevcut hesap Ticimax üyesiyle eşleşti."
     }
+
+
+@router.get("/ticimax/members")
+async def list_ticimax_customers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=500),
+    search: Optional[str] = None,
+    current_user: dict = Depends(require_admin)
+):
+    """Yerel `customers` koleksiyonundaki Ticimax üyelerini listele."""
+    query = {"source": "ticimax"}
+    if search:
+        s = search.strip()
+        query["$or"] = [
+            {"first_name": {"$regex": s, "$options": "i"}},
+            {"last_name": {"$regex": s, "$options": "i"}},
+            {"email": {"$regex": s, "$options": "i"}},
+            {"phone": {"$regex": s, "$options": "i"}},
+            {"musteri_kodu": {"$regex": s, "$options": "i"}},
+        ]
+    total = await db.customers.count_documents(query)
+    cursor = db.customers.find(query, {"_id": 0}).sort("uyelik_tarihi", -1).skip(skip).limit(limit)
+    items = await cursor.to_list(length=limit)
+    return {"total": total, "items": items, "skip": skip, "limit": limit}
 
 
 # ==================== XML FEED IMPORT ====================

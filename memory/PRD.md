@@ -553,3 +553,33 @@ Kullanıcı şikayetleri: (1) Ürün sayfasında birden fazla ürün seçince si
 - `handleBulkDeleteProducts` → appConfirm `danger` ile "{N} ürün silinsin mi?" → DELETE loop → başarı/fail sayacı toast + liste refresh.
 
 
+
+## [2026-05-04] Ticimax Üye Senkronizasyonu + Site-Only Sipariş Filtresi
+
+Kullanıcı isteği: "ticimax kaynaklı tüm siparişleri tüm detayların kadar çek. hangi müşteriler hangi üyelik bilgileriyle sisteme üye olduysa onları da sistemme kaydet. bu ws yetki kodundan SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V üyeler ve siparişlerin çekilme durumlarını araştır. ancak pazaryerlerinden gelen siparişleri çekme trendyol hepsiburada n11 aliexpress gibi. sadece siteden sipariş veren telefon nosu olan insanların verdiği siparişleri çek"
+
+### Yapılanlar
+- `ticimax_client.py`: 
+  - Yeni varsayılan WS kodu: `SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V` (DB ayarından override edilebilir).
+  - **UyeServis** (member service) entegrasyonu eklendi: `get_members(page, page_size, only_active, only_with_phone)`, `get_member_addresses(uye_id)`, `find_member_by_phone_or_email(...)`.
+  - `get_orders()` artık `exclude_marketplace=True` (PazaryeriIhracat=0) ve `only_with_phone=True` parametreleri destekliyor; `IsMarketplace`, `Kaynak`, `PazaryeriButikId` alanlarına göre post-filter ile Trendyol/HB/N11/AliExpress/Temu/Pazarama/Çiçeksepeti/Amazon/PTTAVM siparişleri kesin elenir.
+- `routes/integrations.py`:
+  - Yeni endpoint: `POST /api/integrations/ticimax/members/import?page_size=&max_pages=&only_with_phone=&only_active=&fetch_addresses=` → 91 üye başarıyla çekildi (Hatice Zeybek, Fatma Nur, Ebru Yaren vb. gerçek müşteri verisi). KVKK onayı, SMS/Mail izinleri, üyelik tarihi, son giriş IP'si, doğum tarihi, il/ilçe, üye kodu, para puan, kredi limiti dahil tüm alanlar `customers` koleksiyonuna kaydediliyor; mail veya telefon eşleşmesinde mevcut `users` hesapları `ticimax_uye_id` ile bağlanıyor.
+  - Yeni endpoint: `GET /api/integrations/ticimax/members?skip=&limit=&search=` → kayıtlı Ticimax müşterilerinin listesi.
+  - Mevcut `POST /api/integrations/ticimax/orders/import` → artık `exclude_marketplace`, `only_with_phone`, `pages`, `days` query parametreleri ile çalışıyor; UrunGetir/OdemeGetir/KampanyaGetir flag'leri açık (tek API çağrısında tüm detay), satır kalemleri + IP + kargo takip + fatura no + indirim/KDV detayları kaydediliyor.
+  - Marketplace siparişleri sayılarak atlanır (`skipped_marketplace`); telefon yoksa atlanır (`skipped_no_phone`).
+- `frontend/src/pages/admin/Integrations.jsx`:
+  - Ticimax kartına "Üyeleri Aktar (Telefonlu)" mor butonu (Users ikonu) ve "Siparişleri Aktar (Site, Son 365 Gün)" buton metni güncellemesi.
+  - Açıklayıcı not: "Sipariş aktarımı yalnızca siteden verilen ve telefon numarası bulunan siparişleri çeker. Trendyol/Hepsiburada/N11/AliExpress siparişleri otomatik olarak hariç tutulur."
+
+### WS Yetki Kodu Araştırma Sonucu
+- `SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V` testlerinden çıkan sonuç:
+  - ✅ **UyeServis** (üyeler): ÇALIŞIYOR — 475+ üye erişimi var (sayfa sayfa pull edildi, 91 telefonlu aktif üye DB'ye yazıldı).
+  - ❌ **SiparisServis** (siparişler): API boş response (`<SelectSiparisResult/>`) dönüyor. Bu WS kodu ya `Sipariş Servisi` iznine sahip değil ya da Tedarikçi-scope’lu bir izin (eski key `HANXFW...` "Tedarikçiye bağlı siparişler bulunamadı" hatası veriyor).
+  - ❌ **UrunServis** (ürünler): `SelectUrunCount=0` → bu key ürün servisi iznine de sahip değil.
+- Sonuç: **Sipariş çekme akışı kodda hazır** (filtreler, tüm detay alanları, paging) ama **kullanıcının Ticimax panelinden 'Sipariş Web Servisi' yetkisi olan bir WS kodu** sağlaması gerekiyor (Ticimax → Yönetim → Web Servis Yetkileri → Yeni yetki ekle → "Sipariş Servisi" işaretli).
+
+### Test
+- Backend `/api/integrations/ticimax/members/import?page_size=100&max_pages=2` → `imported: 91, total: 91, message: "91 yeni üye, 0 güncellendi"` ✅
+- Backend `/api/integrations/ticimax/members?limit=5` → real customer data (Konya, İstanbul vs.) ✅
+- Backend `/api/integrations/ticimax/orders/import?days=365&pages=2` → 0 (beklenen, WS izni yok) — kullanıcıya net mesaj.

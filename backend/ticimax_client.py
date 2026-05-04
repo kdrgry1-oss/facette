@@ -1,20 +1,18 @@
 """
 Ticimax SOAP Web Service Client  –  facette.com.tr
-API Key : HANXFWINXLDBY0WH47WMB6QKTE20T5
+Default WS Key (UyeKodu): SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V (override via DB settings)
 
 Gerçek WSDL imzaları (doğrulanmış):
   SelectKategori  : UyeKodu, kategoriID=0, dil='tr', parentID
-    → parentID=0 → kök kategoriler, parentID=X → X'in alt kategorileri
-    → Dönen alanlar: ID, PID, Tanim, Aktif, AltKategoriSayisi, Sira, Url,
-                     Icerik, Kod, KategoriMenuGoster, SeoAnahtarKelime,
-                     SeoSayfaAciklama, SeoSayfaBaslik, PaylasimAyar
-  SelectUrun      : UyeKodu, f:UrunFiltre (Aktif=1|None,KategoriID,...), s:UrunSayfalama (BaslangicIndex, KayitSayisi, KayitSayisinaGoreGetir)
+  SelectUrun      : UyeKodu, f:UrunFiltre, s:UrunSayfalama
   SelectUrunCount : UyeKodu, f:UrunFiltre
-  SelectVaryasyon : UyeKodu, f:VaryasyonFiltre (UrunKartiID), s:UrunSayfalama, varyasyonAyar:SelectVaryasyonAyar
-  SelectUrunResim : UyeKodu, request:UrunResimListeleRequest (UrunKartiId)
+  SelectVaryasyon : UyeKodu, f:VaryasyonFiltre, s:UrunSayfalama, varyasyonAyar
+  SelectUrunResim : UyeKodu, request
   SelectAsortiMiktar: UyeKodu, asortiMiktarId
-  SelectSiparis   : UyeKodu, f:WebSiparisFiltre, s:WebSiparisSayfalama (BaslangicIndex, KayitSayisi, SiralamaDegeri, SiralamaYonu)
+  SelectSiparis   : UyeKodu, f:WebSiparisFiltre, s:WebSiparisSayfalama
   SelectSiparisUrun: UyeKodu, siparisId, iptalEdilmisUrunler
+  SelectUyeler    : UyeKodu, f:UyeFiltre, s:UyeSayfalama
+  SelectUyeAdres  : UyeKodu, uyeID
 """
 import logging, warnings, time
 from typing import List, Dict, Optional, Any
@@ -23,14 +21,16 @@ warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 
 TICIMAX_DOMAIN  = "www.facette.com.tr"
-TICIMAX_API_KEY = "HANXFWINXLDBY0WH47WMB6QKTE20T5"
+TICIMAX_API_KEY = "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
 RATE_LIMIT_SLEEP = 13   # Ticimax rate limit: 12 sn, biz 13 sn bekliyoruz
 
 URUN_WSDL    = f"https://{TICIMAX_DOMAIN}/Servis/UrunServis.svc?wsdl"
 SIPARIS_WSDL = f"https://{TICIMAX_DOMAIN}/Servis/SiparisServis.svc?wsdl"
+UYE_WSDL     = f"https://{TICIMAX_DOMAIN}/Servis/UyeServis.svc?wsdl"
 
 _urun_client_cache = None
 _siparis_client_cache = None
+_uye_client_cache = None
 
 
 def _urun_client():
@@ -57,6 +57,19 @@ def _siparis_client():
             transport=Transport(timeout=90, operation_timeout=180),
         )
     return _siparis_client_cache
+
+
+def _uye_client():
+    global _uye_client_cache
+    if _uye_client_cache is None:
+        from zeep import Client, Settings
+        from zeep.transports import Transport
+        _uye_client_cache = Client(
+            UYE_WSDL,
+            settings=Settings(strict=False, xml_huge_tree=True),
+            transport=Transport(timeout=90, operation_timeout=180),
+        )
+    return _uye_client_cache
 
 
 def _to_dict(obj) -> Any:
@@ -267,20 +280,37 @@ def get_assorted_stock(asorti_grup_id: int, wscode: str = TICIMAX_API_KEY) -> Li
 def get_orders(page: int = 1, page_size: int = 50,
                wscode: str = TICIMAX_API_KEY,
                start_date: Optional[str] = None,
-               end_date: Optional[str] = None) -> List[Dict]:
+               end_date: Optional[str] = None,
+               exclude_marketplace: bool = True,
+               only_with_phone: bool = True) -> List[Dict]:
     """SelectSiparis(UyeKodu, f:WebSiparisFiltre, s:WebSiparisSayfalama)
     
     Doğru WSDL alan adları (doğrulandı):
       SiparisTarihiBas, SiparisTarihiSon  → dateTime formatı (YYYY-MM-DDTHH:MM:SS)
+      PazaryeriIhracat, IsMarketplace     → marketplace exclusion
+      UrunGetir=True                      → satır kalemlerini de getir
+      OdemeGetir=True                     → ödeme detaylarını da getir
+      KampanyaGetir=True                  → kampanya detaylarını da getir
+    
+    exclude_marketplace=True ise, IsMarketplace=True olan siparişler ve
+    Trendyol/HB/N11/AliExpress kaynaklı siparişler çekilmez (sadece site siparişleri).
+    only_with_phone=True ise telefon numarası boş olan siparişler atlanır.
     """
     c = _siparis_client()
     try:
         ff = c.get_type("ns2:WebSiparisFiltre")
         sf = c.get_type("ns2:WebSiparisSayfalama")
 
-        fkw = {}
+        fkw = {
+            "UrunGetir": True,
+            "OdemeGetir": True,
+            "KampanyaGetir": True,
+            "IptalEdilmisUrunler": False,
+        }
+        if exclude_marketplace:
+            # PazaryeriIhracat: 0 = site siparişleri, 1 = pazaryeri (Int field)
+            fkw["PazaryeriIhracat"] = 0
         if start_date:
-            # "DD.MM.YYYY" → "YYYY-MM-DDTHH:MM:SS" formatına çevir
             try:
                 from datetime import datetime as _dt
                 if "." in start_date:
@@ -306,8 +336,48 @@ def get_orders(page: int = 1, page_size: int = 50,
 
         result = c.service.SelectSiparis(UyeKodu=wscode, f=f, s=s)
         orders = _unwrap_list(result)
-        logger.info(f"SelectSiparis page={page} → {len(orders)} orders")
-        return orders
+
+        # Post-filter: pazaryeri kaynaklı tüm siparişleri kesin ele
+        marketplace_keywords = ("trendyol", "hepsiburada", "n11", "aliexpress",
+                                "amazon", "ciceksepeti", "pttavm", "temu",
+                                "pazarama", "gittigidiyor", "epttavm")
+        filtered = []
+        for o in orders:
+            if not o:
+                continue
+            is_mp = bool(o.get("IsMarketplace") or o.get("PazaryeriIhracat"))
+            kaynak = str(o.get("Kaynak") or "").lower()
+            kaynak_id = o.get("SiparisKaynagi") or 0
+            mp_butik = o.get("PazaryeriButikId") or 0
+            if exclude_marketplace:
+                if is_mp:
+                    continue
+                if any(kw in kaynak for kw in marketplace_keywords):
+                    continue
+                if mp_butik and int(mp_butik) > 0:
+                    continue
+            if only_with_phone:
+                phone = (o.get("UyeTelefon") or "")
+                # Telefon adres içinde olabilir, daha geniş kontrol için adres alanlarına bakalım
+                if not phone:
+                    kargo_adresi = o.get("KargoAdresi") or {}
+                    if hasattr(kargo_adresi, "__values__"):
+                        kargo_adresi = dict(kargo_adresi.__values__)
+                    if isinstance(kargo_adresi, dict):
+                        phone = (kargo_adresi.get("Telefon") or kargo_adresi.get("CepTelefonu") or "")
+                if not phone:
+                    fatura = o.get("FaturaAdresi") or {}
+                    if hasattr(fatura, "__values__"):
+                        fatura = dict(fatura.__values__)
+                    if isinstance(fatura, dict):
+                        phone = (fatura.get("Telefon") or fatura.get("CepTelefonu") or "")
+                phone = str(phone or "").strip()
+                if not phone:
+                    continue
+            filtered.append(o)
+
+        logger.info(f"SelectSiparis page={page} → {len(orders)} raw, {len(filtered)} after filter (exclude_mp={exclude_marketplace}, only_phone={only_with_phone})")
+        return filtered
     except Exception as e:
         logger.error(f"SelectSiparis: {e}")
         raise
@@ -323,3 +393,83 @@ def get_order_items(siparis_id: int, wscode: str = TICIMAX_API_KEY) -> List[Dict
     except Exception as e:
         logger.error(f"SelectSiparisUrun({siparis_id}): {e}")
         return []
+
+
+# ═══════════════ MEMBERS (ÜYE) ════════════════════════════════
+# Ticimax UyeServis: SelectUyeler, SelectUyeAdres, SelectUyeIdByMailOrTel
+# Üye fields: ID, Isim, Soyisim, Mail, CepTelefonu, Telefon, IlID, IlceID,
+#             Il, Ilce, DogumTarihi, CinsiyetID, UyelikTarihi, SonGirisTarihi,
+#             SonGirisIp, ParaPuan, KrediLimiti, MailIzin, SmsIzin,
+#             KVKKSozlesmeOnay, UyelikSozlesmeOnay, MusteriKodu,
+#             UyeTuru, UyeTuruID, UyelikTipi, UyelikTipiID, UyelikKaynagi,
+#             Aktif, Onay, Meslek, OgrenimDurumu
+
+
+def get_members(page: int = 1, page_size: int = 100,
+                wscode: str = TICIMAX_API_KEY,
+                only_active: bool = True,
+                only_with_phone: bool = True) -> List[Dict]:
+    """SelectUyeler(UyeKodu, f:UyeFiltre, s:UyeSayfalama)
+    
+    UyeFiltre.Aktif: 1 = aktif, 0 = pasif, None = hepsi
+    UyeSayfalama: KayitSayisi, SayfaNo (1-based), SiralamaDegeri, SiralamaYonu
+    
+    only_with_phone=True ise CepTelefonu/Telefon boş olan üyeler atlanır.
+    """
+    c = _uye_client()
+    try:
+        ff = c.get_type("ns2:UyeFiltre")
+        sf = c.get_type("ns2:UyeSayfalama")
+
+        fkw = {}
+        if only_active:
+            fkw["Aktif"] = 1
+        f = ff(**fkw)
+        s = sf(KayitSayisi=page_size, SayfaNo=page,
+               SiralamaDegeri="UyelikTarihi", SiralamaYonu="DESC")
+
+        result = c.service.SelectUyeler(UyeKodu=wscode, filtre=f, sayfalama=s)
+        members = _unwrap_list(result)
+
+        if only_with_phone:
+            filtered = []
+            for m in members:
+                if not m:
+                    continue
+                phone = (m.get("CepTelefonu") or m.get("Telefon") or "").strip()
+                if not phone:
+                    continue
+                filtered.append(m)
+            members = filtered
+
+        logger.info(f"SelectUyeler page={page} → {len(members)} members")
+        return members
+    except Exception as e:
+        logger.error(f"SelectUyeler: {e}")
+        raise
+
+
+def get_member_addresses(uye_id: int, wscode: str = TICIMAX_API_KEY) -> List[Dict]:
+    """SelectUyeAdres(UyeKodu, adresId, uyeId)"""
+    c = _uye_client()
+    try:
+        result = c.service.SelectUyeAdres(UyeKodu=wscode, adresId=0, uyeId=uye_id)
+        return _unwrap_list(result)
+    except Exception as e:
+        logger.error(f"SelectUyeAdres({uye_id}): {e}")
+        return []
+
+
+def find_member_by_phone_or_email(phone_or_email: str,
+                                  wscode: str = TICIMAX_API_KEY) -> Optional[int]:
+    """SelectUyeIdByMailOrTel(UyeKodu, mailOrTel) → returns UyeID or None"""
+    c = _uye_client()
+    try:
+        result = c.service.SelectUyeIdByMailOrTel(
+            UyeKodu=wscode, mailOrTel=phone_or_email)
+        if result:
+            return int(result)
+        return None
+    except Exception as e:
+        logger.error(f"SelectUyeIdByMailOrTel({phone_or_email}): {e}")
+        return None
