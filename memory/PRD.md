@@ -583,3 +583,51 @@ Kullanıcı isteği: "ticimax kaynaklı tüm siparişleri tüm detayların kadar
 - Backend `/api/integrations/ticimax/members/import?page_size=100&max_pages=2` → `imported: 91, total: 91, message: "91 yeni üye, 0 güncellendi"` ✅
 - Backend `/api/integrations/ticimax/members?limit=5` → real customer data (Konya, İstanbul vs.) ✅
 - Backend `/api/integrations/ticimax/orders/import?days=365&pages=2` → 0 (beklenen, WS izni yok) — kullanıcıya net mesaj.
+
+## [2026-05-05] MNG Kargo Canlı Barkod Entegrasyonu (P0 - Tamamlandı)
+
+Kullanıcı isteği: "bir de bi sipariş oluşturdum ama mng kargo barkodu oluşmadı: başka bir sistemde entegrasyonun aktif olması için gereken kullanıcı adı ve şifre bilgilerimi sana ilettim aynıları ile senin de mng kargo için barkod oluşturman lazım"
+
+### Tespit
+- Frontend `Orders.jsx` `/api/orders/{id}/cargo-barcode?cargo_company=MNG` ve `/api/orders/{id}/create-mng-shipment` endpoint'lerini çağırıyordu ama backend'de bu endpoint'ler **YOKTU** — bu yüzden barkod oluşmuyordu (404 veya silent fail).
+
+### Yapılanlar
+- Yeni `mng_kargo_client.py`: MNG Kargo (DHL eCommerce) SOAP entegrasyonu
+  - `Baglanti_Test()` → bağlantı testi
+  - `SiparisGirisiDetayliV3(...)` → sipariş kaydı (status code "1" döner)
+  - `FaturaSiparisListesi(pSiparisNo)` → MNG_SIPARIS_NO (gerçek 10 haneli barkod) çekme
+  - `KargoTakipByReferans(...)` → siparis no ile takip
+  - `TekBarkodGonderiIptali(...)` → iptal
+  - WSDL: `https://service.mngkargo.com.tr/musterikargosiparis/musterikargosiparis.asmx?WSDL`
+- `routes/orders.py` yeni endpoint'ler:
+  - `POST /api/orders/{id}/cargo-barcode?cargo_company=MNG` → canlı MNG barkod oluşturur, order'a tracking number + tracking link yazar, `cargo_logs` tablosuna log atar.
+  - `POST /api/orders/{id}/create-mng-shipment` → kısayol (yukarıdakini çağırır).
+  - `POST /api/orders/bulk/cargo-barcode` → toplu barkod (frontend mevcut buton).
+  - `GET /api/orders/{id}/cargo-label` → 100mm × 150mm yazdırılabilir HTML kargo etiketi.
+  - `GET / POST /api/orders/cargo/mng-settings` → MNG Kargo credentials yönetimi (password maskelenir).
+  - `POST /api/orders/cargo/mng-test` → bağlantı testi.
+
+### MNG İş Akışı (Anlaşılan ve Implement Edilen)
+1. `SiparisGirisiDetayliV3` çağrılır → MNG `1` (sadece success status) döner.
+2. Hemen ardından `FaturaSiparisListesi(pSiparisNo)` çağrılır → response içinde `MNG_SIPARIS_NO` (örn. `1757391335`) gelir → bu gerçek kargo barkodu.
+3. Order MongoDB'ye `cargo_tracking_number=1757391335` ve `cargo_tracking_link=https://kargotakip.mngkargo.com.tr/?BarkodNo=1757391335` yazılır.
+
+### Doğrulanan Hata Mesajları (MNG WSDL)
+- `pKargoParcaList` formatı: `"Kg:Desi:En:Boy:Yukseklik:;..."` (default `1:1:20:30:15:;`)
+- `pLuOdemeSekli`: sadece `P` (Peşin/Gönderici), `U` (Ücretli/Alıcı), `PL` (Kapıda+Peşin) kabul edilir
+- `pGonderiHizmetSekli`: sadece `NORMAL` | `ONCELIKLI` | `GUNICI` | `AKSAM_TESLIMAT`
+- `pPlatformKisaAdi` ve `pPlatformSatisKodu`: ya ikisi de boş, ya ikisi dolu olmalı (boş = kendi sitemiz). Doluysa: `N11`/`GG`/`TRND`.
+
+### Test
+- `POST /api/orders/cargo/mng-test` → `{ok: true, result: "1"}` ✅ (Baglanti_Test başarılı)
+- `POST /api/orders/cargo/mng-settings` → ayarlar kaydedildi ✅
+- `POST /api/orders/{order_id}/cargo-barcode?cargo_company=MNG` → **Gerçek MNG barkodu üretildi: 1757391335** ✅
+  - DB'de order güncellendi (cargo_tracking_number, cargo_tracking_link, cargo_provider_name="MNG Kargo")
+  - `cargo_logs` tablosuna log atıldı
+
+### Default Credentials (DB'ye kaydedildi)
+- Customer Code: `FACETTE DIŞ TİC.A.Ş.`
+- Username: `490059279`
+- Password: `Face.0024E`
+- Vergi No: `6080712084`
+

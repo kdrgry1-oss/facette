@@ -765,3 +765,340 @@ async def print_invoice_html(order_id: str, token: str = None):
 </body></html>
 """
     return HTMLResponse(content=html)
+
+
+
+# ==================== KARGO BARKOD / MNG SHIPMENT ====================
+
+def _normalize_phone(p: str) -> str:
+    if not p:
+        return ""
+    digits = "".join(ch for ch in str(p) if ch.isdigit())
+    # Türkiye: 90XXXXXXXXXX (12) → 5XXXXXXXXX (10) format, MNG cep formatı tercih eder
+    if digits.startswith("90") and len(digits) == 12:
+        return digits[2:]
+    if digits.startswith("0") and len(digits) == 11:
+        return digits[1:]
+    return digits
+
+
+async def _get_mng_settings() -> dict:
+    """MNG Kargo ayarlarını DB'den çeker, yoksa kullanıcı tarafından verilen default'u döndürür."""
+    s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
+    return {
+        "username": s.get("username") or "490059279",
+        "password": s.get("password") or "Face.0024E",
+        "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
+        "tax_no": s.get("tax_no") or "6080712084",
+        "is_active": s.get("is_active", True),
+    }
+
+
+async def _get_sender_info() -> dict:
+    """Mağaza/Gönderici bilgilerini DB'den çeker (settings.id=store_info veya mng_kargo)."""
+    store = await db.settings.find_one({"id": "store_info"}, {"_id": 0}) or {}
+    return {
+        "name": store.get("sender_name") or "FACETTE",
+        "phone": _normalize_phone(store.get("sender_phone") or "5550000000"),
+        "address": store.get("sender_address") or "",
+        "city": store.get("sender_city") or "İstanbul",
+        "district": store.get("sender_district") or "",
+    }
+
+
+@router.post("/{order_id}/cargo-barcode")
+async def create_cargo_barcode(
+    order_id: str,
+    cargo_company: str = Query("MNG"),
+    current_user: dict = Depends(require_admin)
+):
+    """Aktif kargo firmasında barkod / takip numarası oluşturur ve sipariş üzerine yazar.
+    Şu an MNG Kargo entegrasyonu canlı; diğer firmalar için manuel takip no input'u gerekir.
+    """
+    company = (cargo_company or "MNG").upper()
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    # Eğer mevcut barkod varsa direkt dön
+    if order.get("cargo_tracking_number"):
+        return {
+            "success": True,
+            "tracking_number": order["cargo_tracking_number"],
+            "cargo_provider_name": order.get("cargo_provider_name") or company,
+            "message": "Sipariş zaten kargo barkoduna sahip",
+        }
+
+    if company != "MNG":
+        # Diğer firmalar için sahte/placeholder takip no üret (henüz canlı entegrasyon yok)
+        import random
+        tracking = f"{company}-{int(time.time())}{random.randint(100,999)}"
+        await db.orders.update_one(
+            {"id": order_id},
+            {"$set": {
+                "cargo_tracking_number": tracking,
+                "cargo_provider_name": company,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
+        return {
+            "success": True,
+            "tracking_number": tracking,
+            "cargo_provider_name": company,
+            "message": f"{company} için manuel takip no atandı (canlı API entegrasyonu yok)",
+        }
+
+    # ===== MNG KARGO CANLI =====
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from mng_kargo_client import create_shipment as mng_create
+
+    settings = await _get_mng_settings()
+    if not settings["is_active"]:
+        raise HTTPException(status_code=400, detail="MNG Kargo entegrasyonu pasif. Lütfen Ayarlar > Kargo bölümünden aktif edin.")
+
+    # Sipariş üzerinden teslim adresini al
+    ship = order.get("shipping_address") or {}
+    full_name = (
+        f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+        or ship.get("name")
+        or "Alıcı"
+    )
+    phone = _normalize_phone(ship.get("phone"))
+    if not phone:
+        raise HTTPException(status_code=400, detail="Alıcı telefonu eksik. MNG barkodu oluşturulamaz.")
+    il = (ship.get("city") or "").strip()
+    ilce = (ship.get("district") or "").strip()
+    adres = (ship.get("address") or "").strip()
+    if not (il and adres):
+        raise HTTPException(status_code=400, detail="Alıcı il ve adresi eksik. MNG barkodu oluşturulamaz.")
+
+    # İçerik: ürün isimleri (ilk 250 karakter)
+    items = order.get("items") or []
+    icerik = "; ".join([f"{it.get('quantity',1)}x {it.get('product_name','')}".strip() for it in items])[:250] or "Ürün"
+    kiymet = float(order.get("total") or order.get("subtotal") or 0)
+
+    # Sipariş numarası (MNG için unique olmalı, varsa siparişin order_number'ı)
+    siparis_no = str(order.get("order_number") or order.get("id") or order_id)
+
+    # Kapıda ödeme?
+    payment_method = (order.get("payment_method") or "").lower()
+    kapida = 1 if payment_method in ("cash_on_delivery", "kapida") else 0
+    odeme_sekli = "U" if kapida else "P"  # P=Peşin (Gönderici Öder), U=Ücretli (Alıcı Öder)
+
+    res = mng_create(
+        username=settings["username"],
+        password=settings["password"],
+        siparis_no=siparis_no,
+        irsaliye_no=str(order.get("invoice_number") or "")[:20],
+        kiymet=kiymet,
+        icerik=icerik,
+        hizmet_sekli="NORMAL",  # NORMAL | ONCELIKLI | GUNICI | AKSAM_TESLIMAT
+        teslim_sekli=1,
+        al_sms=0,
+        gn_sms=1 if phone else 0,
+        # MNG format: "Kg:Desi:En:Boy:Yukseklik:;" (her paket ; ile ayrılır)
+        # Varsayılan: 1 paket, 1kg, 1 desi, 20x30x15cm
+        parca_list="1:1:20:30:15:;",
+        alici_ad=full_name,
+        odeme_sekli=odeme_sekli,
+        adres_farkli="0",
+        il=il,
+        ilce=ilce,
+        adres=adres,
+        tel_cep=phone,
+        email=ship.get("email") or order.get("user_email") or "",
+        kapida_odeme=kapida,
+        platform_adi="",  # Pazaryeri değil — boş geç (N11/GG/TRND aksi takdirde)
+        platform_kodu="",
+    )
+
+    if not res.get("ok"):
+        # MNG hatasını orderhist log et
+        await db.cargo_logs.insert_one({
+            "id": generate_id(),
+            "order_id": order_id,
+            "provider": "MNG",
+            "action": "create_shipment",
+            "status": "error",
+            "request_summary": {"siparis_no": siparis_no, "alici_ad": full_name, "il": il, "ilce": ilce},
+            "error": res.get("hata"),
+            "raw": str(res.get("raw"))[:1000] if res.get("raw") else None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
+
+    barkod = res["barkod"]
+    track_link = f"https://kargotakip.mngkargo.com.tr/?BarkodNo={barkod}"
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "cargo_tracking_number": barkod,
+            "cargo_tracking_link": track_link,
+            "cargo_provider_name": "MNG Kargo",
+            "cargo_provider_code": "MNG",
+            "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    await db.cargo_logs.insert_one({
+        "id": generate_id(),
+        "order_id": order_id,
+        "provider": "MNG",
+        "action": "create_shipment",
+        "status": "success",
+        "tracking_number": barkod,
+        "request_summary": {"siparis_no": siparis_no, "alici_ad": full_name, "il": il, "ilce": ilce},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {
+        "success": True,
+        "tracking_number": barkod,
+        "tracking_link": track_link,
+        "cargo_provider_name": "MNG Kargo",
+        "message": f"MNG Kargo barkodu oluşturuldu: {barkod}",
+    }
+
+
+@router.post("/{order_id}/create-mng-shipment")
+async def create_mng_shipment(order_id: str, current_user: dict = Depends(require_admin)):
+    """MNG Kargo'ya sipariş gönder ve barkod al (kısayol)."""
+    return await create_cargo_barcode(order_id=order_id, cargo_company="MNG", current_user=current_user)
+
+
+@router.post("/bulk/cargo-barcode")
+async def bulk_create_cargo_barcode(
+    order_ids: List[str],
+    cargo_company: str = Query("MNG"),
+    current_user: dict = Depends(require_admin)
+):
+    """Birden çok sipariş için topluca kargo barkodu oluştur."""
+    success = []
+    errors = []
+    for oid in order_ids or []:
+        try:
+            r = await create_cargo_barcode(order_id=oid, cargo_company=cargo_company, current_user=current_user)
+            success.append({"order_id": oid, "tracking_number": r.get("tracking_number")})
+        except HTTPException as he:
+            errors.append({"order_id": oid, "error": he.detail})
+        except Exception as e:
+            errors.append({"order_id": oid, "error": str(e)})
+    return {
+        "success": True,
+        "success_count": len(success),
+        "error_count": len(errors),
+        "successes": success,
+        "errors": errors,
+    }
+
+
+@router.get("/{order_id}/cargo-label")
+async def get_cargo_label(order_id: str, current_user: dict = Depends(require_admin)):
+    """Sipariş için 10x15cm yazdırılabilir kargo etiketi (HTML)."""
+    from fastapi.responses import HTMLResponse
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    barkod = order.get("cargo_tracking_number") or "Yok"
+    sender = await _get_sender_info()
+    ship = order.get("shipping_address") or {}
+    receiver_name = f"{ship.get('first_name','')} {ship.get('last_name','')}".strip() or "Alıcı"
+    receiver_phone = ship.get("phone") or ""
+    receiver_addr = f"{ship.get('address','')}, {ship.get('district','')}/{ship.get('city','')}".strip(", ")
+    siparis_no = order.get("order_number") or order_id
+    items = order.get("items") or []
+    icerik = ", ".join([f"{it.get('quantity',1)}x {it.get('product_name','')[:25]}" for it in items])[:200]
+
+    html = f"""<!DOCTYPE html>
+<html lang="tr"><head><meta charset="utf-8"><title>Kargo Etiketi - {siparis_no}</title>
+<style>
+  @page {{ size: 100mm 150mm; margin: 0; }}
+  body {{ margin: 0; font-family: Arial, sans-serif; width: 100mm; height: 150mm; }}
+  .label {{ box-sizing: border-box; padding: 4mm; border: 1px solid #000; height: 100%; }}
+  .row {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2mm; }}
+  .barcode {{ text-align:center; font-family: 'Libre Barcode 39', 'Courier New', monospace; font-size: 28pt; letter-spacing: 1px; margin: 2mm 0; }}
+  .small {{ font-size: 7pt; color: #444; }}
+  .section {{ border-top: 1px dashed #555; padding-top: 1.5mm; margin-top: 1.5mm; font-size: 9pt; }}
+  .section h4 {{ margin: 0 0 1mm 0; font-size: 8pt; color:#555; text-transform: uppercase; }}
+  .strong {{ font-weight: 700; font-size: 10pt; }}
+  .total {{ background:#000; color:#fff; padding:1mm 2mm; }}
+</style></head><body>
+<div class="label">
+  <div class="row">
+    <div class="strong">MNG Kargo</div>
+    <div class="small">Sipariş: {siparis_no}</div>
+  </div>
+  <div class="barcode">*{barkod}*</div>
+  <div style="text-align:center;font-size:9pt;margin-top:-1mm;">{barkod}</div>
+  <div class="section">
+    <h4>Gönderici</h4>
+    <div class="strong">{sender['name']}</div>
+    <div>{sender['address']} {sender['district']}/{sender['city']}</div>
+    <div class="small">Tel: {sender['phone']}</div>
+  </div>
+  <div class="section">
+    <h4>Alıcı</h4>
+    <div class="strong">{receiver_name}</div>
+    <div>{receiver_addr}</div>
+    <div class="small">Tel: {receiver_phone}</div>
+  </div>
+  <div class="section">
+    <h4>Kargo Detayı</h4>
+    <div class="small">İçerik: {icerik or '-'}</div>
+    <div class="small">Adet: 1 paket / {sum((it.get('quantity') or 1) for it in items)} ürün</div>
+  </div>
+  <div class="row total">
+    <div>Toplam</div>
+    <div class="strong">{float(order.get('total') or 0):.2f} ₺</div>
+  </div>
+  <div class="barcode" style="font-size:22pt;">*{barkod}*</div>
+</div>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
+# ==================== MNG KARGO AYARLARI ====================
+# Bu ayarları integrations.py altındaki generic /{marketplace}/settings de yönetebilir,
+# ancak özelleştirilmiş alanlar için ayrı endpoint sağlıyoruz.
+
+@router.get("/cargo/mng-settings")
+async def get_mng_settings(current_user: dict = Depends(require_admin)):
+    """MNG Kargo ayarlarını döndür (şifre maskelenir)."""
+    s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
+    return {
+        "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
+        "username": s.get("username") or "490059279",
+        "password": "********" if s.get("password") else "",
+        "tax_no": s.get("tax_no") or "6080712084",
+        "is_active": s.get("is_active", True),
+        "barkod_cikti_turu": s.get("barkod_cikti_turu") or "Standart",
+        "musteri_kodu_goster": s.get("musteri_kodu_goster", False),
+    }
+
+
+@router.post("/cargo/mng-settings")
+async def save_mng_settings(payload: dict, current_user: dict = Depends(require_admin)):
+    """MNG Kargo ayarlarını kaydet."""
+    update = {
+        "customer_code": payload.get("customer_code", "FACETTE DIŞ TİC.A.Ş."),
+        "username": payload.get("username", ""),
+        "tax_no": payload.get("tax_no", ""),
+        "is_active": bool(payload.get("is_active", True)),
+        "barkod_cikti_turu": payload.get("barkod_cikti_turu", "Standart"),
+        "musteri_kodu_goster": bool(payload.get("musteri_kodu_goster", False)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if payload.get("password") and payload.get("password") != "********":
+        update["password"] = payload.get("password")
+    await db.settings.update_one({"id": "mng_kargo"}, {"$set": update}, upsert=True)
+    return {"success": True, "message": "MNG Kargo ayarları kaydedildi"}
+
+
+@router.post("/cargo/mng-test")
+async def test_mng_connection(current_user: dict = Depends(require_admin)):
+    """MNG Kargo bağlantı testi (Baglanti_Test)."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from mng_kargo_client import baglanti_test
+    return baglanti_test()
