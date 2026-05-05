@@ -68,6 +68,15 @@ export default function Checkout() {
   const [quickPassword, setQuickPassword] = useState("");
   const [quickBusy, setQuickBusy] = useState(false);
 
+  // KURUMSAL FATURA
+  const [corporateInvoice, setCorporateInvoice] = useState(false);
+  const [corporateData, setCorporateData] = useState({
+    company_name: "",
+    tax_office: "",
+    tax_number: "",  // VKN (10) veya TCKN (11)
+    eInvoice_user: false,  // E-Fatura mükellefi mi
+  });
+
   // Load saved addresses for logged-in users
   useEffect(() => {
     if (!user) return;
