@@ -77,6 +77,19 @@ async def get_orders(
         "pages": (total + limit - 1) // limit
     }
 
+@router.get("/by-number/{order_number}")
+async def get_order_by_number(order_number: str):
+    """Sipariş numarasıyla siparişi getir (public — ödeme sonrası başarı sayfası için).
+    Hassas veriler (payment_id, admin_notes vs.) hariç tutulur."""
+    order = await db.orders.find_one(
+        {"order_number": order_number},
+        {"_id": 0, "admin_notes": 0, "payment_id": 0, "user_id": 0, "customer_ip": 0, "user_agent": 0}
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    return order
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,
@@ -125,6 +138,14 @@ async def create_order(
         "items": order_data.get("items", []),
         "shipping_address": order_data.get("shipping_address", {}),
         "billing_address": order_data.get("billing_address") or order_data.get("shipping_address", {}),
+        # Kurumsal fatura bilgileri (B2B müşteriler için)
+        "billing_info": {
+            "is_corporate": bool((order_data.get("billing_info") or {}).get("is_corporate", False)),
+            "company_name": ((order_data.get("billing_info") or {}).get("company_name") or "").strip(),
+            "tax_office": ((order_data.get("billing_info") or {}).get("tax_office") or "").strip(),
+            "tax_number": ((order_data.get("billing_info") or {}).get("tax_number") or "").strip(),
+            "e_invoice_user": bool((order_data.get("billing_info") or {}).get("e_invoice_user", False)),
+        } if order_data.get("billing_info") else {"is_corporate": False},
         "subtotal": float(order_data.get("subtotal", 0)),
         "shipping_cost": float(order_data.get("shipping_cost", 0)),
         "discount": float(order_data.get("discount", 0)),
@@ -157,6 +178,75 @@ async def create_order(
 
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
+
+    # FAZ — Sipariş onayı bildirimi (SMS + Email + WhatsApp) — fire-and-forget
+    import asyncio as _asyncio
+    async def _notify_order_created():
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+
+            ship = order.get("shipping_address") or {}
+            full_name = (
+                f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                or ship.get("full_name") or ship.get("name") or "Müşterimiz"
+            )
+            # Sipariş kalemlerini email için HTML satırlarına çevir
+            items = order.get("items") or []
+            items_rows = ""
+            for it in items[:20]:
+                img = it.get("image") or ""
+                name = it.get("name") or it.get("product_name") or "Ürün"
+                qty = it.get("quantity", 1)
+                price = it.get("price", 0)
+                size = it.get("size", "")
+                color = it.get("color", "")
+                meta = " · ".join([f"Beden: {size}" if size else "", f"Renk: {color}" if color else "", f"Adet: {qty}"]).strip(" · ")
+                items_rows += (
+                    f'<tr><td style="padding:12px 0;border-bottom:1px solid #f0f0f0;width:80px;">'
+                    f'<img src="{img}" alt="" style="width:64px;height:80px;object-fit:cover;background:#fafafa;"/></td>'
+                    f'<td style="padding:12px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#111;">{name}'
+                    f'<div style="color:#999;font-size:11px;margin-top:4px;">{meta}</div></td>'
+                    f'<td style="padding:12px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-size:13px;color:#111;white-space:nowrap;">{(price*qty):.2f} TL</td></tr>'
+                )
+            items_html = (
+                '<div style="padding:0 24px 16px;"><table cellpadding="0" cellspacing="0" border="0" style="width:100%;">'
+                f'{items_rows}</table></div>'
+            ) if items_rows else ""
+
+            base_url = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
+            order_link = f"{base_url}/order-success/{order['order_number']}" if base_url else "#"
+            order_date = order["created_at"][:10]
+
+            variables = {
+                "customer_name": full_name,
+                "first_name": ship.get("first_name", "") or full_name.split(" ")[0],
+                "order_number": order["order_number"],
+                "order_date": order_date,
+                "amount": f"{order['total']:.2f} TL",
+                "subtotal": f"{order['subtotal']:.2f}",
+                "shipping_cost": f"{order['shipping_cost']:.2f}",
+                "discount": f"{order['discount']:.2f}",
+                "total": f"{order['total']:.2f}",
+                "items_html": items_html,
+                "shipping_full_name": full_name,
+                "shipping_address": ship.get("address", ""),
+                "shipping_city": ship.get("city", ""),
+                "shipping_district": ship.get("district", ""),
+                "shipping_phone": ship.get("phone", ""),
+                "order_link": order_link,
+            }
+            await send_notification(
+                db, "order_confirmed",
+                to_phone=ship.get("phone") or order.get("phone"),
+                to_email=ship.get("email") or order.get("email"),
+                variables=variables,
+            )
+        except Exception as e:
+            logger.warning(f"order_confirmed notification dispatch failed: {e}")
+
+    _asyncio.create_task(_notify_order_created())
 
     # FAZ 1 - C1: otomatik stok düşümü
     try:
@@ -1016,6 +1106,29 @@ async def create_cargo_barcode(
 
     barkod = res["barkod"]  # MNG_SIPARIS_NO (MNG Self Barkod) — gerçek kargo takip kodu
     
+    # MNGGonderiBarkod denemesi → NZ-formatlı kargo barkodu (kurumsal hesaplarda anında dolar).
+    # Yetki hatası alırsa graceful fallback: MNG_SIPARIS_NO kullanılır.
+    nz_barkod = ""
+    nz_gonderi_no = ""
+    try:
+        from mng_kargo_client import get_mng_barcode_immediately
+        kapida = (order.get("payment_method") or "").lower() in ("cash_on_delivery", "kapida")
+        nz_res = get_mng_barcode_immediately(
+            username=settings["username"], password=settings["password"],
+            siparis_no=siparis_no,
+            irsaliye_no=str(order.get("invoice_number") or "")[:20],
+            urun_bedeli=kiymet,
+            kapida_tahsilat=kapida,
+        )
+        if nz_res.get("ok"):
+            nz_barkod = nz_res.get("barkod", "")
+            nz_gonderi_no = nz_res.get("gonderi_no", "")
+            logger.info(f"MNG NZ barkod alındı: {nz_barkod} (gonderi_no={nz_gonderi_no})")
+        else:
+            logger.info(f"MNGGonderiBarkod denenemedi/başarısız (graceful fallback): {nz_res.get('hata')}")
+    except Exception as nz_err:
+        logger.warning(f"MNGGonderiBarkod exception (fallback to siparis_no): {nz_err}")
+
     # FaturaSiparisListesi'nden ek kargo durumu çek (şube, kargo statu, varsa GONDERI_NO)
     from mng_kargo_client import get_mng_shipment_status
     status_info = get_mng_shipment_status(
@@ -1028,7 +1141,8 @@ async def create_cargo_barcode(
 
     # Self Barkod hesapları için: MNG_SIPARIS_NO zaten gerçek kargo takip kodudur
     # NZ-formatlı havuz tahsis edilen kurumsal hesaplarda GONDERI_NO field'ında ayrı bir kod gelir
-    public_tracking = gonderi_no_status or barkod
+    # Öncelik: NZ (anında MNGGonderiBarkod) → GONDERI_NO (FaturaSiparisListesi sonradan dolu) → MNG_SIPARIS_NO
+    public_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or barkod
     track_link = kargo_takip_url or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
     update_doc = {
         "cargo_tracking_number": public_tracking,
@@ -1042,7 +1156,9 @@ async def create_cargo_barcode(
             "tracking_link": track_link,
             "label_format": "10x15cm",
             "mng_siparis_no": barkod,                      # MNG Self Barkod (her zaman dolu)
-            "mng_gonderi_no": gonderi_no_status,           # NZ formatlı (sadece kurumsal havuzlu hesaplar)
+            "mng_gonderi_no": gonderi_no_status,           # NZ formatlı (FaturaSiparisListesi sonrası)
+            "mng_nz_barkod": nz_barkod,                    # NZ formatlı (MNGGonderiBarkod anında, varsa)
+            "mng_nz_gonderi_no": nz_gonderi_no,
             "mng_kargo_statu": kargo_statu,
             "mng_kargo_statu_aciklama": kargo_statu_aciklama,
             "cikis_subesi": status_info.get("cikis_subesi"),
@@ -1208,8 +1324,9 @@ async def get_cargo_label(order_id: str, token: str = None):
     cargo_obj = order.get("cargo") or {}
     mng_siparis_no = cargo_obj.get("mng_siparis_no") or ""
     mng_gonderi_no = cargo_obj.get("mng_gonderi_no") or ""
-    # Etikette gösterilecek "asıl" kargo takip — GONDERI_NO varsa o, yoksa MNG_SIPARIS_NO, yoksa current barkod
-    real_kargo_takip = mng_gonderi_no or mng_siparis_no or barkod or ""
+    mng_nz_barkod = cargo_obj.get("mng_nz_barkod") or ""
+    # Etikette gösterilecek "asıl" kargo takip — NZ varsa (anında MNGGonderiBarkod) → GONDERI_NO → MNG_SIPARIS_NO
+    real_kargo_takip = mng_nz_barkod or mng_gonderi_no or mng_siparis_no or barkod or ""
     siparis_no = str(order.get("order_number") or order_id)
     sender = await _get_sender_info()
     mng = await _get_mng_settings()

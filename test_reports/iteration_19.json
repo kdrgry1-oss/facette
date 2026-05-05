@@ -1,0 +1,62 @@
+{
+  "summary": "Iteration 19 — covered (1) POST /api/orders billing_info corporate/non-corporate persistence, (2) GET /api/orders/by-number/{n} public endpoint, (3) POST /api/notifications/templates/seed?force=true rich HTML body for order_confirmed (>2000 chars), (4) fire-and-forget order_confirmed notification log, (5) MNG cargo schema fields (mng_nz_barkod / mng_siparis_no / mng_gonderi_no), (6) /order-success/:orderNumber UI render incl. corporate billing block, (7) /odeme corporate-invoice toggle + 4 input fields + VKN/TCKN digit-only & 11-char truncation. Backend 7/8 pass (1 skipped — see notes). Frontend: both pages render correctly with all data-testid hooks intact.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/orders (generate_order_number)",
+        "issue": "order_number generator uses `f\"FC{int(time.time())}\"` (defined in /app/backend/routes/orders.py:15-16 and /app/backend/routes/deps.py:100-103). Two orders created within the same second receive IDENTICAL order_numbers. Reproduced: two back-to-back POSTs returned FC1777945008 / FC1777945008. Consequence: GET /api/orders/by-number/{n} returns the FIRST matching document (so the second order's billing_info is hidden behind the first); the order_confirmed email contains the wrong order link; admin lookup is ambiguous. This is a production-impacting collision that becomes likely under any minor traffic burst.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/notifications/templates/seed (manually_edited preservation)",
+        "issue": "Could not exercise the manually_edited=true preservation branch end-to-end because no admin endpoint to flip a single template's manually_edited flag was located (the test was skipped). The seed_templates code path in /app/backend/routes/notifications.py:289-303 reads manually_edited=true correctly, but recommend exposing PUT /api/notifications/templates/{id} that accepts manually_edited so this branch is testable from outside."
+      },
+      {
+        "endpoint": "GET /api/orders/by-number/{n}",
+        "issue": "Endpoint is intentionally public, but the projection currently still returns full `shipping_address` (incl. phone/email/address) and `billing_info` to anyone who guesses an order_number. Order numbers are sequential timestamps (`FC<unix_seconds>`) so are highly enumerable. Recommend: (a) require either auth or short signed token (?t=...) for non-trivial fields, or (b) randomize the order_number with a non-monotonic suffix (also fixes the duplicate bug above)."
+      },
+      {
+        "endpoint": "POST /api/orders (cargo schema)",
+        "issue": "MNG cargo NZ-barkod attempt itself was not exercised because no shippable order with MNG settings exists in the preview DB; MNG schema check passed indirectly by inspecting an existing shipped order. Real NZ-barkod path (with FACETTE creds) should be smoke-tested in a staging env that has MNG settings saved."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/odeme (Checkout)", "issues": ["React warning in console: 'Cannot update a component (BrowserRouter) while rendering a different component (Checkout)'. Likely a navigate()/setState call inside Checkout's render path. Not user-visible but should be migrated into a useEffect."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration19_order_success.py",
+    "/app/test_reports/pytest/iteration19.xml"
+  ],
+  "action_items": [
+    "FIX (CRITICAL): make generate_order_number() collision-resistant — e.g. f\"FC{int(time.time())}{secrets.token_hex(2).upper()}\" or use a Mongo counter / uuid suffix. Affected files: /app/backend/routes/orders.py:15-16 and /app/backend/routes/deps.py:100-103.",
+    "Consider locking GET /api/orders/by-number/{n} behind a short signed token, or stripping shipping_address/email/billing_info from the public response.",
+    "Move setState/navigate side-effects out of Checkout render into useEffect to silence the React warning seen in /odeme console.",
+    "(Optional) Expose admin update endpoint that lets QA/admin set manually_edited=true on a template so the seed force=true preservation path is verifiable end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/orders.py:142-148 — billing_info construction is correct: dict-or-default branch normalizes is_corporate and trims string fields. Verified persistence for both true/false cases.",
+    "/app/backend/routes/orders.py:80-90 — get_order_by_number drops _id/admin_notes/payment_id/user_id/customer_ip/user_agent. Sensible projection. But still leaks ship address+billing_info to public — see minor issue above.",
+    "/app/backend/routes/orders.py:182-249 — fire-and-forget notification uses asyncio.create_task with broad try/except. Verified an order_confirmed entry appears in /api/notifications/logs within ~1-3s of POST /api/orders.",
+    "/app/backend/routes/orders.py:1109-1130 — MNGGonderiBarkod NZ attempt is wrapped in try/except and logs at info/warning level on failure; siparis_no fallback flows through to public_tracking. Graceful fallback verified by static read of cargo schema in DB.",
+    "/app/backend/routes/notifications.py:265-315 — seed_templates: force=false → skip existing (correct); force=true → respects manually_edited=true (correct); rich HTML body for order_confirmed verified > 2000 chars after force seed.",
+    "/app/frontend/src/pages/OrderSuccess.jsx — clean fetch-by-orderNumber with token-optional Authorization header; handles loading and 404 paths. data-testid hooks (order-success-page/title/number, view-orders-btn, continue-shopping-btn) all present and rendered. Corporate billing block correctly gated by `order?.billing_info?.is_corporate`.",
+    "/app/frontend/src/pages/Checkout.jsx — corporate-invoice-checkbox toggles corporate-invoice-fields container; tax_number input enforces digit-only + 11-char cap (verified — typed 'abc12345678901xyz' → '12345678901'); validateAddresses requires company_name/tax_office and rejects non-(10 or 11)-digit tax numbers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration19_order_success.py"
+  ],
+  "success_rate": {"backend": "100% (7 passed / 1 intentionally skipped)", "frontend": "100% (OrderSuccess + Checkout corporate flows render & interact)"},
+  "test_credentials": "admin@facette.com / admin123 (POST /api/auth/login?email=...&password=...) — used for seed/templates/logs only.",
+  "seed_data_creation": "Created 4 TEST_ orders during run (FC* numbers; non-corp + corp variants). They remain in db.orders with TEST_ prefix on names/emails/companies. notification_templates were re-seeded via force=true (zero net effect on already-rich templates). No template manually_edited flag was toggled.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Backend test file backend/tests/test_iteration19_order_success.py has 1.5s sleeps between order POSTs as a workaround for the FC{int(time.time())} duplicate bug — once main agent fixes generate_order_number to be collision-resistant, those sleeps can be removed. The manually_edited preservation test is auto-skipped if PUT /api/notifications/templates/{id} is unavailable; if that endpoint is added, the test will exercise it automatically.",
+  "rca of the issue": "Repro: requests.post('/api/orders', json={...}) twice in <1s → both responses contain the SAME order_number. GET /api/orders/by-number/<that_number> always returns the first document (find_one + insertion order). Root cause: /app/backend/routes/orders.py line 15-16 → return f'FC{int(time.time())}'. Mitigation: append a short random suffix (secrets.token_hex(2).upper()) or use an atomic Mongo counter; also de-duplicate by adding a unique index on order_number so a duplicate insert raises immediately."
+}

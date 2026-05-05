@@ -128,7 +128,7 @@ export default function Checkout() {
         clearCart();
         setPaymentStep("success");
         toast.success("Ödemeniz başarıyla tamamlandı!");
-        setTimeout(() => navigate(`/hesabim?order=${res.data.orderNumber}`), 2500);
+        setTimeout(() => navigate(`/order-success/${res.data.orderNumber}`), 1500);
       } else {
         setPaymentStep("error");
         toast.error(res.data.error || "Ödeme başarısız");
@@ -226,6 +226,12 @@ export default function Checkout() {
     const ok = (a) => a && a.first_name && a.last_name && a.phone && a.address && a.city && a.district;
     if (!ok(shippingAddress)) { toast.error("Lütfen teslimat adresi seçin / ekleyin"); return false; }
     if (!billingSameAsShipping && !ok(billingAddress)) { toast.error("Lütfen fatura adresi seçin / ekleyin"); return false; }
+    if (corporateInvoice) {
+      if (!corporateData.company_name?.trim()) { toast.error("Firma Ünvanı gereklidir"); return false; }
+      if (!corporateData.tax_office?.trim()) { toast.error("Vergi Dairesi gereklidir"); return false; }
+      const tn = (corporateData.tax_number || "").replace(/\D/g, "");
+      if (tn.length !== 10 && tn.length !== 11) { toast.error("VKN (10 hane) veya TCKN (11 hane) hatalı"); return false; }
+    }
     return true;
   };
 
@@ -245,6 +251,13 @@ export default function Checkout() {
         shipping_address: { ...shippingAddress, email: shippingAddress.email || user?.email || "" },
         billing_address: billingSameAsShipping ? { ...shippingAddress } : { ...billingAddress },
         billing_same_as_shipping: billingSameAsShipping,
+        billing_info: corporateInvoice ? {
+          is_corporate: true,
+          company_name: corporateData.company_name,
+          tax_office: corporateData.tax_office,
+          tax_number: corporateData.tax_number,
+          e_invoice_user: corporateData.eInvoice_user,
+        } : { is_corporate: false },
         subtotal: total,
         shipping_cost: shippingCost,
         discount, coupon_code: appliedCoupon?.code || "",
@@ -282,7 +295,7 @@ export default function Checkout() {
         clearCart();
         toast.success("Siparişiniz alındı!");
         if (!user) { setGuestOrderNumber(orderRes.data.order_number); setShowQuickSignup(true); }
-        else navigate(`/hesabim?order=${orderRes.data.order_number}`);
+        else navigate(`/order-success/${orderRes.data.order_number}`);
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
@@ -461,6 +474,56 @@ export default function Checkout() {
                     <span>Faturamı Aynı Adrese Gönder</span>
                   </label>
                 </div>
+              </div>
+
+              {/* 2.b) Kurumsal Fatura */}
+              <div className="bg-white rounded border" data-testid="corporate-invoice-block">
+                <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors">
+                  <input type="checkbox" checked={corporateInvoice}
+                    onChange={(e) => setCorporateInvoice(e.target.checked)}
+                    className="accent-orange-500" data-testid="corporate-invoice-checkbox" />
+                  <Building size={18} className="text-orange-500" />
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">Kurumsal Fatura İstiyorum</div>
+                    <div className="text-xs text-gray-500">Şirket adına fatura kesilecekse VKN ve vergi dairesi bilgilerinizi girin.</div>
+                  </div>
+                </label>
+                {corporateInvoice && (
+                  <div className="px-5 pb-5 border-t pt-4 space-y-3" data-testid="corporate-invoice-fields">
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-700 mb-1">Firma Ünvanı *</label>
+                        <input value={corporateData.company_name}
+                          onChange={(e) => setCorporateData({ ...corporateData, company_name: e.target.value })}
+                          placeholder="Örn. Facette Tekstil A.Ş."
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          data-testid="corp-company-name-input" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-700 mb-1">VKN / TCKN *</label>
+                        <input value={corporateData.tax_number}
+                          onChange={(e) => setCorporateData({ ...corporateData, tax_number: e.target.value.replace(/\D/g, "").slice(0, 11) })}
+                          placeholder="10 hane VKN veya 11 hane TCKN"
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          data-testid="corp-tax-number-input" />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs text-gray-700 mb-1">Vergi Dairesi *</label>
+                        <input value={corporateData.tax_office}
+                          onChange={(e) => setCorporateData({ ...corporateData, tax_office: e.target.value })}
+                          placeholder="Örn. Beşiktaş Vergi Dairesi"
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          data-testid="corp-tax-office-input" />
+                      </div>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={corporateData.eInvoice_user}
+                        onChange={(e) => setCorporateData({ ...corporateData, eInvoice_user: e.target.checked })}
+                        className="accent-orange-500" data-testid="corp-einvoice-user" />
+                      Şirketim e-Fatura mükellefidir (e-Fatura kesilsin)
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* 3) Ödeme Seçenekleri */}
@@ -735,7 +798,7 @@ export default function Checkout() {
                   localStorage.setItem("token", r.data.token);
                   toast.success(r.data.existing_account ? "Hesabınıza bağlandı" : "Hesap oluşturuldu!");
                   setShowQuickSignup(false);
-                  navigate(`/hesabim?order=${guestOrderNumber}`);
+                  navigate(`/order-success/${guestOrderNumber}`);
                 } catch (e) {
                   toast.error(e?.response?.data?.detail || "İşlem başarısız");
                 } finally { setQuickBusy(false); }
@@ -744,7 +807,7 @@ export default function Checkout() {
                 data-testid="quick-signup-create">
                 {quickBusy ? "Oluşturuluyor..." : "Hesap Oluştur"}
               </button>
-              <button onClick={() => { setShowQuickSignup(false); navigate(`/hesabim?order=${guestOrderNumber}`); }}
+              <button onClick={() => { setShowQuickSignup(false); navigate(`/order-success/${guestOrderNumber}`); }}
                 className="text-sm text-gray-500 hover:text-black px-3" data-testid="quick-signup-skip">
                 Şimdi değil
               </button>

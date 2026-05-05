@@ -169,30 +169,150 @@ _DEFAULT_TEMPLATES = {
 }
 
 
+# Zengin HTML e-posta şablonları (ZaraHome / Trendyol esinlenmiş minimal tasarım)
+_EMAIL_HTML_TEMPLATES = {
+    "order_confirmed": {
+        "subject": "Siparişin alındı · {order_number}",
+        "body": """
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#fafafa;padding:0;margin:0;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;">
+    <div style="text-align:center;padding:32px 24px 16px;border-bottom:1px solid #efefef;">
+      <h1 style="margin:0;font-size:22px;font-weight:300;letter-spacing:6px;color:#111;">FACETTE</h1>
+    </div>
+    <div style="padding:48px 24px 16px;text-align:center;">
+      <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:50%;background:#f7f3ee;margin-bottom:18px;">
+        <span style="font-size:28px;color:#b08968;">✓</span>
+      </div>
+      <h2 style="margin:0 0 8px;font-size:18px;font-weight:500;color:#111;letter-spacing:1px;">SİPARİŞİN ALINDI</h2>
+      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:8px 0 4px;">Sevgili {customer_name},</p>
+      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:0;">Siparişin için teşekkür ederiz. Hazırlanmaya başladığında seni bilgilendireceğiz.</p>
+    </div>
+    <div style="padding:0 24px 16px;">
+      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#fafafa;padding:18px;border-radius:4px;">
+        <tr><td style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;padding-bottom:8px;">Sipariş Numarası</td></tr>
+        <tr><td style="font-size:16px;color:#111;font-weight:500;">{order_number}</td></tr>
+        <tr><td style="font-size:11px;color:#999;padding-top:12px;">Sipariş tarihi: {order_date}</td></tr>
+      </table>
+    </div>
+    {items_html}
+    <div style="padding:0 24px 16px;">
+      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;font-size:13px;color:#444;">
+        <tr><td style="padding:6px 0;">Ara Toplam</td><td style="text-align:right;padding:6px 0;">{subtotal} TL</td></tr>
+        <tr><td style="padding:6px 0;">Kargo</td><td style="text-align:right;padding:6px 0;">{shipping_cost} TL</td></tr>
+        <tr><td style="padding:6px 0;color:#b08968;">İndirim</td><td style="text-align:right;padding:6px 0;color:#b08968;">-{discount} TL</td></tr>
+        <tr><td style="padding:14px 0 6px;font-weight:600;color:#111;border-top:1px solid #eee;">Toplam</td><td style="text-align:right;padding:14px 0 6px;font-weight:600;color:#111;border-top:1px solid #eee;">{amount}</td></tr>
+      </table>
+    </div>
+    <div style="padding:16px 24px 32px;border-top:1px solid #efefef;">
+      <p style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;margin:0 0 8px;">Teslimat Adresi</p>
+      <p style="font-size:13px;color:#444;line-height:1.6;margin:0;">{shipping_full_name}<br/>{shipping_address}<br/>{shipping_district} / {shipping_city}<br/>{shipping_phone}</p>
+    </div>
+    <div style="text-align:center;padding:0 24px 40px;">
+      <a href="{order_link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:14px 36px;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Siparişimi Görüntüle</a>
+    </div>
+    <div style="background:#fafafa;padding:24px;text-align:center;color:#999;font-size:11px;letter-spacing:0.5px;line-height:1.7;">
+      <p style="margin:0;">FACETTE · facette.com.tr</p>
+      <p style="margin:6px 0 0;">Sorularınız için: destek@facette.com.tr</p>
+    </div>
+  </div>
+</div>
+""".strip(),
+    },
+    "order_shipped": {
+        "subject": "Kargoya verildi · {order_number}",
+        "body": """
+<div style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;background:#fafafa;margin:0;padding:0;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;">
+    <div style="text-align:center;padding:32px 24px 16px;border-bottom:1px solid #efefef;">
+      <h1 style="margin:0;font-size:22px;font-weight:300;letter-spacing:6px;color:#111;">FACETTE</h1>
+    </div>
+    <div style="padding:48px 24px 24px;text-align:center;">
+      <div style="font-size:42px;margin-bottom:8px;">📦</div>
+      <h2 style="margin:0 0 8px;font-size:18px;font-weight:500;color:#111;letter-spacing:1px;">KARGOYA VERİLDİ</h2>
+      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:0;">Sevgili {customer_name}, siparişin {cargo_provider} kargosuna teslim edildi.</p>
+    </div>
+    <div style="padding:0 24px 16px;">
+      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#fafafa;padding:18px;border-radius:4px;">
+        <tr><td style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;padding-bottom:6px;">Kargo Takip Numarası</td></tr>
+        <tr><td style="font-size:18px;color:#111;font-weight:600;font-family:monospace;letter-spacing:1px;">{tracking_number}</td></tr>
+      </table>
+    </div>
+    <div style="text-align:center;padding:8px 24px 40px;">
+      <a href="{tracking_link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:14px 36px;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Kargo Takibi</a>
+    </div>
+    <div style="background:#fafafa;padding:24px;text-align:center;color:#999;font-size:11px;letter-spacing:0.5px;">
+      <p style="margin:0;">FACETTE · facette.com.tr</p>
+    </div>
+  </div>
+</div>
+""".strip(),
+    },
+    "order_delivered": {
+        "subject": "Siparişin teslim edildi · {order_number}",
+        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;color:#111;margin:0 0 32px;">FACETTE</h1><div style="font-size:42px;margin:16px 0;">🎉</div><h2 style="font-size:18px;font-weight:500;letter-spacing:1px;margin:0 0 12px;">SİPARİŞİN TESLİM EDİLDİ</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, {order_number} numaralı siparişin teslim edildi. Tercihin için teşekkür ederiz.</p></div>""",
+    },
+    "order_cancelled": {
+        "subject": "Siparişin iptal edildi · {order_number}",
+        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;margin:0 0 32px;">FACETTE</h1><h2 style="font-size:18px;font-weight:500;margin:0 0 12px;">Siparişin iptal edildi</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, {order_number} numaralı siparişin iptal edilmiştir. Ödemeniz iade edilecektir.</p></div>""",
+    },
+    "order_undelivered": {
+        "subject": "Kargon şubede bekliyor · {order_number}",
+        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;margin:0 0 32px;">FACETTE</h1><h2 style="font-size:18px;font-weight:500;margin:0 0 12px;">Kargon teslim edilemedi</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, kargon teslim edilemedi ve şubede bekliyor.<br/>Takip: <strong>{tracking_number}</strong></p></div>""",
+    },
+}
+
+
 @router.post("/templates/seed")
-async def seed_templates(current_user: dict = Depends(require_admin)):
-    """Default şablonları oluştur. Var olanlara dokunmaz."""
+async def seed_templates(
+    force: bool = False,
+    current_user: dict = Depends(require_admin),
+):
+    """Default şablonları oluştur. force=true ise mevcut zengin olmayan
+    e-posta şablonlarını da günceller (override)."""
     created = 0
+    updated = 0
     for ev in DEFAULT_EVENTS:
         ev_key = ev["key"]
         for ch in CHANNELS:
-            existing = await db.notification_templates.find_one({"event": ev_key, "channel": ch}, {"_id": 1})
+            existing = await db.notification_templates.find_one({"event": ev_key, "channel": ch}, {"_id": 0})
+            # Zengin email şablonu varsa onu kullan
+            if ch == "email" and ev_key in _EMAIL_HTML_TEMPLATES:
+                rich = _EMAIL_HTML_TEMPLATES[ev_key]
+                body = rich["body"]
+                subj = rich["subject"]
+            else:
+                body = _DEFAULT_TEMPLATES.get((ev_key, ch), "")
+                subj = ev["name"] if ch == "email" else ""
+                if ch == "email" and not body:
+                    body = f"<p>Merhaba {{customer_name}},</p><p>{ev['name']} bildirimi.</p>"
+
             if existing:
-                continue
-            body = _DEFAULT_TEMPLATES.get((ev_key, ch), "")
-            subj = ev["name"] if ch == "email" else ""
-            if ch == "email" and not body:
-                body = f"<p>Merhaba {{customer_name}},</p><p>{ev['name']} bildirimi.</p>"
-            await db.notification_templates.insert_one({
-                "event": ev_key,
-                "channel": ch,
-                "enabled": bool(body),
-                "subject": subj,
-                "body": body,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            created += 1
-    return {"success": True, "created": created}
+                # force ile yeniden seedle (manuel düzenlenmemişlere yeniden uygula)
+                if not force:
+                    continue
+                if existing.get("manually_edited"):
+                    continue  # admin manuel değiştirdiyse dokunma
+                await db.notification_templates.update_one(
+                    {"event": ev_key, "channel": ch},
+                    {"$set": {
+                        "subject": subj,
+                        "body": body,
+                        "enabled": bool(body),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }}
+                )
+                updated += 1
+            else:
+                await db.notification_templates.insert_one({
+                    "event": ev_key,
+                    "channel": ch,
+                    "enabled": bool(body),
+                    "subject": subj,
+                    "body": body,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                created += 1
+    return {"success": True, "created": created, "updated": updated}
 
 
 @router.post("/test")

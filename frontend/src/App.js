@@ -14,6 +14,7 @@ import StaticPage from "./pages/StaticPage";
 import Account from "./pages/Account";
 import Login from "./pages/Login";
 import TrackOrder from "./pages/TrackOrder";
+import OrderSuccess from "./pages/OrderSuccess";
 
 // Admin Pages
 import AdminLayout from "./pages/admin/AdminLayout";
@@ -99,6 +100,8 @@ function App() {
             <Route path="/giris" element={<Login />} />
             <Route path="/siparis-takip" element={<TrackOrder />} />
             <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
+            <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
+            <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
 
             {/* Admin */}
             <Route path="/admin/login" element={<AdminLogin />} />
