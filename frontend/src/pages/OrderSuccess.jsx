@@ -1,17 +1,23 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Check, Package, Truck, Home, Mail, Phone, MapPin } from "lucide-react";
+import { Check, Package, Truck, Home, Mail, Phone, MapPin, UserPlus } from "lucide-react";
 import axios from "axios";
+import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import { useAuth } from "../context/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function OrderSuccess() {
   const { orderNumber } = useParams();
   const navigate = useNavigate();
+  const { user, refreshUser } = useAuth() || {};
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [signupPwd, setSignupPwd] = useState("");
+  const [signupBusy, setSignupBusy] = useState(false);
+  const [signupDone, setSignupDone] = useState(false);
 
   useEffect(() => {
     if (!orderNumber) {
@@ -187,6 +193,60 @@ export default function OrderSuccess() {
             Alışverişe Devam Et
           </Link>
         </div>
+
+        {/* Guest Signup CTA — Hesap oluştur ve siparişi takip et */}
+        {!user && !signupDone && order && (
+          <div className="mt-12 border-t border-stone-100 pt-12" data-testid="guest-signup-cta">
+            <div className="max-w-lg mx-auto bg-stone-50 px-6 sm:px-10 py-10 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white mb-4">
+                <UserPlus size={20} strokeWidth={1.5} className="text-stone-900" />
+              </div>
+              <p className="text-[10px] tracking-[0.3em] text-stone-400 uppercase mb-2">SIRA SENDE</p>
+              <h3 className="text-lg font-light text-stone-900 mb-2">Hesap oluştur, takipte kal</h3>
+              <p className="text-xs text-stone-500 leading-relaxed mb-6">
+                Bu siparişin <strong>otomatik hesabına bağlanır</strong>; iade & değişim, kargo durumu ve gelecek siparişlerin tek bir yerden yönetilir.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
+                <input type="password" value={signupPwd} onChange={(e) => setSignupPwd(e.target.value)}
+                  placeholder="En az 6 karakter şifre"
+                  data-testid="guest-signup-password"
+                  className="flex-1 bg-white border border-stone-200 px-4 py-3 text-sm focus:outline-none focus:border-stone-900" />
+                <button onClick={async () => {
+                  if (signupPwd.length < 6) { toast.error("Şifre en az 6 karakter olmalı"); return; }
+                  setSignupBusy(true);
+                  try {
+                    const r = await axios.post(`${API}/auth/convert-guest-order`, { order_id: orderNumber, password: signupPwd });
+                    localStorage.setItem("token", r.data.token);
+                    toast.success(r.data.existing_account ? "Hesabınıza bağlandı" : "Hesap oluşturuldu!");
+                    setSignupDone(true);
+                    if (refreshUser) await refreshUser();
+                  } catch (e) {
+                    toast.error(e?.response?.data?.detail || "İşlem başarısız");
+                  } finally { setSignupBusy(false); }
+                }} disabled={signupBusy}
+                  data-testid="guest-signup-create-btn"
+                  className="bg-stone-900 hover:bg-stone-800 text-white px-6 py-3 text-xs tracking-[0.2em] uppercase disabled:opacity-60">
+                  {signupBusy ? "..." : "Oluştur"}
+                </button>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-4">
+                E-posta: {order?.shipping_address?.email || "—"}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {signupDone && (
+          <div className="mt-12 border-t border-stone-100 pt-12 text-center" data-testid="guest-signup-done">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-stone-100 mb-3">
+              <Check size={20} className="text-stone-900" />
+            </div>
+            <p className="text-sm text-stone-900 mb-2">Hesabın hazır!</p>
+            <Link to="/hesabim" className="text-xs underline tracking-wider text-stone-500 hover:text-stone-900">
+              HESABIMA GİT
+            </Link>
+          </div>
+        )}
 
         {/* Help */}
         <div className="text-center mt-16 pt-12 border-t border-stone-100">
