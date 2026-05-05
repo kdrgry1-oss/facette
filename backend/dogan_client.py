@@ -318,44 +318,66 @@ class DoganClient:
 </Invoice>"""
         return xml
 
-    def send_earsiv_invoice(self, ubl_xml: str) -> dict:
+    def send_earsiv_invoice(self, ubl_xml: str, invoice_uuid: str = None) -> dict:
         """E-Arşiv faturayı Doğan e-Dönüşüm WriteToArchive ile gönderir.
         
+        ⚠ Doğan canlı endpoint UBL'i ZIP içinde bekliyor (ElementType="ZIP").
+        ZIP içinde tek bir XML dosyası: <invoice_uuid>.xml
+        
         ubl_xml: UTF-8 string UBL-TR 1.2 invoice XML.
-        Returns: {success, uuid, response_code, message}
+        invoice_uuid: ZIP içindeki dosya adı (varsayılan random uuid).
+        Returns: {success, code, message}
         """
         try:
+            import io, zipfile, uuid as _uuid
             client = self._get_earsiv_client()
             xml_bytes = ubl_xml.encode("utf-8")
-            content_type = client.get_type("ns0:ArchiveInvoiceWriteContent")
+            inv_uuid = invoice_uuid or str(_uuid.uuid4())
 
-            # Elements is anonymous {ElementType, ElementCount, ElementList[]}
+            # UBL'i ZIP'le (Doğan canlı bekliyor)
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{inv_uuid}.xml", xml_bytes)
+            zip_bytes = zip_buf.getvalue()
+
+            content_type = client.get_type("ns0:ArchiveInvoiceWriteContent")
             content = content_type(Elements=[{
-                "ElementType": "XML",
+                "ElementType": "ZIP",       # ← canlı için ZIP
                 "ElementCount": 1,
-                "ElementList": [xml_bytes],
+                "ElementList": [zip_bytes],
             }])
             result = client.service.WriteToArchive(
                 REQUEST_HEADER=self._make_header(compressed="N"),
                 ArchiveInvoiceWriteContent=content,
             )
             from zeep.helpers import serialize_object
-            ser = serialize_object(result)
-            code = None
-            desc = None
-            try:
-                # Response is ArchiveInvoiceWriteResponse with RESPONSE_HEADER
-                hdr = ser.get("RESPONSE_HEADER") or {}
-                code = hdr.get("RETURN_CODE") or hdr.get("ReturnCode") or ser.get("RETURN_CODE")
-                desc = hdr.get("RETURN_TEXT") or hdr.get("ReturnText") or ser.get("RETURN_TEXT") or str(ser)
-            except Exception:
-                desc = str(ser)
-            success = str(code) in ("0", "AE00000") or "başarı" in str(desc).lower()
+            ser = serialize_object(result) or {}
+
+            # Önce ERROR_TYPE kontrol et — varsa hata
+            err = ser.get("ERROR_TYPE") or {}
+            err_code = err.get("ERROR_CODE") if err else None
+            err_msg = err.get("ERROR_SHORT_DES") if err else None
+            if err_code:
+                return {
+                    "success": False,
+                    "code": str(err_code),
+                    "message": str(err_msg or "Bilinmeyen hata"),
+                    "raw": str(ser)[:1000],
+                    "uuid": inv_uuid,
+                }
+
+            # REQUEST_RETURN.RETURN_CODE = 0 → başarı
+            ret = ser.get("REQUEST_RETURN") or {}
+            return_code = ret.get("RETURN_CODE")
+            intl_txn_id = ret.get("INTL_TXN_ID")
+            success = str(return_code) == "0"
             return {
-                "success": bool(success),
-                "code": str(code or ""),
-                "message": str(desc or ""),
-                "raw": str(ser)[:1000],
+                "success": success,
+                "code": str(return_code or ""),
+                "message": "OK" if success else f"RETURN_CODE={return_code}",
+                "intl_txn_id": str(intl_txn_id or ""),
+                "uuid": inv_uuid,
+                "raw": str(ser)[:500],
             }
         except Exception as e:
             logger.error(f"send_earsiv_invoice error: {e}")

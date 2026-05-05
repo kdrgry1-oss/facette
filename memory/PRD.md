@@ -877,3 +877,25 @@ Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak
 
 ### Atlandı (yüksek risk, düşük değer)
 - `integrations.py` (4150 satır) refactoring — Trendyol/HB/Temu modüllerini ayırma. İhtiyaç olunca yapılır.
+
+## [2026-05-05] Doğan e-Arşiv Canlı Fatura Kesimi — ÇÖZÜLDÜ ve DOĞRULANDI
+
+### Hata kodu 10013'ün kök nedeni
+Doğan canlı `connector.doganedonusum.com/EIArchiveWS/EFaturaArchive` endpoint'i raw XML kabul etmiyor — UBL'nin **ZIP'lenmiş paket** içinde gönderilmesini bekliyor:
+- ✗ ElementType="XML" + raw bytes → 10013 "Yüklediğiniz dosyada eFatura bulunamamıştır"
+- ✗ ElementType="XML.GZ" + gzip → 10013
+- ✗ ElementType="XML" + compressed=Y → 10013
+- ✅ **ElementType="ZIP" + ZIP payload (içinde `<uuid>.xml`)** → RETURN_CODE=0 başarı
+
+### Düzeltme
+- `dogan_client.py::send_earsiv_invoice` — UBL'i ZIP içine paketlenir (`zipfile.ZIP_DEFLATED`), `ElementType="ZIP"` ile gönderir.
+- Response parsing iyileştirildi: `ERROR_TYPE` öncelikli + `REQUEST_RETURN.RETURN_CODE=0` başarı kriteri.
+- Yeni response field'ları: `intl_txn_id` (Doğan tarafı işlem ID), `uuid` (zip içindeki dosya UUID'i).
+- `routes/orders.py::create-invoice` → `invoice_intl_txn_id` artık DB'ye kaydediliyor.
+
+### End-to-End Doğrulama (canlı)
+- Order: `11053838413` (Ticimax'tan import edilen gerçek sipariş)
+- Invoice no: **FAC2026000000001** (ilk canlı fatura)
+- UUID: `f35f37b4-11c9-48a8-8e06-f53832c6bafc`
+- Doğan INTL_TXN_ID: **13776942506**
+- HTTP 200, success: true

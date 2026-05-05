@@ -837,7 +837,7 @@ async def create_invoice_for_order(
             password=dogan_settings["password"],
             is_test=dogan_settings.get("is_test", True),
         )
-        dogan_result = await run_in_threadpool(dogan_client.send_earsiv_invoice, ubl_xml)
+        dogan_result = await run_in_threadpool(dogan_client.send_earsiv_invoice, ubl_xml, invoice_uuid)
 
         if not dogan_result.get("success"):
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
@@ -855,6 +855,7 @@ async def create_invoice_for_order(
             "invoice_type": invoice_type,
             "invoice_provider": active,
             "invoice_provider_response": dogan_result,
+            "invoice_intl_txn_id": dogan_result.get("intl_txn_id", ""),
             "invoice_issued_at": now.isoformat(),
             "invoice_issued_by": current_user.get("email", ""),
             "updated_at": now.isoformat(),
