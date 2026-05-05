@@ -631,3 +631,44 @@ Kullanıcı isteği: "bir de bi sipariş oluşturdum ama mng kargo barkodu oluş
 - Password: `Face.0024E`
 - Vergi No: `6080712084`
 
+
+## [2026-05-05] Ticimax -1 Filter + MNG Etiket Güncelleme + Auto SMS/WhatsApp/Email
+
+### Tespit
+- Ticimax SiparisServis ve UyeServis için **int filtre alanlarında "-1" = "filtre yok"**. 0 göndermek "değeri 0 olanları getir" demek olduğu için 0 sipariş dönüyordu. Doc: https://www.destekalani.com/Icerik/ws-yetki-kodu-yonetimi-web-servis-modulu-649
+
+### Yapılanlar
+1. **`ticimax_client.py`**:
+   - `get_orders()` — tüm int filtre alanları default `-1` (EntegrasyonAktarildi, SiparisDurumu, OdemeDurumu, OdemeTamamlandi, OdemeTipi, PaketlemeDurumu, PazaryeriIhracat, SiparisID, TedarikciID, UyeID, EFaturaURL, KargoEntegrasyonTakipDurumu, KargoFirmaID, TeslimatMagazaID).
+   - `get_members()` — UyeFiltre int alanları (Aktif, AlisverisYapti, Cinsiyet, IlID, IlceID, MailIzin, SmsIzin, UyeID) default `-1`.
+   - **CANLI TEST: 150 sipariş çekildi** (FC1777939101 dahil tüm gerçek siparişler MongoDB'ye yazıldı).
+2. **`integrations.py`**:
+   - `/ticimax/orders/import` default'ları gevşetildi (`exclude_marketplace=False`, `only_with_phone=False`, `days=365→3650`, `pages=20`, `limit=200`).
+   - "ayrım yapma" talebi → tüm siparişler (site + pazaryeri) ve tüm üyeler (telefonlu + telefonsuz) çekiliyor.
+3. **MNG Kargo Etiketi (`/api/orders/{id}/cargo-label`)**:
+   - MNG DHL E-Commerce başlık + üst Code39 barkod **sipariş numarası** + alt Code39 barkod **MNG kargo takip no**.
+   - Gönderici/Alıcı/Kargo bilgi bölümleri (10cm × 15cm thermal).
+   - Authorization yerine `?token=` query parametresi kabul ediyor (yeni sekme yazdırma için).
+4. **Otomatik Müşteri Bildirimi (kargoya verildi)**:
+   - MNG barkodu üretildikten sonra `notification_service.send_notification(event="order_shipped")` çağrılıyor.
+   - 3 kanal aktif: SMS (Netgsm/İletimerkezi/Twilio/VatanSMS), WhatsApp (Meta Cloud API), Email (Resend).
+   - Default template'ler DB'ye seedlendi: `/api/notification-templates` üzerinden düzenlenebilir.
+5. **Mağaza bilgileri**: `settings.id=store_info` (sender_name=`FACETTE DIŞ TİC.A.Ş.`, sender_phone, sender_address vb.) etikette gönderici olarak kullanılıyor.
+6. **Cargo nested obje**: Frontend `selectedOrder.cargo?.tracking_number` üzerinden kontrol ediyordu. Backend artık hem `cargo_tracking_number` (top-level) hem `cargo.tracking_number` (nested) yazıyor → manuel input kaybolur. 23 mevcut sipariş için backfill yapıldı.
+
+### MNG Kargo Workflow (Final)
+1. SiparisGirisiDetayliV3 → status code "1" döner.
+2. FaturaSiparisListesi(pSiparisNo) → MNG_SIPARIS_NO çekilir (gerçek 10 haneli barkod).
+3. Order'a 2 alanda yazılır: `cargo_tracking_number` + `cargo.tracking_number`.
+4. SMS/WhatsApp/Email otomatik gönderilir (template'ler {tracking_number}, {tracking_link}, {order_number}, {name} değişkenleriyle).
+
+### Doğan e-Dönüşüm e-Fatura (PENDING — büyük iş)
+Kullanıcı "neden gerçek faturası dogandonusume düşmüyor" sordu. Mevcut `create_invoice_for_order` endpoint sadece **MOCK fatura numarası** üretiyor (`FAC00000001` gibi). Gerçek e-fatura için Doğan'a UBL-TR XML formatında SOAP üzerinden gönderim gerekiyor — Doğan client'da SendInvoice methodu eksik. Sonraki iterationda eklenecek (login → SendInvoice(xmlContent, type) → invoice UUID al → DB'ye yaz).
+
+### Test
+- `/ticimax/orders/import` (730 gün, 3 sayfa, no filter) → **150 sipariş eklendi** ✅
+- `/ticimax/members/import` → 91 üye (önceki) ✅
+- `/orders/{id}/cargo-barcode?cargo_company=MNG` → barkod `1757391445` üretildi ✅
+- `/orders/{id}/cargo-label` (browser render) → MNG-style etiket, üst sipariş no + alt takip no barkodu ✅
+- order_shipped notification → 3 kanal template seedlendi (SMS/WhatsApp/Email) ✅
+

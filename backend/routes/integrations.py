@@ -1717,15 +1717,15 @@ async def import_ticimax_products(
 @router.post("/ticimax/orders/import")
 async def import_ticimax_orders(
     limit: int = Query(200, ge=1, le=2000),
-    days: int = Query(20, ge=1, le=365, description="Son kaç günün siparişleri çekilsin"),
-    exclude_marketplace: bool = Query(True, description="Pazaryeri (Trendyol/HB/N11/AliExpress/Temu) siparişlerini hariç tut"),
-    only_with_phone: bool = Query(True, description="Sadece telefon numarası olan siparişleri çek"),
-    pages: int = Query(1, ge=1, le=20, description="Kaç sayfa çekilecek"),
+    days: int = Query(365, ge=1, le=3650, description="Son kaç günün siparişleri çekilsin"),
+    exclude_marketplace: bool = Query(False, description="True ise Trendyol/HB/N11 vb. pazaryeri siparişleri hariç tutulur"),
+    only_with_phone: bool = Query(False, description="True ise telefon numarası olmayan siparişler atlanır"),
+    pages: int = Query(20, ge=1, le=100, description="Kaç sayfa çekilecek"),
     current_user: dict = Depends(require_admin)
 ):
-    """Fetch orders from Ticimax (last N days) and upsert into local MongoDB.
+    """Fetch orders from Ticimax and upsert into local MongoDB.
     
-    Varsayılan: Sadece site siparişleri (pazaryeri hariç) ve telefon numarası olan müşteriler.
+    Default: TÜM siparişler (pazaryeri + site, telefonlu + telefonsuz). Filtreler opsiyonel.
     """
     import sys, os
     from datetime import timedelta

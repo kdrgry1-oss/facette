@@ -929,18 +929,51 @@ async def create_cargo_barcode(
         raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
 
     barkod = res["barkod"]
-    track_link = f"https://kargotakip.mngkargo.com.tr/?BarkodNo={barkod}"
-    await db.orders.update_one(
-        {"id": order_id},
-        {"$set": {
-            "cargo_tracking_number": barkod,
-            "cargo_tracking_link": track_link,
-            "cargo_provider_name": "MNG Kargo",
-            "cargo_provider_code": "MNG",
-            "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }}
-    )
+    track_link = f"https://kargotakip.mngkargo.com.tr/?BarkodNo={barkod}" if barkod else ""
+    update_doc = {
+        "cargo_tracking_number": barkod,
+        "cargo_tracking_link": track_link,
+        "cargo_provider_name": "MNG Kargo",
+        "cargo_provider_code": "MNG",
+        # Frontend `selectedOrder.cargo?.tracking_number` üzerinden kontrol ettiği için nested obje yaz
+        "cargo": {
+            "provider": "MNG",
+            "provider_name": "MNG Kargo",
+            "tracking_number": barkod,
+            "tracking_link": track_link,
+            "label_format": "10x15cm",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": update_doc})
+
+    # Otomatik müşteri bildirimi (SMS + WhatsApp + Email) — kargoya verildi
+    try:
+        from notification_service import send_notification
+        ship_addr = order.get("shipping_address") or {}
+        full_name = (
+            f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip()
+            or ship_addr.get("name") or ""
+        )
+        await send_notification(
+            db,
+            event="order_shipped",
+            to_phone=ship_addr.get("phone") or order.get("customer_phone"),
+            to_email=ship_addr.get("email") or order.get("customer_email") or order.get("user_email"),
+            variables={
+                "name": full_name,
+                "first_name": ship_addr.get("first_name", ""),
+                "order_number": order.get("order_number") or order_id,
+                "tracking_number": barkod,
+                "tracking_link": track_link,
+                "cargo_provider": "MNG Kargo",
+                "total": float(order.get("total") or 0),
+            },
+        )
+    except Exception as ne:
+        logger.warning(f"Kargo bildirimi gönderilemedi (order={order_id}): {ne}")
     await db.cargo_logs.insert_one({
         "id": generate_id(),
         "order_id": order_id,
@@ -993,66 +1026,98 @@ async def bulk_create_cargo_barcode(
 
 
 @router.get("/{order_id}/cargo-label")
-async def get_cargo_label(order_id: str, current_user: dict = Depends(require_admin)):
-    """Sipariş için 10x15cm yazdırılabilir kargo etiketi (HTML)."""
+async def get_cargo_label(order_id: str, token: str = None):
+    """100x150mm yazdırılabilir MNG-stili kargo etiketi (HTML + Code39).
+    Üstteki barkod = sipariş numarası | Alttaki barkod = MNG kargo takip no.
+    Authorization header yerine ?token=... query parametresi de kabul eder (yeni sekme yazdırma).
+    """
     from fastapi.responses import HTMLResponse
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
-    barkod = order.get("cargo_tracking_number") or "Yok"
+    barkod = order.get("cargo_tracking_number") or ""
+    siparis_no = str(order.get("order_number") or order_id)
     sender = await _get_sender_info()
+    mng = await _get_mng_settings()
+    sender_company = mng.get("customer_code") or sender["name"] or "FACETTE"
+
     ship = order.get("shipping_address") or {}
-    receiver_name = f"{ship.get('first_name','')} {ship.get('last_name','')}".strip() or "Alıcı"
+    receiver_name = f"{ship.get('first_name','')} {ship.get('last_name','')}".strip() or ship.get("name") or "Alıcı"
     receiver_phone = ship.get("phone") or ""
-    receiver_addr = f"{ship.get('address','')}, {ship.get('district','')}/{ship.get('city','')}".strip(", ")
-    siparis_no = order.get("order_number") or order_id
+    receiver_addr = f"{ship.get('address','')}".strip()
+    receiver_district_city = f"{ship.get('district','')} / {ship.get('city','')}".strip(" /")
+
     items = order.get("items") or []
-    icerik = ", ".join([f"{it.get('quantity',1)}x {it.get('product_name','')[:25]}" for it in items])[:200]
+    paket_sayisi = "1/1"
+    total_adet = sum(int(it.get("quantity") or 1) for it in items)
+    desi = "1"
+
+    payment_method = (order.get("payment_method") or "").lower()
+    odeme_tipi = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery","kapida") else "Gönderici Ödemeli"
+    kargo_tipi = "Alıcı Ödemeli Kargo" if payment_method in ("cash_on_delivery","kapida") else "Gönderici Ödemeli Kargo"
 
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="utf-8"><title>Kargo Etiketi - {siparis_no}</title>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">
 <style>
   @page {{ size: 100mm 150mm; margin: 0; }}
-  body {{ margin: 0; font-family: Arial, sans-serif; width: 100mm; height: 150mm; }}
-  .label {{ box-sizing: border-box; padding: 4mm; border: 1px solid #000; height: 100%; }}
-  .row {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 2mm; }}
-  .barcode {{ text-align:center; font-family: 'Libre Barcode 39', 'Courier New', monospace; font-size: 28pt; letter-spacing: 1px; margin: 2mm 0; }}
-  .small {{ font-size: 7pt; color: #444; }}
-  .section {{ border-top: 1px dashed #555; padding-top: 1.5mm; margin-top: 1.5mm; font-size: 9pt; }}
-  .section h4 {{ margin: 0 0 1mm 0; font-size: 8pt; color:#555; text-transform: uppercase; }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; width: 100mm; min-height: 150mm; color: #000; }}
+  .label {{ padding: 3mm; height: 100%; }}
+  .row {{ display: flex; justify-content: space-between; align-items: center; }}
+  .small {{ font-size: 7pt; color: #333; }}
+  .barcode {{ font-family: 'Libre Barcode 39', monospace; font-size: 38pt; letter-spacing: 0; line-height: 0.9; text-align: center; }}
+  .barcode-num {{ text-align:center; font-size: 10pt; letter-spacing: 1.5px; margin-top: -1mm; font-family: 'Courier New', monospace; }}
+  .section {{ border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm; font-size: 9pt; }}
+  .section h4 {{ margin: 0 0 1mm 0; font-size: 7pt; color:#444; text-transform: uppercase; letter-spacing: 0.6px; }}
   .strong {{ font-weight: 700; font-size: 10pt; }}
-  .total {{ background:#000; color:#fff; padding:1mm 2mm; }}
+  .top-bar {{ display:flex; justify-content:space-between; align-items:center; padding-bottom:1mm; }}
+  .brand {{ font-weight: 800; font-size: 12pt; }}
+  .meta {{ display:flex; gap:6mm; font-size: 8pt; }}
+  .meta b {{ font-size: 9pt; }}
 </style></head><body>
 <div class="label">
-  <div class="row">
-    <div class="strong">MNG Kargo</div>
-    <div class="small">Sipariş: {siparis_no}</div>
+  <div class="top-bar">
+    <div class="brand">MNG <span style="color:#e60012">DHL</span> E-Commerce</div>
+    <div class="small">{datetime.now(timezone.utc).strftime('%d.%m.%Y')}</div>
   </div>
-  <div class="barcode">*{barkod}*</div>
-  <div style="text-align:center;font-size:9pt;margin-top:-1mm;">{barkod}</div>
+
+  <!-- ÜST: SİPARİŞ NUMARASI BARKODU -->
+  <div class="barcode">*{siparis_no}*</div>
+  <div class="barcode-num">{siparis_no}</div>
+
   <div class="section">
-    <h4>Gönderici</h4>
-    <div class="strong">{sender['name']}</div>
-    <div>{sender['address']} {sender['district']}/{sender['city']}</div>
-    <div class="small">Tel: {sender['phone']}</div>
+    <h4>Gönderici Bilgileri</h4>
+    <div class="strong">{sender_company}</div>
+    <div class="small">Telefon: {sender['phone']}</div>
+    <div class="small">Adres: {sender['address']} {sender['district']}/{sender['city']}</div>
   </div>
+
   <div class="section">
-    <h4>Alıcı</h4>
+    <h4>Alıcı Bilgileri</h4>
     <div class="strong">{receiver_name}</div>
-    <div>{receiver_addr}</div>
-    <div class="small">Tel: {receiver_phone}</div>
+    <div class="small">Telefon: {receiver_phone}</div>
+    <div class="small">Adres: {receiver_addr}</div>
+    <div class="small">{receiver_district_city}</div>
   </div>
+
   <div class="section">
-    <h4>Kargo Detayı</h4>
-    <div class="small">İçerik: {icerik or '-'}</div>
-    <div class="small">Adet: 1 paket / {sum((it.get('quantity') or 1) for it in items)} ürün</div>
+    <h4>Kargo Bilgileri</h4>
+    <div class="meta">
+      <div>Ödeme Türü: <b>{odeme_tipi}</b></div>
+      <div>Paket Sayısı: <b>{paket_sayisi}</b></div>
+      <div>Desi: <b>{desi}</b></div>
+    </div>
+    <div class="small" style="margin-top:1mm;">Kargo Tipi: {kargo_tipi}</div>
+    <div class="small">Sipariş No: {siparis_no}</div>
   </div>
-  <div class="row total">
-    <div>Toplam</div>
-    <div class="strong">{float(order.get('total') or 0):.2f} ₺</div>
+
+  <!-- ALT: KARGO TAKİP NO BARKODU -->
+  <div style="margin-top: 3mm;">
+    <div class="barcode">*{barkod or siparis_no}*</div>
+    <div class="barcode-num">Takip No: {barkod or '— bekleniyor —'}</div>
   </div>
-  <div class="barcode" style="font-size:22pt;">*{barkod}*</div>
 </div>
 </body></html>"""
     return HTMLResponse(content=html)

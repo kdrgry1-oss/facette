@@ -327,7 +327,8 @@ export default function AdminOrders() {
   };
 
   const handlePrintLabel = (orderId) => {
-    const labelUrl = `${API}/orders/${orderId}/cargo-label`;
+    const token = localStorage.getItem('token');
+    const labelUrl = `${API}/orders/${orderId}/cargo-label?token=${token}`;
     const printWindow = window.open(labelUrl, '_blank', 'width=400,height=600');
     if (printWindow) {
       printWindow.onload = () => {

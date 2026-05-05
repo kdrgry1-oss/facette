@@ -371,12 +371,12 @@ export default function Integrations() {
 
   const handleTicimaxImportOrders = async () => {
     setTicimaxImportingOrders(true);
-    toast.info("Site siparişleri çekiliyor (pazaryeri hariç)...");
+    toast.info("Tüm Ticimax siparişleri çekiliyor (pazaryeri + site)...");
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/orders/import?days=365&limit=200&pages=5&exclude_marketplace=true&only_with_phone=true`, null, {
+      const res = await axios.post(`${API}/integrations/ticimax/orders/import?days=730&limit=200&pages=20&exclude_marketplace=false&only_with_phone=false`, null, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 240000
+        timeout: 600000
       });
       if (res.data.success) {
         toast.success(res.data.message || `${res.data.total} sipariş aktarıldı`);
@@ -395,12 +395,12 @@ export default function Integrations() {
   const [ticimaxImportingMembers, setTicimaxImportingMembers] = useState(false);
   const handleTicimaxImportMembers = async () => {
     setTicimaxImportingMembers(true);
-    toast.info("Ticimax üyeleri çekiliyor (telefonlu, aktif)...");
+    toast.info("Tüm Ticimax üyeleri çekiliyor (ayrım yok)...");
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/members/import?page_size=100&max_pages=50&only_with_phone=true&only_active=true&fetch_addresses=false`, null, {
+      const res = await axios.post(`${API}/integrations/ticimax/members/import?page_size=200&max_pages=100&only_with_phone=false&only_active=false&fetch_addresses=false`, null, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 600000
+        timeout: 900000
       });
       if (res.data.success) {
         toast.success(res.data.message || `${res.data.total} üye aktarıldı`);
@@ -822,7 +822,7 @@ export default function Integrations() {
                 className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-600 disabled:opacity-50 transition-colors"
               >
                 {ticimaxImportingOrders ? <RefreshCw size={14} className="animate-spin" /> : <ShoppingBag size={14} />}
-                {ticimaxImportingOrders ? "Siparişler Yükleniyor..." : "Siparişleri Aktar (Site, Son 365 Gün)"}
+                {ticimaxImportingOrders ? "Siparişler Yükleniyor..." : "Tüm Siparişleri Aktar (2 yıl)"}
               </button>
               <button
                 onClick={handleTicimaxImportMembers}
@@ -831,11 +831,11 @@ export default function Integrations() {
                 className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
               >
                 {ticimaxImportingMembers ? <RefreshCw size={14} className="animate-spin" /> : <Users size={14} />}
-                {ticimaxImportingMembers ? "Üyeler Yükleniyor..." : "Üyeleri Aktar (Telefonlu)"}
+                {ticimaxImportingMembers ? "Üyeler Yükleniyor..." : "Tüm Üyeleri Aktar"}
               </button>
             </div>
             <p className="text-xs text-gray-500 mt-3 px-1">
-              <strong>Not:</strong> Sipariş aktarımı yalnızca <em>siteden</em> verilen ve telefon numarası bulunan siparişleri çeker. Trendyol/Hepsiburada/N11/AliExpress siparişleri otomatik olarak hariç tutulur.
+              <strong>Tüm veri:</strong> Site + pazaryeri siparişleri + tüm üyeler dahil. Filtrelemek için API parametrelerini kullanabilirsiniz.
             </p>
           </div>
         </div>

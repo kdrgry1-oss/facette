@@ -301,15 +301,29 @@ def get_orders(page: int = 1, page_size: int = 50,
         ff = c.get_type("ns2:WebSiparisFiltre")
         sf = c.get_type("ns2:WebSiparisSayfalama")
 
+        # CRITICAL: Ticimax int filter fields require -1 to mean "no filter".
+        # Sending 0 means "filter for value 0" which returns nothing.
+        # Therefore default ALL int filters to -1 here.
         fkw = {
             "UrunGetir": True,
             "OdemeGetir": True,
             "KampanyaGetir": True,
             "IptalEdilmisUrunler": False,
+            "EntegrasyonAktarildi": -1,
+            "SiparisDurumu": -1,
+            "OdemeDurumu": -1,
+            "OdemeTamamlandi": -1,
+            "OdemeTipi": -1,
+            "PaketlemeDurumu": -1,
+            "PazaryeriIhracat": -1,  # default: hepsi (post-filter ile site only ayrılır)
+            "SiparisID": -1,
+            "TedarikciID": -1,
+            "UyeID": -1,
+            "EFaturaURL": -1,
+            "KargoEntegrasyonTakipDurumu": -1,
+            "KargoFirmaID": -1,
+            "TeslimatMagazaID": -1,
         }
-        if exclude_marketplace:
-            # PazaryeriIhracat: 0 = site siparişleri, 1 = pazaryeri (Int field)
-            fkw["PazaryeriIhracat"] = 0
         if start_date:
             try:
                 from datetime import datetime as _dt
@@ -407,12 +421,12 @@ def get_order_items(siparis_id: int, wscode: str = TICIMAX_API_KEY) -> List[Dict
 
 def get_members(page: int = 1, page_size: int = 100,
                 wscode: str = TICIMAX_API_KEY,
-                only_active: bool = True,
-                only_with_phone: bool = True) -> List[Dict]:
-    """SelectUyeler(UyeKodu, f:UyeFiltre, s:UyeSayfalama)
+                only_active: bool = False,
+                only_with_phone: bool = False) -> List[Dict]:
+    """SelectUyeler(UyeKodu, filtre:UyeFiltre, sayfalama:UyeSayfalama)
     
-    UyeFiltre.Aktif: 1 = aktif, 0 = pasif, None = hepsi
-    UyeSayfalama: KayitSayisi, SayfaNo (1-based), SiralamaDegeri, SiralamaYonu
+    NOT: Ticimax int filtre alanları için "-1" = "filtre yok". 0 göndermek "değeri 0 olanları getir"
+    anlamına gelir → bu yüzden default int alanları -1'e set ediyoruz.
     
     only_with_phone=True ise CepTelefonu/Telefon boş olan üyeler atlanır.
     """
@@ -421,7 +435,17 @@ def get_members(page: int = 1, page_size: int = 100,
         ff = c.get_type("ns2:UyeFiltre")
         sf = c.get_type("ns2:UyeSayfalama")
 
-        fkw = {}
+        # Default tüm int alanları -1 (filtre yok)
+        fkw = {
+            "Aktif": -1,
+            "AlisverisYapti": -1,
+            "Cinsiyet": -1,
+            "IlID": -1,
+            "IlceID": -1,
+            "MailIzin": -1,
+            "SmsIzin": -1,
+            "UyeID": -1,
+        }
         if only_active:
             fkw["Aktif"] = 1
         f = ff(**fkw)
