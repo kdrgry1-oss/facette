@@ -1014,35 +1014,21 @@ async def create_cargo_barcode(
         })
         raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
 
-    barkod = res["barkod"]  # MNG_SIPARIS_NO (referans no)
+    barkod = res["barkod"]  # MNG_SIPARIS_NO (MNG Self Barkod) — gerçek kargo takip kodu
     
-    # ✨ ANINDA NZ-FORMATLI KARGO BARKODU ÇEK (MNGGonderiBarkod)
-    # IP whitelist'liyse, sipariş ofisten çıkmadan gerçek kargo takip kodu (NZ...) elde edilir.
-    from mng_kargo_client import get_mng_barcode_immediately, get_mng_shipment_status
-    nz_result = get_mng_barcode_immediately(
-        username=settings["username"], password=settings["password"],
-        siparis_no=siparis_no,
-        irsaliye_no=str(order.get("invoice_number") or "")[:20],
-        urun_bedeli=kiymet,
-        kapida_tahsilat=bool(kapida),
-        out_barkod_type="C",  # Code39
-    )
-    nz_barkod = nz_result.get("barkod") if nz_result.get("ok") else ""
-    nz_gonderi_no = nz_result.get("gonderi_no") if nz_result.get("ok") else ""
-    nz_error = nz_result.get("hata") if not nz_result.get("ok") else None
-    if nz_error:
-        logger.warning(f"MNGGonderiBarkod alınamadı (whitelist?): {nz_error}")
-
-    # Fallback olarak da FaturaSiparisListesi'nden GONDERI_NO çek (şube işlemi sonrası dolar)
+    # FaturaSiparisListesi'nden ek kargo durumu çek (şube, kargo statu, varsa GONDERI_NO)
+    from mng_kargo_client import get_mng_shipment_status
     status_info = get_mng_shipment_status(
         username=settings["username"], password=settings["password"], siparis_no=siparis_no
     )
     gonderi_no_status = (status_info.get("gonderi_no") or "") if status_info.get("ok") else ""
     kargo_takip_url = (status_info.get("kargo_takip_url") or "") if status_info.get("ok") else ""
     kargo_statu = (status_info.get("kargo_statu") or "0") if status_info.get("ok") else "0"
+    kargo_statu_aciklama = (status_info.get("kargo_statu_aciklama") or "") if status_info.get("ok") else ""
 
-    # Önceliklendirme: NZ barkodu (MNGGonderiBarkod) > GONDERI_NO (status) > MNG_SIPARIS_NO
-    public_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or barkod
+    # Self Barkod hesapları için: MNG_SIPARIS_NO zaten gerçek kargo takip kodudur
+    # NZ-formatlı havuz tahsis edilen kurumsal hesaplarda GONDERI_NO field'ında ayrı bir kod gelir
+    public_tracking = gonderi_no_status or barkod
     track_link = kargo_takip_url or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
     update_doc = {
         "cargo_tracking_number": public_tracking,
@@ -1055,11 +1041,12 @@ async def create_cargo_barcode(
             "tracking_number": public_tracking,
             "tracking_link": track_link,
             "label_format": "10x15cm",
-            "mng_siparis_no": barkod,                            # iç referans (her zaman dolu)
-            "mng_gonderi_no": nz_gonderi_no or gonderi_no_status, # NZ formatlı asıl kargo no
-            "mng_nz_barkod": nz_barkod,                          # MNGGonderiBarkod ile çekilen
+            "mng_siparis_no": barkod,                      # MNG Self Barkod (her zaman dolu)
+            "mng_gonderi_no": gonderi_no_status,           # NZ formatlı (sadece kurumsal havuzlu hesaplar)
             "mng_kargo_statu": kargo_statu,
-            "mng_whitelist_error": nz_error,                     # IP whitelist hatası varsa
+            "mng_kargo_statu_aciklama": kargo_statu_aciklama,
+            "cikis_subesi": status_info.get("cikis_subesi"),
+            "teslim_subesi": status_info.get("teslim_subesi"),
             "created_at": datetime.now(timezone.utc).isoformat(),
         },
         "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
@@ -1107,16 +1094,10 @@ async def create_cargo_barcode(
         "tracking_number": public_tracking,
         "tracking_link": track_link,
         "mng_siparis_no": barkod,
-        "mng_gonderi_no": nz_gonderi_no or gonderi_no_status,
-        "mng_nz_barkod": nz_barkod,
+        "mng_gonderi_no": gonderi_no_status,
         "mng_kargo_statu": kargo_statu,
-        "mng_whitelist_error": nz_error,
         "cargo_provider_name": "MNG Kargo",
-        "message": (
-            f"✅ NZ-formatlı kargo barkodu üretildi: {public_tracking}" if nz_barkod else
-            (f"⚠️ NZ barkod alınamadı (IP whitelist gerekli): {nz_error}. Şube işlemi sonrası 'Yenile' butonu ile tekrar denenebilir. Şu an etikette referans no kullanılıyor: {barkod}" if nz_error else
-             f"MNG'ye sipariş kaydedildi (Ref: {barkod}). Gerçek kargo takip numarası şube tarafından işlendiğinde atanacak.")
-        ),
+        "message": f"✅ MNG kargo barkodu oluşturuldu: {public_tracking}",
     }
 
 
@@ -1129,7 +1110,7 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
     """
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-    from mng_kargo_client import get_mng_shipment_status, get_mng_barcode_immediately
+    from mng_kargo_client import get_mng_shipment_status
 
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
@@ -1139,26 +1120,15 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
     siparis_no = str(order.get("order_number") or order_id)
     settings = await _get_mng_settings()
 
-    # 1) Anında NZ barkod (whitelist gerekli)
-    nz_result = get_mng_barcode_immediately(
-        username=settings["username"], password=settings["password"],
-        siparis_no=siparis_no,
-        urun_bedeli=float(order.get("total") or 0),
-        kapida_tahsilat=(order.get("payment_method") or "").lower() in ("cash_on_delivery","kapida"),
-    )
-    nz_barkod = nz_result.get("barkod") if nz_result.get("ok") else ""
-    nz_gonderi = nz_result.get("gonderi_no") if nz_result.get("ok") else ""
-
-    # 2) Status (FaturaSiparisListesi)
     info = get_mng_shipment_status(
         username=settings["username"], password=settings["password"], siparis_no=siparis_no
     )
     if not info.get("ok"):
         raise HTTPException(status_code=502, detail=info.get("error") or "MNG durumu alınamadı")
 
-    gonderi_no = nz_gonderi or info.get("gonderi_no") or ""
+    gonderi_no = info.get("gonderi_no") or ""
     mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
-    public_tracking = nz_barkod or gonderi_no or mng_siparis_no
+    public_tracking = gonderi_no or mng_siparis_no
     track_link = info.get("kargo_takip_url") or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
 
     update = {
@@ -1168,10 +1138,8 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
         "cargo.tracking_link": track_link,
         "cargo.mng_siparis_no": mng_siparis_no,
         "cargo.mng_gonderi_no": gonderi_no,
-        "cargo.mng_nz_barkod": nz_barkod,
         "cargo.mng_kargo_statu": info.get("kargo_statu"),
         "cargo.mng_kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
-        "cargo.mng_whitelist_error": (nz_result.get("hata") if not nz_result.get("ok") else None),
         "cargo.cikis_subesi": info.get("cikis_subesi"),
         "cargo.teslim_subesi": info.get("teslim_subesi"),
         "cargo.teslim_tarihi": info.get("teslim_tarihi"),
@@ -1183,14 +1151,12 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
         "tracking_number": public_tracking,
         "mng_siparis_no": mng_siparis_no,
         "mng_gonderi_no": gonderi_no,
-        "mng_nz_barkod": nz_barkod,
         "kargo_statu": info.get("kargo_statu"),
         "kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
         "tracking_link": track_link,
         "message": (
-            f"✅ NZ barkod: {nz_barkod}" if nz_barkod else
-            (f"📦 Gönderi No: {gonderi_no}" if gonderi_no else
-             f"⏳ Henüz şube işlemi yok ({info.get('kargo_statu_aciklama')}). Referans: {mng_siparis_no}")
+            f"📦 Gönderi No: {gonderi_no}" if gonderi_no else
+            f"✅ Güncel takip: {public_tracking} ({info.get('kargo_statu_aciklama') or 'durum güncellendi'})"
         ),
     }
 

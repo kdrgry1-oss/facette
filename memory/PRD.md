@@ -722,3 +722,27 @@ Kullanıcı "neden gerçek faturası dogandonusume düşmüyor" sordu. Mevcut `c
 - POST `/orders/{id}/cargo-refresh` → MNGGonderiBarkod denemesi → `YETKİ HATASI` (whitelist sonrası NZ barkod gelecek), FaturaSiparisListesi → `kargo_statu: "Gönderi Kargo İşlemi Yapılmadı"` (şube henüz işlemedi). Mesaj net.
 - Etiket render → Code39 üst (sipariş no `FC1777939101`) + alt (takip no `1757391445`) doğru formatta ✅
 
+
+## [2026-05-05] DÜZELTME: MNG Self Barkod modu (whitelist/NZ varsayımı yanlıştı)
+
+### Doğru Anlayış
+- MNG Kargo entegrasyonunda **iki tip hesap** vardır:
+  1. **Self Barkod hesabı** (varsayılan, çoğu e-ticaret sitesi): `SiparisGirisiDetayli` çağrıldığında MNG sistem `MNG_SIPARIS_NO` (örn. `1757391445`) atar — **bu zaten gerçek kargo takip kodudur**, MNG kuryesi etiketteki bu numarayı okutur ve sistemine düşer.
+  2. **Kurumsal NZ-formatlı barkod havuzu** (özel müşteriler): MNG müşteri yöneticisi tarafından NZ-prefix'li bir barkod range tahsis edilir; `pChBarkod` parametresinde kullanıcı bunu gönderir.
+- "MNGGonderiBarkod YETKİ HATASI Mac:0..." → bizim hesap NZ havuzu yok, Self Barkod modu → bu operasyona ihtiyacımız yok.
+- **Çözüm: MNGGonderiBarkod denemesi kaldırıldı.** Mevcut akış:
+  1. SiparisGirisiDetayliV3 → MNG_SIPARIS_NO al (örn. `1757391445`)
+  2. FaturaSiparisListesi → kargo_statu, çıkış/teslim şubesi, varsa GONDERI_NO
+  3. Etikette MNG_SIPARIS_NO basılır → kuryenin scan ettiği gerçek kargo barkodu
+
+### Doğan e-Dönüşüm Production Erişim Sorunu
+- `efatura.doganedonusum.com:443` (195.155.128.35) — pod'dan TCP timeout (Doğan firewall pod'umuzun outbound IP'sini reddediyor, bu network seviyesinde — kod tarafında düzeltilemez).
+- `efaturatest.doganedonusum.com:443` (176.236.208.19) — erişim var ✅, gerçek kullanıcı/şifre kabul etmiyor (test env için ayrı creds).
+- Bu sorun **whitelist talebi değil**, network routing — bizim Google Cloud pod'umuzdan Doğan production'a paket gitmiyor. Çözüm: User'ın kendi Türkiye-bazlı sunucusuna deploy etme (preview ortamında değil, üretimde).
+
+### Temizlik Yapılan
+- `mng_kargo_client.get_mng_barcode_immediately` (MNGGonderiBarkod) — kod kalsın ama default akıştan çıkarıldı.
+- `routes/orders.py create_cargo_barcode` — sadece SiparisGirisiDetayliV3 + FaturaSiparisListesi.
+- `cargo-refresh` — sadece FaturaSiparisListesi (NZ deneme yok).
+- Frontend Orders.jsx — yenile butonu her MNG order için (NZ check kaldırıldı), error toast'larında "whitelist" terimi yok.
+

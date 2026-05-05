@@ -319,13 +319,7 @@ export default function AdminOrders() {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (res.data.mng_nz_barkod) {
-        toast.success(`✅ NZ Barkod: ${res.data.mng_nz_barkod}`);
-      } else if (res.data.mng_whitelist_error) {
-        toast.warning(`⚠️ NZ barkod alınamadı (IP whitelist gerekli). Ref: ${res.data.tracking_number}`);
-      } else {
-        toast.success(`MNG kargo oluşturuldu: ${res.data.tracking_number}`);
-      }
+      toast.success(res.data.message || `MNG kargo barkodu: ${res.data.tracking_number}`);
       fetchOrders();
     } catch (err) {
       toast.error(err.response?.data?.detail || "MNG Kargo oluşturulamadı");
@@ -1172,11 +1166,11 @@ export default function AdminOrders() {
                             <Copy size={15} />
                           </button>
                         )}
-                        {/* 5b. Kargo Durum Yenile (NZ barkodu güncelleme) */}
-                        {order.cargo?.tracking_number && order.cargo?.provider === 'MNG' && !order.cargo?.mng_nz_barkod && (
+                        {/* 5b. Kargo Durum Yenile (şube işlemi sonrası) */}
+                        {order.cargo?.tracking_number && order.cargo?.provider === 'MNG' && (
                           <button
                             onClick={() => handleRefreshCargo(order.id)}
-                            title="Kargo durumunu yenile (NZ barkodu çek)"
+                            title="Kargo durumunu yenile"
                             data-testid="refresh-cargo-btn"
                             className="tci-btn tci-btn-blue"
                           >
