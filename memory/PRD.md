@@ -847,3 +847,33 @@ Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak
 ### Notlar
 - WS yetki kodu `SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V` HEM üye HEM sipariş servisi için yetkili (kullanıcı doğruladı).
 - Ticimax'ta toplam ~800 site siparişi mevcut — tümü çekildi. Yeni siparişler için import endpoint'i tekrar çalıştırılabilir (idempotent — mevcut siparişler güncellenir).
+
+## [2026-05-05] P1+P2 — Cron Scheduler + Temu Router + Auto-Combine
+
+### 1. Periyodik Ticimax Sipariş Senkronizasyonu (P1)
+- `scheduler.py::_ticimax_sync_orders` — her 6 saatte bir çalışır (günde 4×). Son 30 gün, 5 sayfa × 100 sipariş.
+- Idempotent: mevcut order_number/ticimax_order_id varsa atlar.
+- Marketplace prefix filter (TY-, HB-, N11-, AMZ-, AE-) + Kaynak keyword filter ile sadece site siparişlerini DB'ye yazar.
+- `imported_from: 'ticimax_cron'` flag'i ile manual import'tan ayırt edilir.
+- Critical fix (testing agent): `db` + `log_integration_event` lazy import eklendi.
+
+### 2. Temu Router Bağlantısı (P1)
+- `from routes.integrations_temu import router as integrations_temu_router` (server.py:79)
+- `api_router.include_router(integrations_temu_router, prefix="/integrations")` (server.py:265)
+- Endpoint'ler aktif: `/api/integrations/temu/products`, `/orders`, `/stock/update`, `/price/update`. Credential yokken 400 (Temu hesabı tanımlı değil) dönüyor.
+- MarketplaceHub `/marketplace-hub/marketplaces` listesinde `temu` zaten var, UI'da otomatik görünür.
+
+### 3. Otomatik Kombin Ürün Önerisi (P2 — cross-sell ML)
+- **Backend** `routes/products.py`:
+  - `POST /api/products/{id}/auto-combine` — Tek ürün için co-occurrence: aynı siparişlerde geçen ürün ID'lerini sayar (limit 2000 sipariş), top-N'i kombin atar. Existence validation, max 12 cap, dry_run/replace flag'leri.
+  - `POST /api/products/auto-combine-all` — Tüm aktif ürünler için tek tıkla kombin atama. only_empty=True (default) ile sadece kombin'i boş olanlara.
+- **Admin UI** `CombineProductsTab.jsx`: Kombin tab'ının üstünde **"⚡ Otomatik Kombin Önerisi"** siyah card + "Otomatik Ata" butonu (`data-testid="auto-combine-btn"`). Tek tıkla geçmiş siparişlerden top-8 atama.
+
+### Test (Iteration 21)
+- Backend 7/7 PASS, 0 critical (testing agent fixed scheduler imports).
+- Auto-combine ürün 1182 için: co-occurrence ile 1 candidate (8642 Tina Jean) buldu, _co_count=1 ✅
+- Temu router HTTP 400 ✅, MarketplaceHub temu key ✅
+- Cron job listesinde aktif ✅
+
+### Atlandı (yüksek risk, düşük değer)
+- `integrations.py` (4150 satır) refactoring — Trendyol/HB/Temu modüllerini ayırma. İhtiyaç olunca yapılır.
