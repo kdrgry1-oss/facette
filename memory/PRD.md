@@ -672,3 +672,26 @@ Kullanıcı "neden gerçek faturası dogandonusume düşmüyor" sordu. Mevcut `c
 - `/orders/{id}/cargo-label` (browser render) → MNG-style etiket, üst sipariş no + alt takip no barkodu ✅
 - order_shipped notification → 3 kanal template seedlendi (SMS/WhatsApp/Email) ✅
 
+
+## [2026-05-05] MNG GONDERI_NO + Doğan UBL-TR e-Arşiv Entegrasyonu
+
+### MNG Kargo Takip No Anlamı (CRITICAL)
+- `MNG_SIPARIS_NO` (örn. `1757391445`): MNG'nin **iç referans numarası** (sipariş kayıt anında atanır).
+- `GONDERI_NO` (örn. `NZ197406`): **Gerçek kargo takip numarası** (MNG çıkış şubesi paketi işleme aldığında atanır, başlangıçta `null`).
+- Etiket/UI artık `GONDERI_NO` öncelikli, yoksa `MNG_SIPARIS_NO` gösterir.
+- Yeni endpoint: `POST /api/orders/{id}/cargo-refresh` → MNG'den güncel `FaturaSiparisListesi` çekip `GONDERI_NO`/`KARGO_STATU` günceller.
+- 22 mevcut order için cargo.mng_siparis_no/mng_gonderi_no fieldları backfill edildi.
+
+### Doğan e-Dönüşüm UBL-TR e-Arşiv Entegrasyonu (Kod tamamlandı, Auth bekliyor)
+- `dogan_client.py`:
+  - `build_earsiv_ubl_xml(...)` - Tam UBL-TR 1.2 e-Arşiv Fatura XML üretici (bireysel TCKN + kurumsal VKN destekli, satır kalemleri, KDV, kargo, indirim).
+  - `send_earsiv_invoice(ubl_xml)` - Doğan `WriteToArchive` SOAP çağrısı.
+  - `login()` artık ERROR_TYPE'ı kontrol ediyor (önceden mock success dönüyordu, şimdi gerçek credentials hatası net dönüyor).
+- `routes/orders.py` `create_invoice_for_order` artık Doğan canlı çağırıyor (`is_test=true` veya `false`).
+- Credentials kaydedildi: VKN `7810816779`, kullanıcı `7810816779`, şifre `Facette.98`, prefix `FAC`/`FCT`.
+
+### ⚠️ Doğan Auth Sorunu (Kullanıcı Aksiyonu Gerekli)
+- **Production endpoint** (`efatura.doganedonusum.com`) → bizim pod'dan timeout. **IP whitelist gerekli.** Pod outbound IP: `34.170.12.145` — bu IP'yi Doğan destek ekibine ileterek whitelist'e eklettirin.
+- **Test endpoint** (`efaturatest.doganedonusum.com`) → erişilebilir ama verdiğiniz prod credentials test'te `10004 Kullanıcı adı veya şifre hatalı` hatası alıyor (test ortamında ayrı kullanıcı gerekir).
+- Whitelist sonrası canlıya geçiş: `is_test=false` ile aynı credentials kullanılarak otomatik fatura kesimi başlar.
+

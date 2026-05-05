@@ -631,33 +631,119 @@ async def create_invoice_for_order(
     cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0})
     active = (cfg or {}).get("active_provider")
     providers = (cfg or {}).get("providers") or {}
-    if not active or not providers.get(active):
+
+    # Yeni: Doğan ayarları settings.id=dogan_edonusum altında saklanıyor
+    dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    dogan_active = dogan_settings.get("enabled") and dogan_settings.get("username")
+
+    if not (active and providers.get(active)) and not dogan_active:
         raise HTTPException(
             status_code=400,
             detail="Aktif e-fatura entegratörü yapılandırılmamış. Ayarlar > E-Arşiv / E-Fatura ekranından seçin."
         )
 
-    pcfg = providers[active]
-    prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
-              else pcfg.get("einvoice_prefix")) or "FAC"
+    # Prefix
+    if dogan_active:
+        active = "dogan"
+        prefix = (dogan_settings.get("earchive_prefix") if invoice_type == "e-arsiv"
+                  else dogan_settings.get("einvoice_prefix")) or "FAC"
+    else:
+        pcfg = providers[active]
+        prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
+                  else pcfg.get("einvoice_prefix")) or "FAC"
 
-    # Aynı prefix ile kesilmiş fatura sayısına göre sıra numarası üret
+    # Aynı prefix ile kesilmiş fatura sayısına göre sıra numarası üret (yıllık)
+    year_str = datetime.now(timezone.utc).strftime("%Y")
     count = await db.orders.count_documents({
-        "invoice_number": {"$regex": f"^{prefix}"}
+        "invoice_number": {"$regex": f"^{prefix}{year_str}"}
     })
-    invoice_number = f"{prefix}{(count + 1):08d}"
+    invoice_number = f"{prefix}{year_str}{(count + 1):09d}"
+    invoice_uuid = generate_id()  # UUID-like
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    issue_date = now.strftime("%Y-%m-%d")
+    issue_time = now.strftime("%H:%M:%S")
+
+    # Gerçek Doğan e-Arşiv kesimi
+    dogan_result = None
+    if dogan_active and invoice_type == "e-arsiv":
+        from dogan_client import DoganClient
+        from fastapi.concurrency import run_in_threadpool
+
+        # Müşteri VKN/TCKN — order'dan al, yoksa default 11111111111 (TCKN bilinmiyor)
+        bill = order.get("billing_address") or {}
+        ship_addr = order.get("shipping_address") or {}
+        customer_vkn = (bill.get("tax_no") or "").strip().replace(" ", "")
+        customer_name = (bill.get("name") or
+                         f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
+                         "Bireysel Müşteri")
+        if not customer_vkn:
+            # TCKN yoksa Doğan kabul etmez — bireysel için varsayılan TCKN dön (test'te)
+            customer_vkn = "11111111111"
+
+        line_items = []
+        for it in (order.get("items") or []):
+            line_items.append({
+                "name": it.get("product_name") or "Ürün",
+                "qty": int(it.get("quantity") or 1),
+                "unit_price": float(it.get("price") or 0),
+                "kdv_rate": 20.0,
+            })
+
+        ubl_xml = DoganClient.build_earsiv_ubl_xml(
+            invoice_uuid=invoice_uuid,
+            invoice_number=invoice_number,
+            issue_date=issue_date,
+            issue_time=issue_time,
+            supplier_vkn=dogan_settings.get("vkn") or "7810816779",
+            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC.A.Ş.",
+            supplier_district=dogan_settings.get("supplier_district") or "Küçükçekmece",
+            supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
+            supplier_street=dogan_settings.get("supplier_street") or "İkitelli OSB Mah.",
+            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "Küçükçekmece",
+            supplier_phone=dogan_settings.get("supplier_phone") or "",
+            supplier_email=dogan_settings.get("supplier_email") or "",
+            customer_vkn_or_tckn=customer_vkn,
+            customer_name=customer_name,
+            customer_district=ship_addr.get("district") or "",
+            customer_city=ship_addr.get("city") or "",
+            customer_street=ship_addr.get("address") or "",
+            customer_phone=ship_addr.get("phone") or "",
+            customer_email=ship_addr.get("email") or order.get("user_email") or "",
+            currency="TRY",
+            kdv_rate=20.0,
+            line_items=line_items,
+            shipping_cost=float(order.get("shipping_cost") or 0),
+            discount=float(order.get("discount") or 0),
+            note=f"Sipariş No: {order.get('order_number') or order_id}",
+        )
+
+        dogan_client = DoganClient(
+            username=dogan_settings["username"],
+            password=dogan_settings["password"],
+            is_test=dogan_settings.get("is_test", True),
+        )
+        dogan_result = await run_in_threadpool(dogan_client.send_earsiv_invoice, ubl_xml)
+
+        if not dogan_result.get("success"):
+            # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
+            raise HTTPException(
+                status_code=502,
+                detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
+            )
+
     await db.orders.update_one(
         {"id": order_id},
         {"$set": {
             "invoice_issued": True,
             "invoice_number": invoice_number,
+            "invoice_uuid": invoice_uuid,
             "invoice_type": invoice_type,
             "invoice_provider": active,
-            "invoice_issued_at": now,
+            "invoice_provider_response": dogan_result,
+            "invoice_issued_at": now.isoformat(),
             "invoice_issued_by": current_user.get("email", ""),
-            "updated_at": now,
+            "updated_at": now.isoformat(),
         }}
     )
 
@@ -670,7 +756,7 @@ async def create_invoice_for_order(
             status="success",
             direction="outbound",
             ref_id=order_id,
-            message=f"{invoice_type} fatura oluşturuldu: {invoice_number}",
+            message=f"{invoice_type} fatura oluşturuldu: {invoice_number} (Doğan: {dogan_result.get('message') if dogan_result else 'mock'})",
         )
     except Exception:
         pass
@@ -928,20 +1014,33 @@ async def create_cargo_barcode(
         })
         raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
 
-    barkod = res["barkod"]
-    track_link = f"https://kargotakip.mngkargo.com.tr/?BarkodNo={barkod}" if barkod else ""
+    barkod = res["barkod"]  # MNG_SIPARIS_NO (referans no)
+    # Gerçek kargo takip kodunu (GONDERI_NO) çek — şube işlerken atanır, başlangıçta null olabilir
+    from mng_kargo_client import get_mng_shipment_status
+    status_info = get_mng_shipment_status(
+        username=settings["username"], password=settings["password"], siparis_no=siparis_no
+    )
+    gonderi_no = (status_info.get("gonderi_no") or "") if status_info.get("ok") else ""
+    kargo_takip_url = (status_info.get("kargo_takip_url") or "") if status_info.get("ok") else ""
+    kargo_statu = (status_info.get("kargo_statu") or "0") if status_info.get("ok") else "0"
+
+    # Etikette/UI'da göstereceğimiz takip no: GONDERI_NO öncelikli, yoksa MNG_SIPARIS_NO
+    public_tracking = gonderi_no or barkod
+    track_link = kargo_takip_url or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
     update_doc = {
-        "cargo_tracking_number": barkod,
+        "cargo_tracking_number": public_tracking,
         "cargo_tracking_link": track_link,
         "cargo_provider_name": "MNG Kargo",
         "cargo_provider_code": "MNG",
-        # Frontend `selectedOrder.cargo?.tracking_number` üzerinden kontrol ettiği için nested obje yaz
         "cargo": {
             "provider": "MNG",
             "provider_name": "MNG Kargo",
-            "tracking_number": barkod,
+            "tracking_number": public_tracking,
             "tracking_link": track_link,
             "label_format": "10x15cm",
+            "mng_siparis_no": barkod,           # MNG iç referans (her zaman dolu)
+            "mng_gonderi_no": gonderi_no,       # MNG gerçek kargo takip kodu (NZ format, şubede oluşur)
+            "mng_kargo_statu": kargo_statu,
             "created_at": datetime.now(timezone.utc).isoformat(),
         },
         "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
@@ -986,10 +1085,72 @@ async def create_cargo_barcode(
     })
     return {
         "success": True,
-        "tracking_number": barkod,
+        "tracking_number": public_tracking,
         "tracking_link": track_link,
+        "mng_siparis_no": barkod,
+        "mng_gonderi_no": gonderi_no,
+        "mng_kargo_statu": kargo_statu,
         "cargo_provider_name": "MNG Kargo",
-        "message": f"MNG Kargo barkodu oluşturuldu: {barkod}",
+        "message": (f"MNG kargo oluşturuldu. Takip: {gonderi_no}" if gonderi_no
+                    else f"MNG'ye sipariş kaydedildi (Ref: {barkod}). Gerçek kargo takip numarası şube tarafından işlendiğinde atanacak — 'Yenile' butonuyla güncelleyebilirsiniz."),
+    }
+
+
+@router.post("/{order_id}/cargo-refresh")
+async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(require_admin)):
+    """MNG'den güncel kargo durumunu (GONDERI_NO, KARGO_STATU) çek ve order'ı güncelle.
+    
+    UI'dan "Yenile" butonu ile çağrılabilir. Şube işlemi tamamlandığında gerçek
+    NZ-formatlı takip kodu (GONDERI_NO) DB'ye yazılır.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from mng_kargo_client import get_mng_shipment_status
+
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    cargo = order.get("cargo") or {}
+    siparis_no = str(order.get("order_number") or order_id)
+    settings = await _get_mng_settings()
+
+    info = get_mng_shipment_status(
+        username=settings["username"], password=settings["password"], siparis_no=siparis_no
+    )
+    if not info.get("ok"):
+        raise HTTPException(status_code=502, detail=info.get("error") or "MNG durumu alınamadı")
+
+    gonderi_no = info.get("gonderi_no") or ""
+    mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
+    public_tracking = gonderi_no or mng_siparis_no
+    track_link = info.get("kargo_takip_url") or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
+
+    update = {
+        "cargo_tracking_number": public_tracking,
+        "cargo_tracking_link": track_link,
+        "cargo.tracking_number": public_tracking,
+        "cargo.tracking_link": track_link,
+        "cargo.mng_siparis_no": mng_siparis_no,
+        "cargo.mng_gonderi_no": gonderi_no,
+        "cargo.mng_kargo_statu": info.get("kargo_statu"),
+        "cargo.mng_kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
+        "cargo.cikis_subesi": info.get("cikis_subesi"),
+        "cargo.teslim_subesi": info.get("teslim_subesi"),
+        "cargo.teslim_tarihi": info.get("teslim_tarihi"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.orders.update_one({"id": order_id}, {"$set": update})
+    return {
+        "success": True,
+        "tracking_number": public_tracking,
+        "mng_siparis_no": mng_siparis_no,
+        "mng_gonderi_no": gonderi_no,
+        "kargo_statu": info.get("kargo_statu"),
+        "kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
+        "tracking_link": track_link,
+        "message": (f"Güncel takip: {gonderi_no}" if gonderi_no
+                    else f"Henüz şube işlemi yok ({info.get('kargo_statu_aciklama')}). Referans: {mng_siparis_no}"),
     }
 
 
@@ -1037,6 +1198,11 @@ async def get_cargo_label(order_id: str, token: str = None):
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
     barkod = order.get("cargo_tracking_number") or ""
+    cargo_obj = order.get("cargo") or {}
+    mng_siparis_no = cargo_obj.get("mng_siparis_no") or ""
+    mng_gonderi_no = cargo_obj.get("mng_gonderi_no") or ""
+    # Etikette gösterilecek "asıl" kargo takip — GONDERI_NO varsa o, yoksa MNG_SIPARIS_NO, yoksa current barkod
+    real_kargo_takip = mng_gonderi_no or mng_siparis_no or barkod or ""
     siparis_no = str(order.get("order_number") or order_id)
     sender = await _get_sender_info()
     mng = await _get_mng_settings()
@@ -1113,10 +1279,11 @@ async def get_cargo_label(order_id: str, token: str = None):
     <div class="small">Sipariş No: {siparis_no}</div>
   </div>
 
-  <!-- ALT: KARGO TAKİP NO BARKODU -->
+  <!-- ALT: KARGO TAKİP NO BARKODU (varsa GONDERI_NO, yoksa MNG_SIPARIS_NO) -->
   <div style="margin-top: 3mm;">
-    <div class="barcode">*{barkod or siparis_no}*</div>
-    <div class="barcode-num">Takip No: {barkod or '— bekleniyor —'}</div>
+    <div class="barcode">*{real_kargo_takip or siparis_no}*</div>
+    <div class="barcode-num">Takip No: {real_kargo_takip or '— şube işleminden sonra atanacak —'}</div>
+    {('<div class="small" style="text-align:center;margin-top:1mm;">Ref: ' + mng_siparis_no + '</div>') if (mng_siparis_no and mng_siparis_no != real_kargo_takip) else ''}
   </div>
 </div>
 </body></html>"""

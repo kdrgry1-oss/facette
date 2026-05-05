@@ -50,32 +50,60 @@ def baglanti_test() -> Dict:
         return {"ok": False, "error": str(e)}
 
 
-def get_mng_barcode_by_siparis_no(*, username: str, password: str, siparis_no: str) -> Optional[str]:
-    """FaturaSiparisListesi → siparis_no'dan gerçek MNG barkodunu (MNG_SIPARIS_NO) çek."""
+def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) -> Dict:
+    """FaturaSiparisListesi → siparis_no'dan TÜM kargo durumunu çek.
+    
+    Returns:
+      {
+        "mng_siparis_no": "1757391445",  # MNG iç referans
+        "gonderi_no": "NZ197406",         # ASIL KARGO TAKİP KODU (MNG şubesi atadığında)
+        "kargo_statu": "0",               # 0=İşlem Yok, 1+=işleniyor
+        "kargo_statu_aciklama": "...",
+        "kargo_takip_url": "...",
+        "teslim_tarihi": "...",
+        "alici_il": "...",
+      }
+    """
     c = _get_client()
     try:
         r = c.service.FaturaSiparisListesi(
             pSiparisNo=siparis_no, pKullaniciAdi=username, pSifre=password
         )
         if r is None:
-            return None
-        # r is a DataSet-like structure. Convert to dict.
-        if hasattr(r, "__values__"):
-            r = dict(r.__values__)
-        # Navigate: NewDataSet > FaturaSiparisListesi > MNG_SIPARIS_NO
-        # Actually zeep deserializes _value_1 as ANY. Find MNG_SIPARIS_NO key in nested structure.
-        import json
+            return {"ok": False, "error": "Sipariş bulunamadı"}
         from zeep.helpers import serialize_object
         ser = serialize_object(r)
-        s_json = json.dumps(ser, default=str)
-        import re
-        m = re.search(r'"MNG_SIPARIS_NO"\s*:\s*"?(\d+)"?', s_json)
-        if m:
-            return m.group(1)
-        return None
+        # Navigate: schema → _value_1 → list → FaturaSiparisListesi
+        try:
+            rows = ser.get("_value_1", {}).get("_value_1", [])
+            if rows and isinstance(rows, list):
+                row = rows[0].get("FaturaSiparisListesi", {})
+            else:
+                row = {}
+        except Exception:
+            row = {}
+        return {
+            "ok": True,
+            "mng_siparis_no": str(row.get("MNG_SIPARIS_NO") or "").strip(),
+            "gonderi_no": str(row.get("GONDERI_NO") or "").strip(),
+            "kargo_statu": str(row.get("KARGO_STATU") or "0").strip(),
+            "kargo_statu_aciklama": str(row.get("KARGO_STATU_ACIKLAMA") or "").strip(),
+            "kargo_takip_url": str(row.get("KARGO_TAKIP_URL") or "").strip(),
+            "teslim_tarihi": str(row.get("TESLIM_TARIHI") or "").strip(),
+            "alici_il": str(row.get("ALICI_IL") or "").strip(),
+            "cikis_subesi": str(row.get("CIKIS_SUBESI") or "").strip(),
+            "teslim_subesi": str(row.get("TESLIM_SUBESI") or "").strip(),
+            "raw": row,
+        }
     except Exception as e:
-        logger.error(f"FaturaSiparisListesi({siparis_no}): {e}")
-        return None
+        logger.error(f"MNG get_shipment_status({siparis_no}): {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def get_mng_barcode_by_siparis_no(*, username: str, password: str, siparis_no: str) -> Optional[str]:
+    """Geriye uyumluluk: MNG_SIPARIS_NO döndürür."""
+    info = get_mng_shipment_status(username=username, password=password, siparis_no=siparis_no)
+    return info.get("mng_siparis_no") if info.get("ok") else None
 
 
 def create_shipment(
