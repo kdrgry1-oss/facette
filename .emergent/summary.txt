@@ -1,163 +1,161 @@
 <analysis>**original_problem_statement**: 
-Kullanıcı, Ticimax'ten göç eden facette e-ticaret markası için kapsamlı, çok pazaryerli (Trendyol, Hepsiburada, Temu vb.) çalışan, kendi fatura ve kargo entegratörlerini yönetebildiği bir admin paneli ve ERP sistemi istemektedir.
-PRODUCT REQUIREMENTS: 
-- Ürün ve Sipariş tablolarının kompakt hale getirilmesi, gelişmiş pagination (sayfa boyutu seçimi).
-- Ürün özelliklerinin senkronizasyon hatalarının giderilmesi.
-- Tekli ve çoklu barkod yazdırma.
-- Toplu sipariş faturası kesme ve kargo etiketi yazdırma.
-- E-Fatura/E-Arşiv ve Kargo firmaları için Ticimax benzeri ayar ve credential sayfaları (Doğan e-Dönüşüm, Yurtiçi vb. firmaların seçimi ve yapılandırılması).
-- Pazaryeri (Marketplace) Hub: API bilgileri, eşleştirme ayarları, detaylı entegrasyon logları, marka ve kategori eşleştirme, aktarılamayan siparişlerin yönetimi.
-- Excel ile Toplu Fiyat/Stok güncelleme, Stok Uyarısı sistemi.
-- Müşteri segmentasyonu (RFM), Pazaryeri Karlılık raporları ve Google Merchant XML Feed oluşturulması.
+Kullanıcı Ticimax'ten göç eden facette e-ticaret markası için kapsamlı bir e-ticaret admin paneli ve ERP sistemi istemektedir. (Trendyol/Hepsiburada/Temu entegrasyonu, Doğan e-Dönüşüm e-Fatura, MNG Kargo, İmalat Modülü).
+PRODUCT REQUIREMENTS:
+- Ticimax'ten üye ve websitesi siparişlerinin çekilmesi (Cron ile otomatik senkronizasyon).
+- MNG Kargo API entegrasyonu (NZ barkod formatı).
+- Doğan e-Dönüşüm üzerinden canlı e-Arşiv faturasının otomatik oluşturulması (UBL-TR formatında).
+- Trendyol/ZaraHome tarzı asenkron, siyah/beyaz minimal tasarımlı Checkout ve Sipariş Başarı sayfası.
+- Sepet ve Checkout'ta Kombin Ürün (cross-sell) öneri sistemi.
+- Sitenin baştan aşağı elit, kaliteli, siyah-beyaz minimal Facette kurumsal kimliğine uygun tasarlanması (Mobile first).
 
-**User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only / Sonraki ajan kullanıcıya SADECE Türkçe yanıt vermelidir).
+**User's preferred language**: Turkish (Kullanıcı Türkçe konuşuyor. INSTRUCT next agent to respond in Turkish only / Sonraki ajan SADECE Türkçe yanıt vermelidir.)
 
 **what currently exists?** 
-Gelişmiş bir React + FastAPI + MongoDB e-ticaret admin paneli. Ticimax Marketplace v2 özelliklerinin çoğu klonlandı (Marketplace Hub, Entegrasyon Logları, Marka/Kategori Eşleştirme, Başarısız Aktarımlar). 11 E-fatura ve 13 Kargo firması için jenerik ayar arayüzü eklendi. Gelişmiş RFM Segmentasyon, Karlılık Raporları, Toplu Excel İşlemleri, Barkod yazdırma, Stok uyarı modülleri ve tüm API çağrılarını otomatik loglayan bir Middleware mevcuttur. Arayüzde kompakt tablolar, sayfalama ve modüler ürün düzenleme bileşenleri kullanılmaktadır.
+Gelişmiş bir React + FastAPI + MongoDB e-ticaret altyapısı. Ticimax'ten 10.000+ üye ve 300+ site siparişi agresif import ile çekildi, arka planda 6 saatte bir çalışan senkronizasyon cron'u () kuruldu. MNG Kargo NZ barkod üretimi düzeltildi. ZaraHome stili  eklendi ve Checkout sayfası kurumsal fatura alanlarıyla güncellenip siyah-beyaz temaya geçirildi. Temu entegrasyonu backend router'a bağlandı. Kombin Ürünler özelliği backend'de yazıldı ve sepet sayfasına bağlandı. Doğan e-Dönüşüm'ün **canlı (live)** ortamına () bağlantı başarıyla kuruldu, ZIP payload formatı çözüldü ancak gönderilen UBL XML içeriği Doğan tarafından reddediliyor.
 
 **Last working item**:
-    - **Last item agent was working**: Müşteri Segmentasyonu (RFM), Pazaryeri Karlılık Raporu, Google Merchant XML Feed oluşturulması ve AddressFields modülünün Siparişler sayfasına bağlanması.
-    - **Status**: USER VERIFICATION PENDING (Ajan tarafında tüm testler yapıldı ve başarılı oldu, ancak kullanıcının sistemde verileri teyit etmesi bekleniyor).
-    - **Agent Testing Done**: Y
-    - **Which testing method agent to use?**: NA (Testing was successfully completed via curl and screenshot tools).
-    - **User Testing Done**: N
+    - Last item agent was working: 1) Kullanıcının yüklediği örnek geçerli UBL XML dosyasına () bakarak  içerisindeki UBL üretim şemasını Doğan'ın kabul edeceği formata getirmek. 2) Kullanıcının son mesajında talep ettiği sitenin genel UI/UX mobil görünümünü elit, minimal siyah/beyaz, sticky header yapısına geçirmek ve sepet sayfasındaki Kombin Ürün görünümünü sadece görsellerden oluşan Stilini tamamla tasarımına dönüştürmek.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use?: both (Backend for Doğan XML generation testing, Frontend testing agent for UI/UX mobile overhaul). *Note: Must use  for the UI/UX overhaul as requested by the user.*
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Pazaryeri (Marketplace) Canlı API Entegrasyonları ve Testleri (P0)
-     - **Attempted fixes**: Backend ve frontend altyapısı (Marketplace Hub, eşleştirme kuralları, otomatik loglama) tamamen kuruldu ancak gerçek Trendyol/HB/Temu API'lerine canlı isteklerin (ürün basma, sipariş çekme) kullanıcı credential'ları ile uçtan uca test edilmesi gerekiyor.
-     - **Next debug checklist**: Kullanıcıdan test/canlı API key'lerini isteyin,  üzerinden bir ürün yükleme veya sipariş çekme işlemi tetikleyerek  sayfasına yansımasını ve pazaryeri paneline düşmesini doğrulayın. Mutlaka  kullanın.
-     - **Why fix this issue and what will be achieved with the fix?**: Sistem çift yönlü gerçek zamanlı senkronizasyon vadettiği için, bu bağlantıların operasyonel olarak çalıştığının kanıtlanması şarttır.
-     - **Status**: NOT STARTED
-     - **Is recurring issue?**: N
-     - **Should Test frontend/backend/both after fix?**: Both
-  - Issue 2: E-Fatura ve Kargo Canlı Entegrasyonları (P1)
-     - **Next debug checklist**: Ayar sayfaları yapıldı, aktif entegratör üzerinden fatura numarası üretiliyor () ancak gerçek SOAP/REST endpoint'lerine (örn. Doğan e-Dönüşüm, Yurtiçi Kargo) payload gönderimi ve dönen PDF/URL'in kaydedilmesi henüz mock/html üzerinden yürüyor. Gerçek entegrasyonlar yapılmalı.
-     - **Status**: NOT STARTED
-     - **Is recurring issue?**: N
-     - **Should Test frontend/backend/both after fix?**: Both
+  - Issue 1: Doğan e-Arşiv UBL XML Format Reddi (P0)
+     - Attempted fixes: Ajan Doğan'ın canlı ortamına bağlandı ve ElementType=ZIP yöntemini bularak iletişim sorununu çözdü. Ancak gönderilen UBL XML içeriği eksik/hatalı olduğu için Doğan  veya  hatası veriyor. 
+     - Next debug checklist:  (veya kullanıcının son mesajda ilettiği ) dosyasını analiz edin.  içindeki  fonksiyonunu bu örnekteki namespaces, eksik alanlar ve XML yapısına birebir uyacak şekilde yeniden düzenleyin.
+     - Why fix this issue and what will be achieved with the fix?: Fatura kesilememesi uygulamanın en temel e-ticaret gereksinimini bloke ediyor.
+     - Status: IN PROGRESS
+     - Is recurring issue?: Y
+     - Should Test frontend/backend/both after fix?: Backend
+     - Blocked on other issue: None
+  - Issue 2: Sepet Sayfasında Git Butonu Çalışmıyor (P1)
+     - Attempted fixes: Henüz başlanmadı.
+     - Next debug checklist:  içindeki yönlendirme (Link/onClick) metodunu inceleyin.
+     - Why fix this issue and what will be achieved with the fix?: Kullanıcılar ödeme adımına geçemiyor.
+     - Status: NOT STARTED
+     - Is recurring issue?: N
+     - Should Test frontend/backend/both after fix?: Frontend
+     - Blocked on other issue: None
 
 **In progress Task List**:
-  - Task 1: APScheduler Otomatik Senkronizasyon (Auto-Sync) Job'larının Aktifleştirilmesi (P1)
-     - **Where to resume**:  içerisine Auto-cancel unpaid orders eklendi. Sync Products ve Pull Orders işlemleri için, kullanıcının belirlediği periyotlarda (örn. 15 dakikada bir) çalışacak zamanlanmış görevlerin (cron jobs) tanımlanması gerekiyor.
-     - **What will be achieved with this?**: Kullanıcının manuel senkronizasyon tuşuna basmasına gerek kalmadan, pazaryerleri ile arka planda sürekli eşitleme sağlanacak.
-     - **Status**: NOT STARTED
-     - **Should Test frontend/backend/both after fix?**: Backend
-     - **Blocked on something**: Canlı API entegrasyonlarının (Issue 1) tamamlanması ve test edilmesi.
+  - Task 1: Sitenin Baştan Sona Mobil UI/UX Revizyonu ve Kombin Ürün Tasarımı (P0)
+     - Where to resume: , ,  ve ilgili layout dosyaları. 
+     - What will be achieved with this?: Kullanıcı elit, siyah-beyaz minimal, sticky header içeren bir marka deneyimi istiyor. Sepetteki kombin ürünler metin olmadan sadece resim ve Stilini tamamla yazısıyla çıkmalı. **(DİKKAT: Kullanıcı design/tasarım talebinde bulunduğu için  subagent'ı çağrılmalıdır)**.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix?: Frontend
+     - Blocked on something: None
 
-**Upcoming and Future Tasks**:
+**Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Iyzico ve Kargo Firmalarının gerçek API entegrasyon iş mantıkları (Kullanıcı onay verdiğinde yapılacak).
-    - P2: Terkedilmiş Sepet (Abandoned Cart) hatırlatmalarının Resend API (Mail) ile otomatikleştirilmesi (şu an Görevler paneline manuel iş olarak düşüyor).
-    - P2: Stok uyarı sayfasında stoku biten ürünlerin tek tıkla pazaryerlerinde pasife alınması butonu (Deactivate on marketplaces).
+    - P1: Otomatik Fatura Kesimi: Doğan UBL sorunu çözüldükten sonra, sipariş başarıyla tamamlandığı an (payment callback) faturanın otomatik kesilmesi ve PDF linkinin e-postaya eklenmesi.
+    - P2: Admin Products sayfasındaki tüm aktif ürünlere Otomatik Kombin Ata cross-sell butonunun UI entegrasyonu (Backend algoritması yazıldı).
+    
     Future Tasks:
-    - P2: Trendyol Mikro İhracat siparişlerinin tespit edilip ayrı faturalandırılması altyapısı.
+    - P2: Müşteri Segmentasyonu (VIP, Sleeping, Repeat) ve otomatik e-posta kampanyaları.
+    - P3:  dosyasının refactor edilerek Trendyol/HB/Temu olarak bölünmesi (Dosya 4150 satır, şu anki ajan riskli bulup erteledi).
 
-**Completed work in this session**:
--  eklendi, tablolar kompakt hale getirildi (DONE).
--  modüllere bölündü (, , ) (DONE).
-- Ürün tablosunda çoklu seçim (checkbox) ve toplu sayfa boyutu ayarlama (20/50/100) eklendi (DONE).
-- Tekli ve çoklu barkod kartı oluşturma () eklendi (DONE).
-- Siparişler için Toplu Fatura Kesme ve Toplu Etiket Yazdırma eklendi (DONE).
-- E-Fatura ve Kargo sağlayıcıları ayar arayüzleri (, 11 Fatura, 13 Kargo firması) eklendi (DONE).
--  (Pazaryerleri ayar hub'ı) ve  (Detaylı log tablosu) yapıldı (DONE).
-- Marka ve Kategori eşleştirme sayfaları (, ) eklendi (DONE).
--  ile backend'deki tüm entegrasyon çağrıları otomatik loglanmaya başlandı (DONE).
-- Excel ile Toplu Fiyat/Stok güncelleme () eklendi (DONE).
-- Kritik Stok Uyarıları () eklendi (DONE).
-- Müşteri RFM Segmentasyonu () eklendi (DONE).
-- Pazaryeri Karlılık Raporu () eklendi (DONE).
-- Google Merchant XML Feed API oluşturuldu (DONE).
+**Completed work in this session**
+- Checkout sayfası quick-signup modal'ı kaldırılarak Guest user'ların ZaraHome stili  sayfasına sorunsuz yönlendirilmesi (DONE)
+- Ticimax üzerinden 10.431 müşteri ve 300+ websitesi siparişinin bulk olarak DB'ye aktarılması (DONE)
+-  ile Ticimax siparişlerinin 6 saatte bir asenkron senkronize edilmesi (DONE)
+- Temu entegrasyonu için backend rotalarının 'a bağlanması ve UI'da gösterilmesi (DONE)
+- Sepet ve Admin Ürünler sayfası için Kombin Ürün (Cross-sell) altyapısının geliştirilmesi (DONE)
+- Doğan e-Dönüşüm CANLI ortam ayarlarının kaydedilmesi ve WSDL bağlantı/TCP timeout sorunlarının aşılması (DONE)
 
-**Earlier issues found/mentioned but not fixed**:
-   - Issue 1: Sipariş iade sürecinde Iyzico kısmi iade ve kargo kesinti hesaplamaları
-     - **Debug checklist**: Backend'de iade endpointlerini kontrol et, iade işleminde kargo bedeli düşülecekse Iyzico API'sine gönderilen tutarı güncelle.
-     - **Why to solve this issue and what will be achieved with this?**: Kullanıcının daha önceki oturumlarda talep ettiği muhasebesel doğruluk ve otomatik para iadesi.
-     - **Should Test frontend/backend/both after fix**: Both
-     - **Is recurring issue?**: N
+**Earlier issues found/mentioned but not fixed**
+   - Issue 1:  dosyasının çok büyük olması (4150 satır).
+   - Debug checklist: Fonksiyonları vendor bazlı yeni dosyalara (ör. ) taşımak.
+   - Why to solve this issue and what will be achieved with this?: Kodun bakımının kolaylaşması ve spagetti kodun önlenmesi.
+   - Should Test frontend/backend/both after fix: Backend
+   - Is recurring issue?: Y
 
-**Known issue recurrence from previous fork**:
-  - Recurrence count: 0
-  - Status: RESOLVED (Products.jsx'teki attributes sync sorunu başarıyla düzeltildi).
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: Doğan e-Dönüşüm SOAP entegrasyonunda XML/UBL formatı zorlukları. Zeep kütüphanesinin raw XML yerine Base64 veya ZIP beklemesi (Çözüldü, ElementType=ZIP yapıldı ama içerik hatası devam ediyor).
+  - Recurrence count: 2
+  - Status: IN PROGRESS
 
-**Code Architecture**:
-- Backend API Routes:  altında , , , , , ,  gibi birçok spesifik modül oluşturuldu.
-- Frontend Admin Pages:  altında Ticimax yapısını taklit eden onlarca modüler sayfa mevcut.
-- Ortak Frontend Componentleri:  altında form ve paginasyon araçları (, , ).
+**Code Architecture**
+- API Routes:  
+- SOAP Clients:  (Zeep kullanıyor, e-Arşiv/Fatura), 
+- Background Jobs:  (APScheduler tabanlı).
+- Frontend Pages:  ve 
 
-**Key Technical Concepts**:
-- Frontend: React, Tailwind CSS, Shadcn UI, Context API
-- Backend: FastAPI, Motor (MongoDB), APScheduler (Arka plan görevleri), Custom Middleware ().
-- Veri İletişimi: Çoklu Pazaryeri eşzamanlama mimarisi, Provider Pattern (fatura ve kargo için dinamik provider yönlendirme).
+**Key Technical Concepts**
+- Backend: FastAPI, Motor (MongoDB), Zeep (SOAP), APScheduler.
+- Frontend: React, TailwindCSS, Shadcn UI. Context API.
+- Doğan e-Dönüşüm CANLI Uç Noktası: 
 
-**key DB schema**:
-  - : Pazaryeri API credential'ları ve eşleştirme ayarları.
-  - : Middleware üzerinden otomatik kaydedilen HTTP entegrasyon logları.
-  - : Zamanlanmış pazaryeri güncelleme görevlerinin (cron) konfigürasyonları.
-  - : Aktif E-Fatura ve Kargo entegratörlerinin bilgileri.
+**key DB schema**
+  - : İçerisinde Doğan entegrasyonu için  ve  tutuluyor.
+  - :  array listesi eklendi.
+  - :  konfigürasyonları (is_test: false, username, password).
 
-**changes in tech stack**:
-  -  ve  kütüphaneleri Excel toplu ürün/stok yükleme/indirme işlemleri için eklendi.
-  -  kütüphanesi ile EAN-13 formatında barkod görselleri HTML olarak oluşturuluyor.
+**changes in tech stack**
+  - Arka plan işleri (Ticimax sync vs) için  eklendi ve  lifespan event'ine bağlandı.
 
-**All files of reference**: 
-Aşağıdaki dosyalar bu oturumda yoğun olarak oluşturuldu/güncellendi:
--  (Middleware eklendi, yeni router'lar dahil edildi)
--  ve  (Modülerleştirme ve checkbox eklentileri)
-- 
-- 
-- 
-- 
-- 
-- 
-- 
-- 
-- İlgili tüm backend routerları ( içerisindeki yeni dosyalar).
+**All files of reference** 
+-  (UBL şeması FCT2026000011227.xml'e göre baştan düzenlenecek)
+-  (Kullanıcının yüklediği çalışan örnek UBL dosyası)
+-  (Mobil UX ve Git butonu)
+-  &  (Mobile UI overhauls)
 
-**Areas that need refactoring**:
--  dosyası hala 3500+ satır. Pazaryerine göre (Trendyol, Hepsiburada, Temu vb.) parçalanması (,  şeklinde) sürdürülebilirlik açısından büyük avantaj sağlayacaktır.
+**Areas that need refactoring**: 
+-  dosyası aşırı şişmiş durumda.
 
-**key api endpoints**:
--  (Toplu barkod)
--  (Aktif entegratöre göre fatura kesimi)
--  (Müşteri Segmentasyonu)
--  (Pazaryeri kârlılık)
--  (XML ürün feed'i)
+**key api endpoints**
+-  (Doğan fatura tetikleyici)
+-  (Kombin ürün mantığı)
 
-**Critical Info for New Agent**:
-- **DİL**: MUTLAKA Türkçe yanıt verin.
-- **Entegrasyonlar**: E-Fatura, Kargo ve Pazaryeri entegrasyonlarının UI ve temel DB kısımları hazır. Ancak gerçek API entegrasyon kodlamaları (örneğin Trendyol'a gerçekten ürün basmak veya Doğan e-Dönüşüm API'sine SOAP ile bağlanmak) yapılacağı zaman, MUTLAKA  subagent'ını kullanın.
-- **Loglama**:  sayesinde  altındaki tüm dış servis istekleri  tablosuna otomatik düşüyor. Custom bir log insert'üne genelde gerek kalmamıştır.
+**Critical Info for New Agent** 
+- Kullanıcı **tasarım ve UI/UX** konusunda köklü bir talepte bulunmuştur (mobil görünüm elit, siyah beyaz, sticky header). Sistem kuralları gereği frontend UI/UX overhaul işlemleri için derhal **** alt ajanını kullanmalısınız.
+- Doğan E-Dönüşüm'de sunucu bağlantısı veya login sorunu YOKTUR. Sorun gönderilen UBL XML'in GİB şemasına uymamasıdır. Geçmiş ajan 'i kaydetti, onu okuyup  içindeki  metodunu düzeltmeniz P0 önceliğindedir.
+- Oturumunuzda mutlaka Türkçe yanıt verin.
 
-**documents and test reports created in this job**
-  - /app/memory/PRD.md (Kapsamlı pazar araştırması özellikleri ve mevcut durum ile güncellendi).
+**documents and test reports created in this job** 
+  - 
+  - 
+  - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. *User*: Ürün özellikleri senkron olmuyor, siparişlerdeki gibi soldan tiklerle seçebilmek istiyorum... Toplu fatura kesebilmek, barkod yazdırabilmek istiyorum. -> *Agent: Paginasyon, barkod yazdırma, toplu fatura ve ürün senkronizasyon hatalarını çözdü.*
-2. *User*: E arşiv fatura ayarları ve Kargo firması ayarları sayfalarını Ticimax'teki gibi oluştur. -> *Agent: 11 E-fatura ve 13 kargo firması için Provider Settings yapılarını kurdu.*
-3. *User*: (Ekran görüntüleri göndererek) Sistem Trendyol, Hepsiburada, Temu ile çift yönlü çalışsın, ayar ekranları ve log kayıtlarını da tut. -> *Agent: Marketplace Hub, Entegrasyon Logları sayfalarını ve otomatik loglama (Middleware) sistemini kurdu.*
-4. *User*: Sonraki adımlara başla, marka eşleştirme vb. potansiyel iyileştirmeleri de yap. -> *Agent: Aktarılamayan işlemler, Marka eşleştirme ve Middleware kayıtlarını test edip bitirdi.*
-5. *User*: Genel sistemi tara, piyasadaki diğer sistemlerde olması gereken özellikleri araştır ve plana dahil et. -> *Agent: Toplu Fiyat/Stok Yükleme, Stok Uyarıları, Kategori Eşleştirme, İl/İlçe dropdowns ve Scheduler özelliklerini kurdu.*
-6. *User*: Sonraki adımlara devam et. -> *Agent: RFM Müşteri Segmentasyonu, Pazaryeri Karlılık Raporu ve Google Merchant XML Feed oluşturma özelliklerini kurdu ve başarıyla test etti.*
-*(Pending Human Action: Ajan en son RFM ve Karlılık ekranlarının çalıştığını raporlayıp süreci bitirdi. Kullanıcıdan onay veya yeni bir yönlendirme bekleniyor).*
+ 1. *User*: Doğan portalda faturayı görmüyorum, e-arşiv FCT, e-fatura EFC öneki ile gitmeli.
+ 2. *Agent*: Fatura önekleri düzeltildi. Status query yapıldığında Doğan FATURA ID BULUNAMADI veya 10013 dönüyor.
+ 3. *User*: 10013 hatası alıyorum Yüklediğiniz dosyada eFatura bulunamamıştır.
+ 4. *Agent*: UBL formatında eksikler var, null değerleri string'e dönüştürdüm, hala kabul etmiyor. Örnek çalışan bir UBL XML lazım.
+ 5. *User*: (FCT2026000011227.xml dosyasını yükler) Kombin ürünler sepette sadece resim ve Stilini tamamla olarak çıksın. Sepette git butonu çalışmıyor. Sitenin mobil UX/UI tasarımını tamamen elit, siyah/beyaz minimal, sticky header olarak baştan tasarla.
+ *(Pending Human Action: Ajan bu son isteği yerine getirmeden taskı devretti. Yeni ajan UBL düzenlemesini ve UI/UX Design Subagent çağrısını yapmalıdır.)*
 
 **Project Health Check:**
-- Broken: Yok (Son iterasyonda test edilen tüm özellikler çalışıyor).
-- Mocked: Fatura üretimi () şu an aktif provider'ın ismini alıp HTML şablon basıyor. Pazaryeri ürün aktarım fonksiyonları başarılı yanıt dönüyor ama gerçek hesap testleri eksik.
+- Broken: Doğan Canlı UBL Gönderimi, Sepet Git butonu.
+- Mocked: Yok.
 
 **3rd Party Integrations** 
-- **OpenAI GPT-5.2** — uses Emergent LLM Key
-- Doğan e-Dönüşüm, Uyumsoft vb. (11 E-Fatura Provider) — Mocked / Kullanıcı Credential Bekliyor
-- Yurtiçi, MNG vb. (13 Kargo Provider) — Mocked / Kullanıcı Credential Bekliyor
-- Trendyol, Hepsiburada, Temu vb. (13 Pazaryeri) — Requires User API Key 
+- Doğan e-Dönüşüm — Requires User API Key (Credentials exist in DB as LIVE).
+- Ticimax — Requires User API Key
+- MNG Kargo — Requires User API Key
+- OpenAI / LLMs — uses Emergent LLM Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Tüm geliştirmeler ajan tarafından cURL ve screenshot aracı ile kapsamlı şekilde bizzat doğrulanarak ilerledi).
+  - Testing agent used after significant changes: YES (Iteration 19, 20, 21 run successfully).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: Yok
-  - Known regressions: Yok
+  - Test files created: 
+  - Known regressions: Cart Git button broken during UI changes.
 
 **Credentials to test flow:**
 - Facette Admin Paneli:  / 
+- Doğan Canlı:  /  (DB settings collection'da kayıtlı).
 
 **What agent forgot to execute**
-- Son oturumda her şey plana uygun şekilde uygulandı. Sadece kargo ve e-fatura sistemlerinin gerçek dış servis (API/SOAP) implementasyonlarına başlanmadı çünkü UI ve konfigürasyon altyapısının kurulması önceliklendirildi.</analysis>
+- Kullanıcının ilettiği  XML dosyasına bakarak 'i refactor etmeyi bitiremedi.
+- Kullanıcının kapsamlı UI/UX tasarım isteğini başlatamadı.
+
+**Debugging checklist for current issue**
+    Issue 1: Doğan UBL XML Validation Error (10013)
+    Backend files to check:
+    -  ->  metodunda namespaces (ext, cac, cbc, vs.), CustomizationID, ProfileID ve zorunlu alanlar kullanıcının ilettiği  dosyası referans alınarak düzeltilmelidir.
+    
+    Issue 2: Mobil UI/UX Revizyonu ve Kombin Ürün
+    Frontend files to check:
+    -  (Kombin UI'si sadece görsel + Stilini tamamla yazısı olacak ve çalışmayan Git butonu düzeltilecek).
+    - Genel layout dosyaları (tasarım için  kullanılmalıdır).</analysis>
