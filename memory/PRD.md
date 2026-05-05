@@ -746,3 +746,31 @@ Kullanıcı "neden gerçek faturası dogandonusume düşmüyor" sordu. Mevcut `c
 - `cargo-refresh` — sadece FaturaSiparisListesi (NZ deneme yok).
 - Frontend Orders.jsx — yenile butonu her MNG order için (NZ check kaldırıldı), error toast'larında "whitelist" terimi yok.
 
+
+## [2026-05-05] Trendyol-Style One-Page Checkout Yeniden Tasarımı
+
+### Tetikleyici
+Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak benzer UI/UX talep etti.
+
+### Yapılanlar (`/app/frontend/src/pages/Checkout.jsx` tam yeniden yazıldı)
+- **Layout**: 12-col grid; sol 9 col (içerik), sağ 3 col (sticky `Sipariş Özeti` paneli).
+- **Sepetimdeki Ürünler**: Collapsible card; daraltılınca thumbnail stack + adet özeti, açılınca detaylı liste.
+- **Adres Bölümü**: Yan yana 2 kart (Teslimat + Fatura) + her birinin sağ üstünde turuncu **Adres Ekle/Değiştir** butonu. **Modal** açılır (sayfa yenilemeden async).
+  - Modal içinde: kayıtlı adres seçicisi (logged-in users) + yeni adres formu + ProvinceDistrictSelect + Posta Kodu.
+  - `POST/PUT /api/customer/addresses` ile DB'ye kaydeder, listeyi yeniler.
+  - **Faturamı Aynı Adrese Gönder** checkbox — checked olunca billing card "Teslimat ile aynı" mesajı + edit butonu disable.
+- **Ödeme Seçenekleri**: 3 method radio (Banka & Kredi Kartı / Havale / Kapıda Ödeme), seçili olana turuncu vurgu. Kredi Kartı seçili iken: Kart bilgileri (iyzico'ya yönlendirme infosu), Taksit özeti, **3D Secure** checkbox (default ON), **Puan Kullan** checkbox (puan varsa).
+- **Hediye Seçenekleri**: Hediye paketi (+130 TL) + Hediye notu (300 char limit).
+- **Sipariş Özeti** (sticky):
+  - **Sana Özel Kuponlar** — Trendyol-style turuncu kart (seçili olunca dolu turuncu, hover'da turuncu border).
+  - Manuel kupon input + Uygula/Kaldır.
+  - Ara Toplam, Kargo (≥500₺ "Bedava" badge + üstü çizili 59,99₺), Kupon, Puan, Hediye paketi, Kapıda Ödeme satırları, Toplam (turuncu).
+  - **Ödeme Yap** turuncu büyük buton (sözleşme onaylanmadan disabled).
+  - **Mesafeli Satış Sözleşmesi + Ön Bilgilendirme Koşulları** checkbox butonun altında.
+- **SSL Güvenli Ödeme** rozet üst sağda.
+- **Quick signup modal** korundu (guest sipariş sonrası hesap oluşturma).
+
+### Test
+- Hot reload + smoke test ile gerçek render doğrulandı (Slim Fit Triko Bluz, Yüksek Bel Kumaş Pantolon, kupon TEST10 -149.97 TL, bedava kargo, toplam 1499.70 TL). ✅
+- Lint pass.
+

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, Truck, CheckCircle, AlertCircle } from "lucide-react";
+import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, MapPin, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -12,72 +12,98 @@ import { trackInitiateCheckout, trackPurchase } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+const emptyAddress = {
+  id: "",
+  title: "",
+  first_name: "",
+  last_name: "",
+  phone: "",
+  address: "",
+  city: "",
+  district: "",
+  postal_code: "",
+};
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { items, total, clearCart } = useCart();
   const { user } = useAuth();
+
+  // Cart collapse + payment flow
+  const [cartCollapsed, setCartCollapsed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [couponCode, setCouponCode] = useState("");
-  const [discount, setDiscount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState("credit_card");
-  const [acceptTerms, setAcceptTerms] = useState(false);
-  const [paymentStep, setPaymentStep] = useState("form"); // form, processing, iframe, success, error
+  const [paymentStep, setPaymentStep] = useState("form"); // form | processing | iframe | success | error
   const [paymentUrl, setPaymentUrl] = useState("");
   const [orderId, setOrderId] = useState(null);
   const iframeRef = useRef(null);
-  
-  const [formData, setFormData] = useState({
-    first_name: user?.first_name || "",
-    last_name: user?.last_name || "",
-    email: user?.email || "",
-    phone: user?.phone || "",
-    address: "",
-    city: "",
-    district: "",
-    postal_code: "",
-  });
 
-  // FAZ 4 — hediye notu + hediye paketi + uygulanabilir kupon listesi
+  // Addresses
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [shippingAddress, setShippingAddress] = useState({ ...emptyAddress, email: user?.email || "" });
+  const [billingAddress, setBillingAddress] = useState({ ...emptyAddress });
+  const [billingSameAsShipping, setBillingSameAsShipping] = useState(true);
+  const [addressModal, setAddressModal] = useState(null); // null | 'shipping' | 'billing'
+  const [addressForm, setAddressForm] = useState({ ...emptyAddress });
+
+  // Coupons
+  const [couponCode, setCouponCode] = useState("");
+  const [discount, setDiscount] = useState(0);
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
+
+  // Payment options
+  const [paymentMethod, setPaymentMethod] = useState("credit_card");
+  const [use3DSecure, setUse3DSecure] = useState(true);
+  const [usePoints, setUsePoints] = useState(false);
+  const [userPoints] = useState(0); // future: fetch from /api/users/me
+
+  // Gift options + terms + quick signup
   const GIFT_WRAP_PRICE = 130;
   const [giftNote, setGiftNote] = useState("");
   const [giftWrap, setGiftWrap] = useState(false);
-  const [availableCoupons, setAvailableCoupons] = useState([]);
-  const [appliedCoupon, setAppliedCoupon] = useState(null);
-  // FAZ Hızlı Üyelik — guest sipariş sonrası quick signup
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [showQuickSignup, setShowQuickSignup] = useState(false);
   const [guestOrderNumber, setGuestOrderNumber] = useState("");
   const [quickPassword, setQuickPassword] = useState("");
   const [quickBusy, setQuickBusy] = useState(false);
 
-  // Uygulanabilir kuponları sepete göre tetikle
+  // Load saved addresses for logged-in users
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("token");
+    axios.get(`${API}/customer/my-addresses`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => {
+        const list = r.data?.addresses || [];
+        setSavedAddresses(list);
+        const def = list.find((a) => a.is_default) || list[0];
+        if (def) {
+          setShippingAddress({ ...def, email: user.email || "" });
+          setBillingAddress({ ...def });
+        }
+      })
+      .catch(() => {});
+  }, [user]);
+
+  // Available coupons + InitiateCheckout pixel
   useEffect(() => {
     if (items.length === 0) { setAvailableCoupons([]); return; }
-    // FAZ 9+ — InitiateCheckout pixel event (ilk giriş)
     trackInitiateCheckout({
       total,
-      items: items.map((it) => ({
-        product_id: it.productId, name: it.name,
-        price: it.price, quantity: it.quantity,
-      })),
+      items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
     });
     axios.post(`${API}/coupons/available`, {
       cart_total: total,
       user_id: user?.id || null,
-      items: items.map((it) => ({
-        product_id: it.productId, category_id: it.categoryId,
-        price: it.price, qty: it.quantity,
-      })),
+      items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
     }).then((r) => setAvailableCoupons(r.data?.items || []))
       .catch(() => setAvailableCoupons([]));
   }, [items, total, user?.id]);
 
-  // Handle payment callback
+  // Payment callback
   useEffect(() => {
-    const token = searchParams.get('token');
-    if (token) {
-      handlePaymentCallback(token);
-    }
+    const token = searchParams.get("token");
+    if (token) handlePaymentCallback(token);
   }, [searchParams]);
 
   const handlePaymentCallback = async (token) => {
@@ -85,21 +111,15 @@ export default function Checkout() {
     try {
       const res = await axios.post(`${API}/payment/callback?token=${token}`);
       if (res.data.success) {
-        // FAZ 9+ — Purchase pixel event (callback flow)
         trackPurchase({
           order_id: res.data.orderNumber,
           total: res.data.amount || grandTotal,
-          items: items.map((it) => ({
-            product_id: it.productId, name: it.name,
-            price: it.price, quantity: it.quantity,
-          })),
+          items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
         });
         clearCart();
         setPaymentStep("success");
         toast.success("Ödemeniz başarıyla tamamlandı!");
-        setTimeout(() => {
-          navigate(`/hesabim?order=${res.data.orderNumber}`);
-        }, 3000);
+        setTimeout(() => navigate(`/hesabim?order=${res.data.orderNumber}`), 2500);
       } else {
         setPaymentStep("error");
         toast.error(res.data.error || "Ödeme başarısız");
@@ -113,15 +133,12 @@ export default function Checkout() {
   const freeShippingLimit = 500;
   const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
-  const grandTotal = total + shippingCost - discount + giftWrapTotal;
-
-  const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
+  const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
+  const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
 
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
-    
     try {
       const res = await axios.post(`${API}/campaigns/validate?code=${couponCode}&total=${total}`);
       setDiscount(res.data.discount);
@@ -132,7 +149,6 @@ export default function Checkout() {
     }
   };
 
-  // Trendyol Go stili: kart listesinden kupon seçimi
   const handlePickCoupon = (c) => {
     setCouponCode(c.code);
     setDiscount(c.discount);
@@ -146,43 +162,87 @@ export default function Checkout() {
     setDiscount(0);
   };
 
+  // ----- Address Modal -----
+  const openAddressModal = (which) => {
+    setAddressModal(which);
+    const current = which === "shipping" ? shippingAddress : billingAddress;
+    setAddressForm({ ...emptyAddress, ...current });
+  };
+
+  const closeAddressModal = () => { setAddressModal(null); setAddressForm({ ...emptyAddress }); };
+
+  const handleSaveAddress = async () => {
+    // Validate
+    const required = ["first_name","last_name","phone","address","city","district"];
+    for (const k of required) {
+      if (!addressForm[k]) { toast.error("Tüm zorunlu alanları doldurun"); return; }
+    }
+    // Persist for logged in users (async, page does not reload)
+    if (user) {
+      const token = localStorage.getItem("token");
+      try {
+        if (addressForm.id) {
+          await axios.put(`${API}/customer/addresses/${addressForm.id}`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
+        } else {
+          const r = await axios.post(`${API}/customer/addresses`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
+          addressForm.id = r.data?.address_id;
+        }
+        // Refresh list
+        const list = await axios.get(`${API}/customer/my-addresses`, { headers: { Authorization: `Bearer ${token}` } });
+        setSavedAddresses(list.data?.addresses || []);
+      } catch (e) { /* silently continue with local state */ }
+    }
+    if (addressModal === "shipping") {
+      setShippingAddress({ ...addressForm, email: user?.email || addressForm.email || "" });
+      if (billingSameAsShipping) setBillingAddress({ ...addressForm });
+    } else {
+      setBillingAddress({ ...addressForm });
+    }
+    closeAddressModal();
+    toast.success("Adres kaydedildi");
+  };
+
+  const pickSavedAddress = (a) => {
+    if (addressModal === "shipping") {
+      setShippingAddress({ ...a, email: user?.email || "" });
+      if (billingSameAsShipping) setBillingAddress({ ...a });
+    } else {
+      setBillingAddress({ ...a });
+    }
+    closeAddressModal();
+  };
+
+  // ----- Submit -----
+  const validateAddresses = () => {
+    const ok = (a) => a && a.first_name && a.last_name && a.phone && a.address && a.city && a.district;
+    if (!ok(shippingAddress)) { toast.error("Lütfen teslimat adresi seçin / ekleyin"); return false; }
+    if (!billingSameAsShipping && !ok(billingAddress)) { toast.error("Lütfen fatura adresi seçin / ekleyin"); return false; }
+    return true;
+  };
+
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!acceptTerms) {
-      toast.error("Lütfen sözleşmeleri kabul ediniz");
-      return;
-    }
-
-    if (items.length === 0) {
-      toast.error("Sepetiniz boş");
-      return;
-    }
-
+    if (e?.preventDefault) e.preventDefault();
+    if (!validateAddresses()) return;
+    if (!acceptTerms) { toast.error("Lütfen sözleşmeleri onaylayın"); return; }
+    if (items.length === 0) { toast.error("Sepetiniz boş"); return; }
     setLoading(true);
     try {
-      // First create the order
       const orderData = {
         user_id: user?.id || null,
-        items: items.map(item => ({
-          product_id: item.productId,
-          variant_id: item.variantId,
-          quantity: item.quantity,
-          price: item.price,
-          name: item.name,
-          image: item.image,
-          size: item.size,
-          color: item.color,
+        items: items.map((item) => ({
+          product_id: item.productId, variant_id: item.variantId, quantity: item.quantity,
+          price: item.price, name: item.name, image: item.image, size: item.size, color: item.color,
         })),
-        shipping_address: formData,
+        shipping_address: { ...shippingAddress, email: shippingAddress.email || user?.email || "" },
+        billing_address: billingSameAsShipping ? { ...shippingAddress } : { ...billingAddress },
+        billing_same_as_shipping: billingSameAsShipping,
         subtotal: total,
         shipping_cost: shippingCost,
-        discount: discount,
-        coupon_code: appliedCoupon?.code || "",
-        gift_note: giftNote || "",
-        gift_wrap: giftWrap,
-        gift_wrap_price: giftWrap ? GIFT_WRAP_PRICE : 0,
-        total: grandTotal + (paymentMethod === "cash_on_delivery" ? 10 : 0),
+        discount, coupon_code: appliedCoupon?.code || "",
+        gift_note: giftNote || "", gift_wrap: giftWrap, gift_wrap_price: giftWrapTotal,
+        use_points: usePoints, points_used: pointsDeduction,
+        use_3d_secure: use3DSecure,
+        total: grandTotal,
         payment_method: paymentMethod,
         attribution_session_id:
           (typeof window !== "undefined" && (window.__FACETTE_SID__ || localStorage.getItem("facette_sid"))) || null,
@@ -192,44 +252,28 @@ export default function Checkout() {
       const newOrderId = orderRes.data.order_id;
       setOrderId(newOrderId);
 
-      // If credit card payment, initialize Iyzico
       if (paymentMethod === "credit_card") {
         const callbackUrl = `${window.location.origin}/odeme`;
         const paymentRes = await axios.post(
           `${API}/payment/initialize?order_id=${newOrderId}&callback_url=${encodeURIComponent(callbackUrl)}`
         );
-
         if (paymentRes.data.success && paymentRes.data.paymentPageUrl) {
-          // Redirect to Iyzico payment page
           window.location.href = paymentRes.data.paymentPageUrl;
         } else if (paymentRes.data.checkoutFormContent) {
-          // Show embedded checkout form
           setPaymentUrl(paymentRes.data.checkoutFormContent);
           setPaymentStep("iframe");
         } else {
           toast.error(paymentRes.data.error || "Ödeme başlatılamadı");
         }
       } else {
-        // For other payment methods, complete order directly
-        // FAZ 9+ — Purchase conversion event
         trackPurchase({
-          order_id: orderRes.data.order_number,
-          total: grandTotal,
-          shipping: shippingCost,
-          items: items.map((it) => ({
-            product_id: it.productId, name: it.name,
-            price: it.price, quantity: it.quantity,
-          })),
+          order_id: orderRes.data.order_number, total: grandTotal, shipping: shippingCost,
+          items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
         });
         clearCart();
         toast.success("Siparişiniz alındı!");
-        // FAZ Hızlı Üyelik — Guest ise quick-signup modalı aç
-        if (!user) {
-          setGuestOrderNumber(orderRes.data.order_number);
-          setShowQuickSignup(true);
-        } else {
-          navigate(`/hesabim?order=${orderRes.data.order_number}`);
-        }
+        if (!user) { setGuestOrderNumber(orderRes.data.order_number); setShowQuickSignup(true); }
+        else navigate(`/hesabim?order=${orderRes.data.order_number}`);
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
@@ -238,12 +282,8 @@ export default function Checkout() {
     }
   };
 
-  if (items.length === 0 && paymentStep === "form") {
-    navigate("/sepet");
-    return null;
-  }
+  if (items.length === 0 && paymentStep === "form") { navigate("/sepet"); return null; }
 
-  // Payment Success Screen
   if (paymentStep === "success") {
     return (
       <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
@@ -251,14 +291,12 @@ export default function Checkout() {
         <div className="container-main py-16 text-center">
           <CheckCircle size={64} className="mx-auto text-green-500 mb-4" />
           <h1 className="text-2xl font-medium mb-2">Ödemeniz Başarılı!</h1>
-          <p className="text-gray-600 mb-4">Siparişiniz alındı. Yönlendiriliyorsunuz...</p>
+          <p className="text-gray-600">Siparişiniz alındı. Yönlendiriliyorsunuz...</p>
         </div>
         <Footer />
       </div>
     );
   }
-
-  // Payment Error Screen
   if (paymentStep === "error") {
     return (
       <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
@@ -266,255 +304,259 @@ export default function Checkout() {
         <div className="container-main py-16 text-center">
           <AlertCircle size={64} className="mx-auto text-red-500 mb-4" />
           <h1 className="text-2xl font-medium mb-2">Ödeme Başarısız</h1>
-          <p className="text-gray-600 mb-4">Ödeme işlemi tamamlanamadı. Lütfen tekrar deneyin.</p>
-          <button 
-            onClick={() => setPaymentStep("form")}
-            className="btn-primary"
-          >
-            Tekrar Dene
-          </button>
+          <button onClick={() => setPaymentStep("form")} className="btn-primary">Tekrar Dene</button>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+  if (paymentStep === "processing") {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="container-main py-16 text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-black mx-auto mb-4"></div>
+          <h1 className="text-2xl font-medium">Ödeme Doğrulanıyor...</h1>
         </div>
         <Footer />
       </div>
     );
   }
 
-  // Processing Screen
-  if (paymentStep === "processing") {
-    return (
-      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
-        <Header />
-        <div className="container-main py-16 text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-black mx-auto mb-4"></div>
-          <h1 className="text-2xl font-medium mb-2">Ödeme Doğrulanıyor...</h1>
-          <p className="text-gray-600">Lütfen bekleyin</p>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
+  // ───────── Render ─────────
+  const addressCardContent = (a, label) => (
+    <div className="text-xs text-gray-700 leading-relaxed">
+      <div className="font-semibold text-sm">{a.title || label}</div>
+      <div className="text-gray-500">{a.first_name} {a.last_name} {a.phone && <span>· {a.phone}</span>}</div>
+      <div className="mt-1 line-clamp-2">{a.address}</div>
+      <div className="text-gray-500">{a.district} / {a.city}</div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
       <Header />
 
-      <div className="container-main py-8">
-        <h1 className="text-2xl font-medium mb-8">Ödeme</h1>
+      <div className="container-main py-6">
+        {/* Top bar with SSL badge */}
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-medium">Sipariş Onayı</h1>
+          <div className="flex items-center gap-2 text-xs text-gray-600 bg-white px-3 py-1.5 rounded-full border">
+            <ShieldCheck size={14} className="text-green-600" />
+            <span><span className="font-bold text-green-700">SSL</span> Güvenli Ödeme</span>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="grid lg:grid-cols-3 gap-8">
-            {/* Form */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Shipping Address */}
-              <div className="bg-white p-6">
-                <h2 className="text-lg font-medium mb-4">Teslimat Bilgileri</h2>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm mb-1">Ad *</label>
-                    <input
-                      type="text"
-                      name="first_name"
-                      value={formData.first_name}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
-                    />
+          <div className="grid lg:grid-cols-12 gap-6">
+            {/* SOL — %75 */}
+            <div className="lg:col-span-9 space-y-4">
+              {/* 1) Sepetimdeki Ürünler — collapsible */}
+              <div className="bg-white rounded border" data-testid="cart-summary-block">
+                <button type="button" onClick={() => setCartCollapsed((v) => !v)}
+                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium">Sepetimdeki Ürünler ({items.length})</span>
+                    {!cartCollapsed && <span className="text-xs text-gray-500">— detaylar gizlemek için tıklayın</span>}
                   </div>
-                  <div>
-                    <label className="block text-sm mb-1">Soyad *</label>
-                    <input
-                      type="text"
-                      name="last_name"
-                      value={formData.last_name}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
-                    />
+                  <div className="flex items-center gap-2">
+                    {cartCollapsed && (
+                      <div className="flex -space-x-2">
+                        {items.slice(0, 4).map((it) => (
+                          <img key={it.id} src={it.image} alt="" className="w-8 h-8 rounded-full border-2 border-white object-cover" />
+                        ))}
+                        {items.length > 4 && (
+                          <div className="w-8 h-8 rounded-full bg-gray-200 border-2 border-white text-[10px] flex items-center justify-center font-semibold">+{items.length - 4}</div>
+                        )}
+                      </div>
+                    )}
+                    {cartCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
                   </div>
-                  <div>
-                    <label className="block text-sm mb-1">E-posta *</label>
-                    <input
-                      type="email"
-                      name="email"
-                      value={formData.email}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm mb-1">Telefon *</label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      value={formData.phone}
-                      onChange={handleInputChange}
-                      required
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm mb-1">Adres *</label>
-                    <textarea
-                      name="address"
-                      value={formData.address}
-                      onChange={handleInputChange}
-                      required
-                      rows={3}
-                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black resize-none"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <ProvinceDistrictSelect
-                      city={formData.city}
-                      district={formData.district}
-                      onChange={({ city, district }) => setFormData((p) => ({ ...p, city, district }))}
-                      testIdPrefix="checkout-addr"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Method */}
-              <div className="bg-white p-6">
-                <h2 className="text-lg font-medium mb-4">Ödeme Yöntemi</h2>
-                <div className="space-y-3">
-                  <label className={`flex items-center gap-3 p-4 border cursor-pointer transition-colors ${paymentMethod === "credit_card" ? "border-black" : "border-gray-200"}`}>
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="credit_card"
-                      checked={paymentMethod === "credit_card"}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="sr-only"
-                    />
-                    <CreditCard size={20} />
-                    <span className="text-sm">Kredi Kartı / Banka Kartı</span>
-                    <span className={`ml-auto w-4 h-4 rounded-full border ${paymentMethod === "credit_card" ? "bg-black border-black" : "border-gray-300"}`} />
-                  </label>
-                  
-                  <label className={`flex items-center gap-3 p-4 border cursor-pointer transition-colors ${paymentMethod === "bank_transfer" ? "border-black" : "border-gray-200"}`}>
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="bank_transfer"
-                      checked={paymentMethod === "bank_transfer"}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="sr-only"
-                    />
-                    <Building size={20} />
-                    <span className="text-sm">Havale / EFT</span>
-                    <span className={`ml-auto w-4 h-4 rounded-full border ${paymentMethod === "bank_transfer" ? "bg-black border-black" : "border-gray-300"}`} />
-                  </label>
-                  
-                  <label className={`flex items-center gap-3 p-4 border cursor-pointer transition-colors ${paymentMethod === "cash_on_delivery" ? "border-black" : "border-gray-200"}`}>
-                    <input
-                      type="radio"
-                      name="payment"
-                      value="cash_on_delivery"
-                      checked={paymentMethod === "cash_on_delivery"}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="sr-only"
-                    />
-                    <Truck size={20} />
-                    <span className="text-sm">Kapıda Ödeme (+10 TL)</span>
-                    <span className={`ml-auto w-4 h-4 rounded-full border ${paymentMethod === "cash_on_delivery" ? "bg-black border-black" : "border-gray-300"}`} />
-                  </label>
-                </div>
-
-                {paymentMethod === "credit_card" && (
-                  <div className="mt-4 p-4 bg-gray-50 text-sm text-gray-600">
-                    <p>Test modunda çalışıyorsunuz. Ödeme işlemi simüle edilecektir.</p>
+                </button>
+                {!cartCollapsed && (
+                  <div className="px-5 pb-5 border-t pt-4 space-y-3">
+                    {items.map((item) => (
+                      <div key={item.id} className="flex gap-3 items-center">
+                        <img src={item.image} alt={item.name} className="w-14 h-16 object-cover bg-gray-100 rounded" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate">{item.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {item.size && <>Beden: <span className="text-gray-700">{item.size}</span> · </>}
+                            {item.color && <>Renk: <span className="text-gray-700">{item.color}</span> · </>}
+                            Adet: {item.quantity}
+                          </p>
+                        </div>
+                        <div className="text-sm font-semibold whitespace-nowrap">{(item.price * item.quantity).toFixed(2)} TL</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
 
-              {/* Hediye Seçenekleri — FAZ 4 */}
-              <div className="bg-white p-6" data-testid="gift-options-section">
-                <h2 className="text-lg font-medium mb-4">Hediye Seçenekleri</h2>
-                <label className="flex items-start gap-3 cursor-pointer border rounded p-3 mb-3 hover:border-black transition-colors"
-                  style={{ borderColor: giftWrap ? "#000" : undefined }}>
-                  <input type="checkbox" checked={giftWrap}
-                    onChange={(e) => setGiftWrap(e.target.checked)}
-                    className="mt-1" data-testid="gift-wrap-toggle" />
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Hediye paketi</span>
-                      <span className="text-sm font-semibold">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
+              {/* 2) Adres */}
+              <div className="bg-white rounded border" data-testid="address-block">
+                <div className="px-5 py-4 border-b flex items-center gap-3">
+                  <MapPin size={18} className="text-orange-500" />
+                  <span className="font-medium">Teslimat Adresi</span>
+                  <label className="ml-auto inline-flex items-center gap-2 text-xs cursor-pointer text-gray-700">
+                    <input type="radio" checked readOnly className="accent-orange-500" /> Adrese Teslim Edilsin
+                  </label>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4 p-5">
+                  {/* Teslimat */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-gray-700">Teslimat Adresi</span>
+                      <button type="button" onClick={() => openAddressModal("shipping")}
+                        data-testid="edit-shipping-addr-btn"
+                        className="inline-flex items-center gap-1 text-xs text-orange-600 border border-orange-500 rounded px-3 py-1 hover:bg-orange-50 transition">
+                        <Plus size={14} /> Adres Ekle / Değiştir
+                      </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajıyla kurdele ve kartla gönderilir.</p>
+                    <button type="button" onClick={() => openAddressModal("shipping")}
+                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-orange-50 border-orange-200" : "bg-gray-50 border-dashed border-gray-300 hover:border-orange-400"}`}>
+                      {shippingAddress.first_name
+                        ? addressCardContent(shippingAddress, "Teslimat Adresi")
+                        : <span className="text-xs text-gray-500">Henüz teslimat adresi seçilmedi. Eklemek için tıklayın.</span>}
+                    </button>
                   </div>
-                </label>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Hediye Notu (opsiyonel)</label>
-                  <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
-                    rows={2} placeholder="Kartta yer almasını istediğiniz mesaj (max 300 karakter)"
-                    className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-black resize-none"
-                    data-testid="gift-note-input" />
-                  {giftNote && <div className="text-xs text-gray-400 mt-1">{giftNote.length}/300</div>}
+                  {/* Fatura */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-gray-700">Fatura Adresi</span>
+                      <button type="button" onClick={() => openAddressModal("billing")}
+                        data-testid="edit-billing-addr-btn"
+                        disabled={billingSameAsShipping}
+                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-orange-600 border border-orange-500 hover:bg-orange-50"}`}>
+                        <Plus size={14} /> Adres Ekle / Değiştir
+                      </button>
+                    </div>
+                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-gray-50 border-gray-200" : (billingAddress.first_name ? "bg-orange-50 border-orange-200" : "bg-gray-50 border-dashed border-gray-300")}`}>
+                      {billingSameAsShipping
+                        ? <span className="text-xs text-gray-500 italic">Teslimat adresi ile aynı</span>
+                        : (billingAddress.first_name
+                            ? addressCardContent(billingAddress, "Fatura Adresi")
+                            : <span className="text-xs text-gray-500">Fatura adresi seçilmedi</span>)}
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 pb-4">
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={billingSameAsShipping}
+                      onChange={(e) => {
+                        setBillingSameAsShipping(e.target.checked);
+                        if (e.target.checked) setBillingAddress({ ...shippingAddress });
+                      }}
+                      className="accent-orange-500"
+                      data-testid="same-billing-checkbox" />
+                    <span>Faturamı Aynı Adrese Gönder</span>
+                  </label>
                 </div>
               </div>
 
-              {/* Terms */}
-              <div className="bg-white p-6">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={acceptTerms}
-                    onChange={(e) => setAcceptTerms(e.target.checked)}
-                    className="mt-1"
-                  />
-                  <span className="text-sm text-gray-600">
-                    <a href="/sayfa/mesafeli-satis" className="underline">Mesafeli Satış Sözleşmesi</a> ve{" "}
-                    <a href="/sayfa/kvkk" className="underline">KVKK Aydınlatma Metni</a>'ni okudum, kabul ediyorum.
-                  </span>
-                </label>
+              {/* 3) Ödeme Seçenekleri */}
+              <div className="bg-white rounded border" data-testid="payment-block">
+                <div className="px-5 py-4 border-b">
+                  <span className="font-medium">Ödeme Seçenekleri</span>
+                </div>
+                <div className="p-5 space-y-3">
+                  {/* Method radios */}
+                  <div className="grid sm:grid-cols-3 gap-2">
+                    {[
+                      { key: "credit_card", label: "Banka & Kredi Kartı ile Öde", icon: CreditCard },
+                      { key: "bank_transfer", label: "Havale / EFT", icon: Building },
+                      { key: "cash_on_delivery", label: "Kapıda Ödeme (+10₺)", icon: Truck },
+                    ].map(({ key, label, icon: Icon }) => (
+                      <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-gray-400"}`}>
+                        <input type="radio" name="payment" value={key}
+                          checked={paymentMethod === key}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="accent-orange-500" />
+                        <Icon size={16} className={paymentMethod === key ? "text-orange-600" : "text-gray-500"} />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {paymentMethod === "credit_card" && (
+                    <div className="grid md:grid-cols-2 gap-4 mt-3 pt-3 border-t">
+                      <div>
+                        <div className="text-xs font-medium text-gray-700 mb-2">Kart Bilgileri</div>
+                        <div className="rounded border p-3 bg-gray-50 text-xs text-gray-500 leading-relaxed">
+                          <Lock size={12} className="inline mr-1 text-green-600" />
+                          Kart bilgileri <b>iyzico</b> güvenli ödeme sayfasında güvenle alınacaktır. Bu sayfaya yönlendirileceksiniz.
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-gray-700 mb-2">Taksit Seçenekleri</div>
+                        <div className="rounded border p-3 bg-gray-50 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span>Tek Çekim</span><span className="font-semibold">{grandTotal.toFixed(2)} TL</span>
+                          </div>
+                          <div className="text-[11px] text-gray-500 mt-1">Banka kartınıza özel taksit seçenekleri ödeme sayfasında listelenecektir.</div>
+                        </div>
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-orange-500" />
+                        <ShieldCheck size={14} className="text-green-600" /> 3D Secure ile ödemek istiyorum
+                      </label>
+                      {userPoints > 0 && (
+                        <label className="inline-flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-orange-500" />
+                          <span className="text-orange-600 font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 4) Hediye */}
+              <div className="bg-white rounded border" data-testid="gift-options-section">
+                <div className="px-5 py-4 border-b"><span className="font-medium">Hediye Seçenekleri</span></div>
+                <div className="p-5 space-y-3">
+                  <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-gray-400"}`}>
+                    <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
+                      className="mt-1 accent-orange-500" data-testid="gift-wrap-toggle" />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Hediye paketi</span>
+                        <span className="text-sm font-semibold text-orange-600">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajı + kurdele + el yazılı kart ile gönderilir.</p>
+                    </div>
+                  </label>
+                  <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
+                    rows={2} placeholder="Hediye Notu (opsiyonel) — kart üzerine yazılır, max 300 karakter"
+                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
+                    data-testid="gift-note-input" />
+                </div>
               </div>
             </div>
 
-            {/* Order Summary */}
-            <div className="lg:col-span-1">
-              <div className="bg-white p-6 sticky top-24">
-                <h2 className="text-lg font-medium mb-4">Sipariş Özeti</h2>
-                
-                {/* Items */}
-                <div className="space-y-3 max-h-60 overflow-y-auto mb-4">
-                  {items.map((item) => (
-                    <div key={item.id} className="flex gap-3">
-                      <img src={item.image} alt={item.name} className="w-16 h-20 object-cover bg-gray-100" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate">{item.name}</p>
-                        <div className="text-xs text-gray-500 space-y-0.5">
-                          {item.size && <p>Beden: <span className="font-medium text-gray-700">{item.size}</span></p>}
-                          {item.color && <p>Renk: <span className="font-medium text-gray-700">{item.color}</span></p>}
-                          <p>Adet: {item.quantity}</p>
-                        </div>
-                        <p className="text-sm font-medium mt-1">{(item.price * item.quantity).toFixed(2)} TL</p>
-                      </div>
-                    </div>
-                  ))}
+            {/* SAĞ — %25 — Sticky Order Summary */}
+            <div className="lg:col-span-3">
+              <div className="bg-white rounded border sticky top-24">
+                <div className="px-5 py-4 border-b">
+                  <span className="font-medium">Sipariş Özeti</span>
                 </div>
 
-                {/* Trendyol Go stili uygulanabilir kupon listesi — FAZ 4 */}
+                {/* Available Coupons */}
                 {availableCoupons.length > 0 && (
-                  <div className="mb-4" data-testid="available-coupons-block">
-                    <div className="text-xs font-medium text-gray-600 mb-2">Kullanılabilir kuponlar</div>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {availableCoupons.slice(0, 6).map((c) => {
+                  <div className="px-5 pt-4" data-testid="available-coupons-block">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Sana Özel Kuponlar</div>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto -mx-1 px-1">
+                      {availableCoupons.slice(0, 5).map((c) => {
                         const selected = appliedCoupon?.code === c.code;
                         return (
                           <button type="button" key={c.id} onClick={() => handlePickCoupon(c)}
-                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-black bg-black text-white" : "border-dashed border-gray-300 hover:border-black"}`}
+                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-orange-500 bg-orange-500 text-white" : "border-dashed border-gray-300 hover:border-orange-500"}`}
                             data-testid={`coupon-card-${c.code}`}>
                             <div className="min-w-0">
-                              <div className={`text-xs font-semibold tracking-wide ${selected ? "text-white" : "text-black"}`}>{c.code}</div>
-                              <div className={`text-[11px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>
-                                {c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}
-                              </div>
+                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-orange-700"}`}>{c.code}</div>
+                              <div className={`text-[10px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>{c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}</div>
                             </div>
-                            <div className={`text-sm font-semibold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>
-                              -{c.discount.toFixed(2)} TL
-                            </div>
+                            <div className={`text-xs font-bold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>-{c.discount.toFixed(2)} ₺</div>
                           </button>
                         );
                       })}
@@ -522,101 +564,158 @@ export default function Checkout() {
                   </div>
                 )}
 
-                {/* Coupon */}
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    value={couponCode}
-                    onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                    placeholder="Kupon Kodu"
-                    className="flex-1 border px-3 py-2 text-sm"
-                    data-testid="manual-coupon-input"
-                  />
-                  {appliedCoupon ? (
-                    <button type="button" onClick={handleRemoveCoupon}
-                      className="btn-secondary text-xs px-4" data-testid="remove-coupon-btn">
-                      Kaldır
-                    </button>
-                  ) : (
-                    <button 
-                      type="button"
-                      onClick={handleApplyCoupon}
-                      className="btn-secondary text-xs px-4"
-                      data-testid="apply-coupon-btn"
-                    >
-                      Uygula
-                    </button>
-                  )}
+                {/* Manual coupon */}
+                <div className="px-5 pt-4">
+                  <div className="flex gap-2">
+                    <input type="text" value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                      placeholder="Kupon Kodu"
+                      className="flex-1 border rounded px-3 py-2 text-xs"
+                      data-testid="manual-coupon-input" />
+                    {appliedCoupon
+                      ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-gray-50" data-testid="remove-coupon-btn">Kaldır</button>
+                      : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-gray-50" data-testid="apply-coupon-btn">Uygula</button>}
+                  </div>
                 </div>
 
                 {/* Totals */}
-                <div className="space-y-2 text-sm border-t pt-4">
+                <div className="px-5 py-4 mt-3 border-t space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-600">Ara Toplam</span><span>{total.toFixed(2)} TL</span></div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Ara Toplam</span>
-                    <span>{total.toFixed(2)} TL</span>
+                    <span className="text-gray-600">Kargo Tutarı</span>
+                    {shippingCost === 0
+                      ? <span><s className="text-gray-400">59,99 TL</s> <span className="ml-1 inline-block bg-green-50 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold rounded">Bedava</span></span>
+                      : <span>{shippingCost.toFixed(2)} TL</span>}
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Kargo</span>
-                    <span className={shippingCost === 0 ? "text-green-600" : ""}>
-                      {shippingCost === 0 ? "Ücretsiz" : `${shippingCost.toFixed(2)} TL`}
-                    </span>
-                  </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-green-600">
-                      <span>İndirim{appliedCoupon ? ` (${appliedCoupon.code})` : ""}</span>
-                      <span>-{discount.toFixed(2)} TL</span>
-                    </div>
-                  )}
-                  {giftWrap && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Hediye paketi</span>
-                      <span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
-                    </div>
-                  )}
-                  {paymentMethod === "cash_on_delivery" && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Kapıda Ödeme</span>
-                      <span>+10.00 TL</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-lg font-medium pt-2 border-t">
-                    <span>Toplam</span>
-                    <span>{(grandTotal + (paymentMethod === "cash_on_delivery" ? 10 : 0)).toFixed(2)} TL</span>
+                  {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
+                  {pointsDeduction > 0 && <div className="flex justify-between text-orange-600"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
+                  {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
+                  {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
+                  <div className="flex justify-between text-base font-semibold pt-2 border-t">
+                    <span>Toplam</span><span className="text-orange-600">{grandTotal.toFixed(2)} TL</span>
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="btn-primary w-full mt-6 disabled:opacity-50"
-                  data-testid="place-order-btn"
-                >
-                  {loading ? "İşleniyor..." : "Siparişi Tamamla"}
-                </button>
+                {/* Submit */}
+                <div className="px-5 pb-5">
+                  <button type="submit" disabled={loading || !acceptTerms}
+                    className={`w-full py-3 rounded font-semibold text-sm transition-colors ${(loading || !acceptTerms) ? "bg-gray-300 text-white cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600 text-white"}`}
+                    data-testid="place-order-btn">
+                    {loading ? "İşleniyor..." : "Ödeme Yap"}
+                  </button>
+
+                  {/* Sözleşme — Trendyol style: Ödeme Yap'ın altında */}
+                  <label className="flex items-start gap-2 mt-3 text-[11px] text-gray-700 cursor-pointer leading-relaxed">
+                    <input type="checkbox" checked={acceptTerms}
+                      onChange={(e) => setAcceptTerms(e.target.checked)}
+                      className="mt-0.5 accent-orange-500" data-testid="accept-terms-checkbox" />
+                    <span>
+                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-orange-600">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
+                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-orange-600">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
         </form>
       </div>
 
-      {/* Hızlı Üyelik Modal — guest sipariş sonrası */}
+      {/* Address Modal */}
+      {addressModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" data-testid="address-modal">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white">
+              <h2 className="font-semibold text-base">{addressModal === "shipping" ? "Teslimat Adresi" : "Fatura Adresi"} {addressForm.id ? "Düzenle" : "Ekle"}</h2>
+              <button type="button" onClick={closeAddressModal} className="p-1 hover:bg-gray-100 rounded" data-testid="close-address-modal">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Saved addresses (if user logged in) */}
+            {user && savedAddresses.length > 0 && (
+              <div className="px-5 py-4 border-b bg-gray-50">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Kayıtlı Adreslerim</div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {savedAddresses.map((a) => (
+                    <button key={a.id} type="button" onClick={() => pickSavedAddress(a)}
+                      className="text-left p-3 border rounded text-xs bg-white hover:border-orange-500 transition-colors">
+                      <div className="font-semibold text-sm">{a.title || `${a.first_name} ${a.last_name}`}</div>
+                      <div className="text-gray-500 mt-0.5 line-clamp-2">{a.address}</div>
+                      <div className="text-gray-500">{a.district} / {a.city}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-2">— veya yeni adres oluşturun:</div>
+              </div>
+            )}
+
+            {/* Address form */}
+            <div className="p-5 grid md:grid-cols-2 gap-3">
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-700 mb-1">Adres Başlığı (örn. Ev, İş)</label>
+                <input value={addressForm.title} onChange={(e) => setAddressForm({ ...addressForm, title: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-700 mb-1">Ad *</label>
+                <input value={addressForm.first_name} onChange={(e) => setAddressForm({ ...addressForm, first_name: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-700 mb-1">Soyad *</label>
+                <input value={addressForm.last_name} onChange={(e) => setAddressForm({ ...addressForm, last_name: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-700 mb-1">Telefon *</label>
+                <input value={addressForm.phone} onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" required />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-700 mb-1">Adres *</label>
+                <textarea value={addressForm.address} onChange={(e) => setAddressForm({ ...addressForm, address: e.target.value })}
+                  rows={3}
+                  className="w-full border rounded px-3 py-2 text-sm resize-none" required />
+              </div>
+              <div className="md:col-span-2">
+                <ProvinceDistrictSelect
+                  city={addressForm.city}
+                  district={addressForm.district}
+                  onChange={({ city, district }) => setAddressForm((p) => ({ ...p, city, district }))}
+                  testIdPrefix="address-modal"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-gray-700 mb-1">Posta Kodu</label>
+                <input value={addressForm.postal_code} onChange={(e) => setAddressForm({ ...addressForm, postal_code: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
+              <button type="button" onClick={closeAddressModal} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">İptal</button>
+              <button type="button" onClick={handleSaveAddress}
+                className="px-4 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white rounded font-medium"
+                data-testid="save-address-btn">Kaydet ve Kullan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hızlı Üyelik Modal */}
       {showQuickSignup && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" data-testid="quick-signup-modal">
           <div className="bg-white rounded-lg max-w-md w-full p-6 space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold">Hesap oluşturmak ister misiniz?</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                <b>{guestOrderNumber}</b> numaralı siparişinizin durumunu takip etmek ve hızlı sipariş vermek için bir şifre belirleyin.
-                Adınız ve e-postanız siparişten alınıyor.
-              </p>
-            </div>
+            <h2 className="text-lg font-semibold">Hesap oluşturmak ister misiniz?</h2>
+            <p className="text-sm text-gray-600">
+              <b>{guestOrderNumber}</b> numaralı siparişinizi takip etmek için bir şifre belirleyin.
+            </p>
             <div>
               <label className="block text-xs text-gray-600 mb-1">Şifre (en az 6 karakter)</label>
               <input type="password" value={quickPassword}
                 onChange={(e) => setQuickPassword(e.target.value)}
                 className="w-full border px-3 py-2 text-sm rounded"
-                placeholder="••••••"
-                data-testid="quick-password-input" />
+                placeholder="••••••" data-testid="quick-password-input" />
             </div>
             <div className="flex items-center gap-2">
               <button onClick={async () => {
@@ -625,7 +724,7 @@ export default function Checkout() {
                 try {
                   const r = await axios.post(`${API}/auth/convert-guest-order`, { order_id: guestOrderNumber, password: quickPassword });
                   localStorage.setItem("token", r.data.token);
-                  toast.success(r.data.existing_account ? "Mevcut hesabınıza bağlandı" : "Hesap oluşturuldu!");
+                  toast.success(r.data.existing_account ? "Hesabınıza bağlandı" : "Hesap oluşturuldu!");
                   setShowQuickSignup(false);
                   navigate(`/hesabim?order=${guestOrderNumber}`);
                 } catch (e) {
@@ -634,13 +733,10 @@ export default function Checkout() {
               }} disabled={quickBusy}
                 className="flex-1 bg-black text-white px-4 py-2 rounded text-sm disabled:opacity-60"
                 data-testid="quick-signup-create">
-                {quickBusy ? "Oluşturuluyor..." : "Hesap Oluştur & Giriş Yap"}
+                {quickBusy ? "Oluşturuluyor..." : "Hesap Oluştur"}
               </button>
-              <button onClick={() => {
-                setShowQuickSignup(false);
-                navigate(`/hesabim?order=${guestOrderNumber}`);
-              }} className="text-sm text-gray-500 hover:text-black px-3"
-                data-testid="quick-signup-skip">
+              <button onClick={() => { setShowQuickSignup(false); navigate(`/hesabim?order=${guestOrderNumber}`); }}
+                className="text-sm text-gray-500 hover:text-black px-3" data-testid="quick-signup-skip">
                 Şimdi değil
               </button>
             </div>
