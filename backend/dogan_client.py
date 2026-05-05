@@ -186,7 +186,28 @@ class DoganClient:
         is_individual = len(customer_vkn_or_tckn) == 11
         party_id_scheme = "TCKN" if is_individual else "VKN"
 
-        # Satır kalemlerini hesapla
+        # null/None safety — UBL'de "None" string'i şema hatası verir
+        def _s(v):
+            if v is None or str(v).lower() == "none":
+                return ""
+            return str(v).strip()
+
+        supplier_phone = _s(supplier_phone)
+        supplier_email = _s(supplier_email)
+        supplier_website = _s(supplier_website)
+        supplier_street = _s(supplier_street)
+        supplier_district = _s(supplier_district)
+        supplier_city = _s(supplier_city)
+        supplier_tax_office = _s(supplier_tax_office)
+        customer_phone = _s(customer_phone)
+        customer_email = _s(customer_email)
+        customer_street = _s(customer_street)
+        customer_district = _s(customer_district)
+        customer_city = _s(customer_city)
+        customer_name = _s(customer_name)
+        note = _s(note)
+
+        # Satır kalemlerini hesapla — unitCode "NIU" (Number of International Units = Adet) UBL-TR standardı
         invoice_lines_xml = []
         line_subtotal = 0.0
         kdv_total = 0.0
@@ -201,14 +222,14 @@ class DoganClient:
             name = escape(it.get("name") or "Ürün")[:255]
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
   <cbc:ID>{idx}</cbc:ID>
-  <cbc:InvoicedQuantity unitCode="C62">{qty}</cbc:InvoicedQuantity>
+  <cbc:InvoicedQuantity unitCode="NIU">{qty:.4f}</cbc:InvoicedQuantity>
   <cbc:LineExtensionAmount currencyID="{currency}">{line_amount:.2f}</cbc:LineExtensionAmount>
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
     <cac:TaxSubtotal>
       <cbc:TaxableAmount currencyID="{currency}">{line_amount:.2f}</cbc:TaxableAmount>
       <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
-      <cbc:Percent>{li_kdv_rate:.1f}</cbc:Percent>
+      <cbc:Percent>{li_kdv_rate:.0f}</cbc:Percent>
       <cac:TaxCategory>
         <cac:TaxScheme><cbc:Name>KDV</cbc:Name><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme>
       </cac:TaxCategory>
@@ -271,7 +292,7 @@ class DoganClient:
   <cbc:LineCountNumeric>{len(line_items)}</cbc:LineCountNumeric>
   <cac:AccountingSupplierParty>
     <cac:Party>
-      <cbc:WebsiteURI>{escape(supplier_website)}</cbc:WebsiteURI>
+      {('<cbc:WebsiteURI>' + escape(supplier_website) + '</cbc:WebsiteURI>') if supplier_website else ''}
       <cac:PartyIdentification><cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID></cac:PartyIdentification>
       <cac:PartyName><cbc:Name>{escape(supplier_name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
@@ -281,7 +302,7 @@ class DoganClient:
         <cac:Country><cbc:Name>{escape(supplier_country)}</cbc:Name></cac:Country>
       </cac:PostalAddress>
       <cac:PartyTaxScheme><cac:TaxScheme><cbc:Name>{escape(supplier_tax_office or '-')}</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>
-      <cac:Contact><cbc:Telephone>{escape(supplier_phone)}</cbc:Telephone><cbc:ElectronicMail>{escape(supplier_email)}</cbc:ElectronicMail></cac:Contact>
+      {('<cac:Contact>' + (('<cbc:Telephone>' + escape(supplier_phone) + '</cbc:Telephone>') if supplier_phone else '') + (('<cbc:ElectronicMail>' + escape(supplier_email) + '</cbc:ElectronicMail>') if supplier_email else '') + '</cac:Contact>') if (supplier_phone or supplier_email) else ''}
     </cac:Party>
   </cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
@@ -295,7 +316,7 @@ class DoganClient:
         <cac:Country><cbc:Name>{escape(customer_country)}</cbc:Name></cac:Country>
       </cac:PostalAddress>
       {customer_name_block}
-      <cac:Contact><cbc:Telephone>{escape(customer_phone)}</cbc:Telephone><cbc:ElectronicMail>{escape(customer_email)}</cbc:ElectronicMail></cac:Contact>
+      {('<cac:Contact>' + (('<cbc:Telephone>' + escape(customer_phone) + '</cbc:Telephone>') if customer_phone else '') + (('<cbc:ElectronicMail>' + escape(customer_email) + '</cbc:ElectronicMail>') if customer_email else '') + '</cac:Contact>') if (customer_phone or customer_email) else ''}
     </cac:Party>
   </cac:AccountingCustomerParty>
   {''.join(allowance_charges_xml)}
@@ -324,17 +345,22 @@ class DoganClient:
         ⚠ Doğan canlı endpoint UBL'i ZIP içinde bekliyor (ElementType="ZIP").
         ZIP içinde tek bir XML dosyası: <invoice_uuid>.xml
         
+        ⚠ Ayrıca Doğan asenkron işliyor — RETURN_CODE=0 sadece "request alındı"
+        anlamında, UBL parse hatası varsa GetEArchiveInvoiceStatus ile öğrenilir.
+        Bu fonksiyon 2 saniye bekledikten sonra status sorgusu yapar ve gerçek
+        sonucu döner.
+        
         ubl_xml: UTF-8 string UBL-TR 1.2 invoice XML.
         invoice_uuid: ZIP içindeki dosya adı (varsayılan random uuid).
-        Returns: {success, code, message}
+        Returns: {success, code, message, status, status_desc, intl_txn_id, uuid}
         """
         try:
-            import io, zipfile, uuid as _uuid
+            import io, zipfile, uuid as _uuid, time
             client = self._get_earsiv_client()
             xml_bytes = ubl_xml.encode("utf-8")
             inv_uuid = invoice_uuid or str(_uuid.uuid4())
 
-            # UBL'i ZIP'le (Doğan canlı bekliyor)
+            # UBL'i ZIP'le
             zip_buf = io.BytesIO()
             with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr(f"{inv_uuid}.xml", xml_bytes)
@@ -342,7 +368,7 @@ class DoganClient:
 
             content_type = client.get_type("ns0:ArchiveInvoiceWriteContent")
             content = content_type(Elements=[{
-                "ElementType": "ZIP",       # ← canlı için ZIP
+                "ElementType": "ZIP",
                 "ElementCount": 1,
                 "ElementList": [zip_bytes],
             }])
@@ -353,7 +379,7 @@ class DoganClient:
             from zeep.helpers import serialize_object
             ser = serialize_object(result) or {}
 
-            # Önce ERROR_TYPE kontrol et — varsa hata
+            # Önce ERROR_TYPE kontrol et
             err = ser.get("ERROR_TYPE") or {}
             err_code = err.get("ERROR_CODE") if err else None
             err_msg = err.get("ERROR_SHORT_DES") if err else None
@@ -366,18 +392,58 @@ class DoganClient:
                     "uuid": inv_uuid,
                 }
 
-            # REQUEST_RETURN.RETURN_CODE = 0 → başarı
             ret = ser.get("REQUEST_RETURN") or {}
             return_code = ret.get("RETURN_CODE")
             intl_txn_id = ret.get("INTL_TXN_ID")
-            success = str(return_code) == "0"
+            if str(return_code) != "0":
+                return {
+                    "success": False,
+                    "code": str(return_code or ""),
+                    "message": f"WriteToArchive RETURN_CODE={return_code}",
+                    "intl_txn_id": str(intl_txn_id or ""),
+                    "uuid": inv_uuid,
+                    "raw": str(ser)[:500],
+                }
+
+            # ⚠ Doğan asenkron — status sorgusu ile gerçek sonucu öğren
+            # İlk denemede genellikle "FATURA ID BULUNAMADI" döner; 5 sn aralıklarla 4 kez dene.
+            status, status_desc, invoice_id = "", "", ""
+            st_ser = {}
+            for attempt in range(4):
+                time.sleep(5 if attempt == 0 else 4)
+                try:
+                    st_result = client.service.GetEArchiveInvoiceStatus(
+                        REQUEST_HEADER=self._make_header(compressed="N"),
+                        UUID=[inv_uuid],
+                    )
+                    st_ser = serialize_object(st_result) or {}
+                    invoices = st_ser.get("INVOICE") or []
+                    if invoices:
+                        hdr = (invoices[0] or {}).get("HEADER") or {}
+                        status = str(hdr.get("STATUS") or "")
+                        status_desc = str(hdr.get("STATUS_DESC") or "")
+                        invoice_id = str(hdr.get("INVOICE_ID") or "")
+                        # 200 = "FATURA ID BULUNAMADI" → henüz işlenmiyor → retry
+                        # 300+ veya invoice_id dolu → final state
+                        if invoice_id or (status and status != "200"):
+                            break
+                except Exception as se:
+                    logger.warning(f"GetEArchiveInvoiceStatus attempt {attempt+1} error: {se}")
+
+            # STATUS değerlendir:
+            # - 200 + boş invoice_id → 4 deneme sonrası hala bulunamadı = UBL parse hatası
+            # - invoice_id dolu veya status=300+/100 → başarı
+            is_success = bool(invoice_id) or (status and status not in ("200", "1000"))
             return {
-                "success": success,
-                "code": str(return_code or ""),
-                "message": "OK" if success else f"RETURN_CODE={return_code}",
+                "success": is_success,
+                "code": status or "0",
+                "message": status_desc or ("OK" if is_success else "Doğan kayıt bulunamadı (UBL parse hatası olabilir)"),
                 "intl_txn_id": str(intl_txn_id or ""),
                 "uuid": inv_uuid,
-                "raw": str(ser)[:500],
+                "invoice_id": invoice_id,
+                "status": status,
+                "status_desc": status_desc,
+                "raw": str(st_ser)[:500],
             }
         except Exception as e:
             logger.error(f"send_earsiv_invoice error: {e}")

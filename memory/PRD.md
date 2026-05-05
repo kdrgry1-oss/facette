@@ -899,3 +899,29 @@ Doğan canlı `connector.doganedonusum.com/EIArchiveWS/EFaturaArchive` endpoint'
 - UUID: `f35f37b4-11c9-48a8-8e06-f53832c6bafc`
 - Doğan INTL_TXN_ID: **13776942506**
 - HTTP 200, success: true
+
+
+## [2026-05-05] Doğan e-Arşiv UBL Şema Validation — DEVAM EDEN İŞ
+
+### Mevcut durum
+- ✅ Bağlantı (connector.doganedonusum.com) çalışıyor
+- ✅ Login (Facette.98) başarılı
+- ✅ ZIP payload formatı çalışıyor (10013 hatası geçti)
+- ✅ Status query (GetEArchiveInvoiceStatus) entegre edildi (4×5sn retry ile)
+- ✅ Fatura prefix'leri düzeltildi: e-Arşiv=FCT, e-Fatura=EFC
+- ❌ **Doğan UBL'imizi parse edemiyor** → STATUS=200 "FATURA ID BULUNAMADI" (4 retry sonrası bile)
+
+### UBL'de yapılan iyileştirmeler
+- `unitCode="C62"` → `"NIU"` (UBL-TR adet standardı)
+- Boş `<cbc:Telephone>None</cbc:Telephone>` "None" string sorunu fix (null-safety helper `_s()`)
+- Boş `<cbc:WebsiteURI/>` ve `<cac:Contact/>` koşullu render
+
+### Hala çözülemeyen — gerekli aksiyon
+UBL-TR şemasıyla tam uyum için Doğan'dan **örnek geçerli UBL XML** istenmeli. Olası eksiklikler:
+- `<ext:UBLExtensions>` (imza bloğu zorunlu olabilir)
+- `<cac:Signature>`
+- `<cac:PaymentMeans>`
+- `<cbc:ProfileID>` değeri (`EARSIVFATURA` doğrulanmalı, alternatifi `TICARIFATURA` olabilir)
+
+### Sonraki agent için
+Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyasını alın → `build_earsiv_ubl_xml` çıktısıyla diff alın → eksik blokları ekleyin.

@@ -756,15 +756,19 @@ async def create_invoice_for_order(
             detail="Aktif e-fatura entegratörü yapılandırılmamış. Ayarlar > E-Arşiv / E-Fatura ekranından seçin."
         )
 
-    # Prefix
+    # Prefix — e-Arşiv: FCT, e-Fatura: EFC (kullanıcı belirleyebilir; default Doğan standardı)
     if dogan_active:
         active = "dogan"
         prefix = (dogan_settings.get("earchive_prefix") if invoice_type == "e-arsiv"
-                  else dogan_settings.get("einvoice_prefix")) or "FAC"
+                  else dogan_settings.get("einvoice_prefix"))
+        if not prefix:
+            prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
     else:
         pcfg = providers[active]
         prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
-                  else pcfg.get("einvoice_prefix")) or "FAC"
+                  else pcfg.get("einvoice_prefix"))
+        if not prefix:
+            prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
 
     # Aynı prefix ile kesilmiş fatura sayısına göre sıra numarası üret (yıllık)
     year_str = datetime.now(timezone.utc).strftime("%Y")
