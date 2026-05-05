@@ -477,6 +477,12 @@ async def update_combine_products(
     # En fazla 12 kombin ürün
     combine_ids = combine_ids[:12]
 
+    # Var olan ürün ID'lerini doğrula — fake/stale id'leri filtrele
+    if combine_ids:
+        existing = await db.products.distinct("id", {"id": {"$in": combine_ids}})
+        existing_set = set(existing)
+        combine_ids = [cid for cid in combine_ids if cid in existing_set]
+
     result = await db.products.update_one(
         {"id": product_id},
         {"$set": {
