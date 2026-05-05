@@ -831,3 +831,19 @@ Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak
 
 ### Backlog (yeni)
 - Ticimax sipariş servisi yetkisi: Kullanıcının Ticimax panelinde "Sipariş Servisi" izni verilmesi gerekiyor — şu anki WS Yetki Kodu (`SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V`) sipariş servisi izni içermiyor (empty response). Üye listesi başarıyla çekilebiliyor, sipariş için ayrı yetki açılmalı.
+
+## [2026-05-05] Ticimax Sipariş Agresif Import + Pagination Bug Fix
+
+### Yapılanlar
+- **`get_orders` post-filter pagination bug fix** (`integrations.py` 1766): Önceki `if len(page_orders) < limit: break` post-filter sonrası dönüş sayısını gerçek raw sayfa boyutuyla karıştırıyordu → page=1'den sonra erken terminate. Çözüm: route'ta `exclude_marketplace=False, only_with_phone=False` raw çek, post-filter route içinde yapılır. Sayfa boş olduğunda dur.
+- **Marketplace prefix filter eklendi**: `SiparisNo` "TY-", "HB-", "N11-", "AMZ-", "AE-" prefix'leri Trendyol/HB/N11/Amazon/AliExpress siparişleri olarak post-filter'da skip edilir (Ticimax `Kaynak` field'ı bazı pazaryeri siparişlerde boş gelebiliyordu).
+- **DB temizlik**: Mevcut 289 marketplace prefix'li sipariş silindi (TY-/HB-/N11-).
+- **Agresif import**: `?limit=200&days=3000&pages=100` ile 8 yıl × 100 sayfa max çekim. Sonuç:
+  - **800 raw sipariş** Ticimax'tan çekildi (4 sayfa × 200, 5. sayfa boş → durdu)
+  - **293 site siparişi** DB'de güncellendi (ticimax_order_id ile match)
+  - **507 marketplace siparişi** filter ile atlandı
+  - DB toplam: **357 sipariş, 304'ü site Ticimax siparişi**
+
+### Notlar
+- WS yetki kodu `SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V` HEM üye HEM sipariş servisi için yetkili (kullanıcı doğruladı).
+- Ticimax'ta toplam ~800 site siparişi mevcut — tümü çekildi. Yeni siparişler için import endpoint'i tekrar çalıştırılabilir (idempotent — mevcut siparişler güncellenir).

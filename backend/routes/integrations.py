@@ -1743,7 +1743,7 @@ async def import_ticimax_orders(
     end_date_str   = end_dt.strftime("%d.%m.%Y")
     logger.info(f"Ticimax sipariş import: son {days} gün, {pages} sayfa, exclude_mp={exclude_marketplace}, only_phone={only_with_phone}")
 
-    # Sayfa sayfa çek
+    # Sayfa sayfa çek — RAW (filtersız), post-filter route'da yapılıyor
     orders_raw = []
     for page_no in range(1, pages + 1):
         try:
@@ -1752,8 +1752,8 @@ async def import_ticimax_orders(
                 page_size=limit,
                 start_date=start_date_str,
                 end_date=end_date_str,
-                exclude_marketplace=exclude_marketplace,
-                only_with_phone=only_with_phone,
+                exclude_marketplace=False,   # Raw çek — son sayfa tespitini bozmaması için
+                only_with_phone=False,
                 wscode=api_key,
             )
         except Exception as e:
@@ -1763,9 +1763,9 @@ async def import_ticimax_orders(
         if not page_orders:
             break
         orders_raw.extend(page_orders)
-        if len(page_orders) < limit:
-            break  # Son sayfa
-        import time as _t; _t.sleep(1)
+        # NOT: filter sonrası length kontrolü güvenilir değil (post-filter düşürebilir).
+        # Sadece tamamen boş sayfa gelince dur — yoksa pages parametresine kadar devam.
+        import time as _t; _t.sleep(0.4)
 
     logger.info(f"Ticimax: toplam {len(orders_raw)} site siparişi çekildi")
 
@@ -1782,10 +1782,20 @@ async def import_ticimax_orders(
             continue
         ticimax_order_id = int(ticimax_order_id)
 
-        # Ek güvenlik: post-filter
-        if exclude_marketplace and (raw.get("IsMarketplace") or (raw.get("PazaryeriButikId") or 0) > 0):
-            skipped_marketplace += 1
-            continue
+        # Ek güvenlik: post-filter (Kaynak + IsMarketplace + SiparisNo prefix bazlı)
+        if exclude_marketplace:
+            siparis_no = str(raw.get("SiparisNo") or "").upper()
+            kaynak = str(raw.get("Kaynak") or "").lower()
+            mp_keywords = ("trendyol", "hepsiburada", "n11", "aliexpress",
+                           "amazon", "ciceksepeti", "pttavm", "temu",
+                           "pazarama", "gittigidiyor", "epttavm")
+            mp_prefixes = ("TY-", "HB-", "N11-", "AMZ-", "AE-")
+            is_mp_flag = bool(raw.get("IsMarketplace") or (raw.get("PazaryeriButikId") or 0) > 0)
+            is_mp_kaynak = any(kw in kaynak for kw in mp_keywords)
+            is_mp_prefix = any(siparis_no.startswith(pref) for pref in mp_prefixes)
+            if is_mp_flag or is_mp_kaynak or is_mp_prefix:
+                skipped_marketplace += 1
+                continue
 
         # Real Ticimax order field names
         order_number = str(raw.get("SiparisNo") or raw.get("SiparisKodu") or raw.get("SiparisID") or ticimax_order_id)
