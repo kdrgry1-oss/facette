@@ -24,10 +24,11 @@ class DoganClient:
             self.earsiv_wsdl = "https://efaturatest.doganedonusum.com:443/EIArchiveWS/EFaturaArchive?wsdl"
             self.eirsaliye_wsdl = "https://efaturatest.doganedonusum.com/EIrsaliyeWS/EIrsaliye?wsdl"
         else:
-            self.auth_wsdl = "https://efatura.doganedonusum.com/AuthenticationWS?wsdl"
-            self.efatura_wsdl = "https://efatura.doganedonusum.com/EFaturaOIB?wsdl"
-            self.earsiv_wsdl = "https://efatura.doganedonusum.com:443/EIArchiveWS/EFaturaArchive?wsdl"
-            self.eirsaliye_wsdl = "https://efatura.doganedonusum.com/EIrsaliyeWS/EIrsaliye?wsdl"
+            # CANLI endpoint = connector.doganedonusum.com (Doğan müşteri yöneticisi tarafından sağlanan resmi URL'ler)
+            self.auth_wsdl = "https://connector.doganedonusum.com/AuthenticationWS?wsdl"
+            self.efatura_wsdl = "https://connector.doganedonusum.com/EFaturaOIB?wsdl"
+            self.earsiv_wsdl = "https://connector.doganedonusum.com/EIArchiveWS/EFaturaArchive?wsdl"
+            self.eirsaliye_wsdl = "https://connector.doganedonusum.com/EIrsaliyeWS/EIrsaliye?wsdl"
 
         session = Session()
         session.verify = True
