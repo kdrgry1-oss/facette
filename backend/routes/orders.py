@@ -13,7 +13,8 @@ from .attribution import resolve_attribution_for_order
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
 def generate_order_number() -> str:
-    return f"FC{int(time.time())}"
+    import secrets
+    return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
 
 @router.get("")
 async def get_orders(
@@ -80,13 +81,36 @@ async def get_orders(
 @router.get("/by-number/{order_number}")
 async def get_order_by_number(order_number: str):
     """Sipariş numarasıyla siparişi getir (public — ödeme sonrası başarı sayfası için).
-    Hassas veriler (payment_id, admin_notes vs.) hariç tutulur."""
+    PII maskelenir (telefon/email son kısımları gizlenir, adres detayı sınırlanır)."""
     order = await db.orders.find_one(
         {"order_number": order_number},
-        {"_id": 0, "admin_notes": 0, "payment_id": 0, "user_id": 0, "customer_ip": 0, "user_agent": 0}
+        {"_id": 0, "admin_notes": 0, "payment_id": 0, "user_id": 0, "customer_ip": 0, "user_agent": 0,
+         "billing_address": 0, "attribution": 0}
     )
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    def _mask_email(e: str) -> str:
+        if not e or "@" not in e:
+            return ""
+        local, _, domain = e.partition("@")
+        return (local[:2] + "***@" + domain) if len(local) > 2 else "***@" + domain
+
+    def _mask_phone(p: str) -> str:
+        digits = "".join(c for c in str(p or "") if c.isdigit())
+        return (digits[:3] + "****" + digits[-2:]) if len(digits) >= 6 else ""
+
+    ship = order.get("shipping_address") or {}
+    if ship:
+        order["shipping_address"] = {
+            "first_name": ship.get("first_name", ""),
+            "last_name": ship.get("last_name", ""),
+            "phone": _mask_phone(ship.get("phone", "")),
+            "email": _mask_email(ship.get("email", "")),
+            "address": (ship.get("address") or "")[:40] + ("..." if len(ship.get("address") or "") > 40 else ""),
+            "city": ship.get("city", ""),
+            "district": ship.get("district", ""),
+        }
     return order
 
 

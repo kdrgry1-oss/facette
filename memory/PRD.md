@@ -774,3 +774,21 @@ Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak
 - Hot reload + smoke test ile gerçek render doğrulandı (Slim Fit Triko Bluz, Yüksek Bel Kumaş Pantolon, kupon TEST10 -149.97 TL, bedava kargo, toplam 1499.70 TL). ✅
 - Lint pass.
 
+
+
+## [2026-05-05] Sipariş Başarı Sayfası (ZaraHome) + Kurumsal Fatura + Zengin Mail + MNG NZ + Collision Fix
+
+### Yapılanlar
+- **OrderSuccess.jsx (yeni)**: ZaraHome stili minimal beyaz tasarım, harf aralıklı `TEŞEKKÜR EDERİZ` başlık, sipariş numarası kartı, 4 adımlı ilerleme göstergesi (Onaylandı/Hazırlanıyor/Kargoda/Teslim), ürün listesi, totallar, teslimat adresi, kurumsal fatura bilgisi (varsa), CTA "Siparişlerimi Gör" + "Alışverişe Devam Et". Routes: `/order-success/:orderNumber` ve `/siparis-tamamlandi/:orderNumber`.
+- **Backend `GET /api/orders/by-number/{n}` (yeni public)**: Sipariş numarasıyla getir. **PII maskeleme**: `phone="055****67"`, `email="te***@example.com"`, address ilk 40 karakter. `billing_address`, `payment_id`, `admin_notes`, `customer_ip` gizli.
+- **Checkout Kurumsal Fatura**: "Kurumsal Fatura İstiyorum" checkbox + Firma Ünvanı + VKN/TCKN (10/11 hane validation) + Vergi Dairesi + e-Fatura mükellefi flag. `orders.billing_info: {is_corporate, company_name, tax_office, tax_number, e_invoice_user}` MongoDB'ye yazılır.
+- **Checkout Redirect**: Tüm ödeme yolları (bank_transfer / cash_on_delivery / 3D credit_card) success → `/order-success/{order_number}`.
+- **Sipariş Onay Maili Zenginleştirme**: `_EMAIL_HTML_TEMPLATES` ile `order_confirmed`, `order_shipped`, `order_delivered`, `order_cancelled`, `order_undelivered` için ZaraHome stili HTML şablonları (3393+ karakter, FACETTE letter-spacing branding, ürün thumb listesi, totallar, teslimat bloğu, "Siparişimi Görüntüle" CTA). `POST /api/notifications/templates/seed?force=true` ile mevcut template'leri override eder (manually_edited=true olanlara dokunmaz).
+- **Otomatik order_confirmed bildirimi**: `POST /api/orders` create-order'da fire-and-forget `order_confirmed` SMS+Email+WhatsApp tetiklenir.
+- **MNG NZ Barkod denemesi**: `cargo-barcode` endpoint'inde `MNGGonderiBarkod` çağrısı geri eklendi (graceful fallback). Yetki hatası alsa bile sipariş oluşur, fallback MNG_SIPARIS_NO. NZ alınırsa `cargo.mng_nz_barkod` field'ına yazılır ve etikette öncelikli gösterilir. Öncelik: `mng_nz_barkod` → `mng_gonderi_no` → `mng_siparis_no`.
+- **CRITICAL FIX — Sipariş No Collision**: `generate_order_number()` artık `f"FC{int(time.time())}{secrets.token_hex(2).upper()}"` formatında (örn. `FC1777945272DE0C`). Aynı saniye 3 sipariş = 3 farklı numara. /app/backend/routes/{deps,orders}.py.
+- **React Warning Fix**: Checkout'ta render-içi `navigate()` useEffect'e taşındı.
+
+### Test (Iteration 19)
+- Backend 11/12 PASS, 0 critical (collision-resistant + PII masking eklendi).
+- Frontend `/order-success` ve `/odeme` corporate UI smoke test geçti.

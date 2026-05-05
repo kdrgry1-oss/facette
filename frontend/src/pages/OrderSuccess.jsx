@@ -33,7 +33,6 @@ export default function OrderSuccess() {
     })();
     return () => { cancel = true; };
   }, [orderNumber, navigate]);
-
   if (loading) {
     return (
       <div className="min-h-screen bg-white">

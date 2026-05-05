@@ -304,7 +304,14 @@ export default function Checkout() {
     }
   };
 
-  if (items.length === 0 && paymentStep === "form") { navigate("/sepet"); return null; }
+  // Boş sepet → /sepet'e yönlendir (render içinde değil, useEffect'te)
+  useEffect(() => {
+    if (items.length === 0 && paymentStep === "form") {
+      navigate("/sepet");
+    }
+  }, [items.length, paymentStep, navigate]);
+
+  if (items.length === 0 && paymentStep === "form") return null;
 
   if (paymentStep === "success") {
     return (

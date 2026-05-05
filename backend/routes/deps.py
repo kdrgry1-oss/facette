@@ -98,9 +98,9 @@ async def generate_short_id(collection_name: str) -> str:
     return str(uuid.uuid4())[:4]
 
 def generate_order_number() -> str:
-    """Generate order number"""
-    import time
-    return f"FC{int(time.time())}"
+    """Generate order number (collision-resistant)"""
+    import time, secrets
+    return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
 
 def serialize_doc(doc):
     """Serialize MongoDB document for JSON response"""
