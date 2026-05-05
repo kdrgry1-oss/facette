@@ -319,10 +319,31 @@ export default function AdminOrders() {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`MNG Kargo oluşturuldu: ${res.data.tracking_number}`);
+      if (res.data.mng_nz_barkod) {
+        toast.success(`✅ NZ Barkod: ${res.data.mng_nz_barkod}`);
+      } else if (res.data.mng_whitelist_error) {
+        toast.warning(`⚠️ NZ barkod alınamadı (IP whitelist gerekli). Ref: ${res.data.tracking_number}`);
+      } else {
+        toast.success(`MNG kargo oluşturuldu: ${res.data.tracking_number}`);
+      }
       fetchOrders();
     } catch (err) {
-      toast.error("MNG Kargo oluşturulamadı");
+      toast.error(err.response?.data?.detail || "MNG Kargo oluşturulamadı");
+    }
+  };
+
+  const handleRefreshCargo = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/orders/${orderId}/cargo-refresh`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(res.data.message || "Kargo durumu güncellendi");
+      fetchOrders();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Kargo durumu yenilenemedi");
     }
   };
 
@@ -1149,6 +1170,17 @@ export default function AdminOrders() {
                             className={`tci-btn ${order.cargo?.tracking_number ? 'tci-btn-green-active' : 'tci-btn-gray'}`}
                           >
                             <Copy size={15} />
+                          </button>
+                        )}
+                        {/* 5b. Kargo Durum Yenile (NZ barkodu güncelleme) */}
+                        {order.cargo?.tracking_number && order.cargo?.provider === 'MNG' && !order.cargo?.mng_nz_barkod && (
+                          <button
+                            onClick={() => handleRefreshCargo(order.id)}
+                            title="Kargo durumunu yenile (NZ barkodu çek)"
+                            data-testid="refresh-cargo-btn"
+                            className="tci-btn tci-btn-blue"
+                          >
+                            <RefreshCw size={15} />
                           </button>
                         )}
                         {/* 6. SMS Gönder */}

@@ -695,3 +695,30 @@ Kullanıcı "neden gerçek faturası dogandonusume düşmüyor" sordu. Mevcut `c
 - **Test endpoint** (`efaturatest.doganedonusum.com`) → erişilebilir ama verdiğiniz prod credentials test'te `10004 Kullanıcı adı veya şifre hatalı` hatası alıyor (test ortamında ayrı kullanıcı gerekir).
 - Whitelist sonrası canlıya geçiş: `is_test=false` ile aynı credentials kullanılarak otomatik fatura kesimi başlar.
 
+
+## [2026-05-05] MNGGonderiBarkod (NZ Anında Barkod) + Postal Code → İl
+
+### MNGGonderiBarkod Entegrasyonu
+- `mng_kargo_client.py` → `get_mng_barcode_immediately(...)` eklendi (MNGGonderiBarkod SOAP).
+- Kargo barkodu oluşturulduğu anda **NZ formatlı** kargo takip kodunu çeker (sipariş ofisten çıkmadan önce).
+- `routes/orders.py` create_cargo_barcode + cargo-refresh artık 3 katmanlı veriyi DB'ye yazıyor:
+  1. **MNGGonderiBarkod** (NZ barkod) — anında alınır, IP whitelist gerekli.
+  2. **FaturaSiparisListesi.GONDERI_NO** — şube işlemi sonrası dolar.
+  3. **MNG_SIPARIS_NO** — fallback (her zaman dolu).
+- Frontend Orders.jsx → `cargo.provider == 'MNG' && !cargo.mng_nz_barkod` koşulunda **🔄 Yenile** butonu görünür.
+
+### IP Whitelist Talebi (KRİTİK)
+- **Pod outbound IP**: `34.170.12.145`
+- Bu IP whitelist edilmesi gereken iki servis:
+  - **MNG Kargo** (`MNGGonderiBarkod` endpoint için) → şu an `YETKİ HATASI! Mac : 000000000000 Ip :34.170.12.145`
+  - **Doğan e-Dönüşüm** (`efatura.doganedonusum.com:443`) → şu an connection timeout
+
+### Postal Code → İl Mapping
+- Yeni `il_mapping.py` modülü (81 il, posta kodu prefix bazlı).
+- Ticimax import sırasında `Sehir` boş gelirse posta kodundan otomatik il çıkartılıyor.
+- 137 mevcut sipariş için backfill yapıldı.
+
+### Test
+- POST `/orders/{id}/cargo-refresh` → MNGGonderiBarkod denemesi → `YETKİ HATASI` (whitelist sonrası NZ barkod gelecek), FaturaSiparisListesi → `kargo_statu: "Gönderi Kargo İşlemi Yapılmadı"` (şube henüz işlemedi). Mesaj net.
+- Etiket render → Code39 üst (sipariş no `FC1777939101`) + alt (takip no `1757391445`) doğru formatta ✅
+

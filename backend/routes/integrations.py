@@ -1835,9 +1835,13 @@ async def import_ticimax_orders(
             continue
 
         address = str(kargo_adresi.get("Adres") or fatura_adresi.get("Adres") or "")
-        city = str(kargo_adresi.get("Sehir") or kargo_adresi.get("Il") or fatura_adresi.get("Sehir") or "")
-        district = str(kargo_adresi.get("Ilce") or fatura_adresi.get("Ilce") or "")
+        city = str(kargo_adresi.get("Sehir") or kargo_adresi.get("Il") or kargo_adresi.get("IlAdi") or fatura_adresi.get("Sehir") or fatura_adresi.get("Il") or "")
+        district = str(kargo_adresi.get("Ilce") or kargo_adresi.get("IlceAdi") or fatura_adresi.get("Ilce") or "")
+        # Eğer city boş ama postal_code varsa Türkiye il kodu eşleştirmesi yap (ilk 2 hane il koduna karşılık gelir)
         posta_kodu = str(kargo_adresi.get("PostaKodu") or fatura_adresi.get("PostaKodu") or "")
+        if not city and posta_kodu and len(posta_kodu) >= 2:
+            from il_mapping import IL_CODE_TO_NAME  # type: ignore  # noqa
+            city = IL_CODE_TO_NAME.get(posta_kodu[:2], "")
 
         # Fetch line items (UrunGetir=True ile zaten gelmesi lazım, ama yine de fallback)
         items = []

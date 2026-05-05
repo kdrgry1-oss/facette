@@ -50,6 +50,66 @@ def baglanti_test() -> Dict:
         return {"ok": False, "error": str(e)}
 
 
+def get_mng_barcode_immediately(*, username: str, password: str, siparis_no: str,
+                                 irsaliye_no: str = "", urun_bedeli: float = 0.0,
+                                 kapida_tahsilat: bool = False,
+                                 out_barkod_type: str = "C") -> Dict:
+    """MNGGonderiBarkod → Anında NZ-formatlı kargo barkodu üretir (sipariş oluşturulduktan sonra).
+    
+    NOT: Bu endpoint MNG tarafında IP whitelist gerektirir. Whitelist yoksa
+    'YETKİ HATASI' döner ve fallback olarak MNG_SIPARIS_NO kullanılmalıdır.
+    
+    out_barkod_type:
+      C = Code39  |  B = Barcode  |  P = Plain (NZ formatlı)
+    
+    Returns:
+      { ok: bool, barkod: str (örn 'NZ197406'), gonderi_no: str, hata: str }
+    """
+    c = _get_client()
+    try:
+        req_type = c.get_type("ns0:GonderiBarkodRequest")
+        req = req_type(
+            WsUserName=username, WsPassword=password,
+            ReferansNo=siparis_no, IrsaliyeNo=irsaliye_no,
+            OutBarkodType=out_barkod_type,
+            FlKapidaTahsilat="1" if kapida_tahsilat else "0",
+            UrunBedeli=f"{urun_bedeli:.2f}",
+            ChMesaj="", EkString1="", EkString2="", EkString3="", EkString4="",
+            HatadaReferansBarkoduBas=0,
+            ParcaBilgi=None,
+        )
+        r = c.service.MNGGonderiBarkod(req=req)
+        from zeep.helpers import serialize_object
+        ser = serialize_object(r)
+        success = (ser.get("IstekBasarili") == 1)
+        if not success:
+            return {"ok": False, "barkod": "", "gonderi_no": "",
+                    "hata": ser.get("IstekHata") or "MNGGonderiBarkod başarısız",
+                    "raw": ser}
+        # GonderiBarkods → list of barcodes for each parça
+        barkods_obj = ser.get("GonderiBarkods")
+        first_barkod = ""
+        if barkods_obj:
+            # zeep parses ArrayOfGonderiBarkod as {"_value_1": [...]} or list
+            items = barkods_obj.get("_value_1", []) if isinstance(barkods_obj, dict) else barkods_obj
+            if items and isinstance(items, list):
+                first = items[0]
+                if isinstance(first, dict):
+                    first_barkod = (first.get("Barkod") or first.get("barkod") or "").strip()
+                elif hasattr(first, "__values__"):
+                    first_barkod = str(dict(first.__values__).get("Barkod") or "").strip()
+        return {
+            "ok": True,
+            "barkod": first_barkod or str(ser.get("MngKargoGonderiNo") or ""),
+            "gonderi_no": str(ser.get("MngKargoGonderiNo") or "").strip(),
+            "fatura_seri_no": str(ser.get("MngKargoFaturaSeriNo") or "").strip(),
+            "raw": ser,
+        }
+    except Exception as e:
+        logger.error(f"MNGGonderiBarkod error for {siparis_no}: {e}")
+        return {"ok": False, "barkod": "", "gonderi_no": "", "hata": str(e), "raw": None}
+
+
 def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) -> Dict:
     """FaturaSiparisListesi → siparis_no'dan TÜM kargo durumunu çek.
     
