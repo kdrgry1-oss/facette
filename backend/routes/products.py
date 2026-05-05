@@ -495,6 +495,136 @@ async def update_combine_products(
     return {"success": True, "count": len(combine_ids)}
 
 
+@router.post("/{product_id}/auto-combine")
+async def auto_assign_combine_products(
+    product_id: str,
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Geçmiş siparişlerdeki co-occurrence verisinden bu ürünle en sık birlikte
+    satılan top-N ürünü otomatik kombin olarak atar."""
+    payload = payload or {}
+    max_n = min(int(payload.get("max", 8)), 12)
+    dry_run = bool(payload.get("dry_run", False))
+    replace = bool(payload.get("replace", True))
+
+    base = await db.products.find_one({"id": product_id}, {"_id": 0, "combine_products": 1})
+    if not base:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+
+    co_count = {}
+    async for order in db.orders.find(
+        {"items.product_id": product_id}, {"_id": 0, "items.product_id": 1}
+    ).limit(2000):
+        ids_in_order = {it.get("product_id") for it in (order.get("items") or []) if it.get("product_id")}
+        if product_id not in ids_in_order:
+            continue
+        for pid in ids_in_order:
+            if pid and pid != product_id:
+                co_count[pid] = co_count.get(pid, 0) + 1
+
+    sorted_ids = sorted(co_count.items(), key=lambda kv: kv[1], reverse=True)
+    if not sorted_ids:
+        return {"success": False, "message": "Bu ürün için yeterli sipariş geçmişi yok", "candidates": []}
+
+    candidate_ids = [pid for pid, _ in sorted_ids[:max_n * 3]]
+    existing_ids = set(await db.products.distinct(
+        "id", {"id": {"$in": candidate_ids}, "is_active": {"$ne": False}}
+    ))
+
+    candidates = []
+    for pid, cnt in sorted_ids:
+        if len(candidates) >= max_n:
+            break
+        if pid not in existing_ids:
+            continue
+        prod = await db.products.find_one(
+            {"id": pid}, {"_id": 0, "id": 1, "name": 1, "price": 1, "images": 1, "image": 1}
+        )
+        if prod:
+            candidates.append({**prod, "_co_count": cnt})
+
+    selected_ids = [c["id"] for c in candidates]
+    if dry_run:
+        return {"success": True, "candidates": candidates, "would_assign": selected_ids, "dry_run": True}
+
+    new_ids = selected_ids if replace else list(dict.fromkeys((base.get("combine_products") or []) + selected_ids))[:12]
+    await db.products.update_one(
+        {"id": product_id},
+        {"$set": {
+            "combine_products": new_ids,
+            "combine_auto_generated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {
+        "success": True, "assigned": new_ids, "candidates": candidates,
+        "count": len(new_ids),
+        "message": f"{len(new_ids)} kombin ürün atandı (geçmiş siparişlerden)",
+    }
+
+
+@router.post("/auto-combine-all")
+async def auto_assign_combine_all(
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Tüm aktif ürünler için tek tıkla otomatik kombin atama (admin)."""
+    payload = payload or {}
+    max_n = min(int(payload.get("max", 8)), 12)
+    only_empty = bool(payload.get("only_empty", True))
+
+    query = {"is_active": {"$ne": False}}
+    if only_empty:
+        query["$or"] = [
+            {"combine_products": {"$exists": False}},
+            {"combine_products": {"$size": 0}},
+        ]
+
+    processed = 0
+    assigned_total = 0
+    skipped_no_data = 0
+
+    cursor = db.products.find(query, {"_id": 0, "id": 1})
+    async for p in cursor:
+        pid = p["id"]
+        co_count = {}
+        async for order in db.orders.find(
+            {"items.product_id": pid}, {"_id": 0, "items.product_id": 1}
+        ).limit(500):
+            ids_in_order = {it.get("product_id") for it in (order.get("items") or []) if it.get("product_id")}
+            for cid in ids_in_order:
+                if cid and cid != pid:
+                    co_count[cid] = co_count.get(cid, 0) + 1
+        sorted_ids = sorted(co_count.items(), key=lambda kv: kv[1], reverse=True)
+        if not sorted_ids:
+            skipped_no_data += 1
+            processed += 1
+            continue
+        candidate_ids = [cid for cid, _ in sorted_ids[:max_n * 2]]
+        existing_ids = set(await db.products.distinct(
+            "id", {"id": {"$in": candidate_ids}, "is_active": {"$ne": False}}
+        ))
+        selected = [cid for cid, _ in sorted_ids if cid in existing_ids][:max_n]
+        if selected:
+            await db.products.update_one(
+                {"id": pid},
+                {"$set": {
+                    "combine_products": selected,
+                    "combine_auto_generated_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            assigned_total += 1
+        processed += 1
+
+    return {
+        "success": True, "processed": processed,
+        "products_with_combine_assigned": assigned_total,
+        "skipped_no_order_history": skipped_no_data,
+        "message": f"{assigned_total}/{processed} ürüne kombin atandı",
+    }
+
+
 @router.post("/cart-suggestions")
 async def get_cart_suggestions(payload: dict):
     """Sepetteki ürünlere göre öneriler döner (public).

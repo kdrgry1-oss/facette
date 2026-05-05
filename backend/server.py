@@ -76,6 +76,7 @@ from routes.category_mapping import router as category_mapping_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
+from routes.integrations_temu import router as integrations_temu_router
 from routes.customer_risk import router as customer_risk_router
 from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
@@ -261,6 +262,7 @@ api_router.include_router(cms_router)
 from routes.integrations_iyzico import router as iyzico_router
 api_router.include_router(iyzico_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
+api_router.include_router(integrations_temu_router, prefix="/integrations")
 api_router.include_router(admin_router)
 api_router.include_router(customer_router)
 api_router.include_router(variants_router)

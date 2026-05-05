@@ -105,6 +105,37 @@ export default function CombineProductsTab({ productId, combineIds = [], onChang
         </p>
       </div>
 
+      {/* Auto-combine — geçmiş siparişlerden otomatik öneri */}
+      {productId && (
+        <div className="bg-stone-900 text-white rounded-lg p-4 flex items-start gap-3" data-testid="auto-combine-card">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium mb-1">⚡ Otomatik Kombin Önerisi</div>
+            <div className="text-xs text-stone-300">
+              Geçmiş siparişlerde bu ürünle <strong>en sık birlikte satılan</strong> top-8 ürünü otomatik kombin olarak ata.
+            </div>
+          </div>
+          <button type="button" onClick={async () => {
+            const token = localStorage.getItem("token");
+            try {
+              const r = await axios.post(`${API}/products/${productId}/auto-combine`,
+                { max: 8, replace: true },
+                { headers: { Authorization: `Bearer ${token}` } });
+              if (r.data?.success) {
+                toast.success(r.data.message || "Otomatik atama tamam");
+                onChange(r.data.assigned || []);
+              } else {
+                toast.error(r.data?.message || "Yeterli sipariş geçmişi yok");
+              }
+            } catch (e) {
+              toast.error(e?.response?.data?.detail || "Otomatik atama başarısız");
+            }
+          }} className="bg-white text-stone-900 hover:bg-stone-100 px-4 py-2 text-xs tracking-wider uppercase rounded font-medium whitespace-nowrap"
+             data-testid="auto-combine-btn">
+            Otomatik Ata
+          </button>
+        </div>
+      )}
+
       <div className="grid md:grid-cols-2 gap-6">
         {/* SOL: Atanmış kombin ürünler */}
         <div>

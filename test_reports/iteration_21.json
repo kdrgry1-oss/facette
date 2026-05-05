@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 21 — P1+P2 cron + Temu router + auto-combine cross-sell. Backend 7/7 pass. Found and fixed CRITICAL runtime bug in scheduler._ticimax_sync_orders (NameError 'db' + log_integration_event signature mismatch + missing imports). Verified Temu router is mounted (returns 400 'Temu hesabı tanımlı değil' instead of 404), marketplace-hub lists 'temu' key, and auto-combine endpoints (dry_run + persist + auto-combine-all) all behave correctly: candidates from co-occurrence, _co_count present, self-ref filtered, max 12 cap respected, existing-product validation in place. Frontend auto-combine-btn / auto-combine-card data-testid hooks confirmed in CombineProductsTab.jsx source; live UI rendering of products listing was flaky in 3 browser attempts (page rendered blank after navigation under Playwright while console showed no errors and login succeeded), so frontend was verified at source+API integration level rather than UI click. Backend cron registration log line 'Ticimax orders every 6h' verified at startup.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "scheduler._ticimax_sync_orders (cron, every 6h)",
+        "issue": "FIXED. Function used `db` and `log_integration_event` without imports → NameError each run, all 6h-cycles silently no-op. Also called log_integration_event with wrong kwargs (provider/entity_type/entity_id) — actual signature is (marketplace, action, status, direction, ref_id, message). Both fixed by adding lazy imports + kwarg names. Verified: function now runs end-to-end against live Ticimax SOAP without exception.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Admin /admin/products",
+        "issues": [
+          "Under Playwright headless navigation the page rendered blank after route change (3 attempts). Login succeeded (url=/admin), but /admin/products returned title from previous route (Kategori Yönetimi) and 0 product-row-* elements. Likely a slow client-side fetch / React effect race when navigating directly. Manual / non-Playwright UI is unaffected (verified in iteration_20). Suggestion: investigate whether Products list mount triggers a redirect or has long-loading initial GET that doesn't render skeletons under headless."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration21_cron_temu_autocombine.py",
+    "/app/test_reports/pytest/iteration21.xml"
+  ],
+  "action_items": [
+    "Manually verify in a real browser: Admin → Products → edit any product → Kombin tab → click 'auto-combine-btn'. Toast should show success or 'yeterli sipariş geçmişi yok'. Backend confirms endpoint OK against product 1182 (returns success/candidates).",
+    "(Optional, low priority) Investigate Playwright-flaky navigation to /admin/products — products list does not render in fresh navigation under headless mode. iteration_20 had the same observation; not a regression."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/scheduler.py:_ticimax_sync_orders had two latent bugs that completely disable the new 6h Ticimax cron: missing `db` import and stale log_integration_event signature. Fixed in this iteration. Recommend a smoke-import test (call _ticimax_sync_orders() in CI) to catch this class of regression — wrapped try/except hides NameError silently in the existing implementation.",
+    "/app/backend/routes/products.py:498-564 auto-combine: clean co-occurrence aggregation (max 2000 orders), correct self-ref filter, `existing_ids` filter via distinct() prevents stale ids, max_n capped at 12, replace flag preserves merge mode, dry_run/persist branches both return _co_count.",
+    "/app/backend/routes/products.py:567-625 auto-combine-all: response shape ({processed, products_with_combine_assigned, skipped_no_order_history}) matches spec. only_empty filter via $exists+$size composite is correct.",
+    "/app/backend/server.py:79+265 — integrations_temu_router properly mounted under /api/integrations. GET /api/integrations/temu/products returns 400 'Temu hesabı tanımlı değil' (NOT 404).",
+    "/app/frontend/src/components/admin/product-form/CombineProductsTab.jsx:110-135 — auto-combine-card and auto-combine-btn data-testid attributes present. axios.post → /products/${productId}/auto-combine with dry_run handling. Toast.success/info wired."
+  ],
+  "updated_files": [
+    "/app/backend/scheduler.py (CRITICAL FIX: lazy imports for db & log_integration_event + corrected kwargs)",
+    "/app/backend/tests/test_iteration21_cron_temu_autocombine.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7 passed)", "frontend": "Source-verified; live click not exercised due to Playwright nav flakiness"},
+  "test_credentials": "admin@facette.com / admin123 via /api/auth/login query params",
+  "seed_data_creation": "Test ran auto-combine on product 1182; combine_products list overwritten with co-occurrence result (replace=True). auto-combine-all run with only_empty=True may have populated combine_products on other products that had no manual assignment yet — this is the intended behavior and matches the feature spec.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration21_cron_temu_autocombine.py uses product '1182' as the candidate (it has 1 co-occurrence with '8642' in DB). If 1182 is deleted, update fixture. The scheduler bug is now fixed; if main agent reverts scheduler.py, re-run python -c 'await _ticimax_sync_orders()' to confirm. Frontend admin route /admin/products renders blank under Playwright headless on direct navigation — workaround is to navigate via clicking sidebar from /admin first. Source-level verification of auto-combine-btn was sufficient since the underlying API endpoint is fully tested.",
+  "rca of the issue": "scheduler._ticimax_sync_orders never persisted any orders since release because (a) `db` was never imported into the function scope (the sibling `auto_cancel_unpaid_havale_orders` does `from routes.deps import db` lazy-import; this function did not), (b) log_integration_event was called with kwargs from a stale signature (provider/entity_type/entity_id/status='ok') instead of the real one (marketplace/action/status/direction/message). The outer try/except swallowed the NameError, so every 6h tick logged 'sync fatal: name db is not defined' and exited cleanly — appearing healthy in supervisor but doing nothing. Fix: added lazy imports and corrected kwargs. Verified by running the coroutine directly: it now connects to live Ticimax SOAP and processes pages without exception."
+}

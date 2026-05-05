@@ -275,6 +275,109 @@ async def _send_abandoned_cart_reminders():
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
 
 
+
+async def _ticimax_sync_orders():
+    """Periyodik olarak Ticimax'tan site siparişlerini çek (idempotent).
+    Son 30 günün siparişleri, 5 sayfa × 100. Yeni site siparişlerini DB'ye yazar.
+    """
+    try:
+        import sys, os, uuid
+        sys.path.insert(0, os.path.dirname(__file__))
+        from ticimax_client import get_orders as tc_get_orders
+        from routes.deps import db  # lazy import
+        from routes.marketplace_hub import log_integration_event  # lazy import
+        s = await db.settings.find_one({"id": "ticimax"}) or {}
+        api_key = s.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=30)
+        start_str = start_dt.strftime("%d.%m.%Y")
+        end_str = end_dt.strftime("%d.%m.%Y")
+        new_count = 0
+        skipped_mp = 0
+        seen_pages = 0
+        mp_kw = ("trendyol", "hepsiburada", "n11", "aliexpress", "amazon",
+                 "ciceksepeti", "pttavm", "temu", "pazarama")
+        mp_pref = ("TY-", "HB-", "N11-", "AMZ-", "AE-")
+
+        for page in range(1, 6):
+            try:
+                orders = tc_get_orders(
+                    page=page, page_size=100, wscode=api_key,
+                    start_date=start_str, end_date=end_str,
+                    exclude_marketplace=False, only_with_phone=False,
+                )
+            except Exception as e:
+                logger.warning(f"[cron][ticimax] page {page} error: {e}")
+                break
+            if not orders:
+                break
+            seen_pages += 1
+            for o in orders:
+                if not o:
+                    continue
+                tc_id = o.get("SiparisID") or o.get("ID")
+                tc_no = (o.get("SiparisNo") or "").strip().upper()
+                kaynak = str(o.get("Kaynak") or "").lower()
+                is_mp_flag = bool(o.get("IsMarketplace") or (o.get("PazaryeriButikId") or 0) > 0)
+                if is_mp_flag or any(k in kaynak for k in mp_kw) or any(tc_no.startswith(p) for p in mp_pref):
+                    skipped_mp += 1
+                    continue
+                # Idempotent
+                exist = await db.orders.find_one(
+                    {"$or": [{"order_number": tc_no}, {"ticimax_order_id": int(tc_id) if tc_id else -1}]},
+                    {"_id": 0, "id": 1}
+                )
+                if exist:
+                    continue
+                # Basit insert (hızlı senkron için minimum mapping)
+                first_name = str(o.get("AliciAdi") or "").strip()
+                last_name = str(o.get("AliciSoyadi") or "").strip()
+                phone = str(o.get("AliciCepTelefonu") or o.get("AliciTelefon") or "").strip()
+                email = str(o.get("AliciEmail") or "").strip().lower()
+                order_doc = {
+                    "id": str(uuid.uuid4())[:8],
+                    "order_number": tc_no or f"TC-{tc_id}",
+                    "ticimax_order_id": int(tc_id) if tc_id else None,
+                    "user_id": None,
+                    "shipping_address": {
+                        "first_name": first_name, "last_name": last_name,
+                        "phone": phone, "email": email,
+                        "address": str(o.get("TeslimatAdresi") or ""),
+                        "city": str(o.get("TeslimatIl") or ""),
+                        "district": str(o.get("TeslimatIlce") or ""),
+                    },
+                    "items": [],
+                    "subtotal": float(o.get("ToplamSiparisTutariOrjinal") or 0),
+                    "shipping_cost": float(o.get("KargoUcreti") or 0),
+                    "discount": float(o.get("KuponIndirimi") or 0),
+                    "total": float(o.get("ToplamSiparisTutari") or 0),
+                    "payment_method": str(o.get("OdemeTipi") or ""),
+                    "payment_status": "paid" if o.get("OdemeTamamlandi") else "pending",
+                    "status": str(o.get("SiparisDurumuStr") or "pending"),
+                    "platform": "facette",
+                    "channel": "web",
+                    "imported_from": "ticimax_cron",
+                    "imported_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": str(o.get("SiparisTarihi") or datetime.now(timezone.utc).isoformat()),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                try:
+                    await db.orders.insert_one(order_doc)
+                    new_count += 1
+                except Exception as ie:
+                    logger.warning(f"[cron][ticimax] insert err: {ie}")
+        if new_count > 0:
+            logger.info(f"[cron][ticimax] +{new_count} yeni site siparişi (skipped MP={skipped_mp}, pages={seen_pages})")
+            await log_integration_event(
+                marketplace="ticimax", action="order_pull", status="success",
+                direction="inbound",
+                message=f"[cron] {new_count} yeni site siparişi eklendi"
+            )
+    except Exception as e:
+        logger.exception(f"[cron][ticimax] sync fatal: {e}")
+
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -312,8 +415,18 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
+    _scheduler.add_job(
+        _ticimax_sync_orders,
+        "interval",
+        hours=6,
+        id="ticimax_orders_sync",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
-    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily)")
+    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily + Ticimax orders every 6h)")
     return _scheduler
 
 
