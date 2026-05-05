@@ -805,7 +805,12 @@ async def create_invoice_for_order(
                 "name": it.get("product_name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
-                "kdv_rate": 20.0,
+                "kdv_rate": float(it.get("kdv_rate") or 20.0),
+                "sku": it.get("sku") or it.get("product_code") or "",
+                "barcode": it.get("barcode") or "",
+                "note": (f"Renk:{it.get('color') or ''}; Beden:{it.get('size') or ''}: Barcode:{it.get('barcode') or ''}"
+                         if (it.get('color') or it.get('size') or it.get('barcode'))
+                         else ""),
             })
 
         ubl_xml = DoganClient.build_earsiv_ubl_xml(
@@ -814,13 +819,14 @@ async def create_invoice_for_order(
             issue_date=issue_date,
             issue_time=issue_time,
             supplier_vkn=dogan_settings.get("vkn") or "7810816779",
-            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC.A.Ş.",
-            supplier_district=dogan_settings.get("supplier_district") or "Küçükçekmece",
+            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ. TİC.A.Ş",
+            supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
             supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
-            supplier_street=dogan_settings.get("supplier_street") or "İkitelli OSB Mah.",
-            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "Küçükçekmece",
+            supplier_street=dogan_settings.get("supplier_street") or "",
+            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
             supplier_phone=dogan_settings.get("supplier_phone") or "",
             supplier_email=dogan_settings.get("supplier_email") or "",
+            supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
             customer_vkn_or_tckn=customer_vkn,
             customer_name=customer_name,
             customer_district=ship_addr.get("district") or "",
@@ -828,12 +834,15 @@ async def create_invoice_for_order(
             customer_street=ship_addr.get("address") or "",
             customer_phone=ship_addr.get("phone") or "",
             customer_email=ship_addr.get("email") or order.get("user_email") or "",
+            customer_tax_office=bill.get("tax_office") or "",
             currency="TRY",
             kdv_rate=20.0,
             line_items=line_items,
             shipping_cost=float(order.get("shipping_cost") or 0),
             discount=float(order.get("discount") or 0),
-            note=f"Sipariş No: {order.get('order_number') or order_id}",
+            order_number=order.get("order_number") or order_id,
+            payment_method=order.get("payment_method") or "DIGER",
+            note="",
         )
 
         dogan_client = DoganClient(
@@ -841,7 +850,13 @@ async def create_invoice_for_order(
             password=dogan_settings["password"],
             is_test=dogan_settings.get("is_test", True),
         )
-        dogan_result = await run_in_threadpool(dogan_client.send_earsiv_invoice, ubl_xml, invoice_uuid)
+        # Müşteri e-postasına PDF gönder
+        cust_email = (ship_addr.get("email") or order.get("user_email") or "").strip()
+        archive_note = f"Sipariş No: {order.get('order_number') or order_id}"
+        dogan_result = await run_in_threadpool(
+            dogan_client.send_earsiv_invoice,
+            ubl_xml, invoice_uuid, cust_email, archive_note,
+        )
 
         if not dogan_result.get("success"):
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
@@ -859,7 +874,9 @@ async def create_invoice_for_order(
             "invoice_type": invoice_type,
             "invoice_provider": active,
             "invoice_provider_response": dogan_result,
-            "invoice_intl_txn_id": dogan_result.get("intl_txn_id", ""),
+            "invoice_intl_txn_id": (dogan_result or {}).get("intl_txn_id", ""),
+            "invoice_dogan_id": (dogan_result or {}).get("invoice_id", ""),
+            "invoice_pdf_url": (dogan_result or {}).get("web_key", ""),
             "invoice_issued_at": now.isoformat(),
             "invoice_issued_by": current_user.get("email", ""),
             "updated_at": now.isoformat(),
