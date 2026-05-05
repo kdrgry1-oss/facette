@@ -439,6 +439,125 @@ async def save_attributes_bulk(payload: dict, current_user: dict = Depends(requi
     return {"success": True, "updated": updated}
 
 
+@router.get("/{product_id}/combine-products")
+async def get_combine_products(product_id: str):
+    """Bu ürünle birlikte gösterilecek kombin ürünlerin LİSTESİNİ döner.
+    Public endpoint — sepet/ürün detay sayfası kullanır."""
+    product = await db.products.find_one(
+        {"id": product_id},
+        {"_id": 0, "combine_products": 1, "category_id": 1, "categories": 1}
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+
+    combine_ids = product.get("combine_products") or []
+    items = []
+    if combine_ids:
+        async for p in db.products.find(
+            {"id": {"$in": combine_ids}, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+        ):
+            items.append(p)
+    return {"items": items, "source": "combine"}
+
+
+@router.put("/{product_id}/combine-products")
+async def update_combine_products(
+    product_id: str,
+    payload: dict,
+    current_user: dict = Depends(require_admin)
+):
+    """Bu ürün için kombin ürün ID listesini günceller (admin)."""
+    combine_ids = payload.get("combine_products") or []
+    if not isinstance(combine_ids, list):
+        raise HTTPException(status_code=400, detail="combine_products bir liste olmalıdır")
+    # Self-reference temizliği
+    combine_ids = [str(cid) for cid in combine_ids if str(cid) != product_id]
+    # En fazla 12 kombin ürün
+    combine_ids = combine_ids[:12]
+
+    result = await db.products.update_one(
+        {"id": product_id},
+        {"$set": {
+            "combine_products": combine_ids,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    return {"success": True, "count": len(combine_ids)}
+
+
+@router.post("/cart-suggestions")
+async def get_cart_suggestions(payload: dict):
+    """Sepetteki ürünlere göre öneriler döner (public).
+    
+    Öncelik:
+      1) Sepetteki ürünlerin combine_products listesi (cross-sell, manuel atama)
+      2) Sale/indirim kategorisindeki aktif ürünler (fallback)
+    """
+    cart_product_ids = payload.get("product_ids") or []
+    limit = int(payload.get("limit", 8))
+
+    suggestions = []
+    seen = set(cart_product_ids)
+
+    # 1) Sepetteki her ürünün combine_products'ını topla
+    if cart_product_ids:
+        cart_products = []
+        async for p in db.products.find(
+            {"id": {"$in": cart_product_ids}},
+            {"_id": 0, "combine_products": 1}
+        ):
+            cart_products.append(p)
+        combine_ids = []
+        for cp in cart_products:
+            for cid in (cp.get("combine_products") or []):
+                if cid not in seen:
+                    combine_ids.append(cid)
+                    seen.add(cid)
+        if combine_ids:
+            async for p in db.products.find(
+                {"id": {"$in": combine_ids[:limit]}, "is_active": {"$ne": False}},
+                {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+                 "images": 1, "image": 1, "stock": 1, "category_id": 1}
+            ):
+                suggestions.append({**p, "_source": "combine"})
+
+    # 2) Yetersizse → sale/discount kategorisindeki aktif ürünlerle doldur
+    needed = max(0, limit - len(suggestions))
+    if needed > 0:
+        sale_query = {
+            "is_active": {"$ne": False},
+            "id": {"$nin": list(seen)},
+            "$or": [
+                {"discount_price": {"$gt": 0}},
+                {"is_on_sale": True},
+                {"sale_active": True},
+            ],
+        }
+        async for p in db.products.find(
+            sale_query,
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+        ).limit(needed):
+            suggestions.append({**p, "_source": "sale"})
+            seen.add(p["id"])
+
+    # 3) Hala yetersizse → en son eklenmiş aktif ürünler
+    needed = max(0, limit - len(suggestions))
+    if needed > 0:
+        async for p in db.products.find(
+            {"is_active": {"$ne": False}, "id": {"$nin": list(seen)}},
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+        ).sort("created_at", -1).limit(needed):
+            suggestions.append({**p, "_source": "new"})
+
+    return {"items": suggestions[:limit], "total": len(suggestions[:limit])}
+
+
 @router.get("/{product_id}/attributes")
 async def get_product_attributes(product_id: str, current_user: dict = Depends(require_admin)):
     """Get attributes for a single product"""

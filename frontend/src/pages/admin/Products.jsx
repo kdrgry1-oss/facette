@@ -60,6 +60,7 @@ import Pagination from "../../components/admin/Pagination";
 import SearchableAttribute from "../../components/admin/product-form/SearchableAttribute";
 import SeoTab from "../../components/admin/product-form/SeoTab";
 import StockTab from "../../components/admin/product-form/StockTab";
+import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -162,7 +163,8 @@ export default function AdminProducts() {
     use_default_markup: true,
     markup_rate: 0,
     hepsiburada_attributes: {},
-    temu_attributes: {}
+    temu_attributes: {},
+    combine_products: []
   });
 
   const [trendyolAttributesList, setTrendyolAttributesList] = useState([]);
@@ -814,6 +816,7 @@ export default function AdminProducts() {
       hepsiburada_attributes: product.hepsiburada_attributes || {},
       temu_attributes: product.temu_attributes || {},
       variants: product.variants || [],
+      combine_products: product.combine_products || [],
       attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}) },
     });
     setModalOpen(true);
@@ -841,6 +844,7 @@ export default function AdminProducts() {
       hepsiburada_attributes: {},
       temu_attributes: {},
       variants: [], newVariant: {},
+      combine_products: [],
       attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR" },
     });
   };
@@ -1324,6 +1328,7 @@ export default function AdminProducts() {
                  <TabsTrigger value="seo" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">SEO</TabsTrigger>
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
                  <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
+                 <TabsTrigger value="combine" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Kombin</TabsTrigger>
                  <TabsTrigger value="trendyol" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all ml-auto flex gap-2">
                    <Store size={16} /> Trendyol Ayarları
                  </TabsTrigger>
@@ -2321,6 +2326,15 @@ export default function AdminProducts() {
               {/* SEO Tab */}
               <TabsContent value="seo" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <SeoTab formData={formData} setFormData={setFormData} />
+              </TabsContent>
+
+              {/* Combine Products Tab — Kombin Ürün Atama */}
+              <TabsContent value="combine" className="space-y-4 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <CombineProductsTab
+                  productId={editingProduct?.id}
+                  combineIds={formData.combine_products || []}
+                  onChange={(ids) => setFormData({ ...formData, combine_products: ids })}
+                />
               </TabsContent>
 
               {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}

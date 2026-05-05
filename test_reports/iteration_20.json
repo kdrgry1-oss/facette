@@ -1,0 +1,57 @@
+{
+  "summary": "Iteration 20 — covered (1) POST /api/products/cart-suggestions empty + with product_ids (fallback chain combine→sale→new verified via _source field), (2) PUT /api/products/{id}/combine-products admin assign + GET public read (3-id list persisted, 12-cap trimming, self-ref filter), (3) GET /api/integrations/ticimax/members + DB count of source=ticimax_excel customers (>=10k verified, actual value matches 10,431+), (4) Frontend /sepet 'Bu ürünlerle yakışanlar' block renders with 8 cart-suggestion cards, (5) Admin Products → edit modal → Kombin tab → search/add flow (combine-products-tab, combine-search-input, add-combine-{id}, combine-item-{id} all hooked up), (6) Checkout.jsx source audit: 0 'orange' occurrences, 24 stone-900/stone-50 classes → black/white theme migration clean. Backend 7/7 pass, frontend critical flows 100%. /odeme UI could not be rendered directly in-browser because it redirects guests to /sepet (auth-gated), but source-level verification confirms orange→stone migration is complete.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/products/{id}/combine-products",
+        "issue": "Public endpoint (no auth) leaks full price/stock/images for any product id combination. Low impact since already covered by GET /api/products but worth noting."
+      },
+      {
+        "endpoint": "PUT /api/products/{id}/combine-products",
+        "issue": "No existence check on submitted combine_ids — caller can store arbitrary fake ids (verified: PUT with 15 FAKE_COMBINE_* ids persisted the first 12). GET endpoint filters on is_active during read, so UX is safe, but DB ends up with stale references. Consider validating ids against db.products before save."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Admin edit-product modal",
+        "issues": [
+          "Console warnings: 'DialogContent requires a DialogTitle for accessibility' + 'Missing Description or aria-describedby'. Not blocking but should add a <DialogTitle> (visually hidden if needed) in the product edit dialog.",
+          "Console error: 'In HTML, <span> cannot be a child of <option>' (hydration warning) — somewhere under AdminLayout a <span> is nested in a <select><option>. Inspect select elements (category/brand/etc.) in admin list/filter bar."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration20_combine_cart_suggestions.py",
+    "/app/test_reports/pytest/iteration20.xml"
+  ],
+  "action_items": [
+    "(Optional) Validate combine_ids against existing products before persisting in PUT /api/products/{id}/combine-products to prevent stale/fake ids in DB.",
+    "(Optional) Add <DialogTitle> (VisuallyHidden) + aria-describedby to the product edit DialogContent to silence a11y console errors.",
+    "(Optional) Fix <span> inside <option> hydration warning in admin listing (likely a filter/select in Products.jsx).",
+    "(Non-blocking) /odeme could not be exercised as a guest (redirects to /sepet). Ensure that the cart-based auth flow is documented — source-level orange→stone migration is clean."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/products.py:465-489 — update_combine_products: correctly strips self-reference and trims to 12 via combine_ids[:12]. Verified end-to-end with fake ids (15→12 persisted, self-ref dropped).",
+    "/app/backend/routes/products.py:492-558 — get_cart_suggestions: clean 3-tier fallback (combine → sale → new). Each item tagged with _source, 'seen' set prevents duplicates. Sale query includes discount_price>0/is_on_sale/sale_active — good defensive matching.",
+    "/app/backend/routes/products.py:442-462 — get_combine_products filters on is_active:{$ne: False}, so stale/inactive ids are transparently hidden on read. Good defense-in-depth.",
+    "/app/frontend/src/pages/Checkout.jsx — verified 0 occurrences of 'orange' substring; stone-900/stone-50 used throughout. CTA button black, theme migration complete.",
+    "/app/frontend/src/components/admin/product-form/CombineProductsTab.jsx — all required data-testid hooks present (combine-products-tab, combine-search-input, add-combine-{id}, combine-item-{id}, remove-combine-{id}). Integration verified: typed 'triko' → 19 search results → clicked first → 1 combine-item-* added.",
+    "/app/frontend/src/pages/Cart.jsx — cart-suggestions-block renders, 8 cart-suggestion-{id} cards shown, suggestions correctly exclude the in-cart product."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration20_combine_cart_suggestions.py"
+  ],
+  "success_rate": {"backend": "100% (7/7 passed)", "frontend": "100% on exercised flows (/sepet suggestions + admin Kombin tab); /odeme verified at source level only"},
+  "test_credentials": "admin@facette.com / admin123 — /api/auth/login?email=...&password=... (query params).",
+  "seed_data_creation": "Test run left product id 1182 with combine_products=[] (reset at end of trim test) and one combine item added via UI in final flow (product id 1182 → 1 combine-item-*). No TEST_ orders created in this iteration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file backend/tests/test_iteration20_combine_cart_suggestions.py is self-contained (loads env from /app/frontend/.env + /app/backend/.env, strips quotes from MONGO_URL). For /odeme UI browser testing, the page redirects guests to /sepet — either (a) authenticate a customer user before navigating, or (b) rely on source-level grep for theme checks (grep -c 'orange' /app/frontend/src/pages/Checkout.jsx == 0). Admin edit modal opens via `button[title=\"Düzenle\"]` inside product-row-{id} (no data-testid on the pencil button itself).",
+  "rca of the issue": "N/A — no blocking bugs. All 11 review request items verified positive."
+}

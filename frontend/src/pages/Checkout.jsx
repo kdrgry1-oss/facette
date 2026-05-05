@@ -199,7 +199,15 @@ export default function Checkout() {
         // Refresh list
         const list = await axios.get(`${API}/customer/my-addresses`, { headers: { Authorization: `Bearer ${token}` } });
         setSavedAddresses(list.data?.addresses || []);
-      } catch (e) { /* silently continue with local state */ }
+      } catch (e) {
+        // Hatayı kullanıcıya bildir (önceden silently catch ediliyordu)
+        const msg = e?.response?.data?.detail || e?.message || "Adres kaydedilemedi";
+        toast.error(`Adres kayıt hatası: ${msg}`);
+        if (e?.response?.status === 401) {
+          toast.warning("Oturumunuz sonlanmış olabilir. Lütfen tekrar giriş yapın.");
+        }
+        // Local state ile devam et — checkout akışını bozmasın
+      }
     }
     if (addressModal === "shipping") {
       setShippingAddress({ ...addressForm, email: user?.email || addressForm.email || "" });
@@ -425,10 +433,10 @@ export default function Checkout() {
               {/* 2) Adres */}
               <div className="bg-white rounded border" data-testid="address-block">
                 <div className="px-5 py-4 border-b flex items-center gap-3">
-                  <MapPin size={18} className="text-orange-500" />
+                  <MapPin size={18} className="text-stone-900" />
                   <span className="font-medium">Teslimat Adresi</span>
                   <label className="ml-auto inline-flex items-center gap-2 text-xs cursor-pointer text-gray-700">
-                    <input type="radio" checked readOnly className="accent-orange-500" /> Adrese Teslim Edilsin
+                    <input type="radio" checked readOnly className="accent-black" /> Adrese Teslim Edilsin
                   </label>
                 </div>
                 <div className="grid md:grid-cols-2 gap-4 p-5">
@@ -438,12 +446,12 @@ export default function Checkout() {
                       <span className="text-sm font-medium text-gray-700">Teslimat Adresi</span>
                       <button type="button" onClick={() => openAddressModal("shipping")}
                         data-testid="edit-shipping-addr-btn"
-                        className="inline-flex items-center gap-1 text-xs text-orange-600 border border-orange-500 rounded px-3 py-1 hover:bg-orange-50 transition">
+                        className="inline-flex items-center gap-1 text-xs text-stone-900 border border-stone-900 rounded px-3 py-1 hover:bg-stone-50 transition">
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
                     <button type="button" onClick={() => openAddressModal("shipping")}
-                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-orange-50 border-orange-200" : "bg-gray-50 border-dashed border-gray-300 hover:border-orange-400"}`}>
+                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-gray-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
                       {shippingAddress.first_name
                         ? addressCardContent(shippingAddress, "Teslimat Adresi")
                         : <span className="text-xs text-gray-500">Henüz teslimat adresi seçilmedi. Eklemek için tıklayın.</span>}
@@ -456,11 +464,11 @@ export default function Checkout() {
                       <button type="button" onClick={() => openAddressModal("billing")}
                         data-testid="edit-billing-addr-btn"
                         disabled={billingSameAsShipping}
-                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-orange-600 border border-orange-500 hover:bg-orange-50"}`}>
+                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-stone-900 border border-stone-900 hover:bg-stone-50"}`}>
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
-                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-gray-50 border-gray-200" : (billingAddress.first_name ? "bg-orange-50 border-orange-200" : "bg-gray-50 border-dashed border-gray-300")}`}>
+                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-gray-50 border-gray-200" : (billingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-gray-50 border-dashed border-gray-300")}`}>
                       {billingSameAsShipping
                         ? <span className="text-xs text-gray-500 italic">Teslimat adresi ile aynı</span>
                         : (billingAddress.first_name
@@ -476,7 +484,7 @@ export default function Checkout() {
                         setBillingSameAsShipping(e.target.checked);
                         if (e.target.checked) setBillingAddress({ ...shippingAddress });
                       }}
-                      className="accent-orange-500"
+                      className="accent-black"
                       data-testid="same-billing-checkbox" />
                     <span>Faturamı Aynı Adrese Gönder</span>
                   </label>
@@ -488,8 +496,8 @@ export default function Checkout() {
                 <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
-                    className="accent-orange-500" data-testid="corporate-invoice-checkbox" />
-                  <Building size={18} className="text-orange-500" />
+                    className="accent-black" data-testid="corporate-invoice-checkbox" />
+                  <Building size={18} className="text-stone-900" />
                   <div className="flex-1">
                     <div className="font-medium text-sm">Kurumsal Fatura İstiyorum</div>
                     <div className="text-xs text-gray-500">Şirket adına fatura kesilecekse VKN ve vergi dairesi bilgilerinizi girin.</div>
@@ -503,7 +511,7 @@ export default function Checkout() {
                         <input value={corporateData.company_name}
                           onChange={(e) => setCorporateData({ ...corporateData, company_name: e.target.value })}
                           placeholder="Örn. Facette Tekstil A.Ş."
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-company-name-input" />
                       </div>
                       <div>
@@ -511,7 +519,7 @@ export default function Checkout() {
                         <input value={corporateData.tax_number}
                           onChange={(e) => setCorporateData({ ...corporateData, tax_number: e.target.value.replace(/\D/g, "").slice(0, 11) })}
                           placeholder="10 hane VKN veya 11 hane TCKN"
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-tax-number-input" />
                       </div>
                       <div className="md:col-span-2">
@@ -519,14 +527,14 @@ export default function Checkout() {
                         <input value={corporateData.tax_office}
                           onChange={(e) => setCorporateData({ ...corporateData, tax_office: e.target.value })}
                           placeholder="Örn. Beşiktaş Vergi Dairesi"
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500"
+                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-tax-office-input" />
                       </div>
                     </div>
                     <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
                       <input type="checkbox" checked={corporateData.eInvoice_user}
                         onChange={(e) => setCorporateData({ ...corporateData, eInvoice_user: e.target.checked })}
-                        className="accent-orange-500" data-testid="corp-einvoice-user" />
+                        className="accent-black" data-testid="corp-einvoice-user" />
                       Şirketim e-Fatura mükellefidir (e-Fatura kesilsin)
                     </label>
                   </div>
@@ -546,12 +554,12 @@ export default function Checkout() {
                       { key: "bank_transfer", label: "Havale / EFT", icon: Building },
                       { key: "cash_on_delivery", label: "Kapıda Ödeme (+10₺)", icon: Truck },
                     ].map(({ key, label, icon: Icon }) => (
-                      <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-gray-400"}`}>
+                      <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                         <input type="radio" name="payment" value={key}
                           checked={paymentMethod === key}
                           onChange={(e) => setPaymentMethod(e.target.value)}
-                          className="accent-orange-500" />
-                        <Icon size={16} className={paymentMethod === key ? "text-orange-600" : "text-gray-500"} />
+                          className="accent-black" />
+                        <Icon size={16} className={paymentMethod === key ? "text-stone-900" : "text-gray-500"} />
                         <span>{label}</span>
                       </label>
                     ))}
@@ -576,13 +584,13 @@ export default function Checkout() {
                         </div>
                       </div>
                       <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-orange-500" />
+                        <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-black" />
                         <ShieldCheck size={14} className="text-green-600" /> 3D Secure ile ödemek istiyorum
                       </label>
                       {userPoints > 0 && (
                         <label className="inline-flex items-center gap-2 text-sm">
-                          <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-orange-500" />
-                          <span className="text-orange-600 font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
+                          <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-black" />
+                          <span className="text-stone-900 font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
                         </label>
                       )}
                     </div>
@@ -594,20 +602,20 @@ export default function Checkout() {
               <div className="bg-white rounded border" data-testid="gift-options-section">
                 <div className="px-5 py-4 border-b"><span className="font-medium">Hediye Seçenekleri</span></div>
                 <div className="p-5 space-y-3">
-                  <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-orange-500 bg-orange-50" : "border-gray-200 hover:border-gray-400"}`}>
+                  <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                     <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
-                      className="mt-1 accent-orange-500" data-testid="gift-wrap-toggle" />
+                      className="mt-1 accent-black" data-testid="gift-wrap-toggle" />
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">Hediye paketi</span>
-                        <span className="text-sm font-semibold text-orange-600">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
+                        <span className="text-sm font-semibold text-stone-900">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajı + kurdele + el yazılı kart ile gönderilir.</p>
                     </div>
                   </label>
                   <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
                     rows={2} placeholder="Hediye Notu (opsiyonel) — kart üzerine yazılır, max 300 karakter"
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-orange-500 resize-none"
+                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
                     data-testid="gift-note-input" />
                 </div>
               </div>
@@ -629,10 +637,10 @@ export default function Checkout() {
                         const selected = appliedCoupon?.code === c.code;
                         return (
                           <button type="button" key={c.id} onClick={() => handlePickCoupon(c)}
-                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-orange-500 bg-orange-500 text-white" : "border-dashed border-gray-300 hover:border-orange-500"}`}
+                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-stone-900 bg-stone-900 text-white" : "border-dashed border-gray-300 hover:border-stone-900"}`}
                             data-testid={`coupon-card-${c.code}`}>
                             <div className="min-w-0">
-                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-orange-700"}`}>{c.code}</div>
+                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-stone-900"}`}>{c.code}</div>
                               <div className={`text-[10px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>{c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}</div>
                             </div>
                             <div className={`text-xs font-bold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>-{c.discount.toFixed(2)} ₺</div>
@@ -667,18 +675,18 @@ export default function Checkout() {
                       : <span>{shippingCost.toFixed(2)} TL</span>}
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
-                  {pointsDeduction > 0 && <div className="flex justify-between text-orange-600"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
+                  {pointsDeduction > 0 && <div className="flex justify-between text-stone-900"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
                   <div className="flex justify-between text-base font-semibold pt-2 border-t">
-                    <span>Toplam</span><span className="text-orange-600">{grandTotal.toFixed(2)} TL</span>
+                    <span>Toplam</span><span className="text-stone-900">{grandTotal.toFixed(2)} TL</span>
                   </div>
                 </div>
 
                 {/* Submit */}
                 <div className="px-5 pb-5">
                   <button type="submit" disabled={loading || !acceptTerms}
-                    className={`w-full py-3 rounded font-semibold text-sm transition-colors ${(loading || !acceptTerms) ? "bg-gray-300 text-white cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600 text-white"}`}
+                    className={`w-full py-3 rounded font-semibold text-sm transition-colors ${(loading || !acceptTerms) ? "bg-gray-300 text-white cursor-not-allowed" : "bg-stone-900 hover:bg-stone-800 text-white"}`}
                     data-testid="place-order-btn">
                     {loading ? "İşleniyor..." : "Ödeme Yap"}
                   </button>
@@ -687,10 +695,10 @@ export default function Checkout() {
                   <label className="flex items-start gap-2 mt-3 text-[11px] text-gray-700 cursor-pointer leading-relaxed">
                     <input type="checkbox" checked={acceptTerms}
                       onChange={(e) => setAcceptTerms(e.target.checked)}
-                      className="mt-0.5 accent-orange-500" data-testid="accept-terms-checkbox" />
+                      className="mt-0.5 accent-black" data-testid="accept-terms-checkbox" />
                     <span>
-                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-orange-600">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
-                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-orange-600">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
+                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-stone-900">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
+                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-stone-900">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
                     </span>
                   </label>
                 </div>
@@ -718,7 +726,7 @@ export default function Checkout() {
                 <div className="grid sm:grid-cols-2 gap-2">
                   {savedAddresses.map((a) => (
                     <button key={a.id} type="button" onClick={() => pickSavedAddress(a)}
-                      className="text-left p-3 border rounded text-xs bg-white hover:border-orange-500 transition-colors">
+                      className="text-left p-3 border rounded text-xs bg-white hover:border-stone-900 transition-colors">
                       <div className="font-semibold text-sm">{a.title || `${a.first_name} ${a.last_name}`}</div>
                       <div className="text-gray-500 mt-0.5 line-clamp-2">{a.address}</div>
                       <div className="text-gray-500">{a.district} / {a.city}</div>
@@ -774,7 +782,7 @@ export default function Checkout() {
             <div className="px-5 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
               <button type="button" onClick={closeAddressModal} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">İptal</button>
               <button type="button" onClick={handleSaveAddress}
-                className="px-4 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white rounded font-medium"
+                className="px-4 py-2 text-sm bg-stone-900 hover:bg-stone-800 text-white rounded font-medium"
                 data-testid="save-address-btn">Kaydet ve Kullan</button>
             </div>
           </div>

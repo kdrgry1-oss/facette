@@ -792,3 +792,42 @@ Kullanıcı Trendyol checkout ekran görüntüsü ve detaylı prompt paylaşarak
 ### Test (Iteration 19)
 - Backend 11/12 PASS, 0 critical (collision-resistant + PII masking eklendi).
 - Frontend `/order-success` ve `/odeme` corporate UI smoke test geçti.
+
+
+## [2026-05-05] Excel Üye Bulk Import + Kombin Ürün + Adres Bug + Checkout B&W Tema
+
+### 1. Ticimax Excel Üye Toplu Import (10,522 üye)
+- Excel: `/app/backend/imports/uyelist_facette_05052026.xlsx` (15 ana kolon: ID, ISIM, SOYISIM, MAIL, TEL, CEP, DOGUMTARIHI, CINSIYET, MUSTERIKODU, UYELIKTARIHI, UYE TURU, AKTIF, SONGIRISTARIHI, …)
+- **Yeni endpoint**: `POST /api/integrations/ticimax/members/import-excel` (admin)
+- Direkt script çalıştırma: `/tmp/import_ticimax_excel.py` (HTTP timeout sorunu için bulk insert with batch=500)
+- **Sonuç**: 10,431 yeni `customers` (ticimax_uye_id ile) + 10,482 yeni pasif `users` (mail varsa, `is_active=false, needs_password_setup=true`).
+- Mevcut kullanıcı (mail/phone match) varsa `ticimax_uye_id` ile bağlanır. Yeni hesaplar şifre sıfırlama akışıyla aktif edilir.
+
+### 2. Kombin Ürün Önerileri (Cross-sell)
+- **Backend** `routes/products.py`:
+  - `GET /api/products/{id}/combine-products` (public) — ürünün kombin listesini döner.
+  - `PUT /api/products/{id}/combine-products` (admin) — kombin ID listesi günceller (max 12, self-ref filtreli).
+  - `POST /api/products/cart-suggestions` (public) — sepet ürün ID'lerine göre öneriler:
+    1. Sepet ürünlerinin `combine_products`'ı (öncelik)
+    2. Yetersizse → indirimdeki (`discount_price > 0` veya `is_on_sale`) ürünler
+    3. Hala yetersizse → en yeni aktif ürünler
+- **Admin UI** `Products.jsx` form'una **"Kombin"** tab eklendi:
+  - `CombineProductsTab.jsx` (yeni component) — solda atanmış ürünler (sürükle-yukarı/aşağı + kaldır), sağda arama + ekle (max 12).
+  - formData.combine_products → PUT/POST payload'a otomatik dahil.
+- **Storefront `Cart.jsx`** sayfa altında **"Bu ürünlerle yakışanlar / Beğenebilecekleriniz"** carousel/grid (4 kart × 2 satır):
+  - "Kombin" rozeti (siyah) veya "İndirim" rozeti (kırmızı) — kaynak rozeti
+  - Hover'da scale-105 görsel animasyonu
+
+### 3. Adres Kaydetme Bug (P0 fix)
+- `Checkout.jsx handleSaveAddress`: `try { … } catch (e) { /* silently continue */ }` → toast.error ile gerçek hata mesajı gösterilir; 401 ise "Oturumunuz sonlanmış" warning toast'ı eklenir.
+
+### 4. Checkout Renk Düzeni — Turuncu → Siyah/Beyaz Facette Teması
+- 33 turuncu sınıf değişikliği: `text-orange-*` → `text-stone-900`, `bg-orange-*` → `bg-stone-50/900`, `border-orange-*` → `border-stone-*`, `accent-orange-500` → `accent-black`. Minimal siyah-beyaz Facette branding'e uygun hale geldi.
+
+### Test (smoke)
+- Excel import: 10,431 yeni customer + 10,482 user oluşturuldu ✅
+- `/products/cart-suggestions` (boş sepet) → 4 yeni ürün döndü ✅
+- Lint temiz (Cart.jsx, Checkout.jsx, CombineProductsTab.jsx, products.py)
+
+### Backlog (yeni)
+- Ticimax sipariş servisi yetkisi: Kullanıcının Ticimax panelinde "Sipariş Servisi" izni verilmesi gerekiyor — şu anki WS Yetki Kodu (`SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V`) sipariş servisi izni içermiyor (empty response). Üye listesi başarıyla çekilebiliyor, sipariş için ayrı yetki açılmalı.

@@ -1,15 +1,35 @@
 import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { Trash2, Plus, Minus } from "lucide-react";
+import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import ProductCard from "../components/ProductCard";
 import { useCart } from "../context/CartContext";
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function Cart() {
   const { items, removeItem, updateQuantity, total, itemCount } = useCart();
   const freeShippingLimit = 500;
   const remaining = Math.max(0, freeShippingLimit - total);
   const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
+
+  // Kombin / sale öneriler
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  useEffect(() => {
+    if (items.length === 0) { setSuggestions([]); return; }
+    let cancel = false;
+    setSuggestionsLoading(true);
+    const productIds = items.map((it) => it.productId).filter(Boolean);
+    axios.post(`${API}/products/cart-suggestions`, { product_ids: productIds, limit: 8 })
+      .then((r) => { if (!cancel) setSuggestions(r.data?.items || []); })
+      .catch(() => { if (!cancel) setSuggestions([]); })
+      .finally(() => { if (!cancel) setSuggestionsLoading(false); });
+    return () => { cancel = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
   if (items.length === 0) {
     return (
@@ -138,6 +158,50 @@ export default function Cart() {
             </div>
           </div>
         </div>
+
+        {/* Kombin Ürün Önerileri */}
+        {(suggestions.length > 0 || suggestionsLoading) && (
+          <div className="mt-16 pt-12 border-t border-stone-200" data-testid="cart-suggestions-block">
+            <div className="mb-8 text-center">
+              <p className="text-[10px] tracking-[0.3em] text-stone-400 uppercase mb-2">
+                {suggestions.some((s) => s._source === "combine") ? "BU ÜRÜNLERLE YAKIŞANLAR" : "BEĞENEBİLECEKLERİN"}
+              </p>
+              <h2 className="text-2xl font-light tracking-wide text-stone-900">Tarzına Tamamla</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+              {suggestions.map((p) => {
+                const img = (p.images && p.images[0]) || p.image || "";
+                const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                return (
+                  <Link key={p.id} to={`/urun/${p.slug || p.id}`}
+                    className="group block" data-testid={`cart-suggestion-${p.id}`}>
+                    <div className="relative aspect-[3/4] bg-stone-50 overflow-hidden mb-3">
+                      <img src={img} alt={p.name}
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                      {p._source === "combine" && (
+                        <span className="absolute top-2 left-2 bg-stone-900 text-white text-[9px] tracking-wider px-2 py-1 uppercase">Kombin</span>
+                      )}
+                      {p._source === "sale" && hasDiscount && (
+                        <span className="absolute top-2 left-2 bg-red-600 text-white text-[9px] tracking-wider px-2 py-1 uppercase">İndirim</span>
+                      )}
+                    </div>
+                    <h3 className="text-sm text-stone-900 mb-1 line-clamp-2 group-hover:underline">{p.name}</h3>
+                    <div className="flex items-baseline gap-2">
+                      {hasDiscount ? (
+                        <>
+                          <span className="text-sm font-medium text-stone-900">{p.discount_price.toFixed(2)} TL</span>
+                          <span className="text-xs text-stone-400 line-through">{p.price.toFixed(2)} TL</span>
+                        </>
+                      ) : (
+                        <span className="text-sm text-stone-900">{(p.price || 0).toFixed(2)} TL</span>
+                      )}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <Footer />

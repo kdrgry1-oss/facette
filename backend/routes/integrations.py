@@ -2144,6 +2144,185 @@ async def import_ticimax_members(
     }
 
 
+@router.post("/ticimax/members/import-excel")
+async def import_ticimax_members_from_excel(
+    file_path: str = Query("/app/backend/imports/uyelist_facette_05052026.xlsx",
+                            description="Excel dosya yolu"),
+    create_user_accounts: bool = Query(True,
+                            description="users koleksiyonuna pasif hesap oluştur"),
+    current_user: dict = Depends(require_admin),
+):
+    """Ticimax UyeList Excel dosyasından TÜM üyeleri customers + users koleksiyonuna agresif import eder.
+    
+    Excel format: ID, ISIM, SOYISIM, MAIL, TEL, CEP, DOGUMTARIHI, CINSIYET, MESLEK,
+                   MUSTERIKODU, UYELIKTARIHI, UYETURU, ONAY, AKTIF, SONGIRISTARIHI
+    """
+    import os
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Excel dosyası bulunamadı: {file_path}")
+
+    from openpyxl import load_workbook
+    from fastapi.concurrency import run_in_threadpool
+
+    def _read_rows():
+        wb = load_workbook(file_path, read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        rows_iter = ws.iter_rows(values_only=True)
+        header = next(rows_iter, None)
+        if not header:
+            return []
+        out = []
+        for row in rows_iter:
+            if not row or all(v is None for v in row):
+                continue
+            d = {str(header[i] or "").strip(): row[i] for i in range(min(len(header), len(row)))}
+            out.append(d)
+        return out
+
+    rows = await run_in_threadpool(_read_rows)
+    total_excel = len(rows)
+    if total_excel == 0:
+        return {"success": False, "message": "Excel boş", "imported": 0}
+
+    def _str(v):
+        return str(v).strip() if v not in (None, "") else ""
+
+    def _phone_norm(p):
+        digits = "".join(c for c in _str(p) if c.isdigit())
+        if not digits:
+            return ""
+        if digits.startswith("90") and len(digits) == 12:
+            return digits
+        if digits.startswith("0") and len(digits) == 11:
+            return "90" + digits[1:]
+        if len(digits) == 10:
+            return "90" + digits
+        return digits
+
+    imported = 0
+    updated = 0
+    user_created = 0
+    user_linked = 0
+    errors = 0
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for r in rows:
+        try:
+            uye_id_raw = r.get("ID")
+            if uye_id_raw in (None, ""):
+                continue
+            try:
+                uye_id = int(uye_id_raw)
+            except Exception:
+                continue
+
+            mail = _str(r.get("MAIL")).lower()
+            cep = _phone_norm(r.get("CEP") or r.get("TEL"))
+            first_name = _str(r.get("ISIM"))
+            last_name = _str(r.get("SOYISIM"))
+
+            customer_doc = {
+                "ticimax_uye_id": uye_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": mail,
+                "phone": cep,
+                "musteri_kodu": _str(r.get("MUSTERIKODU")),
+                "dogum_tarihi": _str(r.get("DOGUMTARIHI")),
+                "cinsiyet_str": _str(r.get("CINSIYET")),
+                "meslek": _str(r.get("MESLEK")),
+                "uyelik_tarihi": _str(r.get("UYELIKTARIHI")),
+                "uye_turu": _str(r.get("UYETURU")),
+                "onay": _str(r.get("ONAY")) in ("1", "True", "true"),
+                "aktif": _str(r.get("AKTIF")) in ("1", "True", "true"),
+                "son_giris_tarihi": _str(r.get("SONGIRISTARIHI")),
+                "source": "ticimax_excel",
+                "imported_via": "excel_bulk",
+                "updated_at": now_iso,
+            }
+
+            existing = await db.customers.find_one(
+                {"ticimax_uye_id": uye_id}, {"_id": 0, "id": 1}
+            )
+            if existing:
+                await db.customers.update_one(
+                    {"ticimax_uye_id": uye_id}, {"$set": customer_doc}
+                )
+                updated += 1
+            else:
+                customer_doc["id"] = generate_id()
+                customer_doc["created_at"] = now_iso
+                await db.customers.insert_one(customer_doc)
+                imported += 1
+
+            # users hesabı oluştur veya bağla
+            if create_user_accounts and (mail or cep):
+                or_clauses = []
+                if mail:
+                    or_clauses.append({"email": mail})
+                if cep:
+                    or_clauses.append({"phone": cep})
+                user = await db.users.find_one({"$or": or_clauses}) if or_clauses else None
+                if user:
+                    await db.users.update_one(
+                        {"id": user["id"]},
+                        {"$set": {
+                            "ticimax_uye_id": uye_id,
+                            "ticimax_synced_at": now_iso,
+                        }}
+                    )
+                    user_linked += 1
+                else:
+                    # Yeni pasif user account (şifre yok — şifre sıfırlama ile aktive olur)
+                    new_user = {
+                        "id": generate_id(),
+                        "email": mail or f"ticimax-{uye_id}@noemail.facette.com",
+                        "phone": cep,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "name": f"{first_name} {last_name}".strip(),
+                        "ticimax_uye_id": uye_id,
+                        "ticimax_synced_at": now_iso,
+                        "is_active": False,
+                        "imported_from": "ticimax_excel",
+                        "needs_password_setup": True,
+                        "created_at": now_iso,
+                    }
+                    try:
+                        await db.users.insert_one(new_user)
+                        user_created += 1
+                    except Exception:
+                        # duplicate key (email unique) → atla
+                        pass
+        except Exception as exc:
+            errors += 1
+            logger.warning(f"Excel üye satır hata: {exc}")
+            if errors >= 50:
+                break
+
+    await db.settings.update_one(
+        {"id": "ticimax"},
+        {"$set": {
+            "members_excel_last_import": now_iso,
+            "members_excel_imported": imported + updated,
+        }},
+        upsert=True,
+    )
+
+    return {
+        "success": True,
+        "total_in_excel": total_excel,
+        "imported": imported,
+        "updated": updated,
+        "user_accounts_created": user_created,
+        "user_accounts_linked": user_linked,
+        "errors": errors,
+        "message": f"{imported} yeni üye eklendi, {updated} mevcut güncellendi. "
+                   f"{user_created} yeni hesap oluşturuldu, {user_linked} mevcut hesap eşleşti.",
+    }
+
+
 @router.get("/ticimax/members")
 async def list_ticimax_customers(
     skip: int = Query(0, ge=0),
