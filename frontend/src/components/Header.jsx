@@ -124,7 +124,7 @@ export default function Header({ hideMenu = false }) {
       )}
 
       {/* Main Header */}
-      <header className="sticky top-0 z-40 bg-white border-b border-gray-100">
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
         <div className="max-w-screen-2xl mx-auto px-4">
           <div className="flex items-center h-14">
             {/* Left: Navigation Menu */}

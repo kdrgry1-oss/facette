@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 22 — verified P0 Doğan e-Arşiv UBL XML rewrite + P0 cart/footer/header redesign. Backend: 16/16 tests pass — UBL XML well-formed, all UBL-TR-required blocks present (cac:Signature with VKN, cac:Delivery>CarrierParty MNG Kargo, cac:PaymentMeans, AdditionalDocumentReference[XSLT base64 + SendingType=ELEKTRONIK]), InvoicedQuantity unitCode='C62' on every line, both individual (TCKN→cac:Person) and corporate (VKN→PartyName+PartyTaxScheme) customer paths produce schema-correct output. Backend smoke (GET /api/, /api/products, /api/orders auth-required + with admin token, /api/settings) all 200/expected. Doğan canlı settings persisted in db.settings (id=dogan_edonusum, VKN 7810816779). Live invoice cut endpoint (POST /api/orders/{id}/create-invoice) intentionally NOT exercised — would create a real fatura record at Doğan canlı. Frontend (mobile 390x844 + desktop 1920x1080): cart-mobile-sticky-cta visible, checkout-btn visible, 'Stilini tamamla' suggestion grid contains ONLY <img> + hover overlay (no h3, no price text/'TL'/'₺'), CartDrawer opens on header cart icon click with both go-to-checkout + go-to-cart buttons, Footer mobile accordion has 3 toggles, Header is sticky+glass ('sticky top-0 bg-white/90 backdrop-blur-xl').",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration22_dogan_ubl_smoke.py",
+    "/app/test_reports/pytest/iteration22.xml"
+  ],
+  "action_items": [
+    "(Optional, manual QA only) Operator should cut ONE real fatura via POST /api/orders/{order_id}/create-invoice on a low-value test order to confirm WriteToArchiveExtended returns INVOICE_ID + WEB_KEY end-to-end (not exercised in automated tests because it creates a real archived invoice record).",
+    "(Optional) Consider adding a backend dry-run flag (e.g. ?dry_run=1) to create-invoice so the UBL build + WriteToArchiveExtended round-trip can be CI-tested against Doğan test endpoint without persisting a record."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/dogan_client.py:158-552 build_earsiv_ubl_xml — clean, well-structured. Required UBL-TR fields all present: CustomizationID=TR1.2, ProfileID=EARSIVFATURA, InvoiceTypeCode=SATIS, two AdditionalDocumentReferences (XSLT b64 + SendingType ELEKTRONIK), cac:Signature with PartyTaxScheme + DigitalSignatureAttachment URI, cac:Delivery>CarrierParty (MNG default), cac:PaymentMeans code=1, multi-rate KDV grouping in TaxSubtotal, individual vs corporate split via len(vkn)==11 check. None-safe via _s() helper. HTML escape applied throughout — XML injection safe.",
+    "/app/backend/dogan_client.py:554-628 send_earsiv_invoice — uses WriteToArchiveExtended (synchronous), correctly maps EARSIV_TYPE='INTERNET', EARSIV_EMAIL_FLAG, VALIDATION_FLAG='Y'. Error envelope (ERROR_CODE/ERROR_SHORT_DES) properly extracted; success returns invoice_id + web_key. run_in_threadpool used in route handler to avoid blocking the event loop.",
+    "/app/backend/routes/orders.py:684-895 create-invoice — bireysel TCKN fallback ('11111111111') only triggers when bill.tax_no is missing; for ETGB micro-export the alternate branch is correctly isolated. Result persisted to invoice_dogan_id + invoice_pdf_url. log_integration_event signature matches new contract.",
+    "/app/frontend/src/pages/Cart.jsx — sticky bottom CTA wrapped in md:hidden + safe-area-inset-bottom (good iOS support). Suggestion grid uses Link with absolute-positioned hover overlay — no visible h3/price text, matches spec exactly.",
+    "/app/frontend/src/components/Header.jsx — header tag uses 'sticky top-0 z-40 bg-white/90 backdrop-blur-xl' which is the elite minimal glassmorphism asked for.",
+    "MINOR (informational): Cart.jsx reads cart from a 'cart' localStorage key — when seeding via that key the items rendered correctly. CartDrawer + sticky CTA both reactive."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration22_dogan_ubl_smoke.py (new)"
+  ],
+  "success_rate": {"backend": "100% (16/16 passed)", "frontend": "100% (10/10 critical assertions passed)"},
+  "test_credentials": "admin@facette.com / admin123 — POST /api/auth/login?email=...&password=... returns access_token",
+  "seed_data_creation": "Frontend test seeded a single cart item (real product id from /api/products) into localStorage 'cart' key — purely client-side, no DB writes. No real Doğan invoice was cut (test deliberately stops short of POST /create-invoice).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration22_dogan_ubl_smoke.py is fully self-contained. UBL parser uses xml.etree.ElementTree; namespaces hardcoded (NS dict) — if Doğan ever changes namespaces, update there. Live Doğan invoice cut is the ONE remaining manual QA step — see action_items. Cart localStorage key is 'cart' (string-encoded JSON array). For frontend cart seeding, no zustand-persist key is needed; the app reads/writes the plain 'cart' key directly.",
+  "rca of the issue": "N/A — no blocking bugs found. Both P0 fixes (Doğan UBL rewrite + cart/footer/header mobile-first redesign) are implemented correctly per spec."
+}

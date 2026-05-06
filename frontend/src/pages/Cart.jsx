@@ -13,6 +13,7 @@ export default function Cart() {
   const freeShippingLimit = 500;
   const remaining = Math.max(0, freeShippingLimit - total);
   const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
+  const grandTotal = total + shippingCost;
 
   // Kombin / sale öneriler
   const [suggestions, setSuggestions] = useState([]);
@@ -33,12 +34,21 @@ export default function Cart() {
 
   if (items.length === 0) {
     return (
-      <div className="min-h-screen" data-testid="cart-page">
+      <div className="min-h-screen bg-white" data-testid="cart-page">
         <Header />
-        <div className="container-main py-16 text-center">
-          <h1 className="text-2xl font-medium mb-4">Sepetiniz Boş</h1>
-          <p className="text-gray-500 mb-8">Henüz sepetinize ürün eklemediniz.</p>
-          <Link to="/" className="btn-primary">Alışverişe Başla</Link>
+        <div className="container-main py-24 text-center">
+          <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-6">SEPETİM</p>
+          <h1 className="text-3xl sm:text-4xl font-light tracking-tight mb-4">Sepetiniz boş</h1>
+          <p className="text-sm text-black/60 mb-10 max-w-md mx-auto">
+            Henüz sepetinize ürün eklemediniz. Yeni sezon parçaları keşfetmek için alışverişe başlayın.
+          </p>
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center h-12 px-10 bg-black text-white text-xs uppercase tracking-[0.25em] hover:bg-black/85 transition-colors"
+            data-testid="empty-cart-shop-btn"
+          >
+            Alışverişe başla
+          </Link>
         </div>
         <Footer />
       </div>
@@ -46,24 +56,29 @@ export default function Cart() {
   }
 
   return (
-    <div className="min-h-screen" data-testid="cart-page">
+    <div className="min-h-screen bg-white pb-32 md:pb-12" data-testid="cart-page">
       <Header />
 
-      <div className="container-main py-8">
-        <h1 className="text-2xl font-medium mb-8">Sepetim ({itemCount} Ürün)</h1>
+      <div className="container-main py-6 md:py-12">
+        <div className="mb-8 md:mb-10">
+          <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">SEPETİM</p>
+          <h1 className="text-2xl sm:text-3xl font-light tracking-tight">
+            {itemCount} ürün
+          </h1>
+        </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="grid lg:grid-cols-3 gap-8 lg:gap-12">
           {/* Cart Items */}
           <div className="lg:col-span-2">
             {/* Free Shipping Progress */}
             {remaining > 0 && (
-              <div className="mb-6 p-4 bg-gray-50">
-                <p className="text-sm text-center mb-2">
-                  Ücretsiz kargo için <span className="font-semibold">{remaining.toFixed(2)} TL</span> daha ekleyin
+              <div className="mb-8 p-4 bg-stone-50 border border-black/5">
+                <p className="text-xs text-center mb-2 text-black/70">
+                  Ücretsiz kargo için <span className="font-medium text-black">{remaining.toFixed(2)} TL</span> daha ekleyin
                 </p>
-                <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-black transition-all duration-500"
+                <div className="h-[2px] bg-black/10 overflow-hidden">
+                  <div
+                    className="h-full bg-black transition-all duration-700 ease-out"
                     style={{ width: `${Math.min(100, (total / freeShippingLimit) * 100)}%` }}
                   />
                 </div>
@@ -71,47 +86,68 @@ export default function Cart() {
             )}
 
             {/* Items */}
-            <div className="space-y-4">
+            <div className="divide-y divide-black/10">
               {items.map((item) => (
-                <div key={item.id} className="flex gap-4 p-4 border border-gray-100" data-testid={`cart-item-${item.id}`}>
-                  <img 
-                    src={item.image} 
-                    alt={item.name}
-                    className="w-24 h-32 object-cover bg-gray-100"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between">
-                      <div>
-                        <h3 className="font-medium">{item.name}</h3>
-                        {item.size && <p className="text-sm text-gray-500 mt-1">Beden: {item.size}</p>}
-                        {item.color && <p className="text-sm text-gray-500">Renk: {item.color}</p>}
+                <div
+                  key={item.id}
+                  className="flex gap-4 sm:gap-6 py-6"
+                  data-testid={`cart-item-${item.id}`}
+                >
+                  <Link to={`/urun/${item.slug || item.productId || ""}`} className="shrink-0">
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="w-24 h-32 sm:w-32 sm:h-40 object-cover bg-stone-100"
+                    />
+                  </Link>
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="min-w-0">
+                        <Link
+                          to={`/urun/${item.slug || item.productId || ""}`}
+                          className="block"
+                        >
+                          <h3 className="text-sm sm:text-base font-medium leading-tight line-clamp-2 hover:underline">
+                            {item.name}
+                          </h3>
+                        </Link>
+                        <div className="mt-2 space-y-0.5 text-xs text-black/60">
+                          {item.color && <p>Renk: {item.color}</p>}
+                          {item.size && <p>Beden: {item.size}</p>}
+                        </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => removeItem(item.id)}
-                        className="text-gray-400 hover:text-red-500"
+                        className="text-black/40 hover:text-black transition-colors p-1 -m-1"
                         data-testid={`remove-cart-${item.id}`}
+                        aria-label="Ürünü kaldır"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={16} />
                       </button>
                     </div>
-                    
-                    <div className="flex items-center justify-between mt-4">
-                      <div className="flex items-center border border-gray-300">
-                        <button 
+
+                    <div className="flex items-center justify-between mt-auto pt-4">
+                      <div className="inline-flex items-center border border-black/15">
+                        <button
                           onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                          className="p-2 hover:bg-gray-100"
+                          className="p-2 hover:bg-black/5 transition-colors disabled:opacity-30"
+                          disabled={item.quantity <= 1}
+                          aria-label="Azalt"
                         >
-                          <Minus size={14} />
+                          <Minus size={12} />
                         </button>
-                        <span className="px-4 text-sm">{item.quantity}</span>
-                        <button 
+                        <span className="px-3 sm:px-4 text-xs sm:text-sm tabular-nums">{item.quantity}</span>
+                        <button
                           onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          className="p-2 hover:bg-gray-100"
+                          className="p-2 hover:bg-black/5 transition-colors"
+                          aria-label="Arttır"
                         >
-                          <Plus size={14} />
+                          <Plus size={12} />
                         </button>
                       </div>
-                      <p className="font-medium">{(item.price * item.quantity).toFixed(2)} TL</p>
+                      <p className="text-sm sm:text-base font-medium tabular-nums">
+                        {(item.price * item.quantity).toFixed(2)} TL
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -119,82 +155,74 @@ export default function Cart() {
             </div>
           </div>
 
-          {/* Summary */}
+          {/* Summary - desktop only sticky sidebar */}
           <div className="lg:col-span-1">
-            <div className="bg-gray-50 p-6 sticky top-24">
-              <h2 className="text-lg font-medium mb-4">Sipariş Özeti</h2>
-              
+            <div className="bg-stone-50 p-6 lg:sticky lg:top-32 border border-black/5">
+              <h2 className="text-[10px] tracking-[0.3em] uppercase text-black/60 mb-5">Sipariş Özeti</h2>
+
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Ara Toplam</span>
-                  <span>{total.toFixed(2)} TL</span>
+                  <span className="text-black/60">Ara toplam</span>
+                  <span className="tabular-nums">{total.toFixed(2)} TL</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Kargo</span>
-                  <span className={shippingCost === 0 ? "text-green-600" : ""}>
+                  <span className="text-black/60">Kargo</span>
+                  <span className={shippingCost === 0 ? "text-emerald-700" : "tabular-nums"}>
                     {shippingCost === 0 ? "Ücretsiz" : `${shippingCost.toFixed(2)} TL`}
                   </span>
                 </div>
-                <div className="border-t pt-3 flex justify-between text-base font-medium">
-                  <span>Toplam</span>
-                  <span>{(total + shippingCost).toFixed(2)} TL</span>
+                <div className="border-t border-black/10 pt-3 flex justify-between text-base">
+                  <span className="font-medium">Toplam</span>
+                  <span className="font-medium tabular-nums">{grandTotal.toFixed(2)} TL</span>
                 </div>
               </div>
 
-              <Link 
-                to="/odeme" 
-                className="btn-primary w-full text-center block mt-6"
-                data-testid="checkout-btn"
+              <Link
+                to="/odeme"
+                className="hidden md:flex items-center justify-center w-full h-14 mt-6 bg-black text-white text-xs uppercase tracking-[0.25em] hover:bg-black/85 transition-colors"
+                data-testid="checkout-btn-desktop"
               >
                 Ödemeye Geç
               </Link>
-              
-              <Link 
-                to="/" 
-                className="block text-center text-sm underline mt-4 text-gray-600 hover:text-black"
+
+              <Link
+                to="/"
+                className="block text-center text-xs underline mt-4 text-black/60 hover:text-black transition-colors"
               >
-                Alışverişe Devam Et
+                Alışverişe devam et
               </Link>
             </div>
           </div>
         </div>
 
-        {/* Kombin Ürün Önerileri */}
+        {/* Stilini Tamamla — sadece görsel grid */}
         {(suggestions.length > 0 || suggestionsLoading) && (
-          <div className="mt-16 pt-12 border-t border-stone-200" data-testid="cart-suggestions-block">
-            <div className="mb-8 text-center">
-              <p className="text-[10px] tracking-[0.3em] text-stone-400 uppercase mb-2">
-                {suggestions.some((s) => s._source === "combine") ? "BU ÜRÜNLERLE YAKIŞANLAR" : "BEĞENEBİLECEKLERİN"}
-              </p>
-              <h2 className="text-2xl font-light tracking-wide text-stone-900">Tarzına Tamamla</h2>
+          <div className="mt-16 md:mt-24 pt-10 md:pt-14 border-t border-black/10" data-testid="cart-suggestions-block">
+            <div className="mb-6 md:mb-10">
+              <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">Tarzını Tamamla</p>
+              <h2 className="text-xl sm:text-2xl font-light tracking-tight">Stilini tamamla</h2>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
               {suggestions.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
-                const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
-                  <Link key={p.id} to={`/urun/${p.slug || p.id}`}
-                    className="group block" data-testid={`cart-suggestion-${p.id}`}>
-                    <div className="relative aspect-[3/4] bg-stone-50 overflow-hidden mb-3">
-                      <img src={img} alt={p.name}
-                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                      {p._source === "combine" && (
-                        <span className="absolute top-2 left-2 bg-stone-900 text-white text-[9px] tracking-wider px-2 py-1 uppercase">Kombin</span>
-                      )}
-                      {p._source === "sale" && hasDiscount && (
-                        <span className="absolute top-2 left-2 bg-red-600 text-white text-[9px] tracking-wider px-2 py-1 uppercase">İndirim</span>
-                      )}
-                    </div>
-                    <h3 className="text-sm text-stone-900 mb-1 line-clamp-2 group-hover:underline">{p.name}</h3>
-                    <div className="flex items-baseline gap-2">
-                      {hasDiscount ? (
-                        <>
-                          <span className="text-sm font-medium text-stone-900">{p.discount_price.toFixed(2)} TL</span>
-                          <span className="text-xs text-stone-400 line-through">{p.price.toFixed(2)} TL</span>
-                        </>
-                      ) : (
-                        <span className="text-sm text-stone-900">{(p.price || 0).toFixed(2)} TL</span>
-                      )}
+                  <Link
+                    key={p.id}
+                    to={`/urun/${p.slug || p.id}`}
+                    className="group relative block overflow-hidden bg-stone-100 aspect-[3/4]"
+                    data-testid={`cart-suggestion-${p.id}`}
+                    aria-label={p.name}
+                  >
+                    <img
+                      src={img}
+                      alt={p.name}
+                      className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 sm:p-4">
+                      <span className="text-white text-[10px] uppercase tracking-[0.25em] translate-y-3 group-hover:translate-y-0 transition-transform duration-300 ease-out">
+                        Detayı gör
+                      </span>
                     </div>
                   </Link>
                 );
@@ -202,6 +230,24 @@ export default function Cart() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Sticky bottom mobile CTA */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-black/10 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+12px)] md:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"
+        data-testid="cart-mobile-sticky-cta"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-black/60">Toplam</span>
+          <span className="text-sm font-medium tabular-nums">{grandTotal.toFixed(2)} TL</span>
+        </div>
+        <Link
+          to="/odeme"
+          className="flex items-center justify-center w-full h-12 bg-black text-white text-xs uppercase tracking-[0.25em] hover:bg-black/85 active:bg-black/85 transition-colors"
+          data-testid="checkout-btn"
+        >
+          Ödemeye Geç
+        </Link>
       </div>
 
       <Footer />
