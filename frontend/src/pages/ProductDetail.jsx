@@ -407,22 +407,48 @@ export default function ProductDetail() {
           </div>
         </div>
 
+        {/* Combo Products — "Stilini Tamamla" (sadece görsel + hover overlay) */}
+        {comboProducts.length > 0 && (
+          <section className="mt-16 md:mt-20 pt-10 md:pt-12 border-t border-black/10" data-testid="product-combo-section">
+            <div className="mb-6 md:mb-8">
+              <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">Bu Ürünle Yakışanlar</p>
+              <h2 className="text-xl sm:text-2xl font-light tracking-tight">Stilini tamamla</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+              {comboProducts.map((p) => {
+                const img = (p.images && p.images[0]) || p.image || "";
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/urun/${p.slug || p.id}`}
+                    className="group relative block overflow-hidden bg-stone-100 aspect-[3/4]"
+                    data-testid={`combo-product-${p.id}`}
+                    aria-label={p.name}
+                  >
+                    <img
+                      src={img}
+                      alt={p.name}
+                      className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 sm:p-4">
+                      <span className="text-white text-[10px] uppercase tracking-[0.25em] translate-y-3 group-hover:translate-y-0 transition-transform duration-300 ease-out">
+                        Detayı gör
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Similar Products */}
         {similarProducts.length > 0 && (
           <section className="mt-12 pt-12 border-t">
             <h2 className="text-base font-light mb-6">Benzer Ürünler</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {similarProducts.map((p) => <ProductCard key={p.id} product={p} />)}
-            </div>
-          </section>
-        )}
-
-        {/* Combo Products - "Bu Ürünle Giyin" */}
-        {comboProducts.length > 0 && (
-          <section className="mt-12 pt-12 border-t">
-            <h2 className="text-base font-light mb-6">Bu Ürünle Giyin</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {comboProducts.map((p) => <ProductCard key={p.id} product={p} />)}
             </div>
           </section>
         )}

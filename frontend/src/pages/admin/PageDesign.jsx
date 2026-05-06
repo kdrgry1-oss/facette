@@ -530,16 +530,42 @@ export default function PageDesign() {
           <h1 className="text-2xl font-bold">Sayfa Tasarımı</h1>
           <p className="text-sm text-gray-500 mt-1">Ana sayfa blokları - Sürükle bırak ile sırala</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {hasChanges && (
             <button 
               onClick={handleSaveOrder}
               disabled={saving}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+              data-testid="save-order-btn"
             >
               {saving ? "Kaydediliyor..." : "Sıralamayı Kaydet"}
             </button>
           )}
+          <button
+            onClick={async () => {
+              if (blocks.length > 0 && !window.confirm("Anasayfada zaten bloklar var. Bunları silip varsayılan tasarımla değiştirmek istiyor musunuz?")) return;
+              try {
+                const token = localStorage.getItem('token');
+                const res = await axios.post(
+                  `${API}/page-blocks/seed-default-home?overwrite=${blocks.length > 0}`,
+                  {},
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (res.data?.success) {
+                  toast.success(res.data.message || "Varsayılan anasayfa yüklendi");
+                  fetchBlocks();
+                } else {
+                  toast.error(res.data?.message || "İşlem başarısız");
+                }
+              } catch (e) {
+                toast.error(e.response?.data?.detail || "Hata oluştu");
+              }
+            }}
+            className="flex items-center gap-2 bg-stone-800 text-white px-4 py-2 rounded hover:bg-black"
+            data-testid="seed-default-home-btn"
+          >
+            <Image size={16} /> Varsayılanı Yükle
+          </button>
           <button 
             onClick={() => { resetForm(); setModalOpen(true); }}
             className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"

@@ -684,18 +684,17 @@ async def mark_order_invoiced(
 @router.post("/{order_id}/create-invoice")
 async def create_invoice_for_order(
     order_id: str,
-    invoice_type: str = "e-arsiv",
+    invoice_type: str = "auto",
     current_user: dict = Depends(require_admin),
 ):
     """
     Seçili sipariş için e-Arşiv / e-Fatura keser.
 
-    AKIŞ:
-      1) Siparişi ve aktif e-fatura provider config'ini çek.
-      2) Provider config'i yoksa hata dön (kullanıcı Ayarlar > E-Fatura
-         ekranında provider seçmeli).
-      3) Mock: prefix + sayaç ile invoice_number üret, siparişe yaz.
-      4) integration_logs'a "invoice_create" olayı yaz.
+    invoice_type:
+      - "auto" (default): Müşterinin VKN/TCKN'sini Doğan'da CheckUser ile sorgular,
+        e-Fatura mükellefi ise e-Fatura, değilse veya VKN/TC boşsa e-Arşiv keser.
+      - "e-arsiv": Zorla e-Arşiv (bireysel TCKN dolu/boş hepsi)
+      - "e-fatura": Zorla e-Fatura (10 haneli VKN şart)
     """
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
@@ -759,12 +758,47 @@ async def create_invoice_for_order(
     # Prefix — e-Arşiv: FCT, e-Fatura: EFC (kullanıcı belirleyebilir; default Doğan standardı)
     if dogan_active:
         active = "dogan"
+    else:
+        pcfg = providers[active]
+
+    # ─── AKILLI HİBRİT MOD ─────────────────────────────────────────────
+    # invoice_type="auto" (default): VKN/TCKN dolu ise Doğan CheckUser ile
+    # mükellef sorgula → mükellef ise e-Fatura, değilse e-Arşiv. Boşsa e-Arşiv.
+    bill = order.get("billing_address") or {}
+    ship_addr = order.get("shipping_address") or {}
+    customer_vkn_raw = (bill.get("tax_no") or "").strip().replace(" ", "")
+    receiver_alias = ""
+
+    if invoice_type == "auto" and dogan_active:
+        if customer_vkn_raw and len(customer_vkn_raw) in (10, 11):
+            # Doğan'a sor
+            try:
+                from dogan_client import DoganClient as _DC
+                from fastapi.concurrency import run_in_threadpool as _rtp
+                _tmp = _DC(
+                    username=dogan_settings["username"],
+                    password=dogan_settings["password"],
+                    is_test=dogan_settings.get("is_test", True),
+                )
+                chk = await _rtp(_tmp.check_user, customer_vkn_raw)
+                if chk.get("is_efatura") and len(customer_vkn_raw) == 10:
+                    invoice_type = "e-fatura"
+                    receiver_alias = chk.get("invoice_alias") or ""
+                else:
+                    invoice_type = "e-arsiv"
+            except Exception as _e:
+                logger.warning(f"CheckUser fallback to e-arsiv: {_e}")
+                invoice_type = "e-arsiv"
+        else:
+            # VKN/TCKN boş → bireysel e-arşiv
+            invoice_type = "e-arsiv"
+
+    if dogan_active:
         prefix = (dogan_settings.get("earchive_prefix") if invoice_type == "e-arsiv"
                   else dogan_settings.get("einvoice_prefix"))
         if not prefix:
             prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
     else:
-        pcfg = providers[active]
         prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
                   else pcfg.get("einvoice_prefix"))
         if not prefix:
@@ -789,9 +823,7 @@ async def create_invoice_for_order(
         from fastapi.concurrency import run_in_threadpool
 
         # Müşteri VKN/TCKN — order'dan al, yoksa default 11111111111 (TCKN bilinmiyor)
-        bill = order.get("billing_address") or {}
-        ship_addr = order.get("shipping_address") or {}
-        customer_vkn = (bill.get("tax_no") or "").strip().replace(" ", "")
+        customer_vkn = customer_vkn_raw
         customer_name = (bill.get("name") or
                          f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
                          "Bireysel Müşteri")
@@ -863,6 +895,101 @@ async def create_invoice_for_order(
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
+            )
+
+    # ─── Doğan e-Fatura (TEMELFATURA) kesimi ─────────────────────────
+    if dogan_active and invoice_type == "e-fatura":
+        from dogan_client import DoganClient
+        from fastapi.concurrency import run_in_threadpool
+
+        customer_vkn = customer_vkn_raw
+        if not customer_vkn or len(customer_vkn) != 10:
+            raise HTTPException(
+                status_code=400,
+                detail="e-Fatura için 10 haneli VKN gerekli, müşteride yok."
+            )
+        customer_name = (bill.get("name") or
+                         f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
+                         "Müşteri")
+
+        # receiver_alias auto-mode'da çekildi; explicit invoice_type=e-fatura
+        # çağrısında alias yoksa CheckUser ile tamamla
+        if not receiver_alias:
+            try:
+                _tmp_cli = DoganClient(
+                    username=dogan_settings["username"],
+                    password=dogan_settings["password"],
+                    is_test=dogan_settings.get("is_test", True),
+                )
+                chk = await run_in_threadpool(_tmp_cli.check_user, customer_vkn)
+                receiver_alias = chk.get("invoice_alias") or ""
+            except Exception:
+                pass
+        if not receiver_alias:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Müşteri ({customer_vkn}) e-Fatura mükellefi değil veya alias bulunamadı."
+            )
+
+        line_items = []
+        for it in (order.get("items") or []):
+            line_items.append({
+                "name": it.get("product_name") or "Ürün",
+                "qty": int(it.get("quantity") or 1),
+                "unit_price": float(it.get("price") or 0),
+                "kdv_rate": float(it.get("kdv_rate") or 20.0),
+                "sku": it.get("sku") or it.get("product_code") or "",
+                "buyer_sku": it.get("sku") or it.get("product_code") or "",
+                "barcode": it.get("barcode") or "",
+                "note": (f"{it.get('product_name', '')}, Renk:{it.get('color') or ''}, Beden:{it.get('size') or ''}"
+                         if (it.get('color') or it.get('size'))
+                         else ""),
+            })
+
+        ubl_xml = DoganClient.build_efatura_ubl_xml(
+            invoice_uuid=invoice_uuid,
+            invoice_number=invoice_number,
+            issue_date=issue_date,
+            issue_time=issue_time,
+            supplier_vkn=dogan_settings.get("vkn") or "7810816779",
+            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ. TİC.A.Ş",
+            supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
+            supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
+            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
+            supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
+            customer_vkn=customer_vkn,
+            customer_name=customer_name,
+            customer_street=ship_addr.get("address") or "",
+            customer_district=ship_addr.get("district") or "",
+            customer_city=ship_addr.get("city") or "İstanbul",
+            customer_postal_zone=ship_addr.get("postal_code") or "34000",
+            customer_email=ship_addr.get("email") or order.get("user_email") or "",
+            currency="TRY",
+            kdv_rate=20.0,
+            line_items=line_items,
+            shipping_cost=float(order.get("shipping_cost") or 0),
+            discount=float(order.get("discount") or 0),
+            order_number=order.get("order_number") or order_id,
+            order_date=(order.get("created_at") or now.isoformat())[:10],
+        )
+
+        dogan_client = DoganClient(
+            username=dogan_settings["username"],
+            password=dogan_settings["password"],
+            is_test=dogan_settings.get("is_test", True),
+        )
+        cust_email = (ship_addr.get("email") or order.get("user_email") or "").strip()
+        sender_alias = dogan_settings.get("sender_alias") or ""
+        dogan_result = await run_in_threadpool(
+            dogan_client.send_efatura_invoice,
+            ubl_xml, invoice_uuid, invoice_number,
+            customer_vkn, receiver_alias, sender_alias, cust_email,
+        )
+
+        if not dogan_result.get("success"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
             )
 
     await db.orders.update_one(

@@ -694,6 +694,42 @@ async def get_cart_suggestions(payload: dict):
     return {"items": suggestions[:limit], "total": len(suggestions[:limit])}
 
 
+@router.post("/checkout-deals")
+async def get_checkout_deals(payload: dict):
+    """Sepet sayfasındaki "Kasa Önü Fırsatları" — yalnızca indirimdeki aktif ürünler.
+
+    Sepetteki ürünleri hariç tutar, indirimli olanları rastgele döner.
+    """
+    cart_product_ids = payload.get("product_ids") or []
+    limit = int(payload.get("limit", 8))
+
+    sale_query = {
+        "is_active": {"$ne": False},
+        "id": {"$nin": cart_product_ids},
+        "$or": [
+            {"discount_price": {"$gt": 0}},
+            {"is_on_sale": True},
+            {"sale_active": True},
+        ],
+    }
+
+    deals = []
+    async for p in db.products.find(
+        sale_query,
+        {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+         "images": 1, "image": 1, "stock": 1, "category_id": 1}
+    ).limit(limit * 2):
+        # Yalnızca gerçekten indirimi olanları kabul et
+        if (p.get("discount_price") or 0) > 0 and p["discount_price"] < (p.get("price") or 0):
+            deals.append(p)
+        elif p.get("is_on_sale") or p.get("sale_active"):
+            deals.append(p)
+        if len(deals) >= limit:
+            break
+
+    return {"items": deals[:limit], "total": len(deals[:limit])}
+
+
 @router.get("/{product_id}/attributes")
 async def get_product_attributes(product_id: str, current_user: dict = Depends(require_admin)):
     """Get attributes for a single product"""

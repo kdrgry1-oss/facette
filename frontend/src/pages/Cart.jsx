@@ -18,15 +18,23 @@ export default function Cart() {
   // Kombin / sale öneriler
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [deals, setDeals] = useState([]);
 
   useEffect(() => {
-    if (items.length === 0) { setSuggestions([]); return; }
+    if (items.length === 0) { setSuggestions([]); setDeals([]); return; }
     let cancel = false;
     setSuggestionsLoading(true);
     const productIds = items.map((it) => it.productId).filter(Boolean);
-    axios.post(`${API}/products/cart-suggestions`, { product_ids: productIds, limit: 8 })
-      .then((r) => { if (!cancel) setSuggestions(r.data?.items || []); })
-      .catch(() => { if (!cancel) setSuggestions([]); })
+    Promise.all([
+      axios.post(`${API}/products/cart-suggestions`, { product_ids: productIds, limit: 8 }),
+      axios.post(`${API}/products/checkout-deals`, { product_ids: productIds, limit: 6 }),
+    ])
+      .then(([s, d]) => {
+        if (cancel) return;
+        setSuggestions(s.data?.items || []);
+        setDeals(d.data?.items || []);
+      })
+      .catch(() => { if (!cancel) { setSuggestions([]); setDeals([]); } })
       .finally(() => { if (!cancel) setSuggestionsLoading(false); });
     return () => { cancel = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -223,6 +231,61 @@ export default function Cart() {
                       <span className="text-white text-[10px] uppercase tracking-[0.25em] translate-y-3 group-hover:translate-y-0 transition-transform duration-300 ease-out">
                         Detayı gör
                       </span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Kasa Önü Fırsatları — indirimdeki ürünler */}
+        {deals.length > 0 && (
+          <div className="mt-12 md:mt-16 pt-8 md:pt-12 border-t border-black/10" data-testid="checkout-deals-block">
+            <div className="mb-6 md:mb-8 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.3em] text-red-700 uppercase mb-2">Sınırlı Süre</p>
+                <h2 className="text-xl sm:text-2xl font-light tracking-tight">Kasa önü fırsatları</h2>
+              </div>
+              <Link to="/kategori/sale" className="hidden sm:inline-block text-[11px] tracking-[0.25em] uppercase border-b border-black pb-0.5 hover:opacity-70">
+                Tümü
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+              {deals.map((p) => {
+                const img = (p.images && p.images[0]) || p.image || "";
+                const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                const off = hasDiscount ? Math.round(((p.price - p.discount_price) / p.price) * 100) : 0;
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/urun/${p.slug || p.id}`}
+                    className="group block"
+                    data-testid={`checkout-deal-${p.id}`}
+                  >
+                    <div className="relative aspect-[3/4] bg-stone-100 overflow-hidden mb-2">
+                      <img
+                        src={img}
+                        alt={p.name}
+                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                        loading="lazy"
+                      />
+                      {off > 0 && (
+                        <span className="absolute top-2 left-2 bg-red-700 text-white text-[10px] tracking-[0.15em] px-2 py-1 uppercase">
+                          %{off}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-[11px] sm:text-xs text-black/85 leading-tight line-clamp-1 group-hover:underline">{p.name}</h3>
+                    <div className="flex items-baseline gap-2 mt-0.5">
+                      {hasDiscount ? (
+                        <>
+                          <span className="text-xs font-medium text-red-700 tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                          <span className="text-[10px] text-black/40 line-through tabular-nums">{p.price.toFixed(2)} TL</span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-black/85 tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                      )}
                     </div>
                   </Link>
                 );

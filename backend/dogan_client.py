@@ -125,23 +125,39 @@ class DoganClient:
             return {"success": False, "error": str(e)}
 
     def check_user(self, vkn: str) -> dict:
-        """Check if a VKN is registered for e-Fatura"""
+        """Check if a VKN is registered for e-Fatura. Returns the user list with
+        their PK aliases. is_efatura=True if INVOICE document_type alias exists.
+        """
         try:
+            from zeep.helpers import serialize_object
             client = self._get_efatura_client()
             result = client.service.CheckUser(
                 REQUEST_HEADER=self._make_header(),
                 USER={"IDENTIFIER": vkn}
             )
+            ser = serialize_object(result) or {}
+            # Response shape: {USER: [...], ERROR_TYPE: ...}
+            user_list = ser.get("USER") or []
             users = []
-            if result:
-                for u in result:
-                    users.append({
-                        "identifier": str(getattr(u, "IDENTIFIER", "")),
-                        "alias": str(getattr(u, "ALIAS", "")),
-                        "title": str(getattr(u, "TITLE", "")),
-                        "type": str(getattr(u, "TYPE", "")),
-                    })
-            return {"success": True, "users": users, "is_efatura": len(users) > 0}
+            for u in user_list:
+                if not u or not isinstance(u, dict):
+                    continue
+                users.append({
+                    "identifier": str(u.get("IDENTIFIER") or ""),
+                    "alias": str(u.get("ALIAS") or ""),
+                    "title": str(u.get("TITLE") or ""),
+                    "type": str(u.get("TYPE") or ""),
+                    "unit": str(u.get("UNIT") or ""),
+                    "document_type": str(u.get("DOCUMENT_TYPE") or ""),
+                })
+            # e-Fatura mükellefi sayılır: en az 1 INVOICE document_type'a sahip alias varsa
+            invoice_users = [u for u in users if u.get("document_type") == "INVOICE" and u.get("alias")]
+            return {
+                "success": True,
+                "users": users,
+                "is_efatura": len(invoice_users) > 0,
+                "invoice_alias": invoice_users[0]["alias"] if invoice_users else "",
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "is_efatura": False}
 
@@ -550,6 +566,413 @@ class DoganClient:
   {''.join(invoice_lines_xml)}
 </Invoice>"""
         return xml
+
+    # ═════════════════ UBL-TR e-Fatura (TEMELFATURA) Üretimi ════════════
+    @staticmethod
+    def build_efatura_ubl_xml(*,
+                                invoice_uuid: str,
+                                invoice_number: str,
+                                issue_date: str,
+                                issue_time: str,
+                                supplier_vkn: str,
+                                supplier_name: str,
+                                supplier_district: str = "KÜÇÜKÇEKMECE",
+                                supplier_city: str = "İstanbul",
+                                supplier_country: str = "Türkiye",
+                                supplier_tax_office: str = "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
+                                supplier_website: str = "facette.com.tr",
+                                customer_vkn: str,
+                                customer_name: str,
+                                customer_street: str = "",
+                                customer_district: str = "",
+                                customer_city: str = "İstanbul",
+                                customer_postal_zone: str = "",
+                                customer_country: str = "Türkiye",
+                                customer_email: str = "",
+                                currency: str = "TRY",
+                                kdv_rate: float = 20.0,
+                                line_items: list = None,
+                                shipping_cost: float = 0.0,
+                                discount: float = 0.0,
+                                order_number: str = "",
+                                order_date: str = "",
+                                profile_id: str = "TEMELFATURA",
+                                ) -> str:
+        """UBL-TR 1.2 e-Fatura (TEMELFATURA) — kurumsal alıcılar için.
+
+        Örnek EFC2026000000049.xml referansı:
+          • ProfileID=TEMELFATURA
+          • cac:OrderReference (sipariş no + tarih)
+          • cac:BuyerCustomerParty (alıcı ayrı blok)
+          • cac:Delivery>DeliveryAddress (CarrierParty yok)
+          • cac:PaymentMeans yok
+          • InvoiceLine: BuyersItemIdentification + SellersItemIdentification
+          • Customer kesinlikle 10 haneli VKN olmalı
+        """
+        from html import escape
+        import uuid as _uuid
+
+        line_items = line_items or []
+        if len(customer_vkn) != 10:
+            raise ValueError(f"e-Fatura için 10 haneli VKN gerekli, alındı: {customer_vkn} ({len(customer_vkn)} hane)")
+
+        def _s(v):
+            if v is None or str(v).lower() == "none":
+                return ""
+            return str(v).strip()
+
+        supplier_website = _s(supplier_website)
+        customer_street = _s(customer_street)
+        customer_district = _s(customer_district)
+        customer_city = _s(customer_city) or "İstanbul"
+        customer_postal_zone = _s(customer_postal_zone) or "34000"
+        customer_email = _s(customer_email)
+        customer_name = _s(customer_name) or "Müşteri"
+        order_number = _s(order_number)
+        order_date = _s(order_date) or issue_date
+
+        # InvoiceLine'lar — C62 unitCode
+        invoice_lines_xml = []
+        line_subtotal = 0.0
+        kdv_total = 0.0
+        kdv_groups = {}
+        for idx, it in enumerate(line_items, start=1):
+            qty = float(it.get("qty") or 1)
+            unit_price = float(it.get("unit_price") or 0)
+            line_amount = round(qty * unit_price, 2)
+            li_kdv_rate = float(it.get("kdv_rate") if it.get("kdv_rate") is not None else kdv_rate)
+            line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            line_subtotal += line_amount
+            kdv_total += line_kdv
+            grp = kdv_groups.setdefault(li_kdv_rate, {"taxable": 0.0, "tax": 0.0})
+            grp["taxable"] += line_amount
+            grp["tax"] += line_kdv
+
+            name = escape((it.get("name") or "Ürün"))[:255]
+            sku = escape(_s(it.get("sku") or it.get("product_code") or f"URN{idx:04d}"))
+            buyer_sku = escape(_s(it.get("buyer_sku") or it.get("sku") or sku))
+            li_note = escape(_s(it.get("note") or it.get("barcode") or ""))
+            note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
+
+            invoice_lines_xml.append(f"""<cac:InvoiceLine>
+    <cbc:ID>{idx}</cbc:ID>
+    {note_xml}
+    <cbc:InvoicedQuantity unitCode="C62">{qty:g}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">{line_amount:.2f}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">{line_amount:.2f}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
+        <cbc:Percent>{li_kdv_rate:g}</cbc:Percent>
+        <cac:TaxCategory>
+          <cac:TaxScheme>
+            <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+            <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>{name}</cbc:Name>
+      <cac:BuyersItemIdentification>
+        <cbc:ID>{buyer_sku}</cbc:ID>
+      </cac:BuyersItemIdentification>
+      <cac:SellersItemIdentification>
+        <cbc:ID>{sku}</cbc:ID>
+      </cac:SellersItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{unit_price:.4f}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>""")
+
+        # Kargo ayrı satır olarak (e-Fatura'da da)
+        if shipping_cost > 0:
+            sh_kdv_rate = 20.0
+            sh_kdv = round(shipping_cost * sh_kdv_rate / 100.0, 2)
+            sh_taxable = round(shipping_cost - sh_kdv, 2)
+            kdv_total += sh_kdv
+            line_subtotal += sh_taxable
+            grp = kdv_groups.setdefault(sh_kdv_rate, {"taxable": 0.0, "tax": 0.0})
+            grp["taxable"] += sh_taxable
+            grp["tax"] += sh_kdv
+            invoice_lines_xml.append(f"""<cac:InvoiceLine>
+    <cbc:ID>{len(line_items) + 1}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">{sh_taxable:.2f}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">{sh_kdv:.2f}</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">{sh_taxable:.2f}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">{sh_kdv:.2f}</cbc:TaxAmount>
+        <cbc:Percent>{sh_kdv_rate:g}</cbc:Percent>
+        <cac:TaxCategory>
+          <cac:TaxScheme>
+            <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+            <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>KARGO</cbc:Name>
+      <cac:SellersItemIdentification><cbc:ID>KARGO</cbc:ID></cac:SellersItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{sh_taxable:.4f}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>""")
+
+        allowance_charges_xml = []
+        if discount > 0:
+            line_subtotal -= discount
+            allowance_charges_xml.append(f"""<cac:AllowanceCharge>
+    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+    <cbc:AllowanceChargeReason>İndirim</cbc:AllowanceChargeReason>
+    <cbc:Amount currencyID="{currency}">{discount:.2f}</cbc:Amount>
+  </cac:AllowanceCharge>""")
+
+        tax_inclusive_total = round(line_subtotal + kdv_total, 2)
+
+        tax_subtotals_xml = []
+        for rate, grp in sorted(kdv_groups.items()):
+            tax_subtotals_xml.append(f"""<cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="{currency}">{grp['taxable']:.2f}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="{currency}">{grp['tax']:.2f}</cbc:TaxAmount>
+      <cbc:Percent>{rate:g}</cbc:Percent>
+      <cac:TaxCategory>
+        <cac:TaxScheme>
+          <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+          <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>""")
+
+        notes_xml = []
+        if order_number:
+            notes_xml.append(f"<cbc:Note>{escape(order_number)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Sipariş Numarası: {escape(order_number)}</cbc:Note>")
+        notes_xml.append("<cbc:Note>Bu Satış İnternet Üzerinden Yapılmıştır</cbc:Note>")
+        notes_xml.append(f"<cbc:Note>Web Adresi: {escape(supplier_website)}</cbc:Note>")
+        if customer_street:
+            notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+
+        xslt_ref_id = str(_uuid.uuid4())
+
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:qdt="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDatatypes-2" xmlns:ccts="urn:un:unece:uncefact:documentation:2" xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" xmlns:ubltr="urn:oasis:names:specification:ubl:schema:xsd:TurkishCustomizationExtensionComponents" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:udt="urn:un:unece:uncefact:data:specification:UnqualifiedDataTypesSchemaModule:2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2 UBL-Invoice-2.1.xsd">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>TR1.2</cbc:CustomizationID>
+  <cbc:ProfileID>{escape(profile_id)}</cbc:ProfileID>
+  <cbc:ID>{escape(invoice_number)}</cbc:ID>
+  <cbc:CopyIndicator>false</cbc:CopyIndicator>
+  <cbc:UUID>{escape(invoice_uuid)}</cbc:UUID>
+  <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+  <cbc:IssueTime>{issue_time}</cbc:IssueTime>
+  <cbc:InvoiceTypeCode>SATIS</cbc:InvoiceTypeCode>
+  {''.join(notes_xml)}
+  <cbc:DocumentCurrencyCode>{currency}</cbc:DocumentCurrencyCode>
+  <cbc:LineCountNumeric>{len(invoice_lines_xml)}</cbc:LineCountNumeric>
+  <cac:OrderReference>
+    <cbc:ID>{escape(order_number) or escape(invoice_number)}</cbc:ID>
+    <cbc:IssueDate>{order_date}</cbc:IssueDate>
+  </cac:OrderReference>
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>{xslt_ref_id}</cbc:ID>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:DocumentType>XSLT</cbc:DocumentType>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject characterSetCode="UTF-8" encodingCode="Base64" filename="{escape(invoice_number)}.xslt" mimeCode="application/CSTAdata+xml">{DOGAN_XSLT_B64}</cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>
+  <cac:Signature>
+    <cbc:ID schemeID="VKN_TCKN">{escape(supplier_vkn)}</cbc:ID>
+    <cac:SignatoryParty>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(supplier_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+        <cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
+        <cac:Country>
+          <cbc:Name>{escape(supplier_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:Name>{escape(supplier_tax_office)}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      <cac:Contact/>
+    </cac:SignatoryParty>
+    <cac:DigitalSignatureAttachment>
+      <cac:ExternalReference>
+        <cbc:URI>#Signature_{escape(invoice_number)}</cbc:URI>
+      </cac:ExternalReference>
+    </cac:DigitalSignatureAttachment>
+  </cac:Signature>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(supplier_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+        <cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
+        <cac:Country>
+          <cbc:Name>{escape(supplier_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:Name>{escape(supplier_tax_office)}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      <cac:Contact/>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(customer_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:StreetName>{escape(customer_street or '-')}</cbc:StreetName>
+        <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(customer_city)}</cbc:CityName>
+        <cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>
+        <cac:Country>
+          <cbc:Name>{escape(customer_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      {('<cac:Contact><cbc:ElectronicMail>' + escape(customer_email) + '</cbc:ElectronicMail></cac:Contact>') if customer_email else ''}
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:BuyerCustomerParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(customer_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
+        <cbc:StreetName>{escape(customer_street or '-')}</cbc:StreetName>
+        <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(customer_city)}</cbc:CityName>
+        <cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>
+        <cac:Country>
+          <cbc:Name>{escape(customer_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      {('<cac:Contact><cbc:ElectronicMail>' + escape(customer_email) + '</cbc:ElectronicMail></cac:Contact>') if customer_email else ''}
+    </cac:Party>
+  </cac:BuyerCustomerParty>
+  <cac:Delivery>
+    <cac:DeliveryAddress>
+      <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
+      <cbc:CityName>{escape(customer_city)}</cbc:CityName>
+      <cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>
+      <cac:Country>
+        <cbc:Name>{escape(customer_country)}</cbc:Name>
+      </cac:Country>
+    </cac:DeliveryAddress>
+  </cac:Delivery>
+  {''.join(allowance_charges_xml)}
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="{currency}">{kdv_total:.2f}</cbc:TaxAmount>
+    {''.join(tax_subtotals_xml)}
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="{currency}">{line_subtotal:.2f}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="{currency}">{line_subtotal:.2f}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="{currency}">{tax_inclusive_total:.2f}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="{currency}">{tax_inclusive_total:.2f}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  {''.join(invoice_lines_xml)}
+</Invoice>"""
+        return xml
+
+    def send_efatura_invoice(self, ubl_xml: str, invoice_uuid: str,
+                              invoice_number: str,
+                              receiver_vkn: str, receiver_alias: str,
+                              sender_alias: str = "",
+                              email_to: str = "") -> dict:
+        """E-Faturayı Doğan EFaturaOIB.SendInvoice ile gönderir.
+
+        Önemli: receiver_alias e-Fatura ataması (PK alias). check_user'dan dönen
+        ilk user'ın alias'ı kullanılmalı (örn: "urn:mail:defaultpk@vkn.tr").
+        sender_alias boşsa Doğan default'u kullanır.
+        """
+        try:
+            client = self._get_efatura_client()
+            xml_bytes = ubl_xml.encode("utf-8")
+            mail_flag = "Y" if email_to else "N"
+            mail_list = [email_to] if email_to else []
+
+            invoice_obj = {
+                "HEADER": {
+                    "SENDER": self.username if not sender_alias else sender_alias,
+                    "RECEIVER": receiver_alias,
+                    "MAIL_FLAG": mail_flag,
+                    "MAIL": mail_list,
+                },
+                "CONTENT": xml_bytes,
+                "ID": invoice_number,
+                "UUID": invoice_uuid,
+            }
+
+            result = client.service.SendInvoice(
+                REQUEST_HEADER=self._make_header(compressed="N"),
+                SENDER={"vkn": self.username, "alias": sender_alias or ""},
+                RECEIVER={"vkn": receiver_vkn, "alias": receiver_alias},
+                INVOICE=[invoice_obj],
+            )
+            from zeep.helpers import serialize_object
+            ser = serialize_object(result) or {}
+
+            err = ser.get("ERROR_TYPE") or {}
+            err_code = err.get("ERROR_CODE") if err else None
+            err_msg = err.get("ERROR_SHORT_DES") if err else None
+            intl_txn_id = (err.get("INTL_TXN_ID") if err else None) or \
+                          (ser.get("REQUEST_RETURN") or {}).get("INTL_TXN_ID")
+            if err_code:
+                return {
+                    "success": False,
+                    "code": str(err_code),
+                    "message": str(err_msg or "Bilinmeyen hata"),
+                    "intl_txn_id": str(intl_txn_id or ""),
+                    "uuid": invoice_uuid,
+                    "raw": str(ser)[:600],
+                }
+
+            invoice_id = ser.get("INVOICE_ID") or invoice_number
+            return {
+                "success": True,
+                "code": "0",
+                "message": "OK",
+                "invoice_id": str(invoice_id),
+                "intl_txn_id": str(intl_txn_id or ""),
+                "uuid": invoice_uuid,
+                "receiver_alias": receiver_alias,
+                "raw": str(ser)[:300],
+            }
+        except Exception as e:
+            logger.error(f"send_efatura_invoice error: {e}")
+            return {"success": False, "code": "", "message": str(e), "raw": ""}
 
     def send_earsiv_invoice(self, ubl_xml: str, invoice_uuid: str = None,
                               email_to: str = "", archive_note: str = "") -> dict:

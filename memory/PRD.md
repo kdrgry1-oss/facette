@@ -20,6 +20,57 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+## Iteration 23 (2026-05-06) — e-Fatura Akıllı Hibrit + Page Builder Seed + Combo Sections
+
+### P0 — Doğan e-Fatura (TEMELFATURA) Eklendi ✅
+- `dogan_client.py`'a `build_efatura_ubl_xml` static method eklendi:
+  - ProfileID=TEMELFATURA, cac:OrderReference, cac:BuyerCustomerParty, cac:Delivery>DeliveryAddress
+  - cac:PaymentMeans yok (e-Fatura için ihtiyaç yok)
+  - InvoiceLine'da hem BuyersItemIdentification hem SellersItemIdentification
+  - Customer 10 haneli VKN şart (validation built-in)
+- `send_efatura_invoice` metodu — EFaturaOIB.SendInvoice endpoint'ini kullanıyor
+- `check_user(vkn)` parse düzeltildi — `is_efatura` ve `invoice_alias` doğru dönüyor
+- Test sonucu (canlı): 7810816779 → mükellef + alias `urn:mail:defaultpk@facette.com`; 7570050418 → mükellef + alias `urn:mail:setekspk@edmbilisim.com`
+
+### P0 — Akıllı Hibrit Fatura Kesimi (orders.py::create-invoice) ✅
+- `invoice_type` default'u **`auto`**'ya değiştirildi:
+  - VKN/TC dolu (10 veya 11 hane) → Doğan CheckUser sorgusu
+  - `is_efatura=True` ve 10 haneli → **e-Fatura** (EFC prefix, EFaturaOIB.SendInvoice)
+  - Aksi → **e-Arşiv** (FCT prefix, WriteToArchiveExtended)
+  - VKN/TC boş → e-Arşiv (TCKN=11111111111 fallback)
+- DB'ye `invoice_dogan_id`, `invoice_pdf_url` kaydediliyor (e-Arşiv için web_key, e-Fatura için INVOICE_ID)
+
+### P1 — Page Builder Default Home Seed ✅
+- `cms.py::POST /api/page-blocks/seed-default-home` endpoint'i eklendi
+- Mevcut Home.jsx default tasarımı (hero_slider, full_banner, two_banners, product_slider, instashop) DB'ye aktarıldı
+- Admin `/admin/sayfa-tasarimi` ekranına **"Varsayılan Anasayfayı Yükle"** butonu eklendi
+- Artık admin slider görsellerini, vitrin ürünlerini, banner'ları UI'dan değiştirebilir
+
+### P1 — ProductDetail "Stilini Tamamla" ✅
+- ProductDetail.jsx'te `comboProducts` (cross-sell) bloğu sade siyah/beyaz "Stilini tamamla" formatına geçirildi
+- Sadece görsel + hover overlay "DETAYI GÖR" (text/fiyat yok) — kullanıcının açık talebi
+
+### P1 — Cart "Kasa Önü Fırsatları" ✅
+- `products.py::POST /api/products/checkout-deals` endpoint'i — sadece indirimli aktif ürünler
+- Cart.jsx'te "Stilini Tamamla" altında ayrı "Kasa Önü Fırsatları" bloğu (kırmızı %X badge, satıcı orijinal fiyat üstü çizili)
+- Sepetteki ürünler hariç tutuluyor
+
+### Files Modified
+- /app/backend/dogan_client.py (build_efatura_ubl_xml, send_efatura_invoice, check_user fix)
+- /app/backend/routes/orders.py (auto/hibrit invoice_type)
+- /app/backend/routes/cms.py (seed-default-home endpoint)
+- /app/backend/routes/products.py (checkout-deals endpoint)
+- /app/frontend/src/pages/Cart.jsx (deals section eklendi)
+- /app/frontend/src/pages/ProductDetail.jsx ("Stilini Tamamla" minimal)
+- /app/frontend/src/pages/admin/PageDesign.jsx ("Varsayılanı Yükle" butonu)
+
+### Test Results
+- Backend smoke: 4/4 pass (homepage blocks, cart suggestions, checkout deals, admin auth)
+- Doğan CheckUser canlı: ✅ alias parse doğru
+- e-Fatura UBL well-formed (218 KB, ProfileID=TEMELFATURA, BuyerCustomerParty + DeliveryAddress)
+- 5 default home blocks seed edildi DB'ye
+
+
 ## Iteration 22 (2026-05-05) — Doğan UBL CANLI ÇÖZÜLDÜ + Mobil UI/UX Overhaul
 
 ### P0 BACKEND — Doğan e-Dönüşüm CANLI e-Arşiv UBL **ÇALIŞIYOR** ✅
