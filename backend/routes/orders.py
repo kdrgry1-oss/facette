@@ -1521,12 +1521,12 @@ async def get_cargo_label(order_id: str, token: str = None):
     kargo_tipi = "Alıcı Ödemeli Kargo" if payment_method in ("cash_on_delivery","kapida") else "Gönderici Ödemeli Kargo"
 
     html = f"""<!DOCTYPE html>
-<html lang="tr"><head><meta charset="utf-8"><title>Kargo Etiketi - {siparis_no}</title>
-<link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39&family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">
+<html lang="tr"><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><title>Kargo Etiketi - {siparis_no}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=Libre+Barcode+39&family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">
 <style>
   @page {{ size: 100mm 150mm; margin: 0; }}
-  * {{ box-sizing: border-box; }}
-  body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; width: 100mm; min-height: 150mm; color: #000; }}
+  * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  body {{ margin: 0; font-family: 'Inter', 'Liberation Sans', 'DejaVu Sans', Arial, sans-serif; width: 100mm; min-height: 150mm; color: #000; }}
   .label {{ padding: 3mm; height: 100%; }}
   .row {{ display: flex; justify-content: space-between; align-items: center; }}
   .small {{ font-size: 7pt; color: #333; }}
@@ -1584,7 +1584,7 @@ async def get_cargo_label(order_id: str, token: str = None):
   </div>
 </div>
 </body></html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
 
 
 # ==================== MNG KARGO AYARLARI ====================
@@ -1596,7 +1596,7 @@ async def get_mng_settings(current_user: dict = Depends(require_admin)):
     """MNG Kargo ayarlarını döndür (şifre maskelenir)."""
     s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
     return {
-        "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
+        "customer_code": s.get("customer_code") or "FACETTE DIS TIC.A.S.",
         "username": s.get("username") or "490059279",
         "password": "********" if s.get("password") else "",
         "tax_no": s.get("tax_no") or "6080712084",

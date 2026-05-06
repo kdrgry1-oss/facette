@@ -20,6 +20,37 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+## Iteration 24 (2026-05-06) — Bug Fixes: MNG TR Encoding + Combo Endpoint + UTF-8
+
+### P0 — MNG Kargo Türkçe Karakter Bozulması Düzeltildi ✅
+- **Sorun**: MNG kargo etiketinde "FACETTE DIŞ TİC.A.Ş." → "FACETTE DI T CARET A. .", "GÜZİN GÖKSOY" → "GÜZ N GöKSOY", "İstanbul" → " stanbul" (uppercase Turkish chars Ş İ Ğ Ö Ü stripped by MNG's PDF render engine)
+- **Çözüm**:
+  - `mng_kargo_client.py`'a `tr_safe()` ASCII-normalize fonksiyonu eklendi
+  - `siparis_giris_detayli_v3` içinde MNG'ye giden tüm string field'lar (alici_ad, il, ilce, adres, semt, mahalle, vergi_dairesi, customer_code) `tr_safe`'ten geçiriliyor
+  - DB'deki `mng_kargo.customer_code` "FACETTE DIŞ TİC.A.Ş." → "FACETTE DIS TIC.A.S." olarak güncellendi
+  - Default değer `orders.py::get_mng_settings`'te de "FACETTE DIS TIC.A.S." olarak güncellendi
+- **Sonuç**: MNG etiketinde artık tüm karakterler tam görünür (özel uppercase Turkish chars ASCII karşılıklarına çevrilir, hiçbiri kaybolmaz)
+
+### P0 — Ürün Detay Combo "Stilini Tamamla" Çalışmıyordu ✅
+- **Sorun**: Frontend `GET /products/{id}/combo?limit=4` çağırıyordu ama backend endpoint'i `/combine-products` (URL mismatch → 404 → comboProducts boş)
+- **Çözüm**: ProductDetail.jsx artık doğru endpoint'i çağırıyor + boş dönerse cart-suggestions'a fallback yapıyor (kategori bazlı öneri)
+- **Test**: DOM'da `data-testid="product-combo-section"` + 4 combo item render ediliyor — desktop ekran görüntüsünde "BU ÜRÜNLE YAKIŞANLAR / Stilini tamamla" başlığı altında 4 görsel + hover overlay görünüyor
+
+### Cargo Label HTML UTF-8 Hardening
+- `/cargo-label` HTMLResponse'a explicit `Content-Type: text/html; charset=utf-8` header eklendi
+- Font-stack: Google Fonts Inter (full Turkish coverage) → Liberation Sans → DejaVu Sans → Arial
+- `lang="tr"`, double charset declaration (meta charset + http-equiv), `print-color-adjust: exact`
+
+### Files Modified
+- /app/backend/mng_kargo_client.py (`tr_safe`, all SOAP params normalized)
+- /app/backend/routes/orders.py (cargo-label HTML font-stack + UTF-8 header, default customer_code ASCII-safe)
+- /app/frontend/src/pages/ProductDetail.jsx (combo endpoint URL fix + cart-suggestions fallback)
+- DB: settings.mng_kargo.customer_code → "FACETTE DIS TIC.A.S."
+
+### Pending User Communication
+Kullanıcı "mobilde değişiklik yok" dedi, ama tüm ekran görüntülerinde mobil sticky header (FACETTE+blur), product detail mobile sticky bottom CTA (resim+isim+fiyat+SEPETE EKLE), Footer accordion, Cart bottom CTA çalışıyor. Browser cache temizleme gerekebilir. Daha somut bir mobil değişiklik istiyorsa hangi sayfa/blok'un farklı olmasını istediğini belirtmesi gerekiyor.
+
+
 ## Iteration 23 (2026-05-06) — e-Fatura Akıllı Hibrit + Page Builder Seed + Combo Sections
 
 ### P0 — Doğan e-Fatura (TEMELFATURA) Eklendi ✅

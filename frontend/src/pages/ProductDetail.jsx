@@ -89,10 +89,23 @@ export default function ProductDetail() {
         }
       }
       
-      // Fetch combo products
+      // Fetch combo products ("Stilini tamamla")
       try {
-        const comboRes = await axios.get(`${API}/products/${res.data.id}/combo?limit=4`);
-        setComboProducts(comboRes.data || []);
+        const comboRes = await axios.get(`${API}/products/${res.data.id}/combine-products`);
+        const comboItems = comboRes.data?.items || [];
+        setComboProducts(comboItems);
+        // Fallback: kombin atanmamışsa cart-suggestions çağırarak kategori bazlı öner
+        if (comboItems.length === 0) {
+          try {
+            const fb = await axios.post(`${API}/products/cart-suggestions`, {
+              product_ids: [res.data.id],
+              limit: 4,
+            });
+            setComboProducts(fb.data?.items || []);
+          } catch {
+            // ignore
+          }
+        }
       } catch {
         setComboProducts([]);
       }

@@ -26,6 +26,22 @@ WSDL_URL = "https://service.mngkargo.com.tr/musterikargosiparis/musterikargosipa
 
 _client_cache = None
 
+# MNG kargo etiket render motoru Türkçe büyük karakterleri (Ş, İ, Ğ, vb.)
+# kaybediyor. ASCII-güvenli bir Türkçe çeviri ile gönderiyoruz; PDF'de
+# "Ş→S, İ→I, Ğ→G, ..." görüntülenecek ama veriler eksiksiz korunur.
+_TR_MAP = str.maketrans({
+    "Ç": "C", "Ğ": "G", "İ": "I", "Ö": "O", "Ş": "S", "Ü": "U",
+    "ç": "c", "ğ": "g", "ı": "i", "ö": "o", "ş": "s", "ü": "u",
+    "Â": "A", "Î": "I", "Û": "U", "â": "a", "î": "i", "û": "u",
+})
+
+
+def tr_safe(s) -> str:
+    """Türkçe karakterleri ASCII karşılığına dönüştürür. None/boş güvenli."""
+    if not s:
+        return ""
+    return str(s).translate(_TR_MAP)
+
 
 def _get_client():
     global _client_cache
@@ -211,10 +227,10 @@ def create_shipment(
     c = _get_client()
     try:
         result = c.service.SiparisGirisiDetayliV3(
-            pChIrsaliyeNo=irsaliye_no,
+            pChIrsaliyeNo=tr_safe(irsaliye_no),
             pPrKiymet=str(kiymet),
             pChBarkod="",
-            pChIcerik=icerik[:250],
+            pChIcerik=tr_safe(icerik)[:250],
             pGonderiHizmetSekli=hizmet_sekli,
             pTeslimSekli=teslim_sekli,
             pFlAlSms=al_sms,
@@ -222,28 +238,28 @@ def create_shipment(
             pKargoParcaList=parca_list,
             pAliciMusteriMngNo=alici_mng_no,
             pAliciMusteriBayiNo=alici_bayi_no,
-            pAliciMusteriAdi=alici_ad[:100],
+            pAliciMusteriAdi=tr_safe(alici_ad)[:100],
             pChSiparisNo=siparis_no,
             pLuOdemeSekli=odeme_sekli,
             pFlAdresFarkli=adres_farkli,
-            pChIl=il,
-            pChIlce=ilce,
-            pChAdres=adres[:250],
-            pChSemt=semt,
-            pChMahalle=mahalle,
-            pChMeydanBulvar=meydan_bulvar,
-            pChCadde=cadde,
-            pChSokak=sokak,
+            pChIl=tr_safe(il),
+            pChIlce=tr_safe(ilce),
+            pChAdres=tr_safe(adres)[:250],
+            pChSemt=tr_safe(semt),
+            pChMahalle=tr_safe(mahalle),
+            pChMeydanBulvar=tr_safe(meydan_bulvar),
+            pChCadde=tr_safe(cadde),
+            pChSokak=tr_safe(sokak),
             pChTelEv=tel_ev,
             pChTelCep=tel_cep,
             pChTelIs=tel_is,
             pChFax=fax,
             pChEmail=email,
-            pChVergiDairesi=vergi_dairesi,
+            pChVergiDairesi=tr_safe(vergi_dairesi),
             pChVergiNumarasi=vergi_no,
             pFlKapidaOdeme=kapida_odeme,
             pMalBedeliOdemeSekli=mal_bedeli_odeme,
-            pPlatformKisaAdi=platform_adi,
+            pPlatformKisaAdi=tr_safe(platform_adi),
             pPlatformSatisKodu=platform_kodu,
             pKullaniciAdi=username,
             pSifre=password,
