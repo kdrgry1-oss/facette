@@ -20,6 +20,41 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+## Iteration 22 (2026-05-05) — Doğan UBL CANLI ÇÖZÜLDÜ + Mobil UI/UX Overhaul
+
+### P0 BACKEND — Doğan e-Dönüşüm CANLI e-Arşiv UBL **ÇALIŞIYOR** ✅
+- `dogan_client.py::build_earsiv_ubl_xml` örnek `FCT2026000011227.xml` referans alınarak komple yeniden yazıldı:
+  - Tam UBL-TR namespace seti (ext, qdt, ccts, xades, ubltr, cac, udt, cbc, ds, xsi:schemaLocation)
+  - **Zorunlu** `cac:Signature` bloğu (SignatoryParty + DigitalSignatureAttachment URI)
+  - **Zorunlu** `cac:AdditionalDocumentReference` × 2 (XSLT base64 + SendingType=ELEKTRONIK)
+  - **Zorunlu** `cac:Delivery` > `CarrierParty` (MNG Kargo VKN 6080712084 default)
+  - `cac:PaymentMeans` (PaymentMeansCode=1)
+  - `unitCode="C62"` her InvoiceLine için (NIU değil)
+  - `SellersItemIdentification` her satırda
+  - Multi-rate KDV gruplandırma (TaxSubtotal blokları)
+  - Bireysel (TCKN 11) → cac:Person, Kurumsal (VKN 10) → PartyName + PartyTaxScheme
+- Doğan XSLT şablonu `/app/backend/dogan_xslt_template.txt`'e kaydedildi (210 KB base64), her UBL'ye gömülüyor
+- `send_earsiv_invoice` artık `WriteToArchiveExtended` (senkron) kullanıyor — INVOICE_ID + WEB_KEY anında dönüyor
+- EARSIV_TYPE=INTERNET, VALIDATION_FLAG=Y, EARCHIVE_TEST_FLAG=is_test
+- **Canlı submit testi başarılı**: INVOICE_ID=FCT2026778025040, web_key=https://portal.doganedonusum.com/earchive/view-earchive/view-pdf-earchive.xhtml?webValidationKey=...
+- `orders.py::create-invoice` endpoint'i `invoice_dogan_id` ve `invoice_pdf_url` alanlarını DB'ye yazıyor
+
+### P0 FRONTEND — Mobil-First Elit Siyah/Beyaz Minimal Tema
+- `Cart.jsx` baştan sona yeniden yazıldı:
+  - **Mobile sticky bottom CTA** (`fixed bottom-0 z-40 ... md:hidden`) safe-area-inset-bottom destekli
+  - **"Stilini tamamla"** kombin önerileri **sadece görsel** + hover overlay "DETAYI GÖR" (eski h3 + fiyat kaldırıldı)
+  - Editorial tipografi, divide-y border, tabular-nums fiyatlar
+- `Footer.jsx` minimal kurumsal — mobile accordion (chevron), desktop 3 kolon
+- `CartDrawer.jsx` premium yan panel — slide-right animasyon, `Ödemeye Geç` + `Sepete Git` CTAs
+- `Header.jsx` glassmorphism (`bg-white/90 backdrop-blur-xl`)
+- `index.css`'e `@keyframes slideRight` + `.animate-slide-right` eklendi
+
+### Test Sonuçları (iteration_22.json)
+- Backend: 16/16 ✅ (UBL well-formed, tüm zorunlu UBL-TR alanları, smoke endpoints)
+- Frontend: 10/10 ✅ (mobil sticky CTA, "Stilini tamamla" image-only, drawer, footer accordion, header glass)
+- Manual QA pending: tek bir gerçek order üzerinde POST /api/orders/{id}/create-invoice tetikleyip canlı PDF link doğrulaması (operatör tarafından)
+
+
 ## Completed in Iteration 14 (2026-04-23) — FAZ 1 + FAZ 2 + FAZ 3
 
 ### FAZ 1 — TR Lokasyon (İl/İlçe)
