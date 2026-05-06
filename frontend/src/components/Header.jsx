@@ -124,25 +124,27 @@ export default function Header({ hideMenu = false }) {
       )}
 
       {/* Main Header */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
-        <div className="max-w-screen-2xl mx-auto px-4">
-          <div className="flex items-center h-14">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
+        <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
+          <div className="flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center">
               {!isCheckout && (
                 <>
-                  <button 
+                  <button
                     className="lg:hidden p-2 -ml-2"
                     onClick={() => setMobileMenuOpen(true)}
+                    aria-label="Menü"
+                    data-testid="mobile-menu-btn"
                   >
-                    <Menu size={22} />
+                    <Menu size={20} strokeWidth={1.4} />
                   </button>
 
                   <nav className="hidden lg:flex items-center gap-8">
                     {/* EN YENİLER */}
                     <Link
                       to="/kategori/en-yeniler"
-                      className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60"
+                      className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
                     >
                       EN YENİLER
                     </Link>
@@ -155,7 +157,7 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/kategori/giyim"
-                        className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60 flex items-center"
+                        className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 flex items-center"
                       >
                         GİYİM
                       </Link>
@@ -169,7 +171,7 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/kategori/aksesuar"
-                        className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60"
+                        className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
                       >
                         AKSESUAR
                       </Link>
@@ -178,7 +180,7 @@ export default function Header({ hideMenu = false }) {
                     {/* SALE */}
                     <Link
                       to="/kategori/sale"
-                      className="text-xs font-semibold tracking-wider uppercase py-4 hover:opacity-60 text-red-600"
+                      className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 text-red-700"
                     >
                       SALE
                     </Link>
@@ -187,25 +189,26 @@ export default function Header({ hideMenu = false }) {
               )}
             </div>
 
-            {/* Center: Logo */}
-            <Link to="/" className="flex-shrink-0">
-              <img src="/logo.webp" alt="FACETTE" className="h-8" />
+            {/* Center: Logo (text on mobile, image on desktop) */}
+            <Link to="/" className="flex-shrink-0" data-testid="header-logo">
+              <span className="md:hidden text-base tracking-[0.4em] font-light">FACETTE</span>
+              <img src="/logo.webp" alt="FACETTE" className="hidden md:block h-7" />
             </Link>
 
-            {/* Right: Icons */}
-            <div className="flex-1 flex items-center justify-end gap-3">
+            {/* Right: Icons (mobile: search + cart only; desktop: full set) */}
+            <div className="flex-1 flex items-center justify-end gap-1 md:gap-3">
               {!isCheckout && (
                 <>
-                  <button onClick={() => setSearchOpen(true)} className="p-1.5 hover:opacity-60">
-                    <Search size={18} strokeWidth={1.5} />
+                  <button onClick={() => setSearchOpen(true)} className="p-2 hover:opacity-60" aria-label="Ara" data-testid="search-btn">
+                    <Search size={18} strokeWidth={1.4} />
                   </button>
-                  <Link to={user ? "/hesabim" : "/giris"} className="p-1.5 hover:opacity-60">
-                    <User size={18} strokeWidth={1.5} />
+                  <Link to={user ? "/hesabim" : "/giris"} className="hidden md:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
+                    <User size={18} strokeWidth={1.4} />
                   </Link>
-                  <button onClick={() => setIsOpen(true)} className="p-1.5 hover:opacity-60 relative">
-                    <ShoppingBag size={18} strokeWidth={1.5} />
+                  <button onClick={() => setIsOpen(true)} className="p-2 hover:opacity-60 relative" aria-label="Sepet" data-testid="cart-btn">
+                    <ShoppingBag size={18} strokeWidth={1.4} />
                     {itemCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-black text-white text-[9px] rounded-full flex items-center justify-center">
+                      <span className="absolute top-0 right-0 min-w-[16px] h-4 px-1 bg-black text-white text-[9px] rounded-full flex items-center justify-center">
                         {itemCount}
                       </span>
                     )}
@@ -335,79 +338,94 @@ export default function Header({ hideMenu = false }) {
       {/* Mobile Menu */}
       {!isCheckout && (
         <div className={`mobile-menu ${mobileMenuOpen ? "open" : ""}`}>
-          <div className="flex items-center justify-between p-4 border-b">
-            <img src="/logo.webp" alt="FACETTE" className="h-5" />
-            <button onClick={() => setMobileMenuOpen(false)}><X size={22} /></button>
+          <div className="flex items-center justify-between px-5 h-14 border-b border-black/5">
+            <Link to="/" onClick={() => setMobileMenuOpen(false)}>
+              <span className="text-base tracking-[0.4em] font-light">FACETTE</span>
+            </Link>
+            <button onClick={() => setMobileMenuOpen(false)} className="-mr-2 p-2" aria-label="Kapat">
+              <X size={20} strokeWidth={1.4} />
+            </button>
           </div>
-          <nav className="p-4 overflow-y-auto h-[calc(100vh-60px)]">
-            {/* EN YENİLER */}
-            <Link 
-              to="/kategori/en-yeniler" 
-              className="block py-3 text-sm font-semibold tracking-wider uppercase border-b border-gray-100"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              EN YENİLER
-            </Link>
-
-            {/* GİYİM with subcategories */}
-            <div className="border-b border-gray-100">
-              <Link 
-                to="/kategori/giyim" 
-                className="block py-3 text-sm font-semibold tracking-wider uppercase"
+          <nav className="overflow-y-auto h-[calc(100vh-56px)] flex flex-col">
+            {/* Primary Categories */}
+            <div className="px-5 pt-6 pb-4">
+              <Link
+                to="/kategori/en-yeniler"
+                className="block py-3 text-sm tracking-[0.15em] uppercase font-light"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                GİYİM
+                En Yeniler
               </Link>
-              <div className="pl-4 pb-3">
-                {Object.entries(GIYIM_MENU).map(([category, items]) => (
-                  <div key={category} className="mb-3">
-                    <p className="text-xs font-bold text-gray-500 mb-1">{category}</p>
-                    {items.map((item) => (
-                      <Link 
-                        key={item.slug}
-                        to={`/kategori/${item.slug}`} 
-                        className="block py-1 text-sm text-gray-600"
-                        onClick={() => setMobileMenuOpen(false)}
-                      >
-                        {item.name}
-                      </Link>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            {/* AKSESUAR */}
-            <div className="border-b border-gray-100">
-              <Link 
-                to="/kategori/aksesuar" 
-                className="block py-3 text-sm font-semibold tracking-wider uppercase"
+              {/* GİYİM accordion */}
+              <details className="group border-t border-black/5">
+                <summary className="flex items-center justify-between py-3 cursor-pointer list-none">
+                  <span className="text-sm tracking-[0.15em] uppercase font-light">Giyim</span>
+                  <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
+                </summary>
+                <div className="pb-3 pl-1 space-y-3">
+                  {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                    <div key={category}>
+                      <p className="text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5">{category}</p>
+                      {items.map((item) => (
+                        <Link
+                          key={item.slug}
+                          to={`/kategori/${item.slug}`}
+                          className="block py-1.5 text-[13px] font-light text-black/75"
+                          onClick={() => setMobileMenuOpen(false)}
+                        >
+                          {item.name}
+                        </Link>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </details>
+
+              {/* AKSESUAR accordion */}
+              <details className="group border-t border-black/5">
+                <summary className="flex items-center justify-between py-3 cursor-pointer list-none">
+                  <span className="text-sm tracking-[0.15em] uppercase font-light">Aksesuar</span>
+                  <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
+                </summary>
+                <div className="pb-3 pl-1">
+                  {AKSESUAR_MENU.map((item) => (
+                    <Link
+                      key={item.slug}
+                      to={`/kategori/${item.slug}`}
+                      className="block py-1.5 text-[13px] font-light text-black/75"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+
+              <Link
+                to="/kategori/sale"
+                className="block py-3 text-sm tracking-[0.15em] uppercase font-light text-red-700 border-t border-black/5"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                AKSESUAR
+                Sale
               </Link>
-              <div className="pl-4 pb-3">
-                {AKSESUAR_MENU.map((item) => (
-                  <Link 
-                    key={item.slug}
-                    to={`/kategori/${item.slug}`} 
-                    className="block py-1 text-sm text-gray-600"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    {item.name}
-                  </Link>
-                ))}
-              </div>
             </div>
 
-            {/* SALE */}
-            <Link 
-              to="/kategori/sale" 
-              className="block py-3 text-sm font-semibold tracking-wider uppercase text-red-600 border-b border-gray-100"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              SALE
-            </Link>
+            {/* Bottom: Account + Service */}
+            <div className="mt-auto px-5 py-6 bg-stone-50 border-t border-black/5 space-y-2.5">
+              <Link to={user ? "/hesabim" : "/giris"} className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
+                {user ? "Hesabım" : "Giriş Yap / Üye Ol"}
+              </Link>
+              <Link to="/siparis-takip" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
+                Sipariş Takibi
+              </Link>
+              <Link to="/sayfa/iletisim" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
+                İletişim
+              </Link>
+              <Link to="/sayfa/iade-kosullari" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
+                İade & Değişim
+              </Link>
+            </div>
           </nav>
         </div>
       )}

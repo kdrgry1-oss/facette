@@ -369,16 +369,19 @@ export default function Checkout() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+    <div className="min-h-screen bg-white" data-testid="checkout-page">
       <Header />
 
-      <div className="container-main py-6">
+      <div className="container-main py-6 md:py-10">
         {/* Top bar with SSL badge */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-medium">Sipariş Onayı</h1>
-          <div className="flex items-center gap-2 text-xs text-gray-600 bg-white px-3 py-1.5 rounded-full border">
-            <ShieldCheck size={14} className="text-green-600" />
-            <span><span className="font-bold text-green-700">SSL</span> Güvenli Ödeme</span>
+        <div className="flex items-center justify-between mb-8 md:mb-10">
+          <div>
+            <p className="text-[10px] tracking-[0.3em] uppercase text-black/50 mb-1.5">Ödeme</p>
+            <h1 className="text-xl md:text-2xl font-light tracking-tight">Sipariş Onayı</h1>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-black/60">
+            <ShieldCheck size={13} className="text-emerald-700" strokeWidth={1.6} />
+            <span>SSL Güvenli</span>
           </div>
         </div>
 
@@ -387,7 +390,7 @@ export default function Checkout() {
             {/* SOL — %75 */}
             <div className="lg:col-span-9 space-y-4">
               {/* 1) Sepetimdeki Ürünler — collapsible */}
-              <div className="bg-white rounded border" data-testid="cart-summary-block">
+              <div className="bg-white border border-black/10" data-testid="cart-summary-block">
                 <button type="button" onClick={() => setCartCollapsed((v) => !v)}
                   className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-center gap-3">
@@ -429,7 +432,7 @@ export default function Checkout() {
               </div>
 
               {/* 2) Adres */}
-              <div className="bg-white rounded border" data-testid="address-block">
+              <div className="bg-white border border-black/10" data-testid="address-block">
                 <div className="px-5 py-4 border-b flex items-center gap-3">
                   <MapPin size={18} className="text-stone-900" />
                   <span className="font-medium">Teslimat Adresi</span>
@@ -490,7 +493,7 @@ export default function Checkout() {
               </div>
 
               {/* 2.b) Kurumsal Fatura */}
-              <div className="bg-white rounded border" data-testid="corporate-invoice-block">
+              <div className="bg-white border border-black/10" data-testid="corporate-invoice-block">
                 <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
@@ -540,7 +543,7 @@ export default function Checkout() {
               </div>
 
               {/* 3) Ödeme Seçenekleri */}
-              <div className="bg-white rounded border" data-testid="payment-block">
+              <div className="bg-white border border-black/10" data-testid="payment-block">
                 <div className="px-5 py-4 border-b">
                   <span className="font-medium">Ödeme Seçenekleri</span>
                 </div>
@@ -597,7 +600,7 @@ export default function Checkout() {
               </div>
 
               {/* 4) Hediye */}
-              <div className="bg-white rounded border" data-testid="gift-options-section">
+              <div className="bg-white border border-black/10" data-testid="gift-options-section">
                 <div className="px-5 py-4 border-b"><span className="font-medium">Hediye Seçenekleri</span></div>
                 <div className="p-5 space-y-3">
                   <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
@@ -621,7 +624,7 @@ export default function Checkout() {
 
             {/* SAĞ — %25 — Sticky Order Summary */}
             <div className="lg:col-span-3">
-              <div className="bg-white rounded border sticky top-24">
+              <div className="bg-white border border-black/10 sticky top-24">
                 <div className="px-5 py-4 border-b">
                   <span className="font-medium">Sipariş Özeti</span>
                 </div>

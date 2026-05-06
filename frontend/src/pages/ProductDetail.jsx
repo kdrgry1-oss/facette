@@ -420,36 +420,55 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* Combo Products — "Stilini Tamamla" (sadece görsel + hover overlay) */}
+        {/* Combo Products — Suud Collection stili: image + bookmark + name + price */}
         {comboProducts.length > 0 && (
-          <section className="mt-16 md:mt-20 pt-10 md:pt-12 border-t border-black/10" data-testid="product-combo-section">
-            <div className="mb-6 md:mb-8">
-              <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">Bu Ürünle Yakışanlar</p>
-              <h2 className="text-xl sm:text-2xl font-light tracking-tight">Stilini tamamla</h2>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+          <section className="mt-12 md:mt-16 pt-8 md:pt-10 border-t border-black/10" data-testid="product-combo-section">
+            <h2 className="text-lg md:text-xl font-light tracking-tight mb-6 md:mb-8">Görünümü Tamamla</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
               {comboProducts.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
+                const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
-                  <Link
-                    key={p.id}
-                    to={`/urun/${p.slug || p.id}`}
-                    className="group relative block overflow-hidden bg-stone-100 aspect-[3/4]"
-                    data-testid={`combo-product-${p.id}`}
-                    aria-label={p.name}
-                  >
-                    <img
-                      src={img}
-                      alt={p.name}
-                      className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
-                      loading="lazy"
-                    />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3 sm:p-4">
-                      <span className="text-white text-[10px] uppercase tracking-[0.25em] translate-y-3 group-hover:translate-y-0 transition-transform duration-300 ease-out">
-                        Detayı gör
-                      </span>
+                  <div key={p.id} className="group relative" data-testid={`combo-product-${p.id}`}>
+                    <Link
+                      to={`/urun/${p.slug || p.id}`}
+                      className="block relative overflow-hidden bg-stone-100 aspect-[3/4]"
+                      aria-label={p.name}
+                    >
+                      <img
+                        src={img}
+                        alt={p.name}
+                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
+                        loading="lazy"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center bg-white/0 hover:bg-white/80 transition-colors"
+                        aria-label="Favorilere ekle"
+                      >
+                        <Bookmark size={16} strokeWidth={1.4} className="text-black/80" />
+                      </button>
+                    </Link>
+                    <div className="mt-2.5">
+                      <Link
+                        to={`/urun/${p.slug || p.id}`}
+                        className="block text-xs md:text-sm font-light text-black/85 line-clamp-1 hover:underline"
+                      >
+                        {p.name}
+                      </Link>
+                      <div className="flex items-baseline gap-2 mt-1">
+                        {hasDiscount ? (
+                          <>
+                            <span className="text-xs md:text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                            <span className="text-xs md:text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                          </>
+                        ) : (
+                          <span className="text-xs md:text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                        )}
+                      </div>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
