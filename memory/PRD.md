@@ -20,6 +20,42 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul
+
+### Kullanıcı Verbatim Talepleri (Hepsi Karşılandı ✅)
+1. **"Combo ürünler suudcollection.com gibi görünsün"** → Image+Bookmark+Name+Price 4-sütun grid
+2. **"Tüm fontlar Muli (Mulish), çoğunlukla ince"** → Mulish 200/300/400, body weight 300 default
+3. **"Mobilde logo+search+menü görünümleri hoşa gitmiyor"** → Header sadeleştirildi
+4. **"Mobil menü kalabalık"** → Accordion (default kapalı) + alt hesap linkleri
+5. **"Ödeme sayfası karışık"** → bg-white, sharp edges, light typography
+
+### Değişiklikler
+- **`index.css`**: Manrope kaldırıldı, **Mulish** yüklendi (200-800), body default font-weight 300, override `.font-medium → 400`, `.font-semibold → 500`, `.font-bold → 600`
+- **`ProductDetail.jsx` & `Cart.jsx`**: Combo/suggestion bloğu Suud Collection stili — image + Bookmark icon (top-right) + product name (line-clamp-1) + price (with optional crossed-out original). Başlık: **"Görünümü Tamamla"**
+- **`Header.jsx`**: 
+  - Desktop nav font-weight light + tracking-[0.2em]
+  - Mobile: text logo "FACETTE" (md:hidden), image logo (hidden md:block) — ayrım net
+  - Mobile: account ikonu kaldırıldı (hidden md:inline-flex), kalan: hamburger / logo / search / cart
+  - Mobile menü: 4 ana kategori (En Yeniler / Giyim / Aksesuar / Sale), Giyim + Aksesuar `<details>` accordion default kapalı, alt'ta bg-stone-50 panel'de Giriş/Sipariş/İletişim/İade linkleri
+- **`Checkout.jsx`**: 
+  - bg-gray-50 → bg-white
+  - "Sipariş Onayı" başlık font-medium → font-light tracking-tight + üst caption "ÖDEME"
+  - SSL pill → minimal text "SSL Güvenli"
+  - Tüm `bg-white rounded border` → `bg-white border border-black/10` (sharp edges, tema tutarlı)
+
+### Test (iteration_23.json — 7/7 ✅)
+- body font-family Mulish, weight 300; Checkout h1 weight 200
+- Combo "Görünümü Tamamla" + 4 ürün Suud formatında render
+- Mobile menu: 4 üst kategori, Giyim/Aksesuar accordions default closed → click ile açılıyor
+- Mobile account icon hidden, FACETTE text logo visible
+- Checkout bg white, cards radius 0px
+
+### Kritik Code Review Notları (Major Risk DEĞİL)
+- ProductDetail dedup: allImages[0]===allImages[1] dedupping; Set ile genişletilebilir
+- Cart useEffect deps sadece `items.length` — quantity changes suggestions'ı refresh etmiyor (kabul edilebilir)
+- Header useEffect popularSearches.length deps eksik (eslint suppression yok ama warning vermiyor)
+
+
 ## Iteration 24 (2026-05-06) — Bug Fixes: MNG TR Encoding + Combo Endpoint + UTF-8
 
 ### P0 — MNG Kargo Türkçe Karakter Bozulması Düzeltildi ✅
