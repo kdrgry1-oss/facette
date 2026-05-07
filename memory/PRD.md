@@ -21,6 +21,54 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 28 (2026-05-07) — Page Blocks Yönetimi + MNG Webhook Tamamlandı
+
+### 🟡 P1.1 — Admin Sayfa Tasarımı (page-blocks)
+**Tespit edilen bug**: `cms.py` seed-default-home `two_banners` type kullanıyordu ama Home.jsx BlockRenderer ve PageDesign.jsx BLOCK_TYPES `half_banners` bekliyordu → orta blok hiç render edilmiyordu.
+
+**Yapılanlar:**
+- Seed default'ı düzeltildi: `two_banners` → `half_banners`
+- DB migration yapıldı: 1 mevcut block tipi `half_banners`'a güncellendi
+- Yeni endpoint `POST /api/page-blocks/reorder` (body: `{ids: [...]}`) — bulk drag-drop reorder, tek seferde sort_order=1,2,3,... atar
+- `PageDesign.jsx` save-order artık 5 paralel PUT yerine tek POST/reorder kullanıyor (hızlı + atomik)
+- PUT field whitelist eklendi (id/created_at override engellendi — security önerisi)
+- Mevcut UI zaten tam fonksiyonel: drag-drop dnd-kit, mobile/desktop iframe preview, image upload, product picker, all 8 block types
+
+### 🟡 P1.2 — MNG Kargo Webhook
+**Mevcut:** `POST /api/orders/cargo/mng-webhook` (orders.py:1529) zaten yazılı + status_map dolu.
+
+**Doğrulanan:**
+- BARKOD veya REFERANS_NO ile sipariş eşleşme
+- Status mapping: 100=preparing, 200/300=shipped, 400=delivered+delivered_at, 500=returned
+- `cargo_status_history` push (audit trail)
+- `integration_logs` collection log
+- Auth-free (public endpoint, MNG için)
+- Bilinmeyen barkodlar sessizce loglanıyor (MNG retry yapmasın)
+
+**Yeni:** ProviderSettings.jsx'e MNG seçildiğinde **webhook URL info kartı** eklendi:
+- URL: `{BACKEND}/api/orders/cargo/mng-webhook` (kopyala butonuyla)
+- Beklenen payload örneği (ISLEM_KODU 100/200/300/400/500)
+- MNG paneline tanımlanması için admin'e talimat
+
+### Test Status
+- testing_agent_v3_fork iteration 24 → **12/12 passed**, 1 skipped (non-bug)
+- Test dosyası: `/app/backend/tests/test_iteration24_pageblocks_mng_webhook.py`
+- Page blocks: GET sort, POST/PUT/DELETE/reorder/seed all pass + admin auth enforced
+- MNG webhook: 400 hata, unknown silent log, 200/300/400 status updates, history push, integration_logs ✅
+
+### Files Modified
+- `/app/backend/routes/cms.py` (half_banners fix + reorder endpoint + PUT whitelist)
+- `/app/frontend/src/pages/admin/PageDesign.jsx` (save-order bulk endpoint)
+- `/app/frontend/src/components/admin/ProviderSettings.jsx` (MNG webhook info card)
+
+### MNG Webhook URL (admin'e tanımlatılacak)
+```
+https://kombin-shop.preview.emergentagent.com/api/orders/cargo/mng-webhook
+```
+(Production'da REACT_APP_BACKEND_URL'a göre değişir; UI'da auto-render ediliyor)
+
+
+
 ## Iteration 27 (2026-05-07) — Ticimax Sipariş Verilerinin Düzeltilmesi + Account Sayfası Yenilendi
 
 ### 🔴 P0 Critical Bug Fix — Ticimax Pagination + Cron Parser

@@ -58,14 +58,18 @@ async def update_page_block(
     block_data: dict,
     current_user: dict = Depends(require_admin)
 ):
-    """Update page block (admin only)"""
+    """Update page block (admin only).
+    Whitelist'li güncelleme: id, created_at gibi sistem alanları override edilemez.
+    """
     existing = await db.page_blocks.find_one({"id": block_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Blok bulunamadı")
-    
-    block_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    await db.page_blocks.update_one({"id": block_id}, {"$set": block_data})
+
+    allowed = {"type", "title", "images", "links", "settings", "page", "sort_order", "is_active"}
+    update_set = {k: v for k, v in block_data.items() if k in allowed}
+    update_set["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.page_blocks.update_one({"id": block_id}, {"$set": update_set})
     return {"message": "Blok güncellendi"}
 
 @router.delete("/{block_id}")
