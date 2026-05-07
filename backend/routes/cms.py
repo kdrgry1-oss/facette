@@ -46,6 +46,8 @@ async def create_page_block(
         "page": block_data.get("page", "home"),
         "sort_order": block_data.get("sort_order", 0),
         "is_active": block_data.get("is_active", True),
+        "show_desktop": block_data.get("show_desktop", True),
+        "show_mobile": block_data.get("show_mobile", True),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -65,7 +67,7 @@ async def update_page_block(
     if not existing:
         raise HTTPException(status_code=404, detail="Blok bulunamadı")
 
-    allowed = {"type", "title", "images", "links", "settings", "page", "sort_order", "is_active"}
+    allowed = {"type", "title", "images", "links", "settings", "page", "sort_order", "is_active", "show_desktop", "show_mobile"}
     update_set = {k: v for k, v in block_data.items() if k in allowed}
     update_set["updated_at"] = datetime.now(timezone.utc).isoformat()
 

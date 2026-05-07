@@ -553,6 +553,49 @@ async def list_campaigns(current_user: dict = Depends(require_admin)):
     return {"items": items}
 
 
+@email_admin_router.post("/send-to-emails")
+async def send_to_emails(payload: dict, current_user: dict = Depends(require_admin)):
+    """RFM segment vb. dinamik liste için gönderim.
+
+    Body:
+      {
+        "emails": ["a@b.com", "c@d.com"],   // zorunlu
+        "subject": "Konu",
+        "html": "<p>...</p>",
+        "segment_label": "VIP / Şampiyon"   // opsiyonel — kayıt için
+      }
+    """
+    emails = payload.get("emails") or []
+    if not isinstance(emails, list):
+        raise HTTPException(status_code=400, detail="emails listesi gerekli")
+    subject = (payload.get("subject") or "").strip()
+    html = (payload.get("html") or "").strip()
+    if not subject or not html:
+        raise HTTPException(status_code=400, detail="Konu ve HTML içerik zorunlu")
+    # E-posta validasyonu + dedupe
+    valid = list({e.strip().lower() for e in emails if e and "@" in e})
+    if not valid:
+        raise HTTPException(status_code=400, detail="Geçerli e-posta yok")
+    if len(valid) > 5000:
+        raise HTTPException(status_code=400, detail="Maks 5000 alıcı")
+
+    success, failed, errors = await _send_email_via_resend(valid, subject, html)
+    record = {
+        "id": str(uuid.uuid4()),
+        "subject": subject,
+        "segment": payload.get("segment_label") or "custom",
+        "recipient_count": len(valid),
+        "success": success,
+        "failed": failed,
+        "errors": errors[:5],
+        "sent_at": _now(),
+        "sent_by": current_user.get("email", ""),
+    }
+    await db.email_campaigns.insert_one(record)
+    record.pop("_id", None)
+    return {"success": True, "result": record}
+
+
 # ---------- Currency Rates ----------
 currency_router = APIRouter(prefix="/admin/currency", tags=["admin-currency"])
 

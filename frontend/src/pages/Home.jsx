@@ -238,26 +238,26 @@ function RotatingText({ block }) {
 
 // Block Renderer
 function BlockRenderer({ block, products }) {
+  let component = null;
   switch (block.type) {
-    case "hero_slider":
-      return <HeroSlider block={block} />;
-    case "full_banner":
-      return <FullBanner block={block} />;
-    case "half_banners":
-      return <HalfBanners block={block} />;
-    case "product_slider":
-      return <ProductSlider block={block} products={products} />;
-    case "instashop":
-      return <InstaShop block={block} />;
-    case "text_block":
-      return <TextBlock block={block} />;
-    case "video_banner":
-      return <VideoBanner block={block} />;
-    case "rotating_text":
-      return <RotatingText block={block} />;
-    default:
-      return null;
+    case "hero_slider":   component = <HeroSlider block={block} />; break;
+    case "full_banner":   component = <FullBanner block={block} />; break;
+    case "half_banners":  component = <HalfBanners block={block} />; break;
+    case "product_slider":component = <ProductSlider block={block} products={products} />; break;
+    case "instashop":     component = <InstaShop block={block} />; break;
+    case "text_block":    component = <TextBlock block={block} />; break;
+    case "video_banner":  component = <VideoBanner block={block} />; break;
+    case "rotating_text": component = <RotatingText block={block} />; break;
+    default: return null;
   }
+  // Cihaz görünürlüğü — show_desktop / show_mobile false ise tailwind ile gizle
+  const showDesktop = block.show_desktop !== false;
+  const showMobile  = block.show_mobile  !== false;
+  if (!showDesktop && !showMobile) return null;
+  let visClass = "";
+  if (!showDesktop) visClass = "md:hidden";       // sadece mobil
+  else if (!showMobile) visClass = "hidden md:block"; // sadece masaüstü
+  return visClass ? <div className={visClass}>{component}</div> : component;
 }
 
 export default function Home() {

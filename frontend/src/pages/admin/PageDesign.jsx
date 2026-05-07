@@ -102,6 +102,16 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggleActive, getBlockTy
             }`}>
               {block.is_active ? 'Yayında' : 'Taslak'}
             </span>
+            {block.show_desktop === false && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" title="Masaüstünde gizli">
+                🖥️ Gizli
+              </span>
+            )}
+            {block.show_mobile === false && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" title="Mobilde gizli">
+                📱 Gizli
+              </span>
+            )}
           </div>
           <h3 className="font-medium truncate">{block.title || "Başlıksız"}</h3>
           <p className="text-sm text-gray-500">
@@ -488,6 +498,8 @@ export default function PageDesign() {
       settings: block.settings || {},
       sort_order: block.sort_order || 0,
       is_active: block.is_active ?? true,
+      show_desktop: block.show_desktop !== false,
+      show_mobile: block.show_mobile !== false,
       page: block.page || "home"
     });
     setModalOpen(true);
@@ -503,6 +515,8 @@ export default function PageDesign() {
       settings: { texts: [""] },
       sort_order: 0,
       is_active: true,
+      show_desktop: true,
+      show_mobile: true,
       page: "home"
     });
     setProductSearch("");
@@ -745,6 +759,32 @@ export default function PageDesign() {
                 <span className="text-sm">Yayında (Ana sayfada müşterilere göster)</span>
               </label>
               <p className="text-xs text-gray-500 ml-6 block w-full">- Seçilmezse "Taslak" olur, sadece önizlemede görünür.</p>
+            </div>
+
+            {/* Visibility Toggles (Mobile / Desktop) */}
+            <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-600 mb-2">Cihaz Görünürlüğü</p>
+              <div className="flex items-center gap-6 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer" data-testid="block-show-desktop">
+                  <input
+                    type="checkbox"
+                    checked={formData.show_desktop !== false}
+                    onChange={(e) => setFormData({ ...formData, show_desktop: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">🖥️ Masaüstünde Göster</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer" data-testid="block-show-mobile">
+                  <input
+                    type="checkbox"
+                    checked={formData.show_mobile !== false}
+                    onChange={(e) => setFormData({ ...formData, show_mobile: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">📱 Mobilde Göster</span>
+                </label>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2">İkisi de seçili değilse blok hiçbir cihazda görünmez (etkin olarak gizlenir).</p>
             </div>
 
             {/* Dynamic Block Settings */}

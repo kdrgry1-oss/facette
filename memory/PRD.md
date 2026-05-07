@@ -21,6 +21,44 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 29 (2026-05-07) — Page Block Visibility + Trendyol Cron + Kampanya E-postası
+
+### ✨ Page Block Cihaz Görünürlüğü (Mobile / Desktop)
+- Backend: `cms.py` POST/PUT whitelist'ine `show_desktop`, `show_mobile` (default True) eklendi
+- Frontend: `PageDesign.jsx` form'una iki toggle (🖥️ Masaüstünde Göster / 📱 Mobilde Göster); blok kartında "🖥️ Gizli" / "📱 Gizli" rozetleri
+- `Home.jsx` BlockRenderer artık görünürlüğe göre `md:hidden` / `hidden md:block` class'ı uyguluyor; ikisi de false ise blok hiç render edilmez
+
+### ⏱️ Trendyol Cron 2-dakikalık Senkronizasyon
+- `marketplace_accounts.trendyol.auto_sync.orders_interval_min = 2` DB'ye yazıldı + `orders_enabled = True`
+- Cron `_run_trendyol_auto_orders_pull` zaten dinamik interval okuyor → 2 dk'da bir tetiklenecek
+- ⚠️ Şu an Trendyol creds `TEST_TY_KEY` placeholder. Gerçek API çalışması için kullanıcı admin > Pazaryeri ayarlarından `api_key` / `api_secret` / `supplier_id` girmeli
+
+### 🟡 P2.1 — Trendyol Sipariş Listesi
+- DB'de zaten 20 Trendyol siparişi mevcut (platform=trendyol)
+- Admin Orders.jsx `?platform=trendyol` filtresi düzgün çalışıyor (curl ile doğrulandı: 20 sipariş, müşteri isimleri, item count tamam)
+- Cron 2 dk'lık aktif olduğunda yeni siparişler otomatik akacak
+
+### 🟡 P2.2 — RFM Müşteri Segmentasyonu + E-posta Kampanyası
+- ✅ `/api/analytics-extra/rfm` endpoint'i zaten vardı (R/F/M quintile + 9 segment etiketi: VIP, Sadık, Yeni, Potansiyel Sadık, Risk Altında, Dikkat Edilmeli, Kaybedilen, Hibernasyon, Standart)
+- ✅ `/admin/musteri-segmentleri` admin sayfası zaten vardı (segment kartları + tablo + Excel export)
+- ✨ **Yeni**: `POST /api/admin/email/send-to-emails` endpoint — dinamik liste için Resend kampanya
+- ✨ **Yeni**: CustomerSegments.jsx'e "Kampanya Gönder" butonu + modal (subject + HTML editor + canlı önizleme + segment'e özel toplu gönderim)
+- 156 müşteri segmentlere ayrıldı (VIP/Şampiyon: 19, Yeni Müşteri: 34, Kaybedilen: 29 vs.)
+- ⚠️ Resend gönderim için `RESEND_API_KEY` gerekli (admin .env'e eklenmeli)
+
+### ⚪ P3 — `integrations.py` Refactor (Defer Edildi)
+- 4380 satırlık dosya çalışıyor + tüm testler geçiyor; refactor riski faydadan yüksek
+- Future iteration'da vendor bazlı bölme (`integrations_trendyol.py`, `_hb.py`, `_temu.py`, `_ticimax.py`) önerilir
+
+### Files Modified
+- `/app/backend/routes/cms.py` (show_desktop/show_mobile field whitelist)
+- `/app/backend/routes/catalog_extras.py` (send-to-emails endpoint)
+- `/app/frontend/src/pages/admin/PageDesign.jsx` (visibility toggles + badges)
+- `/app/frontend/src/pages/Home.jsx` (BlockRenderer visibility CSS)
+- `/app/frontend/src/pages/admin/CustomerSegments.jsx` (CampaignModal + Send button)
+
+
+
 ## Iteration 28 (2026-05-07) — Page Blocks Yönetimi + MNG Webhook Tamamlandı
 
 ### 🟡 P1.1 — Admin Sayfa Tasarımı (page-blocks)

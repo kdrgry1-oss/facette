@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Users, Trophy, HeartPulse, Rocket, AlertOctagon, UserMinus, Search, Download } from "lucide-react";
+import { Users, Trophy, HeartPulse, Rocket, AlertOctagon, UserMinus, Search, Download, Mail, X, Send } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -31,6 +31,7 @@ export default function CustomerSegments() {
   const [lookback, setLookback] = useState(365);
   const [search, setSearch] = useState("");
   const [segmentFilter, setSegmentFilter] = useState("");
+  const [campaignOpen, setCampaignOpen] = useState(false);
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -95,6 +96,11 @@ export default function CustomerSegments() {
           <button onClick={exportCsv} disabled={!filtered.length}
             className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
             <Download size={14} /> Excel'e Aktar
+          </button>
+          <button onClick={() => setCampaignOpen(true)} disabled={!filtered.length}
+            data-testid="open-campaign-btn"
+            className="flex items-center gap-1 px-3 py-2 bg-black hover:bg-gray-800 text-white rounded-lg text-sm disabled:opacity-50">
+            <Mail size={14} /> Kampanya Gönder ({filtered.length})
           </button>
         </div>
       </div>
@@ -187,6 +193,127 @@ export default function CustomerSegments() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Kampanya Gönder Modal */}
+      {campaignOpen && (
+        <CampaignModal
+          recipients={filtered.map((i) => i.email).filter(Boolean)}
+          segmentLabel={segmentFilter || "Tüm Filtrelenenler"}
+          onClose={() => setCampaignOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ───────────────────────── CampaignModal ───────────────────────── */
+
+function CampaignModal({ recipients, segmentLabel, onClose }) {
+  const [subject, setSubject] = useState("");
+  const [html, setHtml] = useState(
+    `<div style="font-family:Mulish,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px;color:#000;">\n  <h1 style="font-size:22px;font-weight:300;letter-spacing:0.05em;margin-bottom:16px;">Merhaba,</h1>\n  <p style="font-size:14px;line-height:1.6;color:#333;">\n    Sizin için özel bir teklifimiz var...\n  </p>\n  <a href="https://kombin-shop.preview.emergentagent.com" style="display:inline-block;background:#000;color:#fff;padding:14px 32px;text-decoration:none;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-top:16px;">Alışverişe Başla</a>\n</div>`
+  );
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+  const token = localStorage.getItem("token");
+
+  const send = async () => {
+    if (!subject.trim() || !html.trim()) {
+      toast.error("Konu ve HTML içerik zorunlu");
+      return;
+    }
+    if (!recipients.length) {
+      toast.error("Alıcı yok");
+      return;
+    }
+    setSending(true);
+    try {
+      const r = await axios.post(`${API}/admin/email/send-to-emails`,
+        { emails: recipients, subject: subject.trim(), html: html.trim(), segment_label: segmentLabel },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setResult(r.data.result);
+      if (r.data.result?.success > 0) {
+        toast.success(`${r.data.result.success} e-posta başarıyla gönderildi`);
+      } else if (r.data.result?.failed > 0) {
+        toast.error(`Hepsi başarısız (${r.data.result.errors?.[0] || "Bilinmiyor"})`);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gönderim başarısız");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" data-testid="campaign-modal">
+      <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h3 className="text-lg font-bold flex items-center gap-2">
+            <Mail size={18} /> Kampanya Gönder
+            <span className="text-sm font-normal text-gray-500">→ {segmentLabel}</span>
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+            <strong>{recipients.length}</strong> alıcıya gönderilecek
+            <span className="text-xs text-blue-700 block mt-1">
+              {recipients.slice(0, 3).join(", ")}{recipients.length > 3 ? `, +${recipients.length - 3} daha` : ""}
+            </span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">E-posta Konusu</label>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)}
+              placeholder="Örn: VIP müşterilerimize özel %20 indirim"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-black"
+              data-testid="campaign-subject" />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold uppercase tracking-wider text-gray-600">HTML İçerik</label>
+              <span className="text-[10px] text-gray-400">Mulish font + minimal stil önerilir</span>
+            </div>
+            <textarea value={html} onChange={(e) => setHtml(e.target.value)}
+              rows={10}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-black"
+              data-testid="campaign-html" />
+          </div>
+
+          {/* Önizleme */}
+          <details className="border border-gray-200 rounded-lg">
+            <summary className="px-3 py-2 cursor-pointer text-sm font-medium hover:bg-gray-50">📧 Önizleme</summary>
+            <div className="p-3 bg-gray-50 border-t" dangerouslySetInnerHTML={{ __html: html }} />
+          </details>
+
+          {result && (
+            <div className={`rounded-lg p-3 text-sm border ${result.success > 0 ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"}`}>
+              ✅ Başarılı: <strong>{result.success}</strong> &nbsp;·&nbsp;
+              ❌ Başarısız: <strong>{result.failed}</strong>
+              {result.errors?.length > 0 && (
+                <ul className="text-xs mt-2 space-y-0.5">
+                  {result.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 p-5 border-t bg-gray-50">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-white">
+            Kapat
+          </button>
+          <button onClick={send} disabled={sending || !!result}
+            data-testid="campaign-send-btn"
+            className="flex items-center gap-2 px-5 py-2 bg-black hover:bg-gray-800 text-white rounded-lg text-sm disabled:opacity-50">
+            <Send size={14} />
+            {sending ? "Gönderiliyor..." : result ? "Gönderildi" : `${recipients.length} Kişiye Gönder`}
+          </button>
+        </div>
       </div>
     </div>
   );
