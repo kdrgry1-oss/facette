@@ -363,6 +363,11 @@ export default function ProviderSettings({ kind, title, subtitle }) {
                 ))}
               </div>
 
+              {/* MNG Webhook Info - sadece kind=cargo + provider=mng için */}
+              {kind === "cargo" && (activeKey === "mng" || activeKey === "mng_kargo") && (
+                <MngWebhookInfo />
+              )}
+
               <p className="text-[11px] text-gray-400 mt-6 border-t pt-4">
                 Şifre ve API anahtarları şifreli saklanmalıdır. Bu sayfadan
                 sadece yetkili yöneticiler (admin) erişebilir. Gerçek bağlantı
@@ -373,6 +378,63 @@ export default function ProviderSettings({ kind, title, subtitle }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * MngWebhookInfo — MNG Kargo durum güncelleme webhook URL'ini gösterir.
+ * Admin bu URL'i MNG paneline tanımlar; kargo durumu değiştiğinde sipariş
+ * otomatik `shipped`/`delivered` durumuna geçer.
+ */
+function MngWebhookInfo() {
+  const url = `${process.env.REACT_APP_BACKEND_URL}/api/orders/cargo/mng-webhook`;
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success("Webhook URL kopyalandı");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Kopyalanamadı");
+    }
+  };
+  return (
+    <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg" data-testid="mng-webhook-info">
+      <h3 className="text-sm font-semibold text-amber-900 mb-2">📡 MNG Kargo Durum Güncelleme Webhook</h3>
+      <p className="text-xs text-amber-800 mb-3 leading-relaxed">
+        MNG paneline / entegrasyon ekibine aşağıdaki URL'i tanımlatın. Kargo durumu değiştiğinde MNG bu adrese POST isteği gönderir
+        ve sipariş otomatik olarak <code className="bg-amber-100 px-1 rounded">shipped</code> / <code className="bg-amber-100 px-1 rounded">delivered</code> durumuna geçer.
+      </p>
+      <div className="flex items-center gap-2 mb-3">
+        <code className="flex-1 bg-white border border-amber-200 rounded px-3 py-2 text-xs font-mono text-gray-800 select-all break-all">
+          {url}
+        </code>
+        <button
+          onClick={copy}
+          className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded font-medium whitespace-nowrap transition-colors"
+          data-testid="copy-mng-webhook-btn"
+        >
+          {copied ? "✓ Kopyalandı" : "Kopyala"}
+        </button>
+      </div>
+      <details className="text-xs text-amber-800">
+        <summary className="cursor-pointer font-medium hover:underline">Beklenen payload formatı (örnek)</summary>
+        <pre className="mt-2 bg-white border border-amber-200 rounded p-2 overflow-x-auto font-mono text-[11px]">
+{`{
+  "BARKOD": "OA341862",        // MNG kargo barkodu
+  "ISLEM_KODU": "300",         // 100/200/300/400/500
+  "ISLEM_ADI": "Dağıtımda",
+  "TARIH": "2026-05-07T22:30:00",
+  "REFERANS_NO": "FC1777948407" // Sipariş numarası (opsiyonel)
+}`}
+        </pre>
+        <p className="mt-2">
+          <strong>İşlem kodları:</strong>
+          <span className="ml-2">100=Şubeye Girdi, 200=Transferde, 300=Dağıtımda, 400=Teslim Edildi, 500=İade</span>
+        </p>
+      </details>
     </div>
   );
 }

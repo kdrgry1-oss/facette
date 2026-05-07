@@ -80,6 +80,28 @@ async def delete_page_block(
     return {"message": "Blok silindi"}
 
 
+@router.post("/reorder")
+async def reorder_page_blocks(
+    payload: dict,
+    current_user: dict = Depends(require_admin)
+):
+    """Toplu sıralama güncellemesi.
+    Body: { "ids": ["id1", "id2", "id3", ...] } — listedeki sıraya göre sort_order=1,2,3,... atanır.
+    Tek tek PUT'a gerek kalmadan hızlı sürükle-bırak kaydetmeyi sağlar.
+    """
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="ids listesi gerekli")
+    now = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    for idx, bid in enumerate(ids, start=1):
+        r = await db.page_blocks.update_one(
+            {"id": bid}, {"$set": {"sort_order": idx, "updated_at": now}}
+        )
+        updated += r.modified_count
+    return {"success": True, "updated": updated, "total": len(ids)}
+
+
 @router.post("/seed-default-home")
 async def seed_default_home_blocks(
     overwrite: bool = Query(False),
@@ -121,7 +143,7 @@ async def seed_default_home_blocks(
             "sort_order": 2,
         },
         {
-            "type": "two_banners",
+            "type": "half_banners",
             "title": "İki Banner",
             "images": [
                 f"{base}/title-65777bd3-0.jpg",

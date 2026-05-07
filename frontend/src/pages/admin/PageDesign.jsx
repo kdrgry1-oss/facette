@@ -271,15 +271,11 @@ export default function PageDesign() {
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
-      
-      // Update each block's sort_order
-      await Promise.all(blocks.map((block, index) => 
-        axios.put(`${API}/page-blocks/${block.id}`, {
-          ...block,
-          sort_order: index + 1
-        }, { headers }).catch(() => {})
-      ));
-      
+      // Bulk reorder — tek API call
+      await axios.post(`${API}/page-blocks/reorder`,
+        { ids: blocks.map(b => b.id) },
+        { headers }
+      );
       toast.success("Sıralama kaydedildi");
       setHasChanges(false);
       refreshPreview();
