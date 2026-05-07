@@ -506,12 +506,12 @@ export default function Integrations() {
     },
     {
       id: "mng",
-      name: "MNG Kargo",
+      name: "DHL E-Commerce",
       description: "Kargo takip, etiket basımı, gönderi oluşturma",
       icon: <Truck className="w-8 h-8" />,
       status: statuses.mng,
       color: "green",
-      instructions: "MNG Kargo Müşteri Portalı'ndan API kullanıcı + şifresi alınız.",
+      instructions: "DHL E-Commerce (eski MNG Kargo) Müşteri Portalı'ndan API kullanıcı + şifresi alınız.",
       envKeys: [],
       actions: [
         { label: "Ayarları Yapılandır", icon: <Truck size={16} />, onClick: () => fetchMarketplaceSettings('mng', setCargoSettings, (v) => { setActiveCargoProvider('mng'); setCargoModalOpen(v); }) },

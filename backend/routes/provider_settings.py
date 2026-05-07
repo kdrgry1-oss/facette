@@ -236,9 +236,9 @@ EINVOICE_PROVIDERS = {
 
 CARGO_PROVIDERS = {
     "mng": {
-        "name": "MNG Kargo",
+        "name": "DHL E-Commerce",
         "website": "https://www.mngkargo.com.tr",
-        "description": "MNG Kargo API entegrasyonu.",
+        "description": "DHL E-Commerce (eski MNG Kargo) API entegrasyonu.",
         "fields": [
             _f("customer_number", "Müşteri Numarası", required=True),
             _f("username", "Kullanıcı Adı", required=True),

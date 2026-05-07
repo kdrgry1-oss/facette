@@ -21,6 +21,71 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 30 (2026-05-08) — Countdown Bar + DHL Rebrand + Otomasyon Paneli
+
+### ⏱️ Yönetilebilir Geri Sayım Üst Barı (countdown_bar)
+**Yeni özellik**: Admin > Sayfa Tasarımı > "Geri Sayım Barı" bloğu — sitenin en üstünde tam yönetilebilir countdown.
+
+**Field'lar (settings JSON)**:
+- `left_text` — sol tarafta görünen metin (örn: "TÜM ALIŞVERİŞLERDE KARGO BEDAVA")
+- `timer_label` — sayaç etiketi (örn: "KALAN SÜRE:")
+- `start_at` — datetime-local; bu tarih gelene kadar bar GİZLİ (planlama)
+- `end_at` — datetime-local; countdown bitince bar otomatik kaybolur
+- `bg_color` / `text_color` — color picker
+- `fallback_text` — bar pasifken (start öncesi/end sonrası) gösterilecek metin
+
+**Akış**: now < start_at → fallback / now ∈ [start, end] → countdown / now > end → fallback. Reference image (facette.com.tr) ile birebir uyumlu görsel (sayı kutuları beyaz, GÜN/SAAT/DK/SN etiketli).
+
+**Files**:
+- NEW `/app/frontend/src/components/CountdownBar.jsx`
+- NEW form section + canlı önizleme: `PageDesign.jsx`
+- `Header.jsx` artık statik "500 TL Üzeri Ücretsiz Kargo" yerine `<CountdownBar/>` render ediyor (bar yoksa orijinal metin fallback)
+- `Home.jsx` BlockRenderer countdown_bar tipini skip ediyor (zaten Header'da)
+
+### 🚚 MNG Kargo → "DHL E-Commerce" Rebrand
+- Admin Orders.jsx: cargo provider listesi, action button title'ları, toast mesajları
+- Integrations.jsx: provider name + description
+- ProviderSettings.jsx: webhook info kartı başlığı + payload comment
+- provider_settings.py: provider name + description
+- Backend internal key `mng` korundu (API/DB compat)
+
+### 📊 Otomasyon Durumu Paneli (NEW: `/admin/otomasyon`)
+**Yeni özellik**: Admin tüm cron + senkron + entegrasyon durumlarını tek ekrandan görür.
+
+**Bölümler**:
+1. **Entegrasyon kartları** (4 adet): Ticimax / Doğan / Resend / Trendyol — yapılandırma durumu yeşil/gri
+2. **Aktif Cron İşleri**: APScheduler job listesi (id, interval, sıradaki çalışma + relative time)
+3. **Pazaryeri Senkron Ayarları**: Her marketplace için ürün + sipariş interval + son senkron zamanı
+4. **Log Özeti**: Son 100 log marketplace bazlı sayım (success/error/info)
+5. **Son Entegrasyon Logları**: 50 satırlık tablo (zaman, marketplace, action, status, mesaj)
+- Otomatik 30sn yenileme + manuel "Yenile" butonu
+- Sidebar > Entegrasyonlar > "Otomasyon Durumu" altında
+
+**Backend**: `GET /api/admin/automation/status?log_limit=N`
+**Files**: `automation_status.py` (NEW), `AutomationStatus.jsx` (NEW), `App.js` route, `AdminLayout.jsx` sidebar
+
+### Test Status
+- countdown_bar: ✅ Screenshot doğrulandı (referans `facette.com.tr` ile birebir aynı: "TÜM ALIŞVERİŞLERDE KARGO BEDAVA | KALAN SÜRE: 11 GÜN 13 SAAT 51 DK 30 SN")
+- automation status: ✅ Screenshot doğrulandı (4 cron, Trendyol AKTIF "Ürün: 5dk Sipariş: 2dk", 6 marketplace log)
+- DHL rebrand: ✅ Tüm UI'da "DHL E-Commerce" / "DHL" yazıyor
+
+### Files Modified
+- NEW `/app/backend/routes/automation_status.py`
+- NEW `/app/frontend/src/components/CountdownBar.jsx`
+- NEW `/app/frontend/src/pages/admin/AutomationStatus.jsx`
+- `/app/backend/server.py` (router include)
+- `/app/backend/routes/provider_settings.py` (DHL rename)
+- `/app/frontend/src/components/Header.jsx` (CountdownBar import)
+- `/app/frontend/src/pages/admin/PageDesign.jsx` (countdown_bar form + preview)
+- `/app/frontend/src/pages/admin/Orders.jsx` (DHL rename)
+- `/app/frontend/src/pages/admin/Integrations.jsx` (DHL rename)
+- `/app/frontend/src/components/admin/ProviderSettings.jsx` (DHL rename)
+- `/app/frontend/src/pages/Home.jsx` (countdown_bar skip)
+- `/app/frontend/src/App.js` (route)
+- `/app/frontend/src/pages/admin/AdminLayout.jsx` (sidebar)
+
+
+
 ## Iteration 29 (2026-05-07) — Page Block Visibility + Trendyol Cron + Kampanya E-postası
 
 ### ✨ Page Block Cihaz Görünürlüğü (Mobile / Desktop)

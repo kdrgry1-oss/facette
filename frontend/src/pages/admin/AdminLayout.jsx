@@ -138,6 +138,8 @@ const navigation = [
       { label: "Marka Eşleştirme", path: "/admin/marka-eslestir", icon: Store },
       // Multi-marketplace kategori eşleştirme
       { label: "Kategori Eşleştirme", path: "/admin/kategori-eslestir", icon: Store },
+      // Tüm cron + senkron + log özeti — admin görünürlüğü
+      { label: "Otomasyon Durumu", path: "/admin/otomasyon", icon: Cable },
     ],
   },
   {

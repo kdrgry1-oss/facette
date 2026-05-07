@@ -4,6 +4,7 @@ import { Search, User, ShoppingBag, Menu, X } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import CartDrawer from "./CartDrawer";
+import CountdownBar from "./CountdownBar";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -132,12 +133,8 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Top Banner */}
-      {!isCheckout && (
-        <div className="bg-black text-white text-center py-1.5 md:py-2">
-          <p className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">500 TL Üzeri Ücretsiz Kargo</p>
-        </div>
-      )}
+      {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
+      {!isCheckout && <CountdownBar />}
 
       {/* Main Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-black/5 transition-all duration-300">

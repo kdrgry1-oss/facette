@@ -28,6 +28,7 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const BLOCK_TYPES = [
+  { value: "countdown_bar", label: "Geri Sayım Barı (Üst Bar)", icon: "⏱️", description: "Sitenin EN ÜST'ünde, planlanabilir tarih/saatli countdown" },
   { value: "hero_slider", label: "Hero Slider", icon: "🎠", description: "Ana sayfa slider - Dönen görseller" },
   { value: "rotating_text", label: "Dönen Yazı", icon: "📢", description: "Üst banner'da dönen metin" },
   { value: "full_banner", label: "Tam Genişlik Banner", icon: "🖼️", description: "Tek görsel tam genişlik" },
@@ -115,7 +116,11 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggleActive, getBlockTy
           </div>
           <h3 className="font-medium truncate">{block.title || "Başlıksız"}</h3>
           <p className="text-sm text-gray-500">
-            {block.type === "product_slider"
+            {block.type === "countdown_bar"
+              ? (block.settings?.end_at
+                  ? `⏱️ Bitiş: ${new Date(block.settings.end_at).toLocaleString("tr-TR")} ${block.settings?.start_at ? `· Başlangıç: ${new Date(block.settings.start_at).toLocaleString("tr-TR")}` : ""}`
+                  : "⏱️ Tarih ayarlanmamış")
+              : block.type === "product_slider"
               ? block.settings?.product_ids?.length
                 ? `${block.settings.product_ids.length} ürün seçili`
                 : `En yeni ürünler gösterilir`
@@ -921,6 +926,138 @@ export default function PageDesign() {
               </div>
             )}
 
+            {/* COUNTDOWN BAR — sitenin en üstünde admin tarafından planlanabilen geri sayım */}
+            {formData.type === "countdown_bar" && (
+              <div className="space-y-4 p-4 bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-lg" data-testid="countdown-form">
+                <div className="text-xs text-amber-800 leading-relaxed">
+                  ⏱️ Bu blok sitenin <strong>EN ÜST barı</strong>nda görünür.
+                  <ul className="mt-1 ml-4 list-disc space-y-0.5">
+                    <li><strong>Başlangıç tarihi</strong> gelene kadar bar gizli kalır.</li>
+                    <li>Başlangıç gelince countdown otomatik aktifleşir.</li>
+                    <li><strong>Bitiş tarihi</strong>nde bar otomatik kaybolur (yedek metin tanımlıysa o gösterilir).</li>
+                  </ul>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Sol Metin</label>
+                    <input
+                      type="text"
+                      value={formData.settings?.left_text || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, left_text: e.target.value } })}
+                      placeholder="TÜM ALIŞVERİŞLERDE KARGO BEDAVA"
+                      className="w-full border border-gray-300 px-3 py-2 rounded text-sm"
+                      data-testid="countdown-left-text"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Sayaç Etiketi</label>
+                    <input
+                      type="text"
+                      value={formData.settings?.timer_label || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, timer_label: e.target.value } })}
+                      placeholder="KALAN SÜRE:"
+                      className="w-full border border-gray-300 px-3 py-2 rounded text-sm"
+                      data-testid="countdown-timer-label"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">
+                      🟢 Başlangıç Tarihi/Saati (planlama)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={formData.settings?.start_at || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, start_at: e.target.value } })}
+                      className="w-full border border-gray-300 px-3 py-2 rounded text-sm font-mono"
+                      data-testid="countdown-start-at"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Boş bırakılırsa hemen aktif olur.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">
+                      🔴 Bitiş Tarihi/Saati (countdown hedef)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={formData.settings?.end_at || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, end_at: e.target.value } })}
+                      className="w-full border border-gray-300 px-3 py-2 rounded text-sm font-mono"
+                      data-testid="countdown-end-at"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Bu tarihte sayaç sıfırlanıp bar gizlenir.</p>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Arkaplan Rengi</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={formData.settings?.bg_color || "#000000"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="w-10 h-10 border border-gray-300 rounded cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={formData.settings?.bg_color || "#000000"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="flex-1 border border-gray-300 px-2 py-2 rounded text-sm font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Yazı Rengi</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={formData.settings?.text_color || "#ffffff"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, text_color: e.target.value } })}
+                        className="w-10 h-10 border border-gray-300 rounded cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={formData.settings?.text_color || "#ffffff"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, text_color: e.target.value } })}
+                        className="flex-1 border border-gray-300 px-2 py-2 rounded text-sm font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Yedek Metin (bar pasifken)</label>
+                    <input
+                      type="text"
+                      value={formData.settings?.fallback_text || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, fallback_text: e.target.value } })}
+                      placeholder="500 TL Üzeri Ücretsiz Kargo"
+                      className="w-full border border-gray-300 px-3 py-2 rounded text-sm"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Boşsa pasif iken bar tamamen gizli.</p>
+                  </div>
+                </div>
+
+                {/* Canlı Önizleme */}
+                <div className="border-t border-amber-200 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-amber-800">📺 Canlı Önizleme</p>
+                  <div
+                    className="text-center py-2.5 rounded"
+                    style={{ backgroundColor: formData.settings?.bg_color || "#000000", color: formData.settings?.text_color || "#ffffff" }}
+                  >
+                    <div className="flex items-center justify-center gap-3 flex-wrap text-xs uppercase tracking-[0.2em]">
+                      {formData.settings?.left_text && <span>{formData.settings.left_text}</span>}
+                      {formData.settings?.timer_label && <span className="hidden md:inline">{formData.settings.timer_label}</span>}
+                      <CountdownPreviewMini endAt={formData.settings?.end_at} bg={formData.settings?.bg_color || "#000"} fg={formData.settings?.text_color || "#fff"} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
             {formData.type === "product_slider" && (
               <div>
                 <label className="block text-sm font-medium mb-2">Ürün Seçimi</label>
@@ -1018,5 +1155,35 @@ export default function PageDesign() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Mini preview countdown for the form (admin-side, isolated)
+function CountdownPreviewMini({ endAt, bg, fg }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!endAt) return <span className="opacity-60 italic">— bitiş tarihi giriniz —</span>;
+  const target = new Date(endAt).getTime();
+  let ms = target - now;
+  if (ms < 0) ms = 0;
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  const Box = ({ v, l }) => (
+    <span className="inline-flex items-center gap-1">
+      <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1 text-xs font-semibold tabular-nums"
+        style={{ backgroundColor: fg, color: bg }}>{pad(v)}</span>
+      <span className="text-[10px] tracking-wider">{l}</span>
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-2">
+      <Box v={d} l="GÜN" /><Box v={h} l="SAAT" /><Box v={m} l="DK" /><Box v={s} l="SN" />
+    </span>
   );
 }

@@ -59,7 +59,7 @@ const statusOptions = [
 ];
 
 const cargoCompanies = [
-  { value: "MNG", label: "MNG Kargo" },
+  { value: "MNG", label: "DHL E-Commerce" },
   { value: "DHL", label: "DHL" },
   { value: "YURTICI", label: "Yurtiçi Kargo" },
   { value: "ARAS", label: "Aras Kargo" },
@@ -319,10 +319,10 @@ export default function AdminOrders() {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(res.data.message || `MNG kargo barkodu: ${res.data.tracking_number}`);
+      toast.success(res.data.message || `DHL E-Commerce kargo barkodu: ${res.data.tracking_number}`);
       fetchOrders();
     } catch (err) {
-      toast.error(err.response?.data?.detail || "MNG Kargo oluşturulamadı");
+      toast.error(err.response?.data?.detail || "DHL E-Commerce oluşturulamadı");
     }
   };
 
@@ -1082,10 +1082,10 @@ export default function AdminOrders() {
                           <button 
                             onClick={() => handleCreateMngShipment(order.id)}
                             className="text-xs text-green-600 hover:underline flex items-center gap-1"
-                            title="MNG ile Gönder"
+                            title="DHL E-Commerce ile Gönder"
                           >
                             <Truck size={14} />
-                            MNG
+                            DHL
                           </button>
                           <button 
                             onClick={() => openShipModal(order.id)}
@@ -1129,7 +1129,7 @@ export default function AdminOrders() {
                         {/* 2. Kargo Durum Yenile */}
                         <button
                           onClick={() => handleCreateMngShipment(order.id)}
-                          title="MNG ile Kargoya Ver / Güncelle"
+                          title="DHL E-Commerce ile Kargoya Ver / Güncelle"
                           className="tci-btn tci-btn-orange"
                         >
                           <RefreshCw size={15} />
@@ -1248,7 +1248,7 @@ export default function AdminOrders() {
                       className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
                     >
                       <Truck size={16} />
-                      MNG ile Gönder
+                      DHL E-Commerce ile Gönder
                     </button>
                     <button 
                       onClick={() => openShipModal(selectedOrder.id)}

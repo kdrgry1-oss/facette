@@ -402,9 +402,9 @@ function MngWebhookInfo() {
   };
   return (
     <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg" data-testid="mng-webhook-info">
-      <h3 className="text-sm font-semibold text-amber-900 mb-2">📡 MNG Kargo Durum Güncelleme Webhook</h3>
+      <h3 className="text-sm font-semibold text-amber-900 mb-2">📡 DHL E-Commerce Kargo Durum Güncelleme Webhook</h3>
       <p className="text-xs text-amber-800 mb-3 leading-relaxed">
-        MNG paneline / entegrasyon ekibine aşağıdaki URL'i tanımlatın. Kargo durumu değiştiğinde MNG bu adrese POST isteği gönderir
+        DHL E-Commerce paneline / entegrasyon ekibine aşağıdaki URL'i tanımlatın. Kargo durumu değiştiğinde DHL bu adrese POST isteği gönderir
         ve sipariş otomatik olarak <code className="bg-amber-100 px-1 rounded">shipped</code> / <code className="bg-amber-100 px-1 rounded">delivered</code> durumuna geçer.
       </p>
       <div className="flex items-center gap-2 mb-3">
@@ -423,7 +423,7 @@ function MngWebhookInfo() {
         <summary className="cursor-pointer font-medium hover:underline">Beklenen payload formatı (örnek)</summary>
         <pre className="mt-2 bg-white border border-amber-200 rounded p-2 overflow-x-auto font-mono text-[11px]">
 {`{
-  "BARKOD": "OA341862",        // MNG kargo barkodu
+  "BARKOD": "OA341862",        // DHL E-Commerce kargo barkodu
   "ISLEM_KODU": "300",         // 100/200/300/400/500
   "ISLEM_ADI": "Dağıtımda",
   "TARIH": "2026-05-07T22:30:00",

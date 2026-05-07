@@ -248,6 +248,7 @@ function BlockRenderer({ block, products }) {
     case "text_block":    component = <TextBlock block={block} />; break;
     case "video_banner":  component = <VideoBanner block={block} />; break;
     case "rotating_text": component = <RotatingText block={block} />; break;
+    case "countdown_bar": return null; // Header'da render ediliyor — burada gösterme
     default: return null;
   }
   // Cihaz görünürlüğü — show_desktop / show_mobile false ise tailwind ile gizle
