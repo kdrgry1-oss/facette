@@ -346,7 +346,10 @@ def get_orders(page: int = 1, page_size: int = 50,
                 fkw["SiparisTarihiSon"] = end_date
 
         f = ff(**fkw)
-        s = sf(BaslangicIndex=(page-1)*page_size, KayitSayisi=page_size, SiralamaDegeri="SiparisTarih", SiralamaYonu="DESC")
+        # Ticimax NOT: BaslangicIndex aslında PAGE INDEX (0-based), KayitSayisi sayfa boyutu.
+        # Yani 100 ürünlük sayfa için page=2 → BaslangicIndex=1 (offset değil!).
+        # Yanlış formül `(page-1)*page_size` her sayfada 100 sayfa atlıyordu.
+        s = sf(BaslangicIndex=(page-1), KayitSayisi=page_size, SiralamaDegeri="SiparisTarih", SiralamaYonu="DESC")
 
         result = c.service.SelectSiparis(UyeKodu=wscode, f=f, s=s)
         orders = _unwrap_list(result)

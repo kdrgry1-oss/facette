@@ -1,6 +1,29 @@
+/**
+ * =============================================================================
+ * Account.jsx — Üye Hesabım Sayfası (Suud / Zara stili)
+ * =============================================================================
+ * Mulish font + minimal siyah/beyaz tasarım. Mobile-first; pill tab navigation.
+ *
+ * Sekmeler: Profil, Siparişlerim, Adreslerim, Favorilerim
+ *
+ * BACKEND uçları (değişmedi):
+ *   - GET    /api/my-orders                — Üye siparişleri (paginated)
+ *   - GET    /api/my-addresses             — Üye adresleri
+ *   - PUT    /api/users/me                 — Profil güncelle
+ *   - POST   /api/addresses                — Adres ekle
+ *   - PUT    /api/addresses/{id}           — Adres güncelle
+ *   - DELETE /api/addresses/{id}           — Adres sil
+ *
+ * Yan modüller: ../components/ProvinceDistrictSelect, ../context/AuthContext
+ * =============================================================================
+ */
 import { useState, useEffect } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
-import { User, Package, MapPin, Heart, Settings, LogOut, ChevronRight, Eye, Truck, CheckCircle, Clock, X } from "lucide-react";
+import {
+  User, Package, MapPin, Heart, LogOut, ChevronRight, ChevronDown,
+  Eye, Truck, CheckCircle, Clock, X, Edit2, Trash2, Plus, Star,
+  ShoppingBag, Calendar, Mail, Phone
+} from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -11,69 +34,76 @@ import { useAuth } from "../context/AuthContext";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const MENU_ITEMS = [
-  { id: "profile", label: "Profil Bilgileri", icon: User },
-  { id: "orders", label: "Siparişlerim", icon: Package },
-  { id: "addresses", label: "Adreslerim", icon: MapPin },
-  { id: "favorites", label: "Favorilerim", icon: Heart },
+  { id: "profile",   label: "Profil",       icon: User },
+  { id: "orders",    label: "Siparişlerim", icon: Package },
+  { id: "addresses", label: "Adreslerim",   icon: MapPin },
+  { id: "favorites", label: "Favorilerim",  icon: Heart },
 ];
 
 const ORDER_STATUS = {
-  pending: { label: "Beklemede", color: "bg-yellow-100 text-yellow-700", icon: Clock },
-  confirmed: { label: "Onaylandı", color: "bg-blue-100 text-blue-700", icon: CheckCircle },
-  shipped: { label: "Kargoda", color: "bg-purple-100 text-purple-700", icon: Truck },
-  delivered: { label: "Teslim Edildi", color: "bg-green-100 text-green-700", icon: CheckCircle },
-  cancelled: { label: "İptal Edildi", color: "bg-red-100 text-red-700", icon: X },
+  pending:     { label: "Onay Bekliyor",  cls: "bg-yellow-50  text-yellow-800  border-yellow-200",  icon: Clock },
+  confirmed:   { label: "Onaylandı",      cls: "bg-blue-50    text-blue-800    border-blue-200",    icon: CheckCircle },
+  processing:  { label: "Hazırlanıyor",   cls: "bg-indigo-50  text-indigo-800  border-indigo-200",  icon: Package },
+  shipped:     { label: "Kargoda",        cls: "bg-purple-50  text-purple-800  border-purple-200",  icon: Truck },
+  delivered:   { label: "Teslim Edildi",  cls: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle },
+  cancelled:   { label: "İptal Edildi",   cls: "bg-red-50     text-red-700     border-red-200",     icon: X },
+};
+
+const formatDate = (str, opts = { day: "numeric", month: "long", year: "numeric" }) => {
+  if (!str) return "-";
+  try { return new Date(str).toLocaleDateString("tr-TR", opts); } catch { return "-"; }
+};
+
+const initialsOf = (u) => {
+  const a = (u?.first_name || "").trim();
+  const b = (u?.last_name  || "").trim();
+  if (a || b) return ((a[0] || "") + (b[0] || "")).toUpperCase();
+  const e = u?.email || "";
+  return e ? e.slice(0, 2).toUpperCase() : "FA";
+};
+
+const greeting = () => {
+  const h = new Date().getHours();
+  if (h < 6)  return "İyi geceler";
+  if (h < 12) return "Günaydın";
+  if (h < 18) return "İyi günler";
+  return "İyi akşamlar";
 };
 
 export default function Account() {
   const { user, logout, loading: authLoading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "profile");
+
   const [orders, setOrders] = useState([]);
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [expandedOrder, setExpandedOrder] = useState(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
-  
-  const [profileForm, setProfileForm] = useState({
-    first_name: "",
-    last_name: "",
-    phone: "",
-  });
 
+  const [profileForm, setProfileForm] = useState({ first_name: "", last_name: "", phone: "" });
   const [addressForm, setAddressForm] = useState({
-    title: "",
-    first_name: "",
-    last_name: "",
-    phone: "",
-    address: "",
-    city: "",
-    district: "",
-    postal_code: "",
-    is_default: false,
+    title: "", first_name: "", last_name: "", phone: "",
+    address: "", city: "", district: "", postal_code: "", is_default: false,
   });
 
   useEffect(() => {
     if (user) {
       setProfileForm({
         first_name: user.first_name || "",
-        last_name: user.last_name || "",
-        phone: user.phone || "",
+        last_name:  user.last_name  || "",
+        phone:      user.phone      || "",
       });
     }
   }, [user]);
 
   useEffect(() => {
-    if (activeTab === "orders") {
-      fetchOrders();
-    } else if (activeTab === "addresses") {
-      fetchAddresses();
-    }
+    if (activeTab === "orders") fetchOrders();
+    else if (activeTab === "addresses") fetchAddresses();
   }, [activeTab]);
 
   useEffect(() => {
-    // Check if redirected from checkout with order number
     const orderNum = searchParams.get("order");
     if (orderNum) {
       setActiveTab("orders");
@@ -92,7 +122,6 @@ export default function Account() {
       setOrders(res.data.orders || []);
     } catch (err) {
       console.error(err);
-      // Mock data for demo
       setOrders([]);
     } finally {
       setLoading(false);
@@ -108,7 +137,6 @@ export default function Account() {
       });
       setAddresses(res.data.addresses || []);
     } catch (err) {
-      // Demo addresses
       setAddresses([]);
     } finally {
       setLoading(false);
@@ -124,7 +152,7 @@ export default function Account() {
       });
       toast.success("Profil güncellendi");
       setEditingProfile(false);
-    } catch (err) {
+    } catch {
       toast.error("Güncelleme başarısız");
     }
   };
@@ -134,7 +162,6 @@ export default function Account() {
     try {
       const token = localStorage.getItem("token");
       const headers = { Authorization: `Bearer ${token}` };
-      
       if (editingAddress?.id) {
         await axios.put(`${API}/addresses/${editingAddress.id}`, addressForm, { headers });
         toast.success("Adres güncellendi");
@@ -142,14 +169,13 @@ export default function Account() {
         await axios.post(`${API}/addresses`, addressForm, { headers });
         toast.success("Adres eklendi");
       }
-      
       setEditingAddress(null);
       setAddressForm({
         title: "", first_name: "", last_name: "", phone: "",
-        address: "", city: "", district: "", postal_code: "", is_default: false
+        address: "", city: "", district: "", postal_code: "", is_default: false,
       });
       fetchAddresses();
-    } catch (err) {
+    } catch {
       toast.error("İşlem başarısız");
     }
   };
@@ -163,360 +189,460 @@ export default function Account() {
       });
       toast.success("Adres silindi");
       fetchAddresses();
-    } catch (err) {
+    } catch {
       toast.error("Silme başarısız");
     }
   };
 
+  const switchTab = (id) => {
+    setActiveTab(id);
+    setSearchParams({ tab: id });
+  };
+
   if (authLoading) {
     return (
-      <div className="min-h-screen">
-        <Header />
-        <div className="container-main py-16 text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mx-auto"></div>
-          <p className="mt-4 text-gray-500">Yükleniyor...</p>
-        </div>
-        <Footer />
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-black border-t-transparent" />
       </div>
     );
   }
+  if (!user) return <Navigate to="/giris" />;
 
-  if (!user) {
-    return <Navigate to="/giris" />;
-  }
+  return (
+    <div className="min-h-screen bg-[#fafafa]" data-testid="account-page">
+      <Header />
 
-  const renderProfile = () => (
-    <div className="space-y-6">
-      <div className="bg-white border rounded-lg p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-medium">Profil Bilgileri</h2>
-          {!editingProfile && (
+      {/* ───────────────────── Hero / Welcome ───────────────────── */}
+      <section className="bg-white border-b border-gray-100">
+        <div className="max-w-screen-xl mx-auto px-4 py-8 md:py-12">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div className="flex items-center gap-4 md:gap-6">
+              <div
+                className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-black text-white flex items-center justify-center text-xl md:text-2xl font-light tracking-wider shrink-0"
+                data-testid="account-avatar"
+                aria-hidden
+              >
+                {initialsOf(user)}
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-gray-400 mb-1">{greeting()}</p>
+                <h1 className="text-2xl md:text-3xl font-light tracking-wide text-black" data-testid="account-greeting">
+                  {user.first_name || user.email.split("@")[0]}
+                </h1>
+                <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
+                  <Mail size={12} /> {user.email}
+                  {user.created_at && (
+                    <>
+                      <span className="text-gray-300">•</span>
+                      <Calendar size={12} /> Üye: {formatDate(user.created_at, { month: "short", year: "numeric" })}
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
             <button
-              onClick={() => setEditingProfile(true)}
-              className="text-sm text-blue-600 hover:underline"
+              onClick={logout}
+              className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-gray-500 hover:text-black transition-colors self-start md:self-center"
+              data-testid="logout-btn"
             >
-              Düzenle
+              <LogOut size={14} /> Çıkış Yap
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ───────────────────── Tab Pills ───────────────────── */}
+      <nav className="sticky top-0 z-10 bg-white border-b border-gray-100">
+        <div className="max-w-screen-xl mx-auto px-4">
+          <div className="flex overflow-x-auto scrollbar-hide gap-1 py-2">
+            {MENU_ITEMS.map((m) => {
+              const Icon = m.icon;
+              const active = activeTab === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => switchTab(m.id)}
+                  data-testid={`tab-${m.id}`}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-xs uppercase tracking-[0.15em] whitespace-nowrap transition-all border-b-2 ${
+                    active
+                      ? "text-black border-black font-semibold"
+                      : "text-gray-400 border-transparent hover:text-black"
+                  }`}
+                >
+                  <Icon size={14} />
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
+
+      {/* ───────────────────── Content ───────────────────── */}
+      <main className="max-w-screen-xl mx-auto px-4 py-8 md:py-10">
+        {activeTab === "profile"   && <ProfilePane user={user} editing={editingProfile} setEditing={setEditingProfile} form={profileForm} setForm={setProfileForm} onSubmit={handleUpdateProfile} />}
+        {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} />}
+        {activeTab === "addresses" && <AddressesPane loading={loading} addresses={addresses} editing={editingAddress} setEditing={setEditingAddress} form={addressForm} setForm={setAddressForm} onSubmit={handleSaveAddress} onDelete={handleDeleteAddress} />}
+        {activeTab === "favorites" && <FavoritesPane />}
+      </main>
+
+      <Footer />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════ PROFILE ═══════════════════════════════ */
+
+function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit }) {
+  return (
+    <div className="grid lg:grid-cols-3 gap-6 max-w-4xl">
+      <div className="lg:col-span-2 bg-white border border-gray-100 p-6 md:p-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-sm uppercase tracking-[0.2em] text-gray-700">Profil Bilgileri</h2>
+          {!editing && (
+            <button onClick={() => setEditing(true)} data-testid="edit-profile-btn"
+              className="text-xs uppercase tracking-[0.15em] text-black underline-offset-4 hover:underline flex items-center gap-1">
+              <Edit2 size={12} /> Düzenle
             </button>
           )}
         </div>
 
-        {editingProfile ? (
-          <form onSubmit={handleUpdateProfile} className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Ad</label>
-                <input
-                  type="text"
-                  value={profileForm.first_name}
-                  onChange={(e) => setProfileForm({ ...profileForm, first_name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Soyad</label>
-                <input
-                  type="text"
-                  value={profileForm.last_name}
-                  onChange={(e) => setProfileForm({ ...profileForm, last_name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">E-posta</label>
-                <input
-                  type="email"
-                  value={user.email}
-                  disabled
-                  className="w-full border px-3 py-2 rounded text-sm bg-gray-50 text-gray-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Telefon</label>
-                <input
-                  type="tel"
-                  value={profileForm.phone}
-                  onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
+        {editing ? (
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div className="grid md:grid-cols-2 gap-5">
+              <Field label="Ad" value={form.first_name} onChange={(v) => setForm({ ...form, first_name: v })} />
+              <Field label="Soyad" value={form.last_name} onChange={(v) => setForm({ ...form, last_name: v })} />
+              <Field label="E-posta" value={user.email} disabled />
+              <Field label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
             </div>
-            <div className="flex gap-2">
-              <button type="submit" className="btn-primary text-sm px-6">
+            <div className="flex gap-3 pt-2">
+              <button type="submit" data-testid="save-profile-btn"
+                className="bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
                 Kaydet
               </button>
-              <button
-                type="button"
-                onClick={() => setEditingProfile(false)}
-                className="btn-secondary text-sm px-6"
-              >
+              <button type="button" onClick={() => setEditing(false)}
+                className="border border-black text-black px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-black hover:text-white transition-colors">
                 İptal
               </button>
             </div>
           </form>
         ) : (
-          <div className="space-y-4">
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">Ad Soyad</label>
-                <p className="font-medium">{user.first_name || "-"} {user.last_name || ""}</p>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">E-posta</label>
-                <p className="font-medium">{user.email}</p>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">Telefon</label>
-                <p className="font-medium">{user.phone || "-"}</p>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-500 mb-1">Üyelik Tarihi</label>
-                <p className="font-medium">
-                  {user.created_at ? new Date(user.created_at).toLocaleDateString("tr-TR") : "-"}
-                </p>
-              </div>
-            </div>
-          </div>
+          <dl className="grid md:grid-cols-2 gap-5">
+            <Row k="Ad Soyad"      v={`${user.first_name || "-"} ${user.last_name || ""}`.trim()} />
+            <Row k="E-posta"       v={user.email} />
+            <Row k="Telefon"       v={user.phone || "-"} icon={Phone} />
+            <Row k="Üyelik Tarihi" v={formatDate(user.created_at)} icon={Calendar} />
+          </dl>
         )}
       </div>
 
-      {/* Change Password */}
-      <div className="bg-white border rounded-lg p-6">
-        <h3 className="font-medium mb-4">Şifre Değiştir</h3>
-        <p className="text-sm text-gray-500 mb-4">
-          Şifrenizi değiştirmek için mevcut şifrenizi ve yeni şifrenizi girin.
-        </p>
-        <button className="btn-secondary text-sm">Şifre Değiştir</button>
-      </div>
+      <aside className="bg-black text-white p-6 md:p-8 flex flex-col justify-between">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400 mb-3">Suud Üye Avantajı</p>
+          <h3 className="text-lg font-light leading-snug mb-4">
+            Yeni koleksiyona üyelere özel <span className="font-semibold">erken erişim</span>.
+          </h3>
+          <p className="text-xs text-gray-300 leading-relaxed">
+            Ücretsiz kargo, kişisel kombin önerileri ve tüm sezonlara özel kampanyalardan ilk siz haberdar olun.
+          </p>
+        </div>
+        <a href="/" className="text-xs uppercase tracking-[0.2em] mt-6 inline-flex items-center gap-2 group">
+          Yeni Sezonu Keşfet
+          <ChevronRight size={14} className="transition-transform group-hover:translate-x-1" />
+        </a>
+      </aside>
     </div>
   );
+}
 
-  const renderOrders = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Siparişlerim</h2>
-        <a href="/siparis-takip" className="text-sm text-blue-600 hover:underline">
+function Field({ label, value, onChange, type = "text", disabled = false }) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2">{label}</label>
+      <input
+        type={type}
+        value={value || ""}
+        disabled={disabled}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        className={`w-full border-0 border-b ${disabled ? "border-gray-200 text-gray-400" : "border-gray-300 focus:border-black"} bg-transparent py-2 text-sm focus:outline-none transition-colors`}
+      />
+    </div>
+  );
+}
+
+function Row({ k, v, icon: Icon }) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-1.5 flex items-center gap-1.5">
+        {Icon && <Icon size={11} />}
+        {k}
+      </dt>
+      <dd className="text-sm text-black font-light">{v}</dd>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════ ORDERS ═══════════════════════════════ */
+
+function OrdersPane({ loading, orders, expandedOrder, setExpandedOrder }) {
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="bg-white border border-gray-100 h-32 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (orders.length === 0) {
+    return (
+      <div className="bg-white border border-gray-100 py-20 px-6 text-center" data-testid="orders-empty">
+        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+          <ShoppingBag size={20} className="text-gray-400" />
+        </div>
+        <p className="text-sm text-gray-500 mb-6 tracking-wide">Henüz siparişiniz bulunmuyor</p>
+        <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
+          Alışverişe Başla
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 max-w-4xl">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm uppercase tracking-[0.2em] text-gray-700">
+          Siparişlerim <span className="text-gray-400">({orders.length})</span>
+        </h2>
+        <a href="/siparis-takip" className="text-xs uppercase tracking-[0.15em] text-gray-500 hover:text-black underline-offset-4 hover:underline">
           Sipariş Takip
         </a>
       </div>
 
-      {loading ? (
-        <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black mx-auto"></div>
-        </div>
-      ) : orders.length === 0 ? (
-        <div className="bg-white border rounded-lg p-12 text-center">
-          <Package size={48} className="mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500 mb-4">Henüz siparişiniz bulunmuyor</p>
-          <a href="/" className="btn-primary text-sm inline-block">
-            Alışverişe Başla
-          </a>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {orders.map((order) => {
-            const status = ORDER_STATUS[order.status] || ORDER_STATUS.pending;
-            const StatusIcon = status.icon;
-            
-            return (
-              <div key={order.id} className="bg-white border rounded-lg overflow-hidden">
-                <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{order.order_number}</p>
-                    <p className="text-sm text-gray-500">
-                      {new Date(order.created_at).toLocaleDateString("tr-TR", {
-                        day: "numeric", month: "long", year: "numeric"
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs px-2.5 py-1 rounded-full flex items-center gap-1 ${status.color}`}>
-                      <StatusIcon size={12} />
-                      {status.label}
-                    </span>
-                    <button
-                      onClick={() => setSelectedOrder(selectedOrder?.id === order.id ? null : order)}
-                      className="p-2 hover:bg-gray-100 rounded"
-                    >
-                      <Eye size={18} />
-                    </button>
-                  </div>
-                </div>
-                
-                {selectedOrder?.id === order.id && (
-                  <div className="p-4 space-y-4">
-                    {/* Order Items */}
-                    <div className="space-y-3">
-                      {order.items?.map((item, idx) => (
-                        <div key={idx} className="flex gap-3">
-                          <img
-                            src={item.image || "/placeholder.jpg"}
-                            alt={item.name}
-                            className="w-16 h-20 object-cover bg-gray-100 rounded"
-                          />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">{item.name}</p>
-                            {item.size && <p className="text-xs text-gray-500">Beden: {item.size}</p>}
-                            <p className="text-xs text-gray-500">Adet: {item.quantity}</p>
-                            <p className="text-sm font-medium mt-1">{item.price?.toFixed(2)} TL</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    {/* Shipping Info */}
-                    {order.shipping_address && (
-                      <div className="border-t pt-4">
-                        <p className="text-sm font-medium mb-2">Teslimat Adresi</p>
-                        <p className="text-sm text-gray-600">
-                          {order.shipping_address.first_name} {order.shipping_address.last_name}<br />
-                          {order.shipping_address.address}<br />
-                          {order.shipping_address.district} / {order.shipping_address.city}
-                        </p>
-                      </div>
-                    )}
-                    
-                    {/* Cargo Info */}
-                    {order.cargo?.tracking_number && (
-                      <div className="border-t pt-4">
-                        <p className="text-sm font-medium mb-2">Kargo Bilgisi</p>
-                        <p className="text-sm text-gray-600">
-                          {order.cargo.company}: {order.cargo.tracking_number}
-                        </p>
-                        {order.cargo.tracking_url && (
-                          <a
-                            href={order.cargo.tracking_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-blue-600 hover:underline"
-                          >
-                            Kargo Takip
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Order Total */}
-                    <div className="border-t pt-4 flex justify-between">
-                      <span className="font-medium">Toplam</span>
-                      <span className="font-medium">{order.total?.toFixed(2)} TL</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {orders.map((order) => (
+        <OrderCard
+          key={order.id || order.order_number}
+          order={order}
+          expanded={expandedOrder === (order.id || order.order_number)}
+          onToggle={() => setExpandedOrder(expandedOrder === (order.id || order.order_number) ? null : (order.id || order.order_number))}
+        />
+      ))}
     </div>
   );
+}
 
-  const renderAddresses = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Adreslerim</h2>
-        <button
-          onClick={() => setEditingAddress({})}
-          className="btn-primary text-sm"
-        >
-          + Yeni Adres
-        </button>
+function OrderCard({ order, expanded, onToggle }) {
+  const status = ORDER_STATUS[order.status] || ORDER_STATUS.pending;
+  const StatusIcon = status.icon;
+  const items = order.items || [];
+  const itemCount = items.reduce((s, i) => s + (i.quantity || 1), 0);
+  const previewImages = items.slice(0, 4);
+  const trackingUrl = order.cargo?.tracking_url || order.cargo_tracking_link;
+  const trackingNumber = order.cargo?.tracking_number || order.cargo_tracking_number;
+
+  return (
+    <article className="bg-white border border-gray-100 transition-shadow hover:shadow-sm" data-testid={`order-card-${order.id}`}>
+      {/* Header row */}
+      <button
+        onClick={onToggle}
+        className="w-full px-4 md:px-6 py-4 flex items-center gap-4 text-left"
+      >
+        {/* Image stack */}
+        <div className="flex -space-x-2 shrink-0">
+          {previewImages.length > 0 ? previewImages.map((it, i) => (
+            <div
+              key={i}
+              className="w-12 h-14 md:w-14 md:h-16 bg-gray-100 border-2 border-white overflow-hidden"
+              style={{ zIndex: previewImages.length - i }}
+            >
+              {it.image ? (
+                <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />
+              )}
+            </div>
+          )) : (
+            <div className="w-12 h-14 md:w-14 md:h-16 bg-gray-100 flex items-center justify-center">
+              <Package size={18} className="text-gray-300" />
+            </div>
+          )}
+          {items.length > 4 && (
+            <div className="w-12 h-14 md:w-14 md:h-16 bg-black text-white text-[10px] flex items-center justify-center border-2 border-white">
+              +{items.length - 4}
+            </div>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-sm font-medium tracking-wide truncate">{order.order_number}</span>
+            <span className="text-[11px] text-gray-400">•</span>
+            <span className="text-[11px] text-gray-500">{formatDate(order.created_at)}</span>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            {itemCount} ürün · <span className="text-black font-medium">{(order.total ?? 0).toFixed(2)} ₺</span>
+          </p>
+        </div>
+
+        {/* Status + chevron */}
+        <div className="flex items-center gap-3 shrink-0">
+          <span className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-[10px] uppercase tracking-[0.15em] border ${status.cls}`}>
+            <StatusIcon size={11} /> {status.label}
+          </span>
+          <ChevronDown size={16} className={`text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {/* Mobile-only status */}
+      <div className="sm:hidden px-4 pb-3 -mt-1">
+        <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] uppercase tracking-[0.15em] border ${status.cls}`}>
+          <StatusIcon size={11} /> {status.label}
+        </span>
       </div>
 
-      {/* Address Form Modal */}
-      {editingAddress !== null && (
-        <div className="bg-white border rounded-lg p-6">
-          <h3 className="font-medium mb-4">
-            {editingAddress?.id ? "Adres Düzenle" : "Yeni Adres"}
+      {/* Expanded body */}
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 md:px-6 py-5 space-y-5 bg-gray-50/40">
+          {/* Items */}
+          <div className="space-y-3">
+            {items.length === 0 && (
+              <p className="text-xs text-gray-500 italic">Bu sipariş için ürün detayı bulunamadı.</p>
+            )}
+            {items.map((it, idx) => (
+              <div key={idx} className="flex gap-3 items-start">
+                <div className="w-14 h-16 bg-white border border-gray-100 overflow-hidden shrink-0">
+                  {it.image
+                    ? <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm leading-snug">{it.name || it.product_name || "Ürün"}</p>
+                  <p className="text-xs text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {it.size && <span>Beden: {it.size}</span>}
+                    {it.color && <span>Renk: {it.color}</span>}
+                    <span>Adet: {it.quantity || 1}</span>
+                  </p>
+                </div>
+                <p className="text-sm font-medium shrink-0">{((it.price || 0) * (it.quantity || 1)).toFixed(2)} ₺</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Address & cargo */}
+          <div className="grid md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+            {order.shipping_address && (
+              <div>
+                <h4 className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2">Teslimat Adresi</h4>
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  {order.shipping_address.first_name} {order.shipping_address.last_name}<br />
+                  {order.shipping_address.address}<br />
+                  {order.shipping_address.district} / {order.shipping_address.city}
+                </p>
+              </div>
+            )}
+            {trackingNumber && (
+              <div>
+                <h4 className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2">Kargo Bilgisi</h4>
+                <p className="text-sm text-gray-700">
+                  {order.cargo?.company_name || order.cargo?.company || order.cargo_provider_name || "Kargo"}: <span className="font-medium">{trackingNumber}</span>
+                </p>
+                {trackingUrl && (
+                  <a href={trackingUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.15em] mt-2 underline underline-offset-4 hover:no-underline">
+                    Kargoyu Takip Et <ChevronRight size={12} />
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Total */}
+          <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
+            <span className="text-xs uppercase tracking-[0.2em] text-gray-500">Toplam</span>
+            <span className="text-lg font-medium">{(order.total ?? 0).toFixed(2)} ₺</span>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+/* ═══════════════════════════════ ADDRESSES ═══════════════════════════════ */
+
+function AddressesPane({ loading, addresses, editing, setEditing, form, setForm, onSubmit, onDelete }) {
+  const startNew = () => {
+    setForm({ title: "", first_name: "", last_name: "", phone: "",
+              address: "", city: "", district: "", postal_code: "", is_default: false });
+    setEditing({});
+  };
+  const startEdit = (addr) => {
+    setForm(addr);
+    setEditing(addr);
+  };
+
+  return (
+    <div className="space-y-5 max-w-4xl">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm uppercase tracking-[0.2em] text-gray-700">
+          Adreslerim <span className="text-gray-400">({addresses.length})</span>
+        </h2>
+        {editing === null && (
+          <button onClick={startNew} data-testid="add-address-btn"
+            className="flex items-center gap-2 bg-black text-white px-5 py-2.5 text-xs uppercase tracking-[0.15em] hover:bg-gray-800 transition-colors">
+            <Plus size={14} /> Yeni Adres
+          </button>
+        )}
+      </div>
+
+      {/* Form */}
+      {editing !== null && (
+        <div className="bg-white border border-gray-100 p-6 md:p-8">
+          <h3 className="text-sm uppercase tracking-[0.2em] text-gray-700 mb-5">
+            {editing?.id ? "Adres Düzenle" : "Yeni Adres"}
           </h3>
-          <form onSubmit={handleSaveAddress} className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Adres Başlığı *</label>
-              <input
-                type="text"
-                value={addressForm.title}
-                onChange={(e) => setAddressForm({ ...addressForm, title: e.target.value })}
-                placeholder="Ev, İş, vb."
-                required
-                className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-              />
-            </div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Ad *</label>
-                <input
-                  type="text"
-                  value={addressForm.first_name}
-                  onChange={(e) => setAddressForm({ ...addressForm, first_name: e.target.value })}
-                  required
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Soyad *</label>
-                <input
-                  type="text"
-                  value={addressForm.last_name}
-                  onChange={(e) => setAddressForm({ ...addressForm, last_name: e.target.value })}
-                  required
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Telefon *</label>
-                <input
-                  type="tel"
-                  value={addressForm.phone}
-                  onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
-                  required
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
+          <form onSubmit={onSubmit} className="space-y-5">
+            <Field label="Adres Başlığı (Ev / İş / vb.)" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
+            <div className="grid md:grid-cols-2 gap-5">
+              <Field label="Ad" value={form.first_name} onChange={(v) => setForm({ ...form, first_name: v })} />
+              <Field label="Soyad" value={form.last_name} onChange={(v) => setForm({ ...form, last_name: v })} />
+              <Field label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
+              <Field label="Posta Kodu" value={form.postal_code} onChange={(v) => setForm({ ...form, postal_code: v })} />
               <div className="md:col-span-2">
                 <ProvinceDistrictSelect
-                  city={addressForm.city}
-                  district={addressForm.district}
-                  onChange={({ city, district }) => setAddressForm({ ...addressForm, city, district })}
-                  selectClass="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black bg-white"
-                  labelClass="block text-sm text-gray-600 mb-1"
+                  city={form.city}
+                  district={form.district}
+                  onChange={({ city, district }) => setForm({ ...form, city, district })}
+                  selectClass="w-full border-0 border-b border-gray-300 bg-transparent py-2 text-sm focus:outline-none focus:border-black transition-colors"
+                  labelClass="block text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2"
                   cityLabel="Şehir"
                   testIdPrefix="account-addr"
                 />
               </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Posta Kodu</label>
-                <input
-                  type="text"
-                  value={addressForm.postal_code}
-                  onChange={(e) => setAddressForm({ ...addressForm, postal_code: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
-                />
-              </div>
             </div>
             <div>
-              <label className="block text-sm text-gray-600 mb-1">Adres *</label>
+              <label className="block text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-2">Adres</label>
               <textarea
-                value={addressForm.address}
-                onChange={(e) => setAddressForm({ ...addressForm, address: e.target.value })}
-                rows={3}
-                required
-                className="w-full border px-3 py-2 rounded text-sm focus:outline-none focus:border-black"
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                rows={3} required
+                className="w-full border border-gray-200 bg-white p-3 text-sm focus:outline-none focus:border-black transition-colors"
               />
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={addressForm.is_default}
-                onChange={(e) => setAddressForm({ ...addressForm, is_default: e.target.checked })}
-              />
-              <span className="text-sm">Varsayılan adres olarak ayarla</span>
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" checked={form.is_default}
+                onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+                className="accent-black"/>
+              <span className="uppercase tracking-[0.15em] text-gray-600">Varsayılan adres olarak işaretle</span>
             </label>
-            <div className="flex gap-2">
-              <button type="submit" className="btn-primary text-sm px-6">Kaydet</button>
-              <button
-                type="button"
-                onClick={() => setEditingAddress(null)}
-                className="btn-secondary text-sm px-6"
-              >
+            <div className="flex gap-3 pt-2">
+              <button type="submit" data-testid="save-address-btn"
+                className="bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
+                Kaydet
+              </button>
+              <button type="button" onClick={() => setEditing(null)}
+                className="border border-black text-black px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-black hover:text-white transition-colors">
                 İptal
               </button>
             </div>
@@ -524,47 +650,47 @@ export default function Account() {
         </div>
       )}
 
-      {/* Addresses List */}
-      {addresses.length === 0 && editingAddress === null ? (
-        <div className="bg-white border rounded-lg p-12 text-center">
-          <MapPin size={48} className="mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500 mb-4">Henüz kayıtlı adresiniz yok</p>
-          <button onClick={() => setEditingAddress({})} className="btn-primary text-sm">
-            Adres Ekle
+      {/* List */}
+      {loading ? (
+        <div className="grid md:grid-cols-2 gap-4">
+          {[1, 2].map((i) => <div key={i} className="bg-white border border-gray-100 h-40 animate-pulse" />)}
+        </div>
+      ) : addresses.length === 0 && editing === null ? (
+        <div className="bg-white border border-gray-100 py-16 px-6 text-center">
+          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+            <MapPin size={20} className="text-gray-400" />
+          </div>
+          <p className="text-sm text-gray-500 mb-6">Henüz kayıtlı adresiniz yok</p>
+          <button onClick={startNew} className="inline-flex items-center gap-2 bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
+            <Plus size={14} /> İlk Adresi Ekle
           </button>
         </div>
       ) : (
         <div className="grid md:grid-cols-2 gap-4">
           {addresses.map((addr) => (
-            <div key={addr.id} className="bg-white border rounded-lg p-4 relative">
+            <div key={addr.id} className="bg-white border border-gray-100 p-5 relative group hover:border-gray-300 transition-colors">
               {addr.is_default && (
-                <span className="absolute top-2 right-2 text-xs bg-black text-white px-2 py-0.5 rounded">
-                  Varsayılan
+                <span className="absolute top-3 right-3 inline-flex items-center gap-1 bg-black text-white text-[9px] uppercase tracking-[0.2em] px-2 py-0.5">
+                  <Star size={9} /> Varsayılan
                 </span>
               )}
-              <p className="font-medium mb-1">{addr.title}</p>
-              <p className="text-sm text-gray-600">
+              <h4 className="text-sm uppercase tracking-[0.15em] mb-3">{addr.title}</h4>
+              <p className="text-sm text-gray-700 leading-relaxed">
                 {addr.first_name} {addr.last_name}<br />
-                {addr.address}<br />
-                {addr.district} / {addr.city}
-                {addr.postal_code && ` - ${addr.postal_code}`}
+                <span className="text-gray-500">{addr.address}</span><br />
+                {addr.district} / {addr.city}{addr.postal_code && ` · ${addr.postal_code}`}
               </p>
-              <p className="text-sm text-gray-500 mt-1">{addr.phone}</p>
-              <div className="flex gap-3 mt-3">
-                <button
-                  onClick={() => {
-                    setAddressForm(addr);
-                    setEditingAddress(addr);
-                  }}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  Düzenle
+              <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                <Phone size={10} /> {addr.phone}
+              </p>
+              <div className="flex gap-3 mt-4 pt-4 border-t border-gray-100">
+                <button onClick={() => startEdit(addr)} data-testid={`edit-address-${addr.id}`}
+                  className="text-xs uppercase tracking-[0.15em] text-black hover:underline underline-offset-4 flex items-center gap-1">
+                  <Edit2 size={11} /> Düzenle
                 </button>
-                <button
-                  onClick={() => handleDeleteAddress(addr.id)}
-                  className="text-xs text-red-600 hover:underline"
-                >
-                  Sil
+                <button onClick={() => onDelete(addr.id)} data-testid={`delete-address-${addr.id}`}
+                  className="text-xs uppercase tracking-[0.15em] text-gray-500 hover:text-red-600 flex items-center gap-1">
+                  <Trash2 size={11} /> Sil
                 </button>
               </div>
             </div>
@@ -573,96 +699,21 @@ export default function Account() {
       )}
     </div>
   );
+}
 
-  const renderFavorites = () => (
-    <div className="space-y-4">
-      <h2 className="text-lg font-medium">Favorilerim</h2>
-      <div className="bg-white border rounded-lg p-12 text-center">
-        <Heart size={48} className="mx-auto text-gray-300 mb-4" />
-        <p className="text-gray-500 mb-4">Henüz favori ürününüz yok</p>
-        <a href="/" className="btn-primary text-sm inline-block">
-          Ürünleri Keşfet
-        </a>
-      </div>
-    </div>
-  );
+/* ═══════════════════════════════ FAVORITES ═══════════════════════════════ */
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case "orders": return renderOrders();
-      case "addresses": return renderAddresses();
-      case "favorites": return renderFavorites();
-      default: return renderProfile();
-    }
-  };
-
+function FavoritesPane() {
   return (
-    <div className="min-h-screen bg-gray-50" data-testid="account-page">
-      <Header />
-
-      <div className="max-w-screen-xl mx-auto px-4 py-8">
-        {/* Mobile Tab Selector */}
-        <div className="md:hidden mb-6">
-          <select
-            value={activeTab}
-            onChange={(e) => setActiveTab(e.target.value)}
-            className="w-full border px-4 py-3 rounded-lg bg-white"
-          >
-            {MENU_ITEMS.map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="grid md:grid-cols-4 gap-8">
-          {/* Sidebar */}
-          <div className="hidden md:block md:col-span-1">
-            <div className="bg-white border rounded-lg overflow-hidden">
-              {/* User Info */}
-              <div className="p-4 border-b bg-gray-50">
-                <p className="font-medium">{user.first_name || user.email.split("@")[0]}</p>
-                <p className="text-sm text-gray-500 truncate">{user.email}</p>
-              </div>
-              
-              {/* Menu */}
-              <nav className="p-2">
-                {MENU_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                        activeTab === item.id
-                          ? "bg-black text-white"
-                          : "hover:bg-gray-100"
-                      }`}
-                    >
-                      <Icon size={18} />
-                      {item.label}
-                      <ChevronRight size={16} className="ml-auto opacity-50" />
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={logout}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 mt-2"
-                >
-                  <LogOut size={18} />
-                  Çıkış Yap
-                </button>
-              </nav>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="md:col-span-3">
-            {renderContent()}
-          </div>
-        </div>
+    <div className="bg-white border border-gray-100 py-20 px-6 text-center max-w-4xl">
+      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+        <Heart size={20} className="text-gray-400" />
       </div>
-
-      <Footer />
+      <p className="text-sm text-gray-500 mb-1 tracking-wide">Henüz favori ürününüz yok</p>
+      <p className="text-xs text-gray-400 mb-6">Beğendiğiniz ürünleri kalp ikonu ile favorilerinize ekleyin.</p>
+      <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
+        Ürünleri Keşfet
+      </a>
     </div>
   );
 }

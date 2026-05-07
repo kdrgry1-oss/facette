@@ -1964,6 +1964,179 @@ async def import_ticimax_orders(
     }
 
 
+@router.post("/ticimax/orders/backfill")
+async def backfill_broken_ticimax_orders(
+    limit: int = Query(1000, ge=1, le=5000, description="En fazla kaç bozuk sipariş düzeltilsin"),
+    days: int = Query(365, ge=1, le=3650, description="Son kaç günü tara"),
+    pages: int = Query(20, ge=1, le=100, description="Kaç sayfa Ticimax'tan çekilsin"),
+    page_size: int = Query(100, ge=50, le=200),
+    items_chunk: int = Query(40, ge=0, le=300, description="Her çağrıda kaç eski sipariş için ürün listesi çekilsin (0=atla)"),
+    current_user: dict = Depends(require_admin)
+):
+    """Daha önce eksik/bozuk şekilde import edilmiş Ticimax cron siparişlerini
+    Ticimax SOAP'tan tekrar çekerek **düzgün şekilde yeniden parse eder**.
+
+    "Bozuk" kriteri: shipping_address.first_name boş VEYA total = 0 VEYA items boş.
+    Yalnızca `imported_from = ticimax_cron` veya `source = ticimax` siparişler hedef alınır.
+    """
+    import sys, os
+    from datetime import timedelta
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from ticimax_client import get_orders as tc_get_orders
+    from ticimax_order_parser import parse_ticimax_order
+
+    settings = await db.settings.find_one({"id": "ticimax"}) or {}
+    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+
+    # 1) DB'deki bozuk siparişleri bul
+    broken_query = {
+        "$and": [
+            {"$or": [
+                {"imported_from": "ticimax_cron"},
+                {"source": "ticimax"},
+                {"ticimax_order_id": {"$exists": True, "$ne": None}},
+            ]},
+            {"$or": [
+                {"shipping_address.first_name": {"$in": ["", None]}},
+                {"total": {"$in": [0, 0.0, None]}},
+                {"items": {"$size": 0}},
+            ]},
+        ]
+    }
+    broken_count = await db.orders.count_documents(broken_query)
+    broken_ids = []
+    async for o in db.orders.find(broken_query, {"_id": 0, "ticimax_order_id": 1, "order_number": 1}).limit(limit):
+        if o.get("ticimax_order_id"):
+            broken_ids.append({"id": int(o["ticimax_order_id"]), "no": o.get("order_number", "")})
+
+    if not broken_ids:
+        return {"success": True, "broken_total": broken_count, "fixed": 0, "not_found": 0,
+                "message": "Düzeltilecek bozuk Ticimax siparişi yok."}
+
+    broken_id_set = {b["id"] for b in broken_ids}
+    broken_no_set = {b["no"].upper() for b in broken_ids if b["no"]}
+
+    # 2) Ticimax'tan ham veri çek (son X gün, çok sayfa)
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(days=days)
+    start_date_str = start_dt.strftime("%d.%m.%Y")
+    end_date_str = end_dt.strftime("%d.%m.%Y")
+
+    fetched_raw = []
+    for page_no in range(1, pages + 1):
+        try:
+            page_orders = tc_get_orders(
+                page=page_no, page_size=page_size,
+                start_date=start_date_str, end_date=end_date_str,
+                exclude_marketplace=False, only_with_phone=False,
+                wscode=api_key,
+            )
+        except Exception as e:
+            logger.warning(f"[backfill] page {page_no} fetch error: {e}")
+            break
+        if not page_orders:
+            break
+        fetched_raw.extend(page_orders)
+        import time as _t; _t.sleep(0.3)
+
+    # 3) Parse et + bozuk olanlara denk gelirse update et
+    fixed = 0
+    not_found_in_ticimax = []
+    fixed_in_ticimax_ids = set()
+
+    for raw in fetched_raw:
+        if not raw:
+            continue
+        tc_id_raw = raw.get("SiparisID") or raw.get("ID")
+        try:
+            tc_id_int = int(tc_id_raw) if tc_id_raw is not None else None
+        except Exception:
+            tc_id_int = None
+        tc_no_str = str(raw.get("SiparisNo") or "").strip().upper()
+
+        # Bizim listemizde mi?
+        if tc_id_int not in broken_id_set and tc_no_str not in broken_no_set:
+            continue
+
+        doc = parse_ticimax_order(raw, api_key=api_key)
+        if not doc:
+            continue
+
+        try:
+            await db.orders.update_one(
+                {"$or": [{"ticimax_order_id": doc["ticimax_order_id"]},
+                         {"order_number": doc["order_number"]}]},
+                {"$set": {**{k: v for k, v in doc.items() if k != "created_at"},
+                          "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            fixed += 1
+            if tc_id_int:
+                fixed_in_ticimax_ids.add(tc_id_int)
+        except Exception as ie:
+            logger.warning(f"[backfill] update err: {ie}")
+
+    not_found_in_ticimax = [b for b in broken_ids if b["id"] not in fixed_in_ticimax_ids]
+
+    # 4) Kalan eski siparişler için per-order SelectSiparisUrun fallback
+    #    (Ticimax SelectSiparis sadece son ~1300 siparişi döndürdüğü için
+    #     daha eski sipariş gövdeleri yoktur, ama UrunListesi her zaman
+    #     siparis_id ile çekilebilir)
+    items_only_fixed = 0
+    if not_found_in_ticimax and items_chunk > 0:
+        from ticimax_client import get_order_items
+        from ticimax_order_parser import _to_dict
+        # Sadece chunk kadar işle — ingress timeout'a takılmamak için
+        for b in not_found_in_ticimax[:items_chunk]:
+            tc_id = b["id"]
+            try:
+                urunler = get_order_items(tc_id, wscode=api_key) or []
+            except Exception as e:
+                logger.warning(f"[backfill] get_order_items({tc_id}) err: {e}")
+                continue
+            if not urunler:
+                continue
+            # Parse to standard format
+            items = []
+            for it in urunler:
+                d = _to_dict(it)
+                if not d:
+                    continue
+                items.append({
+                    "product_name": str(d.get("UrunAdi") or d.get("Adi") or ""),
+                    "name":         str(d.get("UrunAdi") or d.get("Adi") or ""),
+                    "stock_code":   str(d.get("StokKodu") or ""),
+                    "barcode":      str(d.get("Barkod") or ""),
+                    "quantity":     int(d.get("Adet") or d.get("Miktar") or 1),
+                    "price":        float(d.get("BirimFiyat") or d.get("Fiyat") or 0),
+                    "size":         str(d.get("Beden") or ""),
+                    "color":        str(d.get("Renk") or ""),
+                    "image":        str(d.get("Resim") or d.get("ResimUrl") or ""),
+                    "ticimax_urun_id": d.get("UrunID") or d.get("UrunKartiID"),
+                })
+            if items:
+                try:
+                    await db.orders.update_one(
+                        {"ticimax_order_id": tc_id},
+                        {"$set": {"items": items,
+                                  "updated_at": datetime.now(timezone.utc).isoformat()}}
+                    )
+                    items_only_fixed += 1
+                except Exception as ie:
+                    logger.warning(f"[backfill] items update err: {ie}")
+
+    return {
+        "success": True,
+        "broken_total": broken_count,
+        "checked_in_window": len(broken_ids),
+        "ticimax_returned": len(fetched_raw),
+        "fixed": fixed,
+        "items_only_fixed": items_only_fixed,
+        "not_found_in_window": len(not_found_in_ticimax) - items_only_fixed,
+        "message": f"{fixed} sipariş tamamen düzeltildi, {items_only_fixed} sipariş için sadece ürün listesi tamamlandı (toplam {broken_count} bozuk)."
+    }
+
+
+
 @router.post("/ticimax/members/import")
 async def import_ticimax_members(
     page_size: int = Query(100, ge=10, le=500),

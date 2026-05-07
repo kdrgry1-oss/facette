@@ -295,10 +295,11 @@ async def _ticimax_sync_orders():
         new_count = 0
         skipped_mp = 0
         seen_pages = 0
-        mp_kw = ("trendyol", "hepsiburada", "n11", "aliexpress", "amazon",
-                 "ciceksepeti", "pttavm", "temu", "pazarama")
-        mp_pref = ("TY-", "HB-", "N11-", "AMZ-", "AE-")
 
+        # Ortak parser (KargoAdresi/FaturaAdresi nested + UrunListesi item)
+        from ticimax_order_parser import parse_ticimax_order, is_marketplace_order
+
+        updated_count = 0
         for page in range(1, 6):
             try:
                 orders = tc_get_orders(
@@ -315,63 +316,43 @@ async def _ticimax_sync_orders():
             for o in orders:
                 if not o:
                     continue
-                tc_id = o.get("SiparisID") or o.get("ID")
-                tc_no = (o.get("SiparisNo") or "").strip().upper()
-                kaynak = str(o.get("Kaynak") or "").lower()
-                is_mp_flag = bool(o.get("IsMarketplace") or (o.get("PazaryeriButikId") or 0) > 0)
-                if is_mp_flag or any(k in kaynak for k in mp_kw) or any(tc_no.startswith(p) for p in mp_pref):
+                if is_marketplace_order(o):
                     skipped_mp += 1
                     continue
-                # Idempotent
+                doc = parse_ticimax_order(o, api_key=api_key)
+                if not doc:
+                    continue
+                tc_id = doc["ticimax_order_id"]
+                tc_no = doc["order_number"]
+                # Idempotent: varsa update, yoksa insert
                 exist = await db.orders.find_one(
-                    {"$or": [{"order_number": tc_no}, {"ticimax_order_id": int(tc_id) if tc_id else -1}]},
+                    {"$or": [{"order_number": tc_no}, {"ticimax_order_id": tc_id}]},
                     {"_id": 0, "id": 1}
                 )
-                if exist:
-                    continue
-                # Basit insert (hızlı senkron için minimum mapping)
-                first_name = str(o.get("AliciAdi") or "").strip()
-                last_name = str(o.get("AliciSoyadi") or "").strip()
-                phone = str(o.get("AliciCepTelefonu") or o.get("AliciTelefon") or "").strip()
-                email = str(o.get("AliciEmail") or "").strip().lower()
-                order_doc = {
-                    "id": str(uuid.uuid4())[:8],
-                    "order_number": tc_no or f"TC-{tc_id}",
-                    "ticimax_order_id": int(tc_id) if tc_id else None,
-                    "user_id": None,
-                    "shipping_address": {
-                        "first_name": first_name, "last_name": last_name,
-                        "phone": phone, "email": email,
-                        "address": str(o.get("TeslimatAdresi") or ""),
-                        "city": str(o.get("TeslimatIl") or ""),
-                        "district": str(o.get("TeslimatIlce") or ""),
-                    },
-                    "items": [],
-                    "subtotal": float(o.get("ToplamSiparisTutariOrjinal") or 0),
-                    "shipping_cost": float(o.get("KargoUcreti") or 0),
-                    "discount": float(o.get("KuponIndirimi") or 0),
-                    "total": float(o.get("ToplamSiparisTutari") or 0),
-                    "payment_method": str(o.get("OdemeTipi") or ""),
-                    "payment_status": "paid" if o.get("OdemeTamamlandi") else "pending",
-                    "status": str(o.get("SiparisDurumuStr") or "pending"),
-                    "platform": "facette",
-                    "channel": "web",
-                    "imported_from": "ticimax_cron",
-                    "imported_at": datetime.now(timezone.utc).isoformat(),
-                    "created_at": str(o.get("SiparisTarihi") or datetime.now(timezone.utc).isoformat()),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
                 try:
-                    await db.orders.insert_one(order_doc)
-                    new_count += 1
+                    if exist:
+                        # Sadece güncelleme (created_at korunur, id korunur, user_id korunur)
+                        await db.orders.update_one(
+                            {"id": exist["id"]},
+                            {"$set": {**{k: v for k, v in doc.items() if k != "created_at"},
+                                      "updated_at": datetime.now(timezone.utc).isoformat()}}
+                        )
+                        updated_count += 1
+                    else:
+                        doc["id"] = str(uuid.uuid4())[:8]
+                        doc["user_id"] = None
+                        doc["imported_from"] = "ticimax_cron"
+                        doc["imported_at"] = datetime.now(timezone.utc).isoformat()
+                        await db.orders.insert_one(doc)
+                        new_count += 1
                 except Exception as ie:
-                    logger.warning(f"[cron][ticimax] insert err: {ie}")
-        if new_count > 0:
-            logger.info(f"[cron][ticimax] +{new_count} yeni site siparişi (skipped MP={skipped_mp}, pages={seen_pages})")
+                    logger.warning(f"[cron][ticimax] upsert err: {ie}")
+        if new_count > 0 or updated_count > 0:
+            logger.info(f"[cron][ticimax] +{new_count} yeni / ~{updated_count} güncellendi (skipped MP={skipped_mp}, pages={seen_pages})")
             await log_integration_event(
                 marketplace="ticimax", action="order_pull", status="success",
                 direction="inbound",
-                message=f"[cron] {new_count} yeni site siparişi eklendi"
+                message=f"[cron] {new_count} yeni + {updated_count} güncellendi"
             )
     except Exception as e:
         logger.exception(f"[cron][ticimax] sync fatal: {e}")

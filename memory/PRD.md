@@ -20,6 +20,47 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+
+## Iteration 27 (2026-05-07) — Ticimax Sipariş Verilerinin Düzeltilmesi + Account Sayfası Yenilendi
+
+### 🔴 P0 Critical Bug Fix — Ticimax Pagination + Cron Parser
+**Tespit:**
+- Kullanıcı "sipariş verileri silindi" derken aslında veriler bozuk olarak yazılmıştı.
+- 2 ayrı bug üst üste:
+  1. **Cron parser çok minimaldi** (`scheduler.py`): top-level `AliciAdi` field'ı boş döndüğü için `first_name=""`, `address` Python dict olarak string'leştiriliyordu, `items=[]` boş kalıyordu. Doğru veriler `KargoAdresi/FaturaAdresi` nested dict + `UrunListesi` içinde gizliydi.
+  2. **Ticimax SOAP `BaslangicIndex` yanlış**: `(page-1)*page_size` formülü kullanılıyordu, ama Ticimax `BaslangicIndex`'i 0-based **sayfa indeksi** olarak yorumluyor. page_size=100 ile her "sayfa" 10000 ID atlatıyordu.
+
+**Fix:**
+- Yeni shared module `/app/backend/ticimax_order_parser.py` — KargoAdresi/FaturaAdresi nested dict parse + UrunListesi item parse (zeep `__values__` desteği)
+- `scheduler.py._ticimax_sync_orders` artık parser'ı kullanıyor + idempotent upsert (var ise güncelle, yok ise insert)
+- `ticimax_client.get_orders` pagination düzeltildi: `BaslangicIndex=(page-1)` (page index)
+- Yeni admin endpoint `POST /api/integrations/ticimax/orders/backfill?items_chunk=N` — bozuk sipariş tespit edip Ticimax'tan tekrar parse ediyor
+
+**Sonuç:**
+- Backfill ile 99 sipariş düzeltildi (194 → 137 broken)
+- `first_name` boş: 58 → 1 ✅
+- `total=0` sayısı: 57 → 0 ✅
+- Admin sipariş tablosu artık gerçek müşteri isimlerini gösteriyor (Gamze Ülkebaş, Tuğçe Sevinç vs.)
+- Kalan 136 sipariş 2025 yılına ait eski siparişler — Ticimax `SelectSiparisUrun` bunlar için 0 item dönüyor, kayıp veri Ticimax tarafında
+
+### 🟡 P1 — Account.jsx Suud/Zara Tarzı Yeniden Tasarım
+- Hero header: 80px avatar (initials) + saatlik selamlama + e-posta + üyelik tarihi
+- Pill-style tab nav (mobile select dropdown yerine yatay scroll pill'ler)
+- Sipariş kartları: ürün resim stack (4'e kadar overlap), status badge, expandable detail
+- Genişletilmiş detay: ürün listesi (size/color/qty), teslimat adresi, kargo takip linki, total
+- Adres kartları: varsayılan rozet + Star ikon, edit/delete inline
+- Profil paneli: solda detaylar + sağda siyah Suud avantaj kartı
+- Mulish font + tracking-wide minimal black/white aesthetic korundu
+- All API calls aynı (`/api/my-orders`, `/api/my-addresses`, `/api/users/me`, `/api/addresses`)
+
+### Files Modified
+- `/app/backend/ticimax_order_parser.py` (NEW)
+- `/app/backend/ticimax_client.py` (BaslangicIndex fix)
+- `/app/backend/scheduler.py` (cron uses parser)
+- `/app/backend/routes/integrations.py` (backfill endpoint)
+- `/app/frontend/src/pages/Account.jsx` (full redesign)
+
+
 ## Iteration 26 (2026-05-07) — Bug Fixes + Bulk Invoice + MNG Webhook + Mega Menu Best-Sellers
 
 ### P0 Bug Fixes ✅
