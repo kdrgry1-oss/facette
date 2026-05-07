@@ -58,7 +58,7 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 ### Pending User Manual Tasks
 - Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
 - e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
-- MNG'ye webhook URL bildirimi: `https://facette-portal.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+- MNG'ye webhook URL bildirimi: `https://kombin-shop.preview.emergentagent.com/api/orders/cargo/mng-webhook`
 
 
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul
