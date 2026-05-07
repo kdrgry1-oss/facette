@@ -60,7 +60,8 @@ export default function Header({ hideMenu = false }) {
   const [searchResults, setSearchResults] = useState([]);
   const [popularSearches, setPopularSearches] = useState([]);
   const [activeMenu, setActiveMenu] = useState(null);
-  const [megaProducts, setMegaProducts] = useState({ giyim: [], aksesuar: [] });
+  const [hoveredCategory, setHoveredCategory] = useState(null); // alt kategori slug (ceket, sort, ...)
+  const [megaProducts, setMegaProducts] = useState({}); // {slug: [products]}
   
   const { itemCount, setIsOpen } = useCart();
   const { user } = useAuth();
@@ -69,14 +70,19 @@ export default function Header({ hideMenu = false }) {
 
   const isCheckout = location.pathname.includes('/odeme') || location.pathname.includes('/checkout');
 
-  // Mega menu en çok satan ürünleri (lazy: hover'da fetch et)
+  // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch
   useEffect(() => {
-    if (activeMenu && megaProducts[activeMenu].length === 0) {
-      axios.get(`${API}/products?category=${activeMenu}&limit=2&sort=popular`)
-        .then(r => setMegaProducts(prev => ({ ...prev, [activeMenu]: r.data?.products || [] })))
-        .catch(() => {});
+    const slug = hoveredCategory || activeMenu;
+    if (slug && !megaProducts[slug]) {
+      axios.get(`${API}/products?category=${slug}&limit=2&sort=popular`)
+        .then(r => setMegaProducts(prev => ({ ...prev, [slug]: r.data?.products || [] })))
+        .catch(() => setMegaProducts(prev => ({ ...prev, [slug]: [] })));
     }
-  }, [activeMenu]);
+  }, [hoveredCategory, activeMenu]);
+
+  // Aktif olarak gösterilecek ürün listesi: önce alt kategori hover, yoksa ana kategori
+  const activeMegaSlug = hoveredCategory || activeMenu;
+  const activeMegaProducts = (megaProducts[activeMegaSlug] || []).slice(0, 2);
 
   useEffect(() => {
     if (searchOpen && popularSearches.length === 0) {
@@ -250,6 +256,8 @@ export default function Header({ hideMenu = false }) {
                               to={`/kategori/${item.slug}`}
                               className="text-sm text-gray-600 hover:text-black transition-colors"
                               onClick={() => setActiveMenu(null)}
+                              onMouseEnter={() => setHoveredCategory(item.slug)}
+                              onMouseLeave={() => setHoveredCategory(null)}
                             >
                               {item.name}
                             </Link>
@@ -269,31 +277,34 @@ export default function Header({ hideMenu = false }) {
                   ))}
                 </div>
                 
-                {/* Right: En çok satan 2 ürün */}
-                <div className="flex-shrink-0 flex gap-4">
-                  {(megaProducts.giyim.length > 0 ? megaProducts.giyim : []).slice(0, 2).map((p) => (
-                    <Link
-                      key={p.id}
-                      to={`/urun/${p.slug || p.id}`}
-                      className="block w-44 group"
-                      onClick={() => setActiveMenu(null)}
-                    >
-                      <div className="w-44 h-56 overflow-hidden bg-stone-100">
-                        <img
-                          src={(p.images && p.images[0]) || p.image || ""}
-                          alt={p.name}
-                          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-                        />
-                      </div>
-                      <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                      <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
-                    </Link>
-                  ))}
-                  {megaProducts.giyim.length === 0 && MENU_IMAGES.giyim.map((img, i) => (
-                    <Link key={i} to="/kategori/giyim" className="block w-44 h-56 overflow-hidden" onClick={() => setActiveMenu(null)}>
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                    </Link>
-                  ))}
+                {/* Right: Hover edilen kategorinin en çok satan 2 ürünü */}
+                <div className="flex-shrink-0 flex gap-4 min-w-[376px]">
+                  {activeMegaProducts.length > 0 ? (
+                    activeMegaProducts.map((p) => (
+                      <Link
+                        key={p.id}
+                        to={`/urun/${p.slug || p.id}`}
+                        className="block w-44 group"
+                        onClick={() => setActiveMenu(null)}
+                      >
+                        <div className="w-44 h-56 overflow-hidden bg-stone-100">
+                          <img
+                            src={(p.images && p.images[0]) || p.image || ""}
+                            alt={p.name}
+                            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+                          />
+                        </div>
+                        <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
+                        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+                      </Link>
+                    ))
+                  ) : (
+                    MENU_IMAGES.giyim.map((img, i) => (
+                      <Link key={i} to="/kategori/giyim" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
+                        <img src={img} alt="" className="w-full h-full object-cover" />
+                      </Link>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -319,6 +330,8 @@ export default function Header({ hideMenu = false }) {
                           to={`/kategori/${item.slug}`}
                           className="text-sm text-gray-600 hover:text-black transition-colors"
                           onClick={() => setActiveMenu(null)}
+                          onMouseEnter={() => setHoveredCategory(item.slug)}
+                          onMouseLeave={() => setHoveredCategory(null)}
                         >
                           {item.name}
                         </Link>
@@ -334,28 +347,29 @@ export default function Header({ hideMenu = false }) {
                   </Link>
                 </div>
                 
-                {/* Right: En çok satan 2 aksesuar */}
-                <div className="flex-shrink-0 flex gap-4">
-                  {(megaProducts.aksesuar.length > 0 ? megaProducts.aksesuar : []).slice(0, 2).map((p) => (
-                    <Link
-                      key={p.id}
-                      to={`/urun/${p.slug || p.id}`}
-                      className="block w-44 group"
-                      onClick={() => setActiveMenu(null)}
-                    >
-                      <div className="w-44 h-56 overflow-hidden bg-stone-100">
-                        <img
-                          src={(p.images && p.images[0]) || p.image || ""}
-                          alt={p.name}
-                          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-                        />
-                      </div>
-                      <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                      <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
-                    </Link>
-                  ))}
-                  {megaProducts.aksesuar.length === 0 && (
-                    <Link to="/kategori/aksesuar" className="block w-44 h-56 overflow-hidden" onClick={() => setActiveMenu(null)}>
+                {/* Right: Hover edilen kategorinin en çok satan 2 ürünü */}
+                <div className="flex-shrink-0 flex gap-4 min-w-[376px]">
+                  {activeMegaProducts.length > 0 ? (
+                    activeMegaProducts.map((p) => (
+                      <Link
+                        key={p.id}
+                        to={`/urun/${p.slug || p.id}`}
+                        className="block w-44 group"
+                        onClick={() => setActiveMenu(null)}
+                      >
+                        <div className="w-44 h-56 overflow-hidden bg-stone-100">
+                          <img
+                            src={(p.images && p.images[0]) || p.image || ""}
+                            alt={p.name}
+                            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+                          />
+                        </div>
+                        <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
+                        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+                      </Link>
+                    ))
+                  ) : (
+                    <Link to="/kategori/aksesuar" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
                       <img src={MENU_IMAGES.aksesuar[0]} alt="" className="w-full h-full object-cover" />
                     </Link>
                   )}
