@@ -463,22 +463,24 @@ export default function AdminOrders() {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
-    if (!await window.appConfirm(`${selectedOrders.length} sipariş için e-Arşiv fatura oluşturulacak. Devam edilsin mi?`)) return;
+    if (!await window.appConfirm(`${selectedOrders.length} sipariş için fatura oluşturulacak (otomatik: VKN'liyse e-Fatura, değilse e-Arşiv). Devam?`)) return;
     try {
       const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-      let ok = 0, fail = 0;
-      for (const id of selectedOrders) {
-        try {
-          const res = await axios.post(`${API}/orders/${id}/create-invoice?invoice_type=e-arsiv`, {}, { headers });
-          if (res.data?.success) ok += 1; else fail += 1;
-        } catch (e) { fail += 1; }
+      const res = await axios.post(
+        `${API}/orders/bulk/create-invoice?invoice_type=auto`,
+        selectedOrders,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const ok = res.data?.success_count || 0;
+      const fail = res.data?.error_count || 0;
+      toast.success(`${ok} fatura oluşturuldu${fail > 0 ? `, ${fail} başarısız` : ""}`);
+      if (fail > 0 && res.data?.errors?.length) {
+        console.warn("Bulk invoice errors:", res.data.errors);
       }
-      toast.success(`${ok} fatura oluşturuldu, ${fail} başarısız`);
       setSelectedOrders([]);
       fetchOrders();
     } catch (err) {
-      toast.error("Toplu fatura başarısız");
+      toast.error(err.response?.data?.detail || "Toplu fatura başarısız");
     }
   };
 

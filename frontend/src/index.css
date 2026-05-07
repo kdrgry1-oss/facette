@@ -106,6 +106,15 @@ button { font-weight: 400; }
   animation: slideRight 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Hide scrollbar for horizontal snap-scroll carousels */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Button styles */
 .btn-primary {
   @apply bg-black text-white px-6 py-3 text-sm font-medium tracking-wider uppercase transition-all duration-200 hover:bg-gray-900;

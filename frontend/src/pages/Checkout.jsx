@@ -297,11 +297,12 @@ export default function Checkout() {
           order_id: orderRes.data.order_number, total: grandTotal, shipping: shippingCost,
           items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
         });
+        // ÖNCE paymentStep'i "success"'e çevir (useEffect'in /sepet'e yönlendirmesini önler)
+        setPaymentStep("success");
         clearCart();
         toast.success("Siparişiniz alındı!");
         // Guest veya logged-in: doğrudan OrderSuccess sayfasına yönlendir.
-        // (Hesap oluşturma CTA'sı OrderSuccess sayfasında gösterilir.)
-        navigate(`/order-success/${orderRes.data.order_number}`);
+        navigate(`/order-success/${orderRes.data.order_number}`, { replace: true });
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
@@ -321,7 +322,7 @@ export default function Checkout() {
 
   if (paymentStep === "success") {
     return (
-      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+      <div className="min-h-screen bg-stone-50" data-testid="checkout-page">
         <Header />
         <div className="container-main py-16 text-center">
           <CheckCircle size={64} className="mx-auto text-green-500 mb-4" />
@@ -334,7 +335,7 @@ export default function Checkout() {
   }
   if (paymentStep === "error") {
     return (
-      <div className="min-h-screen bg-gray-50" data-testid="checkout-page">
+      <div className="min-h-screen bg-stone-50" data-testid="checkout-page">
         <Header />
         <div className="container-main py-16 text-center">
           <AlertCircle size={64} className="mx-auto text-red-500 mb-4" />
@@ -347,7 +348,7 @@ export default function Checkout() {
   }
   if (paymentStep === "processing") {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-stone-50">
         <Header />
         <div className="container-main py-16 text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-black mx-auto mb-4"></div>
@@ -392,39 +393,38 @@ export default function Checkout() {
               {/* 1) Sepetimdeki Ürünler — collapsible */}
               <div className="bg-white border border-black/10" data-testid="cart-summary-block">
                 <button type="button" onClick={() => setCartCollapsed((v) => !v)}
-                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors">
+                  className="w-full flex items-center justify-between px-4 md:px-5 py-3.5 md:py-4 hover:bg-stone-50 transition-colors">
                   <div className="flex items-center gap-3">
-                    <span className="font-medium">Sepetimdeki Ürünler ({items.length})</span>
-                    {!cartCollapsed && <span className="text-xs text-gray-500">— detaylar gizlemek için tıklayın</span>}
+                    <span className="text-sm font-light tracking-[0.05em]">Sepetimdeki Ürünler ({items.length})</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {cartCollapsed && (
-                      <div className="flex -space-x-2">
+                      <div className="flex -space-x-1.5">
                         {items.slice(0, 4).map((it) => (
-                          <img key={it.id} src={it.image} alt="" className="w-8 h-8 rounded-full border-2 border-white object-cover" />
+                          <img key={it.id} src={it.image} alt="" className="w-7 h-9 border border-white object-cover" />
                         ))}
                         {items.length > 4 && (
-                          <div className="w-8 h-8 rounded-full bg-gray-200 border-2 border-white text-[10px] flex items-center justify-center font-semibold">+{items.length - 4}</div>
+                          <div className="w-7 h-9 bg-stone-100 border border-white text-[10px] flex items-center justify-center font-light">+{items.length - 4}</div>
                         )}
                       </div>
                     )}
-                    {cartCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                    {cartCollapsed ? <ChevronDown size={16} strokeWidth={1.4} /> : <ChevronUp size={16} strokeWidth={1.4} />}
                   </div>
                 </button>
                 {!cartCollapsed && (
-                  <div className="px-5 pb-5 border-t pt-4 space-y-3">
+                  <div className="px-4 md:px-5 pb-5 border-t border-black/10 pt-4 space-y-3">
                     {items.map((item) => (
                       <div key={item.id} className="flex gap-3 items-center">
-                        <img src={item.image} alt={item.name} className="w-14 h-16 object-cover bg-gray-100 rounded" />
+                        <img src={item.image} alt={item.name} className="w-12 h-14 object-cover bg-stone-100" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate">{item.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {item.size && <>Beden: <span className="text-gray-700">{item.size}</span> · </>}
-                            {item.color && <>Renk: <span className="text-gray-700">{item.color}</span> · </>}
+                          <p className="text-[13px] font-light truncate">{item.name}</p>
+                          <p className="text-[11px] text-black/55 mt-0.5">
+                            {item.size && <>Beden: {item.size} · </>}
+                            {item.color && <>Renk: {item.color} · </>}
                             Adet: {item.quantity}
                           </p>
                         </div>
-                        <div className="text-sm font-semibold whitespace-nowrap">{(item.price * item.quantity).toFixed(2)} TL</div>
+                        <div className="text-sm font-light tabular-nums whitespace-nowrap">{(item.price * item.quantity).toFixed(2)} TL</div>
                       </div>
                     ))}
                   </div>
@@ -447,12 +447,12 @@ export default function Checkout() {
                       <span className="text-sm font-medium text-gray-700">Teslimat Adresi</span>
                       <button type="button" onClick={() => openAddressModal("shipping")}
                         data-testid="edit-shipping-addr-btn"
-                        className="inline-flex items-center gap-1 text-xs text-stone-900 border border-stone-900 rounded px-3 py-1 hover:bg-stone-50 transition">
+                        className="inline-flex items-center gap-1 text-xs text-stone-900 border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
                     <button type="button" onClick={() => openAddressModal("shipping")}
-                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-gray-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
+                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
                       {shippingAddress.first_name
                         ? addressCardContent(shippingAddress, "Teslimat Adresi")
                         : <span className="text-xs text-gray-500">Henüz teslimat adresi seçilmedi. Eklemek için tıklayın.</span>}
@@ -469,7 +469,7 @@ export default function Checkout() {
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
-                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-gray-50 border-gray-200" : (billingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-gray-50 border-dashed border-gray-300")}`}>
+                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-stone-50 border-gray-200" : (billingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300")}`}>
                       {billingSameAsShipping
                         ? <span className="text-xs text-gray-500 italic">Teslimat adresi ile aynı</span>
                         : (billingAddress.first_name
@@ -494,7 +494,7 @@ export default function Checkout() {
 
               {/* 2.b) Kurumsal Fatura */}
               <div className="bg-white border border-black/10" data-testid="corporate-invoice-block">
-                <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors">
+                <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-stone-50 transition-colors">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
                     className="accent-black" data-testid="corporate-invoice-checkbox" />
@@ -512,7 +512,7 @@ export default function Checkout() {
                         <input value={corporateData.company_name}
                           onChange={(e) => setCorporateData({ ...corporateData, company_name: e.target.value })}
                           placeholder="Örn. Facette Tekstil A.Ş."
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
+                          className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-company-name-input" />
                       </div>
                       <div>
@@ -520,7 +520,7 @@ export default function Checkout() {
                         <input value={corporateData.tax_number}
                           onChange={(e) => setCorporateData({ ...corporateData, tax_number: e.target.value.replace(/\D/g, "").slice(0, 11) })}
                           placeholder="10 hane VKN veya 11 hane TCKN"
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
+                          className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-tax-number-input" />
                       </div>
                       <div className="md:col-span-2">
@@ -528,7 +528,7 @@ export default function Checkout() {
                         <input value={corporateData.tax_office}
                           onChange={(e) => setCorporateData({ ...corporateData, tax_office: e.target.value })}
                           placeholder="Örn. Beşiktaş Vergi Dairesi"
-                          className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
+                          className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900"
                           data-testid="corp-tax-office-input" />
                       </div>
                     </div>
@@ -570,14 +570,14 @@ export default function Checkout() {
                     <div className="grid md:grid-cols-2 gap-4 mt-3 pt-3 border-t">
                       <div>
                         <div className="text-xs font-medium text-gray-700 mb-2">Kart Bilgileri</div>
-                        <div className="rounded border p-3 bg-gray-50 text-xs text-gray-500 leading-relaxed">
+                        <div className="rounded border p-3 bg-stone-50 text-xs text-gray-500 leading-relaxed">
                           <Lock size={12} className="inline mr-1 text-green-600" />
                           Kart bilgileri <b>iyzico</b> güvenli ödeme sayfasında güvenle alınacaktır. Bu sayfaya yönlendirileceksiniz.
                         </div>
                       </div>
                       <div>
                         <div className="text-xs font-medium text-gray-700 mb-2">Taksit Seçenekleri</div>
-                        <div className="rounded border p-3 bg-gray-50 text-xs">
+                        <div className="rounded border p-3 bg-stone-50 text-xs">
                           <div className="flex items-center justify-between">
                             <span>Tek Çekim</span><span className="font-semibold">{grandTotal.toFixed(2)} TL</span>
                           </div>
@@ -616,7 +616,7 @@ export default function Checkout() {
                   </label>
                   <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
                     rows={2} placeholder="Hediye Notu (opsiyonel) — kart üzerine yazılır, max 300 karakter"
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
+                    className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
                     data-testid="gift-note-input" />
                 </div>
               </div>
@@ -661,8 +661,8 @@ export default function Checkout() {
                       className="flex-1 border rounded px-3 py-2 text-xs"
                       data-testid="manual-coupon-input" />
                     {appliedCoupon
-                      ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-gray-50" data-testid="remove-coupon-btn">Kaldır</button>
-                      : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-gray-50" data-testid="apply-coupon-btn">Uygula</button>}
+                      ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
+                      : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="apply-coupon-btn">Uygula</button>}
                   </div>
                 </div>
 
@@ -722,7 +722,7 @@ export default function Checkout() {
 
             {/* Saved addresses (if user logged in) */}
             {user && savedAddresses.length > 0 && (
-              <div className="px-5 py-4 border-b bg-gray-50">
+              <div className="px-5 py-4 border-b bg-stone-50">
                 <div className="text-xs font-semibold text-gray-700 mb-2">Kayıtlı Adreslerim</div>
                 <div className="grid sm:grid-cols-2 gap-2">
                   {savedAddresses.map((a) => (
@@ -781,7 +781,7 @@ export default function Checkout() {
               </div>
             </div>
             <div className="px-5 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
-              <button type="button" onClick={closeAddressModal} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">İptal</button>
+              <button type="button" onClick={closeAddressModal} className="px-4 py-2 text-sm border rounded hover:bg-stone-50">İptal</button>
               <button type="button" onClick={handleSaveAddress}
                 className="px-4 py-2 text-sm bg-stone-900 hover:bg-stone-800 text-white rounded font-medium"
                 data-testid="save-address-btn">Kaydet ve Kullan</button>

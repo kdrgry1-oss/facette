@@ -1482,6 +1482,158 @@ async def bulk_create_cargo_barcode(
     }
 
 
+@router.post("/bulk/create-invoice")
+async def bulk_create_invoice(
+    order_ids: List[str],
+    invoice_type: str = Query("auto"),
+    current_user: dict = Depends(require_admin)
+):
+    """Toplu fatura kesimi — invoice_type=auto ile her sipariş için VKN/TC kontrolü
+    yapılır, mükellefse e-Fatura, değilse e-Arşiv kesilir.
+    """
+    success = []
+    errors = []
+    for oid in order_ids or []:
+        try:
+            # Daha önce kesilmişse atla
+            o = await db.orders.find_one({"id": oid}, {"_id": 0, "invoice_issued": 1, "order_number": 1})
+            if not o:
+                errors.append({"order_id": oid, "error": "Sipariş bulunamadı"})
+                continue
+            if o.get("invoice_issued"):
+                errors.append({"order_id": oid, "error": "Fatura zaten kesilmiş", "skipped": True})
+                continue
+            r = await create_invoice_for_order(
+                order_id=oid, invoice_type=invoice_type, current_user=current_user
+            )
+            success.append({
+                "order_id": oid,
+                "invoice_number": r.get("invoice_number"),
+                "invoice_type": r.get("invoice_type"),
+                "invoice_pdf_url": r.get("invoice_pdf_url"),
+            })
+        except HTTPException as he:
+            errors.append({"order_id": oid, "error": str(he.detail)})
+        except Exception as e:
+            errors.append({"order_id": oid, "error": str(e)})
+    return {
+        "success": True,
+        "success_count": len(success),
+        "error_count": len(errors),
+        "successes": success,
+        "errors": errors,
+    }
+
+
+# ═══════════════════ MNG KARGO WEBHOOK ═══════════════════════════════
+@router.post("/cargo/mng-webhook")
+async def mng_cargo_webhook(payload: dict):
+    """MNG Kargo'dan gelen kargo durum güncelleme webhook'u.
+
+    MNG Kargo, gönderi durumu değiştikçe önceden tanımlanmış URL'e bu yapıda
+    POST atar:
+      {"BARKOD": "NZ123", "ISLEM_KODU": "300", "ISLEM_ADI": "Dağıtımda",
+       "TARIH": "2026-05-06T12:30:00", "REFERANS_NO": "FC123ABCD"}
+
+    İşlem kodları (MNG standardı):
+      - 100: Şubeye girdi
+      - 200: Transfere alındı
+      - 300: Dağıtıma çıktı
+      - 400: Teslim edildi
+      - 500: İade
+    """
+    barkod = (payload.get("BARKOD") or payload.get("barcode") or "").strip()
+    islem_kodu = str(payload.get("ISLEM_KODU") or payload.get("status_code") or "")
+    islem_adi = (payload.get("ISLEM_ADI") or payload.get("status_text") or "").strip()
+    tarih = (payload.get("TARIH") or payload.get("event_time") or
+             datetime.now(timezone.utc).isoformat())
+    referans_no = (payload.get("REFERANS_NO") or payload.get("reference_no") or "").strip()
+
+    if not barkod and not referans_no:
+        raise HTTPException(status_code=400, detail="BARKOD veya REFERANS_NO zorunlu")
+
+    # Siparişi barkod veya referans_no ile bul
+    query_or = []
+    if barkod:
+        query_or.extend([
+            {"cargo_tracking_number": barkod},
+            {"cargo.mng_nz_barkod": barkod},
+            {"cargo.mng_gonderi_no": barkod},
+            {"cargo.mng_siparis_no": barkod},
+        ])
+    if referans_no:
+        query_or.append({"order_number": referans_no})
+
+    order = await db.orders.find_one({"$or": query_or}, {"_id": 0, "id": 1, "order_number": 1, "cargo_status_history": 1})
+    if not order:
+        # Sessizce 200 dön — MNG retry yapmasın, sadece logla
+        await db.integration_logs.insert_one({
+            "id": generate_id(),
+            "service": "mng_kargo",
+            "event": "webhook_unknown_order",
+            "barkod": barkod,
+            "referans_no": referans_no,
+            "payload": payload,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return {"success": True, "matched": False}
+
+    # Sipariş durumu mapping
+    status_map = {
+        "100": ("preparing", "Şubeye Girdi"),
+        "200": ("shipped", "Transfere Alındı"),
+        "300": ("shipped", "Dağıtımda"),
+        "400": ("delivered", "Teslim Edildi"),
+        "500": ("returned", "İade"),
+    }
+    new_status, _ = status_map.get(islem_kodu, (None, None))
+
+    update_set = {
+        "cargo_last_status_code": islem_kodu,
+        "cargo_last_status_text": islem_adi,
+        "cargo_last_event_at": tarih,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if new_status:
+        update_set["status"] = new_status
+        if new_status == "delivered":
+            update_set["delivered_at"] = tarih
+
+    history_entry = {
+        "code": islem_kodu, "text": islem_adi, "at": tarih,
+        "barkod": barkod, "raw": payload,
+    }
+
+    await db.orders.update_one(
+        {"id": order["id"]},
+        {
+            "$set": update_set,
+            "$push": {"cargo_status_history": history_entry},
+        },
+    )
+
+    # Log'a yaz
+    await db.integration_logs.insert_one({
+        "id": generate_id(),
+        "service": "mng_kargo",
+        "event": "webhook_update",
+        "order_id": order["id"],
+        "order_number": order.get("order_number"),
+        "barkod": barkod,
+        "code": islem_kodu,
+        "text": islem_adi,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "success": True,
+        "matched": True,
+        "order_id": order["id"],
+        "order_number": order.get("order_number"),
+        "new_status": new_status,
+    }
+
+
 @router.get("/{order_id}/cargo-label")
 async def get_cargo_label(order_id: str, token: str = None):
     """100x150mm yazdırılabilir MNG-stili kargo etiketi (HTML + Code39).

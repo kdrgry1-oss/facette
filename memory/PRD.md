@@ -20,6 +20,47 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 - Integrations: Trendyol API, Doğan e-Dönüşüm SOAP (zeep)
 
 
+## Iteration 26 (2026-05-07) — Bug Fixes + Bulk Invoice + MNG Webhook + Mega Menu Best-Sellers
+
+### P0 Bug Fixes ✅
+1. **Order Success ekranı çıkmıyordu** (kritik bug):
+   - Root cause: `clearCart()` sonrası `useEffect`'teki `items.length === 0 && paymentStep === "form"` koşulu `/sepet`'e yönlendiriyordu, navigate(/order-success) overwrite oluyordu
+   - Fix: navigate öncesi `setPaymentStep("success")` + `navigate(replace: true)` — race condition giderildi
+2. **Mobil ürün resim slider çalışmıyordu** (mobile fallback grid-cols-2 idi):
+   - Yeni: mobile full-width snap-x carousel + pagination dots (her resim aspect-[3/4])
+   - `mobileImageIdx` state + onScroll handler ile dot indicator senkron
+   - Desktop: 2-col grid değişmedi
+3. **Sticky CTA bar yukarıdaydı** → mobile bottom, desktop top:
+   - `fixed bottom-0 md:top-0 md:bottom-auto` + safe-area-inset-bottom
+   - mobile: kompakt h-12 (önceki h-14)
+
+### P1 UI/UX
+4. **"Görünümü Tamamla" pozisyonu değişti**: artık ürün açıklaması ile sepete-ekle arasında küçük görseller (64x80px), yatay scroll, 6 ürün
+5. **Mega menu artık dinamik en çok satan ürünleri çekiyor**: hover'da `/products?category=X&limit=2&sort=popular` fetch, sağda 44x56 görseller + ürün adı + fiyat. Statik MENU_IMAGES fallback olarak kaldı
+6. **Ana menü gap-8 → gap-5**: kategori başlıkları daha sıkı (kullanıcı talebi)
+
+### P1 Admin Bulk Operations + MNG Webhook
+7. **`POST /api/orders/bulk/create-invoice?invoice_type=auto`** — toplu fatura kesimi (akıllı hibrit, otomatik VKN/TC kontrolü)
+8. **Admin Orders.jsx `handleBulkGenerateInvoice`** yeni endpoint'i kullanıyor — N tek tek istek yerine 1 toplu istek
+9. **`POST /api/orders/cargo/mng-webhook`** — MNG status update webhook'u:
+   - BARKOD/REFERANS_NO ile sipariş eşle
+   - ISLEM_KODU mapping: 100→preparing, 200/300→shipped, 400→delivered, 500→returned
+   - cargo_status_history array'e push, integration_logs'a yaz
+   - Bilinmeyen sipariş sessiz 200 (MNG retry önler)
+
+### Files Modified
+- /app/backend/routes/orders.py (bulk/create-invoice + cargo/mng-webhook)
+- /app/frontend/src/pages/Checkout.jsx (paymentStep success, navigate replace)
+- /app/frontend/src/pages/ProductDetail.jsx (mobile carousel, sticky bottom, mini combo)
+- /app/frontend/src/components/Header.jsx (mega menu dinamik, gap daraltıldı)
+- /app/frontend/src/pages/admin/Orders.jsx (bulk invoice → yeni endpoint)
+
+### Pending User Manual Tasks
+- Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
+- e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
+- MNG'ye webhook URL bildirimi: `https://facette-portal.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+
+
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul
 
 ### Kullanıcı Verbatim Talepleri (Hepsi Karşılandı ✅)

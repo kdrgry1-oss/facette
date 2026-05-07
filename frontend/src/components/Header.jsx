@@ -60,6 +60,7 @@ export default function Header({ hideMenu = false }) {
   const [searchResults, setSearchResults] = useState([]);
   const [popularSearches, setPopularSearches] = useState([]);
   const [activeMenu, setActiveMenu] = useState(null);
+  const [megaProducts, setMegaProducts] = useState({ giyim: [], aksesuar: [] });
   
   const { itemCount, setIsOpen } = useCart();
   const { user } = useAuth();
@@ -67,6 +68,15 @@ export default function Header({ hideMenu = false }) {
   const location = useLocation();
 
   const isCheckout = location.pathname.includes('/odeme') || location.pathname.includes('/checkout');
+
+  // Mega menu en çok satan ürünleri (lazy: hover'da fetch et)
+  useEffect(() => {
+    if (activeMenu && megaProducts[activeMenu].length === 0) {
+      axios.get(`${API}/products?category=${activeMenu}&limit=2&sort=popular`)
+        .then(r => setMegaProducts(prev => ({ ...prev, [activeMenu]: r.data?.products || [] })))
+        .catch(() => {});
+    }
+  }, [activeMenu]);
 
   useEffect(() => {
     if (searchOpen && popularSearches.length === 0) {
@@ -118,15 +128,15 @@ export default function Header({ hideMenu = false }) {
     <>
       {/* Top Banner */}
       {!isCheckout && (
-        <div className="bg-white text-black text-center py-2 border-b">
-          <p className="text-xs tracking-wider">500 TL ÜZERİ ÜCRETSİZ KARGO</p>
+        <div className="bg-black text-white text-center py-1.5 md:py-2">
+          <p className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">500 TL Üzeri Ücretsiz Kargo</p>
         </div>
       )}
 
       {/* Main Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
-        <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
-          <div className="flex items-center h-12 md:h-14">
+        <div className="max-w-screen-2xl mx-auto px-3 md:px-6">
+          <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center">
               {!isCheckout && (
@@ -140,7 +150,7 @@ export default function Header({ hideMenu = false }) {
                     <Menu size={20} strokeWidth={1.4} />
                   </button>
 
-                  <nav className="hidden lg:flex items-center gap-8">
+                  <nav className="hidden lg:flex items-center gap-5">
                     {/* EN YENİLER */}
                     <Link
                       to="/kategori/en-yeniler"
@@ -190,25 +200,25 @@ export default function Header({ hideMenu = false }) {
             </div>
 
             {/* Center: Logo (text on mobile, image on desktop) */}
-            <Link to="/" className="flex-shrink-0" data-testid="header-logo">
-              <span className="md:hidden text-base tracking-[0.4em] font-light">FACETTE</span>
-              <img src="/logo.webp" alt="FACETTE" className="hidden md:block h-7" />
+            <Link to="/" className="flex-shrink-0 absolute left-1/2 -translate-x-1/2 lg:static lg:translate-x-0" data-testid="header-logo">
+              <span className="lg:hidden text-[13px] tracking-[0.45em] font-light">FACETTE</span>
+              <img src="/logo.webp" alt="FACETTE" className="hidden lg:block h-6" />
             </Link>
 
             {/* Right: Icons (mobile: search + cart only; desktop: full set) */}
-            <div className="flex-1 flex items-center justify-end gap-1 md:gap-3">
+            <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-2">
               {!isCheckout && (
                 <>
                   <button onClick={() => setSearchOpen(true)} className="p-2 hover:opacity-60" aria-label="Ara" data-testid="search-btn">
-                    <Search size={18} strokeWidth={1.4} />
+                    <Search size={17} strokeWidth={1.4} />
                   </button>
-                  <Link to={user ? "/hesabim" : "/giris"} className="hidden md:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
-                    <User size={18} strokeWidth={1.4} />
+                  <Link to={user ? "/hesabim" : "/giris"} className="hidden lg:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
+                    <User size={17} strokeWidth={1.4} />
                   </Link>
                   <button onClick={() => setIsOpen(true)} className="p-2 hover:opacity-60 relative" aria-label="Sepet" data-testid="cart-btn">
-                    <ShoppingBag size={18} strokeWidth={1.4} />
+                    <ShoppingBag size={17} strokeWidth={1.4} />
                     {itemCount > 0 && (
-                      <span className="absolute top-0 right-0 min-w-[16px] h-4 px-1 bg-black text-white text-[9px] rounded-full flex items-center justify-center">
+                      <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 bg-black text-white text-[8px] font-light rounded-full flex items-center justify-center">
                         {itemCount}
                       </span>
                     )}
@@ -259,20 +269,29 @@ export default function Header({ hideMenu = false }) {
                   ))}
                 </div>
                 
-                {/* Right Images */}
+                {/* Right: En çok satan 2 ürün */}
                 <div className="flex-shrink-0 flex gap-4">
-                  {MENU_IMAGES.giyim.map((img, i) => (
-                    <Link 
-                      key={i} 
-                      to="/kategori/giyim"
-                      className="block w-48 h-60 overflow-hidden"
+                  {(megaProducts.giyim.length > 0 ? megaProducts.giyim : []).slice(0, 2).map((p) => (
+                    <Link
+                      key={p.id}
+                      to={`/urun/${p.slug || p.id}`}
+                      className="block w-44 group"
                       onClick={() => setActiveMenu(null)}
                     >
-                      <img 
-                        src={img} 
-                        alt="" 
-                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" 
-                      />
+                      <div className="w-44 h-56 overflow-hidden bg-stone-100">
+                        <img
+                          src={(p.images && p.images[0]) || p.image || ""}
+                          alt={p.name}
+                          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+                        />
+                      </div>
+                      <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
+                      <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+                    </Link>
+                  ))}
+                  {megaProducts.giyim.length === 0 && MENU_IMAGES.giyim.map((img, i) => (
+                    <Link key={i} to="/kategori/giyim" className="block w-44 h-56 overflow-hidden" onClick={() => setActiveMenu(null)}>
+                      <img src={img} alt="" className="w-full h-full object-cover" />
                     </Link>
                   ))}
                 </div>
@@ -315,19 +334,31 @@ export default function Header({ hideMenu = false }) {
                   </Link>
                 </div>
                 
-                {/* Right Image */}
-                <div className="flex-shrink-0">
-                  <Link 
-                    to="/kategori/aksesuar"
-                    className="block w-48 h-60 overflow-hidden"
-                    onClick={() => setActiveMenu(null)}
-                  >
-                    <img 
-                      src={MENU_IMAGES.aksesuar[0]} 
-                      alt="" 
-                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" 
-                    />
-                  </Link>
+                {/* Right: En çok satan 2 aksesuar */}
+                <div className="flex-shrink-0 flex gap-4">
+                  {(megaProducts.aksesuar.length > 0 ? megaProducts.aksesuar : []).slice(0, 2).map((p) => (
+                    <Link
+                      key={p.id}
+                      to={`/urun/${p.slug || p.id}`}
+                      className="block w-44 group"
+                      onClick={() => setActiveMenu(null)}
+                    >
+                      <div className="w-44 h-56 overflow-hidden bg-stone-100">
+                        <img
+                          src={(p.images && p.images[0]) || p.image || ""}
+                          alt={p.name}
+                          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+                        />
+                      </div>
+                      <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
+                      <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+                    </Link>
+                  ))}
+                  {megaProducts.aksesuar.length === 0 && (
+                    <Link to="/kategori/aksesuar" className="block w-44 h-56 overflow-hidden" onClick={() => setActiveMenu(null)}>
+                      <img src={MENU_IMAGES.aksesuar[0]} alt="" className="w-full h-full object-cover" />
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>

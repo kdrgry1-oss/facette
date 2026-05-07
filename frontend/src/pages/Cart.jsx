@@ -203,40 +203,59 @@ export default function Cart() {
           </div>
         </div>
 
-        {/* Görünümü Tamamla — Suud stili: image + bookmark + name + price */}
+        {/* Görünümü Tamamla — mobile: yatay snap, desktop: 4-col grid */}
         {(suggestions.length > 0 || suggestionsLoading) && (
           <div className="mt-12 md:mt-16 pt-8 md:pt-12 border-t border-black/10" data-testid="cart-suggestions-block">
-            <h2 className="text-lg md:text-xl font-light tracking-tight mb-6 md:mb-8">Görünümü Tamamla</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Görünümü Tamamla</h2>
+            {/* Mobile snap-scroll */}
+            <div className="md:hidden -mx-4 px-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
+              <div className="flex gap-3" style={{ minWidth: "max-content" }}>
+                {suggestions.map((p) => {
+                  const img = (p.images && p.images[0]) || p.image || "";
+                  const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                  return (
+                    <div key={p.id} className="snap-start shrink-0 w-[44vw]" data-testid={`cart-suggestion-${p.id}`}>
+                      <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                        <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                      </Link>
+                      <div className="mt-2">
+                        <Link to={`/urun/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">{p.name}</Link>
+                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                          {hasDiscount ? (
+                            <>
+                              <span className="text-[11px] text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                              <span className="text-[12px] font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                            </>
+                          ) : (
+                            <span className="text-[12px] font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Desktop grid */}
+            <div className="hidden md:grid grid-cols-4 gap-5">
               {suggestions.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
-                  <div key={p.id} className="group relative" data-testid={`cart-suggestion-${p.id}`}>
-                    <Link
-                      to={`/urun/${p.slug || p.id}`}
-                      className="block relative overflow-hidden bg-stone-100 aspect-[3/4]"
-                      aria-label={p.name}
-                    >
-                      <img
-                        src={img}
-                        alt={p.name}
-                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
-                        loading="lazy"
-                      />
+                  <div key={p.id} className="group relative">
+                    <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                     </Link>
                     <div className="mt-2.5">
-                      <Link to={`/urun/${p.slug || p.id}`} className="block text-xs md:text-sm font-light text-black/85 line-clamp-1 hover:underline">
-                        {p.name}
-                      </Link>
+                      <Link to={`/urun/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
                         {hasDiscount ? (
                           <>
-                            <span className="text-xs md:text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                            <span className="text-xs md:text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                            <span className="text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                            <span className="text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
                           </>
                         ) : (
-                          <span className="text-xs md:text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          <span className="text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
                         )}
                       </div>
                     </div>

@@ -24,6 +24,7 @@ export default function ProductDetail() {
   const [quantity, setQuantity] = useState(1);
   const [showSizeChart, setShowSizeChart] = useState(false);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const [mobileImageIdx, setMobileImageIdx] = useState(0);
   const [expandedSections, setExpandedSections] = useState({
     description: false,
     shipping: false,
@@ -210,18 +211,18 @@ export default function ProductDetail() {
     <div className="min-h-screen">
       <Header />
 
-      {/* Sticky Product Header - facette.com.tr style */}
+      {/* Sticky Product Bar — mobile: bottom, desktop: top */}
       {showStickyHeader && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-white border-b shadow-sm">
-          <div className="max-w-screen-2xl mx-auto px-4 py-2 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <img src={displayImages[0]} alt="" className="w-10 h-12 object-cover" />
-              <div>
-                <p className="text-sm font-medium line-clamp-1">{product.name}</p>
-                <p className="text-sm">{displayPrice.toFixed(2).replace('.', ',')} TL</p>
+        <div className="fixed left-0 right-0 z-50 bg-white border-t md:border-t-0 md:border-b shadow-[0_-4px_20px_rgba(0,0,0,0.05)] md:shadow-sm bottom-0 md:top-0 md:bottom-auto pb-[env(safe-area-inset-bottom)]" data-testid="sticky-product-bar">
+          <div className="max-w-screen-2xl mx-auto px-3 md:px-4 py-2.5 md:py-2 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <img src={displayImages[0]} alt="" className="w-10 h-12 object-cover bg-stone-100" />
+              <div className="min-w-0">
+                <p className="text-[12px] md:text-sm font-light line-clamp-1">{product.name}</p>
+                <p className="text-[12px] md:text-sm tabular-nums">{displayPrice.toFixed(2).replace('.', ',')} TL</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 shrink-0">
               <div className="hidden md:flex items-center gap-1.5">
                 {sizes.slice(0, 5).map((v, i) => (
                   <button
@@ -235,14 +236,12 @@ export default function ProductDetail() {
                   </button>
                 ))}
               </div>
-              <button 
+              <button
                 onClick={handleAddToCart}
-                className="bg-black text-white px-6 py-2 text-xs uppercase tracking-wider hover:bg-gray-900"
+                className="bg-black text-white px-4 md:px-6 py-2.5 md:py-2 text-[11px] md:text-xs uppercase tracking-[0.2em] hover:bg-black/85"
+                data-testid="sticky-add-to-cart"
               >
                 Sepete Ekle
-              </button>
-              <button className="p-2 border border-gray-300 hover:border-black">
-                <Bookmark size={16} />
               </button>
             </div>
           </div>
@@ -268,11 +267,44 @@ export default function ProductDetail() {
 
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-          {/* All Images in 2 Column Grid - facette.com.tr style */}
+          {/* Image Gallery — mobile: swipe carousel, desktop: 2-col grid */}
           <div className="lg:col-span-8 space-y-2">
-            <div className="grid grid-cols-2 gap-2">
+            {/* Mobile: full-width snap carousel with dots */}
+            <div className="lg:hidden -mx-4">
+              <div
+                className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+                onScroll={(e) => {
+                  const idx = Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth);
+                  setMobileImageIdx(idx);
+                }}
+              >
+                {displayImages.map((img, index) => (
+                  <div key={index} className="snap-center shrink-0 w-screen aspect-[3/4] bg-stone-50">
+                    <img
+                      src={img}
+                      alt={`${product.name} ${index + 1}`}
+                      className="w-full h-full object-cover object-top"
+                      loading={index === 0 ? "eager" : "lazy"}
+                    />
+                  </div>
+                ))}
+              </div>
+              {displayImages.length > 1 && (
+                <div className="flex items-center justify-center gap-1.5 py-3">
+                  {displayImages.map((_, i) => (
+                    <span
+                      key={i}
+                      className={`h-[2px] transition-all ${i === mobileImageIdx ? "w-6 bg-black" : "w-3 bg-black/25"}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Desktop: 2-col grid */}
+            <div className="hidden lg:grid grid-cols-2 gap-2">
               {displayImages.map((img, index) => (
-                <div key={index} className="relative aspect-[3/4] bg-gray-50">
+                <div key={index} className="relative aspect-[3/4] bg-stone-50">
                   <img
                     src={img}
                     alt={`${product.name} ${index + 1}`}
@@ -370,6 +402,34 @@ export default function ProductDetail() {
               </button>
             </div>
 
+            {/* Görünümü Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
+            {comboProducts.length > 0 && (
+              <div className="mb-6 pb-6 border-b border-black/10" data-testid="product-combo-mini">
+                <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Görünümü Tamamla</p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 lg:mx-0 lg:px-0">
+                  {comboProducts.slice(0, 6).map((p) => {
+                    const img = (p.images && p.images[0]) || p.image || "";
+                    return (
+                      <Link
+                        key={p.id}
+                        to={`/urun/${p.slug || p.id}`}
+                        className="shrink-0 w-[64px] group"
+                        data-testid={`combo-mini-${p.id}`}
+                        title={p.name}
+                      >
+                        <div className="relative w-16 h-20 bg-stone-100 overflow-hidden">
+                          <img src={img} alt={p.name} className="w-full h-full object-cover group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" />
+                        </div>
+                        <p className="text-[9px] text-black/50 tabular-nums mt-1 truncate">
+                          {((p.discount_price && p.discount_price > 0) ? p.discount_price : p.price || 0).toFixed(0)} TL
+                        </p>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Custom Accordion Details - No slider issues */}
             <div className="border-t">
               {/* Ürün Özellikleri */}
@@ -420,27 +480,62 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* Combo Products — Suud Collection stili: image + bookmark + name + price */}
+        {/* Combo Products — mobile: yatay snap-scroll, desktop: 4-col grid */}
         {comboProducts.length > 0 && (
           <section className="mt-12 md:mt-16 pt-8 md:pt-10 border-t border-black/10" data-testid="product-combo-section">
-            <h2 className="text-lg md:text-xl font-light tracking-tight mb-6 md:mb-8">Görünümü Tamamla</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Görünümü Tamamla</h2>
+            {/* Mobile horizontal scroll */}
+            <div className="md:hidden -mx-4 px-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
+              <div className="flex gap-3" style={{ minWidth: "max-content" }}>
+                {comboProducts.map((p) => {
+                  const img = (p.images && p.images[0]) || p.image || "";
+                  const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                  return (
+                    <div
+                      key={p.id}
+                      className="snap-start shrink-0 w-[44vw]"
+                      data-testid={`combo-product-${p.id}`}
+                    >
+                      <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                        <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          className="absolute top-1.5 right-1.5 w-7 h-7 flex items-center justify-center"
+                          aria-label="Favorilere ekle"
+                        >
+                          <Bookmark size={15} strokeWidth={1.4} className="text-black" />
+                        </button>
+                      </Link>
+                      <div className="mt-2">
+                        <Link to={`/urun/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">
+                          {p.name}
+                        </Link>
+                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                          {hasDiscount ? (
+                            <>
+                              <span className="text-[11px] text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                              <span className="text-[12px] font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                            </>
+                          ) : (
+                            <span className="text-[12px] font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Desktop grid */}
+            <div className="hidden md:grid grid-cols-4 gap-5">
               {comboProducts.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
-                  <div key={p.id} className="group relative" data-testid={`combo-product-${p.id}`}>
-                    <Link
-                      to={`/urun/${p.slug || p.id}`}
-                      className="block relative overflow-hidden bg-stone-100 aspect-[3/4]"
-                      aria-label={p.name}
-                    >
-                      <img
-                        src={img}
-                        alt={p.name}
-                        className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]"
-                        loading="lazy"
-                      />
+                  <div key={p.id} className="group relative">
+                    <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                       <button
                         type="button"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -451,20 +546,15 @@ export default function ProductDetail() {
                       </button>
                     </Link>
                     <div className="mt-2.5">
-                      <Link
-                        to={`/urun/${p.slug || p.id}`}
-                        className="block text-xs md:text-sm font-light text-black/85 line-clamp-1 hover:underline"
-                      >
-                        {p.name}
-                      </Link>
+                      <Link to={`/urun/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
                         {hasDiscount ? (
                           <>
-                            <span className="text-xs md:text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                            <span className="text-xs md:text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                            <span className="text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                            <span className="text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
                           </>
                         ) : (
-                          <span className="text-xs md:text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          <span className="text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
                         )}
                       </div>
                     </div>
