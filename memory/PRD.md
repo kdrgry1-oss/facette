@@ -21,6 +21,61 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 31 (2026-05-08) — Wave 1: Massive UX Pack (12 fix/feature)
+
+### 🎯 Kullanıcının uzun listesi (Hepsi tamamlandı)
+
+| # | Talep | Durum |
+|---|---|---|
+| 1 | Mega menü öğeleri çok aralıklı + fareyle kayboluyor | ✅ space-y-1, py-6, 250ms close-delay (`openMenu`/`scheduleClose`/`cancelClose` handlers) |
+| 2 | Mega menü sağda 3 ürün | ✅ `limit=2` → `limit=3`, layout `min-w-[564px]` |
+| 3 | Sepet/Üye/Sipariş kartlarında ürün resmi tam sığmıyor | ✅ `object-cover` → `object-contain` (Account.jsx, OrderSuccess.jsx, Checkout.jsx) |
+| 4 | Ürün sayfasında "Adet" yazısı + selector kaldır | ✅ ProductDetail.jsx quantity bloğu silindi (sepete her zaman 1) |
+| 5 | Ürünün başka renkleri varsa kare swatch göster | ✅ Backend `GET /api/products/{id}/color-siblings` (csv_card_id grouping) + ColorSiblings component |
+| 6 | Footer için tasarım şablonu + HTML editor | ✅ NEW `/admin/footer-tasarim` (mode: html / structured), CRUD + canlı önizleme + reset-default |
+| 7 | Account "Suud Collection" → "Facette" | ✅ ProfilePane sidebar metni |
+| 8 | Geri sayım bar aktifken statik metinler de görünsün | ✅ Header.jsx countdown'un altına "500 TL Üzeri Ücretsiz Kargo · İlk Üyeliklere %10" eklendi |
+| 9 | Adres formunda kurumsal alanlar yok | ✅ `is_corporate` toggle + `company_name` / `tax_no` / `tax_office` (frontend + backend whitelist) |
+| 10 | Sepet drawer'da kombin + en çok satanlar göster | ✅ CartDrawer.jsx — cart-suggestions API + best sellers (sort=popular) yatay scroll strips |
+| 11 | Sipariş onay sayfası: geri butonu | ✅ Checkout.jsx + OrderSuccess.jsx üst sola `<ChevronLeft>` border-black butonu |
+| 12 | "Adrese Teslim Edilsin" radio kaldır | ✅ Checkout.jsx address block sadeleştirildi |
+| 13 | Sipariş onay sayfası B&W kontrastı | ✅ `text-stone-*` → `text-black/text-gray-700`, `bg-stone-*` → `bg-black/bg-gray-50` |
+| 14 | Account: şifre sıfırlama | ✅ NEW endpoint `POST /api/auth/change-password` + Account.jsx "Şifre" sekmesi (Lock ikonlu pill tab + form) |
+
+### Backend Files
+- NEW `/app/backend/routes/footer_template.py` (public + admin endpoints)
+- `/app/backend/routes/auth.py` change-password endpoint
+- `/app/backend/routes/customer.py` corporate fields whitelist (POST + PUT)
+- `/app/backend/routes/products.py` color-siblings endpoint
+- `/app/backend/server.py` router registers
+
+### Frontend Files
+- NEW `/app/frontend/src/pages/admin/FooterDesign.jsx`
+- `/app/frontend/src/components/Header.jsx` (mega menu fix + 3 products + delay)
+- `/app/frontend/src/components/CartDrawer.jsx` (kombin + bestsellers)
+- `/app/frontend/src/components/Footer.jsx` (template-driven)
+- `/app/frontend/src/pages/Account.jsx` (security tab + Facette + corporate + object-contain)
+- `/app/frontend/src/pages/OrderSuccess.jsx` (back button + B&W + object-contain)
+- `/app/frontend/src/pages/Checkout.jsx` (back button + B&W + remove address radio)
+- `/app/frontend/src/pages/ProductDetail.jsx` (no quantity + ColorSiblings)
+- `/app/frontend/src/App.js` + AdminLayout sidebar
+
+### Test Status
+- ✅ Smoke screenshot: Top bar ile birlikte countdown (00 GÜN 12 SAAT 48 DK 56 SN) + statik strip + mega menü 3 ürün + tighter spacing tümü doğrulandı
+- ✅ Backend curl: `/api/footer-template` (mode=structured, 3 columns), `/api/products/{id}/color-siblings` (siblings=0 sample), `/api/auth/change-password` (401 unauth — koruma çalışıyor)
+
+### ⚠️ Kullanıcı Aksiyonu Gerekli
+- **Trendyol creds**: Otomasyon paneli "TEST_TY_KEY" gösteriyor → `Admin > Pazaryeri > Trendyol > Ayarlar`'dan canlı `api_key/api_secret/supplier_id` GÜNCELLEME KAYDET basın (bilgileri "ekledim" dediniz ama DB'ye yazılmamış görünüyor)
+- **RESEND_API_KEY**: `/app/backend/.env`'e gerçek Resend key ekleyip backend restart (E-posta kampanyaları için)
+- **Doğan creds**: settings collection'a `id=dogan_edonusum` döküman gerekli
+
+### Defer Edilen
+- Trendyol gerçek 4-5★ yorum çekme (canlı creds geldiğinde yapılır)
+- Trendyol müşteri soruları debug (canlı creds geldiğinde)
+- P3 integrations.py refactor (4380 satır — risk vs fayda)
+
+
+
 ## Iteration 30 (2026-05-08) — Countdown Bar + DHL Rebrand + Otomasyon Paneli
 
 ### ⏱️ Yönetilebilir Geri Sayım Üst Barı (countdown_bar)

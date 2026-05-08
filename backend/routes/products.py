@@ -171,6 +171,49 @@ async def get_product(product_id: str):
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     return product
 
+
+@router.get("/{product_id}/color-siblings")
+async def get_color_siblings(product_id: str):
+    """Aynı modelin (csv_card_id) farklı renk varyantlarını getir.
+    Ürün detay sayfasında "Diğer Renkler" swatch listesi için kullanılır.
+    """
+    p = await db.products.find_one(
+        {"$or": [{"id": product_id}, {"slug": product_id}]},
+        {"_id": 0, "id": 1, "csv_card_id": 1}
+    )
+    if not p:
+        return {"siblings": []}
+    card_id = p.get("csv_card_id")
+    if not card_id:
+        return {"siblings": []}
+    siblings = []
+    cursor = db.products.find(
+        {"csv_card_id": card_id, "id": {"$ne": p["id"]}, "is_active": True},
+        {"_id": 0, "id": 1, "slug": 1, "name": 1, "thumbnail": 1, "images": 1,
+         "variants": 1, "attributes": 1}
+    ).limit(20)
+    async for s in cursor:
+        # Renk: önce variants[0].color, yoksa attributes Web Color
+        color = ""
+        if s.get("variants"):
+            for v in s["variants"]:
+                if v.get("color"):
+                    color = v["color"]
+                    break
+        if not color and isinstance(s.get("attributes"), list):
+            for a in s["attributes"]:
+                if (a.get("name") or "").strip().lower() in ("web color", "renk", "color"):
+                    color = a.get("value") or ""
+                    break
+        siblings.append({
+            "id": s["id"],
+            "slug": s.get("slug") or s["id"],
+            "name": s.get("name") or "",
+            "color": color,
+            "image": (s.get("images") or [s.get("thumbnail")] or [None])[0],
+        })
+    return {"siblings": siblings}
+
 @router.post("")
 async def create_product(
     product_data: dict,

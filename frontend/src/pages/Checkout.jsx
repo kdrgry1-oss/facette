@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, MapPin, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
+import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -376,12 +376,20 @@ export default function Checkout() {
       <div className="container-main py-6 md:py-10">
         {/* Top bar with SSL badge */}
         <div className="flex items-center justify-between mb-8 md:mb-10">
-          <div>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-black/50 mb-1.5">Ödeme</p>
-            <h1 className="text-xl md:text-2xl font-light tracking-tight">Sipariş Onayı</h1>
+          <div className="flex items-center gap-3 md:gap-4">
+            <button type="button" onClick={() => navigate(-1)}
+              data-testid="checkout-back-btn"
+              aria-label="Geri Dön"
+              className="w-9 h-9 md:w-10 md:h-10 border border-black flex items-center justify-center hover:bg-black hover:text-white transition-colors flex-shrink-0">
+              <ChevronLeft size={16} strokeWidth={2} />
+            </button>
+            <div>
+              <p className="text-[10px] tracking-[0.3em] uppercase text-black/60 mb-1.5">Ödeme</p>
+              <h1 className="text-xl md:text-2xl font-light tracking-tight text-black">Sipariş Onayı</h1>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-black/60">
-            <ShieldCheck size={13} className="text-emerald-700" strokeWidth={1.6} />
+          <div className="flex items-center gap-1.5 text-[11px] text-black/70">
+            <ShieldCheck size={13} className="text-black" strokeWidth={1.6} />
             <span>SSL Güvenli</span>
           </div>
         </div>
@@ -401,7 +409,7 @@ export default function Checkout() {
                     {cartCollapsed && (
                       <div className="flex -space-x-1.5">
                         {items.slice(0, 4).map((it) => (
-                          <img key={it.id} src={it.image} alt="" className="w-7 h-9 border border-white object-cover" />
+                          <img key={it.id} src={it.image} alt="" className="w-7 h-9 border border-white object-contain" />
                         ))}
                         {items.length > 4 && (
                           <div className="w-7 h-9 bg-stone-100 border border-white text-[10px] flex items-center justify-center font-light">+{items.length - 4}</div>
@@ -415,7 +423,7 @@ export default function Checkout() {
                   <div className="px-4 md:px-5 pb-5 border-t border-black/10 pt-4 space-y-3">
                     {items.map((item) => (
                       <div key={item.id} className="flex gap-3 items-center">
-                        <img src={item.image} alt={item.name} className="w-12 h-14 object-cover bg-stone-100" />
+                        <img src={item.image} alt={item.name} className="w-12 h-14 object-contain bg-gray-50" />
                         <div className="flex-1 min-w-0">
                           <p className="text-[13px] font-light truncate">{item.name}</p>
                           <p className="text-[11px] text-black/55 mt-0.5">
@@ -434,11 +442,8 @@ export default function Checkout() {
               {/* 2) Adres */}
               <div className="bg-white border border-black/10" data-testid="address-block">
                 <div className="px-5 py-4 border-b flex items-center gap-3">
-                  <MapPin size={18} className="text-stone-900" />
+                  <MapPin size={18} className="text-black" />
                   <span className="font-medium">Teslimat Adresi</span>
-                  <label className="ml-auto inline-flex items-center gap-2 text-xs cursor-pointer text-gray-700">
-                    <input type="radio" checked readOnly className="accent-black" /> Adrese Teslim Edilsin
-                  </label>
                 </div>
                 <div className="grid md:grid-cols-2 gap-4 p-5">
                   {/* Teslimat */}
@@ -447,7 +452,7 @@ export default function Checkout() {
                       <span className="text-sm font-medium text-gray-700">Teslimat Adresi</span>
                       <button type="button" onClick={() => openAddressModal("shipping")}
                         data-testid="edit-shipping-addr-btn"
-                        className="inline-flex items-center gap-1 text-xs text-stone-900 border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
+                        className="inline-flex items-center gap-1 text-xs text-black border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
@@ -465,7 +470,7 @@ export default function Checkout() {
                       <button type="button" onClick={() => openAddressModal("billing")}
                         data-testid="edit-billing-addr-btn"
                         disabled={billingSameAsShipping}
-                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-stone-900 border border-stone-900 hover:bg-stone-50"}`}>
+                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-black border border-stone-900 hover:bg-stone-50"}`}>
                         <Plus size={14} /> Adres Ekle / Değiştir
                       </button>
                     </div>
@@ -498,7 +503,7 @@ export default function Checkout() {
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
                     className="accent-black" data-testid="corporate-invoice-checkbox" />
-                  <Building size={18} className="text-stone-900" />
+                  <Building size={18} className="text-black" />
                   <div className="flex-1">
                     <div className="font-medium text-sm">Kurumsal Fatura İstiyorum</div>
                     <div className="text-xs text-gray-500">Şirket adına fatura kesilecekse VKN ve vergi dairesi bilgilerinizi girin.</div>
@@ -560,7 +565,7 @@ export default function Checkout() {
                           checked={paymentMethod === key}
                           onChange={(e) => setPaymentMethod(e.target.value)}
                           className="accent-black" />
-                        <Icon size={16} className={paymentMethod === key ? "text-stone-900" : "text-gray-500"} />
+                        <Icon size={16} className={paymentMethod === key ? "text-black" : "text-gray-500"} />
                         <span>{label}</span>
                       </label>
                     ))}
@@ -591,7 +596,7 @@ export default function Checkout() {
                       {userPoints > 0 && (
                         <label className="inline-flex items-center gap-2 text-sm">
                           <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-black" />
-                          <span className="text-stone-900 font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
+                          <span className="text-black font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
                         </label>
                       )}
                     </div>
@@ -609,7 +614,7 @@ export default function Checkout() {
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">Hediye paketi</span>
-                        <span className="text-sm font-semibold text-stone-900">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
+                        <span className="text-sm font-semibold text-black">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajı + kurdele + el yazılı kart ile gönderilir.</p>
                     </div>
@@ -641,7 +646,7 @@ export default function Checkout() {
                             className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-stone-900 bg-stone-900 text-white" : "border-dashed border-gray-300 hover:border-stone-900"}`}
                             data-testid={`coupon-card-${c.code}`}>
                             <div className="min-w-0">
-                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-stone-900"}`}>{c.code}</div>
+                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-black"}`}>{c.code}</div>
                               <div className={`text-[10px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>{c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}</div>
                             </div>
                             <div className={`text-xs font-bold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>-{c.discount.toFixed(2)} ₺</div>
@@ -676,11 +681,11 @@ export default function Checkout() {
                       : <span>{shippingCost.toFixed(2)} TL</span>}
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
-                  {pointsDeduction > 0 && <div className="flex justify-between text-stone-900"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
+                  {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
                   <div className="flex justify-between text-base font-semibold pt-2 border-t">
-                    <span>Toplam</span><span className="text-stone-900">{grandTotal.toFixed(2)} TL</span>
+                    <span>Toplam</span><span className="text-black">{grandTotal.toFixed(2)} TL</span>
                   </div>
                 </div>
 
@@ -698,8 +703,8 @@ export default function Checkout() {
                       onChange={(e) => setAcceptTerms(e.target.checked)}
                       className="mt-0.5 accent-black" data-testid="accept-terms-checkbox" />
                     <span>
-                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-stone-900">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
-                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-stone-900">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
+                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-black">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
+                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-black">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
                     </span>
                   </label>
                 </div>

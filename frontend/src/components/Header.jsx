@@ -71,19 +71,33 @@ export default function Header({ hideMenu = false }) {
 
   const isCheckout = location.pathname.includes('/odeme') || location.pathname.includes('/checkout');
 
-  // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch
+  // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün)
   useEffect(() => {
     const slug = hoveredCategory || activeMenu;
     if (slug && !megaProducts[slug]) {
-      axios.get(`${API}/products?category=${slug}&limit=2&sort=popular`)
+      axios.get(`${API}/products?category=${slug}&limit=3&sort=popular`)
         .then(r => setMegaProducts(prev => ({ ...prev, [slug]: r.data?.products || [] })))
         .catch(() => setMegaProducts(prev => ({ ...prev, [slug]: [] })));
     }
   }, [hoveredCategory, activeMenu]);
 
-  // Aktif olarak gösterilecek ürün listesi: önce alt kategori hover, yoksa ana kategori
+  // Aktif olarak gösterilecek ürün listesi: önce alt kategori hover, yoksa ana kategori (3 ürün)
   const activeMegaSlug = hoveredCategory || activeMenu;
-  const activeMegaProducts = (megaProducts[activeMegaSlug] || []).slice(0, 2);
+  const activeMegaProducts = (megaProducts[activeMegaSlug] || []).slice(0, 3);
+
+  // Mega menü kapanma timer'ı — fare üzerine geldiğinde anında kapanmasın, 200ms gecikme
+  const [closeTimer, setCloseTimer] = useState(null);
+  const openMenu = (m) => {
+    if (closeTimer) { clearTimeout(closeTimer); setCloseTimer(null); }
+    setActiveMenu(m);
+  };
+  const scheduleClose = () => {
+    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 250);
+    setCloseTimer(t);
+  };
+  const cancelClose = () => {
+    if (closeTimer) { clearTimeout(closeTimer); setCloseTimer(null); }
+  };
 
   useEffect(() => {
     if (searchOpen && popularSearches.length === 0) {
@@ -136,6 +150,17 @@ export default function Header({ hideMenu = false }) {
       {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
       {!isCheckout && <CountdownBar />}
 
+      {/* Statik üst duyuru — countdown ile beraber HER ZAMAN görünür.
+          Admin > Sayfa Tasarımı'ndaki "rotating_text" bloğundan yönetilebilir;
+          o blok aktif değilse de varsayılan "500 TL Üzeri Ücretsiz Kargo" gösterilir. */}
+      {!isCheckout && (
+        <div className="bg-white text-black border-b border-gray-100 text-center py-1">
+          <p className="text-[9px] md:text-[10px] tracking-[0.3em] uppercase font-light text-gray-700">
+            500 TL Üzeri Ücretsiz Kargo · İlk Üyeliklere Özel %10 İndirim
+          </p>
+        </div>
+      )}
+
       {/* Main Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
         <div className="max-w-screen-2xl mx-auto px-3 md:px-6">
@@ -165,8 +190,8 @@ export default function Header({ hideMenu = false }) {
                     {/* GİYİM - Mega Menu */}
                     <div 
                       className="relative"
-                      onMouseEnter={() => setActiveMenu('giyim')}
-                      onMouseLeave={() => setActiveMenu(null)}
+                      onMouseEnter={() => openMenu('giyim')}
+                      onMouseLeave={scheduleClose}
                     >
                       <Link
                         to="/kategori/giyim"
@@ -179,8 +204,8 @@ export default function Header({ hideMenu = false }) {
                     {/* AKSESUAR */}
                     <div 
                       className="relative"
-                      onMouseEnter={() => setActiveMenu('aksesuar')}
-                      onMouseLeave={() => setActiveMenu(null)}
+                      onMouseEnter={() => openMenu('aksesuar')}
+                      onMouseLeave={scheduleClose}
                     >
                       <Link
                         to="/kategori/aksesuar"
@@ -236,31 +261,30 @@ export default function Header({ hideMenu = false }) {
         {activeMenu === 'giyim' && (
           <div 
             className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
-            onMouseEnter={() => setActiveMenu('giyim')}
-            onMouseLeave={() => setActiveMenu(null)}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
           >
-            <div className="max-w-screen-2xl mx-auto px-8 py-8">
+            <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories */}
                 <div className="flex-1 grid grid-cols-3 gap-8">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
-                      <h3 className="text-xs font-bold tracking-wider mb-4 text-gray-900">{category}</h3>
-                      <ul className="space-y-2.5">
+                      <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">{category}</h3>
+                      <ul className="space-y-1">
                         {items.map((item) => (
                           <li key={item.slug}>
                             <Link
                               to={`/kategori/${item.slug}`}
-                              className="text-sm text-gray-600 hover:text-black transition-colors"
+                              className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
                               onClick={() => setActiveMenu(null)}
                               onMouseEnter={() => setHoveredCategory(item.slug)}
-                              onMouseLeave={() => setHoveredCategory(null)}
                             >
                               {item.name}
                             </Link>
                           </li>
                         ))}
-                        <li className="pt-2">
+                        <li className="pt-1.5">
                           <Link
                             to={`/kategori/${category.toLowerCase().replace(/\s/g, '-').replace(/ş/g, 's').replace(/ı/g, 'i')}`}
                             className="text-xs font-medium underline hover:no-underline"
@@ -274,8 +298,8 @@ export default function Header({ hideMenu = false }) {
                   ))}
                 </div>
                 
-                {/* Right: Hover edilen kategorinin en çok satan 2 ürünü */}
-                <div className="flex-shrink-0 flex gap-4 min-w-[376px]">
+                {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
+                <div className="flex-shrink-0 flex gap-3 min-w-[564px]">
                   {activeMegaProducts.length > 0 ? (
                     activeMegaProducts.map((p) => (
                       <Link
@@ -312,23 +336,22 @@ export default function Header({ hideMenu = false }) {
         {activeMenu === 'aksesuar' && (
           <div 
             className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
-            onMouseEnter={() => setActiveMenu('aksesuar')}
-            onMouseLeave={() => setActiveMenu(null)}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
           >
-            <div className="max-w-screen-2xl mx-auto px-8 py-8">
+            <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories */}
                 <div className="flex-1">
-                  <h3 className="text-xs font-bold tracking-wider mb-4 text-gray-900">AKSESUAR</h3>
-                  <ul className="grid grid-cols-2 gap-x-12 gap-y-2.5">
+                  <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
+                  <ul className="grid grid-cols-2 gap-x-12 gap-y-1">
                     {AKSESUAR_MENU.map((item) => (
                       <li key={item.slug}>
                         <Link
                           to={`/kategori/${item.slug}`}
-                          className="text-sm text-gray-600 hover:text-black transition-colors"
+                          className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
                           onClick={() => setActiveMenu(null)}
                           onMouseEnter={() => setHoveredCategory(item.slug)}
-                          onMouseLeave={() => setHoveredCategory(null)}
                         >
                           {item.name}
                         </Link>
@@ -337,15 +360,15 @@ export default function Header({ hideMenu = false }) {
                   </ul>
                   <Link
                     to="/kategori/aksesuar"
-                    className="inline-block mt-4 text-xs font-medium underline hover:no-underline"
+                    className="inline-block mt-3 text-xs font-medium underline hover:no-underline"
                     onClick={() => setActiveMenu(null)}
                   >
                     Tümünü Gör
                   </Link>
                 </div>
                 
-                {/* Right: Hover edilen kategorinin en çok satan 2 ürünü */}
-                <div className="flex-shrink-0 flex gap-4 min-w-[376px]">
+                {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
+                <div className="flex-shrink-0 flex gap-3 min-w-[564px]">
                   {activeMegaProducts.length > 0 ? (
                     activeMegaProducts.map((p) => (
                       <Link

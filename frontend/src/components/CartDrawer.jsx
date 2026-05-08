@@ -1,11 +1,37 @@
 import { Link } from "react-router-dom";
-import { X, Plus, Minus, ShoppingBag } from "lucide-react";
+import { useEffect, useState } from "react";
+import axios from "axios";
+import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
 import { useCart } from "../context/CartContext";
 
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
 export default function CartDrawer() {
-  const { items, isOpen, setIsOpen, removeItem, updateQuantity, total, itemCount } = useCart();
+  const { items, isOpen, setIsOpen, removeItem, updateQuantity, addItem, total, itemCount } = useCart();
   const freeShippingLimit = 500;
   const remaining = Math.max(0, freeShippingLimit - total);
+
+  const [suggestions, setSuggestions] = useState([]);
+  const [bestsellers, setBestsellers] = useState([]);
+
+  // Sepet ürünlerine göre kombin önerisi (cart-suggestions API)
+  useEffect(() => {
+    if (!isOpen || items.length === 0) return;
+    const productIds = items.map((i) => i.product_id || i.id).filter(Boolean);
+    if (!productIds.length) return;
+    axios.post(`${API}/products/cart-suggestions`, { product_ids: productIds, limit: 4 })
+      .then((r) => setSuggestions((r.data?.suggestions || []).slice(0, 4)))
+      .catch(() => setSuggestions([]));
+  }, [isOpen, items.length]);
+
+  // Bu ay en çok satan ürünler (sort=popular)
+  useEffect(() => {
+    if (!isOpen) return;
+    if (bestsellers.length > 0) return;
+    axios.get(`${API}/products?limit=6&sort=popular`)
+      .then((r) => setBestsellers((r.data?.products || []).slice(0, 6)))
+      .catch(() => setBestsellers([]));
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -132,7 +158,60 @@ export default function CartDrawer() {
 
         {/* Footer */}
         {items.length > 0 && (
-          <div className="border-t border-black/10 px-5 py-4 space-y-3">
+          <>
+            {/* Kombin Önerileri (cart-suggestions) */}
+            {suggestions.length > 0 && (
+              <div className="border-t border-black/5 px-5 py-3 bg-gray-50/60" data-testid="drawer-combo">
+                <p className="text-[10px] tracking-[0.25em] uppercase text-black/70 mb-2 flex items-center gap-1.5">
+                  <Sparkles size={11} /> Stilini Tamamla
+                </p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                  {suggestions.map((s) => (
+                    <Link
+                      key={s.id}
+                      to={`/urun/${s.slug || s.id}`}
+                      className="flex-shrink-0 w-20 group"
+                      onClick={() => setIsOpen(false)}
+                      data-testid={`drawer-combo-${s.id}`}
+                    >
+                      <div className="w-20 h-24 bg-white border border-gray-100 overflow-hidden">
+                        <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      </div>
+                      <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
+                      <p className="text-[10px] tabular-nums text-black/70">{((s.sale_price && s.sale_price > 0) ? s.sale_price : s.price || 0).toFixed(0)} TL</p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bu Ay En Çok Satanlar */}
+            {bestsellers.length > 0 && (
+              <div className="border-t border-black/5 px-5 py-3" data-testid="drawer-bestsellers">
+                <p className="text-[10px] tracking-[0.25em] uppercase text-black/70 mb-2">
+                  Bu Ay En Çok Satanlar
+                </p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                  {bestsellers.map((s) => (
+                    <Link
+                      key={s.id}
+                      to={`/urun/${s.slug || s.id}`}
+                      className="flex-shrink-0 w-20 group"
+                      onClick={() => setIsOpen(false)}
+                      data-testid={`drawer-bs-${s.id}`}
+                    >
+                      <div className="w-20 h-24 bg-gray-50 border border-gray-100 overflow-hidden">
+                        <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      </div>
+                      <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
+                      <p className="text-[10px] tabular-nums text-black/70">{((s.sale_price && s.sale_price > 0) ? s.sale_price : s.price || 0).toFixed(0)} TL</p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="border-t border-black/10 px-5 py-4 space-y-3">
             <div className="flex justify-between items-baseline">
               <span className="text-xs tracking-[0.2em] uppercase text-black/60">Ara Toplam</span>
               <span className="text-base font-medium tabular-nums">{total.toFixed(2)} TL</span>
@@ -158,7 +237,8 @@ export default function CartDrawer() {
             >
               Sepete Git
             </Link>
-          </div>
+            </div>
+          </>
         )}
       </div>
     </>

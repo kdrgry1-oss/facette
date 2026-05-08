@@ -80,6 +80,7 @@ const navigation = [
       { label: "Popuplar", path: "/admin/popuplar", icon: BellRing },
       { label: "Duyurular", path: "/admin/duyurular", icon: BellRing },
       { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
+      { label: "Footer Tasarımı", path: "/admin/footer-tasarim", icon: Palette },
       { label: "Sayfalar (CMS)", path: "/admin/sayfalar", icon: FileText },
     ],
   },

@@ -73,6 +73,11 @@ async def create_address(
         "district": address_data.get("district", ""),
         "postal_code": address_data.get("postal_code", ""),
         "is_default": address_data.get("is_default", False),
+        # Kurumsal (Şirket) Fatura Bilgileri
+        "is_corporate": bool(address_data.get("is_corporate", False)),
+        "company_name": address_data.get("company_name", ""),
+        "tax_no": address_data.get("tax_no", ""),
+        "tax_office": address_data.get("tax_office", ""),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -110,7 +115,9 @@ async def update_address(
             {"$set": {"is_default": False}}
         )
     
-    allowed_fields = ["title", "first_name", "last_name", "phone", "address", "city", "district", "postal_code", "is_default"]
+    allowed_fields = ["title", "first_name", "last_name", "phone", "address", "city", "district",
+                      "postal_code", "is_default",
+                      "is_corporate", "company_name", "tax_no", "tax_office"]
     update_data = {k: v for k, v in address_data.items() if k in allowed_fields}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     

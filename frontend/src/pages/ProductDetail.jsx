@@ -330,6 +330,8 @@ export default function ProductDetail() {
             </div>
 
 
+            {/* Color Siblings (diğer renk) — varsa swatch'ler */}
+            <ColorSiblings productId={product.id} currentColor={product.attributes?.find?.((a) => (a.name || "").toLowerCase().includes("color") || (a.name || "").toLowerCase().includes("renk"))?.value} />
 
             {/* Size Selection */}
             <div className="mb-5">
@@ -360,19 +362,7 @@ export default function ProductDetail() {
               </div>
             </div>
 
-            {/* Quantity */}
-            <div className="mb-5">
-              <span className="text-xs block mb-2">Adet</span>
-              <div className="flex items-center border border-gray-300 w-fit">
-                <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="p-2.5 hover:bg-gray-50">
-                  <Minus size={14} />
-                </button>
-                <span className="px-5 text-sm">{quantity}</span>
-                <button onClick={() => setQuantity(quantity + 1)} className="p-2.5 hover:bg-gray-50">
-                  <Plus size={14} />
-                </button>
-              </div>
-            </div>
+            {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
 
             {/* Size Chart Link – only shown when HTML table exists */}
             {sizeTableData && (
@@ -615,6 +605,52 @@ export default function ProductDetail() {
       )}
 
       <Footer />
+    </div>
+  );
+}
+
+/**
+ * ColorSiblings — Aynı modelin (csv_card_id paylaşan) farklı renk ürünlerini
+ * miniatür kare swatch'lerle gösterir. Hover ile ürün adı tooltip, click ile
+ * o renk varyantının ürün sayfasına yönlendirir.
+ */
+function ColorSiblings({ productId, currentColor }) {
+  const [siblings, setSiblings] = useState([]);
+  useEffect(() => {
+    if (!productId) return;
+    let cancel = false;
+    axios.get(`${API}/products/${productId}/color-siblings`)
+      .then((r) => { if (!cancel) setSiblings(r.data?.siblings || []); })
+      .catch(() => { if (!cancel) setSiblings([]); });
+    return () => { cancel = true; };
+  }, [productId]);
+  if (!siblings.length) return null;
+  return (
+    <div className="mb-5" data-testid="color-siblings">
+      <p className="text-xs uppercase tracking-[0.18em] text-gray-700 mb-2">
+        Renk: <span className="text-black font-medium">{currentColor || "—"}</span>
+        <span className="text-gray-400 ml-2">+ {siblings.length} renk daha</span>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {/* Mevcut ürün ilk swatch — siyah border */}
+        <div className="w-12 h-12 border-2 border-black bg-gray-50 overflow-hidden flex-shrink-0" title={currentColor || ""}>
+          {/* Boş — bu mevcut ürün */}
+          <div className="w-full h-full flex items-center justify-center text-[10px] text-black font-bold">●</div>
+        </div>
+        {siblings.map((s) => (
+          <a
+            key={s.id}
+            href={`/urun/${s.slug || s.id}`}
+            className="w-12 h-12 border border-gray-300 hover:border-black bg-white overflow-hidden flex-shrink-0 transition-colors"
+            title={`${s.color || s.name || ""}`}
+            data-testid={`color-sibling-${s.id}`}
+          >
+            {s.image
+              ? <img src={s.image} alt={s.color || ""} className="w-full h-full object-cover" />
+              : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
+          </a>
+        ))}
+      </div>
     </div>
   );
 }

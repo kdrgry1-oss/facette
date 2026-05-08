@@ -22,7 +22,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import {
   User, Package, MapPin, Heart, LogOut, ChevronRight, ChevronDown,
   Eye, Truck, CheckCircle, Clock, X, Edit2, Trash2, Plus, Star,
-  ShoppingBag, Calendar, Mail, Phone
+  ShoppingBag, Calendar, Mail, Phone, Lock
 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -38,6 +38,7 @@ const MENU_ITEMS = [
   { id: "orders",    label: "Siparişlerim", icon: Package },
   { id: "addresses", label: "Adreslerim",   icon: MapPin },
   { id: "favorites", label: "Favorilerim",  icon: Heart },
+  { id: "security",  label: "Şifre",        icon: Lock },
 ];
 
 const ORDER_STATUS = {
@@ -86,6 +87,7 @@ export default function Account() {
   const [addressForm, setAddressForm] = useState({
     title: "", first_name: "", last_name: "", phone: "",
     address: "", city: "", district: "", postal_code: "", is_default: false,
+    is_corporate: false, company_name: "", tax_no: "", tax_office: "",
   });
 
   useEffect(() => {
@@ -173,6 +175,7 @@ export default function Account() {
       setAddressForm({
         title: "", first_name: "", last_name: "", phone: "",
         address: "", city: "", district: "", postal_code: "", is_default: false,
+        is_corporate: false, company_name: "", tax_no: "", tax_office: "",
       });
       fetchAddresses();
     } catch {
@@ -284,6 +287,7 @@ export default function Account() {
         {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} />}
         {activeTab === "addresses" && <AddressesPane loading={loading} addresses={addresses} editing={editingAddress} setEditing={setEditingAddress} form={addressForm} setForm={setAddressForm} onSubmit={handleSaveAddress} onDelete={handleDeleteAddress} />}
         {activeTab === "favorites" && <FavoritesPane />}
+        {activeTab === "security"  && <SecurityPane />}
       </main>
 
       <Footer />
@@ -338,7 +342,7 @@ function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit }) {
 
       <aside className="bg-black text-white p-6 md:p-8 flex flex-col justify-between">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400 mb-3">Suud Üye Avantajı</p>
+          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400 mb-3">Facette Üye Avantajı</p>
           <h3 className="text-lg font-light leading-snug mb-4">
             Yeni koleksiyona üyelere özel <span className="font-semibold">erken erişim</span>.
           </h3>
@@ -363,6 +367,7 @@ function Field({ label, value, onChange, type = "text", disabled = false }) {
         type={type}
         value={value || ""}
         disabled={disabled}
+        autoComplete={type === "password" ? "off" : undefined}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         className={`w-full border-0 border-b ${disabled ? "border-gray-200 text-gray-400" : "border-gray-300 focus:border-black"} bg-transparent py-2 text-sm focus:outline-none transition-colors`}
       />
@@ -457,7 +462,7 @@ function OrderCard({ order, expanded, onToggle }) {
               style={{ zIndex: previewImages.length - i }}
             >
               {it.image ? (
-                <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-cover" />
+                <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-contain" />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />
               )}
@@ -514,7 +519,7 @@ function OrderCard({ order, expanded, onToggle }) {
               <div key={idx} className="flex gap-3 items-start">
                 <div className="w-14 h-16 bg-white border border-gray-100 overflow-hidden shrink-0">
                   {it.image
-                    ? <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-cover" />
+                    ? <img src={it.image} alt={it.name || it.product_name || ""} className="w-full h-full object-contain" />
                     : <div className="w-full h-full bg-gradient-to-br from-gray-50 to-gray-200" />}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -574,7 +579,8 @@ function OrderCard({ order, expanded, onToggle }) {
 function AddressesPane({ loading, addresses, editing, setEditing, form, setForm, onSubmit, onDelete }) {
   const startNew = () => {
     setForm({ title: "", first_name: "", last_name: "", phone: "",
-              address: "", city: "", district: "", postal_code: "", is_default: false });
+              address: "", city: "", district: "", postal_code: "", is_default: false,
+              is_corporate: false, company_name: "", tax_no: "", tax_office: "" });
     setEditing({});
   };
   const startEdit = (addr) => {
@@ -636,6 +642,26 @@ function AddressesPane({ loading, addresses, editing, setEditing, form, setForm,
                 className="accent-black"/>
               <span className="uppercase tracking-[0.15em] text-gray-600">Varsayılan adres olarak işaretle</span>
             </label>
+
+            {/* Kurumsal (Şirket) Fatura Bilgileri */}
+            <div className="border-t border-gray-100 pt-5">
+              <label className="flex items-center gap-2 text-xs cursor-pointer mb-4" data-testid="corporate-toggle">
+                <input type="checkbox" checked={form.is_corporate}
+                  onChange={(e) => setForm({ ...form, is_corporate: e.target.checked })}
+                  className="accent-black"/>
+                <span className="uppercase tracking-[0.15em] text-gray-700 font-medium">🏢 Kurumsal Fatura (Şirket Adına)</span>
+              </label>
+              {form.is_corporate && (
+                <div className="grid md:grid-cols-2 gap-5 bg-gray-50 p-4 -mx-1 rounded">
+                  <Field label="Şirket Adı / Ünvan" value={form.company_name} onChange={(v) => setForm({ ...form, company_name: v })} />
+                  <Field label="Vergi No (10 hane)" value={form.tax_no} onChange={(v) => setForm({ ...form, tax_no: v })} />
+                  <div className="md:col-span-2">
+                    <Field label="Vergi Dairesi" value={form.tax_office} onChange={(v) => setForm({ ...form, tax_office: v })} />
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button type="submit" data-testid="save-address-btn"
                 className="bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
@@ -714,6 +740,49 @@ function FavoritesPane() {
       <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
         Ürünleri Keşfet
       </a>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════ SECURITY (PASSWORD CHANGE) ═══════════════════════════════ */
+
+function SecurityPane() {
+  const [form, setForm] = useState({ current_password: "", new_password: "", confirm: "" });
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (form.new_password.length < 6) return toast.error("Yeni şifre en az 6 karakter olmalı");
+    if (form.new_password !== form.confirm) return toast.error("Yeni şifreler eşleşmiyor");
+    setBusy(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/auth/change-password`,
+        { current_password: form.current_password, new_password: form.new_password },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success("Şifreniz güncellendi");
+      setForm({ current_password: "", new_password: "", confirm: "" });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Şifre değiştirilemedi");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white border border-gray-100 p-6 md:p-8 max-w-xl" data-testid="security-pane">
+      <h2 className="text-sm uppercase tracking-[0.2em] text-gray-700 mb-2 flex items-center gap-2">
+        <Lock size={14} /> Şifre Değiştir
+      </h2>
+      <p className="text-xs text-gray-500 mb-6">Mevcut şifrenizi girip yeni bir şifre belirleyin. En az 6 karakter olmalı.</p>
+      <form onSubmit={submit} className="space-y-5">
+        <Field label="Mevcut Şifre" type="password" value={form.current_password} onChange={(v) => setForm({ ...form, current_password: v })} />
+        <Field label="Yeni Şifre" type="password" value={form.new_password} onChange={(v) => setForm({ ...form, new_password: v })} />
+        <Field label="Yeni Şifre (Tekrar)" type="password" value={form.confirm} onChange={(v) => setForm({ ...form, confirm: v })} />
+        <button type="submit" disabled={busy} data-testid="change-password-btn"
+          className="bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 disabled:opacity-50 transition-colors">
+          {busy ? "Güncelleniyor..." : "Şifreyi Güncelle"}
+        </button>
+      </form>
     </div>
   );
 }

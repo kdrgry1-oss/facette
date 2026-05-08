@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Check, Package, Truck, Home, Mail, Phone, MapPin, UserPlus } from "lucide-react";
+import { Check, Package, Truck, Home, Mail, Phone, MapPin, UserPlus, ChevronLeft } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -57,29 +57,37 @@ export default function OrderSuccess() {
   return (
     <div className="min-h-screen bg-white" data-testid="order-success-page">
       <Header />
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+        {/* Back button — masaüstü + mobil */}
+        <button onClick={() => navigate(-1)}
+          data-testid="ordersuccess-back-btn"
+          aria-label="Geri Dön"
+          className="mb-6 w-9 h-9 sm:w-10 sm:h-10 border border-black flex items-center justify-center hover:bg-black hover:text-white transition-colors">
+          <ChevronLeft size={16} strokeWidth={2} />
+        </button>
+
         {/* Hero */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-stone-100 mb-6">
-            <Check size={32} className="text-stone-700" strokeWidth={1.5} />
+        <div className="text-center mb-12 sm:mb-16">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-black mb-6">
+            <Check size={32} className="text-white" strokeWidth={2} />
           </div>
-          <h1 className="text-3xl sm:text-4xl font-light tracking-[0.3em] text-stone-900 mb-4" data-testid="order-success-title">
+          <h1 className="text-3xl sm:text-4xl font-light tracking-[0.3em] text-black mb-4" data-testid="order-success-title">
             TEŞEKKÜR EDERİZ
           </h1>
-          <p className="text-stone-500 text-sm tracking-wide max-w-md mx-auto leading-relaxed">
+          <p className="text-gray-700 text-sm tracking-wide max-w-md mx-auto leading-relaxed">
             Siparişiniz başarıyla alındı. Sipariş detayları ve takip bilgileri e-posta adresinize gönderildi.
           </p>
         </div>
 
         {/* Order Number Card */}
-        <div className="border border-stone-200 mb-12">
+        <div className="border border-gray-200 mb-12">
           <div className="px-6 sm:px-10 py-8 text-center">
-            <p className="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-2">Sipariş Numarası</p>
-            <p className="text-2xl font-light text-stone-900 tracking-wider" data-testid="order-success-number">
+            <p className="text-[10px] tracking-[0.2em] text-gray-500 uppercase mb-2">Sipariş Numarası</p>
+            <p className="text-2xl font-light text-black tracking-wider" data-testid="order-success-number">
               {orderNumber}
             </p>
             {order?.created_at && (
-              <p className="text-xs text-stone-400 mt-3">
+              <p className="text-xs text-gray-500 mt-3">
                 {new Date(order.created_at).toLocaleString("tr-TR", {
                   day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit",
                 })}
@@ -99,15 +107,15 @@ export default function OrderSuccess() {
             ].map((step, i, arr) => (
               <div key={i} className="flex-1 flex items-center">
                 <div className="flex flex-col items-center">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${step.active ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-400"}`}>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${step.active ? "bg-black text-white" : "bg-gray-100 text-gray-500"}`}>
                     <step.icon size={16} strokeWidth={1.5} />
                   </div>
-                  <span className={`text-[10px] tracking-wider uppercase mt-2 ${step.active ? "text-stone-900 font-medium" : "text-stone-400"}`}>
+                  <span className={`text-[10px] tracking-wider uppercase mt-2 ${step.active ? "text-black font-medium" : "text-gray-500"}`}>
                     {step.label}
                   </span>
                 </div>
                 {i < arr.length - 1 && (
-                  <div className={`flex-1 h-px mx-2 ${i === 0 ? "bg-stone-300" : "bg-stone-100"}`} />
+                  <div className={`flex-1 h-px mx-2 ${i === 0 ? "bg-gray-300" : "bg-gray-100"}`} />
                 )}
               </div>
             ))}
@@ -117,18 +125,18 @@ export default function OrderSuccess() {
         {/* Items */}
         {items.length > 0 && (
           <div className="mb-12">
-            <p className="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-6">Ürünler ({items.length})</p>
+            <p className="text-[10px] tracking-[0.2em] text-gray-500 uppercase mb-6">Ürünler ({items.length})</p>
             <div className="space-y-4">
               {items.map((it, idx) => (
-                <div key={idx} className="flex gap-5 pb-4 border-b border-stone-100 last:border-0">
-                  <img src={it.image} alt={it.name} className="w-16 h-20 object-cover bg-stone-50" />
+                <div key={idx} className="flex gap-5 pb-4 border-b border-gray-100 last:border-0">
+                  <img src={it.image} alt={it.name} className="w-16 h-20 object-contain bg-gray-50" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-stone-900 truncate">{it.name}</p>
-                    <p className="text-xs text-stone-400 mt-1">
+                    <p className="text-sm text-black truncate">{it.name}</p>
+                    <p className="text-xs text-gray-500 mt-1">
                       {[it.size && `Beden: ${it.size}`, it.color && `Renk: ${it.color}`, `Adet: ${it.quantity}`].filter(Boolean).join(" · ")}
                     </p>
                   </div>
-                  <div className="text-sm text-stone-900 whitespace-nowrap">
+                  <div className="text-sm text-black whitespace-nowrap">
                     {(it.price * it.quantity).toFixed(2)} TL
                   </div>
                 </div>
@@ -138,14 +146,14 @@ export default function OrderSuccess() {
         )}
 
         {/* Totals */}
-        <div className="mb-12 pb-12 border-b border-stone-100">
+        <div className="mb-12 pb-12 border-b border-gray-100">
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between text-stone-500"><span>Ara Toplam</span><span>{(order?.subtotal || 0).toFixed(2)} TL</span></div>
-            <div className="flex justify-between text-stone-500"><span>Kargo</span><span>{(order?.shipping_cost || 0) === 0 ? "Ücretsiz" : `${(order?.shipping_cost || 0).toFixed(2)} TL`}</span></div>
+            <div className="flex justify-between text-gray-700"><span>Ara Toplam</span><span>{(order?.subtotal || 0).toFixed(2)} TL</span></div>
+            <div className="flex justify-between text-gray-700"><span>Kargo</span><span>{(order?.shipping_cost || 0) === 0 ? "Ücretsiz" : `${(order?.shipping_cost || 0).toFixed(2)} TL`}</span></div>
             {(order?.discount || 0) > 0 && (
               <div className="flex justify-between text-stone-700"><span>İndirim{order.coupon_code ? ` · ${order.coupon_code}` : ""}</span><span>-{order.discount.toFixed(2)} TL</span></div>
             )}
-            <div className="flex justify-between pt-3 mt-3 border-t border-stone-200 text-stone-900 font-medium">
+            <div className="flex justify-between pt-3 mt-3 border-t border-gray-200 text-black font-medium">
               <span>Toplam</span><span>{(order?.total || 0).toFixed(2)} TL</span>
             </div>
           </div>
@@ -154,29 +162,29 @@ export default function OrderSuccess() {
         {/* Address & Contact */}
         <div className="grid sm:grid-cols-2 gap-12 mb-16">
           <div>
-            <p className="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-4 flex items-center gap-2">
+            <p className="text-[10px] tracking-[0.2em] text-gray-500 uppercase mb-4 flex items-center gap-2">
               <MapPin size={12} /> Teslimat Adresi
             </p>
-            <p className="text-sm text-stone-900 mb-1">{ship.first_name} {ship.last_name}</p>
-            <p className="text-sm text-stone-500 leading-relaxed">{ship.address}</p>
-            <p className="text-sm text-stone-500">{ship.district} / {ship.city}</p>
-            <p className="text-sm text-stone-500 mt-2 flex items-center gap-2">
+            <p className="text-sm text-black mb-1">{ship.first_name} {ship.last_name}</p>
+            <p className="text-sm text-gray-700 leading-relaxed">{ship.address}</p>
+            <p className="text-sm text-gray-700">{ship.district} / {ship.city}</p>
+            <p className="text-sm text-gray-700 mt-2 flex items-center gap-2">
               <Phone size={12} /> {ship.phone}
             </p>
             {ship.email && (
-              <p className="text-sm text-stone-500 flex items-center gap-2">
+              <p className="text-sm text-gray-700 flex items-center gap-2">
                 <Mail size={12} /> {ship.email}
               </p>
             )}
           </div>
           {isCorporate && (
             <div>
-              <p className="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-4">Kurumsal Fatura</p>
-              <p className="text-sm text-stone-900 mb-1">{order.billing_info.company_name}</p>
-              <p className="text-sm text-stone-500">VKN: {order.billing_info.tax_number}</p>
-              <p className="text-sm text-stone-500">Vergi Dairesi: {order.billing_info.tax_office}</p>
+              <p className="text-[10px] tracking-[0.2em] text-gray-500 uppercase mb-4">Kurumsal Fatura</p>
+              <p className="text-sm text-black mb-1">{order.billing_info.company_name}</p>
+              <p className="text-sm text-gray-700">VKN: {order.billing_info.tax_number}</p>
+              <p className="text-sm text-gray-700">Vergi Dairesi: {order.billing_info.tax_office}</p>
               {order.billing_info.e_invoice_user && (
-                <p className="text-xs text-stone-400 mt-2">e-Fatura mükellefi</p>
+                <p className="text-xs text-gray-500 mt-2">e-Fatura mükellefi</p>
               )}
             </div>
           )}
@@ -189,28 +197,28 @@ export default function OrderSuccess() {
             Siparişlerimi Gör
           </Link>
           <Link to="/" data-testid="continue-shopping-btn"
-            className="inline-block text-center border border-stone-900 hover:bg-stone-50 text-stone-900 px-10 py-4 text-xs tracking-[0.2em] uppercase transition-colors">
+            className="inline-block text-center border border-stone-900 hover:bg-gray-50 text-black px-10 py-4 text-xs tracking-[0.2em] uppercase transition-colors">
             Alışverişe Devam Et
           </Link>
         </div>
 
         {/* Guest Signup CTA — Hesap oluştur ve siparişi takip et */}
         {!user && !signupDone && order && (
-          <div className="mt-12 border-t border-stone-100 pt-12" data-testid="guest-signup-cta">
-            <div className="max-w-lg mx-auto bg-stone-50 px-6 sm:px-10 py-10 text-center">
+          <div className="mt-12 border-t border-gray-100 pt-12" data-testid="guest-signup-cta">
+            <div className="max-w-lg mx-auto bg-gray-50 px-6 sm:px-10 py-10 text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white mb-4">
-                <UserPlus size={20} strokeWidth={1.5} className="text-stone-900" />
+                <UserPlus size={20} strokeWidth={1.5} className="text-black" />
               </div>
-              <p className="text-[10px] tracking-[0.3em] text-stone-400 uppercase mb-2">SIRA SENDE</p>
-              <h3 className="text-lg font-light text-stone-900 mb-2">Hesap oluştur, takipte kal</h3>
-              <p className="text-xs text-stone-500 leading-relaxed mb-6">
+              <p className="text-[10px] tracking-[0.3em] text-gray-500 uppercase mb-2">SIRA SENDE</p>
+              <h3 className="text-lg font-light text-black mb-2">Hesap oluştur, takipte kal</h3>
+              <p className="text-xs text-gray-700 leading-relaxed mb-6">
                 Bu siparişin <strong>otomatik hesabına bağlanır</strong>; iade & değişim, kargo durumu ve gelecek siparişlerin tek bir yerden yönetilir.
               </p>
               <div className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
                 <input type="password" value={signupPwd} onChange={(e) => setSignupPwd(e.target.value)}
                   placeholder="En az 6 karakter şifre"
                   data-testid="guest-signup-password"
-                  className="flex-1 bg-white border border-stone-200 px-4 py-3 text-sm focus:outline-none focus:border-stone-900" />
+                  className="flex-1 bg-white border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:border-stone-900" />
                 <button onClick={async () => {
                   if (signupPwd.length < 6) { toast.error("Şifre en az 6 karakter olmalı"); return; }
                   setSignupBusy(true);
@@ -229,7 +237,7 @@ export default function OrderSuccess() {
                   {signupBusy ? "..." : "Oluştur"}
                 </button>
               </div>
-              <p className="text-[10px] text-stone-400 mt-4">
+              <p className="text-[10px] text-gray-500 mt-4">
                 E-posta: {order?.shipping_address?.email || "—"}
               </p>
             </div>
@@ -237,21 +245,21 @@ export default function OrderSuccess() {
         )}
 
         {signupDone && (
-          <div className="mt-12 border-t border-stone-100 pt-12 text-center" data-testid="guest-signup-done">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-stone-100 mb-3">
-              <Check size={20} className="text-stone-900" />
+          <div className="mt-12 border-t border-gray-100 pt-12 text-center" data-testid="guest-signup-done">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-3">
+              <Check size={20} className="text-black" />
             </div>
-            <p className="text-sm text-stone-900 mb-2">Hesabın hazır!</p>
-            <Link to="/hesabim" className="text-xs underline tracking-wider text-stone-500 hover:text-stone-900">
+            <p className="text-sm text-black mb-2">Hesabın hazır!</p>
+            <Link to="/hesabim" className="text-xs underline tracking-wider text-gray-700 hover:text-black">
               HESABIMA GİT
             </Link>
           </div>
         )}
 
         {/* Help */}
-        <div className="text-center mt-16 pt-12 border-t border-stone-100">
-          <p className="text-xs text-stone-400 tracking-wide">
-            Sorularınız için: <a href="mailto:destek@facette.com.tr" className="underline hover:text-stone-900">destek@facette.com.tr</a>
+        <div className="text-center mt-16 pt-12 border-t border-gray-100">
+          <p className="text-xs text-gray-500 tracking-wide">
+            Sorularınız için: <a href="mailto:destek@facette.com.tr" className="underline hover:text-black">destek@facette.com.tr</a>
           </p>
         </div>
       </div>

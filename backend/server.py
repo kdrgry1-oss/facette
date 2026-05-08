@@ -74,6 +74,7 @@ from routes.marketplace_hub import router as marketplace_hub_router
 from routes.brand_mapping import router as brand_mapping_router
 from routes.category_mapping import router as category_mapping_router
 from routes.automation_status import router as automation_status_router
+from routes.footer_template import public_router as footer_public_router, admin_router as footer_admin_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
@@ -320,6 +321,9 @@ api_router.include_router(brand_mapping_router)
 api_router.include_router(category_mapping_router)
 # Otomasyon durumu — admin için cron + log özet
 api_router.include_router(automation_status_router)
+# Footer şablonu (public + admin)
+api_router.include_router(footer_public_router)
+api_router.include_router(footer_admin_router)
 # Toplu fiyat/stok Excel ops + stok uyarı + yeniden sipariş önerisi
 api_router.include_router(bulk_ops_router)
 # RFM müşteri segmentasyonu + marketplace karlılık + Google Merchant feed

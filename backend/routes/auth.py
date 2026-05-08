@@ -152,6 +152,33 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+@router.post("/change-password")
+async def change_password(
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mevcut kullanıcı kendi şifresini değiştirir.
+    Body: { current_password, new_password }
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    cur = (payload or {}).get("current_password", "")
+    new = (payload or {}).get("new_password", "")
+    if not cur or not new:
+        raise HTTPException(status_code=400, detail="Mevcut ve yeni şifre zorunlu")
+    if len(new) < 6:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
+    user = await db.users.find_one({"id": current_user["id"]})
+    if not user or not verify_password(cur, user.get("password", "")):
+        raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": {"password": hash_password(new),
+                  "password_changed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"success": True, "message": "Şifre güncellendi"}
+
+
 # =============================================================================
 # SMS OTP PASSWORD RESET (FAZ 3)
 # =============================================================================

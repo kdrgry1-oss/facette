@@ -71,6 +71,7 @@ import BulkPriceStock from "./pages/admin/BulkPriceStock";
 import StockAlerts2 from "./pages/admin/StockAlerts";
 import CustomerSegments from "./pages/admin/CustomerSegments";
 import AutomationStatus from "./pages/admin/AutomationStatus";
+import FooterDesign from "./pages/admin/FooterDesign";
 import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import { trackVisit } from "./lib/attribution";
 
@@ -151,6 +152,7 @@ function App() {
               {/* RFM müşteri segmentasyonu — hedefli pazarlama için */}
               <Route path="musteri-segmentleri" element={<CustomerSegments />} />
               <Route path="otomasyon" element={<AutomationStatus />} />
+              <Route path="footer-tasarim" element={<FooterDesign />} />
               {/* Marketplace başına net kâr raporu (komisyon + kargo + iade çıkarılmış) */}
               <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
               <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
