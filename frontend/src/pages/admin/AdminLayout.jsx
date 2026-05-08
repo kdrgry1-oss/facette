@@ -141,6 +141,8 @@ const navigation = [
       { label: "Kategori Eşleştirme", path: "/admin/kategori-eslestir", icon: Store },
       // Tüm cron + senkron + log özeti — admin görünürlüğü
       { label: "Otomasyon Durumu", path: "/admin/otomasyon", icon: Cable },
+      // Iteration 33 — Audit log + lockout + brute force monitor
+      { label: "Güvenlik Paneli", path: "/admin/guvenlik-paneli", icon: Shield },
     ],
   },
   {

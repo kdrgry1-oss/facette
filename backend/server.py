@@ -84,6 +84,7 @@ from routes.customer_risk import router as customer_risk_router
 from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
 from routes.social_auth import router as social_auth_router
+from routes.security_dashboard import router as security_dashboard_router
 
 # Database
 from routes.deps import client, db
@@ -118,6 +119,11 @@ async def lifespan(app: FastAPI):
         await db.orders.create_index("order_number")
         await db.orders.create_index("user_id")
         await db.users.create_index("email", unique=True)
+        # Security audit indexes — fast forensic queries as the collection grows
+        await db.auth_audit_logs.create_index([("created_at", -1)])
+        await db.auth_audit_logs.create_index([("event", 1), ("email", 1), ("created_at", -1)])
+        await db.auth_audit_logs.create_index([("ip", 1), ("created_at", -1)])
+        await db.auth_audit_logs.create_index([("success", 1), ("created_at", -1)])
         
         logger.info("Database indexes created")
     except Exception as e:
@@ -408,6 +414,8 @@ api_router.include_router(customer_risk_router)
 api_router.include_router(production_plan_router)
 api_router.include_router(marketing_pixels_router)
 api_router.include_router(social_auth_router)
+# Security dashboard — auth_audit_logs üzerinde admin görünürlüğü
+api_router.include_router(security_dashboard_router)
 
 # Root endpoint
 @api_router.get("/")

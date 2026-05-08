@@ -4,7 +4,7 @@ Not: Iyzico kısmı `integrations_iyzico.py` modülüne taşındı (2026-04-23).
 """
 from fastapi import APIRouter, HTTPException, Query, Depends, Response, BackgroundTasks, Request
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import base64
 import uuid
@@ -3565,8 +3565,17 @@ async def issue_trendyol_claim(
 # ==================== TRENDYOL Q&A ====================
 
 @router.get("/trendyol/questions/sync")
-async def sync_trendyol_questions(current_user: dict = Depends(require_admin)):
-    """Sync unanswered questions from Trendyol and store in DB"""
+async def sync_trendyol_questions(
+    days_back: int = 90,
+    status: Optional[str] = None,
+    current_user: dict = Depends(require_admin)
+):
+    """Sync questions from Trendyol and store in DB.
+
+    Trendyol QnA Filter API varsayılan olarak son ~14-30 gün döndürür; geçmiş
+    soruları çekebilmek için `startDate`/`endDate` (Unix ms) parametreleri
+    geçilmelidir. `days_back` (varsayılan 90) bunu kontrol eder.
+    """
     config = await get_trendyol_config()
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
@@ -3578,20 +3587,36 @@ async def sync_trendyol_questions(current_user: dict = Depends(require_admin)):
 
     base_url = "https://apigw.trendyol.com" if config.get("mode") == "live" else "https://stageapigw.trendyol.com"
     synced = 0
+    updated = 0
     total_fetched = 0
     page = 0
-    
+
+    # Trendyol API timestamp'i Unix milisaniye bekler
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(days=max(1, min(days_back, 365)))
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             url = f"{base_url}/integration/qna/sellers/{supplier_id}/questions/filter"
-            
+
             while True:
-                params = {"size": 50, "page": page} # Removed status="WAITING_FOR_ANSWER" to pull all
+                params = {
+                    "size": 50,
+                    "page": page,
+                    "startDate": start_ms,
+                    "endDate": end_ms,
+                    "orderByField": "CreatedDate",
+                    "orderByDirection": "DESC",
+                }
+                if status:
+                    params["status"] = status  # WAITING_FOR_ANSWER | ANSWERED | REJECTED
                 resp = await client.get(url, headers=headers, params=params)
                 resp.raise_for_status()
                 data = resp.json()
                 questions = data.get("content", [])
-                
+
                 if not questions:
                     break
 
@@ -3620,20 +3645,28 @@ async def sync_trendyol_questions(current_user: dict = Depends(require_admin)):
                     }
                     if existing:
                         await db.trendyol_questions.update_one({"question_id": q_id}, {"$set": doc})
+                        updated += 1
                     else:
                         doc["id"] = generate_id()
                         doc["created_at"] = datetime.now(timezone.utc).isoformat()
                         await db.trendyol_questions.insert_one(doc)
                         synced += 1
-                
+
                 total_fetched += len(questions)
                 total_pages = data.get("totalPages", 1)
                 page += 1
-                
-                if page >= total_pages or page > 50: # Limit to ~2500 questions per sync to avoid rate limits
+
+                if page >= total_pages or page > 50:
                     break
 
-        return {"success": True, "synced": synced, "total_fetched": total_fetched}
+        return {
+            "success": True,
+            "synced": synced,
+            "updated": updated,
+            "total_fetched": total_fetched,
+            "days_back": days_back,
+            "date_range": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
+        }
     except httpx.HTTPStatusError as e:
         logger.error(f"Q&A sync error: {e.response.text}")
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
@@ -3699,6 +3732,176 @@ async def answer_trendyol_question(question_id: str, payload: dict, current_user
     except Exception as e:
         logger.error(f"Q&A answer error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== TRENDYOL REVIEWS (public storefront scrape) ====================
+# Resmi Trendyol Seller API'sinde ürün yorumları için endpoint yok. Bu yüzden
+# kullanıcının kendi ürünlerinin yorumlarını çekmek için Trendyol public
+# storefront'unun ürün-detay sayfasındaki "ratings" JSON endpoint'i kullanılır.
+# URL deseni: https://public.trendyol.com/discovery-web-websfxsocialreviewrating-santral/api/v1/...
+# Pratik: ürünün public Trendyol URL'sinden contentId çıkarılır → reviews API.
+
+@router.post("/trendyol/reviews/scrape")
+async def scrape_trendyol_reviews(
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Public Trendyol storefront'tan bir ürünün yorumlarını çeker.
+
+    Body: { "trendyol_url": "...", "product_id": "<local product id>", "min_rating": 4 }
+    `min_rating` varsayılan 4 — sadece 4 ve 5 yıldızlı yorumlar import edilir.
+    Eşleşen yorumlar `product_reviews` koleksiyonuna yazılır + ürünün
+    `rating`/`review_count` alanları güncellenir.
+    """
+    url = (payload or {}).get("trendyol_url", "").strip()
+    local_pid = (payload or {}).get("product_id", "").strip()
+    min_rating = int((payload or {}).get("min_rating", 4))
+    if not url or "trendyol.com" not in url:
+        raise HTTPException(status_code=400, detail="Geçerli bir trendyol_url gerekli")
+
+    # 1) Trendyol ürün URL'sinden contentId / merchantId çek
+    m = re.search(r"-p-(\d+)", url)
+    if not m:
+        raise HTTPException(status_code=400, detail="URL'den ürün ID çıkarılamadı")
+    content_id = m.group(1)
+
+    # 2) Public reviews API
+    api_url = (
+        "https://public.trendyol.com/discovery-web-websfxsocialreviewrating-santral/"
+        f"api/v1/reviews/{content_id}"
+    )
+    fetched: List[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            page = 0
+            while page < 10:  # max 10 sayfa = ~300 yorum
+                params = {"page": page, "size": 30, "order": "DESC", "orderBy": "Score"}
+                resp = await client.get(api_url, params=params,
+                                        headers={"User-Agent": "Mozilla/5.0",
+                                                 "Accept": "application/json"})
+                if resp.status_code == 404:
+                    break
+                resp.raise_for_status()
+                data = resp.json()
+                reviews = (data.get("result") or {}).get("productReviews", {}).get("content", [])
+                if not reviews:
+                    break
+                fetched.extend(reviews)
+                total_pages = (data.get("result") or {}).get("productReviews", {}).get("totalPages", 1)
+                page += 1
+                if page >= total_pages:
+                    break
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code,
+                            detail=f"Trendyol public API hatası: {e.response.text[:200]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Yorum çekme hatası: {e}")
+
+    # 3) Filtreleme + DB'ye yazma
+    inserted = 0
+    skipped_low_rating = 0
+    skipped_existing = 0
+    sum_rating = 0.0
+    count_rating = 0
+
+    for r in fetched:
+        rating = int(r.get("rate") or 0)
+        if rating < min_rating:
+            skipped_low_rating += 1
+            continue
+        review_id = str(r.get("id") or "")
+        if not review_id:
+            continue
+        existing = await db.product_reviews.find_one(
+            {"source": "trendyol_public", "external_id": review_id}, {"_id": 1}
+        )
+        if existing:
+            skipped_existing += 1
+            continue
+
+        comment_date = r.get("commentDateISOtype") or r.get("lastModifiedDate") or ""
+        doc = {
+            "id": generate_id(),
+            "external_id": review_id,
+            "source": "trendyol_public",
+            "product_id": local_pid or None,
+            "trendyol_content_id": content_id,
+            "rating": rating,
+            "title": r.get("commentTitle") or "",
+            "comment": r.get("comment") or "",
+            "user_name": r.get("userFullName") or "Trendyol Müşterisi",
+            "is_verified": bool(r.get("verifiedPurchase")),
+            "is_seller_verified": bool(r.get("sellerVerified")),
+            "approved": True,  # 4-5 yıldız zaten otomatik onaylı
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "comment_date": comment_date,
+        }
+        await db.product_reviews.insert_one(doc)
+        inserted += 1
+        sum_rating += rating
+        count_rating += 1
+
+    # 4) Ürünün rating/review_count alanlarını güncelle (yerelde rev sayma)
+    if local_pid:
+        agg = await db.product_reviews.aggregate([
+            {"$match": {"product_id": local_pid, "approved": True}},
+            {"$group": {"_id": None, "avg": {"$avg": "$rating"},
+                        "cnt": {"$sum": 1}}}
+        ]).to_list(1)
+        if agg:
+            await db.products.update_one(
+                {"id": local_pid},
+                {"$set": {
+                    "rating": round(agg[0]["avg"], 2),
+                    "review_count": agg[0]["cnt"],
+                    "reviews_synced_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+
+    await log_integration_event(
+        "trendyol", "review_scrape", "product", local_pid or content_id,
+        "success",
+        f"Yorum çekildi: contentId={content_id} fetched={len(fetched)} inserted={inserted}",
+    )
+    return {
+        "success": True,
+        "content_id": content_id,
+        "fetched": len(fetched),
+        "inserted": inserted,
+        "skipped_low_rating": skipped_low_rating,
+        "skipped_existing": skipped_existing,
+        "min_rating": min_rating,
+    }
+
+
+@router.post("/trendyol/reviews/scrape-bulk")
+async def scrape_trendyol_reviews_bulk(
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Birden fazla ürün için toplu yorum çekimi.
+    Body: { "items": [{"trendyol_url": "...", "product_id": "..."}], "min_rating": 4 }
+    """
+    items = (payload or {}).get("items") or []
+    min_rating = int((payload or {}).get("min_rating", 4))
+    results = []
+    total_inserted = 0
+    for it in items[:50]:  # max 50 ürün/batch
+        try:
+            r = await scrape_trendyol_reviews(
+                {"trendyol_url": it.get("trendyol_url", ""),
+                 "product_id": it.get("product_id", ""),
+                 "min_rating": min_rating},
+                current_user=current_user,
+            )
+            results.append({"product_id": it.get("product_id"), "ok": True, **r})
+            total_inserted += r.get("inserted", 0)
+        except HTTPException as e:
+            results.append({"product_id": it.get("product_id"), "ok": False, "error": e.detail})
+        except Exception as e:
+            results.append({"product_id": it.get("product_id"), "ok": False, "error": str(e)})
+    return {"success": True, "total_inserted": total_inserted, "items": results}
+
 
 
 # ==================== TRENDYOL INVOICE ====================
