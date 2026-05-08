@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 33 — Cybersecurity Hardening backend tests. 25/25 PASSED. Verified JWT strict (alg=none/expired/bad-issuer/bad-signature all rejected), NoSQL injection guard (5 payload variants rejected), brute-force lockout (5 fails → 15-min lock; verified locked_until in DB), per-IP rate limits (login 10/min, register 5/min, forgot-otp 3/min — all 429 after threshold), audit log writes (login success/fail + password_change success/fail to db.auth_audit_logs), security headers on every /api/* response (CSP, HSTS, X-Frame-Options=DENY, X-Content-Type-Options=nosniff, Referrer-Policy, Permissions-Policy, Cross-Origin-Resource-Policy=same-site, X-Robots-Tag), CORS strict whitelist (FastAPI reflects only whitelisted origins; no wildcard), change-password flow (wrong→400+audit, correct→200+audit), bcrypt rounds=12 prefix on new registrations, legacy md5 hash rejected by verify_password, require_admin blocks customer tokens (403), admin@facette.com regression login still works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/* (all routes via Cloudflare/k8s ingress)", "issue": "Public preview URL ingress overrides FastAPI CORS with `Access-Control-Allow-Origin: *`. App-level CORS whitelist is correct (verified directly against localhost:8001) but external clients see wildcard from the ingress. This is infrastructure-level — out of app scope but worth flagging for production deployment where the ingress should NOT inject `*`."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_security_iter33.py",
+    "/app/test_reports/pytest/iteration33.xml"
+  ],
+  "action_items": [
+    "Optional: review k8s/Cloudflare ingress so it does NOT add `Access-Control-Allow-Origin: *` on top of FastAPI responses (otherwise the strict whitelist in server.py is shadowed for external clients).",
+    "Optional: add an index on auth_audit_logs.created_at + (event,email) for fast forensic queries as the collection grows."
+  ],
+  "critical_code_review_comments": [
+    "deps.py:_decode_jwt_strict — correctly pins HS256 + issuer + requires exp/user_id; alg=none, expired, wrong-issuer, tampered-sig all rejected. Good.",
+    "auth.py:login — rate limit decorator applied via `@(limiter.limit(...) if limiter else lambda f: f)` works; account lockout + audit + NoSQL guard all present and tested.",
+    "verify_password — explicitly rejects non-bcrypt prefixes ($2a/$2b/$2y), so legacy md5/sha1 hashes can NOT bypass. Confirmed.",
+    "server.py:SecurityHeadersMiddleware — uses `setdefault`, so headers are not overridden by sub-handlers; CSP/HSTS/XFO/XCTO/Referrer/Permissions/COR-P/X-Robots-Tag all present on /api/*.",
+    "deps.py:write_audit_log — best-effort try/except, never raises; events for login (s/f), register, password_change all wired.",
+    "Minor: server.py line 153 — `cors_origins = os.environ.get('CORS_ORIGINS', '*')` falls back to `*` if env missing; in current .env the whitelist IS set correctly. Consider failing fast (raise) if CORS_ORIGINS is missing in production to prevent accidental wildcard."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_iter33.py (created)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "skipped (per request)"},
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Tests create throwaway users (test_lockout_*, chpw_*, cust_*, bcrypt_*, legacy_*) and clean them up in finally blocks. Audit log entries are intentionally retained.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 33 security hardening is fully validated at backend layer. Test file at /app/backend/tests/test_security_iter33.py reusable for regression. Two infrastructure notes (not bugs): (1) public-URL CORS shows '*' because of Cloudflare/k8s ingress overlay — FastAPI itself is strict (verified via localhost:8001); (2) rate-limit tests use X-Forwarded-For-spoofed unique IPs against localhost:8001 because the public URL goes through a CDN with shared upstream IPs that pollute slowapi buckets. Admin lockout reset done at end. JWT_SECRET is loaded from /app/backend/.env file directly inside the test (not from process env).",
+  "rca of the issue": "n/a — no failures."
+}

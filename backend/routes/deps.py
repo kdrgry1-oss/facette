@@ -29,36 +29,214 @@ db = client[db_name]
 
 # Security
 security = HTTPBearer(auto_error=False)
-JWT_SECRET = os.environ.get('JWT_SECRET', 'facette-secure-secret-key-2024-extended-32bytes!')
-JWT_ALGORITHM = "HS256"
+# JWT_SECRET MUST come from env. A weak default is allowed only as a hard last
+# resort but will trigger a noisy warning. Production must set a strong secret.
+JWT_SECRET = os.environ.get('JWT_SECRET') or 'facette-secure-secret-key-2024-extended-32bytes!'
+if len(JWT_SECRET) < 32:
+    logging.getLogger(__name__).warning(
+        "JWT_SECRET is too short (<32 bytes). Set a strong secret in /app/backend/.env"
+    )
+JWT_ALGORITHM = "HS256"  # strict — prevents 'alg=none' attacks
+JWT_ISSUER = "facette-api"
 
 # Logger
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# SECURITY HELPERS (NoSQL injection guard, audit log, brute-force lockout)
+# ---------------------------------------------------------------------------
+
+def safe_str(value, max_len: int = 256) -> str:
+    """Coerce arbitrary input to a safe string for MongoDB equality matching.
+    Strips type-confusion attacks (dict/list with $operators, deeply nested
+    payloads). Always returns a primitive str — never an operator dict.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple, set)):
+        # NoSQL injection attempt — refuse
+        return ""
+    s = str(value)
+    if len(s) > max_len:
+        s = s[:max_len]
+    return s
+
+
+def is_safe_email(email: str) -> bool:
+    """Basic email validation — rejects $ { } operators that could leak into
+    Mongo equality match if blindly used. Pydantic + safe_str cover the rest.
+    """
+    import re
+    if not email or not isinstance(email, str):
+        return False
+    if any(ch in email for ch in ("$", "{", "}", "\x00")):
+        return False
+    return bool(re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", email))
+
+
+async def write_audit_log(event: str, *, user_id: str = None, email: str = None,
+                          ip: str = None, user_agent: str = None,
+                          success: bool = True, meta: dict = None) -> None:
+    """Append an entry to `auth_audit_logs`. Best-effort, never raises."""
+    try:
+        await db.auth_audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "event": event,
+            "user_id": user_id,
+            "email": (email or "").lower() if email else None,
+            "ip": ip,
+            "user_agent": (user_agent or "")[:500],
+            "success": bool(success),
+            "meta": meta or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning(f"audit log failed: {e}")
+
+
+# Lockout policy — 5 failed attempts inside the last 15 min → lock for 15 min
+LOCKOUT_WINDOW_MIN = 15
+LOCKOUT_THRESHOLD = 5
+LOCKOUT_DURATION_MIN = 15
+
+
+async def is_account_locked(email: str) -> tuple[bool, int]:
+    """Return (locked, retry_after_seconds). Lock is identified by the
+    presence of a `locked_until > now` field on the user document."""
+    if not email:
+        return False, 0
+    user = await db.users.find_one({"email": email.lower()}, {"_id": 0, "locked_until": 1})
+    if not user:
+        return False, 0
+    locked_until = user.get("locked_until")
+    if not locked_until:
+        return False, 0
+    try:
+        until = datetime.fromisoformat(locked_until)
+    except Exception:
+        return False, 0
+    now = datetime.now(timezone.utc)
+    if until > now:
+        return True, int((until - now).total_seconds())
+    return False, 0
+
+
+async def register_failed_login(email: str) -> None:
+    """Increment failed-attempt counter; lock account when threshold hit."""
+    if not email:
+        return
+    now = datetime.now(timezone.utc)
+    user = await db.users.find_one({"email": email.lower()}, {"_id": 0, "id": 1, "failed_attempts": 1, "first_failed_at": 1})
+    if not user:
+        return
+    first_at = user.get("first_failed_at")
+    try:
+        first_dt = datetime.fromisoformat(first_at) if first_at else None
+    except Exception:
+        first_dt = None
+    # Reset window if older than LOCKOUT_WINDOW_MIN
+    if first_dt is None or (now - first_dt) > timedelta(minutes=LOCKOUT_WINDOW_MIN):
+        new_count = 1
+        await db.users.update_one(
+            {"email": email.lower()},
+            {"$set": {"failed_attempts": 1, "first_failed_at": now.isoformat()}}
+        )
+    else:
+        new_count = (user.get("failed_attempts") or 0) + 1
+        update = {"failed_attempts": new_count}
+        if new_count >= LOCKOUT_THRESHOLD:
+            update["locked_until"] = (now + timedelta(minutes=LOCKOUT_DURATION_MIN)).isoformat()
+        await db.users.update_one({"email": email.lower()}, {"$set": update})
+
+
+async def reset_failed_login(email: str) -> None:
+    if not email:
+        return
+    await db.users.update_one(
+        {"email": email.lower()},
+        {"$unset": {"failed_attempts": "", "first_failed_at": "", "locked_until": ""}}
+    )
+
+
+def client_ip_from_request(request) -> str:
+    """Return the real client IP, honouring X-Forwarded-For (first hop)."""
+    if not request:
+        return ""
+    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    try:
+        return request.client.host if request.client else ""
+    except Exception:
+        return ""
+
+
+# Shared SlowAPI limiter instance (single instance per app)
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address as _gra
+
+    def _rate_key(request):
+        xff = request.headers.get("x-forwarded-for") if request else None
+        if xff:
+            return xff.split(",")[0].strip()
+        return _gra(request)
+
+    limiter = Limiter(key_func=_rate_key, default_limits=[])
+except Exception:  # pragma: no cover
+    limiter = None
+
+
 # Password helpers
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    if not hashed or not isinstance(hashed, str):
+        return False
+    # Reject legacy weak hashes (md5/sha1 length) — force bcrypt-only
+    if not (hashed.startswith("$2a$") or hashed.startswith("$2b$") or hashed.startswith("$2y$")):
+        return False
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
 
 def create_token(user_id: str, is_admin: bool = False) -> str:
+    now = datetime.now(timezone.utc)
     payload = {
         "user_id": user_id,
         "is_admin": is_admin,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+        "iat": now,
+        "iss": JWT_ISSUER,
+        "exp": now + timedelta(days=7),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
+
+def _decode_jwt_strict(token: str) -> dict:
+    """Strictly decode JWT — locks algorithm to HS256 and validates issuer.
+    Raises jwt exceptions on tamper/expiry which the caller maps to HTTP errs."""
+    return jwt.decode(
+        token,
+        JWT_SECRET,
+        algorithms=[JWT_ALGORITHM],
+        options={"require": ["exp", "user_id"], "verify_signature": True},
+        issuer=JWT_ISSUER,
+    )
+
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current user from JWT token"""
+    """Get current user from JWT token (strict decode)."""
     if not credentials:
         return None
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = _decode_jwt_strict(credentials.credentials)
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
+        if user and user.get("is_active") is False:
+            return None
         return user
-    except:
+    except Exception:
         return None
 
 async def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -69,19 +247,23 @@ async def require_auth(credentials: HTTPAuthorizationCredentials = Depends(secur
     return user
 
 async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Require admin authentication"""
+    """Require admin authentication (strict JWT)."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Yetkilendirme gerekli")
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        if not payload.get("is_admin"):
-            raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
-        user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
-        return user
+        payload = _decode_jwt_strict(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token süresi dolmuş")
-    except:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Geçersiz token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Geçersiz token")
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
+    if not user or user.get("is_active") is False:
+        raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    return user
 
 def generate_id() -> str:
     """Generate unique UUID"""

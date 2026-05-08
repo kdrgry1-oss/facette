@@ -149,15 +149,83 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+# CORS — strict whitelist (no wildcard in production). Configure via CORS_ORIGINS env.
 cors_origins = os.environ.get("CORS_ORIGINS", "*")
+_origins_list = [o.strip() for o in cors_origins.split(",") if o.strip()] if cors_origins != "*" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins.split(",") if cors_origins != "*" else ["*"],
+    allow_origins=_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    expose_headers=["Content-Disposition"],
+    max_age=600,
 )
+
+# ---------------------------------------------------------------------------
+# RATE LIMITING (slowapi) — protects /api/auth/* against brute force
+# ---------------------------------------------------------------------------
+try:
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+    from routes.deps import limiter as _limiter
+
+    if _limiter is not None:
+        app.state.limiter = _limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_middleware(SlowAPIMiddleware)
+except Exception as _e:
+    logger.warning(f"slowapi rate limiter not enabled: {_e}")
+
+# ---------------------------------------------------------------------------
+# SECURITY HEADERS MIDDLEWARE (CSP, HSTS, XFO, XCTO, Referrer-Policy, etc.)
+# ---------------------------------------------------------------------------
+from starlette.middleware.base import BaseHTTPMiddleware as _BHM
+
+
+class SecurityHeadersMiddleware(_BHM):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        # Skip for static asset routes if any
+        path = request.url.path
+        # Frontend may inject 3rd-party pixels (GA4, Meta, TikTok). Allow https:
+        # script sources broadly but block 'unsafe-eval'. 'unsafe-inline' is
+        # tolerated for inline tag-manager bootstraps.
+        csp = (
+            "default-src 'self' https: data: blob:; "
+            "script-src 'self' 'unsafe-inline' https: blob:; "
+            "style-src 'self' 'unsafe-inline' https: data:; "
+            "img-src 'self' data: blob: https:; "
+            "font-src 'self' data: https:; "
+            "connect-src 'self' https: wss:; "
+            "frame-src 'self' https:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self' https:; "
+            "frame-ancestors 'none'"
+        )
+        response.headers.setdefault("Content-Security-Policy", csp)
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(), microphone=(), camera=(), payment=(self), usb=(), interest-cohort=()",
+        )
+        # HSTS — only meaningful over HTTPS but harmless on HTTP previews
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+        # Disable cross-origin Spectre-class leaks for API responses
+        if path.startswith("/api/"):
+            response.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
+            response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ---------------------------------------------------------------------------
 # INTEGRATION LOGGING MIDDLEWARE

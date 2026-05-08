@@ -8,7 +8,10 @@ import os
 
 from .deps import (
     db, logger, hash_password, verify_password, 
-    create_token, get_current_user, generate_id
+    create_token, get_current_user, generate_id,
+    safe_str, is_safe_email, write_audit_log,
+    is_account_locked, register_failed_login, reset_failed_login,
+    client_ip_from_request, limiter,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -18,32 +21,47 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
 @router.post("/register")
+@(limiter.limit("5/minute") if limiter else (lambda f: f))
 async def register(
+    request: Request,
     email: str = Query(...),
     password: str = Query(...),
     first_name: str = Query(None),
     last_name: str = Query(None)
 ):
     """Register new user"""
-    existing = await db.users.find_one({"email": email.lower()})
+    email = safe_str(email, 256).lower().strip()
+    password = safe_str(password, 200)
+    if not is_safe_email(email):
+        raise HTTPException(status_code=400, detail="Geçersiz e-posta adresi")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Şifre en az 6 karakter olmalı")
+
+    existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Bu e-posta zaten kayıtlı")
-    
+
     user = {
         "id": generate_id(),
-        "email": email.lower(),
+        "email": email,
         "password": hash_password(password),
-        "first_name": first_name or "",
-        "last_name": last_name or "",
+        "first_name": safe_str(first_name, 100) or "",
+        "last_name": safe_str(last_name, 100) or "",
         "phone": "",
         "is_admin": False,
         "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+
     await db.users.insert_one(user)
     token = create_token(user["id"])
-    
+    await write_audit_log(
+        "register", user_id=user["id"], email=email,
+        ip=client_ip_from_request(request),
+        user_agent=request.headers.get("user-agent"),
+        success=True,
+    )
+
     return {
         "token": token,
         "user": {
@@ -56,20 +74,48 @@ async def register(
     }
 
 @router.post("/login")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
 async def login(
+    request: Request,
     email: str = Query(...),
     password: str = Query(...)
 ):
-    """Login with email and password"""
-    user = await db.users.find_one({"email": email.lower()}, {"_id": 0})
+    """Login with email and password (rate-limited + lockout-protected)."""
+    email = safe_str(email, 256).lower().strip()
+    password = safe_str(password, 200)
+    ip = client_ip_from_request(request)
+    ua = request.headers.get("user-agent")
+
+    if not is_safe_email(email):
+        await write_audit_log("login", email=email, ip=ip, user_agent=ua,
+                              success=False, meta={"reason": "invalid_email_format"})
+        raise HTTPException(status_code=400, detail="Geçersiz e-posta veya şifre")
+
+    locked, retry_after = await is_account_locked(email)
+    if locked:
+        await write_audit_log("login", email=email, ip=ip, user_agent=ua,
+                              success=False, meta={"reason": "locked", "retry_after": retry_after})
+        raise HTTPException(status_code=429,
+                            detail=f"Çok fazla başarısız deneme. {retry_after // 60 + 1} dk sonra tekrar deneyin.")
+
+    user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(password, user.get("password", "")):
+        await register_failed_login(email)
+        await write_audit_log("login", email=email, ip=ip, user_agent=ua,
+                              success=False, meta={"reason": "bad_credentials"})
         raise HTTPException(status_code=401, detail="Geçersiz e-posta veya şifre")
-    
+
     if not user.get("is_active", True):
+        await write_audit_log("login", user_id=user["id"], email=email,
+                              ip=ip, user_agent=ua, success=False,
+                              meta={"reason": "inactive"})
         raise HTTPException(status_code=403, detail="Hesabınız devre dışı")
-    
+
+    await reset_failed_login(email)
     token = create_token(user["id"], user.get("is_admin", False))
-    
+    await write_audit_log("login", user_id=user["id"], email=email,
+                          ip=ip, user_agent=ua, success=True)
+
     return {
         "token": token,
         "user": {
@@ -155,6 +201,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 @router.post("/change-password")
 async def change_password(
     payload: dict,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Mevcut kullanıcı kendi şifresini değiştirir.
@@ -162,19 +209,29 @@ async def change_password(
     """
     if not current_user:
         raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
-    cur = (payload or {}).get("current_password", "")
-    new = (payload or {}).get("new_password", "")
+    cur = safe_str((payload or {}).get("current_password", ""), 200)
+    new = safe_str((payload or {}).get("new_password", ""), 200)
     if not cur or not new:
         raise HTTPException(status_code=400, detail="Mevcut ve yeni şifre zorunlu")
     if len(new) < 6:
         raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
     user = await db.users.find_one({"id": current_user["id"]})
     if not user or not verify_password(cur, user.get("password", "")):
+        await write_audit_log(
+            "password_change", user_id=current_user["id"], email=current_user.get("email"),
+            ip=client_ip_from_request(request), user_agent=request.headers.get("user-agent"),
+            success=False, meta={"reason": "wrong_current_password"},
+        )
         raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
     await db.users.update_one(
         {"id": current_user["id"]},
         {"$set": {"password": hash_password(new),
                   "password_changed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    await write_audit_log(
+        "password_change", user_id=current_user["id"], email=current_user.get("email"),
+        ip=client_ip_from_request(request), user_agent=request.headers.get("user-agent"),
+        success=True,
     )
     return {"success": True, "message": "Şifre güncellendi"}
 
@@ -207,7 +264,8 @@ def _hash_otp(code: str) -> str:
 
 
 @router.post("/forgot-password/request-otp")
-async def forgot_password_request_otp(req: OTPRequestReq):
+@(limiter.limit("3/minute") if limiter else (lambda f: f))
+async def forgot_password_request_otp(request: Request, req: OTPRequestReq):
     """Telefon numarasına 6 haneli SMS OTP gönderir.
     Privacy: numara sistemde olmasa bile aynı yanıt döner (enumeration önleme).
     Rate limit: Aynı telefon için 60 sn içinde tek istek.
@@ -271,7 +329,8 @@ async def forgot_password_request_otp(req: OTPRequestReq):
 
 
 @router.post("/forgot-password/verify-otp")
-async def forgot_password_verify_otp(req: OTPVerifyReq):
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def forgot_password_verify_otp(request: Request, req: OTPVerifyReq):
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from notification_service import normalize_phone_tr
