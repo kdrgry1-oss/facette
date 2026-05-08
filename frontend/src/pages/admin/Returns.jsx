@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -591,6 +591,9 @@ export default function Returns() {
               <CreditCard size={18} className="text-blue-600" />
               Iyzico Kısmi İade
             </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500 mt-1">
+              Sipariş tutarından iade yapın. Kargo bedeli kesintisi opsiyoneldir.
+            </DialogDescription>
           </DialogHeader>
           {refundClaim && (
             <div className="space-y-4 py-2">

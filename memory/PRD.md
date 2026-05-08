@@ -77,7 +77,14 @@ Kullanıcının "Android & iOS native uygulamaya taşıyacağım" talebi için s
 - `/app/backend/.env` — CORS Capacitor origin'leri
 - `/app/frontend/src/App.js` — route + import
 - `/app/frontend/src/pages/admin/AdminLayout.jsx` — sidebar link
-- `/app/frontend/src/pages/admin/Returns.jsx` — Iyzico refund modal + button
+- `/app/frontend/src/pages/admin/Returns.jsx` — Iyzico refund modal + button + DialogDescription (a11y)
+
+### Iter35 Refactor (Doğan modülü ayrıldı)
+- `NEW /app/backend/routes/integrations_dogan.py` — 4 endpoint (settings GET/POST, test-connection, check-user)
+- `/app/backend/routes/integrations.py` — Doğan section silindi (4535 → 4459 satır, -76 satır)
+- `/app/backend/server.py:349-352` — `dogan_router` `integrations_router`'dan ÖNCE include (catch-all sıralaması kritik)
+- **Test 24/24 PASS** — Doğan endpoint'leri eski davranışla birebir aynı, hiçbir routing regression yok
+- Sıradaki refactor: Trendyol (44 routes, ~3500 lines) — ayrı kontrollü iterasyon
 
 
 
