@@ -21,6 +21,75 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 34 (2026-05-08) — Security Dashboard + Trendyol Q&A Date Filter + Trendyol Reviews Scraper
+
+### 🛡️ Admin Security Dashboard (`/admin/guvenlik-paneli`)
+Iter33'te oluşturulan `auth_audit_logs` koleksiyonunun üstüne canlı görünürlük paneli kuruldu.
+
+**Backend (`/app/backend/routes/security_dashboard.py`)**
+- `GET /api/admin/security/summary?window_hours=N` — KPI'lar (total events, success/fail logins, registrations, active lockouts, locked_users list, NoSQL injection attempts, lockout-blocked attempts)
+- `GET /top-failed-emails` — başarısız login aggregate (email + count + last_seen + distinct_ips)
+- `GET /top-failed-ips` — IP bazlı agregat
+- `GET /timeline` — saat bazlı success/fail zaman serisi (grafik için)
+- `GET /recent-events?limit=&event=&success=&email=&ip=` — son 100 audit log + filtreleme
+- `POST /unlock-user {email}` — admin manuel kilit açma + `admin_unlock` audit event
+
+**Frontend (`/app/frontend/src/pages/admin/SecurityDashboard.jsx`)**
+- 8 KPI kartı (Toplam Olay / Başarılı / Başarısız / Aktif Kilitli / Yeni Kayıt / Şifre Hata / NoSQL Injection / Lockout Bloğu)
+- "Şu an Kilitli Hesaplar" kartı + her hesap için "Kilidi Aç" butonu
+- "Çok Saldırılan E-postalar" + "Şüpheli IP'ler" grid
+- Son 100 olay tablosu — event/success/email/ip filtreleri
+- Window selector: 1sa / 24sa / 7gün / 30gün
+- Sidebar: Entegrasyonlar > Güvenlik Paneli (Shield ikon)
+
+**Indexes** (`server.py` lifespan'a eklendi):
+- `auth_audit_logs.created_at desc`
+- `auth_audit_logs.event + email + created_at`
+- `auth_audit_logs.ip + created_at`
+- `auth_audit_logs.success + created_at`
+
+### 📅 Trendyol Questions — Tarih Aralığı Düzeltmesi
+Önceki sorun: API varsayılan olarak son ~14-30 gün döndüğü için "geçmiş soruları çekmiyor" bug'ı.
+
+**Fix** (`integrations.py:3567`):
+- `GET /api/integrations/trendyol/questions/sync?days_back=90&status=`
+- Her sayfa request'ine `startDate` + `endDate` (Unix ms) ekleniyor
+- `days_back` clamp `[1, 365]`
+- `orderByField=CreatedDate, orderByDirection=DESC` ile en yeniden eskiye
+- Response'a `synced` (yeni) + `updated` (zaten var) + `date_range` ayrımı eklendi
+
+### ⭐ Trendyol Reviews — Public Storefront Scraper
+Resmi Trendyol Seller API'sinde yorum endpoint'i yok (web search teyit). Public storefront API (`public.trendyol.com/discovery-web-websfxsocialreviewrating-santral`) kullanan scraper eklendi.
+
+**Endpoint'ler** (`integrations.py:3744`):
+- `POST /api/integrations/trendyol/reviews/scrape` body: `{trendyol_url, product_id, min_rating}` (default 4 → sadece 4-5★)
+  - URL'den `-p-(\d+)` regex ile contentId çıkar
+  - Public reviews API'den 10 sayfa × 30 = max 300 yorum çek
+  - DB: `product_reviews` koleksiyonuna duplicate-safe insert (`source: trendyol_public`, `external_id: review_id`)
+  - Ürünün `rating`/`review_count`/`reviews_synced_at` alanlarını re-compute
+- `POST /scrape-bulk` body: `{items:[{trendyol_url, product_id}], min_rating}` (max 50 ürün/batch)
+
+⚠️ Production note: Trendyol public API anti-bot olabilir; UA cycling veya supplier-side review API gerekebilir.
+
+### Test Sonuçları
+**`/app/test_reports/iteration_34.json` — Backend 29/29 PASS + Frontend %100**
+- 6 security endpoint admin guard ✅
+- Locked user → unlock-user → DB'de unset doğrulandı ✅
+- Trendyol questions startDate/endDate kod-review onaylı ✅
+- Reviews scrape input validation (URL + contentId regex) ✅
+- Frontend 8 KPI card, locked user list + unlock button, filters, sidebar link ✅
+
+### Files Modified / Created
+- `NEW /app/backend/routes/security_dashboard.py`
+- `NEW /app/frontend/src/pages/admin/SecurityDashboard.jsx`
+- `/app/backend/server.py` — index'ler + router include
+- `/app/backend/routes/integrations.py` — `timedelta` import, questions sync date params, reviews scrape endpoints
+- `/app/frontend/src/App.js` — import + route `/admin/guvenlik-paneli`
+- `/app/frontend/src/pages/admin/AdminLayout.jsx` — sidebar link
+- `NEW /app/backend/tests/test_iteration34_security_dashboard.py`
+
+
+
 ## Iteration 33 (2026-05-08) — Cybersecurity Hardening (OWASP/PCI-DSS)
 
 ### 🔒 Kapsamlı Güvenlik Sertleştirmesi (Backend)
