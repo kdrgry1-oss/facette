@@ -21,6 +21,42 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 32 (2026-05-08) — Ticimax Canlı Stok Senkronu
+
+### 🎯 Özellik: Web Servis Stok Çekimi
+Admin'in tek tıkla (veya cron ile her 2 saatte bir) Ticimax SOAP'tan canlı stok değerlerini çekip yerel `products` koleksiyonunu güncellemesi.
+
+### Backend
+- NEW `/app/backend/routes/ticimax_stock_sync.py`
+  - `POST /api/admin/ticimax/sync-stock?max_products=2000&page_size=50` — senkron çağrı (~2-30s)
+  - `POST /api/admin/ticimax/sync-stock-async` — background task
+- Eşleme stratejisi (öncelik): csv_card_id == Ticimax UrunKartiID → variants[].id == Varyasyon.ID → variants[].stock_code == Varyasyon.StokKodu → variants[].barcode == Varyasyon.Barkod
+- Cron: `_ticimax_sync_stock` her 2 saatte bir (id=`ticimax_stock_sync`)
+- Loglar `integration_logs` koleksiyonuna `marketplace=ticimax, action=stock_sync` olarak yazılıyor
+
+### Frontend
+- `Otomasyon Durumu` panelinin sağ üstüne **"Ticimax Stok Senkronla"** butonu (Database ikonlu, amber renkli)
+- Tıkladıktan sonra anında popup: ticimax_total, fetched, matched_products, updated_variants, not_found_in_db, duration_sec
+
+### Test Status
+- Endpoint canlı: `ticimax_total=13, fetched=13, matched_products=0` (test wscode sınırlı)
+- ⚠️ **Test ortamı Ticimax SOAP wscode sadece 13 ürün dönüyor** (IDs 2880-2892); DB'de bu csv_card_id'ler yok (DB max 2836).
+- Kullanıcı **production wscode**'u girdiğinde tam katalog senkron olacak. Eşleme algoritması csv_card_id'den fallback olarak stock_code/barcode'a düşüyor.
+
+### Files
+- NEW `/app/backend/routes/ticimax_stock_sync.py`
+- `/app/backend/scheduler.py` (_ticimax_sync_stock job + 2hr interval)
+- `/app/backend/server.py` (router registration)
+- `/app/frontend/src/pages/admin/AutomationStatus.jsx` (ManualSyncButtons component)
+
+### Kullanım
+1. Admin > Otomasyon Durumu sayfasına git
+2. Sağ üstte "Ticimax Stok Senkronla" butonuna tıkla
+3. Sonuç popup'ında "X ürün eşleşti, Y varyasyon güncellendi" gör
+4. Otomatik olarak da 2 saatte bir cron çalışıyor — Aktif Cron İşleri listesinde "ticimax_stock_sync" görünür
+
+
+
 ## Iteration 31 (2026-05-08) — Wave 1: Massive UX Pack (12 fix/feature)
 
 ### 🎯 Kullanıcının uzun listesi (Hepsi tamamlandı)

@@ -276,6 +276,24 @@ async def _send_abandoned_cart_reminders():
 
 
 
+
+async def _ticimax_sync_stock():
+    """Ticimax SelectUrun ile canlı stok senkronu — 2 saatte bir tetiklenir.
+    routes/ticimax_stock_sync içindeki gerçek implementasyonu çağırır.
+    """
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from routes.ticimax_stock_sync import sync_ticimax_stock  # type: ignore
+        result = await sync_ticimax_stock(
+            max_products=2000, aktif=None, page_size=50,
+            current_user={"role": "admin", "id": "scheduler"},
+        )
+        logger.info(f"[scheduler][ticimax_stock] {result.get('message','done')}")
+    except Exception as e:
+        logger.exception(f"[scheduler] ticimax_stock_sync failed: {e}")
+
+
 async def _ticimax_sync_orders():
     """Periyodik olarak Ticimax'tan site siparişlerini çek (idempotent).
     Son 30 günün siparişleri, 5 sayfa × 100. Yeni site siparişlerini DB'ye yazar.
@@ -403,6 +421,16 @@ def start_scheduler():
         hours=6,
         id="ticimax_orders_sync",
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Ticimax canlı stok senkronu — 2 saatte bir
+    _scheduler.add_job(
+        _ticimax_sync_stock,
+        "interval",
+        hours=2,
+        id="ticimax_stock_sync",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
         max_instances=1,
         coalesce=True,
     )
