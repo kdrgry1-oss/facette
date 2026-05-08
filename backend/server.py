@@ -85,6 +85,8 @@ from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
 from routes.social_auth import router as social_auth_router
 from routes.security_dashboard import router as security_dashboard_router
+from routes.mobile import router as mobile_router
+from routes.admin_mobile import router as admin_mobile_router
 
 # Database
 from routes.deps import client, db
@@ -124,6 +126,10 @@ async def lifespan(app: FastAPI):
         await db.auth_audit_logs.create_index([("event", 1), ("email", 1), ("created_at", -1)])
         await db.auth_audit_logs.create_index([("ip", 1), ("created_at", -1)])
         await db.auth_audit_logs.create_index([("success", 1), ("created_at", -1)])
+        # Mobile devices (push notifications)
+        await db.user_devices.create_index([("user_id", 1), ("device_id", 1)], unique=True)
+        await db.user_devices.create_index([("push_token", 1)])
+        await db.user_devices.create_index([("is_active", 1), ("platform", 1)])
         
         logger.info("Database indexes created")
     except Exception as e:
@@ -341,7 +347,10 @@ api_router.include_router(banners_router)
 api_router.include_router(cms_router)
 # Iyzico endpoint'leri — integrations_router'ın catch-all /{marketplace} rotasından ÖNCE include edilmeli
 from routes.integrations_iyzico import router as iyzico_router
+from routes.integrations_dogan import router as dogan_router
 api_router.include_router(iyzico_router, prefix="/integrations")
+# Doğan e-Dönüşüm — Iter35 refactor: ayrı modül. Catch-all /{marketplace}'den ÖNCE
+api_router.include_router(dogan_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(integrations_temu_router, prefix="/integrations")
 api_router.include_router(admin_router)
@@ -416,6 +425,9 @@ api_router.include_router(marketing_pixels_router)
 api_router.include_router(social_auth_router)
 # Security dashboard — auth_audit_logs üzerinde admin görünürlüğü
 api_router.include_router(security_dashboard_router)
+# Mobile app endpoints — version check, device registration, runtime config
+api_router.include_router(mobile_router)
+api_router.include_router(admin_mobile_router)
 
 # Root endpoint
 @api_router.get("/")

@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 35 — Mobile App altyapısı + iyzico Kısmi İade UI + Doğan refactor regression. Backend 24/24 PASSED, Frontend tüm akışlar doğrulandı. Mobile endpoints (version-check, app/config public; devices CRUD auth required; admin mobile versions/devices/push) çalışıyor. Push send mock mode (FCM_SERVER_KEY yok) → queued sayısı dönüyor. Doğan refactor sonrası /api/integrations/dogan/* eski davranışla aynı, routing regression yok (trendyol/iyzico/hepsiburada GET'leri 200). Returns sayfası iyzico Kısmi İade modal'ı 20 RETURN claim üzerinde test edildi: amount=200, shipping=20 → net=₺180,00 canlı hesaplama doğru.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Returns iyzico-refund-modal & gp-modal", "issues": ["DialogContent 'aria-describedby' veya Description prop'u eksik (a11y warning, console.warn). Radix UI standardı; kullanıcıyı etkilemiyor ama erişilebilirlik için DialogDescription eklenmeli."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration35_mobile_dogan.py",
+    "/app/test_reports/pytest/iteration35.xml"
+  ],
+  "action_items": [
+    "Optional (a11y): Returns.jsx içindeki DialogContent'lere DialogDescription veya aria-describedby ekle (iyzico-refund-modal, gp-modal, reject-reason-modal)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:349-353 — dogan_router include sırası DOĞRU: integrations_iyzico → dogan → integrations (catch-all en sonda). Doğan endpoint'leri /{marketplace}/settings catch-all'ına düşmedi.",
+    "mobile.py:147 — devices/me endpoint'i {'_id': 0, 'push_token': 0} projection ile push_token sızdırmıyor — testte doğrulandı.",
+    "mobile.py:120 — register_device update_one upsert + $setOnInsert id+created_at; aynı user_id+device_id için is_new=False döndürüyor (unique compound index server.py:130 ile destekleniyor).",
+    "admin_mobile.py:103 — push send q={'is_active': True, 'push_token': {'$nin': [None, '']}}: boş push_token'lı cihazları hariç tutuyor — doğru.",
+    "admin_mobile.py:96-99 — FCM_SERVER_KEY yok ise mock mode: push_notifications_log koleksiyonuna 'queued_no_fcm_key' status'üyle kayıt — gözlemlenebilirlik için iyi.",
+    "integrations_dogan.py:73 — test_connection run_in_threadpool kullanıyor (zeep SOAP sync olduğundan) — async event loop bloklanmıyor. Doğru.",
+    "integrations_dogan.py:43-49 — settings POST'unda enabled=True ise mevcut kayda fallback (existing.username/password) → kullanıcı kısmi update yapabiliyor. Ayrıca '********' sentinel'i mevcut password'ü koruyor — güvenli.",
+    "Returns.jsx:451-459 — refund button claim.claim_type==='RETURN' kontrolü ile yalnızca iade tipi claim'lerde gösteriliyor. Test: 20 buton bulundu, hepsi RETURN. Doğru.",
+    "Returns.jsx:641-680 — refund-net-amount canlı hesaplama: amount-shipping; iade tutar ve kesinti gösterimi temiz. Testte 200-20=₺180,00 doğrulandı.",
+    "Concern (minor a11y): Tüm DialogContent'lere DialogDescription veya aria-describedby eklemek gerekir; Radix v1.1+ uyarı veriyor.",
+    "Concern (minor): mobile.py'de DEFAULT_APP_VERSION sabit kodlanmış — admin POST /api/admin/mobile/versions ile override edilebiliyor ama default'lar prod için store_url'leri 'idTBD' içeriyor. Gerçek App Store ID'leri eklenmeli.",
+    "Concern (minor): admin_mobile.py push send legacy FCM HTTP API ('/fcm/send') kullanıyor — Google bu API'yi 2024 Haziran'da deprecate etti. FCM HTTP v1 (OAuth2 + service account) gerekli üretim için."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration35_mobile_dogan.py (created)"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "100% (tüm kritik UI öğeleri doğrulandı)"},
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Geçici customer (TEST_iter35_cust_*) ve cihaz (TEST_dev_*, TEST_push_*) oluşturuldu. TEST_dev_* kayıtları test sonunda silindi (DELETE /api/app/devices/{id}). TEST_push_* push fixture teardown'unda silindi. admin@facette.com'a dokunulmadı.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration35_mobile_dogan.py reusable; 24 test, 15s'de geçiyor. Mobile devices unique compound index user_id+device_id (server.py:130). FCM_SERVER_KEY env yok → push mock mode (queued > 0). Doğan refactor SUCCESS — sıradaki refactor adımları (Trendyol/Ticimax) aynı pattern ile yapılabilir, ÖNEMLİ: yeni router server.py'de catch-all integrations_router'ından ÖNCE include edilmeli. Sidebar 'Mobil Uygulama' ve 'Güvenlik Paneli' linkleri AdminLayout.jsx:145-147'de tanımlı ama Entegrasyonlar/Ayarlar dropdown'larının altında — innerText taraması hidden link'leri yakalamıyor; DOM'da query selector ile bakılmalı veya dropdown önce açılmalı (iter34 ile aynı pattern).",
+  "rca of the issue": "n/a — herhangi bir failure yok."
+}

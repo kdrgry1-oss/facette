@@ -143,6 +143,8 @@ const navigation = [
       { label: "Otomasyon Durumu", path: "/admin/otomasyon", icon: Cable },
       // Iteration 33 — Audit log + lockout + brute force monitor
       { label: "Güvenlik Paneli", path: "/admin/guvenlik-paneli", icon: Shield },
+      // Iteration 35 — Mobile app management (versiyon, push, devices)
+      { label: "Mobil Uygulama", path: "/admin/mobil-uygulama", icon: BellRing },
     ],
   },
   {

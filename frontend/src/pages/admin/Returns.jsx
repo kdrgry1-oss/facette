@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -44,6 +44,15 @@ export default function Returns() {
   const [rejectTargetClaim, setRejectTargetClaim] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectReasonId, setRejectReasonId] = useState(1);
+
+  // Iyzico kısmi iade modal state
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [refundClaim, setRefundClaim] = useState(null);
+  const [refundAmount, setRefundAmount] = useState(0);
+  const [refundShipping, setRefundShipping] = useState(0);
+  const [refundReason, setRefundReason] = useState("Müşteri iadesi");
+  const [refundLoading, setRefundLoading] = useState(false);
+
   const limit = 20;
 
   const fetchClaims = useCallback(async () => {
@@ -138,6 +147,57 @@ export default function Returns() {
       fetchClaims();
     } catch (err) {
       toast.error(err.response?.data?.detail || "İtiraz hatası");
+    }
+  };
+
+  const openRefundModal = (claim) => {
+    const totalGross = (claim.items || []).reduce((s, i) => s + (i.gross_price || i.price || 0), 0);
+    const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
+    const totalNet = Math.max(0, totalGross - totalDiscount);
+    setRefundClaim(claim);
+    setRefundAmount(Number(totalNet.toFixed(2)));
+    setRefundShipping(0);
+    setRefundReason(claim.claim_reason || "Müşteri iadesi");
+    setRefundModalOpen(true);
+  };
+
+  const submitRefund = async () => {
+    if (!refundClaim) return;
+    const orderId = refundClaim.order_id || refundClaim.local_order_id;
+    if (!orderId) {
+      toast.error("Sipariş bağlantısı (order_id) bulunamadı — yerel siparişte iyzico ödemesi yapılmamış olabilir.");
+      return;
+    }
+    if (refundAmount <= 0) { toast.error("İade tutarı 0'dan büyük olmalı"); return; }
+    if (refundShipping < 0) { toast.error("Kargo kesintisi negatif olamaz"); return; }
+    if (refundShipping >= refundAmount) {
+      toast.error("Kargo kesintisi iade tutarından büyük veya eşit olamaz");
+      return;
+    }
+    setRefundLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.post(`${API}/integrations/iyzico/refund`,
+        {
+          order_id: orderId,
+          amount: Number(refundAmount),
+          shipping_deduction: Number(refundShipping),
+          reason: refundReason || "Kısmi iade",
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.data.success) {
+        toast.success(`İade başarılı: ${formatCurrency(res.data.net_refund)} müşteriye iade edildi`);
+        setRefundModalOpen(false);
+        setRefundClaim(null);
+        fetchClaims();
+      } else {
+        toast.error(res.data.message || "Iyzico iadesi başarısız");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.message || "İade hatası");
+    } finally {
+      setRefundLoading(false);
     }
   };
 
@@ -388,6 +448,18 @@ export default function Returns() {
                           }`} title="Gider Pusulası">
                           <FileText size={14} />
                         </button>
+                        {claim.claim_type === "RETURN" && (
+                          <button onClick={() => openRefundModal(claim)}
+                            data-testid={`refund-btn-${claim.claim_id}`}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              (claim.refunds || []).length > 0
+                                ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            }`}
+                            title={(claim.refunds || []).length > 0 ? "Kısmi iade yapıldı" : "Iyzico Kısmi İade"}>
+                            <CreditCard size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -508,6 +580,116 @@ export default function Returns() {
               </button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Iyzico Kısmi İade Modal */}
+      <Dialog open={refundModalOpen} onOpenChange={(o) => { setRefundModalOpen(o); if (!o) setRefundClaim(null); }}>
+        <DialogContent data-testid="iyzico-refund-modal" className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard size={18} className="text-blue-600" />
+              Iyzico Kısmi İade
+            </DialogTitle>
+          </DialogHeader>
+          {refundClaim && (
+            <div className="space-y-4 py-2">
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs">
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-600">Sipariş No:</span>
+                  <span className="font-mono font-bold">{refundClaim.order_number || refundClaim.order_id}</span>
+                </div>
+                <div className="flex justify-between mb-1">
+                  <span className="text-gray-600">Müşteri:</span>
+                  <span>{refundClaim.customer_name || "-"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Sipariş Tutarı:</span>
+                  <span className="font-bold">{formatCurrency(refundClaim.order_total || 0)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  İade Edilecek Ürün Tutarı (KDV Dahil) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(parseFloat(e.target.value) || 0)}
+                  data-testid="refund-amount-input"
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm font-mono"
+                />
+                <p className="text-xs text-gray-500 mt-1">İade edilecek ürünlerin toplam tutarı</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                  <Truck size={14} /> Kargo Bedeli Kesintisi
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={refundShipping}
+                  onChange={(e) => setRefundShipping(parseFloat(e.target.value) || 0)}
+                  data-testid="refund-shipping-input"
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm font-mono"
+                />
+                <p className="text-xs text-gray-500 mt-1">İade tutarından düşülerek müşteriden alınacak kargo bedeli</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">İade Sebebi</label>
+                <input
+                  type="text"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  data-testid="refund-reason-input"
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  placeholder="Örn: Müşteri talebiyle iade"
+                />
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded p-3">
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-600">İade Tutarı:</span>
+                  <span className="font-mono">{formatCurrency(refundAmount)}</span>
+                </div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-gray-600">Kargo Kesintisi:</span>
+                  <span className="font-mono text-red-600">-{formatCurrency(refundShipping)}</span>
+                </div>
+                <div className="flex justify-between text-sm font-bold border-t border-gray-300 pt-1 mt-1">
+                  <span>Müşteriye İade Edilecek:</span>
+                  <span data-testid="refund-net-amount" className="font-mono text-blue-700">
+                    {formatCurrency(Math.max(0, refundAmount - refundShipping))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <button
+                  onClick={() => setRefundModalOpen(false)}
+                  disabled={refundLoading}
+                  className="px-4 py-2 border rounded hover:bg-gray-50 text-sm disabled:opacity-50"
+                >
+                  İptal
+                </button>
+                <button
+                  onClick={submitRefund}
+                  disabled={refundLoading || refundAmount <= 0 || refundShipping >= refundAmount}
+                  data-testid="submit-refund-btn"
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm font-bold flex items-center gap-2"
+                >
+                  {refundLoading ? <RefreshCw size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                  {refundLoading ? "İade Yapılıyor..." : "Iyzico'ya İade Et"}
+                </button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

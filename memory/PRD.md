@@ -21,6 +21,66 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 35 (2026-05-08) — iyzico Kısmi İade UI + Mobil Uygulama Hazırlık
+
+### 💳 A) iyzico Kısmi İade UI (`Returns.jsx`)
+Backlog P1 tamamlandı. Mevcut `/api/integrations/iyzico/refund` endpoint'inin üstüne admin UI:
+
+- Returns sayfası tablosuna **CreditCard ikonlu mavi buton** (sadece RETURN tipi için)
+- Modal: 
+  - Sipariş özet kartı (no, müşteri, tutar)
+  - **İade Tutarı** (KDV dahil, default = net iade tutarı)
+  - **Kargo Bedeli Kesintisi** (Truck ikonlu, müşteriden tutulacak tutar)
+  - **İade Sebebi** (text)
+  - Canlı hesaplama: `İade − Kargo = Müşteriye İade Edilecek` (tabular-nums, mavi vurgu)
+  - Validasyon: amount>0, shipping<amount
+- Submit → backend Iyzico /payment/refund → DB `orders.refunds[]` push
+- Loading spinner + toast (success: tutar göster)
+
+### 📱 C) Mobil Uygulama Backend Altyapısı (Capacitor/RN için hazır)
+Kullanıcının "Android & iOS native uygulamaya taşıyacağım" talebi için sunucu-tarafı:
+
+**Yeni endpoint'ler — `routes/mobile.py` (public + auth)**
+- `GET /api/app/version-check?platform=ios&current_version=0.5.0` — force update detection
+- `POST /api/app/devices/register` — push token + device info (FCM/APNs)
+- `DELETE /api/app/devices/{device_id}` — uninstall/logout
+- `GET /api/app/devices/me` — kullanıcının cihazları
+- `GET /api/app/config` — feature flags + branding + support kanalları (uzaktan kontrol)
+
+**Admin endpoint'ler — `routes/admin_mobile.py`**
+- `GET/POST /api/admin/mobile/versions` — iOS/Android version yönetimi
+- `GET/POST /api/admin/mobile/config` — feature flags + branding güncelle
+- `GET /api/admin/mobile/devices` — kayıtlı cihaz listesi + platform breakdown
+- `POST /api/admin/mobile/push/send` — broadcast/segment/user/device push (FCM HTTP). FCM_SERVER_KEY env yoksa mock mode'da kuyruklar.
+
+**Frontend admin sayfası — `MobileApp.jsx` (`/admin/mobil-uygulama`)**
+- 4 Tab: Versiyonlar / Yapılandırma / Cihazlar / Push Bildirim
+- iOS + Android version kart (min, latest, store_url, release notes, force_update toggle)
+- Feature flags: live_support, social_logins, biometric_login, instagram_shop vb.
+- Cihaz tablosu + platform breakdown KPI'ları
+- Push send form: target (all/platform/user/device) + title + body + image_url + JSON data (deep link)
+
+**Yan değişiklikler:**
+- `.env` `CORS_ORIGINS`'e `capacitor://localhost`, `ionic://localhost`, `http://localhost` eklendi
+- Mongo index'ler: `user_devices` `{user_id, device_id} unique`, `push_token`, `is_active+platform`
+- `notification_logs` koleksiyonu push gönderim audit log
+
+### Mobil Uygulama Yol Haritası (Önerilen)
+1. **Faz 1 — Capacitor (1-2 hafta)** — Mevcut React UI'ı hızlıca App Store + Play Store'a çıkar
+2. **Faz 2 — React Native + Expo (1.5-3 ay)** — Premium native UX (background sync, biometric vb.)
+
+### Files Modified / Created
+- `NEW /app/backend/routes/mobile.py`
+- `NEW /app/backend/routes/admin_mobile.py`
+- `NEW /app/frontend/src/pages/admin/MobileApp.jsx`
+- `/app/backend/server.py` — router include + user_devices indexes
+- `/app/backend/.env` — CORS Capacitor origin'leri
+- `/app/frontend/src/App.js` — route + import
+- `/app/frontend/src/pages/admin/AdminLayout.jsx` — sidebar link
+- `/app/frontend/src/pages/admin/Returns.jsx` — Iyzico refund modal + button
+
+
+
 ## Iteration 34 (2026-05-08) — Security Dashboard + Trendyol Q&A Date Filter + Trendyol Reviews Scraper
 
 ### 🛡️ Admin Security Dashboard (`/admin/guvenlik-paneli`)
