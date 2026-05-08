@@ -117,41 +117,75 @@ async def sync_ticimax_stock(
         if not d:
             continue
         tc_card_id = d.get("ID") or d.get("UrunKartiID")
-        if not tc_card_id:
-            continue
         try:
-            tc_card_id = int(tc_card_id)
+            tc_card_id = int(tc_card_id) if tc_card_id else None
         except Exception:
-            continue
+            tc_card_id = None
 
         ticimax_total_stock = float(d.get("ToplamStokAdedi") or 0)
         variants_raw = _unwrap_variants(d.get("Varyasyonlar"))
 
-        # DB ürünü: csv_card_id == tc_card_id
-        product_doc = await db.products.find_one(
-            {"csv_card_id": tc_card_id}, {"_id": 0, "id": 1, "variants": 1}
-        )
+        # ÖNCELİK 1: csv_card_id eşleşmesi
+        product_doc = None
+        if tc_card_id:
+            product_doc = await db.products.find_one(
+                {"csv_card_id": tc_card_id}, {"_id": 0, "id": 1, "variants": 1}
+            )
+
+        # ÖNCELİK 2: ticimax variant barkod/stock_code'larından bizdeki ürünü bul
+        if not product_doc and variants_raw:
+            tv_codes = [str(v.get("StokKodu") or "").strip() for v in variants_raw if v.get("StokKodu")]
+            tv_bars = [str(v.get("Barkod") or "").strip() for v in variants_raw if v.get("Barkod")]
+            or_clauses = []
+            if tv_codes:
+                or_clauses.append({"variants.stock_code": {"$in": tv_codes}})
+                or_clauses.append({"stock_code": {"$in": tv_codes}})
+            if tv_bars:
+                or_clauses.append({"variants.barcode": {"$in": tv_bars}})
+                or_clauses.append({"barcode": {"$in": tv_bars}})
+            if or_clauses:
+                product_doc = await db.products.find_one(
+                    {"$or": or_clauses}, {"_id": 0, "id": 1, "variants": 1}
+                )
+
+        # ÖNCELİK 3: Top-level StokKodu (Varyasyon yoksa) - tek varyantlı ürünler
         if not product_doc:
-            not_found_ids.append(tc_card_id)
+            top_code = str(d.get("StokKodu") or "").strip()
+            top_bar  = str(d.get("Barkod") or d.get("BarkodNo") or "").strip()
+            tcl = []
+            if top_code:
+                tcl.append({"variants.stock_code": top_code})
+                tcl.append({"stock_code": top_code})
+            if top_bar:
+                tcl.append({"variants.barcode": top_bar})
+                tcl.append({"barcode": top_bar})
+            if tcl:
+                product_doc = await db.products.find_one(
+                    {"$or": tcl}, {"_id": 0, "id": 1, "variants": 1}
+                )
+
+        if not product_doc:
+            if tc_card_id:
+                not_found_ids.append(tc_card_id)
             continue
         matched_products += 1
 
-        # Variant bazlı eşleme map: by ID, stock_code, barcode
+        # Variant bazlı eşleme map: by ID, stock_code, barcode (case-insensitive)
         local_variants = product_doc.get("variants") or []
-        var_map = {}
+        var_map: Dict[Any, Dict] = {}
         for lv in local_variants:
             for k in ("id", "stock_code", "barcode"):
                 v = lv.get(k)
-                if v: var_map[(k, str(v))] = lv
+                if v:
+                    var_map[(k, str(v).strip())] = lv
 
-        # Ticimax variant'larını gez, lokali güncelle
-        new_variants: List[Dict] = list(local_variants)  # mutable copy
+        new_variants: List[Dict] = list(local_variants)
         new_variants_lookup = {lv.get("id"): idx for idx, lv in enumerate(new_variants) if lv.get("id")}
         local_total_stock = 0
         for tv in variants_raw:
             tv_id   = tv.get("ID") or tv.get("VaryasyonID")
-            tv_code = tv.get("StokKodu") or ""
-            tv_bar  = tv.get("Barkod") or ""
+            tv_code = str(tv.get("StokKodu") or "").strip()
+            tv_bar  = str(tv.get("Barkod") or "").strip()
             tv_stk  = float(tv.get("StokAdedi") or 0)
 
             local_v = None
@@ -171,10 +205,12 @@ async def sync_ticimax_stock(
                         updated_variants_total += 1
                     local_total_stock += int(tv_stk)
             else:
-                # Lokal'de yok ama Ticimax'te var — bilgi amaçlı sayım
                 local_total_stock += int(tv_stk)
 
-        # Ürün top-level stock güncelle (ya Ticimax'in toplamı ya da local sum)
+        # Variant yoksa top-level stok kullan
+        if not variants_raw and ticimax_total_stock > 0:
+            local_total_stock = int(ticimax_total_stock)
+
         new_stock = int(ticimax_total_stock if ticimax_total_stock > 0 else local_total_stock)
         try:
             await db.products.update_one(

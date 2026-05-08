@@ -257,7 +257,7 @@ Admin'in tek tıkla (veya cron ile her 2 saatte bir) Ticimax SOAP'tan canlı sto
 
 ### MNG Webhook URL (admin'e tanımlatılacak)
 ```
-https://kombin-shop.preview.emergentagent.com/api/orders/cargo/mng-webhook
+https://ecommerce-erp-2.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ```
 (Production'da REACT_APP_BACKEND_URL'a göre değişir; UI'da auto-render ediliyor)
 
@@ -341,7 +341,7 @@ https://kombin-shop.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ### Pending User Manual Tasks
 - Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
 - e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
-- MNG'ye webhook URL bildirimi: `https://kombin-shop.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+- MNG'ye webhook URL bildirimi: `https://ecommerce-erp-2.preview.emergentagent.com/api/orders/cargo/mng-webhook`
 
 
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul

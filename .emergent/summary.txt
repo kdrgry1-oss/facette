@@ -1,161 +1,163 @@
 <analysis>**original_problem_statement**: 
-Kullanıcı Ticimax'ten göç eden facette e-ticaret markası için kapsamlı bir e-ticaret admin paneli ve ERP sistemi istemektedir. (Trendyol/Hepsiburada/Temu entegrasyonu, Doğan e-Dönüşüm e-Fatura, MNG Kargo, İmalat Modülü).
+Kullanıcı facette e-ticaret markası için kapsamlı bir e-ticaret admin paneli ve ERP sistemi istemektedir. (Ticimax senkronizasyonları, Doğan e-Dönüşüm, DHL E-Commerce [eski adıyla MNG], Trendyol entegrasyonları). 
 PRODUCT REQUIREMENTS:
-- Ticimax'ten üye ve websitesi siparişlerinin çekilmesi (Cron ile otomatik senkronizasyon).
-- MNG Kargo API entegrasyonu (NZ barkod formatı).
-- Doğan e-Dönüşüm üzerinden canlı e-Arşiv faturasının otomatik oluşturulması (UBL-TR formatında).
-- Trendyol/ZaraHome tarzı asenkron, siyah/beyaz minimal tasarımlı Checkout ve Sipariş Başarı sayfası.
-- Sepet ve Checkout'ta Kombin Ürün (cross-sell) öneri sistemi.
-- Sitenin baştan aşağı elit, kaliteli, siyah-beyaz minimal Facette kurumsal kimliğine uygun tasarlanması (Mobile first).
+- Ticimax sipariş, ürün ve canlı stok senkronizasyonu.
+- Gelişmiş Suud Collection stili UI/UX (Mega menü, Countdown Bar, Minimal siyah/beyaz Checkout, Dinamik Footer).
+- RFM Müşteri Segmentasyonu ve Resend üzerinden otomatik E-posta kampanyaları.
+- **Kritik Yeni Gereksinim:** Kapsamlı Siber Güvenlik (Cybersecurity) Entegrasyonu. Kullanıcı OWASP Top 10, PCI-DSS veri minimizasyonu, BCrypt/Argon2 kullanımı, CSRF token, XSS/CSP önlemleri, Session Hijacking koruması ve NoSQL Injection önlemlerini içeren çok detaylı bir güvenlik sertleştirmesi (hardening) talep etmiştir.
 
 **User's preferred language**: Turkish (Kullanıcı Türkçe konuşuyor. INSTRUCT next agent to respond in Turkish only / Sonraki ajan SADECE Türkçe yanıt vermelidir.)
 
 **what currently exists?** 
-Gelişmiş bir React + FastAPI + MongoDB e-ticaret altyapısı. Ticimax'ten 10.000+ üye ve 300+ site siparişi agresif import ile çekildi, arka planda 6 saatte bir çalışan senkronizasyon cron'u () kuruldu. MNG Kargo NZ barkod üretimi düzeltildi. ZaraHome stili  eklendi ve Checkout sayfası kurumsal fatura alanlarıyla güncellenip siyah-beyaz temaya geçirildi. Temu entegrasyonu backend router'a bağlandı. Kombin Ürünler özelliği backend'de yazıldı ve sepet sayfasına bağlandı. Doğan e-Dönüşüm'ün **canlı (live)** ortamına () bağlantı başarıyla kuruldu, ZIP payload formatı çözüldü ancak gönderilen UBL XML içeriği Doğan tarafından reddediliyor.
+Gelişmiş bir React + FastAPI + MongoDB altyapısı. Ticimax siparişleri, MNG (yeni adıyla DHL E-Commerce) Webhook entegrasyonu, Page Blocks üzerinden yönetilebilen Countdown Bar ve Desktop/Mobile görünürlük ayarları tamamlandı. Mega menü iyileştirildi, ürün sayfasındaki renk varyant kutucukları, Account sayfasında şifre sıfırlama ve kurumsal fatura alanları eklendi. Otomasyon Durumu adında cron job'ları izleyen yeni bir admin paneli yapıldı. Ticimax manuel canlı stok senkronizasyonu () oluşturuldu.
 
-**Last working item**:
-    - Last item agent was working: 1) Kullanıcının yüklediği örnek geçerli UBL XML dosyasına () bakarak  içerisindeki UBL üretim şemasını Doğan'ın kabul edeceği formata getirmek. 2) Kullanıcının son mesajında talep ettiği sitenin genel UI/UX mobil görünümünü elit, minimal siyah/beyaz, sticky header yapısına geçirmek ve sepet sayfasındaki Kombin Ürün görünümünü sadece görsellerden oluşan Stilini tamamla tasarımına dönüştürmek.
+**Last working item**: 
+    - Last item agent was working: 1) Ticimax stok senkronizasyonunda eşleşmeyi sadece  üzerinden değil,  ve  öncelikli yapacak şekilde güncellemek. 2) Kullanıcının ilettiği devasa **Siber Güvenlik (Cybersecurity) Sertleştirme** listesini (NoSQL Injection, XSS, CSRF, BCrypt şifreleme, Strict JWT doğrulama, HttpOnly Cookie vb.) backend'e entegre etmeye başlamak.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use?: both (Backend for Doğan XML generation testing, Frontend testing agent for UI/UX mobile overhaul). *Note: Must use  for the UI/UX overhaul as requested by the user.*
+    - Which testing method agent to use?: backend testing agent
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Doğan e-Arşiv UBL XML Format Reddi (P0)
-     - Attempted fixes: Ajan Doğan'ın canlı ortamına bağlandı ve ElementType=ZIP yöntemini bularak iletişim sorununu çözdü. Ancak gönderilen UBL XML içeriği eksik/hatalı olduğu için Doğan  veya  hatası veriyor. 
-     - Next debug checklist:  (veya kullanıcının son mesajda ilettiği ) dosyasını analiz edin.  içindeki  fonksiyonunu bu örnekteki namespaces, eksik alanlar ve XML yapısına birebir uyacak şekilde yeniden düzenleyin.
-     - Why fix this issue and what will be achieved with the fix?: Fatura kesilememesi uygulamanın en temel e-ticaret gereksinimini bloke ediyor.
+  - Issue 1: Kapsamlı Uygulama Güvenliği (Cybersecurity Hardening) (P0)
+     - Attempted fixes: Ajan henüz değişikliklere yeni başlıyordu.
+     - Next debug checklist:  içine CSP (Content Security Policy) header'ları, Rate Limiting (Velocity Checks) middleware'leri eklenmeli.  içinde şifrelerin MD5/SHA1 yerine kesinlikle  ile hashlendiğinden emin olunmalı, JWT Token doğrulamalarında alg=none açığına karşı strict validation uygulanmalı. NoSQL injection'a karşı Pydantic modelleri ve tip doğrulamaları sıkılaştırılmalı.
+     - Why fix this issue and what will be achieved with the fix?: Kullanıcının ilettiği güvenlik yönergelerine (PCI-DSS ve OWASP standartları) tam uyum sağlamak.
      - Status: IN PROGRESS
-     - Is recurring issue?: Y
-     - Should Test frontend/backend/both after fix?: Backend
-     - Blocked on other issue: None
-  - Issue 2: Sepet Sayfasında Git Butonu Çalışmıyor (P1)
-     - Attempted fixes: Henüz başlanmadı.
-     - Next debug checklist:  içindeki yönlendirme (Link/onClick) metodunu inceleyin.
-     - Why fix this issue and what will be achieved with the fix?: Kullanıcılar ödeme adımına geçemiyor.
-     - Status: NOT STARTED
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Frontend
+     - Should Test frontend/backend/both after fix?: Both
      - Blocked on other issue: None
 
 **In progress Task List**:
-  - Task 1: Sitenin Baştan Sona Mobil UI/UX Revizyonu ve Kombin Ürün Tasarımı (P0)
-     - Where to resume: , ,  ve ilgili layout dosyaları. 
-     - What will be achieved with this?: Kullanıcı elit, siyah-beyaz minimal, sticky header içeren bir marka deneyimi istiyor. Sepetteki kombin ürünler metin olmadan sadece resim ve Stilini tamamla yazısıyla çıkmalı. **(DİKKAT: Kullanıcı design/tasarım talebinde bulunduğu için  subagent'ı çağrılmalıdır)**.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: Frontend
+  - Task 1: Ticimax Stok Senkronizasyonunda Barkod/Stok Kodu Eşleşmesi (P1)
+     - Where to resume: .
+     - What will be achieved with this?: Stok eşleşmesinde  yerine daha güvenilir olan  ve  kullanılarak hatalı stok güncellemelerinin önüne geçilecek.
+     - Status: IN PROGRESS
+     - Should Test frontend/backend/both after fix?: Backend
      - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Otomatik Fatura Kesimi: Doğan UBL sorunu çözüldükten sonra, sipariş başarıyla tamamlandığı an (payment callback) faturanın otomatik kesilmesi ve PDF linkinin e-postaya eklenmesi.
-    - P2: Admin Products sayfasındaki tüm aktif ürünlere Otomatik Kombin Ata cross-sell butonunun UI entegrasyonu (Backend algoritması yazıldı).
+    - P2: Trendyol gerçek 4-5 yıldız yorumlarını çekme ve ürünlere atama.
+    - P2: Trendyol müşteri sorularının çekilmemesi sorunu (geçmiş soruların incelenmesi ve debug edilmesi).
     
     Future Tasks:
-    - P2: Müşteri Segmentasyonu (VIP, Sleeping, Repeat) ve otomatik e-posta kampanyaları.
-    - P3:  dosyasının refactor edilerek Trendyol/HB/Temu olarak bölünmesi (Dosya 4150 satır, şu anki ajan riskli bulup erteledi).
+    - P3:  dosyasının çok şişmesi (4380 satır) sebebiyle vendor bazlı (Trendyol, Ticimax vb.) bölünerek refactor edilmesi.
 
 **Completed work in this session**
-- Checkout sayfası quick-signup modal'ı kaldırılarak Guest user'ların ZaraHome stili  sayfasına sorunsuz yönlendirilmesi (DONE)
-- Ticimax üzerinden 10.431 müşteri ve 300+ websitesi siparişinin bulk olarak DB'ye aktarılması (DONE)
--  ile Ticimax siparişlerinin 6 saatte bir asenkron senkronize edilmesi (DONE)
-- Temu entegrasyonu için backend rotalarının 'a bağlanması ve UI'da gösterilmesi (DONE)
-- Sepet ve Admin Ürünler sayfası için Kombin Ürün (Cross-sell) altyapısının geliştirilmesi (DONE)
-- Doğan e-Dönüşüm CANLI ortam ayarlarının kaydedilmesi ve WSDL bağlantı/TCP timeout sorunlarının aşılması (DONE)
+- Ticimax Sipariş Verilerinin silinmiş gibi görünmesi sorunu çözüldü (Pagination bug ve JSON ayrıştırma hatası giderildi, Account API rotası bağlandı) (DONE)
+- Admin Sayfa Tasarımı:  düzeltildi, blok sıralama endpoint'i yazıldı, Mobil/Masaüstü görünürlük ayarları eklendi. (DONE)
+- MNG Kargo Webhook eklendi, sonrasında sistemdeki tüm MNG Kargo ibareleri DHL E-Commerce olarak değiştirildi. (DONE)
+- RFM Müşteri Segmentasyon UI'ı ve Toplu E-Posta Kampanyası Gönderme Modülü (Resend) eklendi. (DONE)
+- Otomasyon Durumu (Automation Status) adlı admin sayfası yapılarak arka planda çalışan Cron'ların logları ve takibi görselleştirildi. (DONE)
+- Üst bar için Yönetilebilir Countdown (Geri Sayım) Bloğu eklendi. (DONE)
+- Mega Menü: Alt menülerin fareyi çekince hemen kaybolması gecikme (delay) ile çözüldü, ürün sayısı sınırlandı. (DONE)
+- Account: Şifre sıfırlama sayfası, Kurumsal adres giriş alanları (Vergi Dairesi, VKN vb.) eklendi. (DONE)
+- Footer: CMS üzerinden yönetilebilir  yapısı kuruldu. (DONE)
+- Checkout & Order Success sayfaları siyah/beyaz yüksek kontrastlı minimal tasarıma (Suud stili) geçirildi, geri butonları eklendi. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1:  dosyasının çok büyük olması (4150 satır).
-   - Debug checklist: Fonksiyonları vendor bazlı yeni dosyalara (ör. ) taşımak.
-   - Why to solve this issue and what will be achieved with this?: Kodun bakımının kolaylaşması ve spagetti kodun önlenmesi.
-   - Should Test frontend/backend/both after fix: Backend
-   - Is recurring issue?: Y
+   - Issue 1:  dosyasının devasa boyutu (4380 satır).
+     - Debug checklist: Modülleri ,  vb. şeklinde bölmek.
+     - Why to solve this issue and what will be achieved with this?: Backend kodunun bakımını kolaylaştırmak.
+     - Should Test frontend/backend/both after fix: Backend
+     - Is recurring issue?: Y
+   - Issue 2:  eksik. Toplu kampanya e-postaları şu an hata veriyor.
+   - Issue 3: Doğan e-Dönüşüm Credentials'larının backend'de boş/yanlış görünmesi.
+   - Issue 4: Trendyol sipariş çekme servisi loglarda errors:null - Invalid Token yetki hatası döndürüyor (Kullanıcının supplier_id ve key'leri canlıya alması gerek).
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Doğan e-Dönüşüm SOAP entegrasyonunda XML/UBL formatı zorlukları. Zeep kütüphanesinin raw XML yerine Base64 veya ZIP beklemesi (Çözüldü, ElementType=ZIP yapıldı ama içerik hatası devam ediyor).
-  - Recurrence count: 2
-  - Status: IN PROGRESS
+  - Issue recurrence in previous fork: Yok
+  - Recurrence count: 0
+  - Status: RESOLVED
 
 **Code Architecture**
-- API Routes:  
-- SOAP Clients:  (Zeep kullanıyor, e-Arşiv/Fatura), 
-- Background Jobs:  (APScheduler tabanlı).
-- Frontend Pages:  ve 
+- API Routes:  (, ,  yeni eklendi)
+- Background Jobs: 
+- Frontend Admin Pages:  (,  eklendi)
+- Frontend Components:  ( eklendi)
 
 **Key Technical Concepts**
-- Backend: FastAPI, Motor (MongoDB), Zeep (SOAP), APScheduler.
-- Frontend: React, TailwindCSS, Shadcn UI. Context API.
-- Doğan e-Dönüşüm CANLI Uç Noktası: 
+- Backend: FastAPI, Motor (MongoDB Async), Zeep (SOAP API için), APScheduler (Cron/Background tasks).
+- Security: JWT doğrulama, bcrypt şifreleme, Pydantic ile şema/tip koruması (NoSQL injection önlemi).
 
 **key DB schema**
-  - : İçerisinde Doğan entegrasyonu için  ve  tutuluyor.
-  - :  array listesi eklendi.
-  - :  konfigürasyonları (is_test: false, username, password).
+  - :  (countdown_bar eklendi),  (bool),  (bool).
+  - : yeni koleksiyon.
+  - : , , ,  alanları eklendi.
 
 **changes in tech stack**
-  - Arka plan işleri (Ticimax sync vs) için  eklendi ve  lifespan event'ine bağlandı.
+  - Yeni Cron Job eklendi: Her 4 saatte bir çalışan  ve  yapıları.
 
 **All files of reference** 
--  (UBL şeması FCT2026000011227.xml'e göre baştan düzenlenecek)
--  (Kullanıcının yüklediği çalışan örnek UBL dosyası)
--  (Mobil UX ve Git butonu)
--  &  (Mobile UI overhauls)
+- : Manuel ve Cron tabanlı stok güncelleme modülü (Şu an editleniyordu).
+- : Güvenlik middleware'leri (Rate limit, CSP, CORS) buraya eklenmeli.
+- : Bcrypt ve JWT güvenlik kontrollerinin implementasyon noktası.
+- : Ticimax, Trendyol, Abandoned Cart cron jobları.
+- : Cron loglarının izlendiği ekran.
+- : Sistem mimarisi ve görev geçmişinin loglandığı ana döküman.
 
 **Areas that need refactoring**: 
--  dosyası aşırı şişmiş durumda.
+-  spagetti koda dönüştü, acilen bölünmesi önerilir.
 
 **key api endpoints**
--  (Doğan fatura tetikleyici)
--  (Kombin ürün mantığı)
+- 
+- 
+- 
 
 **Critical Info for New Agent** 
-- Kullanıcı **tasarım ve UI/UX** konusunda köklü bir talepte bulunmuştur (mobil görünüm elit, siyah beyaz, sticky header). Sistem kuralları gereği frontend UI/UX overhaul işlemleri için derhal **** alt ajanını kullanmalısınız.
-- Doğan E-Dönüşüm'de sunucu bağlantısı veya login sorunu YOKTUR. Sorun gönderilen UBL XML'in GİB şemasına uymamasıdır. Geçmiş ajan 'i kaydetti, onu okuyup  içindeki  metodunu düzeltmeniz P0 önceliğindedir.
-- Oturumunuzda mutlaka Türkçe yanıt verin.
+- Kullanıcı çok spesifik ve uzman seviyesinde bir **Siber Güvenlik Sertleştirmesi (Cybersecurity Hardening)** metni iletti. MD5/SHA1 kullanılmaması (sadece Bcrypt), Session Fixation/Hijacking engelleri, JWT  açığının kapatılması, CSP headerları, XSS önlemleri, PCI-DSS veri minimizasyonu, parametrik MongoDB sorguları (NoSQLi önlemi) gibi talepleri var. Backend tarafında bu standartları karşılayacak şekilde ,  ve DB sorgularını gözden geçirerek güvenlik duvarını örmelisiniz.
+- Önce  içindeki Barkod/Stok kodu map'leme işlemini bitirin.
+- Kullanıcıyla iletişimde Türkçe dilini kullanın.
 
 **documents and test reports created in this job** 
   - 
   - 
-  - 
-  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. *User*: Doğan portalda faturayı görmüyorum, e-arşiv FCT, e-fatura EFC öneki ile gitmeli.
- 2. *Agent*: Fatura önekleri düzeltildi. Status query yapıldığında Doğan FATURA ID BULUNAMADI veya 10013 dönüyor.
- 3. *User*: 10013 hatası alıyorum Yüklediğiniz dosyada eFatura bulunamamıştır.
- 4. *Agent*: UBL formatında eksikler var, null değerleri string'e dönüştürdüm, hala kabul etmiyor. Örnek çalışan bir UBL XML lazım.
- 5. *User*: (FCT2026000011227.xml dosyasını yükler) Kombin ürünler sepette sadece resim ve Stilini tamamla olarak çıksın. Sepette git butonu çalışmıyor. Sitenin mobil UX/UI tasarımını tamamen elit, siyah/beyaz minimal, sticky header olarak baştan tasarla.
- *(Pending Human Action: Ajan bu son isteği yerine getirmeden taskı devretti. Yeni ajan UBL düzenlemesini ve UI/UX Design Subagent çağrısını yapmalıdır.)*
+ 1. *User*: Bozuk siparişleri düzelt ve devam et.
+ 2. *Agent*: (Ticimax pagination bug ve parse sorununu çözerek siparişleri DB'ye çeker. Account ve Admin sayfalarını bağlar).
+ 3. *User*: b ile ilerle (P1: Sayfa tasarımı ve MNG webhook testleri).
+ 4. *Agent*: (Page blocks sorunlarını ve MNG webhook  rotasını yapar. Test agent ile dener).
+ 5. *User*: Sayfa tasarımında blokları mobilde göster/gizle seçenekleri sun. Trendyol siparişleri 2 dk'da 1 çeksin.
+ 6. *Agent*: (Visibility özellikleri ve RFM segmentlerine dayalı Resend kampanya modülünü entegre eder).
+ 7. *User*: (Ekran görüntüleri iletir) MNG adını DHL E-Commerce yap. Trendyol canlı bilgilerini ekledim. Cron otomasyon durumunu görebileceğim bir panel yap. Üst tarafa ayarlanabilir Countdown ekle. Mega menüde boşluklar çok fazla kayboluyor, Account sayfasında Suud yazıyor düzelt, Adrese Teslimi kaldır vs. (Devasa bir UI fix listesi verir).
+ 8. *Agent*: (Wave 1 adı altında tüm UI/UX, Checkout B&W tasarımlar, Footer CMS ve Otomasyon paneli işlerini tek batch'te tamamlar).
+ 9. *User*: Ticimax web servis kodu ile ürünlerin güncel stoklarını çek ve panelimizde güncelle.
+ 10. *Agent*: ( yazar ve entegre eder).
+ 11. *User*: (Bekleyen insan eylemi) Stok eşleşmesini barcode'a göre yap. **Ve ek olarak Uygulama Güvenliği (XSS, CSRF, Injection, JWT, BCrypt, PCI-DSS vb.) için sistemin güvenliğini sağla.** (Devasa bir güvenlik manifestosu gönderir).
+ 12. *Agent*: İşleme başlar ancak kesilir. *(Sıradaki işiniz bu güvenlik kurallarını uygulamaktır)*
 
 **Project Health Check:**
-- Broken: Doğan Canlı UBL Gönderimi, Sepet Git butonu.
+- Broken: Güvenlik sertleştirmesi ve  düzenlemesi yarıda kaldı.
 - Mocked: Yok.
 
 **3rd Party Integrations** 
-- Doğan e-Dönüşüm — Requires User API Key (Credentials exist in DB as LIVE).
-- Ticimax — Requires User API Key
-- MNG Kargo — Requires User API Key
-- OpenAI / LLMs — uses Emergent LLM Key
+- Ticimax (SOAP WSDL) — Requires User API Key.
+- DHL E-Commerce (Kargo Webhook) — Requires User API Key.
+- Doğan e-Dönüşüm (Fatura) — Requires User API Key.
+- Resend (Email Campaigns) — Requires User API Key (Şu an missing).
+- Trendyol — Requires User API Key.
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Iteration 19, 20, 21 run successfully).
+  - Testing agent used after significant changes: YES (Iteration 24 for webhook/page blocks).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: 
-  - Known regressions: Cart Git button broken during UI changes.
+  - Known regressions: Yok.
 
 **Credentials to test flow:**
 - Facette Admin Paneli:  / 
-- Doğan Canlı:  /  (DB settings collection'da kayıtlı).
 
 **What agent forgot to execute**
-- Kullanıcının ilettiği  XML dosyasına bakarak 'i refactor etmeyi bitiremedi.
-- Kullanıcının kapsamlı UI/UX tasarım isteğini başlatamadı.
+- Son mesajdaki Siber Güvenlik maddelerini uygulamaya başladı ancak tamamlayamadı.  içine güvenlik middleware'leri ve  güncellemeleri atılmalı.
 
 **Debugging checklist for current issue**
-    Issue 1: Doğan UBL XML Validation Error (10013)
-    Backend files to check:
-    -  ->  metodunda namespaces (ext, cac, cbc, vs.), CustomizationID, ProfileID ve zorunlu alanlar kullanıcının ilettiği  dosyası referans alınarak düzeltilmelidir.
+    Issue: Güvenlik Sertleştirmesi (Cybersecurity Hardening)
     
-    Issue 2: Mobil UI/UX Revizyonu ve Kombin Ürün
-    Frontend files to check:
-    -  (Kombin UI'si sadece görsel + Stilini tamamla yazısı olacak ve çalışmayan Git butonu düzeltilecek).
-    - Genel layout dosyaları (tasarım için  kullanılmalıdır).</analysis>
+    Frontend files to check: 
+    - İsteklerin header'larında veya formlarda XSS açıklarına karşı sanitize işlemlerinin React tarafında default olarak sağlandığından emin olun.
+  
+    Backend files to check:
+    - :  konfigürasyonunu daraltın (Zero Trust).  (Custom veya Starlette) ekleyerek CSP (Content Security Policy) ayarlayın. CSRF Token altyapısı kurun veya SameSite cookie kurallarını katılaştırın. Rate Limiter (Velocity Checks) ekleyin.
+    - :  ile Hash işlemlerinde kesinlikle  kullanıldığını doğrulayın. JWT token doğrulamasında  parametresinin zorunlu ve strict olduğuna emin olun.
+    - : Barkod ve Stok kodu eşleştirme kodunu tamamlayın.</analysis>
