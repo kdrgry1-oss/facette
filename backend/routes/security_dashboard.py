@@ -5,7 +5,7 @@ Backend'in `auth_audit_logs` koleksiyonu + `users.locked_until` field'ları
 üzerinde özet/grafik/forensic sorgular sağlar. Iteration 33'te oluşturulan
 audit log altyapısının üstüne kuruludur.
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -193,3 +193,83 @@ async def unlock_user(payload: dict, current_user: dict = Depends(require_admin)
     except Exception:
         pass
     return {"success": True, "matched": res.matched_count, "modified": res.modified_count}
+
+
+# ---------------------------------------------------------------------------
+# IP BLOCKLIST MANAGEMENT
+# ---------------------------------------------------------------------------
+
+@router.get("/ip-blocklist")
+async def list_ip_blocklist(current_user: dict = Depends(require_admin)):
+    """Aktif IP ban'larını listeler. Otomatik (50+ failed/saat) ve manuel."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cur = db.ip_blocklist.find({
+        "$or": [
+            {"permanent": True},
+            {"blocked_until": {"$gt": now_iso}},
+        ]
+    }, {"_id": 0}).sort("blocked_at", -1).limit(500)
+    items = await cur.to_list(500)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/ip-blocklist")
+async def block_ip(payload: dict, current_user: dict = Depends(require_admin)):
+    """Manuel IP ban — admin'in ilettiği IP'yi blocklist'e ekler.
+    Body: {ip, hours? (default=24), permanent? (default=False), reason?}
+    """
+    ip = (payload or {}).get("ip", "").strip()
+    if not ip:
+        raise HTTPException(status_code=400, detail="ip zorunlu")
+    hours = int((payload or {}).get("hours") or 24)
+    permanent = bool((payload or {}).get("permanent") or False)
+    reason = (payload or {}).get("reason") or f"manuel ban by {current_user.get('email')}"
+
+    until = (datetime.now(timezone.utc) + timedelta(hours=max(1, hours))).isoformat()
+    update = {
+        "ip": ip,
+        "blocked_at": datetime.now(timezone.utc).isoformat(),
+        "reason": reason,
+        "auto_blocked": False,
+        "blocked_by": current_user.get("email"),
+    }
+    if permanent:
+        update["permanent"] = True
+        update.pop("blocked_until", None)
+    else:
+        update["blocked_until"] = until
+        update["permanent"] = False
+
+    await db.ip_blocklist.update_one(
+        {"ip": ip},
+        {"$set": update, "$setOnInsert": {"id": __import__("uuid").uuid4().hex}},
+        upsert=True,
+    )
+    await db.auth_audit_logs.insert_one({
+        "id": __import__("uuid").uuid4().hex,
+        "event": "admin_ip_block",
+        "ip": ip,
+        "user_id": current_user.get("id"),
+        "email": current_user.get("email"),
+        "success": True,
+        "meta": {"hours": hours, "permanent": permanent, "reason": reason},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "ip": ip, "permanent": permanent, "blocked_until": update.get("blocked_until")}
+
+
+@router.delete("/ip-blocklist/{ip}")
+async def unblock_ip(ip: str, current_user: dict = Depends(require_admin)):
+    """IP ban'ı kaldır."""
+    res = await db.ip_blocklist.delete_one({"ip": ip})
+    await db.auth_audit_logs.insert_one({
+        "id": __import__("uuid").uuid4().hex,
+        "event": "admin_ip_unblock",
+        "ip": ip,
+        "user_id": current_user.get("id"),
+        "email": current_user.get("email"),
+        "success": True,
+        "meta": {"by_admin": current_user.get("email")},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "deleted": res.deleted_count}

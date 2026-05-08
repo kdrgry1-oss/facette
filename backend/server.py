@@ -130,6 +130,9 @@ async def lifespan(app: FastAPI):
         await db.user_devices.create_index([("user_id", 1), ("device_id", 1)], unique=True)
         await db.user_devices.create_index([("push_token", 1)])
         await db.user_devices.create_index([("is_active", 1), ("platform", 1)])
+        # IP blocklist (Iter36 — brute force IP-level ban)
+        await db.ip_blocklist.create_index([("ip", 1)], unique=True)
+        await db.ip_blocklist.create_index([("blocked_until", 1)])
         
         logger.info("Database indexes created")
     except Exception as e:
@@ -348,9 +351,12 @@ api_router.include_router(cms_router)
 # Iyzico endpoint'leri — integrations_router'ın catch-all /{marketplace} rotasından ÖNCE include edilmeli
 from routes.integrations_iyzico import router as iyzico_router
 from routes.integrations_dogan import router as dogan_router
+from routes.integrations_trendyol_qna import router as trendyol_qna_router
 api_router.include_router(iyzico_router, prefix="/integrations")
 # Doğan e-Dönüşüm — Iter35 refactor: ayrı modül. Catch-all /{marketplace}'den ÖNCE
 api_router.include_router(dogan_router, prefix="/integrations")
+# Trendyol Q&A + Reviews — Iter37 refactor: catch-all'dan ÖNCE
+api_router.include_router(trendyol_qna_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(integrations_temu_router, prefix="/integrations")
 api_router.include_router(admin_router)

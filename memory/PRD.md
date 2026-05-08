@@ -21,6 +21,75 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 37 (2026-05-08) — Trendyol Q&A + Reviews Refactor
+
+### 🔧 integrations.py Refactor — Aşama 2
+
+Iter35'te Doğan modülü çıkarıldı. Iter37'de **Trendyol Q&A + Reviews** (5 endpoint, ~340 satır) `integrations_trendyol_qna.py`'ye taşındı.
+
+**Taşınan endpoint'ler:**
+- `GET /api/integrations/trendyol/questions/sync` — 60-365 gün geriye Trendyol Q&A çek
+- `GET /api/integrations/trendyol/questions` — local DB list + paginate
+- `POST /api/integrations/trendyol/questions/{id}/answer` — soruya yanıt
+- `POST /api/integrations/trendyol/reviews/scrape` — public storefront yorum çek
+- `POST /api/integrations/trendyol/reviews/scrape-bulk` — toplu
+
+**Yapı:**
+- Lazy import: `from .integrations import get_trendyol_config, get_trendyol_headers, log_integration_event` (her endpoint içinde) — circular import önler
+- server.py'de `trendyol_qna_router` `integrations_router`'dan ÖNCE include edilir (catch-all routing kritik)
+- 339 satır azaldı: integrations.py 4459 → **4126 satır**
+
+### Smoke Test
+- Q&A list (refactored): HTTP 200, 235 soru ✅
+- Q&A sync (refactored): **68 yeni soru çekildi** (son 7 gün, canlı Trendyol API) ✅
+- Trendyol settings (main module): HTTP 200, regression yok ✅
+- Trendyol invoice upload (main module): HTTP 400 expected ("Fatura linki bos olamaz") ✅
+
+### Files Modified / Created
+- `NEW /app/backend/routes/integrations_trendyol_qna.py` (370 satır)
+- `/app/backend/routes/integrations.py` — Q&A + Reviews bloğu silindi (-339 satır)
+- `/app/backend/server.py` — `trendyol_qna_router` include
+
+
+
+## Iteration 36 (2026-05-08) — IP-Level Brute Force Blocklist
+
+### 🛡️ IP Blocklist (Iter34 önerisinin tamamlanması)
+
+Iter33'teki account-level lockout (5 fail/15min → 15 dk lock) tek bir email'i koruyordu.
+Bu iterasyonda **IP-level blocklist** eklendi: aynı IP'den 1 saatte 50+ failed login →
+24 saat otomatik ban. Distributed brute force (botnet) saldırılarını çok daha erken durdurur.
+
+**Backend (`deps.py` + `security_dashboard.py`)**
+- Yeni helper'lar:
+  - `is_ip_blocked(ip) → (locked, retry_after)` — `ip_blocklist` koleksiyonunda permanent veya blocked_until > now kontrol; süresi dolanı temizle
+  - `register_failed_login_ip(ip)` — son 60 dakika içindeki failed login'leri `auth_audit_logs`'da say; threshold 50 → 24h ban
+  - Constants: `IP_BLOCK_WINDOW_MIN=60`, `IP_BLOCK_THRESHOLD=50`, `IP_BLOCK_DURATION_HOURS=24`
+- `auth.py::login` — IP block check (account lockout'tan önce); login fail durumunda hem `register_failed_login` (account) hem `register_failed_login_ip` (IP) çağrılıyor
+- 3 yeni endpoint:
+  - `GET /api/admin/security/ip-blocklist` — aktif ban listesi (manuel + otomatik)
+  - `POST /api/admin/security/ip-blocklist {ip, hours?, permanent?, reason?}` — manuel ban
+  - `DELETE /api/admin/security/ip-blocklist/{ip}` — ban kaldır
+- Mongo index: `ip_blocklist` `{ip} unique`, `{blocked_until}`
+- Audit log event'leri: `admin_ip_block`, `admin_ip_unblock` (kim, hangi IP, ne zaman, hangi sebeple)
+
+**Frontend (`SecurityDashboard.jsx`)**
+- "IP Engel Listesi" yeni section: manuel ekleme formu (IP + saat + Kalıcı checkbox + sebep) + aktif ban tablosu (tip badge KALICI/OTOMATİK/MANUEL, bitiş, sebep, tetik sayı, "Kaldır" butonu)
+
+### Smoke Test
+- Manuel ban (203.0.113.99, 1h) → HTTP 200 ✅
+- Ban'lı IP'den login (`X-Forwarded-For: 203.0.113.99`) → **HTTP 429** + "Bu IP adresinden çok fazla başarısız deneme yapıldı. 1 saat sonra tekrar deneyin." ✅
+- Unblock → DB silindi, login HTTP 200 + token döndü ✅
+
+### Files Modified / Created
+- `/app/backend/routes/deps.py` — IP blocklist helper'ları
+- `/app/backend/routes/auth.py` — login akışında IP check
+- `/app/backend/routes/security_dashboard.py` — 3 yeni endpoint + HTTPException import
+- `/app/backend/server.py` — `ip_blocklist` index'leri
+- `/app/frontend/src/pages/admin/SecurityDashboard.jsx` — IP Blocklist section + handler'lar
+
+
+
 ## Iteration 35 (2026-05-08) — iyzico Kısmi İade UI + Mobil Uygulama Hazırlık
 
 ### 💳 A) iyzico Kısmi İade UI (`Returns.jsx`)

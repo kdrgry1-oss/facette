@@ -11,6 +11,7 @@ from .deps import (
     create_token, get_current_user, generate_id,
     safe_str, is_safe_email, write_audit_log,
     is_account_locked, register_failed_login, reset_failed_login,
+    is_ip_blocked, register_failed_login_ip,
     client_ip_from_request, limiter,
 )
 
@@ -91,6 +92,16 @@ async def login(
                               success=False, meta={"reason": "invalid_email_format"})
         raise HTTPException(status_code=400, detail="Geçersiz e-posta veya şifre")
 
+    # IP-level brute force blocklist (account lockout'tan önce kontrol — saldırı için DoS bypass)
+    ip_blocked, ip_retry = await is_ip_blocked(ip)
+    if ip_blocked:
+        await write_audit_log("login", email=email, ip=ip, user_agent=ua,
+                              success=False, meta={"reason": "ip_blocked", "retry_after": ip_retry})
+        msg = "Bu IP adresinden çok fazla başarısız deneme yapıldı."
+        if ip_retry > 0:
+            msg += f" {max(1, ip_retry // 3600)} saat sonra tekrar deneyin."
+        raise HTTPException(status_code=429, detail=msg)
+
     locked, retry_after = await is_account_locked(email)
     if locked:
         await write_audit_log("login", email=email, ip=ip, user_agent=ua,
@@ -101,6 +112,8 @@ async def login(
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(password, user.get("password", "")):
         await register_failed_login(email)
+        # IP-level threshold de tetiklensin
+        await register_failed_login_ip(ip)
         await write_audit_log("login", email=email, ip=ip, user_agent=ua,
                               success=False, meta={"reason": "bad_credentials"})
         raise HTTPException(status_code=401, detail="Geçersiz e-posta veya şifre")

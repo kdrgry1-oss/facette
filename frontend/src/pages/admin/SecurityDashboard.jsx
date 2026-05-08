@@ -53,13 +53,16 @@ export default function SecurityDashboard() {
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState({ event: "", success: "", email: "", ip: "" });
+  // IP Blocklist (Iter36)
+  const [ipList, setIpList] = useState([]);
+  const [newIp, setNewIp] = useState({ ip: "", hours: 24, permanent: false, reason: "" });
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [s, te, ti, re] = await Promise.all([
+      const [s, te, ti, re, ipl] = await Promise.all([
         axios.get(`${API}/admin/security/summary?window_hours=${windowHours}`, auth()),
         axios.get(`${API}/admin/security/top-failed-emails?window_hours=${windowHours}&limit=10`, auth()),
         axios.get(`${API}/admin/security/top-failed-ips?window_hours=${windowHours}&limit=10`, auth()),
@@ -68,11 +71,13 @@ export default function SecurityDashboard() {
         }${filter.success !== "" ? `&success=${filter.success}` : ""
         }${filter.email ? `&email=${encodeURIComponent(filter.email)}` : ""
         }${filter.ip ? `&ip=${encodeURIComponent(filter.ip)}` : ""}`, auth()),
+        axios.get(`${API}/admin/security/ip-blocklist`, auth()),
       ]);
       setSummary(s.data);
       setTopEmails(te.data.items || []);
       setTopIps(ti.data.items || []);
       setRecent(re.data.items || []);
+      setIpList(ipl.data.items || []);
     } catch (e) {
       toast.error("Yüklenemedi: " + (e.response?.data?.detail || e.message));
     } finally {
@@ -87,6 +92,29 @@ export default function SecurityDashboard() {
     try {
       await axios.post(`${API}/admin/security/unlock-user`, { email }, auth());
       toast.success(`${email} kilidi açıldı`);
+      load();
+    } catch (e) {
+      toast.error("Hata: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const blockIp = async () => {
+    if (!newIp.ip.trim()) { toast.error("IP adresi gerekli"); return; }
+    try {
+      await axios.post(`${API}/admin/security/ip-blocklist`, newIp, auth());
+      toast.success(`${newIp.ip} engellendi`);
+      setNewIp({ ip: "", hours: 24, permanent: false, reason: "" });
+      load();
+    } catch (e) {
+      toast.error("Hata: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const unblockIp = async (ip) => {
+    if (!confirm(`${ip} IP banı kaldırılsın mı?`)) return;
+    try {
+      await axios.delete(`${API}/admin/security/ip-blocklist/${encodeURIComponent(ip)}`, auth());
+      toast.success(`${ip} engeli kaldırıldı`);
       load();
     } catch (e) {
       toast.error("Hata: " + (e.response?.data?.detail || e.message));
@@ -174,6 +202,112 @@ export default function SecurityDashboard() {
           </div>
         </div>
       )}
+
+      {/* IP Blocklist (Iter36 — brute force IP-level ban) */}
+      <div data-testid="security-ip-blocklist" className="bg-white border border-gray-200 rounded-lg p-4">
+        <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+          <Globe className="w-4 h-4 text-red-700" />
+          IP Engel Listesi ({ipList.length})
+          <span className="text-xs text-gray-400 font-normal ml-2">
+            Otomatik: 50+ başarısız login/saat → 24 saat ban
+          </span>
+        </h3>
+
+        {/* Manuel ekleme formu */}
+        <div className="bg-gray-50 border border-gray-200 rounded p-3 mb-3 grid grid-cols-1 md:grid-cols-5 gap-2">
+          <input
+            data-testid="ipblock-ip-input"
+            placeholder="IP adresi (ör: 1.2.3.4)"
+            value={newIp.ip}
+            onChange={(e) => setNewIp({ ...newIp, ip: e.target.value })}
+            className="border border-gray-300 rounded px-2 py-1.5 text-sm md:col-span-2 font-mono"
+          />
+          <input
+            data-testid="ipblock-hours-input"
+            type="number"
+            min="1"
+            max="8760"
+            placeholder="Saat (24)"
+            value={newIp.hours}
+            disabled={newIp.permanent}
+            onChange={(e) => setNewIp({ ...newIp, hours: parseInt(e.target.value, 10) || 24 })}
+            className="border border-gray-300 rounded px-2 py-1.5 text-sm disabled:bg-gray-100"
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              data-testid="ipblock-permanent-cb"
+              type="checkbox"
+              checked={newIp.permanent}
+              onChange={(e) => setNewIp({ ...newIp, permanent: e.target.checked })}
+            />
+            Kalıcı
+          </label>
+          <button
+            data-testid="ipblock-add-btn"
+            onClick={blockIp}
+            className="bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1.5 text-sm font-medium"
+          >
+            IP'yi Engelle
+          </button>
+          <input
+            data-testid="ipblock-reason-input"
+            placeholder="Sebep (opsiyonel)"
+            value={newIp.reason}
+            onChange={(e) => setNewIp({ ...newIp, reason: e.target.value })}
+            className="border border-gray-300 rounded px-2 py-1.5 text-sm md:col-span-5"
+          />
+        </div>
+
+        {/* Aktif ban listesi */}
+        {ipList.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">Aktif IP engeli yok</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-3 py-2 text-xs font-medium">IP</th>
+                  <th className="text-left px-3 py-2 text-xs font-medium">Tip</th>
+                  <th className="text-left px-3 py-2 text-xs font-medium">Bitiş</th>
+                  <th className="text-left px-3 py-2 text-xs font-medium">Sebep</th>
+                  <th className="text-left px-3 py-2 text-xs font-medium">Tetik Sayı</th>
+                  <th className="text-right px-3 py-2 text-xs font-medium">İşlem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ipList.map((ip) => (
+                  <tr key={ip.ip} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-3 py-1.5 font-mono text-xs">{ip.ip}</td>
+                    <td className="px-3 py-1.5">
+                      {ip.permanent ? (
+                        <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded text-xs">KALICI</span>
+                      ) : ip.auto_blocked ? (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs">OTOMATİK</span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">MANUEL</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-xs">
+                      {ip.permanent ? "—" : formatTime(ip.blocked_until)}
+                    </td>
+                    <td className="px-3 py-1.5 text-xs text-gray-600 truncate max-w-xs">{ip.reason || "—"}</td>
+                    <td className="px-3 py-1.5 text-xs">{ip.trigger_count || "—"}</td>
+                    <td className="px-3 py-1.5 text-right">
+                      <button
+                        data-testid={`ipblock-unblock-${ip.ip}`}
+                        onClick={() => unblockIp(ip.ip)}
+                        className="px-2 py-0.5 bg-black text-white rounded text-xs hover:bg-gray-800"
+                      >
+                        Kaldır
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Top failed emails + IPs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

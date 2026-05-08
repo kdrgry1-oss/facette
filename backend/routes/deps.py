@@ -158,6 +158,71 @@ async def reset_failed_login(email: str) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# IP-LEVEL BRUTE FORCE BLOCKLIST
+# ---------------------------------------------------------------------------
+# Hesap-bazlı lockout (yukarıda) tek bir email'i koruyor. IP-level blocklist
+# ise: aynı IP'den 1 saatte 50+ failed login olduğunda 24 saat ban koyar
+# (collection: ip_blocklist). Botnet/distribuited scanning saldırılarını
+# erken durdurur. `auth_audit_logs` ile entegre.
+IP_BLOCK_WINDOW_MIN = 60       # 1 saatlik pencere
+IP_BLOCK_THRESHOLD = 50        # bu pencerede 50+ failed login → ban
+IP_BLOCK_DURATION_HOURS = 24   # ban süresi
+
+
+async def is_ip_blocked(ip: str) -> tuple[bool, int]:
+    """Return (blocked, retry_after_seconds). Manuel admin ban ve otomatik
+    threshold ban'ları aynı koleksiyonda tutar (`ip_blocklist`)."""
+    if not ip:
+        return False, 0
+    doc = await db.ip_blocklist.find_one({"ip": ip}, {"_id": 0, "blocked_until": 1, "permanent": 1})
+    if not doc:
+        return False, 0
+    if doc.get("permanent"):
+        return True, 0
+    bu = doc.get("blocked_until")
+    if not bu:
+        return False, 0
+    try:
+        until = datetime.fromisoformat(bu)
+    except Exception:
+        return False, 0
+    now = datetime.now(timezone.utc)
+    if until > now:
+        return True, int((until - now).total_seconds())
+    # Süresi dolmuş — pasifle
+    await db.ip_blocklist.delete_one({"ip": ip})
+    return False, 0
+
+
+async def register_failed_login_ip(ip: str) -> None:
+    """IP'nin 1 saatlik pencerede başarısız login sayısını sayar.
+    Threshold aşıldıysa 24 saatlik geçici ban koyar."""
+    if not ip:
+        return
+    since = (datetime.now(timezone.utc) - timedelta(minutes=IP_BLOCK_WINDOW_MIN)).isoformat()
+    fail_count = await db.auth_audit_logs.count_documents({
+        "event": "login",
+        "success": False,
+        "ip": ip,
+        "created_at": {"$gte": since},
+    })
+    if fail_count >= IP_BLOCK_THRESHOLD:
+        until = datetime.now(timezone.utc) + timedelta(hours=IP_BLOCK_DURATION_HOURS)
+        await db.ip_blocklist.update_one(
+            {"ip": ip},
+            {"$set": {
+                "ip": ip,
+                "blocked_until": until.isoformat(),
+                "blocked_at": datetime.now(timezone.utc).isoformat(),
+                "reason": f"auto: {fail_count} failed logins in {IP_BLOCK_WINDOW_MIN}min",
+                "trigger_count": fail_count,
+                "auto_blocked": True,
+            }, "$setOnInsert": {"id": str(uuid.uuid4())}},
+            upsert=True,
+        )
+
+
 def client_ip_from_request(request) -> str:
     """Return the real client IP, honouring X-Forwarded-For (first hop)."""
     if not request:

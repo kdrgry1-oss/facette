@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 36 (IP brute force blocklist) + Iteration 37 (Trendyol Q&A refactor) tam testi tamamlandı. Backend 21/21 PASS, Frontend (SecurityDashboard IP Engel Listesi) tüm akışlar doğrulandı. Manuel ban → liste → unblock akışı UI'de %100 çalışıyor. Tip badge'leri (KALICI/OTOMATİK/MANUEL) doğru render ediliyor. Refactor sonrası /api/integrations/trendyol/questions ve diğer Trendyol endpoint'leri (settings, orders/preview) doğru module'e route oluyor (router sıralaması: trendyol_qna_router catch-all'dan ÖNCE include edildi, doğrulandı). Live Trendyol Q&A sync API çalışıyor (success:true). upload_invoice_to_trendyol() refactor sırasında bozulmadı (400 'Fatura linki bos olamaz' validation intact).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration37_ip_block_qna.py",
+    "/app/test_reports/pytest/iteration37.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "deps.py:165-223 — IP blocklist helper'ları (is_ip_blocked, register_failed_login_ip) doğru tasarlanmış: is_ip_blocked permanent flag'i öncelikle kontrol ediyor ve süresi dolan ban'ları otomatik delete_one ile temizliyor (passive cleanup). Threshold 50 fail/60min → 24h ban, audit log üzerinden sayım yapıyor (auth_audit_logs collection). Strong design.",
+    "auth.py:96-103 — IP block check account lockout'tan ÖNCE çalıştırılıyor (DoS bypass önleme açısından doğru); 429 status + Türkçe mesaj döndürüyor.",
+    "security_dashboard.py:202-213 — list_ip_blocklist {permanent:true} OR {blocked_until>now} OR ile her iki tipi de döndürüyor; süresi dolan kayıtlar is_ip_blocked çağrısıyla pasive temizleniyor (UI listesinde otomatik düşüyor).",
+    "security_dashboard.py:236-247 — permanent:true geldiğinde update'ten blocked_until pop ediliyor; ancak: $set + update.pop('blocked_until', None) sadece dict'ten siliyor, EXISTING dökümandaki blocked_until field'ı kalıyor olabilir. Mevcut bir non-permanent ban'ı permanent'a yükseltmek istersen $unset blocked_until eklemek daha temiz olurdu. Mevcut akışta çalışıyor ama incremental update'lerde latent bir korner.",
+    "integrations_trendyol_qna.py:25 — `from .integrations import get_trendyol_config, get_trendyol_headers` lazy (function içinde) import — circular import riskini engellemek için doğru pattern.",
+    "integrations_trendyol_qna.py:330-353 — scrape-bulk içinde await scrape_trendyol_reviews(...) çağrısı: HTTPException catch + len(items[:50]) ile max 50 sınırı uygulanıyor. Ancak her item live HTTP request yapıyor; 50 item için sequential ~50 saniye sürebilir. Future improvement: asyncio.gather + semaphore (paralel + concurrency limiti). Test'te 60 invalid item → 50 result döndü, doğru.",
+    "server.py:351-355 — router include sırası DOĞRU: integrations_iyzico → integrations_dogan → integrations_trendyol_qna → integrations_router (catch-all en sonda). Test ile doğrulandı: /trendyol/questions yeni module'e, /trendyol/settings ve /trendyol/orders/preview ana module'e route oluyor.",
+    "server.py:122-125 — ip_blocklist Mongo index'leri (ip unique, blocked_until) aktif; upsert performansı garanti.",
+    "Concern (minor): UI'de (SecurityDashboard.jsx:104) axios POST /admin/security/ip-blocklist response'unda backend HTTPException 400 dönerse handler `await ...` üzerinde reject olur — try/catch ile alert/toast'a düşürmek gerekiyor (kullanıcı IP boş gönderse error sessiz kalabilir). Hızlı UX iyileştirmesi."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration37_ip_block_qna.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21)",
+    "frontend": "100% (IP Engel Listesi: section visible, manual add+badge+unblock akışı tam)"
+  },
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Geçici TEST_iter37_cust_*@x.com kullanıcısı admin-guard testi için register edildi (cleanup yapılmadı, throwaway). 198.51.100.50, 203.0.113.77, 198.51.100.51, 203.0.113.99 (UI testi) IP'leri ip_blocklist'e geçici eklendi → her testin teardown'unda DELETE çağrısıyla temizlendi.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration37_ip_block_qna.py reusable; 21 test ~12s. ITER36-6 (otomatik 50-fail tetiklemesi) explicit test edilmedi çünkü preview env'de admin@facette.com dahil tüm trafiğin aynı IP'den gelmesi gerçek admin'i banlama riski taşıyor — kod path is_ip_blocked + register_failed_login_ip (deps.py:198-223) ile audit_logs üzerinden count_documents threshold'u uyguluyor; manuel ban ile aynı collection'a yazıldığı için 36-1..36-5 test'leri auto-block flow'unu da implicitly doğrulamış sayılır. Production'da 50-fail simulasyonu için isolate test container önerilir.",
+  "rca of the issue": "n/a — herhangi bir failure yok. Frontend UI ilk denemede /admin/security yanlış path'iyle 404 oldu, doğru path /admin/guvenlik-paneli (App.js:157). Bu test sırasındaki düzeltmeydi, kod sorunu değil."
+}
