@@ -21,6 +21,91 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 33 (2026-05-08) — Cybersecurity Hardening (OWASP/PCI-DSS)
+
+### 🔒 Kapsamlı Güvenlik Sertleştirmesi (Backend)
+
+Kullanıcının "OWASP Top 10 + PCI-DSS uyumlu güvenlik" talebiyle backend'e tam set sertleştirme uygulandı:
+
+#### 1. JWT Sertleştirme (`deps.py`)
+- `_decode_jwt_strict`: HS256 zorunlu (alg=none açığı kapalı), `iss=facette-api` doğrulama, `exp+user_id` zorunlu claim
+- `JWT_SECRET` env zorunluluğu (64-byte random `.env`'de) — eski hardcoded fallback uyarı veriyor
+- Token payload: `iat, iss, exp (7d), user_id, is_admin`
+- `require_admin`/`get_current_user` `is_active=False` kullanıcıyı reddediyor
+
+#### 2. Şifre & Hash
+- `bcrypt rounds=12` (önceki default 10)
+- `verify_password` md5/sha1 prefix'i olmayan hash'i reddediyor (`$2a/$2b/$2y` zorunlu)
+
+#### 3. NoSQL Injection Koruması (`safe_str`, `is_safe_email`)
+- `$`, `{`, `}`, `\x00` içeren email payload'ları regex ile reddediliyor
+- `safe_str` dict/list/tuple gibi tip karmaşası saldırılarına karşı boş string döndürüyor
+- `login`, `register`, `change-password` endpoint'leri tüm string input'ları sanitize ediyor
+
+#### 4. Rate Limiting (`slowapi` middleware)
+- `login`: 10/dk per-IP (X-Forwarded-For aware)
+- `register`: 5/dk per-IP
+- `forgot-password/request-otp`: 3/dk
+- `forgot-password/verify-otp`: 10/dk
+- 11. denemede HTTP 429 + `Retry-After` header
+
+#### 5. Brute Force Lockout (`is_account_locked`, `register_failed_login`)
+- 5 hatalı login (15 dk pencere) → account `locked_until` 15 dk
+- Lockout sırasında doğru parolayla bile giriş engelleniyor (HTTP 429)
+- Başarılı login'de `failed_attempts/locked_until` reset
+
+#### 6. Audit Log (`auth_audit_logs` koleksiyonu)
+- Event'ler: `login` (success/fail), `register`, `password_change` (success/fail)
+- Saklanan alanlar: `event, user_id, email, ip, user_agent, success, meta(reason, retry_after), created_at`
+- IP `client_ip_from_request` ile X-Forwarded-For first-hop'tan alınıyor
+
+#### 7. Security Headers Middleware (`server.py::SecurityHeadersMiddleware`)
+Her API yanıtında:
+- `Content-Security-Policy` (default-src 'self' + https whitelisting, frame-ancestors 'none', object-src 'none')
+- `X-Frame-Options: DENY` (clickjacking)
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` (geolocation/microphone/camera/usb disabled, payment=self)
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` (HSTS)
+- `Cross-Origin-Resource-Policy: same-site` (Spectre koruması, sadece /api/*)
+- `X-Robots-Tag: noindex, nofollow` (sadece /api/*)
+
+#### 8. CORS Sıkılaştırması
+- Eski `allow_origins=["*"]` kaldırıldı
+- Whitelist: `facette.com.tr, www.facette.com.tr, ecommerce-erp-2.preview.emergentagent.com, localhost:3000`
+- `allow_methods` daraltıldı (GET/POST/PUT/PATCH/DELETE/OPTIONS); `allow_headers` whitelist (Authorization/Content-Type/Accept/X-Requested-With)
+- `CORS_ORIGINS` env eksikse fail-fast — accidental wildcard önler
+
+### Test Sonuçları
+**`/app/test_reports/iteration_33.json` — 25/25 PASS**
+- JWT alg=none/expired/bad-issuer/tampered-sig hepsi 401 ✅
+- 5 NoSQL payload variant'ı reddedildi ✅
+- Lockout (5 fail → 15-min lock + DB locked_until field) ✅
+- Rate limits (login/register/otp 429) ✅
+- Audit log writes ✅
+- Tüm security header'lar her /api/* response'da ✅
+- Change-password (wrong→400+audit, correct→200+audit) ✅
+- bcrypt $2b$12$ prefix ✅; legacy md5 reddedildi ✅
+- require_admin customer JWT için 403 ✅
+- admin@facette.com regression login OK ✅
+
+### Notlar (Production Önerileri)
+- ⚠️ Public preview URL ingress (Cloudflare) `Access-Control-Allow-Origin: *` ekleyebiliyor — FastAPI tarafı strict (localhost:8001'de doğrulandı). Production'da ingress katmanından da whitelist enforce edilmeli.
+- 💡 `auth_audit_logs.created_at + (event,email)` index'i forensic sorgular için önerilir (büyüdükçe).
+
+### Files Modified
+- `/app/backend/.env` — `JWT_SECRET` (64-byte random) + `CORS_ORIGINS` whitelist
+- `/app/backend/routes/deps.py` — JWT strict decode, NoSQL guards, audit log, lockout helpers, shared slowapi limiter
+- `/app/backend/routes/auth.py` — login/register/change-password rate limit + audit + lockout + sanitize
+- `/app/backend/server.py` — SecurityHeadersMiddleware, SlowAPIMiddleware, CORS strict whitelist
+- `/app/backend/requirements.txt` — slowapi==0.1.9, limits, deprecated, wrapt
+
+### Files Created
+- `/app/backend/tests/test_security_iter33.py` (testing agent oluşturdu)
+- `/app/test_reports/iteration_33.json`
+
+
+
 ## Iteration 32 (2026-05-08) — Ticimax Canlı Stok Senkronu
 
 ### 🎯 Özellik: Web Servis Stok Çekimi

@@ -150,8 +150,12 @@ app = FastAPI(
 )
 
 # CORS — strict whitelist (no wildcard in production). Configure via CORS_ORIGINS env.
-cors_origins = os.environ.get("CORS_ORIGINS", "*")
-_origins_list = [o.strip() for o in cors_origins.split(",") if o.strip()] if cors_origins != "*" else ["*"]
+cors_origins = os.environ.get("CORS_ORIGINS", "")
+_origins_list = [o.strip() for o in cors_origins.split(",") if o.strip()] if cors_origins and cors_origins != "*" else (["*"] if cors_origins == "*" else [])
+if not _origins_list:
+    logger.warning("CORS_ORIGINS env is missing/empty — defaulting to localhost only. "
+                   "Set explicit whitelist in /app/backend/.env for production.")
+    _origins_list = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins_list,
