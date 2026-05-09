@@ -21,6 +21,62 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 38 (2026-05-08) — Akıllı Müşteri Yanıtlayıcı (AI Asistan)
+
+### 🤖 AI Asistan — Sohbetle Eğitilen, Otomatik Yanıt Veren Bot
+
+Kullanıcı talebi: "akıllı soru yanıtlayıcı, otomatik mesajlarla eğitiliyor, yanlış/yetersiz cevaplar tespit ediliyor, direk bota ben şunu şunu yaz diyebileyim".
+
+**Backend (`/app/backend/routes/ai_assistant.py`)**
+- `POST /api/ai-assistant/chat` — admin doğrudan bot ile sohbet:
+  - **Intent detection (LLM tabanlı):** TEACH_QA / INSTRUCT / ASK
+  - "S: ... C: ..." pattern'i → otomatik KB'ye eklenir
+  - "Talimat: ..." → settings.ai_chatbot.persona'ya append
+  - Düz soru → bot cevap verir
+- `GET /api/ai-assistant/chat/history` — admin'in son 100 sohbeti
+- `POST /api/ai-assistant/bulk-train` — geçmiş ANSWERED soruları KB'ye toplu aktar (channel/min_length/skip_existing/max_count)
+- `GET /api/ai-assistant/bulk-train-status` — KB toplam, chat-trained, bulk-trained, last_run
+- `POST /api/ai-assistant/auto-answer-batch` — bekleyen WAITING soruları için batch draft + auto-send (dry_run/min_confidence/send flag'leri)
+- `POST /api/ai-assistant/evaluate-answer` — AI cevap kalite kontrolü (sufficient/reason)
+- `GET /api/ai-assistant/auto-answer-stats` — pending, auto_answered_today, last_run
+
+**Frontend (`/admin/ai-asistan`)**
+4 tab page:
+1. **Sohbet ile Eğit** — chat UI, quick prompts (kargo süresi/beden tablosu/iade), intent badge, KB eklendi/Talimat kaydedildi badge
+2. **Bilgi Bankası** — KB CRUD (search, ekle, sil, usage_count)
+3. **Toplu Eğitim** — channel/min_len/max/skip-existing config + run + sonuç kartı
+4. **Otomatik Yanıt** — config (channel/max/conf/dry_run/send) + run + sonuç tablosu (Q, taslak, conf%, yeterli ✓/⚠, action GÖNDERİLDİ/KUYRUKTA)
+
+**Sidebar:** "Entegrasyonlar > AI Asistan" (Brain ikon)
+
+### Smoke Test Canlı (LLM gerçek çağrı)
+- TEACH_QA: "S: Kargo kac gunde gelir? C: 2-3 is gunu icinde teslim edilir." → KB'ye eklendi ✅
+- INSTRUCT: "Talimat: XL bedeni 42-44 numara olarak söyle" → persona'ya append ✅
+- ASK: "iade nasıl yapılır?" → cevap döndü, KB'ye eklenmedi ✅
+- evaluate-answer: kısa cevap için sufficient:false ✅
+- auto-answer dry-run: 1 test sorusu → confidence 0.99, action:queued ✅
+
+### Test Sonuçları
+**`/app/test_reports/iteration_38.json` — Backend 14/15 PASS (1 skip), Frontend %100, 0 critical bug**
+
+### Files Modified / Created
+- `NEW /app/backend/routes/ai_assistant.py` (450 satır)
+- `NEW /app/frontend/src/pages/admin/AIAssistant.jsx` (550 satır)
+- `/app/backend/server.py` — ai_assistant_router include
+- `/app/frontend/src/App.js` — route /admin/ai-asistan
+- `/app/frontend/src/pages/admin/AdminLayout.jsx` — Brain icon + sidebar link
+
+### Sales Documentation Created
+- `NEW /app/SALES_PITCH.md` — Sistem satış dokümantasyonu (8KB, marketing-ready)
+  - Hedef: 5M-250M₺ ciro moda markaları
+  - 10 ana yetenek (çoklu pazaryeri, AI, lojistik, e-Fatura, RFM, mobil, güvenlik, otomasyon, storefront, ödeme)
+  - ROI hesabı (122 saat/ay tasarruf, ~80-120K₺ personel maliyet azalması)
+  - 4 fiyat tier'ı (9.9K-79.9K₺ aylık + 750K₺ one-time license)
+  - Roadmap v1.0/v1.1/v2.0
+  - Demo pitch script + rakip karşılaştırması
+
+
+
 ## Iteration 37 (2026-05-08) — Trendyol Q&A + Reviews Refactor
 
 ### 🔧 integrations.py Refactor — Aşama 2
