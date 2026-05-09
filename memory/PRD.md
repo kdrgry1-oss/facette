@@ -21,6 +21,41 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 40 (2026-05-09) — Capacitor Native Projesi Tamamlandı
+
+### 📱 Android + iOS Native Projeler Üretildi
+
+Apple Developer + Google Play Console hesapları kullanıcıda mevcut. Iter39'da hazırlanan altyapıyı bu iterasyonda native projeye dönüştürdük:
+
+**Yapılanlar:**
+- `npx cap add android` ✅ — `/app/frontend/android/` (Gradle projesi, Java/Kotlin kaynak)
+- `npx cap add ios` ✅ — `/app/frontend/ios/App/` (Xcode workspace, Swift)
+- `AndroidManifest.xml` permissions + deep link intent (`facette://`) + universal link (`https://facette.com.tr`)
+- `Info.plist` iOS: CFBundleURLTypes (facette scheme), localization (tr+en), push capability (UIBackgroundModes:remote-notification), KVKK uyumlu privacy strings (camera/photo/location/contacts), ATS strict
+- `build.gradle` (Android app): release signing config (keystore.properties auto-load), minifyEnabled+shrinkResources, ProGuard rules
+- `capacitor.config.json` — siyah/beyaz tema, splash 2s, push plugin presentation
+- `build-android.sh` (executable) — `bash build-android.sh debug|release` → APK/AAB
+- `build-ios.sh` (executable) — `bash build-ios.sh open|archive` → Xcode/IPA
+- `ios/ExportOptions.plist` — App Store distribution config
+
+**Yeni dokümantasyon:**
+- `NEW /app/MOBILE_APP_BUILD_INSTRUCTIONS.md` (8KB) — Mac/PC'de adım adım rehber:
+  - Save to GitHub → clone → yarn install
+  - Android Studio + JDK 17 setup
+  - Keystore generation (`keytool -genkey`)
+  - Release AAB build
+  - Xcode signing + APNs key
+  - Firebase Console (FCM + APNs) entegrasyonu
+  - App icon/splash generation (`@capacitor/assets`)
+  - 26 maddelik checklist + sorun çözüm tablosu
+
+**Capacitor packages installed (yarn):**
+`@capacitor/cli@7, @capacitor/core@7, @capacitor/android@7, @capacitor/ios@7, @capacitor/app@7, @capacitor/push-notifications@7, @capacitor/preferences@7, @capacitor/splash-screen@7, @capacitor/status-bar@7, @capacitor/network@7`
+
+**Frontend smoke OK:** webpack compiled successfully, storefront live.
+
+
+
 ## Iteration 39 (2026-05-09) — Trendyol Answer Bug Fix + Capacitor Wrap Hazırlık + Dokümantasyon
 
 ### 🐛 Trendyol Answer Field Empty Bug — DÜZELTİLDİ
