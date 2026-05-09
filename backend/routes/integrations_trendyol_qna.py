@@ -204,6 +204,105 @@ async def answer_trendyol_question(question_id: str, payload: dict, current_user
 
 # ==================== TRENDYOL REVIEWS (public storefront scrape) ====================
 
+@router.post("/trendyol/questions/sync-answers")
+async def sync_trendyol_answers(
+    payload: Optional[dict] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """ANSWERED status'lu fakat answer alanı boş olan trendyol_questions için
+    tek tek /questions/{id} çağrısı atıp answer text'lerini doldur.
+
+    Trendyol filter API'si tasarım gereği `answers[]` döndürmez (performans).
+    Bu endpoint detay endpoint'ten çekerek bulk-train için veriyi tamamlar.
+
+    Body: {"max_count": 100, "only_empty_answers": true}
+    """
+    from .integrations import get_trendyol_config, get_trendyol_headers
+
+    cfg = payload or {}
+    max_count = int(cfg.get("max_count") or 100)
+    only_empty = bool(cfg.get("only_empty_answers", True))
+
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+
+    headers = await get_trendyol_headers()
+    if not headers:
+        raise HTTPException(status_code=400, detail="Trendyol kimlik bilgileri eksik")
+
+    supplier_id = config["supplier_id"]
+    base_url = "https://apigw.trendyol.com" if config.get("mode") == "live" else "https://stageapigw.trendyol.com"
+
+    query = {"status": "ANSWERED"}
+    if only_empty:
+        query["$or"] = [{"answer": ""}, {"answer": {"$exists": False}}, {"answer": None}]
+
+    cur = db.trendyol_questions.find(query, {"_id": 0, "question_id": 1}).limit(max_count)
+    targets = await cur.to_list(max_count)
+
+    fetched = 0
+    updated = 0
+    failed = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for t in targets:
+            q_id = t.get("question_id")
+            if not q_id:
+                continue
+            try:
+                resp = await client.get(
+                    f"{base_url}/integration/qna/sellers/{supplier_id}/questions/{q_id}",
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    failed += 1
+                    if len(errors) < 5:
+                        errors.append(f"{q_id}: HTTP {resp.status_code}")
+                    continue
+                fetched += 1
+                data = resp.json()
+                # Trendyol detail endpoint single `answer` object döner (filter'daki answers[] DEĞİL)
+                ans_obj = data.get("answer") or {}
+                # Bazı durumlarda eski format answers[] olabilir — fallback
+                if not ans_obj:
+                    ans_arr = data.get("answers") or []
+                    if ans_arr:
+                        ans_obj = ans_arr[0] if isinstance(ans_arr[0], dict) else {}
+                ans_text = (ans_obj or {}).get("text", "") if isinstance(ans_obj, dict) else ""
+                if ans_text:
+                    answered_at_iso = ""
+                    cdate = ans_obj.get("creationDate") or ans_obj.get("createdDate")
+                    if cdate:
+                        try:
+                            answered_at_iso = datetime.fromtimestamp(cdate / 1000, tz=timezone.utc).isoformat()
+                        except Exception:
+                            answered_at_iso = str(cdate)
+                    await db.trendyol_questions.update_one(
+                        {"question_id": q_id},
+                        {"$set": {
+                            "answer": ans_text,
+                            "answered_at": answered_at_iso or datetime.now(timezone.utc).isoformat(),
+                            "answer_synced_at": datetime.now(timezone.utc).isoformat(),
+                        }}
+                    )
+                    updated += 1
+            except Exception as e:
+                failed += 1
+                if len(errors) < 5:
+                    errors.append(f"{q_id}: {e}")
+
+    return {
+        "success": True,
+        "scanned": len(targets),
+        "fetched": fetched,
+        "updated": updated,
+        "failed": failed,
+        "errors": errors,
+    }
+
+
 @router.post("/trendyol/reviews/scrape")
 async def scrape_trendyol_reviews(
     payload: dict,

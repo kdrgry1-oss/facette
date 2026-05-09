@@ -21,6 +21,74 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 39 (2026-05-09) — Trendyol Answer Bug Fix + Capacitor Wrap Hazırlık + Dokümantasyon
+
+### 🐛 Trendyol Answer Field Empty Bug — DÜZELTİLDİ
+Bug: `trendyol_questions.answer` alanı 303/303 boştu çünkü Trendyol'un filter API'si performans için `answers[]` array'ini boş döndürür.
+
+**Fix (`/api/integrations/trendyol/questions/sync-answers`):**
+- ANSWERED status'lu fakat answer alanı boş soruları batch tara
+- Her biri için `GET /integration/qna/sellers/{supplier_id}/questions/{id}` (detail endpoint)
+- Detail response single `answer` objesi döner (`answers[]` DEĞİL — format farkı tespit edildi)
+- DB update: `answer`, `answered_at`, `answer_synced_at`
+- Body: `{max_count, only_empty_answers}`
+
+**Sonuç:**
+- ✅ 303/303 cevap çekildi
+- ✅ Bulk-train: **228 KB satırı eklendi** (74'ü çok kısa cevap atlandı)
+- ✅ AI Asistan artık 228 örnek cevapla eğitildi
+
+### 📱 Capacitor Wrap Hazırlık (App Store + Play Store)
+Mevcut React frontend → iOS/Android native uygulama paketleme altyapısı:
+
+**Backend (zaten Iter35'te hazır):**
+- `/api/app/version-check`, `/api/app/devices/register`, `/api/app/config`
+- Push notification altyapısı + admin yönetim paneli
+- CORS'a `capacitor://localhost`, `ionic://localhost`
+
+**Frontend altyapısı (Iter39):**
+- `NEW /app/frontend/src/lib/native.js` — Capacitor native bridge (try/catch safe imports)
+- `bootstrapNative()` — push registration + version check + deep links
+- `setupPushNotifications()` — FCM/APNs token alma + backend register
+- `checkAppVersion()` — force-update detection
+- `setupDeepLinks()` — `facette://order/123` URL handler
+- `App.js` — useEffect içinde bootstrap çağrısı (web mode'da no-op)
+- `NEW /app/frontend/capacitor.config.ts` — appId, splash screen, push, statusbar config
+- Capacitor packages installed (yarn): `@capacitor/core`, `@capacitor/app`, `@capacitor/push-notifications`, `@capacitor/preferences`
+
+**Deployment çalıştırılması (kullanıcı tarafında):**
+```bash
+cd /app/frontend
+yarn add @capacitor/cli @capacitor/android @capacitor/ios
+npx cap init "Facette" "com.facette.app" --web-dir=build
+npx cap add android && npx cap add ios
+yarn build && npx cap sync
+npx cap open android  # Android Studio
+npx cap open ios      # Xcode (Mac)
+```
+
+### 📄 Dokümantasyon
+- `NEW /app/SALES_PITCH.md` (14KB) — Marketing satış dokümantasyonu (Iter38'de oluşturulmuştu)
+- `NEW /app/CAPACITOR_DEPLOYMENT_GUIDE.md` (10KB) — Adım adım iOS+Android paketleme rehberi:
+  - Apple Developer + Google Play Console kurulum
+  - Capacitor init + sync komutları
+  - Build & Release flow (Xcode + Android Studio)
+  - Store listing rehberi (icon, screenshot, privacy, KVKK)
+  - 11 maddelik checklist
+  - Yaygın sorun & çözümleri tablosu
+  - Maliyet tahmini (~10-20K₺ ilk yıl)
+
+### Files Modified / Created
+- `/app/backend/routes/integrations_trendyol_qna.py` — sync-answers endpoint (single `answer` object mapping)
+- `NEW /app/frontend/src/lib/native.js` — Capacitor bridge
+- `NEW /app/frontend/capacitor.config.ts` — Capacitor config
+- `/app/frontend/src/App.js` — bootstrapNative useEffect
+- `/app/frontend/package.json` — 4 yeni Capacitor paketi
+- `NEW /app/SALES_PITCH.md`
+- `NEW /app/CAPACITOR_DEPLOYMENT_GUIDE.md`
+
+
+
 ## Iteration 38 (2026-05-08) — Akıllı Müşteri Yanıtlayıcı (AI Asistan)
 
 ### 🤖 AI Asistan — Sohbetle Eğitilen, Otomatik Yanıt Veren Bot

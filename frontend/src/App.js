@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
+import { bootstrapNative } from "./lib/native";
 
 // Pages
 import Home from "./pages/Home";
@@ -86,6 +88,8 @@ function App() {
     window.__FACETTE_TRACKED__ = true;
     trackVisit();
   }
+  // Capacitor native bootstrap (web mode'da no-op)
+  useEffect(() => { bootstrapNative(); }, []);
   return (
     <AuthProvider>
       <CartProvider>
