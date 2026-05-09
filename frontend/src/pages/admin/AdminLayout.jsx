@@ -5,7 +5,7 @@ import {
   Megaphone, FileText, Settings, LogOut, Menu, X, ChevronDown,
   Palette, Plug, RotateCcw, Store, GitMerge, Cable, Building2, Shield, Factory,
   Users, Ruler, MessageSquare, PenTool, Truck, CreditCard, TrendingUp, Link2,
-  BellRing, CheckSquare, Code, Lock,
+  BellRing, CheckSquare, Code, Lock, Brain,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppConfirmRoot } from "../../components/admin/AppConfirm";
@@ -145,6 +145,8 @@ const navigation = [
       { label: "Güvenlik Paneli", path: "/admin/guvenlik-paneli", icon: Shield },
       // Iteration 35 — Mobile app management (versiyon, push, devices)
       { label: "Mobil Uygulama", path: "/admin/mobil-uygulama", icon: BellRing },
+      // Iteration 38 — Akıllı müşteri yanıtlayıcı (AI)
+      { label: "AI Asistan", path: "/admin/ai-asistan", icon: Brain },
     ],
   },
   {
