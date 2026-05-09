@@ -79,6 +79,16 @@ async def mark_alert_read(alert_id: str, _=Depends(require_admin)):
 async def fire_test_alert(admin=Depends(require_admin)):
     if not _is_super(admin):
         raise HTTPException(status_code=403, detail="Sadece süper admin test alarmı tetikleyebilir")
+    # Soft rate-limit: 1 test alert per 30s per super_admin
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+    recent = await db.alerts.count_documents({
+        "kind": "manual_test",
+        "meta.triggered_by": admin.get("email"),
+        "created_at": {"$gte": cutoff},
+    })
+    if recent >= 1:
+        raise HTTPException(status_code=429, detail="Çok hızlı — 30 saniye bekleyin")
     result = await send_alert(
         kind="manual_test",
         level="warning",
