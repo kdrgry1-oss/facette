@@ -88,6 +88,8 @@ from routes.social_auth import router as social_auth_router
 from routes.security_dashboard import router as security_dashboard_router
 from routes.mobile import router as mobile_router
 from routes.admin_mobile import router as admin_mobile_router
+from routes.secrets_vault import router as secrets_vault_router
+from routes.system_health import router as system_health_router
 
 # Database
 from routes.deps import client, db
@@ -111,10 +113,16 @@ async def lifespan(app: FastAPI):
                 "first_name": "Admin",
                 "last_name": "User",
                 "is_admin": True,
+                "is_super_admin": True,
                 "is_active": True,
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
             logger.info("Admin user created: admin@facette.com / admin123")
+        elif not admin.get("is_super_admin"):
+            await db.users.update_one(
+                {"email": "admin@facette.com"},
+                {"$set": {"is_super_admin": True}},
+            )
         
         # Create indexes
         await db.products.create_index("slug")
@@ -134,6 +142,14 @@ async def lifespan(app: FastAPI):
         # IP blocklist (Iter36 — brute force IP-level ban)
         await db.ip_blocklist.create_index([("ip", 1)], unique=True)
         await db.ip_blocklist.create_index([("blocked_until", 1)])
+        # Secrets Vault & monitoring (Iter39)
+        await db.vault_secrets.create_index("key", unique=True)
+        await db.error_logs.create_index([("created_at", -1)])
+        await db.error_logs.create_index([("level", 1), ("created_at", -1)])
+        await db.error_logs.create_index([("kind", 1), ("created_at", -1)])
+        await db.alerts.create_index([("created_at", -1)])
+        await db.alerts.create_index([("read", 1), ("created_at", -1)])
+        await db.alerts.create_index([("fingerprint", 1), ("created_at", -1)])
         
         logger.info("Database indexes created")
     except Exception as e:
@@ -339,6 +355,12 @@ class IntegrationLoggingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(IntegrationLoggingMiddleware)
 
+# ---------------------------------------------------------------------------
+# ERROR TRACKING & ALERTING — captures 5xx, slow responses, exceptions
+# ---------------------------------------------------------------------------
+from security.monitoring import ErrorTrackingMiddleware
+app.add_middleware(ErrorTrackingMiddleware)
+
 # Main API Router
 api_router = APIRouter(prefix="/api")
 
@@ -436,6 +458,9 @@ api_router.include_router(security_dashboard_router)
 # Mobile app endpoints — version check, device registration, runtime config
 api_router.include_router(mobile_router)
 api_router.include_router(admin_mobile_router)
+# Secrets Vault (encrypted credentials store) + System Health monitoring
+api_router.include_router(secrets_vault_router)
+api_router.include_router(system_health_router)
 
 # Root endpoint
 @api_router.get("/")

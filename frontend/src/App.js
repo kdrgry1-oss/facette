@@ -74,6 +74,8 @@ import StockAlerts2 from "./pages/admin/StockAlerts";
 import CustomerSegments from "./pages/admin/CustomerSegments";
 import AutomationStatus from "./pages/admin/AutomationStatus";
 import SecurityDashboard from "./pages/admin/SecurityDashboard";
+import SystemHealth from "./pages/admin/SystemHealth";
+import SecretsVault from "./pages/admin/SecretsVault";
 import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
@@ -160,6 +162,8 @@ function App() {
               <Route path="musteri-segmentleri" element={<CustomerSegments />} />
               <Route path="otomasyon" element={<AutomationStatus />} />
               <Route path="guvenlik-paneli" element={<SecurityDashboard />} />
+              <Route path="sistem-sagligi" element={<SystemHealth />} />
+              <Route path="secrets-vault" element={<SecretsVault />} />
               <Route path="mobil-uygulama" element={<MobileApp />} />
               <Route path="ai-asistan" element={<AIAssistant />} />
               <Route path="footer-tasarim" element={<FooterDesign />} />
