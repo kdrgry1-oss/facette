@@ -1696,6 +1696,13 @@ async def get_cargo_label(order_id: str, token: str = None):
     if not remarks:
         remarks = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery", "kapida") else "Gönderici Ödemeli"
 
+    # Kargo bilgileri (paylaşılan referans şablonuna göre)
+    cargo_company_display = "MNG DHL E-Commerce"  # şu an aktif kargo firması
+    payment_method = (order.get("payment_method") or "").lower()
+    is_kapida = payment_method in ("cash_on_delivery", "kapida")
+    odeme_turu = "Alıcı Ödemeli" if is_kapida else "Gönderici Ödemeli"
+    kargo_tipi = f"{odeme_turu} Kargo"
+
     # Brand logo (PNG → base64) — paylaşılan FACETTE wordmark
     import base64, pathlib
     logo_b64 = ""
@@ -1707,6 +1714,9 @@ async def get_cargo_label(order_id: str, token: str = None):
         logo_b64 = ""
     logo_src = f"data:image/png;base64,{logo_b64}" if logo_b64 else ""
 
+    # Sender (gönderici) için telefon
+    sender_phone = sender.get("phone", "") or ""
+
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
 <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800;900&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
@@ -1715,42 +1725,30 @@ async def get_cargo_label(order_id: str, token: str = None):
   * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
   body {{ margin: 0; font-family: 'Mulish','Helvetica Neue',Arial,sans-serif; width: 100mm; height: 120mm; color: #000; background:#fff; }}
   .label {{ width: 100mm; height: 120mm; padding: 2mm; }}
-  .main {{ width: 100%; height: 100%; border: 1.8pt solid #000; border-radius: 1.5mm; padding: 3mm; display:flex; flex-direction:column; }}
+  .main {{ width: 100%; height: 100%; border: 1.8pt solid #000; border-radius: 1.5mm; padding: 2.5mm; display:flex; flex-direction:column; }}
 
-  /* ÜST: LOGO bandı */
-  .logo-band {{ display:flex; align-items:center; justify-content:center; padding: 1.5mm 0 2.5mm 0; border-bottom: 1.4pt solid #000; }}
-  .logo-band img {{ height: 9mm; width: auto; max-width: 88mm; }}
-  .logo-fallback {{ font-family:'Mulish',sans-serif; font-weight: 900; font-size: 24pt; letter-spacing: 6pt; }}
+  /* LOGO bandı */
+  .logo-band {{ display:flex; align-items:center; justify-content:center; padding: 0.5mm 0 1.8mm 0; border-bottom: 1.4pt solid #000; }}
+  .logo-band img {{ height: 8mm; width: auto; max-width: 88mm; }}
+  .logo-fallback {{ font-family:'Mulish',sans-serif; font-weight: 900; font-size: 22pt; letter-spacing: 6pt; }}
 
-  /* Üst meta blok (ORIGIN ID + FROM) */
-  .meta-block {{ padding: 2mm 0; border-bottom: 1.4pt solid #000; font-size: 8pt; line-height: 1.45; font-family:'Mulish',sans-serif; }}
-  .meta-block .row {{ display:flex; gap:2mm; align-items:baseline; margin-bottom: 0.6mm; }}
-  .meta-block .lbl {{ font-weight: 800; letter-spacing: 0.5pt; min-width: 22mm; }}
-  .meta-block .val {{ font-weight: 700; flex:1; }}
-  .meta-block .val-strong {{ font-weight: 800; flex:1; font-size: 9.5pt; }}
-  .meta-block .small-addr {{ font-weight: 500; font-size: 7.6pt; color: #111; margin-left: 24mm; line-height:1.3; }}
+  /* Bölüm başlığı (Gönderici / Alıcı / Kargo Bilgileri) */
+  .section-title {{ text-align: center; font-family:'Mulish',sans-serif; font-weight: 800; font-size: 9pt; letter-spacing: 0.5pt; padding: 1.2mm 0; border-bottom: 1pt solid #000; background: #f0f0f0; }}
 
-  /* Bölümler */
-  .section {{ padding: 1.8mm 0; border-bottom: 1.4pt solid #000; font-family:'Mulish',sans-serif; }}
-  .section:last-child {{ border-bottom: 0; }}
-  .section .row {{ display:flex; gap:2mm; align-items:baseline; }}
-  .section .lbl {{ font-weight: 800; letter-spacing: 0.5pt; font-size: 7.5pt; min-width: 22mm; }}
-  .section .val {{ font-weight: 700; font-size: 8.8pt; flex:1; }}
-  .section .val-strong {{ font-weight: 800; font-size: 10pt; flex:1; }}
-  .small-addr {{ font-weight: 500; font-size: 7.8pt; color: #111; margin-left: 24mm; line-height: 1.35; }}
+  /* Tablo satırları (label / value) */
+  .info-table {{ border-bottom: 1pt solid #000; }}
+  .info-row {{ display:flex; border-bottom: 0.6pt solid #000; min-height: 5mm; }}
+  .info-row:last-child {{ border-bottom: 0; }}
+  .info-row .lbl {{ width: 22mm; padding: 1mm 1.5mm; font-family:'Mulish',sans-serif; font-weight: 700; font-size: 7.8pt; border-right: 0.6pt solid #000; display:flex; align-items:center; }}
+  .info-row .val {{ flex: 1; padding: 1mm 1.5mm; font-family:'Mulish',sans-serif; font-weight: 700; font-size: 8.4pt; display:flex; align-items:center; line-height: 1.25; word-break: break-word; }}
+  .info-row .val.addr {{ font-weight: 600; font-size: 7.6pt; line-height: 1.3; }}
 
-  .grid {{ display:grid; grid-template-columns: 28mm 1fr; gap: 1.2mm 2mm; font-family:'Mulish',sans-serif; }}
-  .grid .lbl {{ font-weight: 800; letter-spacing: 0.4pt; font-size: 7.8pt; }}
-  .grid .val {{ font-weight: 700; font-size: 8.4pt; }}
-
-  /* Alt bant: REMARKS + BARKOD */
-  .bottom-row {{ flex: 1; display:flex; align-items:stretch; gap: 3mm; padding-top: 2mm; }}
-  .remarks {{ flex: 1; font-family:'Mulish',sans-serif; }}
-  .remarks .lbl {{ font-weight: 800; letter-spacing: 0.5pt; font-size: 7.5pt; display:block; margin-bottom: 1mm; }}
-  .remarks .val {{ font-weight: 700; font-size: 9pt; text-transform: uppercase; line-height: 1.3; }}
-  .barcode-wrap {{ text-align: center; align-self: flex-end; }}
-  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 36pt; letter-spacing: 0; line-height: 0.9; color:#000; }}
-  .barcode-num {{ font-size: 9pt; letter-spacing: 1.4pt; font-family: 'Courier New', monospace; font-weight: 800; margin-top: -0.5mm; }}
+  /* Barkod */
+  .barcode-band {{ margin-top: auto; padding-top: 1.5mm; text-align:center; }}
+  /* Libre Barcode 39 Extended → Code 39 (alfanumerik desteklenir). 30pt → her char ~5mm,
+     12 karakter ≈ 60mm < 88mm kullanılabilir alan. */
+  .barcode {{ font-family: 'Libre Barcode 39 Extended', 'Libre Barcode 39', monospace; font-size: 30pt; letter-spacing: 0; line-height: 0.95; color:#000; white-space: nowrap; display: block; }}
+  .barcode-num {{ font-size: 9pt; letter-spacing: 1.4pt; font-family: 'Courier New', monospace; font-weight: 800; margin-top: 0.3mm; }}
 </style></head><body>
 <div class="label">
   <div class="main">
@@ -1760,55 +1758,67 @@ async def get_cargo_label(order_id: str, token: str = None):
       {('<img src="'+logo_src+'" alt="FACETTE"/>') if logo_src else '<div class="logo-fallback">FACETTE</div>'}
     </div>
 
-    <!-- ORIGIN ID + FROM -->
-    <div class="meta-block">
-      <div class="row"><span class="lbl">ORIGIN ID :</span><span class="val">{siparis_no}</span></div>
-      <div class="row"><span class="lbl">FROM :</span><span class="val-strong">{sender_company}</span></div>
-      <div class="small-addr">{sender_addr_line}</div>
+    <!-- GÖNDERİCİ BİLGİLERİ -->
+    <div class="section-title">Gönderici Bilgileri</div>
+    <div class="info-table">
+      <div class="info-row"><span class="lbl">Firma</span><span class="val">{sender_company}</span></div>
+      <div class="info-row"><span class="lbl">Telefon</span><span class="val">{sender_phone}</span></div>
+      <div class="info-row"><span class="lbl">Adres</span><span class="val addr">{sender_addr_line}</span></div>
     </div>
 
-    <!-- TO -->
-    <div class="section">
-      <div class="row"><span class="lbl">TO :</span><span class="val-strong">{receiver_name}</span></div>
-      <div class="small-addr">{receiver_full_addr}</div>
-      {(f'<div class="small-addr">Tel: {receiver_phone}</div>') if receiver_phone else ''}
+    <!-- ALICI BİLGİLERİ -->
+    <div class="section-title">Alıcı Bilgileri</div>
+    <div class="info-table">
+      <div class="info-row"><span class="lbl">İsim</span><span class="val">{receiver_name}</span></div>
+      <div class="info-row"><span class="lbl">Telefon</span><span class="val">{receiver_phone}</span></div>
+      <div class="info-row"><span class="lbl">Adres</span><span class="val addr">{receiver_full_addr}</span></div>
     </div>
 
-    <!-- REF -->
-    <div class="section">
-      <div class="row"><span class="lbl">REF :</span><span class="val">{main_barcode}</span></div>
+    <!-- KARGO BİLGİLERİ -->
+    <div class="section-title">Kargo Bilgileri</div>
+    <div class="info-table">
+      <div class="info-row"><span class="lbl">Kargo Firması</span><span class="val">{cargo_company_display}</span></div>
+      <div class="info-row"><span class="lbl">Ödeme Türü</span><span class="val">{odeme_turu}</span></div>
+      <div class="info-row"><span class="lbl">Kargo Tipi</span><span class="val">{kargo_tipi}</span></div>
     </div>
 
-    <!-- ORDER / ITEM / SHIP / DIMENSIONS / WEIGHT -->
-    <div class="section">
-      <div class="grid">
-        <span class="lbl">ORDER NO. :</span><span class="val">{siparis_no}</span>
-        <span class="lbl">ITEM NO. :</span><span class="val">{item_no}</span>
-        <span class="lbl">SHIP DATE :</span><span class="val">{ship_date_str}</span>
-        <span class="lbl">DIMENSIONS :</span><span class="val">{dimensions}</span>
-        <span class="lbl">WEIGHT :</span><span class="val">{weight_str}</span>
-      </div>
-    </div>
-
-    <!-- REMARKS + BARKOD -->
-    <div class="bottom-row">
-      <div class="remarks">
-        <span class="lbl">REMARKS :</span>
-        <span class="val">{remarks}</span>
-      </div>
-      <div class="barcode-wrap">
-        <div class="barcode">*{main_barcode}*</div>
-        <div class="barcode-num">{main_barcode}</div>
-      </div>
+    <!-- BARKOD (alt) -->
+    <div class="barcode-band">
+      <div class="barcode">*{main_barcode}*</div>
+      <div class="barcode-num">{main_barcode}</div>
     </div>
 
   </div>
 </div>
 <script>
-  // Otomatik yazdırma: query string ?print=1 ise yazdırma dialogu aç
-  if (window.location.search.includes('print=1')) {{
-    window.addEventListener('load', () => setTimeout(() => window.print(), 300));
+  // Barkodu çerçeveye sığdır — fontlar yüklendikten SONRA çalış
+  async function fitBarcode() {{
+    if (document.fonts && document.fonts.ready) {{
+      try {{ await document.fonts.ready; }} catch(e) {{}}
+    }}
+    // Ekstra güvenlik: fontların gerçekten render olması için bir frame bekle
+    await new Promise(r => requestAnimationFrame(() => r()));
+    const el = document.querySelector('.barcode');
+    if (!el) return;
+    // Container genişliği — .main padding'i çıkarılarak hesaplanır
+    const main = document.querySelector('.main');
+    const maxW = (main ? main.clientWidth : 340) - 12;
+    // 36pt'tan başla, sığana kadar küçült (min 18pt)
+    let size = 36;
+    el.style.fontSize = size + 'pt';
+    let safety = 24;
+    while (el.scrollWidth > maxW && size > 18 && safety-- > 0) {{
+      size -= 1;
+      el.style.fontSize = size + 'pt';
+    }}
   }}
+  window.addEventListener('load', () => {{
+    fitBarcode().then(() => {{
+      if (window.location.search.includes('print=1')) {{
+        setTimeout(() => window.print(), 200);
+      }}
+    }});
+  }});
 </script>
 </body></html>"""
     return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
