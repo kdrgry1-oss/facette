@@ -1636,9 +1636,10 @@ async def mng_cargo_webhook(payload: dict):
 
 @router.get("/{order_id}/cargo-label")
 async def get_cargo_label(order_id: str, token: str = None):
-    """100x150mm yazdırılabilir MNG-stili kargo etiketi (HTML + Code39).
-    Üstteki barkod = sipariş numarası | Alttaki barkod = MNG kargo takip no.
-    Authorization header yerine ?token=... query parametresi de kabul eder (yeni sekme yazdırma).
+    """100x150mm yazdırılabilir kargo etiketi (HTML + Code39).
+    Tek barkod: kargo takip no varsa onu, yoksa sipariş numarasını kullanır.
+    Tasarım: LOGO + ORIGIN ID + FROM/TO/REF + ORDER/ITEM/SHIP DATE/DIMENSIONS/WEIGHT
+    + REMARKS + tek barkod sağ altta + sağ kenarda handling icon'ları.
     """
     from fastapi.responses import HTMLResponse
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
@@ -1650,91 +1651,172 @@ async def get_cargo_label(order_id: str, token: str = None):
     mng_siparis_no = cargo_obj.get("mng_siparis_no") or ""
     mng_gonderi_no = cargo_obj.get("mng_gonderi_no") or ""
     mng_nz_barkod = cargo_obj.get("mng_nz_barkod") or ""
-    # Etikette gösterilecek "asıl" kargo takip — NZ varsa (anında MNGGonderiBarkod) → GONDERI_NO → MNG_SIPARIS_NO
+    # Tek barkod: NZ > GONDERI_NO > MNG_SIPARIS_NO > tracking > sipariş_no
     real_kargo_takip = mng_nz_barkod or mng_gonderi_no or mng_siparis_no or barkod or ""
     siparis_no = str(order.get("order_number") or order_id)
+    main_barcode = real_kargo_takip or siparis_no  # ✅ TEK barkod — etiketin merkezi
     sender = await _get_sender_info()
     mng = await _get_mng_settings()
     sender_company = mng.get("customer_code") or sender["name"] or "FACETTE"
+    sender_addr_line = f"{sender['address']}, {sender['district']}/{sender['city']}".strip(" ,/")
 
     ship = order.get("shipping_address") or {}
     receiver_name = f"{ship.get('first_name','')} {ship.get('last_name','')}".strip() or ship.get("name") or "Alıcı"
     receiver_phone = ship.get("phone") or ""
-    receiver_addr = f"{ship.get('address','')}".strip()
+    receiver_addr = (ship.get("address") or "").strip()
     receiver_district_city = f"{ship.get('district','')} / {ship.get('city','')}".strip(" /")
+    receiver_full_addr = ", ".join([x for x in [receiver_addr, receiver_district_city] if x])
 
     items = order.get("items") or []
-    paket_sayisi = "1/1"
-    total_adet = sum(int(it.get("quantity") or 1) for it in items)
-    desi = "1"
+    total_qty = sum(int(it.get("quantity") or 1) for it in items)
+    # İlk ürünün stock_code/sku/barcode/name'i ITEM NO; çoklu ürün varsa "+N more"
+    first_item = items[0] if items else {}
+    item_no = (first_item.get("stock_code") or first_item.get("sku")
+               or first_item.get("barcode") or first_item.get("name") or "-")
+    # Çok uzun ürün ismini kısalt
+    item_no = (item_no[:32] + "…") if len(str(item_no)) > 33 else item_no
+    if len(items) > 1:
+        item_no = f"{item_no} (+{len(items)-1})"
+
+    ship_date = order.get("ship_date") or order.get("created_at") or datetime.now(timezone.utc).isoformat()
+    try:
+        ship_date_str = datetime.fromisoformat(ship_date.replace("Z", "+00:00")).strftime("%d %b %Y").upper()
+    except Exception:
+        ship_date_str = datetime.now(timezone.utc).strftime("%d %b %Y").upper()
+
+    # Dimensions / Weight — items'dan toplama
+    total_weight = sum(float(it.get("weight") or 0) for it in items)
+    if total_weight <= 0:
+        total_weight = 0.5 * total_qty  # makul varsayılan
+    dimensions = order.get("package_dimensions") or "30x20x15 cm"
+    weight_str = f"{total_weight:.1f} KG"
 
     payment_method = (order.get("payment_method") or "").lower()
-    odeme_tipi = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery","kapida") else "Gönderici Ödemeli"
-    kargo_tipi = "Alıcı Ödemeli Kargo" if payment_method in ("cash_on_delivery","kapida") else "Gönderici Ödemeli Kargo"
+    remarks = order.get("cargo_remarks") or order.get("note") or ""
+    if not remarks:
+        remarks = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery", "kapida") else "Gönderici Ödemeli"
+
+    # Brand initials için (LOGO kutusu) — Facette → F
+    brand_letter = "F"
 
     html = f"""<!DOCTYPE html>
-<html lang="tr"><head><meta charset="UTF-8"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><title>Kargo Etiketi - {siparis_no}</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=Libre+Barcode+39&family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">
+<html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
 <style>
   @page {{ size: 100mm 150mm; margin: 0; }}
   * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-  body {{ margin: 0; font-family: 'Inter', 'Liberation Sans', 'DejaVu Sans', Arial, sans-serif; width: 100mm; min-height: 150mm; color: #000; }}
-  .label {{ padding: 3mm; height: 100%; }}
-  .row {{ display: flex; justify-content: space-between; align-items: center; }}
-  .small {{ font-size: 7pt; color: #333; }}
-  .barcode {{ font-family: 'Libre Barcode 39', monospace; font-size: 38pt; letter-spacing: 0; line-height: 0.9; text-align: center; }}
-  .barcode-num {{ text-align:center; font-size: 10pt; letter-spacing: 1.5px; margin-top: -1mm; font-family: 'Courier New', monospace; }}
-  .section {{ border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm; font-size: 9pt; }}
-  .section h4 {{ margin: 0 0 1mm 0; font-size: 7pt; color:#444; text-transform: uppercase; letter-spacing: 0.6px; }}
-  .strong {{ font-weight: 700; font-size: 10pt; }}
-  .top-bar {{ display:flex; justify-content:space-between; align-items:center; padding-bottom:1mm; }}
-  .brand {{ font-weight: 800; font-size: 12pt; }}
-  .meta {{ display:flex; gap:6mm; font-size: 8pt; }}
-  .meta b {{ font-size: 9pt; }}
+  body {{ margin: 0; font-family: 'Inter','Helvetica Neue',Arial,sans-serif; width: 100mm; min-height: 150mm; color: #000; background:#fff; }}
+  .label {{ display:flex; height: 150mm; }}
+  .main {{ flex: 1; padding: 4mm; border: 1.4pt solid #000; border-radius: 1.5mm; margin: 2mm; }}
+  .side {{ width: 16mm; display:flex; flex-direction:column; justify-content:space-between; padding: 2mm 0; }}
+  .icon-box {{ width: 12mm; height: 12mm; border: 1.4pt solid #000; border-radius: 1mm; display:flex; align-items:center; justify-content:center; margin: 0.5mm auto; }}
+  .icon-box svg {{ width: 8mm; height: 8mm; fill:#000; }}
+
+  /* Üst başlık */
+  .header {{ display:flex; gap: 3mm; align-items:flex-start; padding-bottom: 2mm; border-bottom: 1.2pt solid #000; }}
+  .logo-box {{ width: 16mm; height: 16mm; background: #000; color: #fff; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 18pt; letter-spacing: -0.5pt; flex-shrink: 0; }}
+  .meta-block {{ flex: 1; font-size: 7.2pt; line-height: 1.4; }}
+  .meta-block .lbl {{ font-weight: 700; letter-spacing: 0.4pt; color: #000; display:inline-block; min-width: 18mm; }}
+  .meta-block .val {{ font-weight: 600; }}
+
+  /* Bölümler */
+  .section {{ padding: 2mm 0; border-bottom: 1.2pt solid #000; font-size: 8pt; }}
+  .section:last-child {{ border-bottom: 0; }}
+  .section .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 7pt; display:inline-block; min-width: 22mm; vertical-align: top; }}
+  .section .val {{ font-weight: 600; font-size: 8.5pt; }}
+  .section .val-strong {{ font-weight: 700; font-size: 9.5pt; }}
+  .small-addr {{ font-weight: 500; font-size: 7.5pt; color: #222; }}
+
+  .grid {{ display:grid; grid-template-columns: auto 1fr; gap: 0.8mm 2mm; font-size: 7.5pt; }}
+  .grid .lbl {{ font-weight: 700; letter-spacing: 0.3pt; }}
+  .grid .val {{ font-weight: 600; }}
+
+  /* Barkod alt sağda */
+  .bottom-row {{ display:flex; align-items:flex-end; gap: 3mm; padding-top: 2mm; }}
+  .remarks {{ flex: 1; font-size: 8pt; }}
+  .remarks .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 7pt; display:block; margin-bottom: 1mm; }}
+  .remarks .val {{ font-weight: 600; font-size: 9pt; text-transform: uppercase; }}
+  .barcode-wrap {{ text-align: center; }}
+  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 30pt; letter-spacing: 0; line-height: 0.9; }}
+  .barcode-num {{ font-size: 8pt; letter-spacing: 1.2pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: -0.5mm; }}
 </style></head><body>
 <div class="label">
-  <div class="top-bar">
-    <div class="brand">MNG <span style="color:#e60012">DHL</span> E-Commerce</div>
-    <div class="small">{datetime.now(timezone.utc).strftime('%d.%m.%Y')}</div>
-  </div>
-
-  <!-- ÜST: SİPARİŞ NUMARASI BARKODU -->
-  <div class="barcode">*{siparis_no}*</div>
-  <div class="barcode-num">{siparis_no}</div>
-
-  <div class="section">
-    <h4>Gönderici Bilgileri</h4>
-    <div class="strong">{sender_company}</div>
-    <div class="small">Telefon: {sender['phone']}</div>
-    <div class="small">Adres: {sender['address']} {sender['district']}/{sender['city']}</div>
-  </div>
-
-  <div class="section">
-    <h4>Alıcı Bilgileri</h4>
-    <div class="strong">{receiver_name}</div>
-    <div class="small">Telefon: {receiver_phone}</div>
-    <div class="small">Adres: {receiver_addr}</div>
-    <div class="small">{receiver_district_city}</div>
-  </div>
-
-  <div class="section">
-    <h4>Kargo Bilgileri</h4>
-    <div class="meta">
-      <div>Ödeme Türü: <b>{odeme_tipi}</b></div>
-      <div>Paket Sayısı: <b>{paket_sayisi}</b></div>
-      <div>Desi: <b>{desi}</b></div>
+  <!-- ANA ETİKET KARTI -->
+  <div class="main">
+    <!-- ÜST: LOGO + ORIGIN ID + FROM -->
+    <div class="header">
+      <div class="logo-box">{brand_letter}</div>
+      <div class="meta-block">
+        <div><span class="lbl">ORIGIN ID :</span><span class="val">{siparis_no}</span></div>
+        <div style="margin-top:1.5mm;"><span class="lbl">FROM :</span><span class="val-strong">{sender_company}</span></div>
+        <div style="margin-left: 18mm;" class="small-addr">{sender_addr_line}</div>
+      </div>
     </div>
-    <div class="small" style="margin-top:1mm;">Kargo Tipi: {kargo_tipi}</div>
-    <div class="small">Sipariş No: {siparis_no}</div>
+
+    <!-- TO -->
+    <div class="section">
+      <span class="lbl">TO :</span>
+      <span class="val-strong">{receiver_name}</span>
+      <div style="margin-left: 22mm; margin-top: 0.5mm;" class="small-addr">{receiver_full_addr}</div>
+      {(f'<div style="margin-left: 22mm;" class="small-addr">Tel: {receiver_phone}</div>') if receiver_phone else ''}
+    </div>
+
+    <!-- REF -->
+    <div class="section">
+      <span class="lbl">REF :</span>
+      <span class="val">{main_barcode}</span>
+    </div>
+
+    <!-- ORDER / ITEM / SHIP / DIMENSIONS / WEIGHT -->
+    <div class="section">
+      <div class="grid">
+        <span class="lbl">ORDER NO. :</span><span class="val">{siparis_no}</span>
+        <span class="lbl">ITEM NO. :</span><span class="val">{item_no}</span>
+        <span class="lbl">SHIP DATE :</span><span class="val">{ship_date_str}</span>
+        <span class="lbl">DIMENSIONS :</span><span class="val">{dimensions}</span>
+        <span class="lbl">WEIGHT :</span><span class="val">{weight_str}</span>
+      </div>
+    </div>
+
+    <!-- REMARKS + TEK BARKOD (sağ alt) -->
+    <div class="bottom-row">
+      <div class="remarks">
+        <span class="lbl">REMARKS :</span>
+        <span class="val">{remarks}</span>
+      </div>
+      <div class="barcode-wrap">
+        <div class="barcode">*{main_barcode}*</div>
+        <div class="barcode-num">{main_barcode}</div>
+      </div>
+    </div>
   </div>
 
-  <!-- ALT: KARGO TAKİP NO BARKODU (varsa GONDERI_NO, yoksa MNG_SIPARIS_NO) -->
-  <div style="margin-top: 3mm;">
-    <div class="barcode">*{real_kargo_takip or siparis_no}*</div>
-    <div class="barcode-num">Takip No: {real_kargo_takip or '— şube işleminden sonra atanacak —'}</div>
-    {('<div class="small" style="text-align:center;margin-top:1mm;">Ref: ' + mng_siparis_no + '</div>') if (mng_siparis_no and mng_siparis_no != real_kargo_takip) else ''}
+  <!-- SAĞ KENAR: HANDLING ICONS -->
+  <div class="side">
+    <!-- FRAGILE (kırılan kadeh) -->
+    <div class="icon-box" title="Fragile">
+      <svg viewBox="0 0 24 24"><path d="M5 2l1.5 9c.3 1.7 1.7 3 3.5 3v6H7v2h10v-2h-3v-6c1.8 0 3.2-1.3 3.5-3L19 2H5zm2.4 2h9.2l-.9 5.6L13 11l1 2-2 1-1.5-1.5L9 12l1-2-2.4-1.2L7.4 4z"/></svg>
+    </div>
+    <!-- FLAMMABLE (alev) -->
+    <div class="icon-box" title="Flammable">
+      <svg viewBox="0 0 24 24"><path d="M13.5 1c1 4-1 5-2.5 7C9 11 7 13 7 16c0 4 3 7 7 7s7-3 7-7c0-3-1.5-5-3-6.5C16 8 14 6 13.5 1zM12 18c-2 0-3-1.5-3-3 0-1 0.5-2 1.5-3 0.5 2 2 2.5 3 3.5s-0.5 2.5-1.5 2.5z"/></svg>
+    </div>
+    <!-- RECYCLABLE (geri dönüşüm) -->
+    <div class="icon-box" title="Recyclable">
+      <svg viewBox="0 0 24 24"><path d="M12 2l3 5h-2v3h-2V7H9l3-5zm-7.5 9l1 5.5L3 19.5 5.5 22h6v-2h-4l1.5-1.5-1-5.5-3.5-2zm15 0l-3.5 2-1 5.5L16.5 20h-4v2h6L21 19.5l-2.5-3 1-5.5z"/></svg>
+    </div>
+    <!-- KEEP DRY (şemsiye) -->
+    <div class="icon-box" title="Keep Dry">
+      <svg viewBox="0 0 24 24"><path d="M12 2C7 2 3 6 3 11h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-5-4-9-9-9zm-1 10v8c0 1.7 1.3 3 3 3s3-1.3 3-3h-2c0 0.5-0.5 1-1 1s-1-0.5-1-1v-8h-2z"/></svg>
+    </div>
   </div>
 </div>
+<script>
+  // Otomatik yazdırma: query string ?print=1 ise yazdırma dialogu aç
+  if (window.location.search.includes('print=1')) {{
+    window.addEventListener('load', () => setTimeout(() => window.print(), 300));
+  }}
+</script>
 </body></html>"""
     return HTMLResponse(content=html, headers={"Content-Type": "text/html; charset=utf-8"})
 
