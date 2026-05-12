@@ -14,7 +14,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Wallet, RefreshCw,
-  Save, Search, Box, Activity, Zap,
+  Save, Search, Box, Activity, Zap, Factory, CalendarClock,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -26,6 +26,7 @@ const fmtNum = (v) => Number(v || 0).toLocaleString("tr-TR");
 
 const TABS = [
   { key: "stock", label: "Stok Değer", icon: Box },
+  { key: "forecast", label: "Üretim Önerisi", icon: Factory },
   { key: "fast", label: "Hızlı Satan", icon: TrendingUp },
   { key: "slow", label: "Yavaş Satan", icon: TrendingDown },
   { key: "returns", label: "İade Oranı", icon: AlertTriangle },
@@ -64,6 +65,7 @@ export default function ReportsExtended() {
       </div>
 
       {tab === "stock" && <StockValuation />}
+      {tab === "forecast" && <StockoutForecast />}
       {tab === "fast" && <FastMovers />}
       {tab === "slow" && <SlowMovers />}
       {tab === "returns" && <ReturnRateAlerts />}
@@ -119,6 +121,134 @@ function StockValuation() {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+function StockoutForecast() {
+  const [velocityDays, setVelocityDays] = useState(30);
+  const [horizonDays, setHorizonDays] = useState(60);
+  const [coverDays, setCoverDays] = useState(60);
+  const [data, setData] = useState({ items: [], summary: {} });
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await axios.get(
+        `${API}/admin/reports2/stockout-forecast?velocity_days=${velocityDays}&horizon_days=${horizonDays}&target_cover_days=${coverDays}&min_velocity=0.05`,
+        auth()
+      );
+      setData(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Yüklenemedi"); }
+    finally { setLoading(false); }
+  }, [velocityDays, horizonDays, coverDays]);
+  useEffect(() => { load(); }, [load]);
+
+  const s = data.summary || {};
+  return (
+    <div className="space-y-4" data-testid="forecast-panel">
+      <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm flex items-start gap-2">
+        <CalendarClock className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-700" />
+        <div>
+          Son <strong>{velocityDays}</strong> gün satış ortalamasına göre <strong>{horizonDays}</strong> gün içinde tükenecek ürünler.
+          Önerilen üretim adedi <strong>{coverDays}</strong> günlük stok hedefine göre hesaplanır.
+          Bu ürünleri "Üretim" menüsünden imalat planına ekleyebilirsiniz.
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="text-sm text-gray-600 flex items-center gap-1">Geçmiş veri (gün):
+          <select value={velocityDays} onChange={(e)=>setVelocityDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value={14}>14</option><option value={30}>30</option><option value={60}>60</option><option value={90}>90</option>
+          </select>
+        </label>
+        <label className="text-sm text-gray-600 flex items-center gap-1">Tükenme süresi:
+          <select value={horizonDays} onChange={(e)=>setHorizonDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value={30}>30 gün</option><option value={60}>60 gün</option><option value={90}>90 gün</option><option value={120}>120 gün</option><option value={180}>180 gün</option>
+          </select>
+        </label>
+        <label className="text-sm text-gray-600 flex items-center gap-1">Hedef stok süresi:
+          <select value={coverDays} onChange={(e)=>setCoverDays(+e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <option value={30}>30 gün</option><option value={60}>60 gün</option><option value={90}>90 gün</option><option value={120}>120 gün</option>
+          </select>
+        </label>
+        <button onClick={load} className="ml-auto text-sm text-blue-700 hover:underline flex items-center gap-1">
+          <RefreshCw className={`w-3.5 h-3.5 ${loading?"animate-spin":""}`}/>Yenile
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KPI testid="forecast-critical" label="🔴 Kritik (≤14g)" value={fmtNum(s.critical)} tone="danger" />
+        <KPI testid="forecast-high" label="🟠 Yüksek (≤30g)" value={fmtNum(s.high)} tone="warn" />
+        <KPI testid="forecast-warning" label="🟡 Uyarı" value={fmtNum(s.warning)} tone="info" />
+        <KPI testid="forecast-units" label="Toplam Üretim Adedi" value={fmtNum(s.total_production_units)} icon={Factory} />
+        <KPI testid="forecast-value" label="Üretim Değeri" value={fmtMoney(s.total_production_value)} icon={DollarSign} tone="info" />
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-600">
+            <tr>
+              <th className="text-left px-3 py-2">Ürün</th>
+              <th className="text-right px-3 py-2">Mevcut Stok</th>
+              <th className="text-right px-3 py-2">Günlük Satış</th>
+              <th className="text-center px-3 py-2">🗓️ Tükenir</th>
+              <th className="text-right px-3 py-2">Kalan Gün</th>
+              <th className="text-right px-3 py-2">⚒️ Üretim Önerisi</th>
+              <th className="text-right px-3 py-2">Değer</th>
+              <th className="text-center px-3 py-2">Durum</th>
+            </tr>
+          </thead>
+          <tbody data-testid="forecast-table">
+            {data.items.length === 0 ? (
+              <tr><td colSpan={8} className="text-center text-gray-500 py-8">
+                {loading ? "Hesaplanıyor..." : "🎉 Tüm hızlı satan ürünlerin stoğu yeterli, üretim gerektiren ürün yok."}
+              </td></tr>
+            ) : data.items.map((it) => (
+              <tr key={it.product_id} className={`border-t hover:bg-gray-50 ${
+                it.severity === "critical" ? "bg-red-50/50" :
+                it.severity === "high" ? "bg-orange-50/50" : ""
+              }`}>
+                <td className="px-3 py-2">
+                  <div className="font-medium">{it.name}</div>
+                  {it.stock_code && <div className="text-xs text-gray-500 font-mono">SKU: {it.stock_code}</div>}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.current_stock)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{it.daily_velocity.toFixed(2)}</td>
+                <td className="px-3 py-2 text-center font-medium tabular-nums">{it.stockout_date_tr}</td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  <span className={`font-bold ${it.severity === "critical" ? "text-red-700" : it.severity === "high" ? "text-orange-700" : "text-amber-700"}`}>
+                    {it.days_until_stockout}g
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700">
+                  {it.suggested_production_qty > 0 ? `+${fmtNum(it.suggested_production_qty)}` : "—"}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-600">
+                  {it.suggested_production_qty > 0 ? fmtMoney(it.suggested_production_value) : "—"}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    it.severity === "critical" ? "bg-red-100 text-red-800" :
+                    it.severity === "high" ? "bg-orange-100 text-orange-800" :
+                    "bg-amber-100 text-amber-800"
+                  }`}>
+                    {it.severity === "critical" ? "ACİL ÜRET" : it.severity === "high" ? "Üret" : "İzle"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-gray-500">
+        💡 Sistem, sipariş kalemlerindeki ürün adlarını ürün veritabanınızla akıllı eşleştirir.
+        Sadece <strong>günde 0.05+ adet</strong> satan ürünler analiz edilir.
+      </p>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 function FastMovers() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState({ items: [] });

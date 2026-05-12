@@ -17,6 +17,7 @@ Endpoints (admin-only):
 """
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+import re
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -112,6 +113,148 @@ async def stock_valuation(
                      for k, v in sorted(by_brand.items(), key=lambda kv: -kv[1]["sale"])[:50]],
         "by_category": [{"name": k, **{x: round(v[x], 2) if x != "units" else v[x] for x in v}}
                         for k, v in sorted(by_category.items(), key=lambda kv: -kv[1]["sale"])[:50]],
+        "checked_at": _now().isoformat(),
+    }
+
+
+async def _build_product_lookup() -> dict:
+    """Ürünleri name-keyword'lere göre indeksler. Her ürün için:
+    {'product': {...}, 'keywords': set(...)}.
+    Lookup'ta sipariş kalem adı içinde bu keyword'lerin hepsi geçen ürün arar.
+    """
+    STOPWORDS = {"kadın", "erkek", "çocuk", "kız", "oğlan", "ürün", "yeni", "standart",
+                 "fit", "the", "and", "ve", "ile", "de", "da", "için", "bir", "mevsimlik", "ince"}
+    products = []
+    async for p in db.products.find({"stock": {"$gt": 0}},
+                                       {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
+                                        "stock_code": 1, "barcode": 1, "brand": 1, "category": 1,
+                                        "manufacturer": 1}):
+        nm = (p.get("name") or "").lower()
+        # Kelime tokenize + filtre
+        words = {w for w in re.findall(r"[a-zçğıöşü]{4,}", nm) if w not in STOPWORDS}
+        if not words:
+            continue
+        products.append({"p": p, "kw": words})
+    return products
+
+
+async def _velocity_smart_match(days: int, product_index: list) -> dict:
+    """Her ürün için sipariş kalemleri içinden 'ürün isminin temel kelimelerini
+    içeren' kalemlerin toplam adedini hesaplar.
+
+    Returns: { product_id: daily_velocity }
+    """
+    since = _days_ago(days)
+    # Tüm sipariş kalemlerini bir kere çek
+    pipeline = [
+        {"$match": {"created_at": {"$gte": since}, "status": {"$nin": ["cancelled", "returned"]}}},
+        {"$unwind": "$items"},
+        {"$project": {"name": {"$ifNull": ["$items.product_name", "$items.name"]},
+                       "qty": {"$ifNull": ["$items.quantity", 1]}}},
+    ]
+    items = []
+    async for r in db.orders.aggregate(pipeline):
+        nm = (r.get("name") or "").lower()
+        if nm:
+            items.append((nm, int(r["qty"])))
+
+    velocity: dict = {}
+    for entry in product_index:
+        kw = entry["kw"]
+        if not kw:
+            continue
+        sold = 0
+        # En distinctive 2-3 kelime varsa daha sıkı eşleşme — ilk 4 kelime yeterli
+        kw_list = list(kw)[:4]
+        if not kw_list:
+            continue
+        for nm, qty in items:
+            if all(k in nm for k in kw_list):
+                sold += qty
+        if sold > 0:
+            velocity[str(entry["p"]["id"])] = sold / max(days, 1)
+    return velocity
+
+
+@router.get("/stockout-forecast")
+async def stockout_forecast(
+    velocity_days: int = Query(30, ge=7, le=180, description="Hız hesabı için bakılan gün sayısı"),
+    horizon_days: int = Query(60, ge=7, le=365, description="Bu kadar gün içinde tükenecekleri göster"),
+    target_cover_days: int = Query(60, ge=14, le=365, description="Üretim önerisi için hedef stok süresi"),
+    min_velocity: float = Query(0.05, ge=0, description="Minimum günlük satış hızı"),
+    _=Depends(require_admin),
+):
+    """Hızlı satan ürünler için stok tükenme tahmini + üretim önerisi.
+
+    Mantık:
+      • Son `velocity_days` gün satış verisinden günlük ortalama hız hesaplanır
+      • Eşleştirme: doğrudan product_id → değilse ürün adındaki anahtar kelime kombinasyonu
+      • Mevcut stok / hız = `tükenecek gün`
+      • Üretim önerisi = (`target_cover_days` * hız) - mevcut stok (negatifse 0)
+      • `horizon_days` içinde tükenecek olanlar listelenir
+    """
+    # 1) Doğrudan product_id eşleşmesi
+    items_pid = await _velocity_aggregate(velocity_days)
+    velocity_by_pid = {i["product_id"]: i["daily_velocity"] for i in items_pid}
+
+    # 2) Ürün adı anahtar-kelime smart match (Trendyol/Ticimax orders için)
+    product_index = await _build_product_lookup()
+    velocity_by_smart = await _velocity_smart_match(velocity_days, product_index)
+
+    result = []
+    today = _now().date()
+    for entry in product_index:
+        p = entry["p"]
+        pid = str(p["id"])
+        velocity = max(velocity_by_pid.get(pid, 0.0), velocity_by_smart.get(pid, 0.0))
+        if velocity < min_velocity:
+            continue
+        stock = int(p.get("stock") or 0)
+        if stock <= 0:
+            continue
+        days_left = stock / velocity if velocity > 0 else 9999
+        if days_left > horizon_days:
+            continue
+        stockout_dt = today + timedelta(days=int(days_left))
+        suggested_qty = max(0, int(round(target_cover_days * velocity)) - stock)
+        if days_left <= 14:
+            severity = "critical"
+        elif days_left <= 30:
+            severity = "high"
+        else:
+            severity = "warning"
+
+        result.append({
+            "product_id": pid,
+            "name": p.get("name") or "—",
+            "stock_code": p.get("stock_code"),
+            "brand": p.get("brand"),
+            "category": p.get("category"),
+            "manufacturer": p.get("manufacturer"),
+            "current_stock": stock,
+            "daily_velocity": round(velocity, 3),
+            "days_until_stockout": int(days_left),
+            "stockout_date": stockout_dt.isoformat(),
+            "stockout_date_tr": stockout_dt.strftime("%d.%m.%Y"),
+            "suggested_production_qty": suggested_qty,
+            "suggested_production_value": round(suggested_qty * float(p.get("price") or 0), 2),
+            "severity": severity,
+        })
+
+    result.sort(key=lambda x: (x["days_until_stockout"], -x["suggested_production_value"]))
+    return {
+        "velocity_days": velocity_days,
+        "horizon_days": horizon_days,
+        "target_cover_days": target_cover_days,
+        "total": len(result),
+        "summary": {
+            "critical": sum(1 for r in result if r["severity"] == "critical"),
+            "high": sum(1 for r in result if r["severity"] == "high"),
+            "warning": sum(1 for r in result if r["severity"] == "warning"),
+            "total_production_units": sum(r["suggested_production_qty"] for r in result),
+            "total_production_value": round(sum(r["suggested_production_value"] for r in result), 2),
+        },
+        "items": result,
         "checked_at": _now().isoformat(),
     }
 
