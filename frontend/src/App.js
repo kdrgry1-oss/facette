@@ -77,6 +77,7 @@ import SecurityDashboard from "./pages/admin/SecurityDashboard";
 import SystemHealth from "./pages/admin/SystemHealth";
 import SecretsVault from "./pages/admin/SecretsVault";
 import MenuSettings from "./pages/admin/MenuSettings";
+import ReportsExtended from "./pages/admin/ReportsExtended";
 import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
@@ -203,6 +204,7 @@ function App() {
               <Route path="doviz" element={<CurrencyRates />} />
               <Route path="toplu-mail" element={<BulkMail />} />
               <Route path="raporlar/gelismis" element={<ExtraReports />} />
+              <Route path="raporlar/kar-stok" element={<ReportsExtended />} />
               <Route path="gorevler" element={<AdminTasks />} />
             </Route>
           </Routes>
