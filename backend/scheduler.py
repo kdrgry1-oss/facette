@@ -434,6 +434,23 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Iter 43 — Günlük stok tükenme uyarısı (her gün sabah 9:00 UTC, ~12:00 TR)
+    async def _daily_stockout_alert():
+        try:
+            from routes.production_hooks import send_stockout_alert_email
+            class _SystemAdmin:
+                def get(self, k, *a): return "system@facette.com" if k == "email" else None
+            await send_stockout_alert_email(admin=_SystemAdmin())
+            logger.info("[scheduler] daily stockout alert sent")
+        except Exception as e:
+            logger.warning(f"[scheduler] stockout alert failed: {e}")
+    from apscheduler.triggers.cron import CronTrigger
+    _scheduler.add_job(
+        _daily_stockout_alert,
+        CronTrigger(hour=9, minute=0),
+        id="daily_stockout_alert",
+        max_instances=1, coalesce=True,
+    )
     _scheduler.start()
     logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily + Ticimax orders every 6h)")
     return _scheduler

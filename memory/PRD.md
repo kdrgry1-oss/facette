@@ -21,6 +21,74 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 42-43 (2026-05-12) — Reports Suite + Production Forecasting + IYS
+
+### 📊 Yeni Gelişmiş Rapor Seti (`/admin/raporlar/kar-stok`)
+7 sekmeli tek sayfa, tümü gerçek veriyle çalışıyor:
+
+| # | Rapor | Endpoint | Özellik |
+|---|---|---|---|
+| 1 | Stok Değer | `/admin/reports2/stock-valuation` | Toplam alış + satış değeri, marka/kategori breakdown, potansiyel kâr % |
+| 2 | **Üretim Önerisi** | `/admin/reports2/stockout-forecast` | Stok tükenme tarihi + üretim miktarı önerisi (kritik/yüksek/uyarı renk kodlu) |
+| 3 | Hızlı Satan | `/admin/reports2/fast-movers` | Velocity, stok tükenme tahmini |
+| 4 | Yavaş Satan + Ölü Stok | `/admin/reports2/{slow-movers,dead-stock}` | Stoğa bağlı para |
+| 5 | İade Oranı Uyarısı | `/admin/reports2/return-rate` | Eşik aşan ürünler |
+| 6 | Net Kâr (Kanal) | `/admin/reports2/profit-by-channel` | Site/Trendyol/HB komisyon dahil |
+| 7 | Maliyet Girişi | `/admin/product-costs` (CRUD + bulk) | Manuel ürün maliyeti |
+
+### 🏭 Üretim Önerisi & Otomasyon
+- **Akıllı eşleştirme**: Sipariş kalemlerindeki ürün adlarını veritabanı ürünleriyle keyword-bazlı eşleştirir (Trendyol/Ticimax product_id'leri sistem ID'lerinden farklı olabilir)
+- **Tükenme tarihi**: Mevcut stok / günlük velocity → tahmini bitiş tarihi
+- **Üretim miktarı önerisi**: hedef stok süresi × velocity - mevcut stok
+- **Renk kodlu uyarı**: ≤14g kritik (kırmızı), ≤30g yüksek (turuncu), ≤60g uyarı (sarı)
+- **📧 Email uyarısı**: Tek tık ile kdrgry@gmail.com'a en kritik 20 ürün gönderilir
+- **🏭 Tek tık üretim planına ekle**: Hem toplu hem tek satır bazında `production_plan` koleksiyonuna kaydeder
+- **⏰ Günlük otomatik cron**: Her sabah 9:00 UTC'de otomatik stockout uyarı emaili gönderir
+
+### 👤 Beden Önerisi Sistemi
+- Müşteri profili: `height_cm`, `weight_kg`, `chest_cm`, `waist_cm`, `hip_cm`
+- API: `GET/POST /api/me/measurements`, `GET /api/products/{id}/size-recommendation`
+- Algoritma: marka ölçü tablosu varsa → en yakın bedeni minimize edilmiş squared error ile seçer; yoksa BMI heuristic fallback (XS/S/M/L/XL/XXL)
+
+### 📨 İYS (İleti Yönetim Sistemi) Entegrasyonu
+- Türkiye yasal zorunluluğu — B2C ticari ileti öncesi izin kontrolü
+- OAuth2 Client Credentials token cache
+- 60dk TTL local cache (`iys_permissions` koleksiyonu)
+- Endpoints: `/api/admin/iys/{status,query,query-batch,register}`
+- Credentials Secrets Vault'tan okunur: `IYS_API_USERNAME`, `IYS_API_PASSWORD`, `IYS_BRAND_CODE`
+- Pazarlama kampanyaları öncesi toplu izin doğrulama (50'lik batch)
+
+### Yeni Dosyalar
+- `/app/backend/routes/{reports_v2,production_hooks,size_recommender,iys_integration}.py`
+- `/app/frontend/src/pages/admin/ReportsExtended.jsx` (7 sekmeli rapor sayfası)
+- `/app/frontend/src/lib/adminNav.js` (menü tanımı)
+- `/app/frontend/src/pages/admin/MenuSettings.jsx` (kullanıcıya özel menü düzeni)
+
+### Admin Layout / Menü
+- Beyaz yazılar, sıralama: Sipariş→Katalog→Rapor→Üretim→Tasarım→Üye→Görevler→Pazarlama→SEO→Entegrasyon→Ayarlar
+- "İçerik" → "Tasarım" rename
+- Dashboard sekmesi yok (logo → Dashboard linki)
+- Hover ile altmenü açılır (140ms delay), overflow scroll kaldırıldı
+- Her kullanıcı kendi menü düzenini `Ayarlar → Menü Düzeni`'nden ayarlayabilir (localStorage user-bazlı)
+
+### Kargo Etiketi (`GET /api/orders/{id}/cargo-label`)
+- 100×120mm format, FACETTE logo embedded base64
+- Mulish font, Libre Barcode 39 Extended
+- TEK barkod (sağ altta, kargo tracking veya sipariş_no)
+- 3 bölüm: Gönderici / Alıcı / Kargo Bilgileri
+- Telefon format: "543 595 52 90"
+- "DHL E-Commerce" (MNG kaldırıldı), "Peşin Ödemeli"
+- Auto-fit script: barkod çerçeveye sığacak şekilde font-size dinamik
+
+### .env Yeni
+```
+IYS_API_BASE_URL=https://api.iys.org.tr   # (default)
+IYS_BRAND_CODE=                              # ⚠️ Vault'ta veya .env'de
+IYS_API_USERNAME=                            # ⚠️ Secrets Vault ÖNERİLİR
+IYS_API_PASSWORD=
+```
+
+
 ## Iteration 41 (2026-05-09) — Production Architecture: Vault + Monitoring + Scale
 
 ### 🔐 Hassas Veri Koruması (Secrets Vault)

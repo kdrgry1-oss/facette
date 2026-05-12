@@ -136,6 +136,7 @@ export const navigationGroups = [
       { label: "Güvenlik Paneli", path: "/admin/guvenlik-paneli", icon: Shield },
       { label: "Sistem Sağlığı", path: "/admin/sistem-sagligi", icon: Cable },
       { label: "Secrets Vault", path: "/admin/secrets-vault", icon: Lock },
+      { label: "İYS (İzin Yönetim Sistemi)", path: "/admin/iys", icon: Cable },
       { label: "Mobil Uygulama", path: "/admin/mobil-uygulama", icon: BellRing },
       { label: "AI Asistan", path: "/admin/ai-asistan", icon: Brain },
     ],

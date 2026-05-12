@@ -170,6 +170,29 @@ function StockoutForecast() {
             <option value={30}>30 gün</option><option value={60}>60 gün</option><option value={90}>90 gün</option><option value={120}>120 gün</option>
           </select>
         </label>
+        <button onClick={async () => {
+          try {
+            const r = await axios.post(`${API}/admin/production-hooks/send-stockout-alert`, {}, auth());
+            const d = r.data.alert?.delivered || {};
+            toast.success(`${r.data.items_count} ürün için uyarı gönderildi (${d.smtp ? "SMTP ✓" : ""}${d.resend ? "Resend ✓" : ""} in-app ✓)`);
+          } catch (e) { toast.error(e?.response?.data?.detail || "Gönderilemedi"); }
+        }} className="px-3 py-1.5 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 flex items-center gap-1" data-testid="send-alert-email">
+          📧 Email Uyarı Gönder
+        </button>
+        <button onClick={async () => {
+          const items = data.items.filter(it => it.suggested_production_qty > 0).map(it => ({
+            product_id: it.product_id, product_name: it.name,
+            quantity: it.suggested_production_qty, stockout_date: it.stockout_date,
+            daily_velocity: it.daily_velocity, severity: it.severity,
+          }));
+          if (!items.length) { toast.error("Üretim önerisi olan ürün yok"); return; }
+          try {
+            const r = await axios.post(`${API}/admin/production-hooks/add-to-plan`, items, auth());
+            toast.success(`${r.data.added + r.data.updated} ürün üretim planına eklendi`);
+          } catch (e) { toast.error("Eklenemedi"); }
+        }} className="px-3 py-1.5 bg-emerald-700 text-white rounded text-sm hover:bg-emerald-800 flex items-center gap-1" data-testid="add-to-plan-all">
+          🏭 Tümünü Üretim Planına Ekle
+        </button>
         <button onClick={load} className="ml-auto text-sm text-blue-700 hover:underline flex items-center gap-1">
           <RefreshCw className={`w-3.5 h-3.5 ${loading?"animate-spin":""}`}/>Yenile
         </button>
@@ -195,11 +218,12 @@ function StockoutForecast() {
               <th className="text-right px-3 py-2">⚒️ Üretim Önerisi</th>
               <th className="text-right px-3 py-2">Değer</th>
               <th className="text-center px-3 py-2">Durum</th>
+              <th className="text-center px-3 py-2">İşlem</th>
             </tr>
           </thead>
           <tbody data-testid="forecast-table">
             {data.items.length === 0 ? (
-              <tr><td colSpan={8} className="text-center text-gray-500 py-8">
+              <tr><td colSpan={9} className="text-center text-gray-500 py-8">
                 {loading ? "Hesaplanıyor..." : "🎉 Tüm hızlı satan ürünlerin stoğu yeterli, üretim gerektiren ürün yok."}
               </td></tr>
             ) : data.items.map((it) => (
@@ -233,6 +257,26 @@ function StockoutForecast() {
                   }`}>
                     {it.severity === "critical" ? "ACİL ÜRET" : it.severity === "high" ? "Üret" : "İzle"}
                   </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  {it.suggested_production_qty > 0 && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await axios.post(`${API}/admin/production-hooks/add-to-plan`, [{
+                            product_id: it.product_id, product_name: it.name,
+                            quantity: it.suggested_production_qty, stockout_date: it.stockout_date,
+                            daily_velocity: it.daily_velocity, severity: it.severity,
+                          }], auth());
+                          toast.success(`+${it.suggested_production_qty} ${it.name.slice(0,30)} planına eklendi`);
+                        } catch (e) { toast.error("Eklenemedi"); }
+                      }}
+                      className="text-xs text-emerald-700 hover:underline whitespace-nowrap"
+                      data-testid={`plan-add-${it.product_id}`}
+                    >
+                      + Plana Ekle
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

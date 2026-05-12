@@ -91,6 +91,9 @@ from routes.admin_mobile import router as admin_mobile_router
 from routes.secrets_vault import router as secrets_vault_router
 from routes.system_health import router as system_health_router
 from routes.reports_v2 import router as reports_v2_router, costs_router as product_costs_router
+from routes.production_hooks import router as production_hooks_router
+from routes.size_recommender import router as size_rec_router
+from routes.iys_integration import router as iys_router
 
 # Database
 from routes.deps import client, db
@@ -153,6 +156,12 @@ async def lifespan(app: FastAPI):
         await db.alerts.create_index([("fingerprint", 1), ("created_at", -1)])
         # Product costs (manuel maliyet) — Iter 42
         await db.product_costs.create_index("product_id", unique=True)
+        # Iter 43 indexes
+        await db.production_plan.create_index([("product_id", 1), ("status", 1)])
+        await db.production_plan.create_index([("created_at", -1)])
+        await db.iys_permissions.create_index(
+            [("recipient", 1), ("recipient_type", 1), ("message_type", 1)], unique=True)
+        await db.iys_permissions.create_index([("expires_at", 1)])
         
         logger.info("Database indexes created")
     except Exception as e:
@@ -467,6 +476,10 @@ api_router.include_router(system_health_router)
 # Iteration 42 — Yeni rapor seti (stok değer, hızlı/yavaş satan, iade oranı, kanal kâr)
 api_router.include_router(reports_v2_router)
 api_router.include_router(product_costs_router)
+# Iteration 43 — production hooks + size recommender + IYS
+api_router.include_router(production_hooks_router)
+api_router.include_router(size_rec_router)
+api_router.include_router(iys_router)
 
 # Root endpoint
 @api_router.get("/")
