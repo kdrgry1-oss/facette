@@ -22,11 +22,6 @@ function NavItem({ item, closeMobile }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  // Beyaz tema renkleri
-  const itemBase = "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors";
-  const itemActive = "bg-gray-100 text-gray-900";
-  const itemIdle = "text-gray-700 hover:bg-gray-100 hover:text-gray-900";
-
   if (!item.children) {
     return (
       <NavLink
@@ -34,7 +29,11 @@ function NavItem({ item, closeMobile }) {
         end={item.exact}
         onClick={closeMobile}
         data-testid={`nav-${item.key}`}
-        className={({ isActive }) => `${itemBase} ${isActive ? itemActive : itemIdle}`}
+        className={({ isActive }) =>
+          `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            isActive ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
+          }`
+        }
       >
         <item.icon size={16} />
         {item.label}
@@ -47,7 +46,9 @@ function NavItem({ item, closeMobile }) {
       <button
         onClick={() => setOpen(!open)}
         data-testid={`nav-${item.key}`}
-        className={`${itemBase} outline-none ${isChildActive || open ? itemActive : itemIdle}`}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors outline-none ${
+          isChildActive || open ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
+        }`}
       >
         <item.icon size={16} />
         {item.label}
@@ -56,19 +57,19 @@ function NavItem({ item, closeMobile }) {
 
       {/* Desktop dropdown */}
       {open && (
-        <div className="hidden lg:block absolute left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="hidden lg:block absolute left-0 mt-1 w-52 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
           {item.children.map((child) => {
             const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
             return (
               <Link
                 key={child.path}
                 to={child.path}
-                onClick={() => setOpen(false)}
+                onClick={() => { setOpen(false); }}
                 className={`flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
-                  isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                  isActive ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
                 }`}
               >
-                <child.icon size={15} className={isActive ? "text-gray-900" : "text-gray-500"} />
+                <child.icon size={15} className={isActive ? "text-orange-400" : "text-gray-300"} />
                 {child.label}
               </Link>
             );
@@ -87,7 +88,7 @@ function NavItem({ item, closeMobile }) {
                 to={child.path}
                 onClick={() => { setOpen(false); if (closeMobile) closeMobile(); }}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                  isActive ? "bg-gray-100 text-gray-900" : "text-gray-700 hover:bg-gray-100"
+                  isActive ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
                 }`}
               >
                 <child.icon size={15} />
@@ -104,7 +105,6 @@ function NavItem({ item, closeMobile }) {
 export default function AdminLayout() {
   const { user, isAdmin, logout, loading } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  // Menü, kullanıcıya özel tercihlerle hesaplanır
   const navigation = useMemo(() => getNavigationFor(user?.id || user?.email), [user?.id, user?.email]);
 
   if (loading) {
@@ -120,14 +120,14 @@ export default function AdminLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col" data-testid="admin-layout">
-      {/* Top Navigation Bar — Beyaz tema */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-white text-gray-900 border-b border-gray-200 shadow-sm flex items-center px-4 gap-6">
+    <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="admin-layout">
+      {/* Top Navigation Bar */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-gray-900 text-white border-b border-gray-800 flex items-center px-4 gap-6">
         {/* Logo — Dashboard linki */}
         <Link
           to="/admin"
           data-testid="admin-logo-home"
-          className="text-lg font-bold tracking-[0.2em] shrink-0 text-gray-900 hover:text-gray-600 transition-colors"
+          className="text-lg font-bold tracking-[0.2em] shrink-0 text-white hover:text-gray-300 transition-colors"
         >
           FACETTE
         </Link>
@@ -140,15 +140,15 @@ export default function AdminLayout() {
         </nav>
 
         {/* User area */}
-        <div className="hidden lg:flex items-center gap-3 ml-auto shrink-0 border-l border-gray-200 pl-5">
+        <div className="hidden lg:flex items-center gap-3 ml-auto shrink-0 border-l border-gray-800 pl-5">
           <div className="text-right">
-            <p className="text-xs text-gray-900 font-medium leading-tight">{user.email}</p>
-            <p className="text-xs text-gray-500">Admin</p>
+            <p className="text-xs text-white font-medium leading-tight">{user.email}</p>
+            <p className="text-xs text-gray-300">Admin</p>
           </div>
           <button
             onClick={logout}
             data-testid="admin-logout-btn"
-            className="flex items-center gap-1 text-xs text-gray-600 hover:text-red-600 transition-colors px-2 py-1 rounded hover:bg-red-50"
+            className="flex items-center gap-1 text-xs text-white hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-red-500/10"
           >
             <LogOut size={15} />
             Çıkış
@@ -157,7 +157,7 @@ export default function AdminLayout() {
 
         {/* Mobile menu toggle */}
         <button
-          className="lg:hidden ml-auto text-gray-700 hover:text-gray-900"
+          className="lg:hidden ml-auto text-white hover:text-gray-300"
           onClick={() => setMobileOpen(!mobileOpen)}
           data-testid="admin-mobile-toggle"
         >
@@ -167,16 +167,16 @@ export default function AdminLayout() {
 
       {/* Mobile Menu */}
       {mobileOpen && (
-        <div className="lg:hidden fixed top-14 left-0 right-0 z-40 bg-white border-b border-gray-200 px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto shadow-2xl">
+        <div className="lg:hidden fixed top-14 left-0 right-0 z-40 bg-gray-900 border-b border-gray-800 px-4 py-4 space-y-1 max-h-[80vh] overflow-y-auto shadow-2xl">
           {navigation.map((item) => (
             <NavItem key={item.key} item={item} closeMobile={() => setMobileOpen(false)} />
           ))}
-          <div className="pt-4 mt-4 border-t border-gray-200 flex items-center justify-between">
+          <div className="pt-4 mt-4 border-t border-gray-800 flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-900">{user.email}</p>
-              <p className="text-xs text-gray-500">Admin</p>
+              <p className="text-sm text-white">{user.email}</p>
+              <p className="text-xs text-gray-300">Admin</p>
             </div>
-            <button onClick={logout} className="text-gray-600 hover:text-red-600">
+            <button onClick={logout} className="text-white hover:text-red-400">
               <LogOut size={18} />
             </button>
           </div>
