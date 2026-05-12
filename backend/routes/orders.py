@@ -1696,75 +1696,87 @@ async def get_cargo_label(order_id: str, token: str = None):
     if not remarks:
         remarks = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery", "kapida") else "Gönderici Ödemeli"
 
-    # Brand initials için (LOGO kutusu) — Facette → F
-    brand_letter = "F"
+    # Brand logo (PNG → base64) — paylaşılan FACETTE wordmark
+    import base64, pathlib
+    logo_b64 = ""
+    try:
+        logo_path = pathlib.Path(__file__).parent.parent / "static" / "brand" / "facette-logo.png"
+        if logo_path.exists():
+            logo_b64 = base64.b64encode(logo_path.read_bytes()).decode()
+    except Exception:
+        logo_b64 = ""
+    logo_src = f"data:image/png;base64,{logo_b64}" if logo_b64 else ""
 
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800;900&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
 <style>
   @page {{ size: 100mm 120mm; margin: 0; }}
   * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-  body {{ margin: 0; font-family: 'Inter','Helvetica Neue',Arial,sans-serif; width: 100mm; min-height: 120mm; color: #000; background:#fff; }}
-  .label {{ display:flex; height: 120mm; }}
-  .main {{ flex: 1; padding: 3mm; border: 1.4pt solid #000; border-radius: 1.5mm; margin: 1.5mm; }}
-  .side {{ width: 22mm; display:flex; flex-direction:column; justify-content:space-between; padding: 1.5mm 0; }}
-  .icon-box {{ width: 18mm; height: 18mm; border: 1.6pt solid #000; border-radius: 1mm; display:flex; align-items:center; justify-content:center; margin: 0.5mm auto; }}
-  .icon-box svg {{ width: 13mm; height: 13mm; fill:#000; }}
+  body {{ margin: 0; font-family: 'Mulish','Helvetica Neue',Arial,sans-serif; width: 100mm; height: 120mm; color: #000; background:#fff; }}
+  .label {{ width: 100mm; height: 120mm; padding: 2mm; }}
+  .main {{ width: 100%; height: 100%; border: 1.8pt solid #000; border-radius: 1.5mm; padding: 3mm; display:flex; flex-direction:column; }}
 
-  /* Üst başlık */
-  .header {{ display:flex; gap: 2.5mm; align-items:flex-start; padding-bottom: 1.5mm; border-bottom: 1.2pt solid #000; }}
-  .logo-box {{ width: 14mm; height: 14mm; background: #000; color: #fff; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 16pt; letter-spacing: -0.5pt; flex-shrink: 0; }}
-  .meta-block {{ flex: 1; font-size: 7pt; line-height: 1.35; }}
-  .meta-block .lbl {{ font-weight: 700; letter-spacing: 0.4pt; color: #000; display:inline-block; min-width: 16mm; }}
-  .meta-block .val {{ font-weight: 600; }}
+  /* ÜST: LOGO bandı */
+  .logo-band {{ display:flex; align-items:center; justify-content:center; padding: 1.5mm 0 2.5mm 0; border-bottom: 1.4pt solid #000; }}
+  .logo-band img {{ height: 9mm; width: auto; max-width: 88mm; }}
+  .logo-fallback {{ font-family:'Mulish',sans-serif; font-weight: 900; font-size: 24pt; letter-spacing: 6pt; }}
+
+  /* Üst meta blok (ORIGIN ID + FROM) */
+  .meta-block {{ padding: 2mm 0; border-bottom: 1.4pt solid #000; font-size: 8pt; line-height: 1.45; font-family:'Mulish',sans-serif; }}
+  .meta-block .row {{ display:flex; gap:2mm; align-items:baseline; margin-bottom: 0.6mm; }}
+  .meta-block .lbl {{ font-weight: 800; letter-spacing: 0.5pt; min-width: 22mm; }}
+  .meta-block .val {{ font-weight: 700; flex:1; }}
+  .meta-block .val-strong {{ font-weight: 800; flex:1; font-size: 9.5pt; }}
+  .meta-block .small-addr {{ font-weight: 500; font-size: 7.6pt; color: #111; margin-left: 24mm; line-height:1.3; }}
 
   /* Bölümler */
-  .section {{ padding: 1.5mm 0; border-bottom: 1.2pt solid #000; font-size: 7.5pt; }}
+  .section {{ padding: 1.8mm 0; border-bottom: 1.4pt solid #000; font-family:'Mulish',sans-serif; }}
   .section:last-child {{ border-bottom: 0; }}
-  .section .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 6.5pt; display:inline-block; min-width: 20mm; vertical-align: top; }}
-  .section .val {{ font-weight: 600; font-size: 8pt; }}
-  .section .val-strong {{ font-weight: 700; font-size: 9pt; }}
-  .small-addr {{ font-weight: 500; font-size: 7pt; color: #222; }}
+  .section .row {{ display:flex; gap:2mm; align-items:baseline; }}
+  .section .lbl {{ font-weight: 800; letter-spacing: 0.5pt; font-size: 7.5pt; min-width: 22mm; }}
+  .section .val {{ font-weight: 700; font-size: 8.8pt; flex:1; }}
+  .section .val-strong {{ font-weight: 800; font-size: 10pt; flex:1; }}
+  .small-addr {{ font-weight: 500; font-size: 7.8pt; color: #111; margin-left: 24mm; line-height: 1.35; }}
 
-  .grid {{ display:grid; grid-template-columns: auto 1fr; gap: 0.6mm 2mm; font-size: 7pt; }}
-  .grid .lbl {{ font-weight: 700; letter-spacing: 0.3pt; }}
-  .grid .val {{ font-weight: 600; }}
+  .grid {{ display:grid; grid-template-columns: 28mm 1fr; gap: 1.2mm 2mm; font-family:'Mulish',sans-serif; }}
+  .grid .lbl {{ font-weight: 800; letter-spacing: 0.4pt; font-size: 7.8pt; }}
+  .grid .val {{ font-weight: 700; font-size: 8.4pt; }}
 
-  /* Barkod alt sağda */
-  .bottom-row {{ display:flex; align-items:flex-end; gap: 2mm; padding-top: 1.5mm; }}
-  .remarks {{ flex: 1; font-size: 7.5pt; }}
-  .remarks .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 6.5pt; display:block; margin-bottom: 1mm; }}
-  .remarks .val {{ font-weight: 600; font-size: 8.5pt; text-transform: uppercase; }}
-  .barcode-wrap {{ text-align: center; }}
-  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 26pt; letter-spacing: 0; line-height: 0.9; }}
-  .barcode-num {{ font-size: 7.5pt; letter-spacing: 1.2pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: -0.5mm; }}
+  /* Alt bant: REMARKS + BARKOD */
+  .bottom-row {{ flex: 1; display:flex; align-items:stretch; gap: 3mm; padding-top: 2mm; }}
+  .remarks {{ flex: 1; font-family:'Mulish',sans-serif; }}
+  .remarks .lbl {{ font-weight: 800; letter-spacing: 0.5pt; font-size: 7.5pt; display:block; margin-bottom: 1mm; }}
+  .remarks .val {{ font-weight: 700; font-size: 9pt; text-transform: uppercase; line-height: 1.3; }}
+  .barcode-wrap {{ text-align: center; align-self: flex-end; }}
+  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 36pt; letter-spacing: 0; line-height: 0.9; color:#000; }}
+  .barcode-num {{ font-size: 9pt; letter-spacing: 1.4pt; font-family: 'Courier New', monospace; font-weight: 800; margin-top: -0.5mm; }}
 </style></head><body>
 <div class="label">
-  <!-- ANA ETİKET KARTI -->
   <div class="main">
-    <!-- ÜST: LOGO + ORIGIN ID + FROM -->
-    <div class="header">
-      <div class="logo-box">{brand_letter}</div>
-      <div class="meta-block">
-        <div><span class="lbl">ORIGIN ID :</span><span class="val">{siparis_no}</span></div>
-        <div style="margin-top:1.5mm;"><span class="lbl">FROM :</span><span class="val-strong">{sender_company}</span></div>
-        <div style="margin-left: 18mm;" class="small-addr">{sender_addr_line}</div>
-      </div>
+
+    <!-- LOGO BANDI -->
+    <div class="logo-band">
+      {('<img src="'+logo_src+'" alt="FACETTE"/>') if logo_src else '<div class="logo-fallback">FACETTE</div>'}
+    </div>
+
+    <!-- ORIGIN ID + FROM -->
+    <div class="meta-block">
+      <div class="row"><span class="lbl">ORIGIN ID :</span><span class="val">{siparis_no}</span></div>
+      <div class="row"><span class="lbl">FROM :</span><span class="val-strong">{sender_company}</span></div>
+      <div class="small-addr">{sender_addr_line}</div>
     </div>
 
     <!-- TO -->
     <div class="section">
-      <span class="lbl">TO :</span>
-      <span class="val-strong">{receiver_name}</span>
-      <div style="margin-left: 22mm; margin-top: 0.5mm;" class="small-addr">{receiver_full_addr}</div>
-      {(f'<div style="margin-left: 22mm;" class="small-addr">Tel: {receiver_phone}</div>') if receiver_phone else ''}
+      <div class="row"><span class="lbl">TO :</span><span class="val-strong">{receiver_name}</span></div>
+      <div class="small-addr">{receiver_full_addr}</div>
+      {(f'<div class="small-addr">Tel: {receiver_phone}</div>') if receiver_phone else ''}
     </div>
 
     <!-- REF -->
     <div class="section">
-      <span class="lbl">REF :</span>
-      <span class="val">{main_barcode}</span>
+      <div class="row"><span class="lbl">REF :</span><span class="val">{main_barcode}</span></div>
     </div>
 
     <!-- ORDER / ITEM / SHIP / DIMENSIONS / WEIGHT -->
@@ -1778,7 +1790,7 @@ async def get_cargo_label(order_id: str, token: str = None):
       </div>
     </div>
 
-    <!-- REMARKS + TEK BARKOD (sağ alt) -->
+    <!-- REMARKS + BARKOD -->
     <div class="bottom-row">
       <div class="remarks">
         <span class="lbl">REMARKS :</span>
@@ -1789,26 +1801,7 @@ async def get_cargo_label(order_id: str, token: str = None):
         <div class="barcode-num">{main_barcode}</div>
       </div>
     </div>
-  </div>
 
-  <!-- SAĞ KENAR: HANDLING ICONS -->
-  <div class="side">
-    <!-- FRAGILE (kırılan kadeh) -->
-    <div class="icon-box" title="Fragile">
-      <svg viewBox="0 0 24 24"><path d="M5 2l1.5 9c.3 1.7 1.7 3 3.5 3v6H7v2h10v-2h-3v-6c1.8 0 3.2-1.3 3.5-3L19 2H5zm2.4 2h9.2l-.9 5.6L13 11l1 2-2 1-1.5-1.5L9 12l1-2-2.4-1.2L7.4 4z"/></svg>
-    </div>
-    <!-- FLAMMABLE (alev) -->
-    <div class="icon-box" title="Flammable">
-      <svg viewBox="0 0 24 24"><path d="M13.5 1c1 4-1 5-2.5 7C9 11 7 13 7 16c0 4 3 7 7 7s7-3 7-7c0-3-1.5-5-3-6.5C16 8 14 6 13.5 1zM12 18c-2 0-3-1.5-3-3 0-1 0.5-2 1.5-3 0.5 2 2 2.5 3 3.5s-0.5 2.5-1.5 2.5z"/></svg>
-    </div>
-    <!-- RECYCLABLE (geri dönüşüm) -->
-    <div class="icon-box" title="Recyclable">
-      <svg viewBox="0 0 24 24"><path d="M12 2l3 5h-2v3h-2V7H9l3-5zm-7.5 9l1 5.5L3 19.5 5.5 22h6v-2h-4l1.5-1.5-1-5.5-3.5-2zm15 0l-3.5 2-1 5.5L16.5 20h-4v2h6L21 19.5l-2.5-3 1-5.5z"/></svg>
-    </div>
-    <!-- KEEP DRY (şemsiye) -->
-    <div class="icon-box" title="Keep Dry">
-      <svg viewBox="0 0 24 24"><path d="M12 2C7 2 3 6 3 11h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-1 1-1.5 2-1.5s2 0.5 2 1.5h2c0-5-4-9-9-9zm-1 10v8c0 1.7 1.3 3 3 3s3-1.3 3-3h-2c0 0.5-0.5 1-1 1s-1-0.5-1-1v-8h-2z"/></svg>
-    </div>
   </div>
 </div>
 <script>
