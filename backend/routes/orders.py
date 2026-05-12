@@ -1697,11 +1697,25 @@ async def get_cargo_label(order_id: str, token: str = None):
         remarks = "Alıcı Ödemeli" if payment_method in ("cash_on_delivery", "kapida") else "Gönderici Ödemeli"
 
     # Kargo bilgileri (paylaşılan referans şablonuna göre)
-    cargo_company_display = "MNG DHL E-Commerce"  # şu an aktif kargo firması
+    cargo_company_display = "DHL E-Commerce"  # MNG ibaresi kaldırıldı
     payment_method = (order.get("payment_method") or "").lower()
     is_kapida = payment_method in ("cash_on_delivery", "kapida")
-    odeme_turu = "Alıcı Ödemeli" if is_kapida else "Gönderici Ödemeli"
+    odeme_turu = "Kapıda Ödemeli" if is_kapida else "Peşin Ödemeli"
     kargo_tipi = f"{odeme_turu} Kargo"
+
+    # Telefon formatı: 5435955290 → 543 595 52 90
+    def _fmt_phone(p: str) -> str:
+        if not p:
+            return ""
+        digits = "".join(c for c in str(p) if c.isdigit())
+        # Başında 90 ülke kodu varsa atla, 0 ile başlıyorsa atla
+        if digits.startswith("90") and len(digits) == 12:
+            digits = digits[2:]
+        elif digits.startswith("0") and len(digits) == 11:
+            digits = digits[1:]
+        if len(digits) == 10:
+            return f"{digits[0:3]} {digits[3:6]} {digits[6:8]} {digits[8:10]}"
+        return str(p)
 
     # Brand logo (PNG → base64) — paylaşılan FACETTE wordmark
     import base64, pathlib
@@ -1715,7 +1729,8 @@ async def get_cargo_label(order_id: str, token: str = None):
     logo_src = f"data:image/png;base64,{logo_b64}" if logo_b64 else ""
 
     # Sender (gönderici) için telefon
-    sender_phone = sender.get("phone", "") or ""
+    sender_phone = _fmt_phone(sender.get("phone", "") or "")
+    receiver_phone_fmt = _fmt_phone(receiver_phone)
 
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
@@ -1729,8 +1744,8 @@ async def get_cargo_label(order_id: str, token: str = None):
 
   /* LOGO bandı */
   .logo-band {{ display:flex; align-items:center; justify-content:center; padding: 0.5mm 0 1.8mm 0; border-bottom: 1.4pt solid #000; }}
-  .logo-band img {{ height: 8mm; width: auto; max-width: 88mm; }}
-  .logo-fallback {{ font-family:'Mulish',sans-serif; font-weight: 900; font-size: 22pt; letter-spacing: 6pt; }}
+  .logo-band img {{ height: 7mm; width: auto; max-width: 78mm; }}
+  .logo-fallback {{ font-family:'Mulish',sans-serif; font-weight: 900; font-size: 18pt; letter-spacing: 5pt; }}
 
   /* Bölüm başlığı (Gönderici / Alıcı / Kargo Bilgileri) */
   .section-title {{ text-align: center; font-family:'Mulish',sans-serif; font-weight: 800; font-size: 9pt; letter-spacing: 0.5pt; padding: 1.2mm 0; border-bottom: 1pt solid #000; background: #f0f0f0; }}
@@ -1770,7 +1785,7 @@ async def get_cargo_label(order_id: str, token: str = None):
     <div class="section-title">Alıcı Bilgileri</div>
     <div class="info-table">
       <div class="info-row"><span class="lbl">İsim</span><span class="val">{receiver_name}</span></div>
-      <div class="info-row"><span class="lbl">Telefon</span><span class="val">{receiver_phone}</span></div>
+      <div class="info-row"><span class="lbl">Telefon</span><span class="val">{receiver_phone_fmt}</span></div>
       <div class="info-row"><span class="lbl">Adres</span><span class="val addr">{receiver_full_addr}</span></div>
     </div>
 
@@ -1785,7 +1800,7 @@ async def get_cargo_label(order_id: str, token: str = None):
     <!-- BARKOD (alt) -->
     <div class="barcode-band">
       <div class="barcode">*{main_barcode}*</div>
-      <div class="barcode-num">{main_barcode}</div>
+      <div class="barcode-num">{siparis_no}</div>
     </div>
 
   </div>

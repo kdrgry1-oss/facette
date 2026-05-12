@@ -76,6 +76,7 @@ import AutomationStatus from "./pages/admin/AutomationStatus";
 import SecurityDashboard from "./pages/admin/SecurityDashboard";
 import SystemHealth from "./pages/admin/SystemHealth";
 import SecretsVault from "./pages/admin/SecretsVault";
+import MenuSettings from "./pages/admin/MenuSettings";
 import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
@@ -131,6 +132,7 @@ function App() {
               <Route path="iadeler" element={<AdminReturns />} />
               <Route path="sayfalar" element={<AdminPages />} />
               <Route path="ayarlar" element={<AdminSettings />} />
+              <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />
               {/* Provider ayarları — Ticimax'teki "E-Arşiv/E-Fatura Ayarları"
                   ile aynı mantık. Çoklu entegratör şeması backend'de tanımlı. */}
               <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
