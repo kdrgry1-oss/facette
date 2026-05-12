@@ -1703,42 +1703,42 @@ async def get_cargo_label(order_id: str, token: str = None):
 <html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
 <style>
-  @page {{ size: 100mm 150mm; margin: 0; }}
+  @page {{ size: 100mm 120mm; margin: 0; }}
   * {{ box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-  body {{ margin: 0; font-family: 'Inter','Helvetica Neue',Arial,sans-serif; width: 100mm; min-height: 150mm; color: #000; background:#fff; }}
-  .label {{ display:flex; height: 150mm; }}
-  .main {{ flex: 1; padding: 4mm; border: 1.4pt solid #000; border-radius: 1.5mm; margin: 2mm; }}
-  .side {{ width: 16mm; display:flex; flex-direction:column; justify-content:space-between; padding: 2mm 0; }}
-  .icon-box {{ width: 12mm; height: 12mm; border: 1.4pt solid #000; border-radius: 1mm; display:flex; align-items:center; justify-content:center; margin: 0.5mm auto; }}
-  .icon-box svg {{ width: 8mm; height: 8mm; fill:#000; }}
+  body {{ margin: 0; font-family: 'Inter','Helvetica Neue',Arial,sans-serif; width: 100mm; min-height: 120mm; color: #000; background:#fff; }}
+  .label {{ display:flex; height: 120mm; }}
+  .main {{ flex: 1; padding: 3mm; border: 1.4pt solid #000; border-radius: 1.5mm; margin: 1.5mm; }}
+  .side {{ width: 22mm; display:flex; flex-direction:column; justify-content:space-between; padding: 1.5mm 0; }}
+  .icon-box {{ width: 18mm; height: 18mm; border: 1.6pt solid #000; border-radius: 1mm; display:flex; align-items:center; justify-content:center; margin: 0.5mm auto; }}
+  .icon-box svg {{ width: 13mm; height: 13mm; fill:#000; }}
 
   /* Üst başlık */
-  .header {{ display:flex; gap: 3mm; align-items:flex-start; padding-bottom: 2mm; border-bottom: 1.2pt solid #000; }}
-  .logo-box {{ width: 16mm; height: 16mm; background: #000; color: #fff; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 18pt; letter-spacing: -0.5pt; flex-shrink: 0; }}
-  .meta-block {{ flex: 1; font-size: 7.2pt; line-height: 1.4; }}
-  .meta-block .lbl {{ font-weight: 700; letter-spacing: 0.4pt; color: #000; display:inline-block; min-width: 18mm; }}
+  .header {{ display:flex; gap: 2.5mm; align-items:flex-start; padding-bottom: 1.5mm; border-bottom: 1.2pt solid #000; }}
+  .logo-box {{ width: 14mm; height: 14mm; background: #000; color: #fff; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 16pt; letter-spacing: -0.5pt; flex-shrink: 0; }}
+  .meta-block {{ flex: 1; font-size: 7pt; line-height: 1.35; }}
+  .meta-block .lbl {{ font-weight: 700; letter-spacing: 0.4pt; color: #000; display:inline-block; min-width: 16mm; }}
   .meta-block .val {{ font-weight: 600; }}
 
   /* Bölümler */
-  .section {{ padding: 2mm 0; border-bottom: 1.2pt solid #000; font-size: 8pt; }}
+  .section {{ padding: 1.5mm 0; border-bottom: 1.2pt solid #000; font-size: 7.5pt; }}
   .section:last-child {{ border-bottom: 0; }}
-  .section .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 7pt; display:inline-block; min-width: 22mm; vertical-align: top; }}
-  .section .val {{ font-weight: 600; font-size: 8.5pt; }}
-  .section .val-strong {{ font-weight: 700; font-size: 9.5pt; }}
-  .small-addr {{ font-weight: 500; font-size: 7.5pt; color: #222; }}
+  .section .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 6.5pt; display:inline-block; min-width: 20mm; vertical-align: top; }}
+  .section .val {{ font-weight: 600; font-size: 8pt; }}
+  .section .val-strong {{ font-weight: 700; font-size: 9pt; }}
+  .small-addr {{ font-weight: 500; font-size: 7pt; color: #222; }}
 
-  .grid {{ display:grid; grid-template-columns: auto 1fr; gap: 0.8mm 2mm; font-size: 7.5pt; }}
+  .grid {{ display:grid; grid-template-columns: auto 1fr; gap: 0.6mm 2mm; font-size: 7pt; }}
   .grid .lbl {{ font-weight: 700; letter-spacing: 0.3pt; }}
   .grid .val {{ font-weight: 600; }}
 
   /* Barkod alt sağda */
-  .bottom-row {{ display:flex; align-items:flex-end; gap: 3mm; padding-top: 2mm; }}
-  .remarks {{ flex: 1; font-size: 8pt; }}
-  .remarks .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 7pt; display:block; margin-bottom: 1mm; }}
-  .remarks .val {{ font-weight: 600; font-size: 9pt; text-transform: uppercase; }}
+  .bottom-row {{ display:flex; align-items:flex-end; gap: 2mm; padding-top: 1.5mm; }}
+  .remarks {{ flex: 1; font-size: 7.5pt; }}
+  .remarks .lbl {{ font-weight: 700; letter-spacing: 0.5pt; font-size: 6.5pt; display:block; margin-bottom: 1mm; }}
+  .remarks .val {{ font-weight: 600; font-size: 8.5pt; text-transform: uppercase; }}
   .barcode-wrap {{ text-align: center; }}
-  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 30pt; letter-spacing: 0; line-height: 0.9; }}
-  .barcode-num {{ font-size: 8pt; letter-spacing: 1.2pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: -0.5mm; }}
+  .barcode {{ font-family: 'Libre Barcode 39 Extended', monospace; font-size: 26pt; letter-spacing: 0; line-height: 0.9; }}
+  .barcode-num {{ font-size: 7.5pt; letter-spacing: 1.2pt; font-family: 'Courier New', monospace; font-weight: 700; margin-top: -0.5mm; }}
 </style></head><body>
 <div class="label">
   <!-- ANA ETİKET KARTI -->
