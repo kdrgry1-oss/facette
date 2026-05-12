@@ -8,6 +8,7 @@ import { getNavigationFor } from "../../lib/adminNav";
 function NavItem({ item, closeMobile }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const closeTimer = useRef(null);
   const location = useLocation();
 
   const isChildActive = item.children?.some((c) =>
@@ -22,6 +23,17 @@ function NavItem({ item, closeMobile }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
+  // Hover-to-open (desktop) — küçük gecikmeyle close ki dropdown'a geçerken kaybolmasın
+  const handleEnter = () => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    if (item.children) setOpen(true);
+  };
+  const handleLeave = () => {
+    if (item.children) {
+      closeTimer.current = setTimeout(() => setOpen(false), 140);
+    }
+  };
+
   if (!item.children) {
     return (
       <NavLink
@@ -30,34 +42,34 @@ function NavItem({ item, closeMobile }) {
         onClick={closeMobile}
         data-testid={`nav-${item.key}`}
         className={({ isActive }) =>
-          `flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          `flex items-center gap-1.5 px-2 py-2 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors ${
             isActive ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
           }`
         }
       >
-        <item.icon size={16} />
+        <item.icon size={15} />
         {item.label}
       </NavLink>
     );
   }
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
       <button
         onClick={() => setOpen(!open)}
         data-testid={`nav-${item.key}`}
-        className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors outline-none ${
+        className={`flex items-center gap-1.5 px-2 py-2 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors outline-none ${
           isChildActive || open ? "bg-gray-800 text-white" : "text-white hover:bg-gray-800"
         }`}
       >
-        <item.icon size={16} />
+        <item.icon size={15} />
         {item.label}
-        <ChevronDown size={13} className={`ml-0.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        <ChevronDown size={12} className={`ml-0.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {/* Desktop dropdown */}
       {open && (
-        <div className="hidden lg:block absolute left-0 mt-1 w-52 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="hidden lg:block absolute left-0 mt-1 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-[60] overflow-hidden">
           {item.children.map((child) => {
             const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
             return (
@@ -122,25 +134,25 @@ export default function AdminLayout() {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="admin-layout">
       {/* Top Navigation Bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-gray-900 text-white border-b border-gray-800 flex items-center px-4 gap-6">
+      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-gray-900 text-white border-b border-gray-800 flex items-center px-4 gap-4 overflow-visible">
         {/* Logo — Dashboard linki */}
         <Link
           to="/admin"
           data-testid="admin-logo-home"
-          className="text-lg font-bold tracking-[0.2em] shrink-0 text-white hover:text-gray-300 transition-colors"
+          className="text-base font-bold tracking-[0.2em] shrink-0 text-white hover:text-gray-300 transition-colors"
         >
           FACETTE
         </Link>
 
-        {/* Desktop Nav */}
-        <nav className="hidden lg:flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
+        {/* Desktop Nav — overflow yok; sekmeler kompakt */}
+        <nav className="hidden lg:flex items-center gap-0.5 flex-1 min-w-0">
           {navigation.map((item) => (
             <NavItem key={item.key} item={item} />
           ))}
         </nav>
 
         {/* User area */}
-        <div className="hidden lg:flex items-center gap-3 ml-auto shrink-0 border-l border-gray-800 pl-5">
+        <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0 border-l border-gray-800 pl-3">
           <div className="text-right">
             <p className="text-xs text-white font-medium leading-tight">{user.email}</p>
             <p className="text-xs text-gray-300">Admin</p>
