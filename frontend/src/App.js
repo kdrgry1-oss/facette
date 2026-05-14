@@ -76,6 +76,7 @@ import AutomationStatus from "./pages/admin/AutomationStatus";
 import SecurityDashboard from "./pages/admin/SecurityDashboard";
 import SystemHealth from "./pages/admin/SystemHealth";
 import SecretsVault from "./pages/admin/SecretsVault";
+import IysAdmin from "./pages/admin/IysAdmin";
 import MenuSettings from "./pages/admin/MenuSettings";
 import ReportsExtended from "./pages/admin/ReportsExtended";
 import MobileApp from "./pages/admin/MobileApp";
@@ -167,6 +168,7 @@ function App() {
               <Route path="guvenlik-paneli" element={<SecurityDashboard />} />
               <Route path="sistem-sagligi" element={<SystemHealth />} />
               <Route path="secrets-vault" element={<SecretsVault />} />
+              <Route path="iys" element={<IysAdmin />} />
               <Route path="mobil-uygulama" element={<MobileApp />} />
               <Route path="ai-asistan" element={<AIAssistant />} />
               <Route path="footer-tasarim" element={<FooterDesign />} />
