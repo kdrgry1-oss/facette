@@ -1,106 +1,102 @@
 {
-  "project_name": "Facette E-commerce Restyle",
+  "project_name": "Facette - Premium E-Commerce",
+  "status": "Awaiting user decision on design direction",
   "theme": "light",
-  "archetype": "Archetype 4 (Swiss & High-Contrast) / Minimalist Editorial Fashion",
-  "design_philosophy": "Elite, minimalist, black and white, Zara/COS/Massimo Dutti vibe. Editorial aesthetics. Heavy emphasis on mobile-first interactions, micro-animations, high-quality images, and stark contrast. NO purple/violet, pure monochrome aesthetic.",
-  "colors": {
-    "background": "#FFFFFF",
-    "foreground": "#000000",
-    "muted": "#F5F5F5",
-    "muted_foreground": "#737373",
-    "border": "#E5E5E5",
-    "accent": "#000000",
-    "accent_foreground": "#FFFFFF",
-    "primary": "#000000",
-    "primary_foreground": "#FFFFFF"
-  },
-  "typography": {
-    "headings": {
-      "family": "Cormorant Garamond, Playfair Display, or Bodoni Moda (Editorial Serif)",
-      "style": "tracking-tight, high contrast, elegant",
-      "h1": "text-4xl sm:text-5xl lg:text-6xl font-light",
-      "h2": "text-2xl sm:text-3xl lg:text-4xl font-light",
-      "h3": "text-xl sm:text-2xl font-light"
-    },
-    "body": {
-      "family": "Inter, DM Sans, or Helvetica Neue (Geometric Sans)",
-      "style": "tracking-normal, pure readability",
-      "base": "text-sm sm:text-base text-black/80"
-    },
-    "labels": {
-      "style": "uppercase tracking-[0.2em] text-xs font-semibold text-black/60"
-    }
-  },
-  "layout": {
-    "container": "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8",
-    "spacing": "p-8, p-12, gap-8, gap-12. Use negative space aggressively to frame content.",
-    "border_radius": "rounded-none (0px) - Sharp edges for a high-end editorial feel.",
-    "image_aspect_ratios": "Use 3:4 or 4:5 for all apparel product imagery to emphasize verticality and fashion context."
-  },
-  "components": {
-    "Header.jsx": {
-      "path": "/app/frontend/src/components/Header.jsx",
-      "style": "Sticky, minimal glassmorphism.",
-      "classes": "fixed top-0 left-0 right-0 z-50 w-full bg-white/90 backdrop-blur-xl border-b border-black/5 transition-all duration-300",
-      "instructions_to_main_agent": "Mobile: Left hamburger, Center Logo, Right Cart/Account. Hamburger triggers a full-screen overlay or side drawer (bg-white) with accordion categories (e.g., GİYİM > Üst Giyim). Desktop: Logo left, center nav with hover mega-menu, right icons. Ensure body has padding-top so content is not hidden."
-    },
-    "Footer.jsx": {
-      "path": "/app/frontend/src/components/Footer.jsx",
-      "style": "Minimal corporate footer.",
-      "classes": "bg-black text-white py-16 md:py-24",
-      "instructions_to_main_agent": "Multi-column layout on desktop, stacked accordion layout on mobile. High contrast typography. Add customer service, corporate policies, and social media columns."
-    },
-    "Cart.jsx": {
-      "path": "/app/frontend/src/pages/Cart.jsx",
-      "style": "Clean cart page with a sticky mobile CTA and visual-only 'Complete the Look' suggestions.",
-      "classes": "pb-32 md:pb-12 bg-white",
-      "instructions_to_main_agent": "1. FIX MOBILE CTA: Create a sticky bottom bar for the 'Ödemeye Geç' button on mobile viewports (`fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-black/10 p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]`). \n2. STILINI TAMAMLA: The product suggestions grid MUST NOT show text or price below the image. It must only render the image in a 3:4 aspect ratio. Wrap the image in a group, and on hover (`group-hover:opacity-100`), reveal a black semi-transparent overlay with 'Detayı Gör' (See Details) text."
-    },
-    "CartDrawer.jsx": {
-      "path": "/app/frontend/src/components/CartDrawer.jsx",
-      "style": "Premium side drawer.",
-      "classes": "fixed inset-y-0 right-0 z-50 w-full sm:w-[400px] bg-white shadow-2xl flex flex-col",
-      "instructions_to_main_agent": "Use Shadcn Sheet. Include a stark black 'Ödemeye Geç' button glued to the bottom of the drawer (`mt-auto sticky bottom-0 p-4 bg-white border-t`)."
-    }
-  },
-  "specific_requirements": {
-    "cart_suggestions_stilini_tamamla": {
-      "heading": "Stilini tamamla",
-      "heading_classes": "text-lg font-serif mb-6 text-black",
-      "item_card": "relative group overflow-hidden cursor-pointer aspect-[3/4] bg-muted",
-      "item_image": "w-full h-full object-cover transition-transform duration-700 group-hover:scale-105",
-      "item_hover_overlay": "absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4",
-      "item_hover_text": "text-white text-xs uppercase tracking-widest translate-y-4 group-hover:translate-y-0 transition-transform duration-300"
-    },
-    "sticky_mobile_cta": {
-      "wrapper": "fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-black/10 p-4 md:static md:border-none md:p-0 md:bg-transparent",
-      "button": "w-full bg-black text-white h-14 flex items-center justify-center text-sm uppercase tracking-widest hover:bg-black/90 transition-colors"
-    }
-  },
-  "media": {
-    "hero_images": [
-      {
-        "url": "https://images.unsplash.com/photo-1642080643085-64ee8afa511e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHw0fHxmYXNoaW9uJTIwbW9kZWwlMjBtaW5pbWFsaXN0fGVufDB8fHxibGFja19hbmRfd2hpdGV8MTc3ODAyNTIwMXww&ixlib=rb-4.1.0&q=85",
-        "description": "Black and white fashion model in suit (Hero / Homepage banner)"
+  "archetype": "5 (Jewel & Luxury) / 1 (Organic & Earthy) Hybrid",
+  "target_audience": "Premium women's fashion and home customers in Turkey",
+  "design_directions": {
+    "Option_A_Editorial_Luxury": {
+      "inspiration": "Miu Miu",
+      "vibe": "Fashion-forward, editorial, bold, high-contrast, avant-garde.",
+      "colors": {
+        "background": "#FAFAFA",
+        "surface": "#FFFFFF",
+        "text_primary": "#0A0A0A",
+        "text_secondary": "#555555",
+        "accent": "#E60000",
+        "border": "#E5E5E5"
       },
-      {
-        "url": "https://images.unsplash.com/photo-1638444090472-b72f11195f9b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTF8MHwxfHNlYXJjaHwyfHxmYXNoaW9uJTIwbW9kZWwlMjBtaW5pbWFsaXN0fGVufDB8fHxibGFja19hbmRfd2hpdGV8MTc3ODAyNTIwMXww&ixlib=rb-4.1.0&q=85",
-        "description": "Minimalist editorial sitting model (Category banner)"
-      }
-    ],
-    "product_images": [
-      {
-        "url": "https://images.unsplash.com/photo-1611077675529-5b794e61db47?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwY2xvdGhpbmclMjBwaWVjZXxlbnwwfHx8YmxhY2tfYW5kX3doaXRlfDE3NzgwMjUyMDV8MA&ixlib=rb-4.1.0&q=85",
-        "description": "Minimalist clothing product (Use for 'Stilini Tamamla' suggestions)"
+      "typography": {
+        "headings": "Cabinet Grotesk (Variable weight, high contrast)",
+        "body": "Inter or DM Sans",
+        "style": "Massive typography, very light/thin mixed with ultra black for tension."
       },
-      {
-        "url": "https://images.unsplash.com/photo-1537274942065-eda9d00a6293?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHw0fHxtaW5pbWFsaXN0JTIwY2xvdGhpbmclMjBwaWVjZXxlbnwwfHx8YmxhY2tfYW5kX3doaXRlfDE3NzgwMjUyMDV8MA&ixlib=rb-4.1.0&q=85",
-        "description": "Assorted clothes B&W (Use for category thumbnails)"
+      "layout_rules": {
+        "hero": "Asymmetric layout, full-bleed images with overlapping typography.",
+        "product_grid": "Irregular bento-style grid, varying image sizes (2x1, 1x1).",
+        "pdp": "Immersive sticky scroll gallery on desktop, full-screen swipeable cards on mobile.",
+        "mobile_nav": "Sticky bottom bar with transparent crystal glassmorphism."
       }
-    ]
+    },
+    "Option_B_Refined_Minimal": {
+      "inspiration": "Zara Home",
+      "vibe": "Calm, functional, extremely minimal, lifestyle-led.",
+      "colors": {
+        "background": "#F7F6F2",
+        "surface": "#FFFFFF",
+        "text_primary": "#2C2C2A",
+        "text_secondary": "#7A7A76",
+        "accent": "#A39B8B",
+        "border": "#E2DFD8"
+      },
+      "typography": {
+        "headings": "Cormorant Garamond (Elegant Serif)",
+        "body": "Outfit or Manrope (Clean Sans)",
+        "style": "Generous letter spacing, small labels, subtle hierarchy."
+      },
+      "layout_rules": {
+        "hero": "Cinematic full-screen lifestyle image, centered subtle typography.",
+        "product_grid": "Strict, clean 2-column (mobile) or 4-column (desktop) symmetric grid.",
+        "pdp": "Clean split screen: left gallery, right sticky details.",
+        "mobile_nav": "Hidden until scroll up, minimalist hamburger menu."
+      }
+    },
+    "Option_C_Turkish_Luxury": {
+      "inspiration": "Vakko",
+      "vibe": "Classic, rich, formal luxury, structured.",
+      "colors": {
+        "background": "#FFFFFF",
+        "surface": "#F9F9F9",
+        "text_primary": "#1A1B26",
+        "text_secondary": "#4A4D64",
+        "accent": "#CBA052",
+        "border": "#EAEAEA"
+      },
+      "typography": {
+        "headings": "Playfair Display",
+        "body": "Work Sans",
+        "style": "Capitalized headings, formal serif, gold/champagne accents."
+      },
+      "layout_rules": {
+        "hero": "Structured carousel with framing borders, classic CTA buttons.",
+        "product_grid": "Uniform grid with elegant hover effects (second image on hover).",
+        "pdp": "Traditional layout, large image with breadcrumbs and accordion details.",
+        "mobile_nav": "Classic top nav with prominent cart and account icons."
+      }
+    }
   },
-  "motion": {
-    "hover": "Images scale up by 1.05 over 700ms ease-out. Text and buttons fade or slide subtly.",
-    "interactions": "Buttons invert colors on hover (Black -> White, White -> Black border). Focus states use sharp 1px black outline."
-  }
+  "global_components_inventory": {
+    "shadcn_customizations": {
+      "Button": "Remove default rounded-md. Use rounded-none for Option A & B. Add subtle hover scale.",
+      "Card": "Avoid default borders. Use border-transparent with soft shadow for Option C, purely flat for Option A/B.",
+      "Accordion": "Use for PDP details (Shipping, Materials). Remove default underline on hover.",
+      "Sheet": "Use for Mobile Drawer Nav and Mini-cart. Customize overlay to backdrop-blur-md.",
+      "Select": "Use for size/color variants. Style to match minimal inputs with 1px border.",
+      "Carousel": "Use for Homepage hero and PDP mobile gallery."
+    }
+  },
+  "implementation_roadmap": [
+    "Phase 1: Setup - Configure Tailwind config, variables, and fonts based on user's selected Option.",
+    "Phase 2: Global Layout - Implement Header (Mega-menu Desktop, Drawer Mobile) & Footer.",
+    "Phase 3: Homepage - Build Hero, Lookbook section, and curated Product Carousels.",
+    "Phase 4: PLP - Implement Product Grid, Filters Drawer, and Sort Dropdown.",
+    "Phase 5: PDP - Build Image Gallery, Sticky Cart, Size Guide Modal, and Accordion details.",
+    "Phase 6: Cart & Checkout - Implement Mini-cart Drawer, single-page seamless checkout (Iyzico integration UI)."
+  ],
+  "accessibility_and_performance": {
+    "motion": "Use Framer Motion for page transitions. Respect prefers-reduced-motion.",
+    "images": "Lazy load all non-hero images. Max height 80vh on mobile to prevent blocking.",
+    "testing": "All interactive elements MUST have data-testid attributes (e.g., data-testid='add-to-cart-btn')."
+  },
+  "instructions_to_main_agent": "Wait for the user to specify their chosen design direction (A, B, or C). Once selected, apply the exact typography, colors, and layout rules for that option across the implementation phases."
 }
