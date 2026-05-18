@@ -2618,6 +2618,73 @@ async def import_xml_products(
     """
     import html
 
+    def parse_description_attributes(html_text: str) -> tuple[dict, str]:
+        """
+        Ticimax description HTML'inden 'Ürün Bilgisi', 'Kumaş Bilgisi',
+        'Kalıp', 'Beden Ölçüleri', 'Model Ölçüleri' gibi etiketli teknik
+        detayları çıkarıp dict olarak döndürür.
+        Returns: (attributes_dict, clean_text_description)
+        """
+        import re as _re
+        if not html_text:
+            return {}, ""
+        # 1) HTML temizle
+        text = html.unescape(html_text)
+        # <br>, </p>, </div> → newline
+        text = _re.sub(r"<\s*br\s*/?>", "\n", text, flags=_re.I)
+        text = _re.sub(r"</\s*(p|div|li|tr)\s*>", "\n", text, flags=_re.I)
+        # diğer tagları kaldır
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = _re.sub(r"&nbsp;|\u00a0", " ", text)
+        # Çoklu whitespace
+        text = _re.sub(r"[ \t]+", " ", text)
+        text = _re.sub(r"\n[ \t]+", "\n", text)
+        text = _re.sub(r"\n{2,}", "\n", text).strip()
+
+        # 2) Etiketli kısımları yakala — "Etiket:" deseni
+        # Tanımlı (öncelikli) etiketler — admin'de Özellikler sekmesinde gösterilecek
+        LABELS = [
+            ("Ürün Bilgisi",   "urun_bilgisi"),
+            ("Kumaş Bilgisi",  "kumas"),
+            ("Kumaş",          "kumas"),
+            ("Kalıp",          "kalip"),
+            ("Beden",          "beden"),
+            ("Beden Ölçüleri", "beden_olculeri"),
+            ("Model Ölçüleri", "model_olculeri"),
+            ("Yıkama",         "yikama"),
+            ("Bakım",          "bakim"),
+            ("Astar",          "astar"),
+            ("Renk",           "renk"),
+            ("Materyal",       "materyal"),
+            ("Ürün Kodu",      "urun_kodu"),
+        ]
+        # "Label:" başlangıçlarını bul
+        label_pattern = "|".join([_re.escape(l[0]) for l in LABELS])
+        splitter = _re.compile(rf"(?:^|\n)\s*({label_pattern})\s*:\s*", _re.IGNORECASE)
+        parts = splitter.split(text)
+        # parts: [prefix, label1, value1, label2, value2, ...]
+        attrs: dict = {}
+        if len(parts) > 1:
+            i = 1
+            while i < len(parts) - 1:
+                lbl = parts[i].strip()
+                val = parts[i + 1].strip()
+                # Bir sonraki label'a kadar olan kısmı al, fazla satırları kırp
+                # value temizle
+                val = _re.sub(r"\s+", " ", val).strip()
+                # Map to slug key
+                slug = next((s for n, s in LABELS if n.lower() == lbl.lower()), None)
+                if slug and val:
+                    # Birden fazla aynı etiket gelirse ilkini al
+                    if slug not in attrs:
+                        attrs[slug] = {"label": lbl, "value": val[:500]}
+                i += 2
+        # 3) Geriye dönen "clean" description: ilk paragraf veya etiketsiz kısım
+        # En basit: tüm metni döndür (klasik), ama etiketler attrs'a alındı
+        return attrs, text
+
+    import html as _html_mod_unused  # noop (already imported above)
+
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             resp = await client.get(xml_url)
@@ -2649,6 +2716,8 @@ async def import_xml_products(
                 continue
 
             desc = html.unescape(_xml_text(item, "g:description"))
+            # Teknik detayları parse et — admin'de "Özellikler" sekmesinde gösterilecek
+            tech_attrs, _clean_text = parse_description_attributes(desc)
 
             def parse_price(s: str) -> Optional[float]:
                 if not s:
@@ -2690,6 +2759,7 @@ async def import_xml_products(
                 "name":          title,
                 "slug":          slug,
                 "description":   desc,
+                "attributes":    tech_attrs,  # parsed teknik detaylar: urun_bilgisi, kumas, kalip, beden_olculeri, model_olculeri, ...
                 "price":         price,
                 "sale_price":    sale_price,
                 "brand":         brand,

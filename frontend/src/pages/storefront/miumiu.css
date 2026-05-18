@@ -273,6 +273,7 @@
   width: 230px;
   scroll-snap-align: start;
   display: block;
+  position: relative;
 }
 .mm-product-img {
   width: 100%;
@@ -280,18 +281,61 @@
   background: #f4f4f4;
   overflow: hidden;
   margin-bottom: 12px;
+  position: relative;
 }
 .mm-product-img img {
+  position: absolute; inset: 0;
   width: 100%; height: 100%;
   object-fit: cover;
-  transition: transform 1s ease;
+  transition: opacity .45s ease, transform 1s ease;
 }
-.mm-product-card:hover .mm-product-img img { transform: scale(1.04); }
+.mm-img-primary { opacity: 1; z-index: 1; }
+.mm-img-hover { opacity: 0; z-index: 2; }
+.mm-product-card:hover .mm-img-primary { opacity: 0; }
+.mm-product-card:hover .mm-img-hover { opacity: 1; transform: scale(1.02); }
+.mm-product-card:hover .mm-img-primary,
+.mm-product-card:hover .mm-img-hover { /* slow image swap */ }
+.mm-product-wish {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 32px; height: 32px;
+  background: rgba(255,255,255,0.92);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #000;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .25s ease, transform .25s ease, background .15s;
+  z-index: 3;
+}
+.mm-product-card:hover .mm-product-wish { opacity: 1; transform: translateY(0); }
+.mm-product-wish:hover { background: #fff; color: #c8102e; }
 .mm-product-name {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
   color: #000;
+  /* clamp to 2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 32px;
+  line-height: 1.35;
+}
+.mm-product-price {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.mm-price-old {
+  font-weight: 400;
+  text-decoration: line-through;
+  color: #999;
 }
 
 /* --- Newsletter --- */

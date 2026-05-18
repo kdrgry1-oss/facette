@@ -2013,3 +2013,38 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 - Theme blocks `MongoDB` üzerinde Theme dökümanı içine `blocks: [...]` array olarak gömülü (denormalize). Sıralama `order` field'ına göre.
 - Block görselleri: harici URL veya `/api/upload` ile self-host. Mobil ayrı görsel desteği var (`mobile_image`).
 - `product_scroller` block tipi `/api/products?category=<slug>&limit=<n>` ile dinamik ürün çekiyor.
+
+---
+
+## Iteration 46 — Ticimax XML Fix + Storefront Live Data (2026-05-18)
+
+### ✅ Tamamlanan
+
+**Ticimax Ürün İçe Aktarımı (kök neden çözüldü):**
+- Önceki ajan WS Yetki Kodunu `HANX...` → `SSIQ...` ile değiştirmişti, `SSIQ...` sadece UyeServis'e yetkili
+- Ürünler aslında **Ticimax XML Feed** (Google Shopping format) üzerinden çekiliyor, SOAP'tan değil
+- `/api/integrations/xml/products/import` çağrıldığında **563 ürün** başarıyla DB'ye geldi
+- `description` HTML'inden teknik detaylar parse ediliyor → product.attributes:
+  - `urun_bilgisi`, `kumas`, `kalip`, `beden_olculeri`, `model_olculeri`, `yikama`, `astar`, `renk`, vb.
+- Yeni endpoint: `GET /api/integrations/ticimax/test-connection` → hangi SOAP servislerinde yetki var net gösteriyor
+- Admin UI'da `"Bağlantı Testi"` butonu eklendi (Ticimax kartının altında)
+- Import endpoint artık erişim yoksa HTTP 403 + açıklayıcı remedy mesajı dönüyor (eski "sessiz 0 ürün" yanılgısı düzeldi)
+
+**Miu Miu Storefront Live Data:**
+- Mega menü artık **kullanıcının gerçek kategorilerinden** dinamik build ediliyor (`/api/categories` → buildMegaMenu)
+- Root kategoriler (parent_id=null) top-level nav, L1 children → mega columns, L2 children → links
+- Product scroller bloku **gerçek DB ürünlerinden** çekiyor (Ticimax thumbnail'ları + fiyatlar)
+- Kategori-bazlı filtre boş dönerse tüm aktif ürünlere fallback
+- Miu Miu hover efektleri: ürün kartında alt görsele swap, wishlist butonu opaklığı, fiyat + indirim gösterimi
+
+### Files
+- `/app/backend/routes/integrations.py` — `parse_description_attributes()` helper, `ticimax_test_connection` endpoint, XML import attributes
+- `/app/backend/ticimax_client.py` — `check_urun_service_access()`, `TicimaxAuthError`
+- `/app/frontend/src/pages/storefront/MiuMiuTheme.jsx` — `buildMegaMenu()`, `ProductCard` with hover
+- `/app/frontend/src/pages/storefront/miumiu.css` — hover/image-swap/wishlist styling
+
+### Pending
+- **Faz 2 (Miu Miu)**: PLP (kategori) + PDP (ürün detay) — gerçek ürünler ile, hover/zoom/galleri
+- **Faz 3 (Miu Miu)**: Cart, Checkout (3 step), Login, Register, Account
+- Theme block editor UI → PageDesign.jsx tarzı drag-drop + thumbnail (kullanıcı isteği)
+- Trendyol Q&A canlı tetik, Cloudflare R2, Resend mail

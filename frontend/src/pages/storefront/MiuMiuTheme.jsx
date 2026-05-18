@@ -21,14 +21,22 @@ export default function MiuMiuTheme() {
   const [theme, setTheme] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [liveMenu, setLiveMenu] = useState([]);     // user's real categories → mega menu
 
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
         const url = slug ? `${API}/storefront/themes/${slug}` : `${API}/storefront/themes/active`;
-        const r = await axios.get(url);
-        if (!cancel) setTheme(r.data);
+        const [themeRes, catRes] = await Promise.all([
+          axios.get(url),
+          axios.get(`${API}/categories`).catch(() => ({ data: [] })),
+        ]);
+        if (cancel) return;
+        setTheme(themeRes.data);
+        // Build mega menu from user's actual category tree
+        const cats = Array.isArray(catRes.data) ? catRes.data : (catRes.data.items || []);
+        setLiveMenu(buildMegaMenu(cats, themeRes.data.slug));
       } catch (e) {
         if (!cancel) setTheme(null);
       } finally {
@@ -41,6 +49,8 @@ export default function MiuMiuTheme() {
   if (loading) return <div className="mm-loading">Loading…</div>;
   if (!theme) return <div className="mm-loading">Tema bulunamadı.</div>;
 
+  // Use live menu (from user's categories) — fallback to theme.menu only if no live data
+  const menu = liveMenu.length > 0 ? liveMenu : (theme.menu || []);
   const blocks = theme.blocks || [];
   const announcement = blocks.find(b => b.type === "announcement_bar");
   const otherBlocks = blocks.filter(b => b.type !== "announcement_bar");
@@ -54,8 +64,8 @@ export default function MiuMiuTheme() {
         </div>
       )}
 
-      <Header theme={theme} onToggleMobile={() => setMobileMenu(v => !v)} mobileOpen={mobileMenu} />
-      {mobileMenu && <MobileMenu theme={theme} onClose={() => setMobileMenu(false)} />}
+      <Header theme={theme} menu={menu} onToggleMobile={() => setMobileMenu(v => !v)} mobileOpen={mobileMenu} />
+      {mobileMenu && <MobileMenu theme={theme} menu={menu} onClose={() => setMobileMenu(false)} />}
 
       <main>
         {otherBlocks.map((b, idx) => (
@@ -68,9 +78,50 @@ export default function MiuMiuTheme() {
   );
 }
 
+/**
+ * Build Miu-Miu style mega menu from user's flat category list.
+ * - Root categories (parent_id null) become top-level nav items.
+ * - First-level children → grouped as columns within the mega panel.
+ * - Second-level children → links inside each column.
+ */
+function buildMegaMenu(cats, themeSlug) {
+  if (!cats || cats.length === 0) return [];
+  const byParent = new Map();
+  for (const c of cats) {
+    const p = c.parent_id || "__root__";
+    if (!byParent.has(p)) byParent.set(p, []);
+    byParent.get(p).push(c);
+  }
+  const roots = (byParent.get("__root__") || []).filter(c => c.is_active !== false);
+  // Sort by sort_order
+  roots.sort((a, b) => (a.sort_order || 999) - (b.sort_order || 999));
+
+  return roots.slice(0, 10).map(root => {
+    const childrenL1 = (byParent.get(root.id) || []).filter(c => c.is_active !== false);
+    const columns = [];
+    if (childrenL1.length > 0) {
+      // group L1 as columns — at most 4 columns
+      for (const c1 of childrenL1.slice(0, 4)) {
+        const childrenL2 = (byParent.get(c1.id) || []).filter(c => c.is_active !== false).slice(0, 10);
+        columns.push({
+          title: c1.name,
+          links: [
+            { label: `Tümü`, url: `/tema/${themeSlug}/kategori/${c1.slug}` },
+            ...childrenL2.map(c2 => ({ label: c2.name, url: `/tema/${themeSlug}/kategori/${c2.slug}` })),
+          ],
+        });
+      }
+    }
+    return {
+      label: root.name.toUpperCase(),
+      url: `/tema/${themeSlug}/kategori/${root.slug}`,
+      columns,
+    };
+  });
+}
+
 /* ---------- Header ---------- */
-function Header({ theme, onToggleMobile, mobileOpen }) {
-  const menu = theme.menu || [];
+function Header({ theme, menu, onToggleMobile, mobileOpen }) {
   const brand = theme.settings?.brand_name || "miu miu";
   const [openIdx, setOpenIdx] = useState(null);
 
@@ -113,8 +164,7 @@ function Header({ theme, onToggleMobile, mobileOpen }) {
   );
 }
 
-function MobileMenu({ theme, onClose }) {
-  const menu = theme.menu || [];
+function MobileMenu({ theme, menu, onClose }) {
   const [expanded, setExpanded] = useState(null);
   return (
     <div className="mm-mobile-menu" data-testid="mobile-menu">
@@ -199,30 +249,37 @@ function FullScreenBlock({ block, idx, total }) {
 
 function ProductScroller({ block, themeSlug }) {
   const [items, setItems] = useState([]);
-  const [error, setError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
         const slug = block.settings?.category_slug;
         const limit = block.settings?.limit || 12;
-        // Try category endpoint, fall back to generic products
-        let r;
+        // 1) Try category-filtered list
+        let raw = [];
         if (slug) {
-          try { r = await axios.get(`${API}/products`, { params: { category: slug, limit } }); }
-          catch { r = await axios.get(`${API}/products`, { params: { limit } }); }
-        } else {
-          r = await axios.get(`${API}/products`, { params: { limit } });
+          const r1 = await axios.get(`${API}/products`, { params: { category: slug, limit } });
+          raw = Array.isArray(r1.data) ? r1.data : (r1.data.products || r1.data.items || []);
         }
-        const raw = Array.isArray(r.data) ? r.data : (r.data.items || r.data.products || []);
-        if (!cancel) setItems(raw.slice(0, limit));
-      } catch { if (!cancel) setError(true); }
+        // 2) If empty (or no category specified), fall back to ALL active products
+        if (raw.length === 0) {
+          const r2 = await axios.get(`${API}/products`, { params: { limit } });
+          raw = Array.isArray(r2.data) ? r2.data : (r2.data.products || r2.data.items || []);
+        }
+        if (!cancel) {
+          setItems(raw.slice(0, limit));
+          setLoaded(true);
+        }
+      } catch {
+        if (!cancel) setLoaded(true);
+      }
     })();
     return () => { cancel = true; };
   }, [block.settings?.category_slug, block.settings?.limit]);
 
-  // Fallback placeholder products if API empty/error
-  const display = items.length > 0 ? items : (error || items.length === 0 ? PLACEHOLDER_PRODUCTS : []);
+  // If user has no products yet, show editorial placeholder cards
+  const display = items.length > 0 ? items : (loaded ? PLACEHOLDER_PRODUCTS : []);
 
   return (
     <section className="mm-scroller" data-testid={`block-product-scroller-${block.id}`}>
@@ -231,16 +288,42 @@ function ProductScroller({ block, themeSlug }) {
         {block.link_url && block.link_label && <a href={block.link_url} className="mm-scroller-cta">{block.link_label}</a>}
       </div>
       <div className="mm-scroller-track">
-        {display.map((p, i) => (
-          <a key={p.id || p.slug || i} href={p.slug ? `/tema/${themeSlug}/urun/${p.slug}` : "#"} className="mm-product-card">
-            <div className="mm-product-img">
-              <img src={p.image || p.images?.[0] || p.thumbnail || PLACEHOLDER_IMG} alt={p.name || p.title || ""} loading="lazy" />
-            </div>
-            <div className="mm-product-name">{p.name || p.title || "Untitled"}</div>
-          </a>
-        ))}
+        {display.map((p, i) => <ProductCard key={p.id || p.slug || i} p={p} themeSlug={themeSlug} />)}
       </div>
     </section>
+  );
+}
+
+function ProductCard({ p, themeSlug }) {
+  const imgs = (p.images && p.images.length) ? p.images : (p.image ? [p.image] : (p.thumbnail ? [p.thumbnail] : [PLACEHOLDER_IMG]));
+  const primary = imgs[0];
+  const hover = imgs[1] || imgs[0];
+  const price = p.sale_price || p.price;
+  const oldPrice = p.sale_price && p.price && p.price > p.sale_price ? p.price : null;
+  const href = p.slug ? `/tema/${themeSlug}/urun/${p.slug}` : "#";
+  return (
+    <a href={href} className="mm-product-card" data-testid={`mm-product-${p.id || p.slug || 'placeholder'}`}>
+      <div className="mm-product-img">
+        <img src={primary} alt={p.name || p.title || ""} loading="lazy" className="mm-img-primary" />
+        {hover && hover !== primary && (
+          <img src={hover} alt="" loading="lazy" className="mm-img-hover" aria-hidden="true" />
+        )}
+        <button
+          className="mm-product-wish"
+          aria-label="Add to wishlist"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
+          <Heart size={14} />
+        </button>
+      </div>
+      <div className="mm-product-name">{p.name || p.title || "Untitled"}</div>
+      {price != null && (
+        <div className="mm-product-price">
+          {oldPrice && <span className="mm-price-old">{Number(oldPrice).toLocaleString("tr-TR")} ₺</span>}
+          <span>{Number(price).toLocaleString("tr-TR")} ₺</span>
+        </div>
+      )}
+    </a>
   );
 }
 
