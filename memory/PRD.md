@@ -2048,3 +2048,35 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 - **Faz 3 (Miu Miu)**: Cart, Checkout (3 step), Login, Register, Account
 - Theme block editor UI → PageDesign.jsx tarzı drag-drop + thumbnail (kullanıcı isteği)
 - Trendyol Q&A canlı tetik, Cloudflare R2, Resend mail
+
+---
+
+## Iteration 47 — Ticimax Varyant + Özellik Tam Senkronizasyon (2026-05-18)
+
+### ✅ Çözülenler
+
+**Bedenler & Varyantlar (319/319 ürün):**
+- Önceki ajanın boş filtre (`f={}`) gönderdiği için SOAP yalnız 139 varyant döndürüyordu (yanlış)
+- **Doğru filtre: `f=VaryasyonFiltre(Aktif=1)`** → 924 varyant / 342 ürün kartı geliyor
+- DB ürünleri barcode/stock_code ile Ticimax SOAP varyantlarına eşleşti → 100% match
+- Her ürün için: `variants[]` (5 elemanlı tipik beden seti), `sizes[]` (örn. ["S","M","L","XL","XS"]), `ticimax_card_id`
+- Listede "BEDENLER" kolonu artık dolu (örn. "5 Beden" tıklanabilir button)
+- Edit modal → Varyantlar sekmesi: her beden için stok_kodu, barkod, stok adedi gösteriliyor
+
+**Teknik Detaylar / Özellikler (318/319 ürün):**
+- Yeni parser çoklu label desteği: `Kumaş & İçerik Bilgisi`, `Kumaş İçeriği`, `Kumaş Bilgisi`, `Kumaş`, `Materyal`, `İçerik`, `Kalıp`, `Beden Ölçüleri`, `Model Ölçüleri`, `Yıkama`, `Bakım`, `Astar`, `Renk`, `Ürün Kodu`, `Ürün Bilgisi`
+- 299 ürün kumaş bilgisi, 127 ürün açıklaması, 120 ürün kalıp bilgisine sahip
+- `product.attributes` dict olarak saklanıyor: `{kumas: {label, value}, kalip: {label, value}, ...}`
+
+### Scripts
+- `/app/backend/scripts/sync_ticimax_variants.py` — Tüm varyantları çek + DB ürünlerine eşle
+- `/app/backend/scripts/reparse_product_attrs.py` — Description'dan özellikleri yeniden parse et
+
+### Files
+- `/app/backend/routes/integrations.py` — `/ticimax/variants/sync` endpoint, gelişmiş `parse_description_attributes()`
+- `/app/frontend/src/pages/admin/Products.jsx` — `attributes` dict↔array compatible openEditModal; liste BEDENLER/BARKOD kolonu
+
+### Pending
+- Edit modal'a yeni "Teknik Detay" sekmesi → parse edilmiş kumas/kalip/yikama vb. gösterimi
+- Stok adedi senkronizasyonu (şu an Ticimax'tan 0 geliyor — gerçek stok için ayrı SOAP `SelectAsortiMiktar` gerekiyor mu test edilecek)
+- Miu Miu Faz 2 (PLP/PDP) — gerçek varyantlar + özellikler ile

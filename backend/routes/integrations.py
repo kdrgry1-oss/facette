@@ -1418,6 +1418,143 @@ async def import_ticimax_categories(
     }
 
 
+@router.post("/ticimax/variants/sync")
+async def sync_ticimax_variants(
+    page_size: int = 500,
+    max_pages: int = 50,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Ticimax SOAP UrunServis.SelectVaryasyon ile TÜM varyantları çeker
+    (her varyantın UrunKartiID, Barkod, StokKodu, Stok, Renk, Beden bilgisi).
+    DB'deki ürünleri barcode (mpn) ile eşleyip:
+      - product.variants[]: aynı UrunKartiID grubundaki tüm varyantlar
+      - product.sizes[]: o gruptaki ayrık bedenler
+      - product.colors[]: o gruptaki ayrık renkler
+    olarak günceller. Ürünler arası UrunKartiID eşlemesi de cache'lenir.
+
+    Rate limit ~15sn/istek olduğundan page_size 500 ile 50 sayfa (25.000 varyant)
+    tipik 13 dakika sürer; arka planda çalışır.
+    """
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from ticimax_client import _urun_client
+    from zeep import helpers as _zh
+    import asyncio as _asyncio
+
+    OLD_KEY = "HANXFWINXLDBY0WH47WMB6QKTE20T5"
+
+    async def runner():
+        c = _urun_client()
+        vf = c.get_type("ns2:VaryasyonFiltre")
+        sf = c.get_type("ns2:UrunSayfalama")
+        ayar = c.get_type("ns2:SelectVaryasyonAyar")
+
+        # 1) Sayfa sayfa çek, kart grupla
+        cards: dict[int, list[dict]] = {}      # UrunKartiID → [variant_obj]
+        barcode_to_card: dict[str, int] = {}    # Barkod → UrunKartiID
+        total_variants = 0
+
+        for page in range(max_pages):
+            s = sf(BaslangicIndex=page * page_size, KayitSayisi=page_size,
+                   KayitSayisinaGoreGetir=True)
+            try:
+                r = c.service.SelectVaryasyon(
+                    UyeKodu=OLD_KEY, f=vf(), s=s, varyasyonAyar=ayar())
+            except Exception as e:
+                logger.error(f"SelectVaryasyon page {page}: {e}")
+                # rate limit etc — wait & retry once
+                await _asyncio.sleep(20)
+                try:
+                    r = c.service.SelectVaryasyon(
+                        UyeKodu=OLD_KEY, f=vf(), s=s, varyasyonAyar=ayar())
+                except Exception as ee:
+                    logger.error(f"SelectVaryasyon page {page} retry: {ee}")
+                    break
+
+            if not r:
+                logger.info(f"SelectVaryasyon page {page}: no more data")
+                break
+
+            for v in r:
+                d = _zh.serialize_object(v, dict)
+                kart_id = d.get("UrunKartiID")
+                barkod = (d.get("Barkod") or "").strip()
+                if not kart_id:
+                    continue
+                # Parse Ozellikler
+                ozel = d.get("Ozellikler") or {}
+                ozel_list = ozel.get("VaryasyonOzellik") if isinstance(ozel, dict) else None
+                ozel_list = ozel_list or []
+                renk = None
+                beden = None
+                for op in ozel_list:
+                    if not isinstance(op, dict):
+                        continue
+                    tan = (op.get("Tanim") or "").lower()
+                    deg = op.get("Deger")
+                    if "renk" in tan:
+                        renk = deg
+                    elif "beden" in tan:
+                        beden = deg
+                vrec = {
+                    "id": d.get("ID"),
+                    "barcode": barkod,
+                    "stock_code": d.get("StokKodu"),
+                    "stock": int(d.get("StokAdedi") or 0),
+                    "active": bool(d.get("Aktif")),
+                    "color": renk,
+                    "size": beden,
+                    "price": d.get("AlisFiyati"),
+                    "sale_price": d.get("IndirimliFiyati"),
+                }
+                cards.setdefault(kart_id, []).append(vrec)
+                if barkod:
+                    barcode_to_card[barkod] = kart_id
+                total_variants += 1
+
+            logger.info(f"SelectVaryasyon page {page}: {len(r)} variants (total={total_variants})")
+            # Eğer dönen kayıt page_size'dan azsa son sayfa
+            if len(r) < page_size:
+                break
+            await _asyncio.sleep(15)  # rate limit
+
+        # 2) DB ürünlerini eşle
+        prods = await db.products.find(
+            {"source": "xml_feed"}, {"_id": 0, "id": 1, "barcode": 1, "sku": 1, "name": 1}
+        ).to_list(None)
+
+        matched = 0
+        unmatched = 0
+        for p in prods:
+            pcode = (p.get("barcode") or p.get("sku") or "").strip()
+            kart_id = barcode_to_card.get(pcode)
+            if not kart_id:
+                unmatched += 1
+                continue
+            variants = cards.get(kart_id, [])
+            sizes = sorted({v["size"] for v in variants if v.get("size")},
+                           key=lambda x: (len(x), x))
+            colors = sorted({v["color"] for v in variants if v.get("color")})
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {
+                    "ticimax_card_id": int(kart_id),
+                    "variants": variants,
+                    "sizes": sizes,
+                    "colors": colors,
+                }}
+            )
+            matched += 1
+
+        logger.info(f"Variants sync done: {total_variants} variants, "
+                    f"{len(cards)} cards, {matched} matched, {unmatched} unmatched")
+
+    # Çalıştır (background değil — admin UI bekleyebilsin, normalde 1-2 dk)
+    await runner()
+    return {"ok": True, "message": "Varyantlar senkronize edildi"}
+
+
 @router.get("/ticimax/test-connection")
 async def ticimax_test_connection(
     current_user: dict = Depends(require_admin)
