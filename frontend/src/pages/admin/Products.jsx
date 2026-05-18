@@ -32,7 +32,7 @@
  *   componentlere bölünmesi planlanıyor (areas_that_need_refactoring).
  * =============================================================================
  */
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
 import axios from "axios";
@@ -93,6 +93,9 @@ export default function AdminProducts() {
     else setSelectedProducts(products.map((p) => p.id));
   };
   const [editingProduct, setEditingProduct] = useState(null);
+  // technicalDetails: XML/Ticimax description'dan parse edilen teknik özellikler.
+  // Shape: { kumas: {label, value}, kalip: {label, value}, ... } VEYA boş obj
+  const [technicalDetails, setTechnicalDetails] = useState({});
   const [uploading, setUploading] = useState(false);
   const [variantsModalOpen, setVariantsModalOpen] = useState(false);
   const [selectedProductForVariants, setSelectedProductForVariants] = useState(null);
@@ -571,6 +574,18 @@ export default function AdminProducts() {
         .filter(([_, v]) => v !== "" && v !== null && v !== undefined)
         .map(([k, v]) => ({ type: k, name: k, value: v }));
 
+      // Teknik detayları (Kumaş, Kalıp, Model Ölçüleri vb.) attribute array'ine ekle
+      // — backend'e kayıt için her teknik detayı ayrı {type, name, value} satırı yap
+      for (const [slug, item] of Object.entries(technicalDetails || {})) {
+        if (item && item.value) {
+          const lbl = item.label || slug;
+          // Aynı label varsa overwrite et
+          const existing = attributesArray.findIndex(a => (a.type || a.name) === lbl);
+          if (existing >= 0) attributesArray[existing] = { type: lbl, name: lbl, value: item.value };
+          else attributesArray.push({ type: lbl, name: lbl, value: item.value });
+        }
+      }
+
       const payload = {
         ...formData,
         attributes: attributesArray,
@@ -765,6 +780,33 @@ export default function AdminProducts() {
    */
   const openEditModal = (product) => {
     setEditingProduct(product);
+    // Parse edilmiş teknik detayları (XML import'dan) ayrı state'e al — Özellikler sekmesinin
+    // üstündeki "Teknik Detay" panelinde gösterilecek
+    const raw = product.attributes;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      // Dict shape: { kumas: {label, value}, ... }
+      const isDictShape = Object.values(raw).every(
+        v => v && typeof v === "object" && ("value" in v || "label" in v)
+      );
+      setTechnicalDetails(isDictShape ? raw : {});
+    } else if (Array.isArray(raw)) {
+      // Backend savedi: [{ type, name, value }] formatından dict'e geri inşa et
+      const dict = {};
+      const techLabels = ["Kumaş", "Kumaş Bilgisi", "Kumaş & İçerik Bilgisi", "Kumaş İçeriği",
+        "Materyal", "İçerik", "Kalıp", "Beden Ölçüleri", "STD Beden Ölçüleri",
+        "Model Ölçüleri", "Yıkama", "Yıkama Talimatı", "Bakım", "Bakım Talimatı",
+        "Astar", "Astar Bilgisi", "Ürün Bilgisi", "Ürün Kodu"];
+      for (const a of raw) {
+        if (techLabels.some(l => (a.type || a.name || "").toLowerCase().includes(l.toLowerCase().slice(0, 6)))) {
+          const slug = (a.type || a.name || "").toLowerCase()
+            .replace(/[^a-z0-9çğıöşü]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+          dict[slug] = { label: a.type || a.name, value: a.value };
+        }
+      }
+      setTechnicalDetails(dict);
+    } else {
+      setTechnicalDetails({});
+    }
     setFormData({
       name: product.name || "",
       slug: product.slug || "",
@@ -1889,6 +1931,10 @@ export default function AdminProducts() {
 
                   return (
                     <div className="space-y-6">
+                      <TeknikDetayPanel
+                        details={technicalDetails}
+                        onChange={(updated) => setTechnicalDetails(updated)}
+                      />
                       {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#F27A1A', bg: '#F27A1A', text: '#9A3412' }, 'TRENDYOL')}
                       {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#FF6000', bg: '#FF6000', text: '#7F1D1D' }, 'HEPSIBURADA')}
                       {renderSection('temu', 'Temu için Özellikler', { border: '#111827', bg: '#111827', text: '#111827' }, 'TEMU')}
@@ -2587,3 +2633,124 @@ export default function AdminProducts() {
     </div>
   );
 }
+
+/**
+ * TeknikDetayPanel — Ticimax XML "description" alanından parse edilmiş
+ * teknik detayları gösterir (Kumaş, Kalıp, Beden Ölçüleri, Model Ölçüleri,
+ * Yıkama, Bakım, Astar, Ürün Bilgisi, vs.). Her satır editable; admin
+ * elle de yeni alan ekleyebilir.
+ *
+ * Props:
+ *   details: { slug: {label, value} } dict
+ *   onChange: (updated dict) => void
+ */
+function TeknikDetayPanel({ details = {}, onChange }) {
+  const [newLabel, setNewLabel] = React.useState("");
+  const [newValue, setNewValue] = React.useState("");
+  // Önceden bilinen sıralama — yoksa alfabetik
+  const ORDER = ["urun_bilgisi", "kumas", "icerik", "materyal", "kalip",
+    "beden_olculeri", "model_olculeri", "astar", "renk", "yikama", "bakim", "urun_kodu"];
+  const entries = Object.entries(details).sort((a, b) => {
+    const ai = ORDER.indexOf(a[0]); const bi = ORDER.indexOf(b[0]);
+    if (ai === -1 && bi === -1) return a[0].localeCompare(b[0]);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+  const update = (slug, patch) => onChange({ ...details, [slug]: { ...details[slug], ...patch } });
+  const remove = (slug) => {
+    const next = { ...details };
+    delete next[slug];
+    onChange(next);
+  };
+  const addNew = () => {
+    if (!newLabel.trim() || !newValue.trim()) return;
+    const slug = newLabel.toLowerCase().trim()
+      .replace(/[^a-z0-9çğıöşü]+/g, "_").replace(/^_|_$/g, "");
+    if (!slug) return;
+    onChange({ ...details, [slug]: { label: newLabel.trim(), value: newValue.trim() } });
+    setNewLabel("");
+    setNewValue("");
+  };
+  const isEmpty = entries.length === 0;
+  return (
+    <div className="rounded-lg border-l-4 border-emerald-600 bg-emerald-50/30 p-5" data-testid="teknik-detay-panel">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-base font-bold text-emerald-800">Teknik Detay</h3>
+          <p className="text-xs text-emerald-700/70 mt-0.5">
+            Ticimax açıklamasından otomatik parse edilen özellikler. Düzenleyebilir veya yeni alan ekleyebilirsiniz.
+          </p>
+        </div>
+        <span className="text-xs font-semibold text-emerald-700 bg-emerald-200/60 px-2 py-1 rounded">
+          {entries.length} alan
+        </span>
+      </div>
+
+      {isEmpty ? (
+        <div className="text-sm text-emerald-700/70 italic py-3">
+          Bu ürün için açıklamadan herhangi bir teknik detay bulunamadı. Aşağıdan elle ekleyebilirsiniz.
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {entries.map(([slug, item]) => (
+            <div key={slug} className="grid grid-cols-12 gap-2 items-start">
+              <input
+                value={item.label || slug}
+                onChange={(e) => update(slug, { label: e.target.value })}
+                placeholder="Etiket"
+                className="col-span-3 px-3 py-2 border border-emerald-200 rounded text-xs font-semibold bg-white text-zinc-800"
+                data-testid={`tek-label-${slug}`}
+              />
+              <textarea
+                value={item.value || ""}
+                onChange={(e) => update(slug, { value: e.target.value })}
+                placeholder="Değer"
+                rows={Math.min(4, Math.max(1, Math.ceil((item.value || "").length / 80)))}
+                className="col-span-8 px-3 py-2 border border-emerald-200 rounded text-sm bg-white text-zinc-700 leading-snug"
+                data-testid={`tek-value-${slug}`}
+              />
+              <button
+                type="button"
+                onClick={() => remove(slug)}
+                className="col-span-1 text-rose-600 hover:bg-rose-50 rounded px-2 py-2 text-sm font-bold"
+                title="Sil"
+                data-testid={`tek-remove-${slug}`}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="border-t border-emerald-200/60 mt-4 pt-3 grid grid-cols-12 gap-2 items-start">
+        <input
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          placeholder="Yeni etiket (örn: Boy)"
+          className="col-span-3 px-3 py-2 border border-emerald-200 rounded text-xs font-semibold bg-white"
+          data-testid="tek-new-label"
+        />
+        <input
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          placeholder="Değer (örn: Diz altı)"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNew(); } }}
+          className="col-span-8 px-3 py-2 border border-emerald-200 rounded text-sm bg-white"
+          data-testid="tek-new-value"
+        />
+        <button
+          type="button"
+          onClick={addNew}
+          disabled={!newLabel.trim() || !newValue.trim()}
+          className="col-span-1 bg-emerald-600 text-white rounded px-2 py-2 text-sm font-semibold hover:bg-emerald-700 disabled:opacity-40"
+          data-testid="tek-new-add"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
