@@ -363,9 +363,42 @@ export default function Integrations() {
         toast.error("Ürün aktarımı başarısız");
       }
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Ticimax ürün hatası");
+      const d = err.response?.data?.detail;
+      if (d && typeof d === "object") {
+        toast.error(d.message || d.error || "Ticimax hatası", {
+          description: d.remedy,
+          duration: 12000,
+        });
+      } else {
+        toast.error(typeof d === "string" ? d : "Ticimax ürün hatası");
+      }
     } finally {
       setTicimaxImportingProducts(false);
+    }
+  };
+
+  const handleTicimaxTestConnection = async () => {
+    toast.info("Ticimax servislerine erişim kontrol ediliyor...");
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/integrations/ticimax/test-connection`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 30000,
+      });
+      const r = res.data || {};
+      const us = r.urun_service || {};
+      const uy = r.uye_service || {};
+      const lines = [];
+      lines.push(`Ürün Servisi: ${us.ok ? "✓ ERİŞİM VAR" : "✗ " + (us.error || "erişim yok")}`);
+      lines.push(`Üye Servisi: ${uy.ok ? "✓ ERİŞİM VAR" : "✗ " + (uy.error || "erişim yok")}`);
+      if (us.ok && r.product_count != null) lines.push(`Toplam ürün: ${r.product_count}`);
+      if (us.ok) {
+        toast.success("Bağlantı OK", { description: lines.join(" · "), duration: 10000 });
+      } else {
+        toast.error("Ürün servisi erişim yok", { description: (us.detail || lines.join(" · ")), duration: 14000 });
+      }
+    } catch (err) {
+      toast.error("Bağlantı testi başarısız: " + (err.response?.data?.detail || err.message || ""));
     }
   };
 
@@ -799,6 +832,13 @@ export default function Integrations() {
               API Key: <code className="font-mono bg-gray-100 px-1 rounded">HANXFWINXLDBY**</code> · Domain: <code className="font-mono bg-gray-100 px-1 rounded">www.facette.com.tr</code>
             </div>
             <div className="flex flex-wrap gap-3 pt-3 border-t">
+              <button
+                onClick={handleTicimaxTestConnection}
+                data-testid="ticimax-test-connection-btn"
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-zinc-900 text-zinc-900 hover:bg-zinc-900 hover:text-white transition-colors"
+              >
+                <RefreshCw size={14} /> Bağlantı Testi
+              </button>
               <button
                 onClick={handleTicimaxImportCategories}
                 disabled={ticimaxImportingCategories}

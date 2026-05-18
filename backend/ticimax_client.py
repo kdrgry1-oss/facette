@@ -105,6 +105,39 @@ def _unwrap_list(result) -> List[Dict]:
 
 # ═══════════════ CATEGORIES ════════════════════════════════════
 
+class TicimaxAuthError(Exception):
+    """Raised when WS Yetki Kodu lacks access to a Ticimax service."""
+    pass
+
+
+def check_urun_service_access(wscode: str = TICIMAX_API_KEY) -> dict:
+    """
+    Probe UrunServis with SelectKategori (a small, deterministic call).
+    Ticimax returns 'Hatalı Kullanıcı Kodu' as a SOAP fault when the WS
+    key has NO access to UrunServis. SelectUrun silently returns empty
+    instead — making the failure invisible. This probe surfaces it.
+    Returns: {"ok": bool, "error": str|None, "categories_sample": int}
+    """
+    c = _urun_client()
+    try:
+        result = c.service.SelectKategori(
+            UyeKodu=wscode, kategoriID=0, dil="tr", parentID=0)
+        cats = _unwrap_list(result)
+        return {"ok": True, "error": None, "categories_sample": len(cats)}
+    except Exception as e:
+        msg = str(e)
+        if "Hatalı Kullanıcı Kodu" in msg or "Hatali Kullanici" in msg:
+            return {
+                "ok": False,
+                "error": "Hatalı Kullanıcı Kodu",
+                "detail": "WS Yetki Kodu (UyeKodu) UrunServis'e erişim yetkisine sahip değil. "
+                          "Ticimax admin panelinden bu anahtara 'Ürün Servis' yetkisi vermelisiniz "
+                          "ya da ürün servisine yetkili farklı bir WS anahtarı edinmelisiniz.",
+                "categories_sample": 0,
+            }
+        return {"ok": False, "error": msg, "detail": msg, "categories_sample": 0}
+
+
 def get_categories(parent_id: int = 0, wscode: str = TICIMAX_API_KEY) -> List[Dict]:
     """
     SelectKategori(UyeKodu, kategoriID=0, dil='tr', parentID)

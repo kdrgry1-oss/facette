@@ -1418,6 +1418,51 @@ async def import_ticimax_categories(
     }
 
 
+@router.get("/ticimax/test-connection")
+async def ticimax_test_connection(
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Ticimax SOAP servislerine erişim testi. Hangi servislere yetkiniz var,
+    hangileri reddediliyor onu gösterir.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from ticimax_client import check_urun_service_access, get_product_count, _uye_client, TICIMAX_API_KEY
+
+    results = {"urun_service": None, "uye_service": None, "product_count": None}
+
+    # Urun service probe
+    access = check_urun_service_access()
+    results["urun_service"] = {
+        "ok": access.get("ok"),
+        "error": access.get("error"),
+        "detail": access.get("detail"),
+    }
+    if access.get("ok"):
+        try:
+            results["product_count"] = get_product_count(aktif=None)
+        except Exception as e:
+            results["product_count"] = f"ERR: {e}"
+
+    # Uye service probe
+    try:
+        c = _uye_client()
+        ff = c.get_type("ns2:UyeFiltre")
+        sf = c.get_type("ns2:UyeSayfalama")
+        s = sf(KayitSayisi=1, SayfaNo=1, SiralamaDegeri="ID", SiralamaYonu="DESC")
+        r = c.service.SelectUyeler(UyeKodu=TICIMAX_API_KEY, filtre=ff(), sayfalama=s)
+        results["uye_service"] = {"ok": True, "sample_received": r is not None}
+    except Exception as e:
+        msg = str(e)
+        results["uye_service"] = {
+            "ok": False,
+            "error": "Hatalı Kullanıcı Kodu" if "Hatalı Kullanıcı Kodu" in msg else msg,
+        }
+
+    return results
+
+
 @router.post("/ticimax/products/import")
 async def import_ticimax_products(
     limit: int = Query(500, ge=1, le=5000),
@@ -1439,9 +1484,29 @@ async def import_ticimax_products(
         get_variants,
         get_product_images,
         get_assorted_stock,
+        check_urun_service_access,
     )
 
     aktif_param = None if aktif == -1 else aktif
+
+    # Probe service access first — Ticimax silently returns empty when WS
+    # key has no UrunServis scope. Surface that as a real error.
+    access = check_urun_service_access()
+    if not access.get("ok"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": access.get("error") or "Erişim reddedildi",
+                "message": access.get("detail") or "Ticimax UrunServis erişim yetkisi yok.",
+                "remedy": (
+                    "Ticimax admin panelinden Web Servis Yetkileri sayfasına gidip "
+                    "kullandığınız WS Yetki Kodu için 'Ürün Servisi' (UrunServis) yetkisini "
+                    "etkinleştirin. Üyeler için yetki açık olsa bile, ürünler için ayrıca "
+                    "yetki gerekiyor. Alternatif olarak ürün servisine yetkili farklı bir "
+                    "anahtar girebilirsiniz."
+                ),
+            }
+        )
 
     try:
         total_remote = get_product_count(aktif=aktif_param)
