@@ -1984,3 +1984,32 @@ UBL-TR şemasıyla tam uyum için Doğan'dan **örnek geçerli UBL XML** istenme
 
 ### Sonraki agent için
 Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyasını alın → `build_earsiv_ubl_xml` çıktısıyla diff alın → eksik blokları ekleyin.
+
+---
+
+## Iteration 45 — Tema Yönetimi (Storefront) — 2026-05-18
+**Original ask**: "tema yönetimi diye bi alan ekle. oraya farklı temalar koy. birinci tema için miumiu'nun masaüstü ve mobil versiyonunun aynısı gibi olsun, fonksiyonları ve blokları ile. miumiu için olan temayı seçince bloklardaki görselleri vb istediğim gibi güncelleyebileyim."
+
+### ✅ Tamamlanan (Faz 1 — Anasayfa + Yönetim)
+- Backend: `themes` koleksiyonu + CRUD + activate + reset + block-level update (`/app/backend/routes/themes.py`)
+- Default Miu Miu teması auto-seed (8 blok + 8 mega menü öğesi)
+- Admin: `/admin/temalar` — kart listesi (preview/aktive et/düzenle/sil), editor (meta + bloklar)
+- Block editor: tip seçimi (announcement_bar/hero_fullscreen/editorial_card/product_scroller/newsletter/...), title/subtitle/CTA, masaüstü + mobil görsel (URL veya `/api/upload`), reorder (▲▼), aktif toggle
+- Storefront: `/tema/:slug` — Mulish font, sticky header + italic "miu miu" logo + mega menu (hover) + ikonlar, full-screen editorial bloklar (1/N counter + "scroll to explore" hint), ürün şeridi (yatay scroll), newsletter, 4 sütunlu footer
+- Mobil responsive (1024px ve 540px breakpoint'ler) + burger menü
+
+### Backend endpointleri
+- Admin (auth): `GET/POST/PUT/DELETE /api/admin/themes`, `POST /api/admin/themes/:id/activate`, `POST /api/admin/themes/:id/reset`, `PUT /api/admin/themes/:id/blocks/:bid`
+- Public: `GET /api/storefront/themes/active`, `GET /api/storefront/themes/:slug`
+
+### Pending (Faz 2 & 3)
+- **Faz 2**: PLP (kategori) + PDP (ürün detay) + Sepet + Favoriler — Miu Miu birebir
+- **Faz 3**: Üye ol/Giriş + Hesabım + Checkout (3-step) + AI Asistan widget
+- Trendyol Q&A senkronizasyon canlı tetik
+- Cloudflare R2 entegrasyonu (kullanıcı onayı bekliyor)
+- Resend (mail) API key
+
+### Architecture notes
+- Theme blocks `MongoDB` üzerinde Theme dökümanı içine `blocks: [...]` array olarak gömülü (denormalize). Sıralama `order` field'ına göre.
+- Block görselleri: harici URL veya `/api/upload` ile self-host. Mobil ayrı görsel desteği var (`mobile_image`).
+- `product_scroller` block tipi `/api/products?category=<slug>&limit=<n>` ile dinamik ürün çekiyor.

@@ -481,6 +481,11 @@ api_router.include_router(production_hooks_router)
 api_router.include_router(size_rec_router)
 api_router.include_router(iys_router)
 
+# Theme management (admin) + storefront theme reader (public)
+from routes.themes import admin_router as themes_admin_router, public_router as themes_public_router
+api_router.include_router(themes_admin_router)
+api_router.include_router(themes_public_router)
+
 # Root endpoint
 @api_router.get("/")
 async def root():

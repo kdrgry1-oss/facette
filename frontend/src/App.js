@@ -83,6 +83,8 @@ import MobileApp from "./pages/admin/MobileApp";
 import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
 import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
+import Themes from "./pages/admin/Themes";
+import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -117,6 +119,10 @@ function App() {
             <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
             <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
 
+            {/* Theme storefront preview (Phase 1) */}
+            <Route path="/tema/:slug" element={<MiuMiuTheme />} />
+            <Route path="/tema" element={<MiuMiuTheme />} />
+
             {/* Admin */}
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>
@@ -129,6 +135,7 @@ function App() {
               <Route path="sorular" element={<AdminQuestions />} />
               <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
               <Route path="bannerlar" element={<AdminBanners />} />
+              <Route path="temalar" element={<Themes />} />
               <Route path="kampanyalar" element={<AdminCampaigns />} />
               <Route path="entegrasyonlar" element={<AdminIntegrations />} />
               <Route path="iadeler" element={<AdminReturns />} />

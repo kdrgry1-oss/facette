@@ -71,6 +71,7 @@ export const navigationGroups = [
     label: "Tasarım",     // ← eski adı "İçerik"
     icon: PenTool,
     children: [
+      { label: "Tema Yönetimi", path: "/admin/temalar", icon: Palette },
       { label: "Bannerlar & Sliderlar", path: "/admin/bannerlar", icon: Image },
       { label: "Popuplar", path: "/admin/popuplar", icon: BellRing },
       { label: "Duyurular", path: "/admin/duyurular", icon: BellRing },
