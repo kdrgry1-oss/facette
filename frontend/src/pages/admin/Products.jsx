@@ -817,7 +817,26 @@ export default function AdminProducts() {
       temu_attributes: product.temu_attributes || {},
       variants: product.variants || [],
       combine_products: product.combine_products || [],
-      attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(product.attributes || []).reduce((acc, curr) => ({...acc, [curr.type || curr.name]: curr.value}), {}) },
+      attributes: (() => {
+        const base = { "Yaş Grubu": "Yetişkin", "Menşei": "TR" };
+        const a = product.attributes;
+        if (!a) return base;
+        // Array shape (existing): [{type|name, value}, …]
+        if (Array.isArray(a)) {
+          return a.reduce((acc, curr) => ({ ...acc, [curr.type || curr.name]: curr.value }), base);
+        }
+        // Object shape (XML import): { slug: {label, value} | string }
+        if (typeof a === "object") {
+          const out = { ...base };
+          for (const [k, v] of Object.entries(a)) {
+            const key = (v && typeof v === "object" && v.label) ? v.label : k;
+            const val = (v && typeof v === "object") ? v.value : v;
+            out[key] = val;
+          }
+          return out;
+        }
+        return base;
+      })(),
     });
     setModalOpen(true);
   };
@@ -1187,9 +1206,9 @@ export default function AdminProducts() {
                     </a>
                     <p className="text-xs text-gray-500">{product.category_name}</p>
                   </td>
-                  <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || '-'}</td>
+                  <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || product.sku || '-'}</td>
                   <td className="text-xs text-gray-600 font-mono">
-                    {product.variants?.find(v => v.barcode)?.barcode || '-'}
+                    {product.barcode || product.variants?.find(v => v.barcode)?.barcode || '-'}
                   </td>
                   <td>
                     {product.variants?.length > 0 ? (
@@ -1200,9 +1219,14 @@ export default function AdminProducts() {
                         <Layers size={14} />
                         {product.variants.length} Beden
                       </button>
+                    ) : (product.sizes?.length > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-700">
+                        <Layers size={14} />
+                        {product.sizes.join(' · ')}
+                      </span>
                     ) : (
                       <span className="text-xs text-gray-400">-</span>
-                    )}
+                    ))}
                   </td>
                   <td>
                     {product.sale_price ? (

@@ -2719,6 +2719,23 @@ async def import_xml_products(
             # Teknik detayları parse et — admin'de "Özellikler" sekmesinde gösterilecek
             tech_attrs, _clean_text = parse_description_attributes(desc)
 
+            # Bedenleri description metninden yakala — "S M L XL bedenlerine uyumlu" vb.
+            import re as _re_sizes
+            sizes_found: list[str] = []
+            # 1) "S M L XL" gibi boşluklu/peş peşe harf bedenleri
+            for m in _re_sizes.findall(r"\b((?:XXS|XS|S|M|L|XL|XXL|XXXL)(?:[ ,/\-]+(?:XXS|XS|S|M|L|XL|XXL|XXXL))+)\b", _clean_text):
+                tokens = _re_sizes.split(r"[ ,/\-]+", m.strip())
+                for t in tokens:
+                    t = t.strip().upper()
+                    if t and t not in sizes_found:
+                        sizes_found.append(t)
+            # 2) Numerik bedenler "34 36 38 40 42 44"
+            num_match = _re_sizes.search(r"\b(\d{2}(?:[ ,/\-]+\d{2}){2,})\b", _clean_text)
+            if num_match:
+                for t in _re_sizes.split(r"[ ,/\-]+", num_match.group(1)):
+                    if t and t not in sizes_found:
+                        sizes_found.append(t)
+
             def parse_price(s: str) -> Optional[float]:
                 if not s:
                     return None
@@ -2760,6 +2777,9 @@ async def import_xml_products(
                 "slug":          slug,
                 "description":   desc,
                 "attributes":    tech_attrs,  # parsed teknik detaylar: urun_bilgisi, kumas, kalip, beden_olculeri, model_olculeri, ...
+                "sizes":         sizes_found,  # description'dan parse edilen beden listesi (S/M/L/XL veya 36/38/40)
+                "stock_code":    label_0 or "",  # Ticimax'ın "Ürün Kodu" — varyantlar arası ortak
+                "sku":           mpn or "",     # MPN/barkod, varyanta özel
                 "price":         price,
                 "sale_price":    sale_price,
                 "brand":         brand,
