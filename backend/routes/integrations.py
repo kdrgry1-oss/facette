@@ -2747,80 +2747,22 @@ def _xml_all(item: ET.Element, tag: str, ns: dict = _NS) -> list:
 @router.post("/xml/products/import")
 async def import_xml_products(
     xml_url: str = Query(XML_FEED_URL, description="Google Shopping XML URL"),
+    deactivate_missing: bool = Query(
+        True,
+        description="Feed'de bulunmayan (Ticimax'ta pasif/silinmiş) ürünleri pasif yap"
+    ),
     current_user: dict = Depends(require_admin)
 ):
     """
     Google Shopping XML feed'inden ürünleri çekip MongoDB'ye upsert eder.
-    Varsayılan URL: facette.com.tr XML export
+
+    - Açıklamadan TÜM `<strong>Etiket:</strong>Değer` özellikleri dinamik olarak
+      çıkarılır (Boy, Cep, Astar, Web Color, Kumaş, Kalıp, Model Ölçüleri vb.).
+    - deactivate_missing=True (varsayılan): Feed'de olmayan tüm `source=xml_feed`
+      ürünleri otomatik olarak `is_active=False` yapılır (Ticimax'ta pasif olanlar).
     """
     import html
-
-    def parse_description_attributes(html_text: str) -> tuple[dict, str]:
-        """
-        Ticimax description HTML'inden 'Ürün Bilgisi', 'Kumaş Bilgisi',
-        'Kalıp', 'Beden Ölçüleri', 'Model Ölçüleri' gibi etiketli teknik
-        detayları çıkarıp dict olarak döndürür.
-        Returns: (attributes_dict, clean_text_description)
-        """
-        import re as _re
-        if not html_text:
-            return {}, ""
-        # 1) HTML temizle
-        text = html.unescape(html_text)
-        # <br>, </p>, </div> → newline
-        text = _re.sub(r"<\s*br\s*/?>", "\n", text, flags=_re.I)
-        text = _re.sub(r"</\s*(p|div|li|tr)\s*>", "\n", text, flags=_re.I)
-        # diğer tagları kaldır
-        text = _re.sub(r"<[^>]+>", " ", text)
-        text = _re.sub(r"&nbsp;|\u00a0", " ", text)
-        # Çoklu whitespace
-        text = _re.sub(r"[ \t]+", " ", text)
-        text = _re.sub(r"\n[ \t]+", "\n", text)
-        text = _re.sub(r"\n{2,}", "\n", text).strip()
-
-        # 2) Etiketli kısımları yakala — "Etiket:" deseni
-        # Tanımlı (öncelikli) etiketler — admin'de Özellikler sekmesinde gösterilecek
-        LABELS = [
-            ("Ürün Bilgisi",   "urun_bilgisi"),
-            ("Kumaş Bilgisi",  "kumas"),
-            ("Kumaş",          "kumas"),
-            ("Kalıp",          "kalip"),
-            ("Beden",          "beden"),
-            ("Beden Ölçüleri", "beden_olculeri"),
-            ("Model Ölçüleri", "model_olculeri"),
-            ("Yıkama",         "yikama"),
-            ("Bakım",          "bakim"),
-            ("Astar",          "astar"),
-            ("Renk",           "renk"),
-            ("Materyal",       "materyal"),
-            ("Ürün Kodu",      "urun_kodu"),
-        ]
-        # "Label:" başlangıçlarını bul
-        label_pattern = "|".join([_re.escape(l[0]) for l in LABELS])
-        splitter = _re.compile(rf"(?:^|\n)\s*({label_pattern})\s*:\s*", _re.IGNORECASE)
-        parts = splitter.split(text)
-        # parts: [prefix, label1, value1, label2, value2, ...]
-        attrs: dict = {}
-        if len(parts) > 1:
-            i = 1
-            while i < len(parts) - 1:
-                lbl = parts[i].strip()
-                val = parts[i + 1].strip()
-                # Bir sonraki label'a kadar olan kısmı al, fazla satırları kırp
-                # value temizle
-                val = _re.sub(r"\s+", " ", val).strip()
-                # Map to slug key
-                slug = next((s for n, s in LABELS if n.lower() == lbl.lower()), None)
-                if slug and val:
-                    # Birden fazla aynı etiket gelirse ilkini al
-                    if slug not in attrs:
-                        attrs[slug] = {"label": lbl, "value": val[:500]}
-                i += 2
-        # 3) Geriye dönen "clean" description: ilk paragraf veya etiketsiz kısım
-        # En basit: tüm metni döndür (klasik), ama etiketler attrs'a alındı
-        return attrs, text
-
-    import html as _html_mod_unused  # noop (already imported above)
+    from utils.attr_parser import parse_description_attributes
 
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
@@ -2844,6 +2786,7 @@ async def import_xml_products(
     imported = 0
     updated = 0
     errors = 0
+    seen_xml_ids: set[str] = set()
 
     for item in items:
         try:
@@ -2851,6 +2794,7 @@ async def import_xml_products(
             title  = _xml_text(item, "g:title")
             if not xml_id or not title:
                 continue
+            seen_xml_ids.add(xml_id)
 
             desc = html.unescape(_xml_text(item, "g:description"))
             # Teknik detayları parse et — admin'de "Özellikler" sekmesinde gösterilecek
@@ -2938,7 +2882,10 @@ async def import_xml_products(
 
             existing = await db.products.find_one({"xml_id": xml_id})
             if existing:
-                await db.products.update_one({"xml_id": xml_id}, {"$set": doc})
+                await db.products.update_one(
+                    {"xml_id": xml_id},
+                    {"$set": doc, "$unset": {"deactivated_reason": ""}},
+                )
                 updated += 1
             else:
                 doc["id"]         = generate_id()
@@ -2958,13 +2905,37 @@ async def import_xml_products(
         upsert=True
     )
 
+    # Feed'de OLMAYAN xml_feed ürünleri pasif yap (Ticimax'ta pasif/silinmiş)
+    deactivated = 0
+    if deactivate_missing and seen_xml_ids:
+        result = await db.products.update_many(
+            {
+                "source": "xml_feed",
+                "xml_id": {"$nin": list(seen_xml_ids)},
+                "is_active": {"$ne": False},
+            },
+            {
+                "$set": {
+                    "is_active": False,
+                    "deactivated_reason": "ticimax_xml_missing",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        deactivated = result.modified_count
+
     return {
-        "success":  True,
-        "imported": imported,
-        "updated":  updated,
-        "total":    imported + updated,
-        "errors":   errors,
-        "message":  f"{imported} yeni ürün eklendi, {updated} ürün güncellendi" + (f", {errors} hata" if errors else "")
+        "success":     True,
+        "imported":    imported,
+        "updated":     updated,
+        "total":       imported + updated,
+        "errors":      errors,
+        "deactivated": deactivated,
+        "message":     (
+            f"{imported} yeni ürün eklendi, {updated} ürün güncellendi"
+            + (f", {deactivated} ürün pasife alındı" if deactivated else "")
+            + (f", {errors} hata" if errors else "")
+        ),
     }
 
 @router.get("/xml/status")

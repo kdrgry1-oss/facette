@@ -940,19 +940,20 @@ export default function AdminProducts() {
     }
   };
 
-  const toggleProductStatus = async (product) => {
+  const setProductActive = async (product, makeActive) => {
+    // Mevcut durumla aynıysa hiçbir şey yapma
+    if (Boolean(product.is_active) === Boolean(makeActive)) return;
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
-      
-      await axios.put(`${API}/products/${product.id}`, {
-        ...product,
-        is_active: !product.is_active
-      }, { headers });
-      
-      toast.success(product.is_active ? "Ürün pasife alındı" : "Ürün aktifleştirildi");
+      await axios.post(
+        `${API}/products/${product.id}/toggle-active`,
+        null,
+        { headers },
+      );
+      toast.success(makeActive ? "Ürün aktifleştirildi" : "Ürün pasife alındı");
       fetchProducts();
-    } catch (err) {
+    } catch {
       toast.error("İşlem başarısız");
     }
   };
@@ -1284,16 +1285,18 @@ export default function AdminProducts() {
                     <div className="flex flex-col gap-1">
                       <div className="flex gap-1 items-center">
                         <button
-                          onClick={() => product.is_active ? toggleProductStatus(product) : null}
-                          title="Aktif"
-                          className={`w-6 h-6 text-xs font-bold rounded ${product.is_active ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400 hover:bg-green-200'}`}
+                          onClick={() => setProductActive(product, true)}
+                          title="Aktif yap"
+                          data-testid={`product-set-active-${product.id}`}
+                          className={`w-6 h-6 text-xs font-bold rounded transition-colors ${product.is_active ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-green-200 hover:text-green-800'}`}
                         >
                           A
                         </button>
                         <button
-                          onClick={() => !product.is_active ? toggleProductStatus(product) : null}
-                          title="Pasif"
-                          className={`w-6 h-6 text-xs font-bold rounded ${!product.is_active ? 'bg-red-400 text-white' : 'bg-gray-200 text-gray-400 hover:bg-red-200'}`}
+                          onClick={() => setProductActive(product, false)}
+                          title="Pasif yap"
+                          data-testid={`product-set-passive-${product.id}`}
+                          className={`w-6 h-6 text-xs font-bold rounded transition-colors ${!product.is_active ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-red-200 hover:text-red-800'}`}
                         >
                           P
                         </button>

@@ -21,6 +21,25 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
+## Iteration 48 (2026-02-18) — Dinamik Attribute Parser + Ticimax Aktif/Pasif Sync + Toggle Bug Fix
+
+### ✅ Tamamlananlar
+- **Dinamik attribute parser** (`/app/backend/utils/attr_parser.py`):
+  - Açıklamadaki TÜM `<strong>Etiket:</strong>Değer` kalıplarını yakalar (predefined liste GEREKTİRMEZ).
+  - `<i>/<em>` markup veya bullet'lı (`•`) format için fallback parser (plain-text "Label: value" satırı).
+  - Ölçü grupları için alt-attribute çıkarımı (Beden Ölçüleri · Boy/Gogus/Kol_boyu).
+  - **Sonuç**: 319 ürünün **309'unda** zengin attribute (önceden 127). Kumaş Bilgisi, Kalıp, Model Ölçüleri, Yıkama, Bakım, Astar, Cep, Boy, Renk, Web Color vs. otomatik.
+- **Ticimax pasif sync**: `/api/integrations/xml/products/import?deactivate_missing=true` artık feed'de OLMAYAN tüm `xml_feed` ürünleri otomatik `is_active=False` yapar. Response'a `deactivated` sayacı eklendi.
+- **Pasif butonu fix**: `Products.jsx` toggle butonları artık explicit "set to active/passive" mantığı (önceden inverted conditional → tıklanmıyordu). Backend `/api/products/{id}/toggle-active` kullanılıyor.
+
+### Dosya Değişiklikleri
+- ✏️ `/app/backend/utils/attr_parser.py` (yeni)
+- ✏️ `/app/backend/routes/integrations.py` (XML import: yeni parser + deactivate_missing)
+- ✏️ `/app/backend/scripts/reparse_product_attrs.py` (yeni parser kullanır)
+- ✏️ `/app/frontend/src/pages/admin/Products.jsx` (toggle bug fix + data-testid)
+
+
+
 ## Iteration 42-43 (2026-05-12) — Reports Suite + Production Forecasting + IYS
 
 ### 📊 Yeni Gelişmiş Rapor Seti (`/admin/raporlar/kar-stok`)
@@ -839,7 +858,7 @@ Admin'in tek tıkla (veya cron ile her 2 saatte bir) Ticimax SOAP'tan canlı sto
 
 ### MNG Webhook URL (admin'e tanımlatılacak)
 ```
-https://erp-dashboard-118.preview.emergentagent.com/api/orders/cargo/mng-webhook
+https://ticimax-sync.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ```
 (Production'da REACT_APP_BACKEND_URL'a göre değişir; UI'da auto-render ediliyor)
 
@@ -923,7 +942,7 @@ https://erp-dashboard-118.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ### Pending User Manual Tasks
 - Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
 - e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
-- MNG'ye webhook URL bildirimi: `https://erp-dashboard-118.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+- MNG'ye webhook URL bildirimi: `https://ticimax-sync.preview.emergentagent.com/api/orders/cargo/mng-webhook`
 
 
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul

@@ -82,7 +82,7 @@ const config: CapacitorConfig = {
   bundledWebRuntime: false,
   server: {
     // Production'da kaldır - sadece development için
-    // url: 'https://erp-dashboard-118.preview.emergentagent.com',
+    // url: 'https://ticimax-sync.preview.emergentagent.com',
     cleartext: false,
     androidScheme: 'https',
   },
