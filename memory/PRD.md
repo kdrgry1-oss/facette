@@ -4,7 +4,26 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 50 (2026-05-19) — Auto-Match Toast Bug + Company Defaults
+## Iteration 51 (2026-05-19) — Değer Eşleştirme Boş Veri Bug Fix
+
+### 🐛 Bug — "Değerler çekilmedi" (Empty Value Modal)
+Kullanıcı şikayeti: "Değer" sekmesine tıklayınca local_values boş geliyordu.
+
+**Root cause**: Ürünlerin `attributes` alanı sistemde **DICT** olarak saklanıyor (örn. `{"ticimax_web_color": {"label":"Web Color","value":"Bej"}, ...}`) ama `get_advanced_values` LIST gibi iteriyordu. Sessizce 0 değer dönüyor, modal boş kalıyordu.
+
+**Fix** — `/api/category-mapping/{mp}/{cat_id}/values`:
+1. **Dual format**: Hem list hem dict `attributes` yapısını destekler. Dict'te `label`/`value` keylerini parse eder.
+2. **Variant color/size**: Varyantın `color` → "Renk"/"Web Color", `size` → "Beden" olarak eklenir.
+3. **Kategori eşleşmesi genişletildi**: `category_id == X` veya `category_name == Y` (ürünler "EN YENİLER" gibi koleksiyon kategorisinde olabiliyor).
+4. **Ticimax master**: `ticimax_attribute_master` koleksiyonundan (18 master attribute, 165 değer) `ozellik_tanim → degerler[].tanim` birleştirildi.
+5. **Global attributes**: 52 sistem özelliği + değerleri zaten ekleniyordu.
+
+**Test sonuçları (Ceket category_id=6846)**:
+- Önce: 0 değer
+- Sonra: 115 attribute group · 118 Renk · 111 Beden · 42 Web Color · 101 Boy · 108 Kalıp · 109 Materyal değeri
+- Frontend modalı 29 attribute tab + 27 satır ile düzgün renderlanıyor
+
+
 Kullanıcı şikayeti: Modaldaki "Otomatik Eşleştir" butonuna basınca "0 özellik" çıkıyor ama bir sürü eşleşmesi gereken alan var.
 
 **Root cause**: `bulk-auto-match-attributes` daha önce çalıştırılmış, tüm global karşılığı olan attribute'lar zaten `attribute_mappings`'e yazılmıştı. Kalan 14 attribute "Üretici Adı, İthalatçı Mail Adresi, Üretici Adres Bilgisi" gibi Trendyol'un yeni AB DSA regülasyonu için zorunlu hale getirdiği ticari kayıt alanları — sistemde global karşılığı yok ve olamaz (her marka için sabit şirket bilgisi).

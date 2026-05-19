@@ -774,40 +774,86 @@ async def get_advanced_values(
     current_user: dict = Depends(require_admin),
 ):
     """Bu sistem kategorisindeki ürünlerin attribute değerleri (distinct) +
-    sistemdeki global attribute değerleri de birleştirilerek döner.
-    Böylece eşleştirme ekranında "Ürünlerde bu kategoride renk kullanılmamış"
-    olsa bile global attributes (ör. Renk → Kırmızı/Mavi) görünür.
+    sistemdeki global attribute değerleri + Ticimax master değerler birleştirilerek döner.
+
+    Ürün attributes formatı hem LIST hem DICT olabilir; ikisini de destekler.
+
+    Ticimax `ticimax_attribute_master` koleksiyonundan
+    (örn. {ozellik_tanim:'Web Color', degerler:[{tanim:'Bej'}, ...]}) da değerler eklenir.
     """
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
 
+    local_values: dict[str, set] = {}
+
+    def _add(nm: str | None, vv):
+        if not nm or vv in (None, ""):
+            return
+        sv = str(vv).strip()
+        if not sv:
+            return
+        local_values.setdefault(str(nm).strip(), set()).add(sv)
+
+    def _collect_attrs(attrs):
+        """attributes alanı list veya dict olabilir."""
+        if isinstance(attrs, list):
+            for a in attrs:
+                if isinstance(a, dict):
+                    nm = a.get("name") or a.get("type") or a.get("attribute_name") or a.get("label")
+                    vv = a.get("value") or a.get("attribute_value")
+                    _add(nm, vv)
+                elif isinstance(a, str):
+                    # Bazı eski kayıtlarda string olarak tutulmuş — atla
+                    pass
+        elif isinstance(attrs, dict):
+            for k, v in attrs.items():
+                if isinstance(v, dict):
+                    nm = v.get("label") or v.get("name") or k
+                    vv = v.get("value") or v.get("attribute_value")
+                    _add(nm, vv)
+                else:
+                    _add(k, v)
+
     # 1) Bu kategorideki ürünlerden distinct attribute değerlerini topla
-    local_values = {}
+    #    (hem category_id hem category_name ile match — bazı ürünler
+    #     "EN YENİLER" gibi koleksiyon kategorisinde olabiliyor)
+    cat_doc = await db.categories.find_one({"id": local_category_id}, {"_id": 0, "name": 1})
+    cat_name = (cat_doc or {}).get("name", "") or ""
+    or_q = [{"category_id": local_category_id}]
+    if cat_name:
+        or_q.append({"category_name": cat_name})
     cursor = db.products.find(
-        {"category_id": local_category_id}, {"_id": 0, "attributes": 1, "variants": 1}
+        {"$or": or_q},
+        {"_id": 0, "attributes": 1, "variants": 1},
     )
     async for p in cursor:
-        for a in p.get("attributes", []) or []:
-            nm = a.get("name") or a.get("type") or a.get("attribute_name")
-            vv = a.get("value") or a.get("attribute_value")
-            if not nm or not vv:
-                continue
-            local_values.setdefault(nm, set()).add(str(vv))
+        _collect_attrs(p.get("attributes"))
         for v in p.get("variants", []) or []:
-            for a in v.get("attributes", []) or []:
-                nm = a.get("name") or a.get("type") or a.get("attribute_name")
-                vv = a.get("value") or a.get("attribute_value")
-                if not nm or not vv:
-                    continue
-                local_values.setdefault(nm, set()).add(str(vv))
+            _collect_attrs(v.get("attributes"))
+            if v.get("color"):
+                _add("Renk", v["color"])
+                _add("Web Color", v["color"])
+            if v.get("size"):
+                _add("Beden", v["size"])
 
-    # 2) Global /api/attributes içerisindeki tüm değerleri de birleştir
+    # 2) Global /api/attributes içerisindeki tüm değerleri birleştir
     async for ga in db.attributes.find({}, {"_id": 0, "name": 1, "values": 1}):
         nm = (ga.get("name") or "").strip()
         if not nm:
             continue
         for val in ga.get("values", []) or []:
             sv = str(val).strip()
+            if sv:
+                local_values.setdefault(nm, set()).add(sv)
+
+    # 3) Ticimax master değerlerini (`ticimax_attribute_master`) birleştir.
+    #    Format: {ozellik_id, ozellik_tanim, degerler:[{id,tanim}, ...]}
+    async for tm in db.ticimax_attribute_master.find({}, {"_id": 0}):
+        nm = (tm.get("ozellik_tanim") or "").strip()
+        if not nm:
+            continue
+        for d in tm.get("degerler") or []:
+            sv = (d.get("tanim") or "").strip() if isinstance(d, dict) else str(d).strip()
             if sv:
                 local_values.setdefault(nm, set()).add(sv)
 
