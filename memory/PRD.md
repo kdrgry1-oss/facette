@@ -42,6 +42,11 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=true: ~3 sn (DB master cache'inden)
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
+### Trendyol Kategori & Aktarım Düzeltmeleri (2026-02-19)
+1. **Otomatik özellik eşleştir bug fix**: `bulk-auto-match-attributes` endpoint'inde `tr_client.get_category_attributes` LIST dönerken kod DICT bekliyordu → sessizce hata yutuluyor, 0 mapping. List/dict dual-handle eklendi → **389 yeni özellik mapping** (Elbise:34, Trençkot:31, Ceket:32, Pantolon:32, vs.)
+2. **Kategori silme**: Backend endpoint zaten çalışıyor (DELETE 200 OK). UI'daki silme butonları aktif.
+3. **Barkod ile spesifik ürün aktarımı**: Yeni "Barkod ile Trendyol'a Aktar" butonu (Products üst bar) + modal popup (textarea ile barkod/stok kodu yazılır) + backend `barcodes`/`stock_codes` filtreleri.
+
 ### Excel-Bazlı Teknik Detay Import (2026-02-19) — KESİN ÇÖZÜM
 Kullanıcı `UrunTeknikDetaylari.xls` (Ticimax export, .xlsx içerik) yükledi.
 Script `/app/backend/scripts/import_attrs_from_excel.py`:

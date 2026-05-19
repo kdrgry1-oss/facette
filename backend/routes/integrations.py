@@ -307,10 +307,26 @@ async def sync_products_to_trendyol(
     payload = await request.json()
     product_ids = payload.get("product_ids", [])
     category_filters = payload.get("category_filters", [])
+    # Yeni: Barkod/stok kodu ile filtre (kullanıcı UI'da yazıp aktarabilsin)
+    barcodes_raw = payload.get("barcodes", [])
+    stock_codes_raw = payload.get("stock_codes", [])
+    barcodes = [str(b).strip() for b in (barcodes_raw or []) if str(b).strip()]
+    stock_codes = [str(s).strip() for s in (stock_codes_raw or []) if str(s).strip()]
     
     query = {}
     if product_ids:
         query = {"id": {"$in": product_ids}}
+    elif barcodes or stock_codes:
+        # Hem ürünün kendi barcode/stock_code'una hem de variants[] içine bak
+        or_conditions = []
+        if barcodes:
+            or_conditions.append({"barcode": {"$in": barcodes}})
+            or_conditions.append({"variants.barcode": {"$in": barcodes}})
+        if stock_codes:
+            or_conditions.append({"stock_code": {"$in": stock_codes}})
+            or_conditions.append({"sku": {"$in": stock_codes}})
+            or_conditions.append({"variants.stock_code": {"$in": stock_codes}})
+        query = {"$or": or_conditions}
     elif category_filters:
         # Build an $or query for each category + its filters
         or_conditions = []

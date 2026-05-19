@@ -78,6 +78,9 @@ export default function AdminProducts() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  const [barcodePushOpen, setBarcodePushOpen] = useState(false);
+  const [barcodePushText, setBarcodePushText] = useState("");
+  const [barcodePushLoading, setBarcodePushLoading] = useState(false);
   // URL'den ürün ID'si — `/admin/urunler/{productId}` ile gelen direct link
   const { productId: urlProductId } = useParams();
   const navigate = useNavigate();
@@ -1086,6 +1089,15 @@ export default function AdminProducts() {
           >
             {techImporting ? <RefreshCw className="animate-spin" size={16} /> : <FileSpreadsheet size={16} />}
             Teknik Detay Yükle
+          </button>
+          <button
+            onClick={() => setBarcodePushOpen(true)}
+            data-testid="trendyol-push-barcodes-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-all font-medium text-sm shadow-sm"
+            title="Barkod / Stok kodu yazıp seçili ürünleri Trendyol'a aktar"
+          >
+            <Store size={16} />
+            Barkod ile Trendyol'a Aktar
           </button>
           <button 
             onClick={() => { resetForm(); setModalOpen(true); }}
@@ -2704,6 +2716,74 @@ export default function AdminProducts() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Barkod ile Trendyol'a Aktar — pop-up */}
+      <Dialog open={barcodePushOpen} onOpenChange={setBarcodePushOpen}>
+        <DialogContent className="max-w-2xl" data-testid="barcode-push-dialog">
+          <DialogHeader>
+            <DialogTitle>Barkod ile Trendyol'a Aktar</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Aktarmak istediğiniz ürünlerin <b>barkod</b> veya <b>stok kodlarını</b> her satıra bir tane yazın.
+              Boşluk, virgül veya satır sonu ile ayırabilirsiniz.
+            </p>
+            <textarea
+              value={barcodePushText}
+              onChange={(e) => setBarcodePushText(e.target.value)}
+              rows={10}
+              placeholder="8684483528521&#10;FCSS2700005&#10;8684483528522"
+              className="w-full border rounded-lg p-3 text-sm font-mono"
+              data-testid="barcode-push-textarea"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setBarcodePushOpen(false)}
+                className="px-4 py-2 border rounded hover:bg-gray-100"
+              >
+                İptal
+              </button>
+              <button
+                disabled={barcodePushLoading || !barcodePushText.trim()}
+                data-testid="barcode-push-submit-btn"
+                onClick={async () => {
+                  // Split by whitespace/comma/newline
+                  const codes = barcodePushText
+                    .split(/[\s,;\n]+/)
+                    .map(s => s.trim())
+                    .filter(Boolean);
+                  if (!codes.length) return;
+                  setBarcodePushLoading(true);
+                  const t = toast.loading(`${codes.length} kod Trendyol'a aktarılıyor...`);
+                  try {
+                    const token = localStorage.getItem('token');
+                    // Hem barkod hem stok_kodu olarak dene — backend ikisini de kontrol eder
+                    const res = await axios.post(
+                      `${API}/integrations/trendyol/products/sync`,
+                      { barcodes: codes, stock_codes: codes },
+                      { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+                    );
+                    toast.dismiss(t);
+                    const data = res.data || {};
+                    toast.success(`${data.successful || data.count || 0} ürün gönderildi${data.failed ? `, ${data.failed} hata` : ''}`);
+                    setBarcodePushOpen(false);
+                    setBarcodePushText("");
+                  } catch (e) {
+                    toast.dismiss(t);
+                    toast.error(e.response?.data?.detail || "Aktarım başarısız");
+                  } finally {
+                    setBarcodePushLoading(false);
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
+              >
+                {barcodePushLoading ? <RefreshCw className="animate-spin" size={16} /> : <Store size={16} />}
+                Trendyol'a Gönder
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

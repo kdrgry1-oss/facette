@@ -35,10 +35,21 @@ MARKETPLACES = ["trendyol", "hepsiburada", "temu", "n11", "amazon-tr",
 
 
 @router.get("/{marketplace}")
-async def list_mappings(marketplace: str, current_user: dict = Depends(require_admin)):
+async def list_mappings(
+    marketplace: str,
+    show_excluded: bool = False,
+    current_user: dict = Depends(require_admin),
+):
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
-    cats = await db.categories.find({}, {"_id": 0}).to_list(length=2000)
+    # Hariç tutulanları filtrele (kullanıcı "Sil" tıkladığı kategoriler)
+    if show_excluded:
+        cats = await db.categories.find({}, {"_id": 0}).to_list(length=2000)
+    else:
+        cats = await db.categories.find(
+            {"excluded_marketplaces": {"$ne": marketplace}},
+            {"_id": 0},
+        ).to_list(length=2000)
     mappings = await db.category_mappings.find({"marketplace": marketplace}, {"_id": 0}).to_list(length=3000)
     mp_map = {m.get("category_id"): m for m in mappings}
     rows = []
@@ -52,11 +63,14 @@ async def list_mappings(marketplace: str, current_user: dict = Depends(require_a
             "marketplace_category_id": m.get("marketplace_category_id"),
             "marketplace_category_name": m.get("marketplace_category_name"),
             "status": m.get("status") or ("matched" if m.get("marketplace_category_id") else "unmatched"),
+            "excluded": marketplace in (c.get("excluded_marketplaces") or []),
             "updated_at": m.get("updated_at"),
         })
     matched = sum(1 for r in rows if r["status"] == "matched")
+    excluded_count = sum(1 for r in rows if r["excluded"])
     return {"marketplace": marketplace, "total": len(rows),
-            "matched": matched, "unmatched": len(rows) - matched, "items": rows}
+            "matched": matched, "unmatched": len(rows) - matched,
+            "excluded": excluded_count, "items": rows}
 
 
 # NOTE: options + bulk-delete + reset-all, generic /{category_id} route'larından
@@ -114,6 +128,11 @@ async def bulk_delete_category_mappings(
         "marketplace": marketplace,
         "category_id": {"$in": ids},
     })
+    # Bu kategorileri listeden GİZLE
+    await db.categories.update_many(
+        {"id": {"$in": ids}},
+        {"$addToSet": {"excluded_marketplaces": marketplace}},
+    )
     return {"success": True, "deleted": res.deleted_count}
 
 
@@ -122,6 +141,11 @@ async def reset_all(marketplace: str, current_user: dict = Depends(require_admin
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     res = await db.category_mappings.delete_many({"marketplace": marketplace})
+    # Tüm gizlenmiş kategorileri tekrar göster
+    await db.categories.update_many(
+        {"excluded_marketplaces": marketplace},
+        {"$pull": {"excluded_marketplaces": marketplace}},
+    )
     return {"success": True, "deleted": res.deleted_count}
 
 
@@ -246,14 +270,22 @@ async def bulk_auto_match_attributes(
         if marketplace == "trendyol" and tr_client:
             try:
                 data = await tr_client.get_category_attributes(int(mp_cat_id))
-                mp_attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                # Trendyol client doğrudan LIST döndürebilir veya {categoryAttributes: [...]} dict döndürebilir
+                if isinstance(data, list):
+                    mp_attrs = data
+                elif isinstance(data, dict):
+                    mp_attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                else:
+                    mp_attrs = []
                 await db.trendyol_category_attributes.update_one(
                     {"category_id": int(mp_cat_id)},
                     {"$set": {"category_id": int(mp_cat_id), "attributes": mp_attrs, "updated_at": now}},
                     upsert=True,
                 )
                 fetched_live = True
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.exception(f"Trendyol attr fetch hatası cat={mp_cat_id}: {e}")
                 mp_attrs = []
         if not mp_attrs:
             coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
@@ -406,9 +438,37 @@ async def refresh_attributes(
 @router.delete("/{marketplace}/{category_id}")
 async def clear_mapping(marketplace: str, category_id: str,
                          current_user: dict = Depends(require_admin)):
+    """
+    Kategoriyi bu pazaryeri için mapping listesinden TAMAMEN gizler:
+      1. Mevcut mapping kaydını siler
+      2. Kategorinin `excluded_marketplaces` array'ine bu pazaryerini ekler
+         → Bu kategori artık bu pazaryerinin Kategori Eşleştirme sayfasında
+           görünmez (kullanıcı tekrar görmek isterse `Hepsini Sıfırla` butonu
+           ile resetler).
+    """
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
-    await db.category_mappings.delete_one({"category_id": category_id, "marketplace": marketplace})
+    await db.category_mappings.delete_one(
+        {"category_id": category_id, "marketplace": marketplace}
+    )
+    # Kategoriyi bu pazaryeri için gizle
+    await db.categories.update_one(
+        {"id": category_id},
+        {"$addToSet": {"excluded_marketplaces": marketplace}},
+    )
+    return {"success": True}
+
+
+@router.post("/{marketplace}/{category_id}/include")
+async def include_category(marketplace: str, category_id: str,
+                            current_user: dict = Depends(require_admin)):
+    """Daha önce silinen (gizlenen) kategoriyi tekrar listeye getirir."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    await db.categories.update_one(
+        {"id": category_id},
+        {"$pull": {"excluded_marketplaces": marketplace}},
+    )
     return {"success": True}
 
 

@@ -36,6 +36,7 @@ export default function CategoryMapping() {
   const [valueMatchFor, setValueMatchFor] = useState(null);
   const [bulkAttrLoading, setBulkAttrLoading] = useState(false);
   const [bulkAttrReport, setBulkAttrReport] = useState(null);
+  const [showExcluded, setShowExcluded] = useState(false);
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -50,12 +51,15 @@ export default function CategoryMapping() {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/category-mapping/${active}`, auth);
+      const r = await axios.get(
+        `${API}/category-mapping/${active}?show_excluded=${showExcluded}`,
+        auth,
+      );
       setData(r.data);
     } catch { toast.error("Liste yüklenemedi"); }
     finally { setLoading(false); }
   };
-  useEffect(() => { if (active) load(); /* eslint-disable-next-line */ }, [active]);
+  useEffect(() => { if (active) load(); /* eslint-disable-next-line */ }, [active, showExcluded]);
 
   const saveRow = async (row) => {
     if (!editVal.name) { toast.info("Pazaryeri kategorisi seçin"); return; }
@@ -68,9 +72,19 @@ export default function CategoryMapping() {
   };
 
   const clearRow = async (row) => {
-    if (!await window.appConfirm(`"${row.category_name}" eşleşmesi silinsin mi?`)) return;
+    if (!await window.appConfirm(
+      `"${row.category_name}" bu pazaryeri eşleştirme listesinden GİZLENECEK.\n\n` +
+      `Eşleştirme silinir ve kategori artık ${active} için listede görünmez.\n` +
+      `(Tekrar göstermek için sayfanın üstündeki "Gizlenenleri Göster" butonunu kullanın.)\n\n` +
+      `Onaylıyor musunuz?`
+    )) return;
     await axios.delete(`${API}/category-mapping/${active}/${row.category_id}`, auth);
-    toast.success("Silindi"); load();
+    toast.success("Kategori bu pazaryeri için gizlendi"); load();
+  };
+
+  const restoreCategory = async (row) => {
+    await axios.post(`${API}/category-mapping/${active}/${row.category_id}/include`, {}, auth);
+    toast.success("Kategori tekrar gösterildi"); load();
   };
 
   const bulkDelete = async () => {
@@ -199,12 +213,24 @@ export default function CategoryMapping() {
         </div>
       </div>
 
-      <div className="relative max-w-md mb-3">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Kategori ara..."
-          className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm"
-          data-testid="cat-search" />
+      <div className="flex items-center gap-3 mb-3">
+        <div className="relative max-w-md flex-1">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Kategori ara..."
+            className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm"
+            data-testid="cat-search" />
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showExcluded}
+            onChange={(e) => setShowExcluded(e.target.checked)}
+            className="rounded"
+            data-testid="cat-show-excluded"
+          />
+          <span>Gizlenenleri Göster {data.excluded ? `(${data.excluded})` : ""}</span>
+        </label>
       </div>
 
       {/* Toplu seçim bar */}
@@ -319,9 +345,17 @@ export default function CategoryMapping() {
                               </button>
                             </>
                           )}
-                          <button onClick={() => clearRow(row)}
-                            className="text-xs text-red-600 hover:underline"
-                            data-testid={`cat-clear-${row.category_id}`}>Sil</button>
+                          {row.excluded ? (
+                            <button onClick={() => restoreCategory(row)}
+                              className="text-xs text-green-600 hover:underline"
+                              data-testid={`cat-restore-${row.category_id}`}>
+                              ↺ Geri Getir
+                            </button>
+                          ) : (
+                            <button onClick={() => clearRow(row)}
+                              className="text-xs text-red-600 hover:underline"
+                              data-testid={`cat-clear-${row.category_id}`}>Sil</button>
+                          )}
                         </div>
                       )}
                     </td>
