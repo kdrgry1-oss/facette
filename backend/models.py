@@ -114,6 +114,7 @@ class ProductBase(BaseModel):
     consignment_stock: int = 0  # KONSINYESTOKADEDI
     purchase_price: Optional[float] = None  # ALISFIYATI
     market_price: Optional[float] = None  # PIYASAFIYATI
+    member_price_1: Optional[float] = None  # UYETIPIFIYAT1 (üye tipi 1 fiyatı)
     vat_rate: float = 20  # KDVORANI
     vat_included: bool = True  # KDVDAHIL
     currency: str = "TRY"  # PARABIRIMI

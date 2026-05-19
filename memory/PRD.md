@@ -4,6 +4,28 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 66 (2026-05-19) — Üye Tipi 1 Fiyat Alanı + Beden Re-sync
+
+### 🎯 Yeni Excel
+Kullanıcı 3-kolonlu Excel yükledi: BARKOD, UYETIPIFIYAT1, Beden. Yeni alan + beden düzeltmeleri istedi.
+
+### 🔧 Yapılan
+1. **`Product.member_price_1` alanı** (`models.py`): Üye Tipi 1 fiyatı (UYETIPIFIYAT1)
+2. **Admin UI** (`Products.jsx`): "Üye Tipi 1 Fiyatı" input alanı (purple text, formData + load)
+3. **Re-sync script** (`scripts/sync_ticimax_v2_excel.py`):
+   - BARKOD → variant.size (sadece Excel'de _is_size() TRUE ise, mevcut DB değeri override edilir)
+   - BARKOD → product.member_price_1
+   - `_is_size` regex iyileştirildi: "XS/S", "M/L", "35-38" gibi kombolar destekleniyor
+
+### ✅ Test
+- FCSS2700005 Palma Bermuda: XS/S/M/L/XL ✓ UYE1=1290 TL ✓
+- Toplam 579 ürün UYE1 fiyatı aldı, 119 barkod gerçek bedenle güncellendi
+
+### ⚠ Bilinen Sorun
+DB'de 204 barkod **multi-variant duplicate** (Ticimax XML her bedene parent barkod yazıyor → S/M/L varyantları aynı barkoda sahip). Bu yüzden Pattern atama bu varyantları farklılaştıramıyor. Çözüm: kullanıcı `/admin/trendyol-hayalet` → DB Duplikatları sayfasından kontrol edip Barkod Sorunları'ndan elden düzeltebilir. Kalıcı fix: Ticimax XML feed parser refactor.
+
+
+
 ## Iteration 65 (2026-05-19) — Beden Atama (Pattern) + Search Bug Fix
 
 ### 🐛 Şikayetler

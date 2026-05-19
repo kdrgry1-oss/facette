@@ -152,7 +152,7 @@ export default function AdminProducts() {
     urun_karti_id: "", urun_id: "",
     // Ticimax fields
     variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
-    supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
+    supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0, member_price_1: null,
     // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
     collection: "", color: "",
     vat_rate: 10,
@@ -878,6 +878,7 @@ export default function AdminProducts() {
       manufacturer: product.manufacturer || "FACETTE",
       max_installment: product.max_installment || 9,
       purchase_price: product.purchase_price || 0,
+      member_price_1: product.member_price_1 ?? null,
       // FAZ 7 — İmalat planı için ek alanlar (geri yükleme)
       collection: product.collection || "",
       color: product.color || "",
@@ -939,7 +940,7 @@ export default function AdminProducts() {
       stock: 0, stock_code: "", barcode: "", sku: "",
       urun_karti_id: "", urun_id: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
-      supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
+      supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0, member_price_1: null,
     // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
     collection: "", color: "",
       market_price: 0, vat_rate: globalVatRate, vat_included: true, currency: "TRY",
@@ -1755,6 +1756,18 @@ export default function AdminProducts() {
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
                           data-testid="product-purchase-price"
                         />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Üye Tipi 1 Fiyatı (TL)</label>
+                        <input
+                          type="number"
+                          value={formData.member_price_1 ?? ""}
+                          onChange={(e) => setFormData({ ...formData, member_price_1: e.target.value === "" ? null : parseFloat(e.target.value) })}
+                          placeholder="Üye tipi 1'e özel fiyat"
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all font-bold text-purple-600"
+                          data-testid="product-member-price-1"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">Ticimax UYETIPIFIYAT1'den çekilir. Storefront'ta üye tipi 1 grubuna özel fiyat olarak gösterilir.</p>
                       </div>
                       {/* FAZ 7 — İmalat modülü için */}
                       <div>
