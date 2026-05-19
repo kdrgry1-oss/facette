@@ -42,6 +42,16 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=true: ~3 sn (DB master cache'inden)
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
+### Excel-Bazlı Teknik Detay Import (2026-02-19) — KESİN ÇÖZÜM
+Kullanıcı `UrunTeknikDetaylari.xls` (Ticimax export, .xlsx içerik) yükledi.
+Script `/app/backend/scripts/import_attrs_from_excel.py`:
+- 242 UrunKartID, 2916 özellik atamasını parse etti
+- DB'deki `ticimax_card_id` + stock_code fallback ile **412 ürün eşleştirildi**
+- **9249 alan yazıldı** (gerçek Ticimax değerleri ile)
+- Maren Bermuda Şortolon Bej örneği: 17 dolu özellik (Boy=Midi, Cep=Cepli, Astar Durumu=Astarsız, Bel=Yüksek Bel, Kalıp=Regular, Materyal=Pamuklu, Koleksiyon=Casual/Günlük, Sezon=SPRING-SUMMER, Web Color=Bej, Ortam=Casual/Günlük vb.)
+
+Bundan sonra kullanıcı her güncellemede Ticimax'tan export edip script'i tetikleyebilir.
+
 ### Default Strategy Reset (2026-02-19) — KAFA GÖRE ATAMA İPTAL
 - Kullanıcı uyarısı: "Bandana için Yaka Tipi=Straplez yazmışsın, Ticimax'ta yok ise BOŞ bırak."
 - Önceki `apply_default_attrs.py` (kategori-bazlı uydurma default'lar) İPTAL edildi.
