@@ -43,6 +43,7 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
 ### Diğer Düzeltmeler
+- **`openEditModal` async fetch (2026-02-19)**: Modal her açılışta DB'den taze ürünü çekiyor — `enrich-attrs` veya `teknik-detay/sync` sonrası kullanıcının sayfayı yenilemesine gerek YOK. Cached list stale olsa bile modal güncel attribute'larla açılır.
 - **Pasif butonu fix**: A/P butonları explicit "set to state" mantığı (önceki: inverted conditional bug).
 - **Pasif sync**: XML feed'de OLMAYAN xml_feed ürünleri otomatik `is_active=False`.
 - **Dinamik description parser** (`utils/attr_parser.py`): `<strong>Etiket:</strong>Değer` ve plain "Label: value" satırlarını yakalar.

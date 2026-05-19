@@ -778,7 +778,17 @@ export default function AdminProducts() {
    *   yerleştirir. Ölçü Tablosu sekmesinde SizeTablePanel bileşeni
    *   `product.id`'yi kullanarak kendi verisini çeker.
    */
-  const openEditModal = (product) => {
+  const openEditModal = async (productArg) => {
+    // DB'den taze çek (enrich/sync sonrası UI cache stale olabilir)
+    let product = productArg;
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await axios.get(`${API}/products/${productArg.id}`, { headers });
+      if (res.data) product = res.data;
+    } catch {
+      // fallback: kullan listedeki cached product
+    }
     setEditingProduct(product);
     // Parse edilmiş teknik detayları (XML import'dan) ayrı state'e al — Özellikler sekmesinin
     // üstündeki "Teknik Detay" panelinde gösterilecek
