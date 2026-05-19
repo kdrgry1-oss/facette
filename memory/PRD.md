@@ -2674,3 +2674,23 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending / Next
 - UI'a "Bedenleri Yeniden Hesapla" butonu eklenebilir (CategoryMapping.jsx)
+
+## Iteration 55 — Modal Beden Sıralama + Matched Highlight (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Değer Eşleştirme modal'ında S/M/L/XL/XXL gibi standart bedenler "89", "9-11 Yaş", "B Cup" gibi karışık değerler arasında kayboluyordu. Otomatik eşleşmiş olsalar bile kullanıcı görsel olarak bulamıyordu.
+
+**Çözüm (`MarketplaceAdvancedMatch.jsx`):**
+1. `SIZE_ORDER` + `_sizeRank()` + `sortLikeSize()` helper'ları eklendi
+2. Sıralama önceliği:
+   - Tier 0: Standart bedenler (XXS, XS, S, M, L, XL, XXL, XXXL, STD, Standart, Tek Beden, Free Size)
+   - Tier 1: Sayısal (32, 34, 36, 38, 40)
+   - Tier 2: Range (36-38, 38/42)
+   - Tier 3: Diğer (XL/L, M/S, vb.)
+   - Tier 4: Yaş/ay grupları (2-3 Yaş, 0-2 Ay)
+3. Bu sıralama hem sol "Sistem Değeri" hem sağ "Trendyol Değeri" dropdown'larına uygulanıyor
+4. Eşleşmiş satır: yeşil arka plan + `✓ EŞLEŞTI` badge + yeşil border/font'lu select kutusu
+
+### Pending
+- Yok

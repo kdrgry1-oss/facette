@@ -27,6 +27,41 @@ import AttrCacheUploadDialog from "./AttrCacheUploadDialog";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
 
+// Beden gibi size attribute'lar için sıralama yardımcısı:
+// XXS, XS, S, M, L, XL, XXL, XXXL ... STD/Standart önce, sayısal bedenler ortada, karışık olanlar sonda.
+const SIZE_ORDER = [
+  "xxxxxs","xxxxs","xxxs","xxs","2xs","xs","s","m","l","xl","xxl","2xl","xxxl","3xl","xxxxl","4xl","xxxxxl","5xl",
+  "std","standart","tek beden","tek ebat","free size","onesize","one size",
+];
+function _isSizeAttrName(n) {
+  const x = (n || "").toLowerCase();
+  return x.includes("beden") || x.includes("size") || x.includes("numara");
+}
+function _sizeRank(name) {
+  const n = (name || "").toString().toLowerCase().trim().replace(/[\s\-_./]/g, "");
+  const idx = SIZE_ORDER.indexOf(n);
+  if (idx >= 0) return [0, idx];                    // standart bedenler en başta
+  // Sayısal (örn 36, 38, 40) → orta
+  const m = n.match(/^(\d+)$/);
+  if (m) return [1, parseInt(m[1], 10)];
+  // Range (36-38, 38/42) → biraz daha aşağı
+  const r = n.match(/^(\d+)[/-](\d+)$/);
+  if (r) return [2, parseInt(r[1], 10)];
+  // Yaş/ay grubu (2-3 yaş, 0-2 ay) → en sonlardan biri
+  if (/(yaş|yas|ay)/.test(n)) return [4, n];
+  // Diğer (XL/L, M/S, Onesize varyantları vs) → 3
+  return [3, n];
+}
+function sortLikeSize(arr, getName) {
+  return [...(arr || [])].sort((a, b) => {
+    const ra = _sizeRank(getName(a));
+    const rb = _sizeRank(getName(b));
+    if (ra[0] !== rb[0]) return ra[0] - rb[0];
+    if (typeof ra[1] === "number" && typeof rb[1] === "number") return ra[1] - rb[1];
+    return String(ra[1]).localeCompare(String(rb[1]), "tr");
+  });
+}
+
 // ─── Local Attribute AutoComplete (gözle görünür suggestions) ───────────────
 function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }) {
   const [q, setQ] = useState(value || "");
@@ -727,26 +762,44 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       Bu kategorideki ürünlerde "{attrName}" özelliği için değer yok.
                     </td></tr>
                   ) : (
-                    (localValues[attrName] || []).map((lv) => (
-                      <tr key={lv} className="border-b hover:bg-gray-50">
-                        <td className="px-4 py-2 font-medium">{lv}</td>
+                    (_isSizeAttrName(attrName)
+                      ? sortLikeSize(localValues[attrName] || [], (x) => x)
+                      : (localValues[attrName] || [])
+                    ).map((lv) => {
+                      const mappedId = valueMappings[`${selectedAttrId}|${lv}`] || "";
+                      const isMapped = !!mappedId;
+                      const mpVals = currentAttr?.attributeValues || [];
+                      const sortedMp = _isSizeAttrName(attrName)
+                        ? sortLikeSize(mpVals, (v) => v.name)
+                        : mpVals;
+                      return (
+                      <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
+                        <td className="px-4 py-2 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{lv}</span>
+                            {isMapped && (
+                              <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-2">
                           <select
-                            value={valueMappings[`${selectedAttrId}|${lv}`] || ""}
+                            value={mappedId}
                             onChange={(e) =>
                               setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
                             }
-                            className="border rounded px-2 py-1 text-sm w-full bg-white"
+                            className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
                             data-testid={`adv-valmap-${lv}`}
                           >
                             <option value="">— seçilmemiş —</option>
-                            {(currentAttr?.attributeValues || []).map((v) => (
+                            {sortedMp.map((v) => (
                               <option key={v.id} value={v.id}>{v.name}</option>
                             ))}
                           </select>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
