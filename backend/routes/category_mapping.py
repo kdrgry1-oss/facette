@@ -530,6 +530,199 @@ async def bulk_auto_match_attributes(
     }
 
 
+async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
+    """Yeni eşleştirilmiş bir kategori için TÜM otomatik kurulumu yapar:
+      1) Live Trendyol attribute'larını çek ve cache'le
+      2) Attribute isim eşleştirme (Trendyol → sistem global attrs)
+      3) Değer eşleştirme (sistem değerleri → Trendyol value_ids, alias tablosu)
+      4) Şirket bilgisini default'lara yaz (Üretici/İthalatçı Adı/Adres)
+      5) Yaş Grubu=Yetişkin, Menşei=Türkiye varsayılanları
+    Mevcut manuel değerler EZİLMEZ.
+    """
+    mapping = await db.category_mappings.find_one(
+        {"category_id": category_id, "marketplace": marketplace}, {"_id": 0}
+    )
+    if not mapping or not mapping.get("marketplace_category_id"):
+        return {"ok": False, "reason": "no_mp_cat_id"}
+    mp_cat_id = mapping["marketplace_category_id"]
+    now = datetime.now(timezone.utc).isoformat()
+    summary = {"attr_matched": 0, "value_matched": 0, "company_filled": 0, "defaults_set": 0}
+
+    # 1) Live Trendyol attrs
+    mp_attrs = []
+    if marketplace == "trendyol":
+        try:
+            from .integrations import get_trendyol_config
+            from trendyol_client import TrendyolClient
+            cfg = await get_trendyol_config()
+            if cfg and cfg.get("is_active") and cfg.get("api_key"):
+                client = TrendyolClient(
+                    supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+                    api_secret=cfg["api_secret"], mode=cfg.get("mode", "live"),
+                )
+                data = await client.get_category_attributes(int(mp_cat_id))
+                if isinstance(data, list):
+                    mp_attrs = data
+                elif isinstance(data, dict):
+                    mp_attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                await db.trendyol_category_attributes.update_one(
+                    {"category_id": int(mp_cat_id)},
+                    {"$set": {"category_id": int(mp_cat_id), "attributes": mp_attrs, "updated_at": now}},
+                    upsert=True,
+                )
+        except Exception:
+            pass
+    if not mp_attrs:
+        coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
+        try:
+            cached = await db[coll].find_one(
+                {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                {"_id": 0}
+            )
+            mp_attrs = (cached or {}).get("attributes", []) or []
+        except Exception:
+            mp_attrs = []
+    if not mp_attrs:
+        return {"ok": False, "reason": "no_attrs", "summary": summary}
+
+    # 2) Attribute name auto-match
+    global_attrs = await db.attributes.find({}, {"_id": 0}).to_list(length=2000)
+    def _match_global(nm: str):
+        n = (nm or "").lower().strip()
+        if not n: return None
+        for ga in global_attrs:
+            gn = (ga.get("name") or "").lower().strip()
+            if not gn: continue
+            if gn == n or n in gn or gn in n:
+                return ga.get("name")
+            if (n in ("color", "web color", "renk") and gn == "renk") or \
+               (n in ("size", "beden") and gn == "beden"):
+                return ga.get("name")
+        return None
+
+    existing_attr_maps = list(mapping.get("attribute_mappings") or [])
+    existing_ids = {str(m.get("mp_attr_id") or m.get("trendyol_attr_id")) for m in existing_attr_maps}
+    for a in mp_attrs:
+        aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+        nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+        if not aid or aid in existing_ids: continue
+        local = _match_global(nm)
+        if local:
+            existing_attr_maps.append({"local_attr": local, "mp_attr_id": int(aid) if aid.isdigit() else aid})
+            existing_ids.add(aid)
+            summary["attr_matched"] += 1
+
+    # 3) Value auto-match (alias + isim)
+    aliases = {
+        "kırmızı": ["red"], "mavi": ["blue"], "yeşil": ["green"], "sarı": ["yellow"],
+        "siyah": ["black"], "beyaz": ["white"], "gri": ["gray", "grey"], "pembe": ["pink"],
+        "mor": ["purple"], "turuncu": ["orange"], "kahverengi": ["brown"], "bej": ["beige"],
+        "lacivert": ["navy", "dark blue"], "altın": ["gold"], "gümüş": ["silver"],
+        "s": ["small", "küçük"], "m": ["medium", "orta"], "l": ["large", "büyük"],
+        "xl": ["x-large", "extra large"], "xxl": ["xx-large", "2xl"], "xs": ["x-small", "extra small"],
+    }
+    # Lokal değerleri topla (ürünlerden + global attributes + ticimax master)
+    local_values: dict = {}
+    def _add(nm, vv):
+        if not nm or vv in (None, ""): return
+        local_values.setdefault(str(nm).strip(), set()).add(str(vv).strip())
+    def _walk(attrs):
+        if isinstance(attrs, dict):
+            for k, v in attrs.items():
+                if isinstance(v, dict):
+                    _add(v.get("label") or v.get("name") or k, v.get("value") or v.get("attribute_value"))
+                elif v is not None:
+                    _add(k, v)
+        elif isinstance(attrs, list):
+            for a in attrs:
+                if isinstance(a, dict):
+                    _add(a.get("label") or a.get("name") or a.get("type"), a.get("value") or a.get("attribute_value"))
+    cat_doc = await db.categories.find_one({"id": category_id}, {"_id": 0, "name": 1})
+    cat_name = (cat_doc or {}).get("name", "") or ""
+    or_q = [{"category_id": category_id}]
+    if cat_name: or_q.append({"category_name": cat_name})
+    async for p in db.products.find({"$or": or_q}, {"_id": 0, "attributes": 1, "variants": 1}):
+        _walk(p.get("attributes"))
+        for v in p.get("variants", []) or []:
+            _walk(v.get("attributes"))
+            if v.get("color"):
+                _add("Renk", v["color"]); _add("Web Color", v["color"])
+            if v.get("size"):
+                _add("Beden", v["size"])
+    async for ga in db.attributes.find({}, {"_id": 0, "name": 1, "values": 1}):
+        for val in (ga.get("values") or []):
+            _add(ga.get("name"), val)
+    async for tm in db.ticimax_attribute_master.find({}, {"_id": 0}):
+        for d in (tm.get("degerler") or []):
+            if isinstance(d, dict):
+                _add(tm.get("ozellik_tanim"), d.get("tanim"))
+    local_values = {k: list(v) for k, v in local_values.items()}
+
+    val_mappings = dict(mapping.get("value_mappings") or {})
+    for a in mp_attrs:
+        aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+        nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+        mp_values = a.get("attributeValues") or []
+        if not aid or not mp_values: continue
+        candidates = local_values.get(nm, [])
+        for lv in candidates:
+            key = f"{aid}|{lv}"
+            if val_mappings.get(key): continue
+            lv_lower = str(lv).lower().strip()
+            ali = aliases.get(lv_lower, [])
+            found = None
+            for mv in mp_values:
+                mvn = (mv.get("name") or "").lower().strip()
+                if mvn == lv_lower or mvn in lv_lower or lv_lower in mvn or any(a == mvn or a in mvn for a in ali):
+                    found = mv; break
+            if found:
+                val_mappings[key] = str(found.get("id"))
+                summary["value_matched"] += 1
+
+    # 4) Şirket bilgisini default'a yaz
+    default_mappings = dict(mapping.get("default_mappings") or {})
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0, "company_info": 1})
+    company = (settings or {}).get("company_info") or {}
+    for a in mp_attrs:
+        aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+        nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+        if not aid or default_mappings.get(aid): continue
+        v = _resolve_company_value(nm, company)
+        if v:
+            default_mappings[aid] = v
+            summary["company_filled"] += 1
+
+    # 5) Yaş Grubu=Yetişkin, Menşei=Türkiye
+    for a in mp_attrs:
+        aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+        nm = (a.get("name") or a.get("attribute", {}).get("name") or "").lower()
+        if not aid or default_mappings.get(aid): continue
+        if "yaş grubu" in nm or "yas grubu" in nm:
+            for v in (a.get("attributeValues") or []):
+                if (v.get("name") or "").strip().lower() in ["yetişkin", "yetiskin"]:
+                    default_mappings[aid] = str(v.get("id"))
+                    summary["defaults_set"] += 1
+                    break
+        elif "menşe" in nm or "mense" in nm or "menşei" in nm:
+            for v in (a.get("attributeValues") or []):
+                if (v.get("name") or "").strip().lower() in ["türkiye", "turkiye", "tr"]:
+                    default_mappings[aid] = str(v.get("id"))
+                    summary["defaults_set"] += 1
+                    break
+
+    # Save all updates
+    await db.category_mappings.update_one(
+        {"category_id": category_id, "marketplace": marketplace},
+        {"$set": {
+            "attribute_mappings": existing_attr_maps,
+            "value_mappings": val_mappings,
+            "default_mappings": default_mappings,
+            "updated_at": now,
+        }}
+    )
+    return {"ok": True, "summary": summary, "mp_attrs_count": len(mp_attrs)}
+
+
 @router.post("/{marketplace}/{category_id}")
 async def set_mapping(marketplace: str, category_id: str, payload: dict,
                        current_user: dict = Depends(require_admin)):
@@ -553,7 +746,17 @@ async def set_mapping(marketplace: str, category_id: str, payload: dict,
         {"category_id": category_id, "marketplace": marketplace},
         {"$set": doc}, upsert=True
     )
-    return {"success": True, "mapping": doc}
+    # 🚀 OTOMATIK kurulum: attribute eşleştir + değer eşleştir + şirket bilgisi + Yaş Grubu/Menşei
+    auto_skip = bool((payload or {}).get("skip_auto_setup"))
+    auto_result = None
+    if not auto_skip and doc["marketplace_category_id"]:
+        try:
+            auto_result = await _auto_setup_mapping(marketplace, category_id)
+        except Exception as e:
+            import logging
+            logging.exception(f"_auto_setup_mapping hatası: {e}")
+            auto_result = {"ok": False, "reason": str(e)}
+    return {"success": True, "mapping": doc, "auto_setup": auto_result}
 
 
 @router.post("/{marketplace}/{local_category_id}/refresh-attributes")

@@ -4,7 +4,35 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 56 (2026-05-19) — Validate DICT/LIST Bug + Menşei/Yaş Grubu Default
+## Iteration 57 (2026-05-19) — Otomatik Kategori Kurulumu (Single-Click)
+
+### 🚀 Yeni Özellik — Eşleştirdiğinde Otomatik Setup
+Kullanıcı şikayeti: "Takım kategorimi Alt-Üst Takım'a eşleştirdim ama otomatik özellik/değer eşleştirmiyor. Her kategoride böyle uğraşacak mıyım?"
+
+**Çözüm**: `POST /api/category-mapping/{mp}/{cat_id}` endpoint'i artık eşleştirme yapıldığında ARKA PLANDA tek istekte şunları yapıyor:
+
+1. **Live Trendyol attribute fetch** + cache
+2. **Attribute isim auto-match** (Trendyol → sistem global attrs, alias dahil)
+3. **Değer auto-match** (alias tablosu: Kırmızı↔Red, S↔Small + 17 daha)
+   - Ürün+global+ticimax master değerleri ile birleştirilmiş havuz
+4. **Şirket bilgisi doldur** (Üretici/İthalatçı Adı/Adres/Mail)
+5. **Yaş Grubu = Yetişkin** + **Menşei = Türkiye** default'u
+
+Mevcut manuel mapping'ler **EZİLMEZ** (idempotent). `payload.skip_auto_setup: true` ile devre dışı bırakılabilir.
+
+Yanıt: `{success, mapping, auto_setup: {ok, summary: {attr_matched, value_matched, company_filled, defaults_set}, mp_attrs_count}}`
+
+### ✅ Test (Takım → Alt-Üst Takım)
+Tek istekte:
+- **36 attribute eşleşti**
+- **857 değer eşleşti**
+- **8 şirket alanı dolduruldu**
+- **2 default (Yaş Grubu + Menşei) atandı**
+- Toplam 52 attribute'tan ~46'sı otomatik kurulu
+
+UI'da modal açıldığında 10 zorunlu alanın hepsi ✓ ile eşli, Yaş Grubu dropdown'da "Yetişkin" seçili.
+
+
 
 ### 🐛 KRITIK Bug — Validate "Eksik Özellik" Yanlış Raporu
 Kullanıcı şikayeti: "FCSS0600004 için 'Kumaş Tipi, Yaş Grubu, Kalıp, Boy, Menşei eksik' diyor ama bunlar Excel'de ve Ticimax teknik detayda var, hala nasıl eksik olabiliyor?"
