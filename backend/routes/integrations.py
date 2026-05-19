@@ -312,6 +312,9 @@ async def sync_products_to_trendyol(
     stock_codes_raw = payload.get("stock_codes", [])
     barcodes = [str(b).strip() for b in (barcodes_raw or []) if str(b).strip()]
     stock_codes = [str(s).strip() for s in (stock_codes_raw or []) if str(s).strip()]
+    # Yeni: Tarih aralığı (created_at — ürün eklenme tarihi)
+    date_from = payload.get("date_from")  # ISO format "2026-01-01"
+    date_to = payload.get("date_to")
     
     query = {}
     if product_ids:
@@ -361,7 +364,16 @@ async def sync_products_to_trendyol(
     else:
         # Sync only active products if no specific IDs are provided
         query = {"is_active": True}
-        
+
+    # Tarih aralığı filtresi (created_at) — diğer filtrelerle AND ile birleşir
+    if date_from or date_to:
+        date_q: dict = {}
+        if date_from:
+            date_q["$gte"] = date_from
+        if date_to:
+            date_q["$lte"] = date_to + "T23:59:59" if "T" not in str(date_to) else date_to
+        query = {"$and": [query, {"created_at": date_q}]} if query else {"created_at": date_q}
+
     products = await db.products.find(query).to_list(length=None)
     
     import sys, os

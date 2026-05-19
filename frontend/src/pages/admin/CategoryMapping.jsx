@@ -213,6 +213,9 @@ export default function CategoryMapping() {
         </div>
       </div>
 
+      {/* Filtreli Toplu Aktarım Paneli */}
+      <FilteredPushPanel marketplace={active} auth={auth} />
+
       <div className="flex items-center gap-3 mb-3">
         <div className="relative max-w-md flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -290,7 +293,14 @@ export default function CategoryMapping() {
                         </span>
                       )}
                     </td>
-                    <td className="font-semibold text-sm">{row.category_name}</td>
+                    <td className="text-sm">
+                      <div className="font-semibold">{row.category_name}</div>
+                      {row.category_path && row.category_path !== row.category_name && (
+                        <div className="text-xs text-gray-500 mt-0.5" title={row.category_path}>
+                          {row.category_path}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       {isEditing ? (
                         <SearchableMapSelect
@@ -467,6 +477,133 @@ export default function CategoryMapping() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+
+/* ───────── Filtreli Toplu Aktarım Paneli ───────── */
+function FilteredPushPanel({ marketplace, auth }) {
+  const [stockCodes, setStockCodes] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+
+  const supportedMarketplaces = ["trendyol"]; // şu an sadece Trendyol için
+  if (!supportedMarketplaces.includes(marketplace)) return null;
+
+  const onSubmit = async () => {
+    const codes = stockCodes
+      .split(/[\s,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!codes.length && !dateFrom && !dateTo) {
+      toast.error("Stok kodu veya tarih aralığı girin");
+      return;
+    }
+    setLoading(true);
+    const t = toast.loading(`${marketplace} aktarımı başlatılıyor...`);
+    try {
+      const body = {};
+      if (codes.length) {
+        body.stock_codes = codes;
+        body.barcodes = codes; // backend hem barkod hem stock için kontrol eder
+      }
+      if (dateFrom) body.date_from = dateFrom;
+      if (dateTo) body.date_to = dateTo;
+      const res = await axios.post(
+        `${API}/integrations/${marketplace}/products/sync`,
+        body,
+        { ...auth, timeout: 180000 },
+      );
+      toast.dismiss(t);
+      const d = res.data || {};
+      setLastResult(d);
+      toast.success(
+        `${d.successful || d.count || 0} ürün gönderildi` +
+        (d.failed ? `, ${d.failed} hata` : ""),
+      );
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Aktarım başarısız");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4" data-testid="filtered-push-panel">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-bold text-orange-900 text-sm">Filtreli Aktarım — {marketplace.toUpperCase()}</div>
+          <div className="text-xs text-orange-700 mt-0.5">
+            Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. Boş bırakırsanız o filtre uygulanmaz.
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+        <div className="md:col-span-3">
+          <label className="text-xs font-medium text-gray-600 block mb-1">Eklenme Tarihi (Başlangıç)</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+            data-testid="push-date-from"
+          />
+        </div>
+        <div className="md:col-span-3">
+          <label className="text-xs font-medium text-gray-600 block mb-1">Eklenme Tarihi (Bitiş)</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+            data-testid="push-date-to"
+          />
+        </div>
+        <div className="md:col-span-4">
+          <label className="text-xs font-medium text-gray-600 block mb-1">
+            Stok Kodu / Barkod (her satıra veya virgülle)
+          </label>
+          <textarea
+            value={stockCodes}
+            onChange={(e) => setStockCodes(e.target.value)}
+            rows={2}
+            placeholder="FCSS2700005, 8684483528521"
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white font-mono"
+            data-testid="push-stock-codes"
+          />
+        </div>
+        <div className="md:col-span-2 flex flex-col gap-2">
+          <button
+            onClick={onSubmit}
+            disabled={loading}
+            data-testid="push-submit-btn"
+            className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50 mt-5"
+          >
+            {loading ? "Gönderiliyor..." : `${marketplace.toUpperCase()}'a Gönder`}
+          </button>
+          {(stockCodes || dateFrom || dateTo) && (
+            <button
+              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); }}
+              className="text-xs text-gray-500 hover:underline"
+            >
+              Temizle
+            </button>
+          )}
+        </div>
+      </div>
+
+      {lastResult && (
+        <div className="mt-3 text-xs bg-white border rounded p-2">
+          Son aktarım: <b>{lastResult.successful || lastResult.count || 0}</b> başarı
+          {lastResult.failed ? <span className="text-red-700"> · {lastResult.failed} hata</span> : null}
+          {lastResult.batch_id ? <span className="text-gray-500"> · Batch: {lastResult.batch_id}</span> : null}
+        </div>
+      )}
     </div>
   );
 }

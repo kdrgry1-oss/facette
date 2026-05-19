@@ -52,13 +52,35 @@ async def list_mappings(
         ).to_list(length=2000)
     mappings = await db.category_mappings.find({"marketplace": marketplace}, {"_id": 0}).to_list(length=3000)
     mp_map = {m.get("category_id"): m for m in mappings}
+
+    # Tüm kategorileri indeksle (path oluşturma için TÜM listeyi al, excluded olsa bile)
+    all_cats = await db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "parent_id": 1}).to_list(length=5000)
+    by_id = {str(c.get("id")): c for c in all_cats}
+
+    def full_path(cat_id: str, max_depth: int = 8) -> str:
+        parts = []
+        seen = set()
+        cur = by_id.get(str(cat_id))
+        depth = 0
+        while cur and depth < max_depth and cur.get("id") not in seen:
+            seen.add(cur.get("id"))
+            parts.insert(0, cur.get("name", ""))
+            pid = cur.get("parent_id")
+            if not pid:
+                break
+            cur = by_id.get(str(pid))
+            depth += 1
+        return " / ".join([p for p in parts if p])
+
     rows = []
     for c in cats:
         cid = c.get("id") or c.get("_id")
         m = mp_map.get(cid) or {}
+        path = full_path(cid)
         rows.append({
             "category_id": cid,
             "category_name": c.get("name", ""),
+            "category_path": path or c.get("name", ""),
             "parent_name": c.get("parent_name") or "",
             "marketplace_category_id": m.get("marketplace_category_id"),
             "marketplace_category_name": m.get("marketplace_category_name"),
