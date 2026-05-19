@@ -4,6 +4,22 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 67 (2026-05-19) — Direct Beden Mapping (V3 Excel)
+
+### 🎯 Yeni Excel
+Kullanıcı 3'üncü Excel yükledi: BARKOD + URUNADI + VARYASYON + "Unnamed: 7" kolonu (gerçek beden değerleri burada — Excel header'da kolon adı yazılmamış).
+
+### 🔧 Fix
+- **Yeni script** `scripts/sync_ticimax_v3_sizes.py` — Pattern tahmini YOK, sadece BARKOD → Beden direct eşleştirme. "Unnamed: 7" kolonu otomatik tespit ediliyor.
+- **1058 barkod için Excel'den direkt beden** alındı (S/M/L/XS/XL/STD + slash kombolar XS/S, M/L, S/M, L/XL + numeric 35-38, 39-42).
+
+### ✅ Sonuç (405 ürün, 1441 varyant)
+- FCSS2700005 Palma: barkod-spesifik bedenler 8576=L, 8583=M, 8590=S, 8606=XL, 8613=XS (önceki pattern tahmin XS/S/M/L/XL ile farklıydı — Excel doğruyu söylüyor)
+- FCSS0600002 Alen Bordo: L/M/S/XS ✓
+- FCSS0900008 Helia: M/L ve XS/S slash kombolar ✓
+
+
+
 ## Iteration 66 (2026-05-19) — Üye Tipi 1 Fiyat Alanı + Beden Re-sync
 
 ### 🎯 Yeni Excel
