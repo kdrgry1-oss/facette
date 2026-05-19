@@ -2641,3 +2641,36 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending / Next
 - "Pelerin", "Bandana", "Şortolon" kategorilerini de Trendyol'a eşleştirmek (otomatik hint ile çoğu zorunluluk dolacak)
+
+## Iteration 54 — Beden Eşleştirme Algoritması Sıkılaştırıldı + Toplu Yeniden Hesaplama (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Trendyol değerlerde beden eşleştirmelerinde çok hata vardı. Eski algoritma `mvn in lv_lower or lv_lower in mvn` substring match'i kullanıyordu — `S` → `XS`, `M` → `XM` gibi yanlış eşleşmeler üretiyordu. STD ↔ Standart, XXS ↔ 2XS, XXL ↔ 2XL gibi alias'lar da yoktu.
+
+**Çözüm (category_mapping.py):**
+1. Yeni size-specific helper'lar:
+   - `_is_size_attr(name)` — attr ismi "Beden" / "Size" / "Numara" mi?
+   - `_norm_size(s)` — lowercase + boşluk/tire/slash/nokta temizle
+   - `_match_size_value(lv, mp_values)` — STRICT: önce birebir normalize, sonra alias pair, aksi → None (substring yasak!)
+   - `_match_general_value(lv, mp_values, aliases)` — beden DIŞI için, kısa string substring match'i engellenmiş (>=4 char gerekli)
+2. Yeni `_SIZE_ALIAS_PAIRS` (bidirectional):
+   - `{std, standart, tek beden, free size, onesize}`
+   - `{xxs, 2xs}`, `{xxxs, 3xs}`, `{xxl, 2xl}`, `{xxxl, 3xl}`, `{xxxxl, 4xl}`, `{xxxxxl, 5xl}`, `{xxxxxxl, 6xl}`
+   - `{s, small}`, `{m, medium, orta}`, `{l, large, büyük}`, `{xl, extra large, x-large, xlarge}`
+3. `_auto_setup_mapping` value-matching adımı yeni helper'ları kullanıyor (beden için sıkı, diğerleri için güvenli).
+4. Yeni endpoint: `POST /api/category-mapping/trendyol/rebuild-size-mappings` — tüm mevcut mapping'lerde size key'leri silip yeniden hesaplar.
+
+### Test (canlı çağrı)
+- POST `/api/category-mapping/trendyol/rebuild-size-mappings`:
+  - **17 mapping kontrol edildi, 16 kategori güncellendi**
+  - **1659 yanlış eski eşleşme silindi** (S→XS gibi)
+  - **275 yeni doğru eşleşme oluşturuldu**
+- DB doğrulama (Ceket kategorisi örneği):
+  - S→S ✓, M→M ✓, L→L ✓, XS→XS ✓, XL→XL ✓
+  - **XXL → 2XL ✓** (alias pair)
+  - **STD → Standart ✓** (alias pair)
+  - Yanlış eşleşme YOK
+
+### Pending / Next
+- UI'a "Bedenleri Yeniden Hesapla" butonu eklenebilir (CategoryMapping.jsx)

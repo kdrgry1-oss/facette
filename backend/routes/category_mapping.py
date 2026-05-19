@@ -568,6 +568,110 @@ async def bulk_auto_match_attributes(
     }
 
 
+# ─────────────── BEDEN / SIZE EŞLEŞTİRME HELPER'LARI ───────────────
+# Trendyol Beden gibi "size" attribute'larında "S" → "XS" gibi yanlış substring
+# match'lerini engellemek için sertleştirilmiş bir algoritma.
+
+# Bidirectional alias seti. Her grup içindeki tüm isimler birbirine EŞDEĞER kabul edilir.
+# Bu, "XXS yoksa 2XS aktar", "STD yoksa Standart aktar" gibi senaryoları çözer.
+_SIZE_ALIAS_PAIRS = [
+    {"std", "standart", "standart beden", "tek beden", "tek ebat", "free size", "freesize", "onesize", "one size"},
+    {"xxs", "2xs"},
+    {"xxxs", "3xs"},
+    {"xxl", "2xl"},
+    {"xxxl", "3xl"},
+    {"xxxxl", "4xl"},
+    {"xxxxxl", "5xl"},
+    {"xxxxxxl", "6xl"},
+    # İngilizce/Türkçe karşılıklar (yalnızca size attribute'unda devreye girer)
+    {"s", "small"},
+    {"m", "medium", "orta"},
+    {"l", "large", "büyük"},
+    {"xl", "extra large", "x-large", "xlarge", "extralarge"},
+]
+
+# "Beden"in türevleri — bu attribute isimlerinde size matcher kullan
+_SIZE_ATTR_KEYWORDS = ["beden", "size", "boy ölçü", "numara"]
+
+
+def _is_size_attr(attr_name: str) -> bool:
+    n = (attr_name or "").lower()
+    return any(k in n for k in _SIZE_ATTR_KEYWORDS)
+
+
+def _norm_size(s: str) -> str:
+    """Bedeni normalize et — lowercase, boşluk/tire/slash/nokta temizle."""
+    if s is None:
+        return ""
+    out = str(s).lower().strip()
+    for ch in (" ", "-", "_", ".", "/"):
+        out = out.replace(ch, "")
+    return out
+
+
+def _match_size_value(lv: str, mp_values: list):
+    """Beden değeri için sıkı eşleştirme.
+    1) Birebir (normalize edilmiş): "XS" == "xs", "2XL" == "2xl"
+    2) Alias pair: "XXS" varsa "2XS"a, yoksa "XXS"a — tek yön değil çift yön
+    3) Aksi → None (substring match'e izin yok!)
+    """
+    if not lv or not mp_values:
+        return None
+    lv_n = _norm_size(lv)
+
+    # 1) Exact normalized
+    for mv in mp_values:
+        if _norm_size(mv.get("name", "")) == lv_n:
+            return mv
+
+    # 2) Alias pair
+    for pair in _SIZE_ALIAS_PAIRS:
+        if lv_n in pair:
+            for mv in mp_values:
+                if _norm_size(mv.get("name", "")) in pair:
+                    return mv
+
+    return None
+
+
+def _match_general_value(lv: str, mp_values: list, aliases: dict):
+    """Beden DIŞINDAKİ attribute'lar için. Daha güvenli substring kuralları."""
+    if not lv or not mp_values:
+        return None
+    lv_lower = str(lv).lower().strip()
+    if not lv_lower:
+        return None
+    ali = aliases.get(lv_lower, [])
+
+    # 1) Birebir
+    for mv in mp_values:
+        if (mv.get("name") or "").lower().strip() == lv_lower:
+            return mv
+
+    # 2) Alias birebir
+    for a in ali:
+        for mv in mp_values:
+            if (mv.get("name") or "").lower().strip() == a.lower():
+                return mv
+
+    # 3) Substring — yalnızca uzun (>=4 karakter) string'lerde, kısa karışmasın
+    if len(lv_lower) >= 4:
+        for mv in mp_values:
+            mvn = (mv.get("name") or "").lower().strip()
+            if mvn and (mvn in lv_lower or lv_lower in mvn):
+                return mv
+        for a in ali:
+            if len(a) >= 4:
+                for mv in mp_values:
+                    mvn = (mv.get("name") or "").lower().strip()
+                    if mvn and (mvn in a or a in mvn):
+                        return mv
+
+    return None
+
+
+
+
 async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     """Yeni eşleştirilmiş bir kategori için TÜM otomatik kurulumu yapar:
       1) Live Trendyol attribute'larını çek ve cache'le
@@ -650,14 +754,12 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
             existing_ids.add(aid)
             summary["attr_matched"] += 1
 
-    # 3) Value auto-match (alias + isim)
+    # 3) Value auto-match — Beden için SIKI, diğerleri için alias + uzun substring
     aliases = {
         "kırmızı": ["red"], "mavi": ["blue"], "yeşil": ["green"], "sarı": ["yellow"],
         "siyah": ["black"], "beyaz": ["white"], "gri": ["gray", "grey"], "pembe": ["pink"],
         "mor": ["purple"], "turuncu": ["orange"], "kahverengi": ["brown"], "bej": ["beige"],
         "lacivert": ["navy", "dark blue"], "altın": ["gold"], "gümüş": ["silver"],
-        "s": ["small", "küçük"], "m": ["medium", "orta"], "l": ["large", "büyük"],
-        "xl": ["x-large", "extra large"], "xxl": ["xx-large", "2xl"], "xs": ["x-small", "extra small"],
     }
     # Lokal değerleri topla (ürünlerden + global attributes + ticimax master)
     local_values: dict = {}
@@ -702,17 +804,18 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
         nm = a.get("name") or a.get("attribute", {}).get("name") or ""
         mp_values = a.get("attributeValues") or []
         if not aid or not mp_values: continue
+        is_size = _is_size_attr(nm)
         candidates = local_values.get(nm, [])
+        # Beden için sistem global "Beden" set'ini de ekle (cross-attribute kazanç)
+        if is_size and "Beden" in local_values and nm != "Beden":
+            candidates = list(set(list(candidates) + local_values["Beden"]))
         for lv in candidates:
             key = f"{aid}|{lv}"
             if val_mappings.get(key): continue
-            lv_lower = str(lv).lower().strip()
-            ali = aliases.get(lv_lower, [])
-            found = None
-            for mv in mp_values:
-                mvn = (mv.get("name") or "").lower().strip()
-                if mvn == lv_lower or mvn in lv_lower or lv_lower in mvn or any(a == mvn or a in mvn for a in ali):
-                    found = mv; break
+            if is_size:
+                found = _match_size_value(lv, mp_values)
+            else:
+                found = _match_general_value(lv, mp_values, aliases)
             if found:
                 val_mappings[key] = str(found.get("id"))
                 summary["value_matched"] += 1
@@ -852,6 +955,128 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
         }}
     )
     return {"ok": True, "summary": summary, "mp_attrs_count": len(mp_attrs)}
+
+
+@router.post("/{marketplace}/rebuild-size-mappings")
+async def rebuild_size_mappings(marketplace: str, current_user: dict = Depends(require_admin)):
+    """
+    Mevcut tüm kategori mapping'lerinde BEDEN (Size) attribute'undaki yanlış
+    eşleştirmeleri yeniden hesaplar. Önce var olan size value_mappings'leri
+    SİLER, sonra `_match_size_value` ile yeniden ekler (exact → alias pair).
+    
+    Kullanıcı feedback'i: "S → XS gibi yanlış eşleşmeler var. Birebir aramayı dene,
+    olmazsa XXS↔2XS, STD↔Standart gibi karşılıklara düş, ama yanlış eşleşme YAPMA."
+    """
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    attr_coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
+    now = datetime.now(timezone.utc).isoformat()
+    summary = {
+        "mappings_checked": 0,
+        "size_keys_removed": 0,
+        "size_keys_added": 0,
+        "categories_updated": 0,
+        "details": [],
+    }
+    mappings = await db.category_mappings.find(
+        {"marketplace": marketplace, "marketplace_category_id": {"$nin": [None, ""]}},
+        {"_id": 0},
+    ).to_list(length=5000)
+    for cm in mappings:
+        summary["mappings_checked"] += 1
+        category_id = cm.get("category_id")
+        mp_cat_id = cm.get("marketplace_category_id")
+        if not mp_cat_id:
+            continue
+        try:
+            cache = await db[attr_coll].find_one(
+                {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                {"_id": 0},
+            )
+        except Exception:
+            cache = None
+        mp_attrs = (cache or {}).get("attributes") or []
+        if not mp_attrs:
+            continue
+        size_attr_ids = set()  # str
+        size_attrs = {}  # aid → mp_values
+        for a in mp_attrs:
+            aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+            nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+            if not aid or not _is_size_attr(nm):
+                continue
+            size_attr_ids.add(aid)
+            size_attrs[aid] = a.get("attributeValues") or []
+
+        if not size_attr_ids:
+            continue
+
+        # Mevcut value_mappings'i temizle (yalnızca size attribute key'leri)
+        vm = dict(cm.get("value_mappings") or {})
+        removed = 0
+        for k in list(vm.keys()):
+            if "|" not in k:
+                continue
+            aid_part = k.split("|", 1)[0]
+            if aid_part in size_attr_ids:
+                vm.pop(k, None)
+                removed += 1
+
+        # Yerel kandidat bedenleri topla
+        cat_doc = await db.categories.find_one({"id": category_id}, {"_id": 0, "name": 1})
+        cat_name = (cat_doc or {}).get("name", "") or ""
+        or_q = [{"category_id": category_id}]
+        if cat_name:
+            or_q.append({"category_name": cat_name})
+        candidates = set()
+        async for p in db.products.find({"$or": or_q}, {"_id": 0, "variants": 1, "sizes": 1}):
+            for sz in (p.get("sizes") or []):
+                if sz:
+                    candidates.add(str(sz).strip())
+            for v in (p.get("variants") or []):
+                if v.get("size"):
+                    candidates.add(str(v["size"]).strip())
+        # Sistemdeki global Beden attribute değerlerini de ekle
+        async for ga in db.attributes.find({"name": {"$regex": "beden", "$options": "i"}}, {"_id": 0, "values": 1}):
+            for vv in (ga.get("values") or []):
+                if vv:
+                    candidates.add(str(vv).strip())
+
+        # Yeniden eşleştir
+        added = 0
+        for aid, mp_values in size_attrs.items():
+            for lv in candidates:
+                key = f"{aid}|{lv}"
+                if vm.get(key):
+                    continue
+                found = _match_size_value(lv, mp_values)
+                if found:
+                    vm[key] = str(found.get("id"))
+                    added += 1
+
+        if removed or added:
+            await db.category_mappings.update_one(
+                {"category_id": category_id, "marketplace": marketplace},
+                {"$set": {"value_mappings": vm, "updated_at": now}},
+            )
+            summary["size_keys_removed"] += removed
+            summary["size_keys_added"] += added
+            summary["categories_updated"] += 1
+            summary["details"].append({
+                "category_id": category_id,
+                "category_name": cat_name,
+                "removed": removed,
+                "added": added,
+            })
+
+    return {"success": True, "summary": summary, "message": (
+        f"{summary['categories_updated']} kategori güncellendi. "
+        f"{summary['size_keys_removed']} eski beden eşleşmesi temizlendi, "
+        f"{summary['size_keys_added']} yeni eşleşme oluşturuldu."
+    )}
+
+
+
 
 
 @router.post("/{marketplace}/{category_id}")
