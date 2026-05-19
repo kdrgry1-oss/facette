@@ -14,7 +14,7 @@
  *   - hint:        alttaki yardım mesajı
  *   - "data-testid"
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import axios from "axios";
 import { Search, X } from "lucide-react";
 
@@ -34,7 +34,9 @@ export default function SearchableMapSelect({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [noCache, setNoCache] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const wrapRef = useRef(null);
+  const inputRef = useRef(null);
   const timer = useRef(null);
 
   useEffect(() => {
@@ -62,6 +64,24 @@ export default function SearchableMapSelect({
     return () => document.removeEventListener("mousedown", handle);
   }, []);
 
+  // Açıldığında altta/üstte yer yetiyor mu kontrol et — yer yoksa yukarı aç
+  useLayoutEffect(() => {
+    if (!open || !inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const dropdownHeight = 280; // max-h-64 (256) + padding
+    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+      setOpenUp(true);
+    } else {
+      setOpenUp(false);
+    }
+    // Scroll into view (eğer yine de gözükmüyorsa)
+    if (spaceBelow < 100 && spaceAbove < 100) {
+      inputRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [open, options.length]);
+
   const onInput = (v) => {
     setQ(v);
     setOpen(true);
@@ -87,6 +107,7 @@ export default function SearchableMapSelect({
         <div className="relative flex-1">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
+            ref={inputRef}
             value={q}
             onFocus={() => { setOpen(true); if (!options.length) fetchOpts(""); }}
             onChange={(e) => onInput(e.target.value)}
@@ -104,7 +125,7 @@ export default function SearchableMapSelect({
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+        <div className={`absolute z-50 left-0 right-0 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto ${openUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
           {loading ? (
             <div className="px-3 py-3 text-xs text-gray-400">Yükleniyor...</div>
           ) : options.length === 0 ? (

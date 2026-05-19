@@ -4,7 +4,23 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 57 (2026-05-19) — Otomatik Kategori Kurulumu (Single-Click)
+## Iteration 58 (2026-05-19) — Searchable Dropdown Sayfa Dışına Taşma Bug Fix
+
+### 🐛 UX Bug — Alttaki Kategorilerde Dropdown Görünmüyor
+Kullanıcı şikayeti: "En alttaki kategorilerde işlem yaparken Trendyol kategori eşleştirirken seçenekler sayfaya sığmıyor ve göremiyorum."
+
+**Root cause**: `SearchableMapSelect` dropdown'u sabit `mt-1` (aşağı doğru) açılıyordu. Viewport sonundaki satırlar için dropdown sayfa dışına taşıyordu.
+
+**Fix**:
+- `useLayoutEffect` ile input'un `getBoundingClientRect()`'i ölçülüp `spaceBelow` < `spaceAbove` ise **yukarı flip** (`bottom-full mb-1`)
+- `dropdownHeight = 280px` (max-h-64 + padding)
+- Hem yukarı hem aşağı da yer yoksa `scrollIntoView({block: "center"})` ile satır görünüme kaydırılır
+
+Etkilenen sayfalar: `CategoryMapping`, `BrandMapping` (her ikisi de bu component'i kullanıyor).
+
+**Test**: Çanta kategorisi (en alt satır) için "elbise" araması → dropdown YUKARI doğru açıldı, 5 öneri input'un üzerinde gösterildi (Abiye Elbisesi, Plaj Elbisesi, Takım Elbise, Elbise, vb.). Screenshot ile teyit.
+
+
 
 ### 🚀 Yeni Özellik — Eşleştirdiğinde Otomatik Setup
 Kullanıcı şikayeti: "Takım kategorimi Alt-Üst Takım'a eşleştirdim ama otomatik özellik/değer eşleştirmiyor. Her kategoride böyle uğraşacak mıyım?"
