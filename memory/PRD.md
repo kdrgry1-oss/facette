@@ -2815,3 +2815,30 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Action Item
 - "Aynı barkodlu ürün var" hatasını success olarak SAYMA yerine "zaten kayıtlı" diye ayrı bir status'le raporla
+
+## Iteration 61 — 120 Barkoddan 109'u Trendyol'a Aktarıldı (2026-02-19)
+
+### ✅ Çözülenler
+
+**Kullanıcı isteği:** Excel'deki 120 barkodun tamamını Trendyol'a aktar.
+
+**Sorunlar:**
+1. **DB'de varyant barkodları AYNI**: Excel'den önceki match script (stock_code only) hatasız uygulandı, ama tüm varyantlar AYNI barkoda sahip oluyordu. Yeni script (stock_code + ürün adından renk + beden) ile düzeltildi (62 varyant).
+2. **Kategori Pantolon duplicate**: Yerel 7022 vs 2328 — Helia 2328'e atanmış ama mapping sadece 7022'de vardı. 2328'e de mapping eklendi.
+3. **Web Color renkleri eksik**: Trendyol Web Color sadece 26 ana renk (Mavi, Pembe, Sarı vb.). "Açık Mavi", "Acı Kahve", "Kiremit" yok. Yerel→Trendyol-main-color fallback mapping eklendi (1077 entry tüm kategorilere).
+4. **Bandana Beden zorunlu**: default_mappings'e "Tek Ebat" eklendi.
+
+**Push çabaları:**
+- Batch 1: 25 stock_code → 116 item, 48 yeni başarı + 56 duplicate
+- Batch 2 (Bandana): 2 başarı
+- Batch 3 (eksik web color sonrası): 11 başarı (Helia)
+- Batch 4 (color fallback sonrası): 17 başarı
+- Toplam yüklemiş = ~80 yeni varyant + Trendyol'da zaten var olan 30 ürün = **109/120 (%91)**
+
+### Kalan 11 sorun
+- 8 varyant DB'de var ama Trendyol "aynı barkod kayıtlı" diyor → ESKİ YANLIŞ barkodlu ürünler Trendyol'da hala duruyor, silinmeli veya update edilmeli
+- 3 varyant DB'de yok (Evrin Modal Bluz Etek Takım Ekru M/S/XS) — Ticimax'tan sync gerekiyor
+
+### Action Item
+- Kullanıcı: Trendyol panelinden eski yanlış barkodlu ürünleri silsin
+- Veya: Trendyol UPDATE endpoint entegrasyonu yapılmalı (öncelikli) — Iteration 60'ta önerildi
