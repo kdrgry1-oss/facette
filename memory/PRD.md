@@ -42,6 +42,12 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=true: ~3 sn (DB master cache'inden)
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
+### Default Attributes (2026-02-19) — Global Sabit Değerler
+- **Tüm 608 ürüne** Cinsiyet=Kadın, Yaş Grubu=Yetişkin, Menşei=TR otomatik eklendi (3 marketplace × 608 = 1824 alan)
+- **Kategori-bazlı**: Şort/Bermuda → Kol Boyu=Kolsuz, Askılı/Büstiyer → Kol Boyu=Askılı, Etek/Pantolon → Kol Boyu=Yok
+- **Elbise/Tunik/Etek/Tulum** kategorisinde ürün adından "Boy" çıkarımı (Maxi/Midi/Mini/Uzun/Kısa)
+- Script: `/app/backend/scripts/apply_default_attrs.py`
+
 ### Direct Link & Modal (2026-02-19)
 - **Direct link URL**: `/admin/urunler/{productId}` — bu URL'e gidildiğinde modal otomatik açılır (paylaşılabilir link).
 - **Liste'de iki ikon**: ✏️ "Hızlı Düzenle" (modal) + 🔗 "Yeni Sekmede Aç" (mavi link icon).
