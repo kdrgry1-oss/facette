@@ -2618,3 +2618,26 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending / Next
 - Kimono kategorisi (yerel 1793) için Trendyol 607 + Kalıp default mapping yapılmalı (kullanıcı action)
+
+## Iteration 53 — Kimono Mapping + Push BAŞARILI (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** FCSS1400001 (Terra Pamuklu Bağlamalı Kimono Beyaz) Trendyol'da oluşturulamıyordu — Kategori 607 (Kimono & Kaftan) için Kalıp zorunlu, mapping eksikti.
+
+**Çözüm:**
+1. `CAT_NAME_HINTS` listesine yeni kurallar eklendi (`category_mapping.py`):
+   - `kimono` → Kalıp=Loose, Boy=Midi
+   - `kaftan` → Kalıp=Loose, Boy=Uzun
+   - `pelerin` → Kalıp=Loose
+2. Yerel "Kimono" kategorisi (ID 1793) → Trendyol 607 (Kimono & Kaftan) eşleştirildi
+3. Auto-setup tetiklendi → 13 default mapping otomatik atandı:
+   - Kalıp=Loose (666280) ✓
+   - Yaş Grubu=Yetişkin, Menşei=TR, Boy=Belirtilmemiş, Kumaş Tipi=Belirtilmemiş
+   - 8 şirket bilgisi field'ı (Üretici/İthalatçı adı + adres)
+4. Push yapıldı → **Trendyol COMPLETED, 1 başarılı, 0 hata** ✓
+
+**Batch ID**: `8106e4fc-efd9-4b14-939e-45138e123942-1779809171`
+
+### Pending / Next
+- "Pelerin", "Bandana", "Şortolon" kategorilerini de Trendyol'a eşleştirmek (otomatik hint ile çoğu zorunluluk dolacak)
