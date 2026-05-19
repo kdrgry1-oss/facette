@@ -4,7 +4,37 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 54 (2026-05-19) — Trendyol Batch Detail + 4 KRITIK Bug Fix
+## Iteration 55 (2026-05-19) — Brand 968→975755 + Boy Default + Aktarım Geçmişi UI
+
+### 🚨 KRITIK Bug: Yanlış Hardcoded Brand ID
+Tüm Trendyol gönderimlerinde `brandId=968` hardcoded'du, ancak FACETTE'in **gerçek Trendyol Brand ID'si 975755**. Trendyol "Girmiş olduğunuz marka (968) sistemde kayıtlı değildir" hatasıyla reddediyordu.
+
+**Tespit yöntemi**: Live Trendyol API çağrısı `GET /integration/product/brands/by-name?name=Facette` → `[{id: 975755, name: "FACETTE"}]`
+
+**Fix**: 3 sync fonksiyonunda `968 → 975755` güncellendi (`sync_products_to_trendyol`, `bulk_sync_v3` ana + varyant kolları).
+
+### ✅ Boy Default Mapping (Midi → Normal Boy)
+Kullanıcı isteği: "Boy gibi value_id'si Trendyol'da olmayan değerler için (Midi→Normal Boy) value mapping ekleyin."
+
+12 matched Trendyol kategori_mapping'inde:
+- `48|Midi → 10623286` (Normal Boy) - eskiden 1282 idi, Trendyol legacy
+- `48|Mini → 10623288` (Kısa/Mini Trendyol yeni id)
+- `default_mappings[48] = 10623286` (Boy için varsayılan Normal Boy)
+
+### ✅ Trendyol Aktarım Geçmişi Sayfası Genişletildi
+Mevcut `/admin/trendyol-loglar` sayfasına eklendi:
+- "Aktarım Geçmişi" butonu CategoryMapping filtered push panel'inde (yeni sekmede açar)
+- Her log row genişletildiğinde **"Trendyol'dan Çek"** butonu
+- Batch detayında: Status / Başarılı / Hatalı / Toplam sayaçları
+- "En çok görülen hatalar" — sıralı liste (× count)
+- Item detayları collapsible — her barkod için SUCCESS/FAILED + failureReasons
+
+### ✅ Test Sonuçları
+- **FCSS0600001 (re-sync)**: 4 items → 4 FAILED ("Aynı barkodlu bir ürününüz bulunduğundan yeni ürün oluşturulamaz") = **ÜRÜNLER ZATEN BAŞARIYLA EKLENMİŞ**
+- **FCSS0600007 ile brand fix testi**: `Brand 968 hatası` → KAYBOLDU (artık 975755), sadece duplicate uyarısı
+- Trendyol Aktarım Logları sayfası screenshot ile 20 batch geçmişi görüntülendi
+
+
 
 ### 🚨 KRITIK Bug 1: attribute resolve_attributes LIST gibi iter ediyordu
 Ürünlerin `attributes` alanı sistemde **DICT** ({key: {label, value}}) olarak saklanıyor; `resolve_attributes` LIST gibi iter ediyordu → Trendyol'a `attributes: []` boş gönderiliyordu → "Zorunlu kategori özellik bilgisi bulunamadı (Cinsiyet, Kumaş Tipi, Boy)" hataları.

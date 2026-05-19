@@ -628,6 +628,15 @@ function FilteredPushPanel({ marketplace, auth }) {
             Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. <b>Önce "Doğrula" ile zorunlu alanları kontrol edin.</b>
           </div>
         </div>
+        <a
+          href="/admin/trendyol-loglar"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs bg-white border border-orange-300 text-orange-700 hover:bg-orange-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+          data-testid="open-sync-history-btn"
+        >
+          📋 Aktarım Geçmişi
+        </a>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">

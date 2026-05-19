@@ -930,7 +930,7 @@ async def sync_products_to_trendyol(
             base_item = {
                 "title": product.get("name"),
                 "productMainId": product.get("stock_code") or product.get("id"),
-                "brandId": int(product.get("trendyol_brand_id") or 968),  # 968 = FACETTE (default)
+                "brandId": int(product.get("trendyol_brand_id") or 975755),  # 975755 = FACETTE (default)
                 "categoryId": int(trendyol_cat_id),
                 "description": product.get("description") or product.get("short_description") or "",
                 "currencyType": product.get("currency", "TRY"),
@@ -4591,7 +4591,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                     "barcode": v.get("barcode") or product.get("barcode"),
                     "title": product.get("name"),
                     "productMainId": product.get("stock_code"),
-                    "brandId": product.get("trendyol_brand_id") or 968,
+                    "brandId": product.get("trendyol_brand_id") or 975755,
                     "categoryId": int(ty_cat_id),
                     "quantity": v.get("stock", 0),
                     "stockCode": v.get("stock_code") or product.get("stock_code"),
@@ -4612,7 +4612,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                 "barcode": product.get("barcode"),
                 "title": product.get("name"),
                 "productMainId": product.get("stock_code"),
-                "brandId": product.get("trendyol_brand_id") or 968,
+                "brandId": product.get("trendyol_brand_id") or 975755,
                 "categoryId": int(ty_cat_id),
                 "quantity": product.get("stock", 0),
                 "stockCode": product.get("stock_code"),

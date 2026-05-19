@@ -23,6 +23,7 @@ export default function TrendyolLogs() {
   const [page, setPage]     = useState(1);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
+  const [batchData, setBatchData] = useState({});  // {logId: {loading, data, error}}
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -40,6 +41,18 @@ export default function TrendyolLogs() {
   }, [page]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  const loadBatchStatus = async (log) => {
+    const batchId = log.batch_request_id;
+    if (!batchId) return;
+    setBatchData(p => ({ ...p, [log.id]: { loading: true } }));
+    try {
+      const r = await axios.get(`${API}/integrations/trendyol/batch/${batchId}`, { headers: authHeaders() });
+      setBatchData(p => ({ ...p, [log.id]: { data: r.data } }));
+    } catch (e) {
+      setBatchData(p => ({ ...p, [log.id]: { error: e.response?.data?.detail || e.message } }));
+    }
+  };
 
   return (
     <div>
@@ -138,6 +151,92 @@ export default function TrendyolLogs() {
                       <p className="text-[10px] text-gray-400 mt-3">
                         Tamamlandı: {fmt(log.finished_at)}
                       </p>
+                    )}
+
+                    {log.batch_request_id && (
+                      <div className="mt-4 pt-3 border-t">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-bold text-blue-700 uppercase tracking-wider">
+                            Trendyol Batch Gerçek Durumu
+                          </p>
+                          {!batchData[log.id]?.data && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); loadBatchStatus(log); }}
+                              disabled={batchData[log.id]?.loading}
+                              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold disabled:opacity-50"
+                              data-testid={`load-batch-${log.id}`}
+                            >
+                              {batchData[log.id]?.loading ? "Yükleniyor..." : "Trendyol'dan Çek"}
+                            </button>
+                          )}
+                        </div>
+                        {batchData[log.id]?.error && (
+                          <div className="text-xs bg-red-50 text-red-700 border border-red-100 rounded px-3 py-2">
+                            {batchData[log.id].error}
+                          </div>
+                        )}
+                        {batchData[log.id]?.data && (
+                          <div className="bg-white border rounded p-3 space-y-2">
+                            <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                              <div className="bg-gray-50 rounded p-1.5">
+                                <div className="text-[9px] text-gray-500 uppercase">Status</div>
+                                <div className="font-bold">{batchData[log.id].data.status}</div>
+                              </div>
+                              <div className="bg-green-50 rounded p-1.5">
+                                <div className="text-[9px] text-green-700 uppercase">Başarılı</div>
+                                <div className="font-bold text-green-700">{batchData[log.id].data.success_count}</div>
+                              </div>
+                              <div className="bg-red-50 rounded p-1.5">
+                                <div className="text-[9px] text-red-700 uppercase">Hatalı</div>
+                                <div className="font-bold text-red-700">{batchData[log.id].data.failed_count}</div>
+                              </div>
+                              <div className="bg-gray-50 rounded p-1.5">
+                                <div className="text-[9px] text-gray-500 uppercase">Toplam</div>
+                                <div className="font-bold">{batchData[log.id].data.item_count}</div>
+                              </div>
+                            </div>
+                            {(batchData[log.id].data.top_failures || []).length > 0 && (
+                              <div>
+                                <div className="text-[10px] font-bold text-red-800 uppercase mb-1">En Çok Görülen Hatalar</div>
+                                <div className="space-y-1">
+                                  {batchData[log.id].data.top_failures.map((f, i) => (
+                                    <div key={i} className="text-[11px] bg-red-50 border border-red-100 rounded px-2 py-1 flex items-start justify-between gap-2">
+                                      <span className="text-red-900 flex-1 break-words">{f.reason}</span>
+                                      <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold shrink-0">×{f.count}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <details>
+                              <summary className="text-[11px] text-gray-500 cursor-pointer hover:text-black">Item Detayları ({batchData[log.id].data.items?.length || 0})</summary>
+                              <div className="mt-1 max-h-60 overflow-auto bg-gray-50 border rounded">
+                                <table className="w-full text-[11px]">
+                                  <tbody>
+                                    {(batchData[log.id].data.items || []).map((it, i) => (
+                                      <tr key={i} className={`border-b ${it.status === "SUCCESS" ? "" : "bg-red-50/30"}`}>
+                                        <td className="px-2 py-1 font-mono">{it.requestItem?.barcode || it.requestItem?.product?.barcode || "-"}</td>
+                                        <td className="px-2 py-1">
+                                          {it.status === "SUCCESS" ? (
+                                            <span className="text-green-700 font-bold">✓ SUCCESS</span>
+                                          ) : (
+                                            <div>
+                                              <span className="text-red-700 font-bold">✗ {it.status}</span>
+                                              {(it.failureReasons || []).slice(0, 2).map((fr, j) => (
+                                                <div key={j} className="text-red-900 mt-0.5 break-words">{fr}</div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </details>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
