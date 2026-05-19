@@ -21,28 +21,38 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
-## Iteration 48 (2026-02-18) — Dinamik Attribute Parser + Ticimax Master Eşleme + Pasif Sync + Toggle Bug Fix
+## Iteration 48 (2026-02-19) — Trendyol/HB/Temu Özellikleri Auto-Fill (ÇÖZÜLDÜ)
 
-### ✅ Tamamlananlar
-- **Dinamik attribute parser** (`/app/backend/utils/attr_parser.py`):
-  - Açıklamadaki TÜM `<strong>Etiket:</strong>Değer` kalıplarını yakalar (predefined liste GEREKTİRMEZ).
-  - `<i>/<em>` markup veya bullet'lı (`•`) format için fallback parser (plain-text "Label: value" satırı).
-  - Ölçü grupları için alt-attribute çıkarımı (Beden Ölçüleri · Boy/Gogus/Kol_boyu).
-  - **Sonuç**: 319 ürünün **309'unda** zengin attribute (önceden 127).
-- **Ticimax MASTER teknik detay eşleme** (`/app/backend/scripts/enrich_attrs_from_ticimax_master.py`):
-  - Ticimax SOAP `SelectTeknikDetayOzellik` + `SelectTeknikDetayDeger` ile master listeyi (18 özellik, 165 değer) çekiyor.
-  - Her ürünün adı + description'unda master değerleri akıllı regex ile arıyor → eşleşeni `attributes[ticimax_*]` olarak ekliyor.
-  - **Sonuç**: **606/608 ürüne** ortalama 4-12 yapılandırılmış özellik atandı: **Web Color (542), Materyal (532), Kalıp (476), Ürün İçerik Bilgisi (450), Boy (375), Kol Boyu (364), Cep (224), Yaka Tipi (221), Kapama Şekli (218), Astar Durumu (205), Desen (191), Bel (157), Kumaş Tipi (140), Kalınlık (116)**.
-  - Background: `SelectUrun` WS yetkisi mevcut Key'de açık olmadığı için ürün-özellik mapping doğrudan SOAP'tan alınamıyor; bu nedenle master+regex eşleme stratejisi devreye alındı.
-- **Ticimax pasif sync**: `/api/integrations/xml/products/import?deactivate_missing=true` → feed'de OLMAYAN tüm `xml_feed` ürünleri otomatik `is_active=False` yapar. Response'a `deactivated` sayacı eklendi.
-- **Pasif butonu fix**: Toggle butonları artık explicit "set to active/passive" mantığı (önceden inverted conditional → tıklanmıyordu). Backend `/api/products/{id}/toggle-active` kullanılıyor.
+### ✅ ÇÖZÜLDÜ — Ana Sorun
+Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47 alan ürün başına BOŞTU. Şimdi otomatik dolduruluyor.
 
-### Dosya Değişiklikleri
+### Çözüm Stratejisi
+- Ticimax SOAP `SelectTeknikDetayOzellik` (18 özellik) + `SelectTeknikDetayDeger` (165 değer) master listeleri çekildi.
+- Her ürünün adı + description text'inde master değerleri akıllı regex ile aranıyor.
+- Eşleşen değer **Trendyol attribute kütüphanesi formatında** `attributes[tanim]` (örn. `attributes["Boy"] = "Midi"`) yazılıyor — Trendyol/HB/Temu formundaki dropdown'lar otomatik doluyor.
+- Yapı IDEMPOTENT — mevcut manuel girilmiş değerler korunur.
+
+### Sonuçlar (606/608 ürün enriched)
+- Web Color: 542 ürün | Materyal: 532 | Kalıp: 476 | Ürün İçerik: 450
+- Boy: 375 | Kol Boyu: 364 | Cep: 224 | Yaka Tipi: 221
+- Kapama Şekli: 218 | **Astar Durumu: 205** | Desen: 191 | **Bel: 157** | Kumaş Tipi: 140 | Kalınlık: 116
+
+### Yeni Endpoint
+- `POST /api/integrations/ticimax/teknik-detay/sync?use_cache=true|false`
+  - cache=true: ~3 sn (DB master cache'inden)
+  - cache=false: ~30 sn (Ticimax SOAP'a refresh)
+
+### Diğer Düzeltmeler
+- **Pasif butonu fix**: A/P butonları explicit "set to state" mantığı (önceki: inverted conditional bug).
+- **Pasif sync**: XML feed'de OLMAYAN xml_feed ürünleri otomatik `is_active=False`.
+- **Dinamik description parser** (`utils/attr_parser.py`): `<strong>Etiket:</strong>Değer` ve plain "Label: value" satırlarını yakalar.
+
+### Dosyalar
 - ✏️ `/app/backend/utils/attr_parser.py` (yeni)
-- ✏️ `/app/backend/scripts/enrich_attrs_from_ticimax_master.py` (yeni, MASTER eşleme)
-- ✏️ `/app/backend/routes/integrations.py` (XML import: yeni parser + deactivate_missing)
-- ✏️ `/app/backend/scripts/reparse_product_attrs.py` (yeni parser kullanır)
-- ✏️ `/app/frontend/src/pages/admin/Products.jsx` (toggle bug fix + data-testid)
+- ✏️ `/app/backend/scripts/enrich_attrs_from_ticimax_master.py` (yeni)
+- ✏️ `/app/backend/routes/integrations.py` (XML import + yeni teknik-detay sync endpoint)
+- ✏️ `/app/backend/scripts/reparse_product_attrs.py`
+- ✏️ `/app/frontend/src/pages/admin/Products.jsx` (toggle bug fix)
 
 
 

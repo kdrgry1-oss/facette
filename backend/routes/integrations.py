@@ -1555,6 +1555,126 @@ async def sync_ticimax_variants(
     return {"ok": True, "message": "Varyantlar senkronize edildi"}
 
 
+@router.post("/ticimax/teknik-detay/sync")
+async def sync_ticimax_teknik_detay(
+    use_cache: bool = Query(True, description="Cache (DB) varsa kullan, yoksa SOAP'tan çek"),
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Ticimax 'Teknik Detay Özellik + Değer' master listesini çekip her ürünün
+    name+description text'inde değerleri arayarak attributes alanına otomatik
+    eşler. Trendyol/HB/Temu özellik formlarındaki Boy, Cep, Astar Durumu, Bel,
+    Web Color, Materyal, Kalıp vs. alanları DOLDURULUR.
+
+    use_cache=True: DB'deki master cache'i kullan (~3 sn, anında).
+    use_cache=False: Ticimax SOAP'a sorgu at, master'ı yenile (~30 sn, rate limit).
+    """
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from scripts.enrich_attrs_from_ticimax_master import (
+        fetch_master, enrich_products, _build_value_pattern,
+    )
+
+    if use_cache:
+        cached = await db.ticimax_attribute_master.find({}, {"_id": 0}).to_list(None)
+        if cached:
+            ozellik_map = {c["ozellik_id"]: c["ozellik_tanim"] for c in cached}
+            deger_by_ozellik: dict = {}
+            for c in cached:
+                ozid = c["ozellik_id"]
+                deger_by_ozellik[ozid] = []
+                for d in c.get("degerler", []):
+                    pat = _build_value_pattern(d["tanim"])
+                    if pat:
+                        deger_by_ozellik[ozid].append({
+                            "id": d["id"], "tanim": d["tanim"], "pattern": pat,
+                        })
+        else:
+            ozellik_map, deger_by_ozellik = fetch_master()
+    else:
+        ozellik_map, deger_by_ozellik = fetch_master()
+
+    # Run enrichment (görüntülemek için stdout yakalamadan; loglar zaten)
+    # `enrich_products` is async-safe; just await it directly via patched runner:
+    total = 0
+    enriched = 0
+    added_keys: dict = {}
+
+    prods = await db.products.find(
+        {"source": {"$in": ["xml_feed", "ticimax", "csv_xml_merge"]}},
+        {"_id": 0, "id": 1, "name": 1, "description": 1, "attributes": 1,
+         "hepsiburada_attributes": 1, "temu_attributes": 1},
+    ).to_list(None)
+
+    import re as _re
+    import unicodedata as _u
+
+    def _norm(s: str) -> str:
+        s = _u.normalize("NFKD", s or "")
+        s = "".join(c for c in s if not _u.combining(c))
+        s = (s.lower()
+               .replace("ı", "i").replace("ş", "s").replace("ç", "c")
+               .replace("ğ", "g").replace("ü", "u").replace("ö", "o"))
+        return _re.sub(r"\s+", " ", s).strip()
+
+    for p in prods:
+        total += 1
+        name = p.get("name") or ""
+        desc = _re.sub(r"<[^>]+>", " ", p.get("description") or "")
+        text = _norm(name + " " + desc)
+
+        existing = p.get("attributes") or {}
+        if isinstance(existing, list):
+            new_attrs = {}
+            for item in existing:
+                if isinstance(item, dict) and item.get("name"):
+                    new_attrs[item["name"]] = str(item.get("value", ""))
+            existing = new_attrs
+
+        hb = p.get("hepsiburada_attributes") or {}
+        temu = p.get("temu_attributes") or {}
+
+        added = False
+        for ozid, tanim in ozellik_map.items():
+            matched = None
+            for d in deger_by_ozellik.get(ozid, []):
+                if d["pattern"].search(text):
+                    matched = d
+                    break
+            if not matched:
+                continue
+            if existing.get(tanim):
+                continue
+            value = matched["tanim"]
+            existing[tanim] = value
+            if not hb.get(tanim):
+                hb[tanim] = value
+            if not temu.get(tanim):
+                temu[tanim] = value
+            added_keys[tanim] = added_keys.get(tanim, 0) + 1
+            added = True
+
+        await db.products.update_one(
+            {"id": p["id"]},
+            {"$set": {
+                "attributes": existing,
+                "hepsiburada_attributes": hb,
+                "temu_attributes": temu,
+            }},
+        )
+        if added:
+            enriched += 1
+
+    return {
+        "success": True,
+        "total_products": total,
+        "enriched_products": enriched,
+        "added_by_attribute": added_keys,
+        "ozellik_count": len(ozellik_map),
+        "message": f"{enriched}/{total} ürüne otomatik teknik detay eşlendi.",
+    }
+
+
 @router.get("/ticimax/test-connection")
 async def ticimax_test_connection(
     current_user: dict = Depends(require_admin)

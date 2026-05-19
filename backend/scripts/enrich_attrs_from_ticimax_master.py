@@ -110,7 +110,13 @@ def fetch_master():
 
 
 async def enrich_products(ozellik_map: dict, deger_by_ozellik: dict):
-    """Her ürün için name+description'da master değerleri ara, attributes'a ekle."""
+    """Her ürün için name+description'da master değerleri ara, attributes'a ekle.
+
+    ÖNEMLİ: attributes dict'i Trendyol UI'sının beklediği format'ta yazılır:
+        `attributes[Ticimax Özellik Tanımı] = "Master Değer"`  (örn. attributes["Boy"] = "Midi")
+    Bu sayede admin'de "Trendyol için Özellikler" formundaki Boy/Cep/Astar/Bel/Web Color
+    dropdown'ları OTOMATİK doldurulmuş olarak gelir.
+    """
     # Master listeyi DB'ye cache'le (frontend dropdown vb. için)
     await db.ticimax_attribute_master.delete_many({})
     docs = []
@@ -128,7 +134,8 @@ async def enrich_products(ozellik_map: dict, deger_by_ozellik: dict):
 
     prods = await db.products.find(
         {"source": {"$in": ["xml_feed", "ticimax", "csv_xml_merge"]}},
-        {"_id": 0, "id": 1, "name": 1, "description": 1, "attributes": 1},
+        {"_id": 0, "id": 1, "name": 1, "description": 1, "attributes": 1,
+         "hepsiburada_attributes": 1, "temu_attributes": 1},
     ).to_list(None)
 
     total = len(prods)
@@ -146,12 +153,11 @@ async def enrich_products(ozellik_map: dict, deger_by_ozellik: dict):
             new_attrs = {}
             for item in existing:
                 if isinstance(item, dict) and item.get("name"):
-                    slug = _slugify(item["name"]) + "_trendyol"
-                    new_attrs[slug] = {
-                        "label": item["name"],
-                        "value": str(item.get("value", "")),
-                    }
+                    new_attrs[item["name"]] = str(item.get("value", ""))
             existing = new_attrs
+
+        hb = p.get("hepsiburada_attributes") or {}
+        temu = p.get("temu_attributes") or {}
 
         added = False
         for ozid, tanim in ozellik_map.items():
@@ -163,20 +169,27 @@ async def enrich_products(ozellik_map: dict, deger_by_ozellik: dict):
                     break
             if not matched:
                 continue
-            slug = "ticimax_" + _slugify(tanim)
-            if slug in existing:
+            # Trendyol kütüphanesi ile aynı `Tanim` kullanılır (Boy, Cep, Web Color, ...).
+            # Mevcut değeri override ETME — kullanıcının manuel girdiği değer korunur.
+            if existing.get(tanim):
                 continue
-            existing[slug] = {
-                "label": tanim,
-                "value": matched["tanim"],
-                "ticimax_ozellik_id": ozid,
-                "ticimax_deger_id": matched["id"],
-            }
-            added_keys[slug] = added_keys.get(slug, 0) + 1
+            value = matched["tanim"]
+            existing[tanim] = value
+            # HB & Temu otomatik sync (boşsa doldur)
+            if not hb.get(tanim):
+                hb[tanim] = value
+            if not temu.get(tanim):
+                temu[tanim] = value
+            added_keys[tanim] = added_keys.get(tanim, 0) + 1
             added = True
 
         await db.products.update_one(
-            {"id": p["id"]}, {"$set": {"attributes": existing}},
+            {"id": p["id"]},
+            {"$set": {
+                "attributes": existing,
+                "hepsiburada_attributes": hb,
+                "temu_attributes": temu,
+            }},
         )
         if added:
             enriched += 1
@@ -187,10 +200,30 @@ async def enrich_products(ozellik_map: dict, deger_by_ozellik: dict):
         print(f"   {v:4d}  {k}")
 
 
-async def main():
+async def main(use_cache: bool = False):
+    if use_cache:
+        # Cache'ten oku (DB'de varsa Ticimax'a sormaz)
+        cached = await db.ticimax_attribute_master.find({}, {"_id": 0}).to_list(None)
+        if cached:
+            ozellik_map = {c["ozellik_id"]: c["ozellik_tanim"] for c in cached}
+            deger_by_ozellik = {}
+            for c in cached:
+                ozid = c["ozellik_id"]
+                deger_by_ozellik[ozid] = []
+                for d in c.get("degerler", []):
+                    pat = _build_value_pattern(d["tanim"])
+                    if pat:
+                        deger_by_ozellik[ozid].append({
+                            "id": d["id"], "tanim": d["tanim"], "pattern": pat,
+                        })
+            print(f"📦 Cache'ten okundu: {len(ozellik_map)} özellik")
+            await enrich_products(ozellik_map, deger_by_ozellik)
+            return
     ozellik_map, deger_by_ozellik = fetch_master()
     await enrich_products(ozellik_map, deger_by_ozellik)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    use_cache = "--cache" in sys.argv
+    asyncio.run(main(use_cache=use_cache))
