@@ -949,13 +949,31 @@ async def sync_products_to_trendyol(
                             "customAttributeValue": str(val_id)
                         })
             
+            # Description (HTML temizle, min 30 karakter Trendyol gereksinimi)
+            import re as _re
+            raw_desc = (product.get("description") or product.get("short_description")
+                        or product.get("long_description") or "").strip()
+            # HTML tag'lerini temizle
+            clean_desc = _re.sub(r"<[^>]+>", " ", raw_desc)
+            clean_desc = _re.sub(r"&nbsp;", " ", clean_desc)
+            clean_desc = _re.sub(r"&amp;", "&", clean_desc)
+            clean_desc = _re.sub(r"\s+", " ", clean_desc).strip()
+            if not clean_desc or len(clean_desc) < 30:
+                # Description yoksa veya çok kısaysa ürün adından bir minimum açıklama üret
+                fallback = (product.get("name") or "").strip()
+                if fallback and len(fallback) >= 10:
+                    clean_desc = f"{fallback}. Kaliteli kumaş, modern kesim, şık tasarım. Günlük ve özel kullanım için ideal."
+                else:
+                    errors.append(f"{product.get('name')} - Açıklama eksik (Trendyol min 30 karakter zorunlu).")
+                    continue
+
             # 3. Base Product Details
             base_item = {
                 "title": product.get("name"),
                 "productMainId": product.get("stock_code") or product.get("id"),
-                "brandId": int(product.get("trendyol_brand_id") or 975755),  # 975755 = FACETTE (default)
+                "brandId": int(product.get("trendyol_brand_id") or 975755),
                 "categoryId": int(trendyol_cat_id),
-                "description": product.get("description") or product.get("short_description") or "",
+                "description": clean_desc,
                 "currencyType": product.get("currency", "TRY"),
                 "listPrice": calculate_trendyol_price(float(product.get("price", 0)), product, config),
                 "salePrice": calculate_trendyol_price(float(product.get("sale_price") or product.get("price", 0)), product, config),

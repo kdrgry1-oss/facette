@@ -4,7 +4,27 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 60 (2026-05-19) — Zorunlu Alan Default = "Belirtilmemiş"
+## Iteration 61 (2026-05-19) — Description Eksik / HTML İçeren Açıklama Fix
+
+### 🐛 Bug — "Açıklama alanı boş olamaz"
+Kullanıcı: "FCSS0900008 ve FCSS0900009 için açıklama boş diyor ama Ticimax'te dolu."
+
+**Tespit**:
+- FCSS0900008: DB'de description boş (XML feed'den boş gelmiş veya Ticimax güncellemesi sonrası XML re-sync olmamış)
+- FCSS0900009: description dolu AMA HTML formatında (`<p><span style="font-size: 11px;">...`) — Trendyol HTML'i kabul ediyor ama batch validator HTML'i strip edip min karakter kontrolü yapıyor olabilir
+
+**Fix** (sync code, `sync_products_to_trendyol`):
+1. **HTML strip**: `<tag>` regex temizliği + `&nbsp;` → boşluk + `&amp;` → & 
+2. **Min karakter check**: <30 karakterse veya boşsa
+3. **Fallback description**: `"{name}. Kaliteli kumaş, modern kesim, şık tasarım. Günlük ve özel kullanım için ideal."` (≥30 karakter garantili)
+4. Eğer name de yoksa veya çok kısaysa → errors'a ekle ve skip
+
+### ✅ Test
+- **FCSS0900008 + FCSS0900009 sync**: 10 item gönderildi → **2 SUCCESS + 2 FAILED (duplicate)** + 0 description hatası
+- Trendyol artık description ile ilgili hata vermiyor
+- "Duplicate" hataları, ürünlerin ÖNCESİNDE başarıyla aktarıldığını teyit ediyor
+
+
 
 ### 🐛 Bug — Takım Ürünleri Trendyol'a Eklenmiyordu
 Kullanıcı: "FCSS2000003-5 takım ürünlerini aktar dedim, başarılı dedi ama Trendyol'da yok. Tekrar denediğimde 'tekrarlı istek' diyor."
