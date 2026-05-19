@@ -507,16 +507,19 @@ async def validate_products_for_trendyol(
             errors.append("En az 1 ürün görseli yok")
 
         # Barkod kontrolü (varyantlı ürünlerde tüm varyantlar)
+        # ⚠️ barcode_uncertain=True ise barkod yok kabul edilir (stock_code'tan kopyalanmış olabilir)
         variants = p.get("variants") or []
         if not variants:
-            if not p.get("barcode"):
-                errors.append("Barkod yok")
+            if not p.get("barcode") or p.get("barcode_uncertain"):
+                errors.append("Barkod yok / belirsiz (Ticimax'tan doğrulayın)")
             if not p.get("stock_code"):
-                warnings.append("Stok kodu yok (barkod kullanılır)")
+                warnings.append("Stok kodu yok")
         else:
-            missing_v_barcode = sum(1 for v in variants if not v.get("barcode"))
+            missing_v_barcode = sum(
+                1 for v in variants if not v.get("barcode") or v.get("barcode_uncertain")
+            )
             if missing_v_barcode:
-                errors.append(f"{missing_v_barcode} varyantın barkodu eksik")
+                errors.append(f"{missing_v_barcode} varyantın barkodu eksik/belirsiz")
 
         # Fiyat
         try:
@@ -1051,8 +1054,8 @@ async def sync_products_to_trendyol(
             # 4. Handle Variants or No-Variants
             variants = product.get("variants", [])
             if not variants:
-                if not product.get("barcode"):
-                    errors.append(f"{product.get('name')} - Barkod eksik (Zorunlu alan).")
+                if not product.get("barcode") or product.get("barcode_uncertain"):
+                    errors.append(f"{product.get('name')} - Barkod yok ya da belirsiz (Ticimax'tan doğrulayın).")
                     continue
                 item = base_item.copy()
                 item["barcode"] = product.get("barcode")
@@ -1062,8 +1065,8 @@ async def sync_products_to_trendyol(
                 items_to_send.append(item)
             else:
                 for v in variants:
-                    if not v.get("barcode"):
-                        errors.append(f"{product.get('name')} - Varyant ({v.get('size')}) barkodu eksik.")
+                    if not v.get("barcode") or v.get("barcode_uncertain"):
+                        errors.append(f"{product.get('name')} - Varyant ({v.get('size') or v.get('color') or '?'}) barkodu yok / belirsiz.")
                         continue
                     item = base_item.copy()
                     item["barcode"] = v.get("barcode")
@@ -1336,6 +1339,108 @@ async def _sync_inventory_to_trendyol(products: list):
         }
         await db.trendyol_sync_logs.insert_one(log_doc)
         raise HTTPException(status_code=500, detail=f"Trendyol stok/fiyat güncelleme hatası: {str(e)}")
+
+
+@router.get("/products/barcode-issues")
+async def list_products_with_barcode_issues(
+    limit: int = 1000,
+    current_user: dict = Depends(require_admin),
+):
+    """Barkodu eksik veya belirsiz (barcode_uncertain=True) ürünleri listeler.
+    
+    Bu ürünler Trendyol vb. pazaryerlerine ÖNCESİ aktarılırken sistem yanlış
+    barkod (stock_code'tan kopyalanmış) gönderiyordu. Şimdi bunlar uncertain
+    olarak işaretlendi ve push'tan engelleniyor — kullanıcı doğru barkodu
+    Ticimax'tan alıp manuel düzeltmeli.
+    """
+    or_q = [
+        {"barcode_uncertain": True},
+        {"barcode": {"$in": [None, ""]}},
+        {"variants.barcode_uncertain": True},
+        {"variants.barcode": {"$in": [None, ""]}},
+    ]
+    items = []
+    async for p in db.products.find(
+        {"$or": or_q},
+        {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "barcode": 1, "sku": 1,
+         "category_name": 1, "barcode_uncertain": 1, "variants": 1, "source": 1,
+         "ticimax_id": 1, "is_active": 1},
+    ).limit(int(limit) or 1000):
+        bad_variants = []
+        for v in p.get("variants") or []:
+            if v.get("barcode_uncertain") or not v.get("barcode"):
+                bad_variants.append({
+                    "id": v.get("id"),
+                    "stock_code": v.get("stock_code") or v.get("sku"),
+                    "color": v.get("color"),
+                    "size": v.get("size"),
+                    "barcode": v.get("barcode"),
+                    "uncertain": v.get("barcode_uncertain", False),
+                })
+        items.append({
+            "id": p.get("id"),
+            "name": p.get("name"),
+            "stock_code": p.get("stock_code") or p.get("sku"),
+            "main_barcode": p.get("barcode"),
+            "main_barcode_uncertain": p.get("barcode_uncertain", False),
+            "category_name": p.get("category_name"),
+            "source": p.get("source"),
+            "ticimax_id": p.get("ticimax_id"),
+            "is_active": p.get("is_active"),
+            "bad_variants": bad_variants,
+            "bad_variant_count": len(bad_variants),
+        })
+    items.sort(key=lambda x: (
+        not x["main_barcode_uncertain"], -(x["bad_variant_count"] or 0), x.get("name") or "",
+    ))
+    return {
+        "success": True,
+        "count": len(items),
+        "items": items,
+        "message": f"{len(items)} ürünün barkodu eksik/belirsiz. Manuel düzeltin.",
+    }
+
+
+@router.post("/products/barcode-fix")
+async def fix_product_barcode(
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """Belirsiz/eksik bir ürün ya da varyant barkodunu manuel düzeltir.
+    
+    Payload: {
+        "product_id": "...",
+        "main_barcode": "...",              # (opsiyonel) ana ürün barkodu
+        "variants": [                          # (opsiyonel) varyant bazlı düzeltme
+            {"variant_id": "...", "barcode": "..."}
+        ]
+    }
+    """
+    pid = payload.get("product_id")
+    if not pid:
+        raise HTTPException(status_code=400, detail="product_id zorunlu")
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    set_fields = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if payload.get("main_barcode"):
+        set_fields["barcode"] = str(payload["main_barcode"]).strip()
+        set_fields["barcode_uncertain"] = False
+        set_fields["barcode_note"] = "Manuel düzeltildi."
+    if payload.get("variants"):
+        existing = p.get("variants") or []
+        fix_map = {str(v.get("variant_id")): str(v.get("barcode", "")).strip()
+                   for v in (payload.get("variants") or []) if v.get("variant_id")}
+        for v in existing:
+            vid = str(v.get("id"))
+            if vid in fix_map and fix_map[vid]:
+                v["barcode"] = fix_map[vid]
+                v["barcode_uncertain"] = False
+        set_fields["variants"] = existing
+    await db.products.update_one({"id": pid}, {"$set": set_fields})
+    return {"success": True, "message": "Barkod güncellendi."}
+
+
 
 @router.get("/trendyol/products/batch-status/{batch_id}")
 async def get_trendyol_batch_status(batch_id: str, current_user: dict = Depends(require_admin)):

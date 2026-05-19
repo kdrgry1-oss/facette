@@ -639,15 +639,26 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. <b>Önce "Doğrula" ile zorunlu alanları kontrol edin.</b>
           </div>
         </div>
-        <a
-          href="/admin/trendyol-loglar"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs bg-white border border-orange-300 text-orange-700 hover:bg-orange-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
-          data-testid="open-sync-history-btn"
-        >
-          📋 Aktarım Geçmişi
-        </a>
+        <div className="flex items-center gap-2 shrink-0">
+          <a
+            href="/admin/barkod-sorunlari"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+            data-testid="open-barcode-issues-btn"
+          >
+            ⚠️ Barkod Sorunları
+          </a>
+          <a
+            href="/admin/trendyol-loglar"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs bg-white border border-orange-300 text-orange-700 hover:bg-orange-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+            data-testid="open-sync-history-btn"
+          >
+            📋 Aktarım Geçmişi
+          </a>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">

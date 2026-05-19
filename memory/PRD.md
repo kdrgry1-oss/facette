@@ -2712,3 +2712,33 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending
 - Yok
+
+## Iteration 57 — Yanlış Barkodlar Temizlendi + Manuel Düzeltme UI (2026-02-19)
+
+### ✅ Çözülenler
+
+**KRİTİK SORUN (User feedback):** XML/CSV sync'inde 258 ana üründe + 179 varyantta barkod = stok kodu olarak sessizce kopyalanmıştı. Sistem bunları "barkod" olarak Trendyol'a göndermeye çalışıyordu. Ticimax API erişimi de şu an çalışmıyor (SelectUrunCount=0, key yetkisi yok).
+
+**Yapılanlar:**
+1. **DB Temizleme**: `barcode == stock_code` olan tüm ürünlerde:
+   - Ana ürün düzeyinde 258 barkod silindi (`barcode_uncertain: true`)
+   - Varyant düzeyinde 179 barkod silindi (64 ürün etkilendi)
+2. **Validation (`integrations.py`)**: `barcode_uncertain=True` olan ürünler için "Barkod yok / belirsiz (Ticimax'tan doğrulayın)" hatası verir
+3. **Push engelleme (`integrations.py`)**: Trendyol push endpoint'i `barcode_uncertain` ürünleri ATLAR — bir daha yanlış barkod gönderilmiyor
+4. **Yeni endpoint'ler**:
+   - `GET /api/integrations/products/barcode-issues` — sorunlu ürünleri listeler
+   - `POST /api/integrations/products/barcode-fix` — manuel barkod düzeltme
+5. **Yeni admin sayfası (`BarcodeIssues.jsx`)**: `/admin/barkod-sorunlari`
+   - Tablo: ürün adı + stok kodu + ana barkod + varyantlar + düzelt input + Kaydet butonu
+   - Arama (ürün adı, stok kodu, kategori)
+   - Otomatik liste güncellemesi (kaydetince satır kaybolur)
+6. **Sidebar link**: CategoryMapping sayfasından `/admin/barkod-sorunlari`'ya kısayol
+
+### Test (canlı)
+- `GET /products/barcode-issues` → 293 sorunlu ürün listelendi ✓
+- Validation panel "Barkod yok / belirsiz" hatası veriyor ✓
+- Trendyol push barcode_uncertain ürünleri atlıyor ✓
+
+### Pending / Next
+- Kullanıcı: Ticimax admin panelinden 293 ürünün doğru barkodlarını kopyalayıp `/admin/barkod-sorunlari` sayfasından düzeltsin
+- Veya: Ticimax WS API key'i yenilersek, otomatik backfill scripti yazılabilir
