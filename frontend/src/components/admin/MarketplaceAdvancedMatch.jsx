@@ -571,10 +571,12 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     } finally { setSaving(false); }
   };
 
-  // Otomatik değer eşleştirme — isim benzerliği (Kırmızı ↔ Red, S ↔ Small vb.)
+  // Otomatik değer eşleştirme — TÜM attribute'lardaki TÜM değerleri tarar
   const handleAutoMatchValues = () => {
     const next = { ...valueMappings };
     let matched = 0;
+    let already = 0;
+    const perAttr = {};
     // Alias tablosu — en yaygın Türkçe↔İngilizce & beden kısaltmaları
     const aliases = {
       "kırmızı": ["red"], "mavi": ["blue"], "yeşil": ["green"], "sarı": ["yellow"],
@@ -587,14 +589,14 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
 
     mpAttrs.forEach((mpAttr) => {
       const id = String(mpAttr.id ?? mpAttr.attribute?.id);
-      const mpName = (mpAttr.name || mpAttr.attribute?.name || "").toLowerCase();
       const mpValues = mpAttr.attributeValues || [];
       const localVals = localValues[mpAttr.name || mpAttr.attribute?.name] || [];
+      let localMatched = 0;
 
       localVals.forEach((lv) => {
         const key = `${id}|${lv}`;
-        if (next[key]) return; // mevcut korunur
-        const lvLower = lv.toLowerCase().trim();
+        if (next[key]) { already++; return; }
+        const lvLower = String(lv).toLowerCase().trim();
         const candidates = aliases[lvLower] || [];
         const found = mpValues.find((mv) => {
           const mvN = (mv.name || "").toLowerCase().trim();
@@ -608,13 +610,22 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
         if (found) {
           next[key] = String(found.id);
           matched++;
+          localMatched++;
         }
       });
+      if (localMatched) perAttr[mpAttr.name || mpAttr.attribute?.name] = localMatched;
     });
 
     setValueMappings(next);
-    if (matched) toast.success(`${matched} değer otomatik eşleştirildi`);
-    else toast.info("Eşleştirilecek yeni değer bulunamadı");
+    if (matched) {
+      const top = Object.entries(perAttr).sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([k, n]) => `${k} (${n})`).join(", ");
+      toast.success(`${matched} değer eşleşti${already ? ` · ${already} zaten eşliydi` : ""}${top ? ` · En çok: ${top}` : ""}`);
+    } else if (already) {
+      toast.info(`Tüm değerler zaten eşli (${already})`);
+    } else {
+      toast.info("Eşleştirilecek değer bulunamadı");
+    }
   };
 
   const currentAttr = mpAttrs.find((a) => String(a.id ?? a.attribute?.id) === String(selectedAttrId));
@@ -622,7 +633,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
 
   return (
     <Dialog open={open} onOpenChange={() => onClose(false)}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center justify-between">
             <DialogTitle className="text-base flex items-center gap-2">
@@ -637,8 +648,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                 onClick={handleAutoMatchValues}
                 className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
                 data-testid="adv-auto-match-values-btn"
+                title="Tüm özellik sekmelerindeki TÜM değerleri otomatik eşleştirir"
               >
-                <LinkIcon size={14} /> Otomatik Eşleştir
+                <LinkIcon size={14} /> Tümünü Otomatik Eşleştir
               </button>
             )}
           </div>
@@ -657,34 +669,56 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
             Bu kategori için değer eşleştirmeye uygun özellik (listeden seçilen) yok.
           </div>
         ) : (
-          <>
-            <div className="flex gap-2 flex-wrap pb-2 border-b">
-              {mpAttrs.map((a) => {
-                const id = String(a.id ?? a.attribute?.id);
-                const name = a.name || a.attribute?.name;
-                return (
-                  <button
-                    key={id}
-                    onClick={() => setSelectedAttrId(id)}
-                    className={`px-3 py-1.5 text-xs rounded-full transition ${
-                      id === String(selectedAttrId)
-                        ? `bg-${color}-500 text-white`
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    }`}
-                    data-testid={`adv-attr-tab-${id}`}
-                  >
-                    {name}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex-1 flex gap-3 overflow-hidden min-h-[400px]">
+            {/* Sol sidebar — özellik listesi */}
+            <aside className="w-56 shrink-0 border rounded-lg overflow-hidden flex flex-col">
+              <div className="bg-gray-50 px-3 py-2 border-b text-[11px] font-bold text-gray-600 uppercase tracking-wide">
+                Özellikler ({mpAttrs.length})
+              </div>
+              <div className="overflow-auto flex-1 divide-y">
+                {mpAttrs.map((a) => {
+                  const id = String(a.id ?? a.attribute?.id);
+                  const name = a.name || a.attribute?.name;
+                  const localCount = (localValues[name] || []).length;
+                  const mappedCount = Object.keys(valueMappings).filter(
+                    (k) => k.startsWith(`${id}|`) && valueMappings[k]
+                  ).length;
+                  const isActive = id === String(selectedAttrId);
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setSelectedAttrId(id)}
+                      className={`w-full text-left px-3 py-2 text-xs transition flex items-center justify-between gap-2 ${
+                        isActive
+                          ? `bg-${color}-50 border-l-2 border-${color}-500 font-semibold text-${color}-900`
+                          : "hover:bg-gray-50 border-l-2 border-transparent text-gray-700"
+                      }`}
+                      data-testid={`adv-attr-tab-${id}`}
+                    >
+                      <span className="truncate">{name}</span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        {mappedCount > 0 && (
+                          <span className="text-[9px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">
+                            {mappedCount}
+                          </span>
+                        )}
+                        <span className="text-[9px] text-gray-400">{localCount}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
 
-            <div className="flex-1 overflow-auto border rounded-lg">
+            {/* Sağ taraf — değer tablosu */}
+            <div className="flex-1 border rounded-lg overflow-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 sticky top-0 border-b">
                   <tr>
-                    <th className="text-left px-4 py-2 text-xs text-gray-500">Sistem Değeri</th>
-                    <th className="text-left px-4 py-2 text-xs text-gray-500">{marketplace} Değeri</th>
+                    <th className="text-left px-4 py-2 text-xs text-gray-500">
+                      Sistem Değeri <span className="text-gray-400 font-normal">— {attrName}</span>
+                    </th>
+                    <th className="text-left px-4 py-2 text-xs text-gray-500 w-1/2">{marketplace} Değeri</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -717,7 +751,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                 </tbody>
               </table>
             </div>
-          </>
+          </div>
         )}
 
         <div className="flex justify-end gap-2 pt-3 border-t">

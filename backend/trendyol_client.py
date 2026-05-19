@@ -92,9 +92,9 @@ class TrendyolClient:
     async def create_products(self, items: List[Dict]) -> Dict:
         """
         Sends a batch of products to Trendyol.
-        Endpoint: POST /suppliers/{supplierId}/v2/products
+        Endpoint (v2 — Aug 2026+): POST /integration/product/sellers/{sellerId}/v2/products
         """
-        url = f"{self.base_url}/suppliers/{self.supplier_id}/v2/products"
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/v2/products"
         async with httpx.AsyncClient(timeout=60.0) as client:
             headers = self._get_headers()
             try:
@@ -114,9 +114,9 @@ class TrendyolClient:
     async def get_batch_request_result(self, batch_request_id: str) -> Dict:
         """
         Checks the status of a batch request (e.g. product creation, price/inventory updates).
-        Endpoint: GET /suppliers/{supplierId}/products/batch-requests/{batchRequestId}
+        Endpoint (v2): GET /integration/product/sellers/{sellerId}/products/batch-requests/{batchRequestId}
         """
-        url = f"{self.base_url}/suppliers/{self.supplier_id}/products/batch-requests/{batch_request_id}"
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/batch-requests/{batch_request_id}"
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = self._get_headers()
             try:
@@ -131,9 +131,9 @@ class TrendyolClient:
         """
         Updates price and stock for products by barcode.
         items format: [{"barcode": "123", "quantity": 10, "salePrice": 100, "listPrice": 120}, ...]
-        Endpoint: POST /suppliers/{supplierId}/products/price-and-inventory
+        Endpoint (v2): POST /integration/inventory/sellers/{sellerId}/products/price-and-inventory
         """
-        url = f"{self.base_url}/suppliers/{self.supplier_id}/products/price-and-inventory"
+        url = f"{self.base_url}/inventory/sellers/{self.supplier_id}/products/price-and-inventory"
         async with httpx.AsyncClient(timeout=60.0) as client:
             headers = self._get_headers()
             try:

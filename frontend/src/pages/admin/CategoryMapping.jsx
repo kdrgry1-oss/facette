@@ -582,13 +582,19 @@ function FilteredPushPanel({ marketplace, auth }) {
       toast.dismiss(t);
       const d = res.data || {};
       setLastResult(d);
-      toast.success(
-        `${d.successful || d.count || 0} ürün gönderildi` +
-        (d.failed ? `, ${d.failed} hata` : ""),
-      );
+      if (d.successful > 0) {
+        toast.success(
+          `${d.successful} ürün gönderildi` +
+          (d.failed ? ` · ${d.failed} hata` : ""),
+        );
+      } else {
+        toast.error(d.message || "0 ürün gönderildi — detay aşağıda");
+      }
     } catch (e) {
       toast.dismiss(t);
-      toast.error(e.response?.data?.detail || "Aktarım başarısız");
+      const data = e.response?.data || {};
+      setLastResult(data);
+      toast.error(data.detail || data.message || e.message || "Aktarım başarısız");
     } finally {
       setLoading(false);
     }
@@ -769,10 +775,44 @@ function FilteredPushPanel({ marketplace, auth }) {
       )}
 
       {lastResult && (
-        <div className="mt-3 text-xs bg-white border rounded p-2">
-          Son aktarım: <b>{lastResult.successful || lastResult.count || 0}</b> başarı
-          {lastResult.failed ? <span className="text-red-700"> · {lastResult.failed} hata</span> : null}
-          {lastResult.batch_id ? <span className="text-gray-500"> · Batch: {lastResult.batch_id}</span> : null}
+        <div className="mt-3 bg-white border rounded-lg overflow-hidden" data-testid="push-last-result">
+          <div className={`px-3 py-2 text-xs flex items-center justify-between ${lastResult.successful > 0 ? "bg-green-50 border-b border-green-200" : "bg-red-50 border-b border-red-200"}`}>
+            <div>
+              <b>Son aktarım:</b>{" "}
+              <span className="text-green-700 font-bold">{lastResult.successful || 0}</span> başarı
+              {(lastResult.failed > 0) && <span className="text-red-700 font-bold"> · {lastResult.failed} hata</span>}
+              {lastResult.batchRequestId && <span className="text-gray-500 font-mono ml-2">Batch: {lastResult.batchRequestId}</span>}
+            </div>
+            <button onClick={() => setLastResult(null)} className="text-xs text-gray-500 hover:underline">Kapat</button>
+          </div>
+          {lastResult.message && (
+            <div className="px-3 py-2 text-xs text-gray-700 border-b">{lastResult.message}</div>
+          )}
+          {(lastResult.errors || []).length > 0 && (
+            <div className="px-3 py-2">
+              <div className="text-[11px] font-bold text-red-800 uppercase mb-1">
+                Hatalar ({lastResult.errors.length})
+              </div>
+              <ul className="space-y-1 max-h-60 overflow-auto">
+                {lastResult.errors.slice(0, 50).map((er, i) => (
+                  <li key={i} className="text-[11px] bg-red-50 text-red-900 border border-red-100 rounded px-2 py-1 font-mono break-words">
+                    {typeof er === "string" ? er : JSON.stringify(er)}
+                  </li>
+                ))}
+                {lastResult.errors.length > 50 && (
+                  <li className="text-[10px] text-gray-500">... {lastResult.errors.length - 50} hata daha (Entegrasyon Logları'na bakın)</li>
+                )}
+              </ul>
+            </div>
+          )}
+          {lastResult.trendyol_response && (
+            <details className="px-3 py-2 border-t">
+              <summary className="text-[11px] text-gray-500 cursor-pointer hover:text-black">Trendyol Ham Cevabı (debug)</summary>
+              <pre className="text-[10px] mt-1 bg-gray-50 p-2 rounded border max-h-40 overflow-auto font-mono whitespace-pre-wrap">
+                {JSON.stringify(lastResult.trendyol_response, null, 2)}
+              </pre>
+            </details>
+          )}
         </div>
       )}
     </div>

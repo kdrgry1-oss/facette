@@ -4,7 +4,62 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 51 (2026-05-19) — Değer Eşleştirme Boş Veri Bug Fix
+## Iteration 53 (2026-05-19) — Trendyol Sync KRITIK Bug Fix + Hata Detay UI
+
+### 🚨 KRITIK Bug 1: Yanlış Trendyol API Endpoint URL
+Tüm sync çağrıları "Service Unavailable" alıyordu. Sebep: Trendyol Aug 2026'da URL formatını değiştirmiş.
+
+- **Eski (deprecated)**: `/integration/suppliers/{id}/v2/products`
+- **Yeni (v2)**: `/integration/product/sellers/{id}/v2/products`
+
+Düzeltilen endpoint'ler (`trendyol_client.py`):
+- `create_products` → `/product/sellers/{id}/v2/products`
+- `get_batch_request_result` → `/product/sellers/{id}/products/batch-requests/{batchId}`
+- `update_price_and_inventory` → `/inventory/sellers/{id}/products/price-and-inventory`
+
+### 🚨 KRITIK Bug 2: brandId Eksikti
+Eski sync fonksiyonu (`sync_products_to_trendyol`) `brandId` göndermiyordu → Trendyol "Marka alanı boş olamaz" hatasıyla reddediyordu.
+
+- Fix: `base_item["brandId"] = int(product.get("trendyol_brand_id") or 968)`  
+  (968 = FACETTE markasının Trendyol ID'si, yeni `bulk_sync_v3` ile uyumlu)
+
+### 🚨 KRITIK Bug 3: Eski Category Mapping Şeması Kullanılıyordu
+Sync sadece `categories.trendyol_category_id` (15 kategori) alanını kontrol ediyordu, oysa kullanıcı yeni `category_mappings` koleksiyonu (12 mapping) ile çalışıyordu. Fix: önce yeni şema, sonra eski şema fallback.
+
+### 🐛 Bug 4: Frontend Hata Detaylarını Göstermiyordu
+Toast sadece "0 ürün gönderildi" diyordu. Backend `errors` listesi vardı ama UI'da gösterilmiyordu.
+
+**Backend response** standardize edildi: `{success, message, total, successful, failed, batchRequestId, errors[], trendyol_response}`
+
+**Frontend `FilteredPushPanel`** geliştirildi:
+- Toast: success/error ayrımı (`d.successful > 0` ise success, değilse error)
+- Sonuç paneli: yeşil/kırmızı banner, hatalar listesi (font-mono, max-h-60 scroll), Trendyol ham JSON cevabı (collapsible)
+
+### ✅ Test Sonuçları (FCSS0600004 — Liora Midi Keten Elbise)
+1. **1. deneme**: `batchRequestId: 586aff19-23a4-4652-903f-0ceb6114ade3-1779796001` ile 4 varyant Trendyol'a aktarıldı ✅
+2. **2. deneme**: Trendyol "tekrarlı ürün oluşturma isteği atılamaz" ile reddetti (beklenen davranış)
+3. **UI**: "Son aktarım: 0 başarı · 4 hata" + tam hata mesajı + Trendyol ham debug cevabı ekranda gösteriliyor
+
+
+
+### 🎨 UI — Sidebar Layout
+Kullanıcı şikayeti: "Üstte yumurta yumurta görüntüsünü sevmedim, değer başlıklarını sol aşağı listele."
+
+**Değişiklik** (`AdvancedValueMatchModal`):
+- 29+ pill chip yerine **sol dikey sidebar** (`w-56`, kategori başına eşli/toplam sayaç)
+- Aktif sekme turuncu sol kenarlık + bg-orange-50
+- Sağ tarafta seçili özelliğin değer tablosu (geniş alan)
+- Modal `max-w-5xl` (önceden 3xl) — daha geniş ekran
+
+### ⚡ Bulk Otomatik Eşleştir
+- Buton ismi: "Otomatik Eşleştir" → "**Tümünü Otomatik Eşleştir**"
+- Fonksiyon zaten tüm `mpAttrs`'ı geziyordu, toast iyileştirildi:
+  - `"812 değer eşleşti · En çok: Beden (110), Menşei (94), Dokuma Tipi (64), Siluet (64), Ürün Detayı (63)"`
+  - Per-attribute breakdown gösteriyor
+
+**Test**: Ceket kategorisi auto-match → 812 değer otomatik eşleşti. Cep tab'i: "4→4 Cep", "5→5 Cep", "Aplike Cep→Aplike Cep", "Cepli→Kargo Cepli", "Cepsiz→Cepsiz", "Chino→Chino" otomatik dolu.
+
+
 
 ### 🐛 Bug — "Değerler çekilmedi" (Empty Value Modal)
 Kullanıcı şikayeti: "Değer" sekmesine tıklayınca local_values boş geliyordu.

@@ -733,14 +733,27 @@ async def sync_products_to_trendyol(
     
     for product in products:
         try:
-            # 1. Category Mapping check
-            category = await db.categories.find_one({"name": product.get("category_name")})
-            if not category or not category.get("trendyol_category_id"):
+            # 1. Category Mapping check — önce yeni category_mappings, sonra eski categories.trendyol_category_id
+            trendyol_cat_id = None
+            category = None
+            cat_id = product.get("category_id")
+            cm = None
+            if cat_id:
+                cm = await db.category_mappings.find_one(
+                    {"category_id": str(cat_id), "marketplace": "trendyol"}, {"_id": 0}
+                )
+                if cm and cm.get("marketplace_category_id"):
+                    trendyol_cat_id = cm["marketplace_category_id"]
+                    category = cm  # category_mappings doc — attribute_mappings, default_mappings içerir
+            if not trendyol_cat_id:
+                cat_doc = await db.categories.find_one({"name": product.get("category_name")})
+                if cat_doc and cat_doc.get("trendyol_category_id"):
+                    trendyol_cat_id = cat_doc["trendyol_category_id"]
+                    category = cat_doc
+            if not trendyol_cat_id:
                 errors.append(f"{product.get('name')} - Trendyol kategori eşleştirmesi (Mapping) yok.")
                 continue
                 
-            trendyol_cat_id = category["trendyol_category_id"]
-            
             # 2. Attributes check and formatting
             raw_attrs = product.get("trendyol_attributes", {})
             attributes = []
@@ -762,6 +775,7 @@ async def sync_products_to_trendyol(
             base_item = {
                 "title": product.get("name"),
                 "productMainId": product.get("stock_code") or product.get("id"),
+                "brandId": int(product.get("trendyol_brand_id") or 968),  # 968 = FACETTE (default)
                 "categoryId": int(trendyol_cat_id),
                 "description": product.get("description") or product.get("short_description") or "",
                 "currencyType": product.get("currency", "TRY"),
@@ -821,6 +835,9 @@ async def sync_products_to_trendyol(
         return {
             "success": False,
             "message": "Trendyol'a gönderilecek geçerli ürün bulunamadı. Lütfen eksikleri giderin.",
+            "total": len(products),
+            "successful": 0,
+            "failed": len(errors),
             "errors": errors
         }
         
@@ -829,24 +846,43 @@ async def sync_products_to_trendyol(
         started_at = datetime.now(timezone.utc).isoformat()
         response = await client.create_products(items_to_send)
         batch_id = response.get("batchRequestId")
+        # Trendyol returned an error response (no batchRequestId)?
+        trendyol_error = None
+        if not batch_id:
+            # response may contain {"errors":[...]} or {"message":...}
+            trendyol_error = (
+                response.get("message")
+                or (response.get("errors") if isinstance(response.get("errors"), list) else None)
+                or str(response)[:500]
+            )
+            if isinstance(trendyol_error, list) and trendyol_error:
+                trendyol_error = "; ".join([
+                    (e.get("message") if isinstance(e, dict) else str(e)) for e in trendyol_error
+                ])[:1000]
         # Save success log
         log_doc = {
             "id": generate_id(),
             "started_at": started_at,
             "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": "success" if not errors else "partial",
+            "status": ("success" if not errors and batch_id else ("partial" if batch_id else "failed")),
             "products_attempted": len(products),
-            "products_sent": len(items_to_send),
+            "products_sent": len(items_to_send) if batch_id else 0,
             "batch_request_id": batch_id,
-            "errors": errors,
-            "message": f"{len(items_to_send)} ürün aktarıldı."
+            "errors": errors + ([f"Trendyol API: {trendyol_error}"] if trendyol_error else []),
+            "trendyol_response": response,
+            "message": f"{len(items_to_send)} ürün aktarıldı." if batch_id else f"Trendyol kabul etmedi: {trendyol_error}"
         }
         await db.trendyol_sync_logs.insert_one(log_doc)
         return {
-            "success": True,
-            "message": f"{len(items_to_send)} ürün Trendyol entegrasyonuna aktarıldı (Batch Request).",
+            "success": bool(batch_id),
+            "message": (f"{len(items_to_send)} ürün Trendyol entegrasyonuna aktarıldı (Batch Request)." if batch_id
+                        else f"Trendyol kabul etmedi: {trendyol_error or 'bilinmeyen hata'}"),
+            "total": len(products),
+            "successful": len(items_to_send) if batch_id else 0,
+            "failed": len(errors) + (0 if batch_id else len(items_to_send)),
             "batchRequestId": batch_id,
-            "errors": errors
+            "errors": errors + ([f"Trendyol API: {trendyol_error}"] if trendyol_error else []),
+            "trendyol_response": response,
         }
     except Exception as e:
         logger.error(f"Error syncing products to Trendyol: {str(e)}")
