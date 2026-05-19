@@ -4,7 +4,26 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 59 (2026-05-19) — Filtreli Aktarım: Kategori Kapsamı
+## Iteration 60 (2026-05-19) — Zorunlu Alan Default = "Belirtilmemiş"
+
+### 🐛 Bug — Takım Ürünleri Trendyol'a Eklenmiyordu
+Kullanıcı: "FCSS2000003-5 takım ürünlerini aktar dedim, başarılı dedi ama Trendyol'da yok. Tekrar denediğimde 'tekrarlı istek' diyor."
+
+**Root cause**: Trendyol Takım kategorisinde Boy(48)/Desen(33)/Kalıp(179) **required**. Auto-setup yalnızca Yaş Grubu + Menşei default'u atıyordu, diğer zorunluları atamıyordu. Validate ise `attribute_mappings`'te Boy var olduğu için "Boy var" sanıyor (`local_vals.get("boy") = "Midi"`), ama value_mapping `48|Midi → 1282` (legacy ID) Trendyol production'da reddediliyor → "Zorunlu özellik bulunamadı". Bu yüzden Trendyol panelde görünmüyor.
+
+**Fix**: `_auto_setup_mapping` artık **TÜM required attribute'lar için** "Belirtilmemiş / Belirsiz / Diğer / Other / Yok" değerlerinden birini bulup `default_mappings`'e yazıyor. Üretici/İthalatçı şirket bilgisi adımında zaten dolduruluyor, Yaş Grubu/Menşei özel değerlerle atanıyor, dosya linki gerektiren attribute'lar skip ediliyor.
+
+Ayrıca:
+- `48|Midi → 10623286 (Normal Boy)` güncellendi (1282 legacy idi)
+- Mevcut 11 matched Trendyol kategorisinde toplam **22 yeni default** eklendi
+
+### ✅ Sonuçlar
+- **FCSS2000008 (Monarc Bluz Pantolon Takım Ekru) Trendyol batch testi**: Success 1, Failed 0 ✅ (barkod 8684483527807 Trendyol'a eklendi)
+- **Tüm 563 ürün validate**:
+  - **115 → 224 → 488 hazır ürün** (cumulative iyileştirme — DICT bug fix + Yaş Grubu/Menşei + Belirtilmemiş defaults)
+  - Sadece 75 invalid kaldı (çoğu görsel/barkod eksikliği)
+
+
 
 ### 🐛 UX Bug — Filtre Tüm Kategoriler İçin Çalışıyordu
 Kullanıcı şikayeti: "Gömlek kategorisi seçili iken tarih filtreledim, doğrula dedim, bana Gömlek kategorisinde olmayan ürünleri de gösteriyor."

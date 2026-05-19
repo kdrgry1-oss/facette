@@ -692,23 +692,51 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
             default_mappings[aid] = v
             summary["company_filled"] += 1
 
-    # 5) Yaş Grubu=Yetişkin, Menşei=Türkiye
+    # 5) Yaş Grubu=Yetişkin, Menşei=Türkiye + diğer ZORUNLU alanlar için "Belirtilmemiş"
+    UNSPECIFIED_TERMS = ["belirtilmemiş", "belirtilmemis", "diğer", "diger", "other", "yok"]
     for a in mp_attrs:
         aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
         nm = (a.get("name") or a.get("attribute", {}).get("name") or "").lower()
-        if not aid or default_mappings.get(aid): continue
+        if not aid: continue
+        # Yaş Grubu özel
         if "yaş grubu" in nm or "yas grubu" in nm:
-            for v in (a.get("attributeValues") or []):
-                if (v.get("name") or "").strip().lower() in ["yetişkin", "yetiskin"]:
-                    default_mappings[aid] = str(v.get("id"))
-                    summary["defaults_set"] += 1
-                    break
-        elif "menşe" in nm or "mense" in nm or "menşei" in nm:
-            for v in (a.get("attributeValues") or []):
-                if (v.get("name") or "").strip().lower() in ["türkiye", "turkiye", "tr"]:
-                    default_mappings[aid] = str(v.get("id"))
-                    summary["defaults_set"] += 1
-                    break
+            if not default_mappings.get(aid):
+                for v in (a.get("attributeValues") or []):
+                    if (v.get("name") or "").strip().lower() in ["yetişkin", "yetiskin"]:
+                        default_mappings[aid] = str(v.get("id"))
+                        summary["defaults_set"] += 1
+                        break
+            continue
+        # Menşei özel
+        if "menşe" in nm or "mense" in nm:
+            if not default_mappings.get(aid):
+                for v in (a.get("attributeValues") or []):
+                    if (v.get("name") or "").strip().lower() in ["türkiye", "turkiye", "tr"]:
+                        default_mappings[aid] = str(v.get("id"))
+                        summary["defaults_set"] += 1
+                        break
+            continue
+        # DİĞER zorunlu alanlar — "Belirtilmemiş" default (kullanıcı sonradan değiştirebilir)
+        if not a.get("required"):
+            continue
+        if default_mappings.get(aid):
+            continue
+        # Dosya linki / sertifika gerektirenler skip
+        if any(p in nm for p in ["analiz testi", "test raporu", "sertifika dosya", "dosya linki"]):
+            continue
+        # Üretici/ithalatçı zaten company_filled adımında doldurulmuştur
+        if any(p in nm for p in ["üretici", "ithalat"]):
+            continue
+        # "Belirtilmemiş" değerini bul
+        unspecified_val = None
+        for v in (a.get("attributeValues") or []):
+            vn = (v.get("name") or "").strip().lower()
+            if vn in UNSPECIFIED_TERMS:
+                unspecified_val = v
+                break
+        if unspecified_val:
+            default_mappings[aid] = str(unspecified_val.get("id"))
+            summary["defaults_set"] += 1
 
     # Save all updates
     await db.category_mappings.update_one(
