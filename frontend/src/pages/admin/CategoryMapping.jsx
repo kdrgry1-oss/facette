@@ -238,7 +238,7 @@ export default function CategoryMapping() {
       </div>
 
       {/* Filtreli Toplu Aktarım Paneli */}
-      <FilteredPushPanel marketplace={active} auth={auth} />
+      <FilteredPushPanel marketplace={active} auth={auth} categories={data.items} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="relative max-w-md flex-1">
@@ -507,7 +507,7 @@ export default function CategoryMapping() {
 
 
 /* ───────── Filtreli Toplu Aktarım Paneli ───────── */
-function FilteredPushPanel({ marketplace, auth }) {
+function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const [stockCodes, setStockCodes] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -518,9 +518,16 @@ function FilteredPushPanel({ marketplace, auth }) {
   const [showInvalidOnly, setShowInvalidOnly] = useState(true);
   const [batchDetail, setBatchDetail] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [selectedCatIds, setSelectedCatIds] = useState([]);
+  const [catFilterOpen, setCatFilterOpen] = useState(false);
 
   const supportedMarketplaces = ["trendyol"]; // şu an sadece Trendyol için
   if (!supportedMarketplaces.includes(marketplace)) return null;
+
+  // Sadece matched kategoriler — boş bırakırsa Tümü demektir
+  const matchedCats = (categories || []).filter(
+    (c) => c.status === "matched" && c.marketplace_category_id
+  );
 
   const buildBody = () => {
     const codes = stockCodes
@@ -534,6 +541,9 @@ function FilteredPushPanel({ marketplace, auth }) {
     }
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
+    if (selectedCatIds.length > 0) {
+      body.category_filters = selectedCatIds.map((id) => ({ category_id: id, filters: {} }));
+    }
     return body;
   };
 
@@ -690,15 +700,79 @@ function FilteredPushPanel({ marketplace, auth }) {
           >
             {loading ? "Gönderiliyor..." : `2. ${marketplace.toUpperCase()}'a Gönder`}
           </button>
-          {(stockCodes || dateFrom || dateTo) && (
+          {(stockCodes || dateFrom || dateTo || selectedCatIds.length) && (
             <button
-              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); }}
+              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); setSelectedCatIds([]); }}
               className="text-xs text-gray-500 hover:underline"
             >
               Temizle
             </button>
           )}
         </div>
+      </div>
+
+      {/* Kategori filtresi */}
+      <div className="mt-3 relative">
+        <label className="text-xs font-medium text-gray-600 block mb-1">
+          Kategori Kapsamı
+          <span className="text-gray-400 font-normal ml-1">
+            (boş = tüm eşleşmiş kategoriler · {matchedCats.length} kategori mevcut)
+          </span>
+        </label>
+        <button
+          type="button"
+          onClick={() => setCatFilterOpen(!catFilterOpen)}
+          className="w-full text-left border bg-white rounded px-2 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between"
+          data-testid="push-cat-filter-btn"
+        >
+          <span className="truncate">
+            {selectedCatIds.length === 0
+              ? "Tüm eşleşmiş kategoriler"
+              : selectedCatIds.length <= 3
+                ? selectedCatIds.map((id) => matchedCats.find((c) => c.category_id === id)?.category_name || id).join(", ")
+                : `${selectedCatIds.length} kategori seçili`}
+          </span>
+          <span className="text-gray-400 text-xs">{catFilterOpen ? "▲" : "▼"}</span>
+        </button>
+        {catFilterOpen && (
+          <div className="absolute z-30 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-64 overflow-auto">
+            <div className="sticky top-0 bg-gray-50 border-b px-3 py-1.5 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setSelectedCatIds([])}
+                className="text-[11px] text-gray-600 hover:underline"
+              >
+                Hepsini temizle
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCatIds(matchedCats.map((c) => c.category_id))}
+                className="text-[11px] text-orange-700 hover:underline font-semibold"
+              >
+                Hepsini seç
+              </button>
+            </div>
+            {matchedCats.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-gray-400">Eşleşmiş kategori yok</div>
+            ) : matchedCats.map((c) => {
+              const checked = selectedCatIds.includes(c.category_id);
+              return (
+                <label key={c.category_id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-orange-50 cursor-pointer border-b last:border-b-0">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setSelectedCatIds((p) => checked ? p.filter((x) => x !== c.category_id) : [...p, c.category_id]);
+                    }}
+                    data-testid={`push-cat-opt-${c.category_id}`}
+                  />
+                  <span className="font-medium flex-1 truncate">{c.category_name}</span>
+                  <span className="text-[10px] text-gray-400 font-mono">→ {c.marketplace_category_name?.split(" > ").pop() || c.marketplace_category_id}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Validation Report */}

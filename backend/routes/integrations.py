@@ -331,15 +331,27 @@ async def _build_product_query_from_payload(payload: dict) -> dict:
                 cat = await db.categories.find_one({"id": cat_id})
             if not cat:
                 continue
-            cat_q = {"category_name": cat.get("name")}
+            cat_name = cat.get("name")
+            # Hem category_id hem category_name ile match (ürünlerin çoğu category_id=None olabiliyor)
+            inner_or = []
+            if cat_id:
+                inner_or.append({"category_id": cat_id})
+            if cat_name:
+                inner_or.append({"category_name": cat_name})
+            if not inner_or:
+                continue
+            cat_q = {"$or": inner_or} if len(inner_or) > 1 else inner_or[0]
+            extra_q = {}
             if filters.get("stock_code"):
-                cat_q["stock_code"] = {"$regex": filters["stock_code"], "$options": "i"}
+                extra_q["stock_code"] = {"$regex": filters["stock_code"], "$options": "i"}
             if filters.get("date_range"):
                 try:
                     date_obj = datetime.strptime(filters["date_range"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    cat_q["created_at"] = {"$gte": date_obj.isoformat()}
+                    extra_q["created_at"] = {"$gte": date_obj.isoformat()}
                 except Exception:
                     pass
+            if extra_q:
+                cat_q = {"$and": [cat_q, extra_q]}
             or_conditions.append(cat_q)
         if or_conditions:
             query = {"$or": or_conditions}

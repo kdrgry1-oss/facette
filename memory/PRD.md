@@ -4,7 +4,26 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 58 (2026-05-19) — Searchable Dropdown Sayfa Dışına Taşma Bug Fix
+## Iteration 59 (2026-05-19) — Filtreli Aktarım: Kategori Kapsamı
+
+### 🐛 UX Bug — Filtre Tüm Kategoriler İçin Çalışıyordu
+Kullanıcı şikayeti: "Gömlek kategorisi seçili iken tarih filtreledim, doğrula dedim, bana Gömlek kategorisinde olmayan ürünleri de gösteriyor."
+
+**Root cause**: Filtreli Aktarım panelinde sadece tarih + stok kodu filtreleri vardı; sayfanın görsel kategori filtresinden bağımsızdı. Validate ve sync ALL ürünler üzerinde çalışıyordu.
+
+**Fix**:
+- Frontend: `FilteredPushPanel`'a **"Kategori Kapsamı"** multi-select dropdown'u eklendi:
+  - Sadece matched kategoriler listelenir (eşleşmemiş olanlar gizli)
+  - "Hepsini seç / Hepsini temizle" toggle butonları
+  - Boş bırakırsa = tüm matched kategoriler (default)
+  - Seçili kategoriler chip olarak gösterilir (≤3 isim, >3 ise sayı)
+- Backend `_build_product_query_from_payload`: `category_filters` yapısı iyileştirildi — products `category_id` veya `category_name` ile match edebiliyor (çoğu üründe category_id=None, sadece category_name var)
+
+**Test (Gömlek filtresi)**:
+- Önce: 319 ürün (Trençkot, Ceket, Blazer Ceket dahil)
+- Sonra: **65 ürün, hepsi Gömlek kategorisinden** (`unique category_names: {'Gömlek'}` ✓)
+
+
 
 ### 🐛 UX Bug — Alttaki Kategorilerde Dropdown Görünmüyor
 Kullanıcı şikayeti: "En alttaki kategorilerde işlem yaparken Trendyol kategori eşleştirirken seçenekler sayfaya sığmıyor ve göremiyorum."
