@@ -478,28 +478,39 @@ async def validate_products_for_trendyol(
                 if mid:
                     mp_id_to_local[mid] = am.get("local_attr")
 
-            # Ürünün attribute'larından lokal isim → değer
+            # Ürünün attribute'larından lokal isim → değer (DICT veya LIST formatını destekler)
             local_vals: dict = {}
-            for a in (p.get("attributes") or []):
-                if not isinstance(a, dict):
-                    continue
-                nm = (a.get("name") or a.get("type") or a.get("attribute_name") or "").strip()
-                vv = a.get("value") or a.get("attribute_value")
-                if nm and vv:
-                    local_vals[nm.lower()] = str(vv)
+
+            def _add_lv(nm, vv):
+                if not nm or vv in (None, ""):
+                    return
+                local_vals.setdefault(str(nm).lower().strip(), str(vv))
+
+            def _walk(attrs):
+                if isinstance(attrs, dict):
+                    for k, v in attrs.items():
+                        if isinstance(v, dict):
+                            nm = v.get("label") or v.get("name") or k
+                            vv = v.get("value") or v.get("attribute_value")
+                            _add_lv(nm, vv)
+                        elif v is not None:
+                            _add_lv(k, v)
+                elif isinstance(attrs, list):
+                    for a in attrs:
+                        if isinstance(a, dict):
+                            nm = a.get("label") or a.get("name") or a.get("type") or a.get("attribute_name")
+                            vv = a.get("value") or a.get("attribute_value")
+                            _add_lv(nm, vv)
+
+            _walk(p.get("attributes"))
             for v in variants:
-                for a in (v.get("attributes") or []):
-                    if not isinstance(a, dict):
-                        continue
-                    nm = (a.get("name") or a.get("type") or a.get("attribute_name") or "").strip()
-                    vv = a.get("value") or a.get("attribute_value")
-                    if nm and vv:
-                        local_vals.setdefault(nm.lower(), str(vv))
-                # varyantın renk/beden değerleri
+                _walk(v.get("attributes"))
                 if v.get("color"):
-                    local_vals.setdefault("renk", str(v["color"]))
+                    _add_lv("Renk", v["color"])
+                    _add_lv("Web Color", v["color"])
                 if v.get("size"):
-                    local_vals.setdefault("beden", str(v["size"]))
+                    _add_lv("Beden", v["size"])
+                    _add_lv("Boy", v["size"])
 
             for ra in req_attrs:
                 ra_id = str(ra.get("id") or ra.get("attribute", {}).get("id") or "")

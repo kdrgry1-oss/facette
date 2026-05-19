@@ -4,7 +4,28 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 55 (2026-05-19) — Brand 968→975755 + Boy Default + Aktarım Geçmişi UI
+## Iteration 56 (2026-05-19) — Validate DICT/LIST Bug + Menşei/Yaş Grubu Default
+
+### 🐛 KRITIK Bug — Validate "Eksik Özellik" Yanlış Raporu
+Kullanıcı şikayeti: "FCSS0600004 için 'Kumaş Tipi, Yaş Grubu, Kalıp, Boy, Menşei eksik' diyor ama bunlar Excel'de ve Ticimax teknik detayda var, hala nasıl eksik olabiliyor?"
+
+**Root cause**: Validate fonksiyonu sync'in 1 önceki iter'inde fix'lediğim aynı bug'a sahipti — ürün `attributes` alanı DICT formatında ama LIST gibi iter ediliyordu, dolayısıyla Boy/Kumaş Tipi/Kalıp tüm değerleri görmeden "eksik" deniyordu.
+
+**Fix**: `_walk()` ortak helper — dict (label/value parse) + list dual format desteği. Ayrıca variant.color → Renk/Web Color, variant.size → Beden/Boy ekleme.
+
+### ✅ Menşei=TR + Yaş Grubu=Yetişkin Default'u (Kullanıcı İsteği)
+12 matched Trendyol kategori_mapping'inde otomatik default eklendi:
+- `Yaş Grubu (346) → 4293 (Yetişkin)` — 12 kategoride
+- `Menşei → 10617344 (Türkiye)` — 12 kategoride
+
+Mevcut default değerler ezilmedi (idempotent).
+
+### ✅ Validate Sonuçları (Öncesi vs Sonrası)
+- **FCSS0600004 (Liora)**: 5 eksik özellik → **0 eksik (HAZIR)** ✅
+- **Tüm ürünler**: 115 hazır → **224 hazır** (+109 ürün; Yaş Grubu/Menşei default + Boy default + DICT fix sayesinde)
+- Kalan invalid: 339 — çoğu **gerçekten ürün attribute'unda olmayan** Kumaş Tipi (211), Materyal (65), Bel (14), Kalıp (2)
+
+
 
 ### 🚨 KRITIK Bug: Yanlış Hardcoded Brand ID
 Tüm Trendyol gönderimlerinde `brandId=968` hardcoded'du, ancak FACETTE'in **gerçek Trendyol Brand ID'si 975755**. Trendyol "Girmiş olduğunuz marka (968) sistemde kayıtlı değildir" hatasıyla reddediyordu.
