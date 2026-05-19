@@ -2566,3 +2566,28 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 ### Pending / Next
 - Ticimax API "Hatalı Kullanıcı Kodu" hatası veriyor — kullanıcının yeni WS key sağlaması gerekebilir
 - P1: Miu Miu Storefront Faz 2 & 3
+
+## Iteration 51 — Dublike Ürün Doküman Filtresi (Validation False Positive Fix) (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** FCSS0600002 stok kodu için Trendyol Validation paneli "En az 1 ürün görseli yok" hatası veriyordu, ama push işlemi başarılı oluyordu (görsel zaten Trendyol'a gönderiliyordu). Bu kullanıcıyı yanılttı.
+
+**Kök neden:** Aynı `stock_code: FCSS0600002` için DB'de 4 dublike ürün dokümanı vardı:
+- 2 doc `source: csv_xml_merge` — `images: []`, `thumbnail: None`
+- 2 doc `source: xml_feed` — `images: [5]`, `thumbnail: ✓`
+
+Validation paneli tüm 4 dokümanı tek tek kontrol ediyordu, görselsizler hata üretiyor; push işlemi pratikte yine de görsel olanı buluyordu.
+
+**Çözüm:** Yeni `_dedupe_products_by_stock_code()` helper'ı eklendi (`/app/backend/routes/integrations.py`):
+- Aynı `(stock_code, name)` grubu için EN İYİ dokümanı seçer (skor: görsel sayısı, thumbnail varlığı, source kalitesi, is_active).
+- Hem validation hem push (`/trendyol/products/sync`) endpoint'inde uygulanır.
+- `name` da key'e dahil — Bordo / Siyah gibi farklı renkler ayrı kalır.
+
+### Test
+- POST `/api/integrations/trendyol/products/validate` `{"stock_codes":["FCSS0600002"]}`:
+  - Önce: 4 ürün, 2 invalid ("En az 1 ürün görseli yok")
+  - Sonra: 2 ürün (Bordo + Siyah), 0 invalid ✓
+
+### Pending / Next
+- Aynı stock_code'lu duplicate'leri otomatik temizleyecek bir admin endpoint eklenebilir (long-term data hygiene)

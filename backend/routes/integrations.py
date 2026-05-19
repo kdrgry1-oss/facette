@@ -294,6 +294,60 @@ async def sync_trendyol_brands(current_user: dict = Depends(require_admin)):
         logger.error(f"Error fetching trendyol brands: {str(e)}")
         raise HTTPException(status_code=500, detail="Trendyol markaları alınamadı")
 
+def _dedupe_products_by_stock_code(products: list) -> list:
+    """Aynı stock_code/barcode ile birden fazla ürün dokümanı varsa
+    (örn. csv_xml_merge ve xml_feed kaynaklarından gelen dublikatlar),
+    her grup için EN İYİ dokümanı seçer.
+
+    "İyi" doküman skoru:
+      +1000  görseli varsa (images non-empty)
+      +100   thumbnail varsa
+      +len(images)
+      +50    source != csv_xml_merge   (xml_feed > ticimax > csv_xml_merge)
+      +10    aktif ürünse
+
+    Aynı stock_code'a sahip diğer dokümanlar elenir. Anahtar olarak
+    stock_code/sku/barcode sırayla denenir; hiçbiri yoksa id ile (tek başına).
+    """
+    def _score(p):
+        s = 0
+        imgs = p.get("images") or []
+        if imgs:
+            s += 1000
+            s += min(len(imgs), 20)
+        if p.get("thumbnail"):
+            s += 100
+        src = (p.get("source") or "").lower()
+        if src and src != "csv_xml_merge":
+            s += 50
+        if p.get("is_active"):
+            s += 10
+        return s
+
+    groups: dict = {}
+    out_no_key: list = []
+    for p in products:
+        # Aynı stock_code'a farklı renkler/varyantlar tek bir SKU paylaşıyorsa
+        # name (ürün adı) ile ayrıştır → "Bordo" ve "Siyah" ayrı kalır.
+        stock = (p.get("stock_code") or p.get("sku") or p.get("barcode") or "").strip()
+        name = (p.get("name") or "").strip().lower()
+        key = f"{stock}|{name}" if stock else ""
+        if not key:
+            out_no_key.append(p)
+            continue
+        groups.setdefault(key, []).append(p)
+
+    deduped = []
+    for key, plist in groups.items():
+        if len(plist) == 1:
+            deduped.append(plist[0])
+        else:
+            best = max(plist, key=_score)
+            deduped.append(best)
+    deduped.extend(out_no_key)
+    return deduped
+
+
 async def _build_product_query_from_payload(payload: dict) -> dict:
     """Trendyol sync/validate payload'undan products koleksiyon sorgusu üretir."""
     product_ids = payload.get("product_ids", [])
@@ -383,6 +437,8 @@ async def validate_products_for_trendyol(
     payload = await request.json()
     query = await _build_product_query_from_payload(payload)
     products = await db.products.find(query, {"_id": 0}).to_list(length=None)
+    # 🛡️ Aynı stock_code ile dublike doküman varsa, görseli/source'u en iyi olanı seç
+    products = _dedupe_products_by_stock_code(products)
 
     # Category mappings (category_id -> mapping doc) — Trendyol için
     cm_list = await db.category_mappings.find(
@@ -711,6 +767,8 @@ async def sync_products_to_trendyol(
         query = {"$and": [query, {"created_at": date_q}]} if query else {"created_at": date_q}
 
     products = await db.products.find(query).to_list(length=None)
+    # 🛡️ Aynı stock_code ile dublike doküman varsa, görseli/source'u en iyi olanı seç
+    products = _dedupe_products_by_stock_code(products)
     
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
