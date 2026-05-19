@@ -42,6 +42,18 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=true: ~3 sn (DB master cache'inden)
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
+### Direct Link & Modal (2026-02-19)
+- **Direct link URL**: `/admin/urunler/{productId}` — bu URL'e gidildiğinde modal otomatik açılır (paylaşılabilir link).
+- **Liste'de iki ikon**: ✏️ "Hızlı Düzenle" (modal) + 🔗 "Yeni Sekmede Aç" (mavi link icon).
+- Modal kapanınca URL otomatik temizlenir, listeye dönülür.
+
+### Önemli Pod Uyarısı
+İki ayrı emergent preview pod'u var:
+- `erp-dashboard-118.preview.emergentagent.com` — eski iteration (rollback/eski chat'ten kalma)
+- `ticimax-sync.preview.emergentagent.com` — ŞU ANKİ chat'in pod'u, tüm güncellemeler burada.
+
+Kullanıcı bu chat'in "Preview" butonunu kullanmalı.
+
 ### Diğer Düzeltmeler
 - **`openEditModal` async fetch (2026-02-19)**: Modal her açılışta DB'den taze ürünü çekiyor — `enrich-attrs` veya `teknik-detay/sync` sonrası kullanıcının sayfayı yenilemesine gerek YOK. Cached list stale olsa bile modal güncel attribute'larla açılır.
 - **Pasif butonu fix**: A/P butonları explicit "set to state" mantığı (önceki: inverted conditional bug).

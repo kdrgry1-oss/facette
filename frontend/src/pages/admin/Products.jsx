@@ -33,7 +33,7 @@
  * =============================================================================
  */
 import React, { useState, useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useParams, useNavigate } from "react-router-dom";
 import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -78,6 +78,9 @@ export default function AdminProducts() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  // URL'den ürün ID'si — `/admin/urunler/{productId}` ile gelen direct link
+  const { productId: urlProductId } = useParams();
+  const navigate = useNavigate();
   // ---------------------------------------------------------------------------
   // Toplu Seçim State'i: siparişler tablosundaki gibi soldaki tiklerle seçilen
   // ürünlerin id listesi. "Seçilenlerin barkod kartını yazdır" ve gelecekte
@@ -209,6 +212,22 @@ export default function AdminProducts() {
         .catch(console.error);
     }
   }, [modalOpen, editingProduct]);
+
+  // Direct link: /admin/urunler/{productId} → modal'ı otomatik aç.
+  useEffect(() => {
+    if (!urlProductId) return;
+    if (editingProduct?.id === urlProductId && modalOpen) return;
+    openEditModal(urlProductId, { skipNavigate: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlProductId]);
+
+  // Modal kapanınca URL'i temizle (direct linkten geldiyse listeye dön).
+  useEffect(() => {
+    if (!modalOpen && urlProductId) {
+      navigate("/admin/urunler", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen]);
 
   useEffect(() => {
     fetchProducts();
@@ -778,16 +797,26 @@ export default function AdminProducts() {
    *   yerleştirir. Ölçü Tablosu sekmesinde SizeTablePanel bileşeni
    *   `product.id`'yi kullanarak kendi verisini çeker.
    */
-  const openEditModal = async (productArg) => {
+  const openEditModal = async (productArg, options = {}) => {
+    const { skipNavigate = false } = options;
     // DB'den taze çek (enrich/sync sonrası UI cache stale olabilir)
     let product = productArg;
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
-      const res = await axios.get(`${API}/products/${productArg.id}`, { headers });
+      const id = typeof productArg === "string" ? productArg : productArg.id;
+      const res = await axios.get(`${API}/products/${id}`, { headers });
       if (res.data) product = res.data;
     } catch {
       // fallback: kullan listedeki cached product
+    }
+    if (!product || !product.id) {
+      toast.error("Ürün bulunamadı");
+      return;
+    }
+    if (!skipNavigate) {
+      // Direct link için URL'i güncelle (geri butonu çalışsın diye replace değil push)
+      navigate(`/admin/urunler/${product.id}`, { replace: false });
     }
     setEditingProduct(product);
     // Parse edilmiş teknik detayları (XML import'dan) ayrı state'e al — Özellikler sekmesinin
@@ -1336,8 +1365,16 @@ export default function AdminProducts() {
                         >
                           P
                         </button>
-                        <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Düzenle">
+                        <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Hızlı Düzenle (Modal)" data-testid={`product-edit-modal-${product.id}`}>
                           <Edit size={16} />
+                        </button>
+                        <button
+                          onClick={() => { window.open(`/admin/urunler/${product.id}`, '_blank'); }}
+                          className="p-1.5 hover:bg-blue-100 rounded text-blue-600"
+                          title="Yeni Sekmede Aç (Direct Link)"
+                          data-testid={`product-open-page-${product.id}`}
+                        >
+                          <Link2 size={16} />
                         </button>
                         <button onClick={() => handleDuplicate(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Kopyala">
                           <Copy size={16} />

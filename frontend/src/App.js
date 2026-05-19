@@ -128,6 +128,7 @@ function App() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="urunler" element={<AdminProducts />} />
+              <Route path="urunler/:productId" element={<AdminProducts />} />
               <Route path="siparisler" element={<AdminOrders />} />
               <Route path="kategoriler" element={<AdminCategories />} />
               <Route path="varyantlar" element={<AdminVariants />} />
