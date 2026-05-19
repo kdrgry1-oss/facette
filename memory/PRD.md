@@ -2543,3 +2543,26 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 - POST `/api/category-mapping/trendyol/9287` (yerel "Şort" → Trendyol 530)
 - Response: `hints_applied: ["Şort → Kalıp=Mini Şort"]`, `defaults_set: 6`
 - DB doğrulama: `default_mappings[179]=10622066` (Kalıp=Mini Şort) ✓
+
+## Iteration 50 — Eksik Kategorileri Ürünlerden Geri Yükleme (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Ticimax kategori senkronizasyonu bazı kategorileri (Tulum, Şortolon, Pelerin, Bandana, Kimono) atlamıştı (muhtemelen 3+ seviye derinlikte). Ürünler `category_name="Tulum"` olarak etiketli ama yerel `categories` koleksiyonunda Tulum yoktu.
+
+**Çözüm:** Yeni endpoint `/api/integrations/ticimax/categories/sync-missing-from-products` (POST):
+- Tüm ürünlerin `category_name` alanlarını aggregate eder
+- Yerel `categories` koleksiyonunda olmayan isimleri tespit eder
+- Eksik kategorileri otomatik oluşturur (`source: "products_backfill"`)
+- Ürünlerin `category_id` boş olanlarını yeni kategoriye bağlar
+- Ticimax API'sini çağırmaz (rate-limit / auth sorunlarına bağımsız)
+
+**Frontend (Categories.jsx):** Sarı "Eksik Kategorileri Yükle" butonu eklendi.
+
+### Test
+- POST endpoint → `created_categories: [Şortolon, Pelerin, Tulum, Bandana, Kimono]`, `relinked_products: 320` ✓
+- DB doğrulama: 5 yeni kategori `source: "products_backfill"` ile, her biri 1-2 ürün bağlı ✓
+
+### Pending / Next
+- Ticimax API "Hatalı Kullanıcı Kodu" hatası veriyor — kullanıcının yeni WS key sağlaması gerekebilir
+- P1: Miu Miu Storefront Faz 2 & 3

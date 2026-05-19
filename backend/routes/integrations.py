@@ -1940,6 +1940,83 @@ async def import_ticimax_categories(
     }
 
 
+@router.post("/ticimax/categories/sync-missing-from-products")
+async def sync_missing_categories_from_products(current_user: dict = Depends(require_admin)):
+    """
+    Ticimax kategori senkronizasyonunda kaçırılmış (örn. çok derin alt-kategori veya
+    silinmiş ama ürünleri kalmış) kategorileri ürünlerin `category_name` alanından
+    bulup yerel `categories` koleksiyonuna ekler ve ilgili ürünleri category_id ile
+    günceller.
+
+    Tipik kullanım: "Tulum kategorisi gelmemiş" gibi durumlarda; Ticimax API'sini
+    tekrar çağırmadan, mevcut veriden eksiklikleri tamamlar.
+    """
+    # 1) Mevcut yerel kategoriler (isim → id)
+    existing = {}
+    async for c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1}):
+        nm = (c.get("name") or "").strip()
+        if nm:
+            existing[nm.lower()] = c.get("id")
+
+    # 2) Ürünlerdeki tüm kategori isimleri (boş olmayanlar)
+    pipeline = [
+        {"$match": {"category_name": {"$nin": [None, ""]}}},
+        {"$group": {"_id": "$category_name", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    product_cats = []
+    async for row in db.products.aggregate(pipeline):
+        product_cats.append({"name": (row["_id"] or "").strip(), "count": row["count"]})
+
+    # 3) Eksik olanları bul → oluştur
+    created = []
+    relinked = 0
+    for pc in product_cats:
+        nm = pc["name"]
+        if not nm or nm.lower() in existing:
+            continue
+        # Yeni kategori oluştur
+        new_id = await generate_short_id("categories")
+        slug = _generate_slug(nm)
+        doc = {
+            "id": new_id,
+            "ticimax_id": None,  # Ticimax'tan gelmediği için None
+            "name": nm,
+            "slug": slug,
+            "parent_id": None,
+            "is_active": True,
+            "source": "products_backfill",
+            "ticimax_sub_count": 0,
+            "ticimax_sira": 999,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "note": "Bu kategori Ticimax sync sırasında kaçırılmıştı; ürünlerden geri-yüklendi.",
+        }
+        await db.categories.insert_one(doc)
+        existing[nm.lower()] = new_id
+        created.append({"id": new_id, "name": nm, "product_count": pc["count"]})
+
+    # 4) Ürünlerde category_id boş olup category_name dolu olanları bağla
+    for pc in product_cats:
+        cat_id = existing.get(pc["name"].lower())
+        if not cat_id:
+            continue
+        res = await db.products.update_many(
+            {"category_name": pc["name"], "$or": [{"category_id": {"$exists": False}}, {"category_id": None}, {"category_id": ""}]},
+            {"$set": {"category_id": cat_id}}
+        )
+        relinked += res.modified_count
+
+    return {
+        "success": True,
+        "created_categories": created,
+        "created_count": len(created),
+        "relinked_products": relinked,
+        "message": f"{len(created)} kategori oluşturuldu, {relinked} ürün bağlandı.",
+    }
+
+
+
 @router.post("/ticimax/variants/sync")
 async def sync_ticimax_variants(
     page_size: int = 500,

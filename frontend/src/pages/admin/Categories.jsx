@@ -309,6 +309,36 @@ export default function AdminCategories() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
+            onClick={async () => {
+              try {
+                const r = await axios.post(
+                  `${API}/integrations/ticimax/categories/sync-missing-from-products`,
+                  {},
+                  { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+                );
+                const created = r.data?.created_categories || [];
+                if (created.length) {
+                  toast.success(
+                    `${r.data.created_count} eksik kategori bulundu: ${created
+                      .map((c) => c.name)
+                      .join(", ")} (${r.data.relinked_products} ürün bağlandı)`
+                  );
+                } else {
+                  toast.success("Eksik kategori yok ✓");
+                }
+                fetchCategories();
+              } catch (e) {
+                toast.error("Eksik kategori senkronizasyonu başarısız");
+              }
+            }}
+            className="flex items-center gap-2 bg-amber-500 text-white px-3 py-2 rounded hover:bg-amber-600 text-sm"
+            title="Ürünlerden eksik kategorileri otomatik oluştur"
+            data-testid="backfill-missing-cats"
+          >
+            <RefreshCw size={16} />
+            Eksik Kategorileri Yükle
+          </button>
+          <button
             onClick={syncTrendyolCategories}
             disabled={syncingTrendyol}
             className="flex items-center gap-2 bg-[#F27A1A] text-white px-4 py-2 rounded hover:bg-[#d96a15] disabled:opacity-50"
