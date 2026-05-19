@@ -86,7 +86,12 @@ async def get_products(
         query["stock_code"] = {"$regex": stock_code, "$options": "i"}
 
     if barcode:
-        query["variants.barcode"] = {"$regex": barcode, "$options": "i"}
+        import re as _re2
+        bce = _re2.escape(barcode.strip())
+        query.setdefault("$and", []).append({"$or": [
+            {"barcode": {"$regex": bce, "$options": "i"}},
+            {"variants.barcode": {"$regex": bce, "$options": "i"}},
+        ]})
     
     if date_from or date_to:
         date_q = {}
@@ -126,11 +131,20 @@ async def get_products(
         ]
     
     if search:
+        import re as _re
+        esc = _re.escape(search.strip())
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}},
-            {"keywords": {"$regex": search, "$options": "i"}},
-            {"stock_code": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": esc, "$options": "i"}},
+            {"description": {"$regex": esc, "$options": "i"}},
+            {"keywords": {"$regex": esc, "$options": "i"}},
+            {"stock_code": {"$regex": esc, "$options": "i"}},
+            {"sku": {"$regex": esc, "$options": "i"}},
+            {"barcode": {"$regex": esc, "$options": "i"}},
+            {"variants.barcode": {"$regex": esc, "$options": "i"}},
+            {"variants.sku": {"$regex": esc, "$options": "i"}},
+            {"variants.stock_code": {"$regex": esc, "$options": "i"}},
+            {"urun_karti_id": {"$regex": esc, "$options": "i"}},
+            {"variants.urun_id": {"$regex": esc, "$options": "i"}},
         ]
     
     if is_featured is not None:

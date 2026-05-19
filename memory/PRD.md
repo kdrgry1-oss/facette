@@ -4,6 +4,31 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 65 (2026-05-19) — Beden Atama (Pattern) + Search Bug Fix
+
+### 🐛 Şikayetler
+1. "barkodların hepsi standart olmuş" — Excel'in Beden sütununda renkler vardı, gerçek beden bilgisi Ticimax export'da kayıp
+2. "ürün sayfasında search kısmı doğru düzgün çalışmıyor" — `/api/products?search=` sadece name/description/keywords/stock_code'da arıyordu
+
+### 🔧 Fix
+
+1. **Beden Pattern Asignment** (`/app/backend/scripts/assign_sizes_from_ticimax.py`):
+   - Aynı URUNKARTIID altındaki birden çok URUNID, **artan sıraya göre standart fashion bedenleme** ile eşleştirilir:
+     - 1 → STD | 2 → S/M | 3 → S/M/L | 4 → XS/S/M/L | 5 → XS/S/M/L/XL | 6 → XXS/XS/S/M/L/XL | 7+ → daha geniş
+   - Excel'de gerçek beden (S/M/L/STD/XS/numeric) varsa o öncelikli; yoksa pattern fallback
+   - Sonuç: **407 ürün, 1448 varyant bedeni** doğru atandı
+
+2. **Search bug fix** (`/app/backend/routes/products.py`):
+   - `search` query'sine eklendi: `sku`, `barcode`, `variants.barcode`, `variants.sku`, `variants.stock_code`, `urun_karti_id`, `variants.urun_id`
+   - Regex special char'lar `re.escape()` ile kaçırıldı (özel char yazınca artık kırılmıyor)
+   - `barcode` filter parametresi artık hem `barcode` hem `variants.barcode`'da arıyor
+
+### ✅ Test
+- Search artık çalışıyor: Barkod, Stok Kodu, İsim, URUN_ID, URUN_KARTI_ID → hepsi 1 sonuçla doğru bulunuyor
+- FCSS2700005 (user'ın image'taki Palma Bermuda Şort): XS/S/M/L/XL bedenleri ile doğru görünüyor
+
+
+
 ## Iteration 64 (2026-05-19) — Ticimax Excel ile Toplu Ürün Güncelleme
 
 ### 🎯 İstek
