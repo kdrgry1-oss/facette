@@ -2769,3 +2769,25 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 - 609 üründen **606'sı (%99.5) barkod sağlam**
 - Kalan 3: KARGO, BANKA KOMİSYONU, DENEME (sistem dummy'leri, normal)
 - Örnek: "Gri Düğmeli Blazer Ceket" S=8683851513299 (doğru), M=8683851513282 (önceden hatalı kopya idi)
+
+## Iteration 59 — Excel'den 25 Ürün Toplu Trendyol Push (2026-02-19)
+
+### ✅ Çözülenler
+
+**Kullanıcı isteği:** TicimaxExport (2).xls'deki ürünleri otomatik Trendyol'a aktar.
+
+**Yapılan:**
+1. Excel parse: 120 satır, 25 unique stok kodu
+2. Kategori kontrol: 10 kategoriden 9'u zaten Trendyol mapping'i vardı; sadece "Bandana" eksikti
+3. Bandana → Trendyol 1046 (Aksesuar > Saç Aksesuarı > Bandana) otomatik eşlendi (auto-setup: 271 value_matched, 1 default)
+4. 25 ürün TEK BATCH'te `POST /api/integrations/trendyol/products/sync` ile gönderildi
+
+**Sonuç (batch_id: 62704dbc-...-1779824159, status: COMPLETED):**
+- ✅ 23 ürün BAŞARIYLA Trendyol'da açıldı
+- ❌ 2 ürün reddedildi (Trendyol: "Aynı barkodlu ürün zaten var"):
+  - FCSS0700002 Nira Şortlu Mini Etek (barkod 8684483523021 zaten kayıtlı)
+  - FCSS0900008 Helia Oversize Gömlek (barkod 8684483526756 zaten kayıtlı)
+- ⚠️ 1 varyant uyarısı: "Rina Ekose Volanlı Elbise Mavi" görsel eksik
+
+### Pending
+- Reddedilen 2 ürün için → Trendyol panelinden eski ürün silinmeli veya update endpoint kullanılmalı
