@@ -37,6 +37,7 @@ import AttributeImport from "./pages/admin/AttributeImport";
 import AdminQuestions from "./pages/admin/Questions";
 import TrendyolLogs from "./pages/admin/TrendyolLogs";
 import BarcodeIssues from "./pages/admin/BarcodeIssues";
+import TrendyolGhostScanner from "./pages/admin/TrendyolGhostScanner";
 import ProductAttributes from "./pages/admin/ProductAttributes";
 import Vendors from "./pages/admin/Vendors";
 import AdminUsersRoles from "./pages/admin/UsersRoles";
@@ -186,6 +187,7 @@ function App() {
               <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
               <Route path="trendyol-loglar" element={<TrendyolLogs />} />
               <Route path="barkod-sorunlari" element={<BarcodeIssues />} />
+              <Route path="trendyol-hayalet" element={<TrendyolGhostScanner />} />
               <Route path="urun-ozellikleri" element={<ProductAttributes />} />
               <Route path="cariler" element={<Vendors />} />
               <Route path="kullanicilar" element={<AdminUsersRoles />} />

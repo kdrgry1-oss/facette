@@ -138,6 +138,84 @@ class TrendyolClient:
 
 
 
+    async def get_filtered_products(
+        self,
+        barcode: Optional[str] = None,
+        stock_code: Optional[str] = None,
+        product_main_id: Optional[str] = None,
+        approved: Optional[bool] = None,
+        archived: Optional[bool] = None,
+        on_sale: Optional[bool] = None,
+        page: int = 0,
+        size: int = 50,
+    ) -> Dict:
+        """
+        Trendyol'da seller'ın ürünlerini filtrelerle listeler (üst limit size=200).
+        Endpoint: GET /integration/product/sellers/{sellerId}/products
+        Response: {"content":[{... barcode, stockCode, approved, archived, onSale ...}], "totalElements":N, "totalPages":..., "page":...}
+        """
+        params: Dict[str, Any] = {"page": page, "size": min(max(size, 1), 200)}
+        if barcode is not None: params["barcode"] = barcode
+        if stock_code is not None: params["stockCode"] = stock_code
+        if product_main_id is not None: params["productMainId"] = product_main_id
+        if approved is not None: params["approved"] = str(approved).lower()
+        if archived is not None: params["archived"] = str(archived).lower()
+        if on_sale is not None: params["onSale"] = str(on_sale).lower()
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.get(url, headers=self._get_headers(), params=params)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Trendyol get_filtered_products error: {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"Trendyol get_filtered_products connection error: {str(e)}")
+                raise
+
+    async def archive_products(self, barcodes: List[str]) -> Dict:
+        """
+        Ürünleri arşivler (panelde görünmez yapar, stockCode iadesi sağlar).
+        Endpoint: POST /integration/product/sellers/{sellerId}/products/archive
+        items format: [{"barcode": "..."}, ...]
+        """
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/archive"
+        items = [{"barcode": b} for b in barcodes if b]
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(url, headers=self._get_headers(), json={"items": items})
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Trendyol archive_products error: {e.response.text}")
+                try:
+                    return e.response.json()
+                except Exception:
+                    raise
+            except Exception as e:
+                logger.error(f"Trendyol archive_products connection error: {str(e)}")
+                raise
+
+    async def unarchive_products(self, barcodes: List[str]) -> Dict:
+        """Arşivden çıkarır. Endpoint: POST /integration/product/sellers/{sellerId}/products/unarchive"""
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/unarchive"
+        items = [{"barcode": b} for b in barcodes if b]
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(url, headers=self._get_headers(), json={"items": items})
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Trendyol unarchive_products error: {e.response.text}")
+                try:
+                    return e.response.json()
+                except Exception:
+                    raise
+            except Exception as e:
+                logger.error(f"Trendyol unarchive_products connection error: {str(e)}")
+                raise
+
     async def get_batch_request_result(self, batch_request_id: str) -> Dict:
         """
         Checks the status of a batch request (e.g. product creation, price/inventory updates).

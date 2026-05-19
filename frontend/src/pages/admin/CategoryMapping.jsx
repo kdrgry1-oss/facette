@@ -650,6 +650,15 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             ⚠️ Barkod Sorunları
           </a>
           <a
+            href="/admin/trendyol-hayalet"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+            data-testid="open-ghost-scanner-btn"
+          >
+            👻 Hayalet Tarayıcı
+          </a>
+          <a
             href="/admin/trendyol-loglar"
             target="_blank"
             rel="noreferrer"

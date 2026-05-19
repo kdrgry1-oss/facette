@@ -4,6 +4,47 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 63 (2026-05-19) — Smart Conflict Resolution + Ghost Scanner + DB Duplicate Detector
+
+### 🐛 Bug — "Trendyol'a aktarıldı diyor ama panelde yok"
+Kullanıcı: "ürünler de trendyola yine aktarılmadı". Sync logları "37 başarı" diyordu ama Trendyol'da check edince 5 barkod (8684483524905, 8684483526275, 8684483526749, 8684483526763, 8684483527067) gerçekten yokmuş.
+
+**Root cause 1 — Polling bug**: `get_batch_request_result` Trendyol bazen `status=COMPLETED` döner ama `items[].status` henüz "PROCESSING" durumunda; `failedItemCount=0` rapor eder ama 5-10sn sonra tüm item'lar FAILED olur. Kod ilk COMPLETED'i görür görmez break ediyordu ⇒ yanıltıcı "success" sayısı.
+
+**Root cause 2 — DB barkod kaosu**: `db.products` aggregate ile bakınca **204 barkod aynı kayda 5-50 varyantta atanmış** (Ticimax XML feed her bedene parent product'un barkodunu yazıyor). Bu yüzden Trendyol push'larında `stockCode` ÇAKIŞMASI alıyoruz: yeni barkod sent_bc=8684483524905 ama Trendyol'da aynı productMainId'de eski conflict_bc=8684483524936 mevcut.
+
+**Fix paketi** (`/app/backend/routes/integrations.py` + `trendyol_client.py`):
+
+1. **Polling iyileştirmesi**: 12×2.5sn loop; `status=COMPLETED + tüm items[].status terminal` koşulu aranır. `batch_success_count` artık `failedItemCount`'tan değil, `items[].status=='SUCCESS'` sayımından hesaplanır.
+
+2. **Smart Conflict Resolution** (yeni 2 fazlı upsert):
+   - `_parse_conflict_barcode(reasons)` → "Aynı barkodlu... Barkod: X" regex'ten X'i çeker
+   - **Cross-conflict** (sent_bc ≠ conflict_bc): `archive_products(eski_bc)` → `create_products(yeni_bc)` (2'nci batch) → poll
+   - **Self-conflict** (sent_bc == conflict_bc): `update_products` (PUT) → poll
+   - Log alanları eklendi: `archived_barcodes`, `archive_batch_id`, `retry_create_batch_id`, `retry_create_succeeded`
+
+3. **TrendyolClient yeni metotlar**:
+   - `get_filtered_products(barcode, stock_code, archived, ...)` (Trendyol seller product list)
+   - `archive_products(barcodes)` ve `unarchive_products(barcodes)`
+
+4. **Ghost Scanner endpoint**: `POST /api/integrations/trendyol/ghost-scanner` — Trendyol panelindeki tüm ürünleri (max 10K) tarayıp DB'de eşleşmeyen "hayalet" barkodları döner (matching: barcode VEYA stockCode VEYA productMainId).
+
+5. **DB Duplicate Detector endpoint**: `GET /api/integrations/trendyol/barcode-duplicates` — `db.products` aggregate ile aynı barkoda atanmış 2+ varyantı listeler.
+
+6. **Archive endpoint**: `POST /api/integrations/trendyol/archive-barcodes` — manuel arşivleme.
+
+7. **UI**: `/admin/trendyol-hayalet` (TrendyolGhostScanner.jsx) — 2 sekmeli sayfa: DB Duplikatları + Trendyol Hayaletleri. CategoryMapping'e "👻 Hayalet Tarayıcı" linki eklendi.
+
+### ✅ Test
+- Önceki 14 stuck barkoddan 9'u başarıyla Trendyol'a girdi (5 hâlâ duplicate çakışması yüzünden bekliyor — DB temizlenince çözülecek).
+- **22/27 kullanıcı barkodu Trendyol'da onaylı**: 18 satışta, 4 (FCSS2700005) onaylı ama qty=0 (DB'de de 0 stok — beklenen davranış).
+- DB'de 204 duplicate barkod tespit edildi → kullanıcıya UI'da gösteriliyor.
+
+### ⚠ Açık Sorun
+- **DB barkod duplikasyonu** (204 kayıt) Ticimax XML import'undan geliyor. Trendyol push'larını kronik olarak bloklar. Kullanıcı manuel olarak Barkod Sorunları sayfasından düzeltmeli VEYA Ticimax feed parser'ı varyant-bazlı barkod üretecek şekilde yeniden yazılmalı.
+
+
+
 ## Iteration 62 (2026-05-19) — Trendyol UPSERT Akışı (Duplicate Barcode Fix)
 
 ### 🐛 Bug — "Aynı barkodlu ürün bulunduğundan oluşturulamaz"

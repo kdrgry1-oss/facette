@@ -2,7 +2,7 @@
 Integration routes - Trendyol, MNG Kargo, GIB, Netgsm, Ticimax, XML Feed
 Not: Iyzico kısmı `integrations_iyzico.py` modülüne taşındı (2026-04-23).
 """
-from fastapi import APIRouter, HTTPException, Query, Depends, Response, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, BackgroundTasks, Request, Body
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import os
@@ -689,6 +689,200 @@ async def get_trendyol_batch_status(
     }
 
 
+# ============== GHOST PRODUCT SCANNER & DB DUPLICATE DETECTOR ==============
+
+@router.get("/trendyol/barcode-duplicates")
+async def trendyol_barcode_duplicates(current_user: dict = Depends(require_admin)):
+    """DB içinde aynı barkoda atanmış birden fazla varyantı tespit eder.
+    Bu Trendyol'a aktarımı bloklayan ana sebep oluyor. Manuel düzeltme için liste döner.
+    """
+    pipeline = [
+        {"$match": {"variants.barcode": {"$ne": None, "$ne": ""}}},
+        {"$unwind": "$variants"},
+        {"$match": {"variants.barcode": {"$ne": None, "$ne": ""}}},
+        {"$group": {
+            "_id": "$variants.barcode",
+            "count": {"$sum": 1},
+            "products": {"$push": {
+                "product_id": "$id",
+                "stock_code": "$stock_code",
+                "name": "$name",
+                "is_active": "$is_active",
+                "variant_size": "$variants.size",
+                "variant_color": "$variants.color",
+                "variant_stock": "$variants.stock",
+            }}
+        }},
+        {"$match": {"count": {"$gt": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 500},
+    ]
+    rows = await db.products.aggregate(pipeline).to_list(length=500)
+    out = []
+    for r in rows:
+        out.append({
+            "barcode": r["_id"],
+            "count": r["count"],
+            "assignments": r["products"],
+        })
+    return {"total": len(out), "duplicates": out}
+
+
+@router.post("/trendyol/ghost-scanner")
+async def trendyol_ghost_scanner(
+    payload: dict = Body(default={}),
+    current_user: dict = Depends(require_admin),
+):
+    """Trendyol panelindeki tüm ürünleri (max 5000) sayfalı çekip,
+    DB'de KARŞILIK BULAMAYAN ya da DB'de archive edilmiş olanları "hayalet" olarak listeler.
+    Bu hayaletler genelde eski yanlış barkod kayıtlarıdır ve duplicate çakışmalara sebep olur.
+    """
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+
+    cli = TrendyolClient(
+        supplier_id=config["supplier_id"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        mode=config["mode"]
+    )
+
+    only_unmatched = bool(payload.get("only_unmatched", True))
+    include_archived = bool(payload.get("include_archived", False))
+    page_limit = int(payload.get("page_limit", 50))  # 50 sayfa x 200 = 10K ürün max
+
+    # DB barkodlarını VE stock_code'larını topla
+    db_barcodes = set()
+    db_stock_codes = set()
+    async for p in db.products.find({}, {"_id": 0, "barcode": 1, "stock_code": 1, "variants.barcode": 1, "variants.stock_code": 1}):
+        if p.get("barcode"):
+            db_barcodes.add(str(p["barcode"]))
+        if p.get("stock_code"):
+            db_stock_codes.add(str(p["stock_code"]))
+        for v in (p.get("variants") or []):
+            if v.get("barcode"):
+                db_barcodes.add(str(v["barcode"]))
+            if v.get("stock_code"):
+                db_stock_codes.add(str(v["stock_code"]))
+
+    ghosts = []
+    matched = 0
+    total_scanned = 0
+    page = 0
+    while page < page_limit:
+        try:
+            res = await cli.get_filtered_products(
+                page=page, size=200,
+                archived=None if include_archived else False,
+            )
+        except Exception as e:
+            return {"error": str(e), "scanned": total_scanned, "ghosts": ghosts}
+        content = res.get("content") or []
+        total_pages = res.get("totalPages") or 0
+        if not content:
+            break
+        for row in content:
+            total_scanned += 1
+            bc = str(row.get("barcode") or "")
+            sc = str(row.get("stockCode") or "")
+            pmi = str(row.get("productMainId") or "")
+            if not bc:
+                continue
+            # Match: barkod DB'de varsa VEYA stockCode/productMainId DB'de varsa "matched"
+            if bc in db_barcodes or sc in db_barcodes or sc in db_stock_codes or pmi in db_stock_codes:
+                matched += 1
+                if only_unmatched:
+                    continue
+            else:
+                ghosts.append({
+                    "barcode": bc,
+                    "stockCode": row.get("stockCode"),
+                    "productMainId": row.get("productMainId"),
+                    "title": row.get("title"),
+                    "brand": row.get("brand"),
+                    "approved": row.get("approved"),
+                    "archived": row.get("archived"),
+                    "onSale": row.get("onSale"),
+                    "salePrice": row.get("salePrice"),
+                    "quantity": row.get("quantity"),
+                    "rejectReasonDetails": row.get("rejectReasonDetails"),
+                })
+        page += 1
+        if page >= total_pages:
+            break
+
+    return {
+        "scanned": total_scanned,
+        "matched_in_db": matched,
+        "ghosts_count": len(ghosts),
+        "ghosts": ghosts,
+    }
+
+
+@router.post("/trendyol/archive-barcodes")
+async def trendyol_archive_barcodes(
+    payload: dict = Body(...),
+    current_user: dict = Depends(require_admin),
+):
+    """Verilen barkodları Trendyol'da arşivler (panelden gizler, slot iadesi sağlar).
+    Hayalet ürünlerin temizliği için kullanılır.
+    """
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+
+    barcodes = [str(b).strip() for b in (payload.get("barcodes") or []) if str(b).strip()]
+    if not barcodes:
+        raise HTTPException(status_code=400, detail="Arşivlenecek barkod listesi boş.")
+    if len(barcodes) > 1000:
+        raise HTTPException(status_code=400, detail="Tek seferde max 1000 barkod arşivlenebilir.")
+
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+
+    cli = TrendyolClient(
+        supplier_id=config["supplier_id"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        mode=config["mode"]
+    )
+
+    try:
+        resp = await cli.archive_products(barcodes)
+        batch_id = (resp or {}).get("batchRequestId")
+        from datetime import datetime, timezone
+        log_doc = {
+            "id": generate_id(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "archive",
+            "products_attempted": len(barcodes),
+            "batch_request_id": batch_id,
+            "archived_barcodes": barcodes,
+            "trendyol_response": resp,
+            "message": f"{len(barcodes)} barkod için arşivleme batch'i Trendyol'a gönderildi (batch: {batch_id}).",
+        }
+        await db.trendyol_sync_logs.insert_one(log_doc)
+        log_doc.pop("_id", None)
+        return {
+            "success": bool(batch_id),
+            "batchRequestId": batch_id,
+            "barcodes_count": len(barcodes),
+            "response": resp,
+        }
+    except Exception as e:
+        logger.error(f"Archive barcodes error: {e}")
+        raise HTTPException(status_code=500, detail=f"Trendyol arşiv hatası: {str(e)}")
+
+
+
+
+
 @router.post("/trendyol/products/sync")
 async def sync_products_to_trendyol(
     request: Request,
@@ -1132,17 +1326,31 @@ async def sync_products_to_trendyol(
 
         # 🔍 Gerçek batch sonucunu sorgula: Trendyol asenkron işliyor; 5-15sn'de tamamlanır.
         # "aktarıldı diyor ama Trendyol'da yok" tuzağını önler.
+        # Trendyol BUG: bazen status=COMPLETED dönüp items[]'in işlenmiş olduğunu söyler,
+        # ama failedItemCount=0 olur halbuki birkaç sn sonra items[].status FAILED olur.
+        # Bu yüzden polling birkaç tur daha sürdürüyoruz: items[].status sayısı itemCount'a ulaşmalı
+        # ve "tüm item'lar terminal status'ta" (SUCCESS|FAILED|COMPLETED) olmalı.
         batch_failed_items = []
         batch_success_count = 0
         batch_final_status = "INPROGRESS"
         if batch_id:
-            for attempt in range(6):  # 6 deneme x 2.5sn = max ~15sn
+            for attempt in range(12):  # 12 deneme x 2.5sn = max ~30sn
                 await _asyncio.sleep(2.5)
                 try:
                     br = await client.get_batch_request_result(batch_id)
                     batch_final_status = (br or {}).get("status") or "INPROGRESS"
-                    if batch_final_status.upper() in ("COMPLETED", "FAILED"):
-                        for it in (br or {}).get("items", []) or []:
+                    items = (br or {}).get("items", []) or []
+                    item_count = (br or {}).get("itemCount", 0) or len(items)
+                    # Tüm item'ların terminal status'ta olmasını bekle
+                    terminal_set = {"SUCCESS", "FAILED", "COMPLETED"}
+                    statuses_present = [(it.get("status") or "").upper() for it in items]
+                    all_terminal = (
+                        len(items) >= item_count
+                        and all(s in terminal_set for s in statuses_present)
+                    )
+                    if batch_final_status.upper() in ("COMPLETED", "FAILED") and all_terminal:
+                        batch_failed_items = []
+                        for it in items:
                             if (it.get("status") or "").upper() == "FAILED":
                                 req = it.get("requestItem", {}) or {}
                                 prod = req.get("product", {}) if isinstance(req, dict) else {}
@@ -1152,19 +1360,24 @@ async def sync_products_to_trendyol(
                                     "title": prod.get("title") or "",
                                     "reasons": it.get("failureReasons") or [],
                                 })
-                        batch_success_count = max(0, (br or {}).get("itemCount", 0) - (br or {}).get("failedItemCount", 0))
+                        # ✔ Gerçek başarı = items listesinden say (failedItemCount değil!)
+                        batch_success_count = sum(1 for s in statuses_present if s == "SUCCESS")
                         break
                 except Exception as poll_err:
-                    logger.warning(f"Batch poll {attempt+1}/6 failed: {poll_err}")
+                    logger.warning(f"Batch poll {attempt+1}/12 failed: {poll_err}")
 
-        # 🔁 UPSERT AKIŞI: Trendyol "duplicate barcode/stockCode" hatası dönen item'ları
-        # update_products (PUT) ile tekrar gönder. Bu, Trendyol'da eski hatalı kayıt
-        # olan ürünleri (eski yanlış barkod ile) ezerek günceller.
+        # 🔁 SMART CONFLICT RESOLUTION:
+        # - "Self duplicate" (sent_bc == conflict_bc) → PUT (update_products)
+        # - "Cross duplicate" (sent_bc != conflict_bc) → eski barkodu ARCHIVE + yeni barkodu CREATE
         upsert_attempted = 0
         upsert_succeeded = 0
         upsert_failed_items = []
         upsert_batch_id = None
         upsert_final_status = None
+        archived_barcodes: list = []
+        archive_batch_id = None
+        retry_create_batch_id = None
+        retry_create_succeeded = 0
 
         def _is_duplicate_error(reasons):
             """Trendyol'un duplicate (çakışma) hatalarını tespit eder."""
@@ -1192,37 +1405,111 @@ async def sync_products_to_trendyol(
             ]
             return any(p in text for p in patterns)
 
+        def _parse_conflict_barcode(reasons):
+            """Trendyol hata mesajından çakışan barkodu çıkar."""
+            import re
+            text = " ".join([
+                (r.get("message") if isinstance(r, dict) else str(r)) for r in (reasons or [])
+            ])
+            m = re.search(r"Barkod[:\s]+(\d{6,})", text)
+            return m.group(1) if m else None
+
         # Hangi item'lar duplicate yüzünden patladı?
         duplicate_failed = [f for f in batch_failed_items if _is_duplicate_error(f.get("reasons"))]
         if batch_id and duplicate_failed:
-            # items_to_send içinden duplicate'leri eşleştirip update payload'u kur
-            failed_keys = set()
-            for f in duplicate_failed:
-                if f.get("barcode"):
-                    failed_keys.add(("b", str(f["barcode"])))
-                if f.get("stock_code"):
-                    failed_keys.add(("s", str(f["stock_code"])))
-            items_to_update = []
-            for it in items_to_send:
-                k_b = ("b", str(it.get("barcode") or ""))
-                k_s = ("s", str(it.get("stockCode") or ""))
-                if k_b in failed_keys or k_s in failed_keys:
-                    items_to_update.append(it)
+            # Cross conflict: eski barkod ARCHIVE + yeni barkod CREATE
+            # Self conflict: PUT update_products
+            cross_conflicts = []   # (sent_barcode, conflict_old_barcode, item_payload)
+            self_conflicts = []    # item_payload
 
-            if items_to_update:
-                upsert_attempted = len(items_to_update)
-                logger.info(f"Trendyol UPSERT: {upsert_attempted} item duplicate yüzünden PUT (update_products) ile tekrar gönderiliyor.")
+            # items_to_send → barcode lookup
+            items_by_barcode = {str(it.get("barcode") or ""): it for it in items_to_send}
+
+            for f in duplicate_failed:
+                sent_bc = str(f.get("barcode") or "")
+                conflict_bc = _parse_conflict_barcode(f.get("reasons")) or ""
+                payload = items_by_barcode.get(sent_bc)
+                if not payload:
+                    continue
+                if conflict_bc and conflict_bc != sent_bc:
+                    cross_conflicts.append((sent_bc, conflict_bc, payload))
+                else:
+                    self_conflicts.append(payload)
+
+            # 1) CROSS CONFLICTS: ARCHIVE old + RETRY CREATE
+            if cross_conflicts:
+                old_barcodes_to_archive = list({c[1] for c in cross_conflicts})
+                logger.info(f"Trendyol CROSS-CONFLICT: {len(old_barcodes_to_archive)} eski barkod arşivlenecek: {old_barcodes_to_archive[:5]}…")
                 try:
-                    upd_resp = await client.update_products(items_to_update)
+                    arch_resp = await client.archive_products(old_barcodes_to_archive)
+                    archive_batch_id = (arch_resp or {}).get("batchRequestId")
+                    archived_barcodes = old_barcodes_to_archive
+                    # Archive batch poll
+                    if archive_batch_id:
+                        for attempt in range(8):
+                            await _asyncio.sleep(2.0)
+                            try:
+                                abr = await client.get_batch_request_result(archive_batch_id)
+                                if (abr or {}).get("status", "").upper() in ("COMPLETED", "FAILED"):
+                                    break
+                            except Exception:
+                                pass
+                except Exception as ae:
+                    logger.error(f"Archive products error: {ae}")
+
+                # Retry CREATE with the new barcodes
+                retry_items = [c[2] for c in cross_conflicts]
+                if retry_items:
+                    upsert_attempted += len(retry_items)
+                    try:
+                        retry_resp = await client.create_products(retry_items)
+                        retry_create_batch_id = (retry_resp or {}).get("batchRequestId")
+                        if retry_create_batch_id:
+                            for attempt in range(8):
+                                await _asyncio.sleep(2.5)
+                                try:
+                                    rbr = await client.get_batch_request_result(retry_create_batch_id)
+                                    rstatus = (rbr or {}).get("status") or "INPROGRESS"
+                                    if rstatus.upper() in ("COMPLETED", "FAILED"):
+                                        for rit in (rbr or {}).get("items", []) or []:
+                                            if (rit.get("status") or "").upper() == "FAILED":
+                                                req = rit.get("requestItem", {}) or {}
+                                                prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                                upsert_failed_items.append({
+                                                    "stock_code": prod.get("stockCode") or req.get("barcode") or "",
+                                                    "barcode": prod.get("barcode") or req.get("barcode") or "",
+                                                    "title": prod.get("title") or "",
+                                                    "reasons": rit.get("failureReasons") or [],
+                                                    "phase": "retry_create",
+                                                })
+                                        retry_create_succeeded = max(
+                                            0,
+                                            (rbr or {}).get("itemCount", 0) - (rbr or {}).get("failedItemCount", 0),
+                                        )
+                                        upsert_succeeded += retry_create_succeeded
+                                        break
+                                except Exception as rp:
+                                    logger.warning(f"Retry-create poll {attempt+1}/8 failed: {rp}")
+                    except Exception as re_err:
+                        logger.error(f"Retry create after archive error: {re_err}")
+
+            # 2) SELF CONFLICTS: PUT update_products
+            if self_conflicts:
+                upsert_attempted += len(self_conflicts)
+                try:
+                    upd_resp = await client.update_products(self_conflicts)
                     upsert_batch_id = (upd_resp or {}).get("batchRequestId")
                     if upsert_batch_id:
-                        # Update batch'ini de poll et
-                        for attempt in range(6):
+                        for attempt in range(8):
                             await _asyncio.sleep(2.5)
                             try:
                                 ubr = await client.get_batch_request_result(upsert_batch_id)
                                 upsert_final_status = (ubr or {}).get("status") or "INPROGRESS"
                                 if upsert_final_status.upper() in ("COMPLETED", "FAILED"):
+                                    put_succeeded = max(
+                                        0,
+                                        (ubr or {}).get("itemCount", 0) - (ubr or {}).get("failedItemCount", 0),
+                                    )
                                     for uit in (ubr or {}).get("items", []) or []:
                                         if (uit.get("status") or "").upper() == "FAILED":
                                             req = uit.get("requestItem", {}) or {}
@@ -1232,38 +1519,29 @@ async def sync_products_to_trendyol(
                                                 "barcode": prod.get("barcode") or req.get("barcode") or "",
                                                 "title": prod.get("title") or "",
                                                 "reasons": uit.get("failureReasons") or [],
+                                                "phase": "put_update",
                                             })
-                                    upsert_succeeded = max(
-                                        0,
-                                        (ubr or {}).get("itemCount", 0) - (ubr or {}).get("failedItemCount", 0),
-                                    )
+                                    upsert_succeeded += put_succeeded
                                     break
                             except Exception as up_poll_err:
-                                logger.warning(f"Upsert batch poll {attempt+1}/6 failed: {up_poll_err}")
+                                logger.warning(f"Upsert PUT poll {attempt+1}/8 failed: {up_poll_err}")
                     else:
-                        # update_products response'unda batchRequestId yok — API rejected
                         upd_err = (upd_resp or {}).get("message") or str(upd_resp)[:500]
-                        logger.warning(f"Trendyol UPSERT update_products reddetti: {upd_err}")
+                        logger.warning(f"Trendyol PUT update_products reddetti: {upd_err}")
                 except Exception as up_err:
-                    logger.error(f"Trendyol UPSERT update_products exception: {up_err}")
+                    logger.error(f"Trendyol PUT update_products exception: {up_err}")
 
-        # Upsert ile düzelen item'ları batch_failed_items'tan düş (artık başarılı sayılırlar)
+        # Upsert ile düzelen item'ları batch_failed_items'tan düş
         if upsert_succeeded > 0 and duplicate_failed:
-            # upsert_failed_items'da kalanlar gerçekten hâlâ patlayanlar
             still_failed_keys = set()
             for f in upsert_failed_items:
                 if f.get("barcode"):
                     still_failed_keys.add(str(f["barcode"]))
-                if f.get("stock_code"):
-                    still_failed_keys.add(str(f["stock_code"]))
 
             def _still_failed(f):
                 if not _is_duplicate_error(f.get("reasons")):
-                    return True  # duplicate olmayan eski hata: dokunma, hâlâ failed
-                return (
-                    str(f.get("barcode") or "") in still_failed_keys
-                    or str(f.get("stock_code") or "") in still_failed_keys
-                )
+                    return True
+                return str(f.get("barcode") or "") in still_failed_keys
 
             batch_failed_items = [f for f in batch_failed_items if _still_failed(f)]
             batch_success_count = batch_success_count + upsert_succeeded
@@ -1310,6 +1588,10 @@ async def sync_products_to_trendyol(
             "upsert_batch_id": upsert_batch_id,
             "upsert_final_status": upsert_final_status,
             "upsert_failed_items": upsert_failed_items,
+            "archived_barcodes": archived_barcodes,
+            "archive_batch_id": archive_batch_id,
+            "retry_create_batch_id": retry_create_batch_id,
+            "retry_create_succeeded": retry_create_succeeded,
             "errors": all_errors,
             "failed_items": batch_failed_items,
             "trendyol_response": response,
@@ -1336,6 +1618,9 @@ async def sync_products_to_trendyol(
             "upsert_succeeded": upsert_succeeded,
             "upsert_batch_id": upsert_batch_id,
             "upsert_failed_items": upsert_failed_items,
+            "archived_barcodes": archived_barcodes,
+            "archive_batch_id": archive_batch_id,
+            "retry_create_batch_id": retry_create_batch_id,
             "errors": all_errors,
             "trendyol_response": response,
         }
