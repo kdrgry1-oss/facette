@@ -42,6 +42,16 @@ Trendyol/Hepsiburada/Temu için "BOY, CEP, ASTAR DURUMU, BEL, WEB COLOR" gibi 47
   - cache=true: ~3 sn (DB master cache'inden)
   - cache=false: ~30 sn (Ticimax SOAP'a refresh)
 
+### Default Strategy Reset (2026-02-19) — KAFA GÖRE ATAMA İPTAL
+- Kullanıcı uyarısı: "Bandana için Yaka Tipi=Straplez yazmışsın, Ticimax'ta yok ise BOŞ bırak."
+- Önceki `apply_default_attrs.py` (kategori-bazlı uydurma default'lar) İPTAL edildi.
+- Yeni script: `/app/backend/scripts/reset_and_apply_ticimax_only.py`
+  1. Uydurma kategori-default'larını TÜM ürünlerden temizler (Cep, Yaka Tipi, Kapama Şekli, Astar Durumu, Kalıp, Bel, Kalınlık, Koleksiyon, Sezon, Kol Boyu).
+  2. Description'dan dinamik `<strong>Etiket:</strong>` parser ile çıkarımı.
+  3. Ticimax SOAP master listesinden (description'da gerçekten geçen değer varsa) atar.
+  4. Sadece 3 sabit global: Cinsiyet=Kadın/Kız, Yaş Grubu=Yetişkin, Menşei=TR.
+- Sonuç: Bandana → Yaka Tipi BOŞ ✓, Elbise → Yaka Tipi=Straplez ✓ (description'da "Straplez yaka" geçtiği için).
+
 ### Default Attributes (2026-02-19) — Global Sabit Değerler
 - **Tüm 608 ürüne** Cinsiyet=Kadın, Yaş Grubu=Yetişkin, Menşei=TR otomatik eklendi (3 marketplace × 608 = 1824 alan)
 - **Kategori-bazlı**: Şort/Bermuda → Kol Boyu=Kolsuz, Askılı/Büstiyer → Kol Boyu=Askılı, Etek/Pantolon → Kol Boyu=Yok
