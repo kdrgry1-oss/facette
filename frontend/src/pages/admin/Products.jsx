@@ -1024,6 +1024,32 @@ export default function AdminProducts() {
             Excel Yükle
           </button>
           <button
+            onClick={async () => {
+              if (!window.confirm("TÜM ürünlerin Trendyol/HB/Temu özelliklerini Ticimax'tan otomatik doldur?\n\nMevcut manuel girilen değerler korunur.")) return;
+              const t = toast.loading("Ticimax'tan teknik detaylar eşleniyor...");
+              try {
+                const token = localStorage.getItem('token');
+                const res = await axios.post(
+                  `${API}/integrations/ticimax/teknik-detay/sync?use_cache=true`,
+                  null,
+                  { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+                );
+                toast.dismiss(t);
+                toast.success(res.data.message || "Eşleme tamamlandı");
+                fetchProducts();
+              } catch (e) {
+                toast.dismiss(t);
+                toast.error(e.response?.data?.detail || "Eşleme başarısız");
+              }
+            }}
+            data-testid="ticimax-tekdetay-sync-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-all font-medium text-sm shadow-sm"
+            title="Ticimax master listesinden tüm ürünlerin teknik detaylarını eşler"
+          >
+            <RefreshCw size={16} />
+            Ticimax'tan Otomatik Doldur
+          </button>
+          <button
             onClick={() => techFileInputRef.current?.click()}
             disabled={techImporting}
             data-testid="tech-import-btn"
