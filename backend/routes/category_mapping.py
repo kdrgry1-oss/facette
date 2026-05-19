@@ -776,6 +776,68 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
             default_mappings[aid] = str(unspecified_val.get("id"))
             summary["defaults_set"] += 1
 
+    # 5b) Yerel kategori adına göre özelleşmiş attribute defaults
+    # Örn: yerel "Şort" → Kalıp="Mini Şort"; "Bermuda" → Kalıp="Bermuda"; "Şort Etek" → Kalıp="Şort Etek"
+    # Burada DÜŞÜK öncelikli — daha önce manuel/auto set edilmiş bir değer EZİLMEZ.
+    if cat_name:
+        cat_name_lc = cat_name.lower()
+        # Kural seti: (kategori_isim_keyword, [(trendyol_attr_isim, trendyol_value_isim), ...])
+        # Sıra ÖNEMLİ: önce daha SPESİFİK (uzun) eşleşmeler denenir.
+        CAT_NAME_HINTS = [
+            ("şort etek",   [("Kalıp", "Şort Etek"), ("Siluet", "Şort Etek")]),
+            ("sort etek",   [("Kalıp", "Şort Etek"), ("Siluet", "Şort Etek")]),
+            ("bermuda",     [("Kalıp", "Bermuda")]),
+            ("mini şort",   [("Kalıp", "Mini Şort")]),
+            ("mini sort",   [("Kalıp", "Mini Şort")]),
+            ("şort",        [("Kalıp", "Mini Şort")]),
+            ("sort",        [("Kalıp", "Mini Şort")]),
+            ("mini elbise", [("Boy", "Mini")]),
+            ("midi elbise", [("Boy", "Midi")]),
+            ("maxi elbise", [("Boy", "Uzun")]),
+            ("uzun elbise", [("Boy", "Uzun")]),
+            ("uzun kol",    [("Kol Boyu", "Uzun Kol")]),
+            ("kısa kol",    [("Kol Boyu", "Kısa Kol")]),
+            ("kisa kol",    [("Kol Boyu", "Kısa Kol")]),
+            ("askılı",      [("Kol Boyu", "Askılı")]),
+            ("askili",      [("Kol Boyu", "Askılı")]),
+            ("kolsuz",      [("Kol Boyu", "Kolsuz")]),
+            ("tişört",      [("Kol Boyu", "Kısa Kol")]),
+            ("tisort",      [("Kol Boyu", "Kısa Kol")]),
+            ("t-shirt",     [("Kol Boyu", "Kısa Kol")]),
+            ("tshirt",      [("Kol Boyu", "Kısa Kol")]),
+        ]
+        applied_hints = set()  # aynı attribute'e iki kez yazma
+        for keyword, rules in CAT_NAME_HINTS:
+            if keyword not in cat_name_lc:
+                continue
+            for tr_attr_name, tr_val_name in rules:
+                # Bu attribute mp_attrs içinde var mı?
+                for a in mp_attrs:
+                    aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+                    nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+                    if not aid or aid in applied_hints:
+                        continue
+                    if (nm or "").strip().lower() != tr_attr_name.lower():
+                        continue
+                    # Mevcut default varsa EZME (manuel/önceki adım kazanır)
+                    if default_mappings.get(aid):
+                        applied_hints.add(aid)
+                        continue
+                    # Trendyol değer listesinden adı eşleşeni bul
+                    target = None
+                    tv = tr_val_name.strip().lower()
+                    for v in (a.get("attributeValues") or []):
+                        if (v.get("name") or "").strip().lower() == tv:
+                            target = v
+                            break
+                    if target:
+                        default_mappings[aid] = str(target.get("id"))
+                        applied_hints.add(aid)
+                        summary["defaults_set"] += 1
+                        summary.setdefault("hints_applied", []).append(
+                            f"{cat_name} → {tr_attr_name}={tr_val_name}"
+                        )
+
     # Save all updates
     await db.category_mappings.update_one(
         {"category_id": category_id, "marketplace": marketplace},

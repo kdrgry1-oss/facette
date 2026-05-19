@@ -2519,3 +2519,27 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 - P2: İYS test (real key)
 - P2: FCM (Push notification)
 - Refactoring: `integrations.py` (>5000 satır) modüllere bölünmeli
+
+## Iteration 49 — Kategori İsminden Akıllı Attribute Defaults (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Trendyol'da "Şort & Bermuda" tek bir kategori (ID 530), Şort/Bermuda ayrımı **Kalıp** özelliği üzerinden yapılıyor. Kullanıcı bunu manuel olarak her seferinde Kalıp dropdown'undan seçmek zorunda kalıyordu.
+
+**Çözüm:** `_auto_setup_mapping` fonksiyonuna **5b adımı** eklendi (`/app/backend/routes/category_mapping.py`):
+- Yerel kategori adı içinde belirli anahtar kelimeler bulunursa ilgili Trendyol attribute'unun default değeri otomatik atanır.
+- Mevcut manuel/önceki default değerleri **EZMEZ** (low priority hint).
+
+**Kural Tablosu** (CAT_NAME_HINTS):
+- `Şort` → Kalıp=Mini Şort
+- `Bermuda` → Kalıp=Bermuda
+- `Şort Etek` → Kalıp=Şort Etek, Siluet=Şort Etek
+- `Mini/Midi/Maxi/Uzun Elbise` → Boy=Mini/Midi/Uzun
+- `Uzun Kol / Kısa Kol / Askılı / Kolsuz` → Kol Boyu=...
+- `Tişört / T-shirt / TShirt` → Kol Boyu=Kısa Kol
+- (Genişletilebilir liste — Türkçe locale-insensitive)
+
+### Test
+- POST `/api/category-mapping/trendyol/9287` (yerel "Şort" → Trendyol 530)
+- Response: `hints_applied: ["Şort → Kalıp=Mini Şort"]`, `defaults_set: 6`
+- DB doğrulama: `default_mappings[179]=10622066` (Kalıp=Mini Şort) ✓
