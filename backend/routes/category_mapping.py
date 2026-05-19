@@ -206,6 +206,162 @@ async def upload_attribute_cache(
             "message": f"{marketplace} kategori #{cat_id} için {len(attrs)} özellik cache'e yazıldı"}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ŞİRKET BİLGİSİ → MP "Üretici / İthalatçı" özelliklerini OTOMATİK doldur
+# ─────────────────────────────────────────────────────────────────────────────
+def _resolve_company_value(attr_name: str, company: dict):
+    """Trendyol/MP attribute adından şirket bilgisini eşler.
+    - "...mail..." → email
+    - "...adres..." → address (mail içermiyorsa)
+    - "üretici/ithalatçı ad(ı)" → company_name (mail/adres içermiyorsa)
+    """
+    import re as _re
+    if not attr_name or not company:
+        return None
+    nm = attr_name.lower().strip()
+    has_uretici_or_ithalatci = bool(_re.search(r"üretici|i?thala?tç[ıi]|i?thalatci", nm))
+    if not has_uretici_or_ithalatci:
+        return None
+    if "mail" in nm:
+        v = (company.get("email") or "").strip()
+        return v or None
+    if "adres" in nm:
+        v = (company.get("address") or "").strip()
+        return v or None
+    # "Üretici Adı" / "Birincil İthalatçı Adı" / "İhracatçı Adı"
+    if _re.search(r"\bad[ıi]\b|\bismi?\b|\bunvan", nm):
+        v = (company.get("company_name") or "").strip()
+        return v or None
+    return None
+
+
+@router.post("/{marketplace}/{local_category_id}/fill-company-defaults")
+async def fill_company_defaults(
+    marketplace: str,
+    local_category_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Sistem ayarlarındaki şirket bilgisini (settings.main.company_info) bu
+    kategorinin Trendyol/MP attribute listesinden 'Üretici / İthalatçı Adı /
+    Mail / Adres' alanları için default_mappings olarak yazar. Mevcut değerler
+    KORUNUR."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    mapping = await db.category_mappings.find_one(
+        {"category_id": local_category_id, "marketplace": marketplace}, {"_id": 0}
+    )
+    if not mapping or not mapping.get("marketplace_category_id"):
+        raise HTTPException(status_code=400, detail="Önce sistem kategorisini pazaryeri kategorisi ile eşleştirin")
+
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0, "company_info": 1})
+    company = (settings or {}).get("company_info") or {}
+    if not company:
+        raise HTTPException(status_code=400, detail="Ayarlar > Şirket Bilgisi boş — önce doldurun")
+
+    mp_cat_id = mapping["marketplace_category_id"]
+    coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
+    cached = await db[coll].find_one(
+        {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+        {"_id": 0},
+    )
+    attrs = (cached or {}).get("attributes", []) or []
+    if not attrs:
+        raise HTTPException(status_code=400, detail="Pazaryeri özellik listesi cache'de yok — önce 'Canlı Çek' deyin")
+
+    defaults = dict(mapping.get("default_mappings") or {})
+    filled = []
+    for a in attrs:
+        aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+        nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+        if not aid or not nm or defaults.get(aid):
+            continue
+        v = _resolve_company_value(nm, company)
+        if v:
+            defaults[aid] = v
+            filled.append({"id": aid, "name": nm, "value": v})
+
+    if filled:
+        await db.category_mappings.update_one(
+            {"category_id": local_category_id, "marketplace": marketplace},
+            {"$set": {"default_mappings": defaults,
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    return {
+        "success": True,
+        "filled_count": len(filled),
+        "filled": filled,
+        "default_mappings": defaults,
+        "message": (f"{len(filled)} şirket alanı dolduruldu" if filled
+                    else "Doldurulacak yeni alan yok (zaten dolu ya da bu kategoride üretici/ithalatçı alanı yok)"),
+    }
+
+
+@router.post("/{marketplace}/bulk-fill-company-defaults")
+async def bulk_fill_company_defaults(
+    marketplace: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Tüm matched kategoriler için Üretici/İthalatçı alanlarını sistem
+    ayarlarındaki şirket bilgisinden default olarak yaz."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0, "company_info": 1})
+    company = (settings or {}).get("company_info") or {}
+    if not company:
+        raise HTTPException(status_code=400, detail="Ayarlar > Şirket Bilgisi boş — önce doldurun")
+
+    matched = await db.category_mappings.find(
+        {"marketplace": marketplace, "marketplace_category_id": {"$nin": [None, ""]}},
+        {"_id": 0},
+    ).to_list(length=3000)
+
+    now = datetime.now(timezone.utc).isoformat()
+    coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
+    total_filled = 0
+    processed = 0
+    details = []
+    for cm in matched:
+        mp_cat_id = cm.get("marketplace_category_id")
+        try:
+            cached = await db[coll].find_one(
+                {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                {"_id": 0},
+            )
+        except Exception:
+            cached = None
+        attrs = (cached or {}).get("attributes", []) or []
+        if not attrs:
+            details.append({"category_name": cm.get("category_name"), "filled": 0, "note": "cache yok"})
+            continue
+        processed += 1
+        defaults = dict(cm.get("default_mappings") or {})
+        filled = 0
+        for a in attrs:
+            aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
+            nm = a.get("name") or a.get("attribute", {}).get("name") or ""
+            if not aid or not nm or defaults.get(aid):
+                continue
+            v = _resolve_company_value(nm, company)
+            if v:
+                defaults[aid] = v
+                filled += 1
+        if filled:
+            await db.category_mappings.update_one(
+                {"category_id": cm.get("category_id"), "marketplace": marketplace},
+                {"$set": {"default_mappings": defaults, "updated_at": now}},
+            )
+            total_filled += filled
+        details.append({"category_name": cm.get("category_name"), "filled": filled})
+    return {
+        "success": True,
+        "processed": processed,
+        "total_filled": total_filled,
+        "details": details,
+        "message": f"{processed} kategoride toplam {total_filled} şirket alanı dolduruldu",
+    }
+
+
+
 @router.post("/{marketplace}/bulk-auto-match-attributes")
 async def bulk_auto_match_attributes(
     marketplace: str,

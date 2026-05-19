@@ -4,7 +4,31 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 49 (2026-05-19) — Trendyol Pre-Sync Validation Panel
+## Iteration 50 (2026-05-19) — Auto-Match Toast Bug + Company Defaults
+Kullanıcı şikayeti: Modaldaki "Otomatik Eşleştir" butonuna basınca "0 özellik" çıkıyor ama bir sürü eşleşmesi gereken alan var.
+
+**Root cause**: `bulk-auto-match-attributes` daha önce çalıştırılmış, tüm global karşılığı olan attribute'lar zaten `attribute_mappings`'e yazılmıştı. Kalan 14 attribute "Üretici Adı, İthalatçı Mail Adresi, Üretici Adres Bilgisi" gibi Trendyol'un yeni AB DSA regülasyonu için zorunlu hale getirdiği ticari kayıt alanları — sistemde global karşılığı yok ve olamaz (her marka için sabit şirket bilgisi).
+
+**Fix**:
+1. `handleAutoMatch` toast'ı bilgilendirici hale getirildi: "X yeni eşleşti (Y zaten eşliydi)" veya "Tüm eşlenebilir alanlar zaten eşli, Z alan için karşılık yok — 'Şirket Bilgisi Doldur' deneyin"
+
+### ✅ Yeni Özellik — "Şirket Bilgisi Doldur" Butonu
+Backend:
+- `POST /api/category-mapping/{mp}/{cat_id}/fill-company-defaults` — Tek kategori için
+- `POST /api/category-mapping/{mp}/bulk-fill-company-defaults` — Tüm matched kategoriler için
+- `settings.main.company_info`'dan `company_name / address / email` çekilir
+- Attribute adında "üretici|ithalatçı" varsa kelime sınıflaması: `mail`→email, `adres`→address, `ad/ı/ismi/unvan`→company_name
+- Mevcut default değerler EZİLMEZ (idempotent)
+
+Frontend:
+- Modaldaki başlık satırına "Şirket Bilgisi Doldur" (mor) butonu
+- Sayfa üstünde "Tümüne Şirket Doldur" toplu buton
+
+**Test sonuçları (Ceket kategorisi)**: 8 şirket alanı dolduruldu (Üretici Adı, Üretici Adres, Birincil/İkincil/Üçüncül İthalatçı Adı + Adres). Mail alanları company_info.email boş olduğu için atlandı (boş value yazılmıyor).
+
+**Test sonuçları (toplu)**: 11 kategoride 80 alan otomatik dolduruldu.
+
+
 
 ### ✅ Yeni Özellik — Aktarım Öncesi Doğrulama
 Trendyol'a ürün göndermeden önce eksik zorunlu alanları (kategori mapping, barkod, görsel, zorunlu attribute) raporlayan **Validation Panel** Kategori Eşleştirme sayfasına eklendi.

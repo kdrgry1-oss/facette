@@ -139,6 +139,23 @@ export default function CategoryMapping() {
     }
   };
 
+  const bulkFillCompanyDefaults = async () => {
+    if (!await window.appConfirm(
+      `${active} için TÜM matched kategorilerin "Üretici / İthalatçı Adı / Adres / Mail" alanları\n` +
+      `Ayarlar > Şirket Bilgisi'nden otomatik doldurulacak.\n\n` +
+      `• Mevcut manuel default değerler KORUNUR (ezilmez), sadece boş olanlar doldurulur.\n` +
+      `• Önce Ayarlar'da şirket bilgilerini eksiksiz doldurun (özellikle email).\n\n` +
+      `Devam edilsin mi?`
+    )) return;
+    try {
+      const r = await axios.post(`${API}/category-mapping/${active}/bulk-fill-company-defaults`, {}, auth);
+      toast.success(r.data?.message || "Şirket alanları dolduruldu");
+      load();
+    } catch (e) {
+      toast.error("Toplu doldurma hatası: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
   const filtered = useMemo(() => {
     if (!search) return data.items;
     const s = search.toLocaleLowerCase("tr");
@@ -165,6 +182,13 @@ export default function CategoryMapping() {
             data-testid="cat-bulk-auto-match">
             {bulkAttrLoading ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
             {bulkAttrLoading ? "Eşleşiyor..." : "Tümünü Otomatik Eşleştir"}
+          </button>
+          <button onClick={bulkFillCompanyDefaults}
+            disabled={data.matched === 0}
+            className="flex items-center gap-1 px-3 py-2 border border-purple-300 text-purple-700 bg-purple-50 rounded-lg text-sm font-semibold hover:bg-purple-100 disabled:opacity-50"
+            title="Tüm matched kategorilerin Üretici/İthalatçı alanlarını şirket bilgilerinden doldur"
+            data-testid="cat-bulk-fill-company">
+            <Settings size={14} /> Tümüne Şirket Doldur
           </button>
           <button onClick={resetAll}
             className="flex items-center gap-1 px-3 py-2 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50"

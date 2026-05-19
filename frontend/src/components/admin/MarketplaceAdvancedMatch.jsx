@@ -148,10 +148,12 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
   const handleAutoMatch = () => {
     const next = { ...mappings };
     let count = 0;
+    let alreadyMapped = 0;
+    let noGlobalMatch = 0;
     mpAttrs.forEach((a) => {
       const id = String(a.id ?? a.attribute?.id ?? "");
       const name = (a.name || a.attribute?.name || "").toLowerCase().trim();
-      if (next[id]) return;
+      if (next[id]) { alreadyMapped++; return; }
       const g = globalAttrs.find((ga) => {
         const gn = (ga.name || "").toLowerCase().trim();
         return (
@@ -164,9 +166,35 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
         );
       });
       if (g) { next[id] = g.name; count++; }
+      else { noGlobalMatch++; }
     });
     setMappings(next);
-    toast.success(`${count} özellik otomatik eşleştirildi`);
+    if (count > 0) {
+      toast.success(`${count} yeni özellik eşleştirildi (${alreadyMapped} zaten eşliydi)`);
+    } else if (alreadyMapped > 0) {
+      toast.info(`Tüm eşlenebilir özellikler zaten eşli (${alreadyMapped}). ${noGlobalMatch} alan için global karşılık yok — "Şirket Bilgisi Doldur" ile üretici/ithalatçı bilgilerini ekleyebilirsiniz.`);
+    } else {
+      toast.info(`${noGlobalMatch} pazaryeri özelliği için sistem karşılığı bulunamadı — manuel girin veya "Şirket Bilgisi Doldur" deneyin.`);
+    }
+  };
+
+  const handleFillCompanyDefaults = async () => {
+    if (!category) return;
+    try {
+      const r = await axios.post(
+        `${API}/category-mapping/${marketplace}/${category.category_id}/fill-company-defaults`,
+        {}, { headers: auth() }
+      );
+      const data = r.data || {};
+      if (data.default_mappings) setDefaults(data.default_mappings);
+      if (data.filled_count > 0) {
+        toast.success(data.message);
+      } else {
+        toast.info(data.message);
+      }
+    } catch (e) {
+      toast.error("Şirket bilgisi doldurulamadı: " + (e.response?.data?.detail || e.message));
+    }
   };
 
   const handleSave = async () => {
@@ -255,6 +283,14 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                 title="Pazaryerinden anlık attribute listesini çek (Trendyol için canlı API)"
               >
                 <RefreshCw size={14} /> {marketplace} Canlı Çek
+              </button>
+              <button
+                onClick={handleFillCompanyDefaults}
+                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-semibold hover:bg-purple-600"
+                data-testid="adv-fill-company-btn"
+                title="Ayarlar > Şirket Bilgisi'nden Üretici / İthalatçı Adı / Adres / Mail alanlarını otomatik doldur"
+              >
+                <Store size={14} /> Şirket Bilgisi Doldur
               </button>
               <button
                 onClick={handleAutoMatch}
