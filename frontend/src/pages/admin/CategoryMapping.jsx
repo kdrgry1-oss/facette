@@ -488,16 +488,61 @@ function FilteredPushPanel({ marketplace, auth }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [validation, setValidation] = useState(null);
+  const [showInvalidOnly, setShowInvalidOnly] = useState(true);
 
   const supportedMarketplaces = ["trendyol"]; // şu an sadece Trendyol için
   if (!supportedMarketplaces.includes(marketplace)) return null;
 
-  const onSubmit = async () => {
+  const buildBody = () => {
     const codes = stockCodes
       .split(/[\s,;\n]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+    const body = {};
+    if (codes.length) {
+      body.stock_codes = codes;
+      body.barcodes = codes;
+    }
+    if (dateFrom) body.date_from = dateFrom;
+    if (dateTo) body.date_to = dateTo;
+    return body;
+  };
+
+  const onValidate = async () => {
+    setValidating(true);
+    setValidation(null);
+    const t = toast.loading("Doğrulanıyor...");
+    try {
+      const body = buildBody();
+      const res = await axios.post(
+        `${API}/integrations/${marketplace}/products/validate`,
+        body,
+        { ...auth, timeout: 120000 },
+      );
+      toast.dismiss(t);
+      setValidation(res.data);
+      const d = res.data || {};
+      if (d.invalid_count === 0) {
+        toast.success(`Tümü hazır (${d.valid_count} ürün)`);
+      } else {
+        toast.warning(
+          `${d.valid_count} hazır, ${d.invalid_count} eksik`,
+        );
+      }
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Doğrulama başarısız");
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const onSubmit = async () => {
+    const body = buildBody();
+    const codes = body.stock_codes || [];
     if (!codes.length && !dateFrom && !dateTo) {
       toast.error("Stok kodu veya tarih aralığı girin");
       return;
@@ -505,13 +550,6 @@ function FilteredPushPanel({ marketplace, auth }) {
     setLoading(true);
     const t = toast.loading(`${marketplace} aktarımı başlatılıyor...`);
     try {
-      const body = {};
-      if (codes.length) {
-        body.stock_codes = codes;
-        body.barcodes = codes; // backend hem barkod hem stock için kontrol eder
-      }
-      if (dateFrom) body.date_from = dateFrom;
-      if (dateTo) body.date_to = dateTo;
       const res = await axios.post(
         `${API}/integrations/${marketplace}/products/sync`,
         body,
@@ -538,7 +576,7 @@ function FilteredPushPanel({ marketplace, auth }) {
         <div>
           <div className="font-bold text-orange-900 text-sm">Filtreli Aktarım — {marketplace.toUpperCase()}</div>
           <div className="text-xs text-orange-700 mt-0.5">
-            Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. Boş bırakırsanız o filtre uygulanmaz.
+            Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. <b>Önce "Doğrula" ile zorunlu alanları kontrol edin.</b>
           </div>
         </div>
       </div>
@@ -577,18 +615,26 @@ function FilteredPushPanel({ marketplace, auth }) {
             data-testid="push-stock-codes"
           />
         </div>
-        <div className="md:col-span-2 flex flex-col gap-2">
+        <div className="md:col-span-2 flex flex-col gap-2 mt-5">
+          <button
+            onClick={onValidate}
+            disabled={validating || loading}
+            data-testid="push-validate-btn"
+            className="bg-white border border-orange-500 text-orange-700 hover:bg-orange-100 text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50"
+          >
+            {validating ? "Doğrulanıyor..." : "1. Doğrula"}
+          </button>
           <button
             onClick={onSubmit}
-            disabled={loading}
+            disabled={loading || validating}
             data-testid="push-submit-btn"
-            className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50 mt-5"
+            className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50"
           >
-            {loading ? "Gönderiliyor..." : `${marketplace.toUpperCase()}'a Gönder`}
+            {loading ? "Gönderiliyor..." : `2. ${marketplace.toUpperCase()}'a Gönder`}
           </button>
           {(stockCodes || dateFrom || dateTo) && (
             <button
-              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); }}
+              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); }}
               className="text-xs text-gray-500 hover:underline"
             >
               Temizle
@@ -596,6 +642,107 @@ function FilteredPushPanel({ marketplace, auth }) {
           )}
         </div>
       </div>
+
+      {/* Validation Report */}
+      {validation && (
+        <div className="mt-4 bg-white border rounded-lg overflow-hidden" data-testid="validation-report">
+          <div className="grid grid-cols-3 divide-x border-b">
+            <div className="px-4 py-2.5">
+              <div className="text-[10px] text-gray-500 uppercase">Toplam</div>
+              <div className="text-lg font-black">{validation.total}</div>
+            </div>
+            <div className="px-4 py-2.5 bg-green-50">
+              <div className="text-[10px] text-green-700 uppercase">Hazır</div>
+              <div className="text-lg font-black text-green-700">{validation.valid_count}</div>
+            </div>
+            <div className="px-4 py-2.5 bg-red-50">
+              <div className="text-[10px] text-red-700 uppercase">Eksik</div>
+              <div className="text-lg font-black text-red-700">{validation.invalid_count}</div>
+            </div>
+          </div>
+
+          {(validation.top_missing_attrs || []).length > 0 && (
+            <div className="px-4 py-2 border-b bg-amber-50">
+              <div className="text-[11px] font-bold text-amber-800 uppercase mb-1">En Çok Eksik Olan Zorunlu Özellikler</div>
+              <div className="flex flex-wrap gap-1.5">
+                {validation.top_missing_attrs.map((m) => (
+                  <span key={m.name} className="inline-flex items-center gap-1 bg-white border border-amber-300 text-amber-800 text-[11px] px-2 py-0.5 rounded">
+                    {m.name} <b className="text-amber-900">×{m.count}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="px-3 py-2 flex items-center justify-between border-b">
+            <label className="text-xs text-gray-600 flex items-center gap-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showInvalidOnly}
+                onChange={(e) => setShowInvalidOnly(e.target.checked)}
+                data-testid="validation-only-invalid"
+              />
+              Sadece eksikleri göster
+            </label>
+            <button
+              onClick={() => setValidation(null)}
+              className="text-xs text-gray-500 hover:underline"
+            >Raporu Kapat</button>
+          </div>
+
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-3 py-1.5 text-left text-gray-600 font-medium">Ürün</th>
+                  <th className="px-3 py-1.5 text-left text-gray-600 font-medium w-32">Stok Kodu</th>
+                  <th className="px-3 py-1.5 text-left text-gray-600 font-medium">Eksikler</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(validation.results || [])
+                  .filter((r) => (showInvalidOnly ? !r.is_valid : true))
+                  .slice(0, 200)
+                  .map((r) => (
+                    <tr key={r.id} className={`border-t ${r.is_valid ? "" : "bg-red-50/40"}`}>
+                      <td className="px-3 py-1.5">
+                        <div className="font-medium">{r.name}</div>
+                        <div className="text-[10px] text-gray-500">{r.category_name}</div>
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-[10px]">{r.stock_code || "-"}</td>
+                      <td className="px-3 py-1.5">
+                        {r.is_valid ? (
+                          <span className="inline-flex items-center gap-1 text-green-700 font-semibold text-[11px]">✓ Hazır</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {(r.errors || []).map((e, i) => (
+                              <div key={i} className="inline-block mr-1 bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded">{e}</div>
+                            ))}
+                            {(r.missing_required_attrs || []).length > 0 && (
+                              <div className="text-[10px] text-amber-700 mt-0.5">
+                                Eksik özellikler: {r.missing_required_attrs.map((m) => m.name).join(", ")}
+                              </div>
+                            )}
+                            {(r.warnings || []).length > 0 && (
+                              <div className="text-[10px] text-gray-500 mt-0.5">
+                                Uyarı: {r.warnings.join(", ")}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {(validation.results || []).filter((r) => (showInvalidOnly ? !r.is_valid : true)).length > 200 && (
+              <div className="text-center py-2 text-[11px] text-gray-500 bg-gray-50 border-t">
+                İlk 200 ürün gösteriliyor — kalanı toplu görmek için stok kodu/tarih ile filtreleyin.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {lastResult && (
         <div className="mt-3 text-xs bg-white border rounded p-2">

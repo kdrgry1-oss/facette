@@ -3,6 +3,38 @@
 ## Problem Statement
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
+
+## Iteration 49 (2026-05-19) — Trendyol Pre-Sync Validation Panel
+
+### ✅ Yeni Özellik — Aktarım Öncesi Doğrulama
+Trendyol'a ürün göndermeden önce eksik zorunlu alanları (kategori mapping, barkod, görsel, zorunlu attribute) raporlayan **Validation Panel** Kategori Eşleştirme sayfasına eklendi.
+
+**Backend**: `POST /api/integrations/trendyol/products/validate`
+- Body sync ile aynı (`stock_codes`, `barcodes`, `date_from`, `date_to`, `product_ids`)
+- Her ürün için kontrol:
+  - Trendyol kategori eşleştirmesi (`category_mappings` veya `categories.trendyol_category_id`)
+  - Görsel zorunluluğu (en az 1)
+  - Barkod (varyantlı/varyantsız)
+  - Fiyat > 0
+  - Toplam stok (warning)
+  - Açıklama (warning)
+  - **Kategori için zorunlu Trendyol attribute'ları** + lokal mapping veya default mapping
+- Çıktı: `{total, valid_count, invalid_count, top_missing_attrs, results: [{is_valid, errors, warnings, missing_required_attrs}]}`
+
+**Frontend**: `CategoryMapping.jsx > FilteredPushPanel`
+- "1. Doğrula" butonu + "2. TRENDYOL'a Gönder" butonu (sıralı akış)
+- Sonuç paneli: hazır/eksik sayısı, en çok eksik özellik chip'leri, ürün başına eksikler tablosu
+- "Sadece eksikleri göster" toggle, ilk 200 satır görüntülenir
+
+**Test (2026-05-19)**:
+- 563 üründe doğrulama: 115 hazır, 448 eksik
+- Top missing: Boy (336), Yaş Grubu (336), Kumaş Tipi (336), Menşei (336), Cinsiyet (324), Kalıp (216), Renk/Beden/Web Color (151), Bel (90)
+- Screenshot ile UI doğrulandı
+
+### P0 Doğrulaması — Attribute Modal Rendering
+Önceki forkdaki "kategori eşleştirme sayfasında alanlar gitmiş" şikayeti güncel kodla teyit edildi: Ceket kategorisinde Trendyol Özellik Eşleştirme modalı 46 attribute satırı + zorunlu/opsiyonel bölünmüş şekilde renderlanıyor. Sorun çözülmüş, regresyon yok.
+
+
 ## Core Requirements
 1. Ürün yönetimi (CRUD, varyantlar, özellikler, fiyatlandırma)
 2. Trendyol entegrasyonu (kategori/özellik eşleştirme, ürün aktarma)
@@ -918,7 +950,7 @@ Admin'in tek tıkla (veya cron ile her 2 saatte bir) Ticimax SOAP'tan canlı sto
 
 ### MNG Webhook URL (admin'e tanımlatılacak)
 ```
-https://ticimax-sync.preview.emergentagent.com/api/orders/cargo/mng-webhook
+https://marketplace-sync-31.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ```
 (Production'da REACT_APP_BACKEND_URL'a göre değişir; UI'da auto-render ediliyor)
 
@@ -1002,7 +1034,7 @@ https://ticimax-sync.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ### Pending User Manual Tasks
 - Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
 - e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
-- MNG'ye webhook URL bildirimi: `https://ticimax-sync.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+- MNG'ye webhook URL bildirimi: `https://marketplace-sync-31.preview.emergentagent.com/api/orders/cargo/mng-webhook`
 
 
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul

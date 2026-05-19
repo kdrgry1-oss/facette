@@ -82,7 +82,7 @@ const config: CapacitorConfig = {
   bundledWebRuntime: false,
   server: {
     // Production'da kaldır - sadece development için
-    // url: 'https://ticimax-sync.preview.emergentagent.com',
+    // url: 'https://marketplace-sync-31.preview.emergentagent.com',
     cleartext: false,
     androidScheme: 'https',
   },

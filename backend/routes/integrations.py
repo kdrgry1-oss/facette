@@ -294,6 +294,265 @@ async def sync_trendyol_brands(current_user: dict = Depends(require_admin)):
         logger.error(f"Error fetching trendyol brands: {str(e)}")
         raise HTTPException(status_code=500, detail="Trendyol markaları alınamadı")
 
+async def _build_product_query_from_payload(payload: dict) -> dict:
+    """Trendyol sync/validate payload'undan products koleksiyon sorgusu üretir."""
+    product_ids = payload.get("product_ids", [])
+    category_filters = payload.get("category_filters", [])
+    barcodes_raw = payload.get("barcodes", [])
+    stock_codes_raw = payload.get("stock_codes", [])
+    barcodes = [str(b).strip() for b in (barcodes_raw or []) if str(b).strip()]
+    stock_codes = [str(s).strip() for s in (stock_codes_raw or []) if str(s).strip()]
+    date_from = payload.get("date_from")
+    date_to = payload.get("date_to")
+
+    query: dict = {}
+    if product_ids:
+        query = {"id": {"$in": product_ids}}
+    elif barcodes or stock_codes:
+        or_conditions = []
+        if barcodes:
+            or_conditions.append({"barcode": {"$in": barcodes}})
+            or_conditions.append({"variants.barcode": {"$in": barcodes}})
+        if stock_codes:
+            or_conditions.append({"stock_code": {"$in": stock_codes}})
+            or_conditions.append({"sku": {"$in": stock_codes}})
+            or_conditions.append({"variants.stock_code": {"$in": stock_codes}})
+        query = {"$or": or_conditions}
+    elif category_filters:
+        or_conditions = []
+        for cf in category_filters:
+            cat_id = cf.get("category_id")
+            filters = cf.get("filters", {})
+            cat = None
+            try:
+                from bson.objectid import ObjectId
+                cat = await db.categories.find_one({"_id": ObjectId(cat_id)})
+            except Exception:
+                cat = await db.categories.find_one({"id": cat_id})
+            if not cat:
+                continue
+            cat_q = {"category_name": cat.get("name")}
+            if filters.get("stock_code"):
+                cat_q["stock_code"] = {"$regex": filters["stock_code"], "$options": "i"}
+            if filters.get("date_range"):
+                try:
+                    date_obj = datetime.strptime(filters["date_range"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    cat_q["created_at"] = {"$gte": date_obj.isoformat()}
+                except Exception:
+                    pass
+            or_conditions.append(cat_q)
+        if or_conditions:
+            query = {"$or": or_conditions}
+        else:
+            query = {"is_active": True}
+    else:
+        query = {"is_active": True}
+
+    if date_from or date_to:
+        date_q: dict = {}
+        if date_from:
+            date_q["$gte"] = date_from
+        if date_to:
+            date_q["$lte"] = date_to + "T23:59:59" if "T" not in str(date_to) else date_to
+        query = {"$and": [query, {"created_at": date_q}]} if query else {"created_at": date_q}
+    return query
+
+
+@router.post("/trendyol/products/validate")
+async def validate_products_for_trendyol(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Aktarım öncesi DOĞRULAMA paneli — ürün(ler)i Trendyol'a göndermeden,
+    eksik zorunlu alanları (kategori mapping, barkod, görsel, zorunlu attribute)
+    listeleyip raporlar. Body sync ile aynı.
+    """
+    payload = await request.json()
+    query = await _build_product_query_from_payload(payload)
+    products = await db.products.find(query, {"_id": 0}).to_list(length=None)
+
+    # Category mappings (category_id -> mapping doc) — Trendyol için
+    cm_list = await db.category_mappings.find(
+        {"marketplace": "trendyol"}, {"_id": 0}
+    ).to_list(length=3000)
+    cm_by_local = {str(c.get("category_id")): c for c in cm_list}
+    # Fallback: kategori adına göre
+    all_cats = await db.categories.find({}, {"_id": 0}).to_list(length=5000)
+    cat_by_id = {str(c.get("id")): c for c in all_cats}
+    cat_by_name = {(c.get("name") or "").strip(): c for c in all_cats}
+
+    # Trendyol mp_cat -> required attribute listesini cache'le
+    attr_cache: dict = {}
+
+    async def get_required_attrs(mp_cat_id):
+        if not mp_cat_id:
+            return []
+        key = str(mp_cat_id)
+        if key in attr_cache:
+            return attr_cache[key]
+        try:
+            cached = await db.trendyol_category_attributes.find_one(
+                {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                {"_id": 0},
+            )
+            attrs = (cached or {}).get("attributes", []) or []
+        except Exception:
+            attrs = []
+        required = [a for a in attrs if a.get("required")]
+        attr_cache[key] = required
+        return required
+
+    results = []
+    valid_count = 0
+    invalid_count = 0
+
+    for p in products:
+        errors: list[str] = []
+        warnings: list[str] = []
+        missing_required_attrs: list[dict] = []
+
+        cat_id = p.get("category_id")
+        cat_name = p.get("category_name") or ""
+        cm = cm_by_local.get(str(cat_id)) if cat_id else None
+        cat_doc = cat_by_id.get(str(cat_id)) or cat_by_name.get(cat_name.strip())
+
+        mp_cat_id = None
+        if cm and cm.get("marketplace_category_id"):
+            mp_cat_id = cm.get("marketplace_category_id")
+        elif cat_doc and cat_doc.get("trendyol_category_id"):
+            mp_cat_id = cat_doc.get("trendyol_category_id")
+
+        if not mp_cat_id:
+            errors.append("Trendyol kategori eşleştirmesi yok")
+
+        # Görsel kontrolü
+        if not (p.get("images") or []):
+            errors.append("En az 1 ürün görseli yok")
+
+        # Barkod kontrolü (varyantlı ürünlerde tüm varyantlar)
+        variants = p.get("variants") or []
+        if not variants:
+            if not p.get("barcode"):
+                errors.append("Barkod yok")
+            if not p.get("stock_code"):
+                warnings.append("Stok kodu yok (barkod kullanılır)")
+        else:
+            missing_v_barcode = sum(1 for v in variants if not v.get("barcode"))
+            if missing_v_barcode:
+                errors.append(f"{missing_v_barcode} varyantın barkodu eksik")
+
+        # Fiyat
+        try:
+            if float(p.get("price", 0) or 0) <= 0:
+                errors.append("Fiyat 0 veya boş")
+        except Exception:
+            errors.append("Fiyat geçersiz")
+
+        # Stok
+        total_stock = int(p.get("stock", 0) or 0) + sum(int(v.get("stock", 0) or 0) for v in variants)
+        if total_stock <= 0:
+            warnings.append("Toplam stok 0")
+
+        # Açıklama
+        if not (p.get("description") or p.get("short_description")):
+            warnings.append("Açıklama boş")
+
+        # Zorunlu attribute kontrolü (category_mappings → attribute_mappings + default_mappings)
+        if mp_cat_id:
+            req_attrs = await get_required_attrs(mp_cat_id)
+            attr_mappings = (cm or {}).get("attribute_mappings", []) or []
+            default_mappings = (cm or {}).get("default_mappings", {}) or {}
+            # local_attr → mp_attr_id map'ını da kur
+            mp_id_to_local = {}
+            for am in attr_mappings:
+                mid = str(am.get("mp_attr_id") or am.get("trendyol_attr_id") or "")
+                if mid:
+                    mp_id_to_local[mid] = am.get("local_attr")
+
+            # Ürünün attribute'larından lokal isim → değer
+            local_vals: dict = {}
+            for a in (p.get("attributes") or []):
+                if not isinstance(a, dict):
+                    continue
+                nm = (a.get("name") or a.get("type") or a.get("attribute_name") or "").strip()
+                vv = a.get("value") or a.get("attribute_value")
+                if nm and vv:
+                    local_vals[nm.lower()] = str(vv)
+            for v in variants:
+                for a in (v.get("attributes") or []):
+                    if not isinstance(a, dict):
+                        continue
+                    nm = (a.get("name") or a.get("type") or a.get("attribute_name") or "").strip()
+                    vv = a.get("value") or a.get("attribute_value")
+                    if nm and vv:
+                        local_vals.setdefault(nm.lower(), str(vv))
+                # varyantın renk/beden değerleri
+                if v.get("color"):
+                    local_vals.setdefault("renk", str(v["color"]))
+                if v.get("size"):
+                    local_vals.setdefault("beden", str(v["size"]))
+
+            for ra in req_attrs:
+                ra_id = str(ra.get("id") or ra.get("attribute", {}).get("id") or "")
+                ra_name = ra.get("name") or ra.get("attribute", {}).get("name") or "(?)"
+                if not ra_id:
+                    continue
+                # default mapping var mı?
+                default_val = default_mappings.get(ra_id) or default_mappings.get(str(ra_id))
+                if default_val:
+                    continue
+                # local attribute mapping var mı + üründe değer var mı?
+                local_attr = mp_id_to_local.get(ra_id)
+                has_val = False
+                if local_attr:
+                    has_val = bool(local_vals.get(local_attr.lower()))
+                if not has_val:
+                    missing_required_attrs.append({
+                        "id": ra_id,
+                        "name": ra_name,
+                        "mapped_local": local_attr,
+                    })
+            if missing_required_attrs:
+                errors.append(f"{len(missing_required_attrs)} zorunlu özellik eksik")
+
+        is_valid = len(errors) == 0
+        if is_valid:
+            valid_count += 1
+        else:
+            invalid_count += 1
+
+        results.append({
+            "id": p.get("id"),
+            "name": p.get("name"),
+            "stock_code": p.get("stock_code"),
+            "barcode": p.get("barcode"),
+            "category_name": cat_name,
+            "marketplace_category_id": mp_cat_id,
+            "is_valid": is_valid,
+            "errors": errors,
+            "warnings": warnings,
+            "missing_required_attrs": missing_required_attrs,
+        })
+
+    # Eksik attribute istatistikleri (en sık eksik olanları üstte göster)
+    attr_freq: dict = {}
+    for r in results:
+        for m in r["missing_required_attrs"]:
+            k = m["name"]
+            attr_freq[k] = attr_freq.get(k, 0) + 1
+    top_missing = sorted(attr_freq.items(), key=lambda x: -x[1])[:10]
+
+    return {
+        "success": True,
+        "total": len(products),
+        "valid_count": valid_count,
+        "invalid_count": invalid_count,
+        "results": results,
+        "top_missing_attrs": [{"name": k, "count": v} for k, v in top_missing],
+    }
+
+
 @router.post("/trendyol/products/sync")
 async def sync_products_to_trendyol(
     request: Request,
