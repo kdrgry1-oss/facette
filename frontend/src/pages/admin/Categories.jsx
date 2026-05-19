@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog";
+import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -186,9 +187,13 @@ export default function AdminCategories() {
       is_active: category.is_active,
       sort_order: category.sort_order || 0,
     });
+    // Trendyol kategori adını yansıt (varsa)
     if (category.trendyol_category_id) {
+      const found = trendyolCategories.find(c => String(c.id) === String(category.trendyol_category_id));
+      setTrendyolCatSearch(found?.name || "");
       fetchTrendyolAttributes(category.trendyol_category_id);
     } else {
+      setTrendyolCatSearch("");
       setTrendyolAttributes([]);
     }
     setModalOpen(true);
@@ -197,6 +202,7 @@ export default function AdminCategories() {
   const resetForm = () => {
     setEditingCategory(null);
     setTrendyolAttributes([]);
+    setTrendyolCatSearch("");
     setFormData({
       name: "", slug: "", description: "", image_url: "", parent_id: "", trendyol_category_id: "",
       hepsiburada_category_id: "", amazon_category_id: "", attribute_mapping: {}, is_active: true, sort_order: 0
@@ -392,36 +398,19 @@ export default function AdminCategories() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Trendyol Kategori Eşleşmesi</label>
-              <input
-                type="text"
-                value={trendyolCatSearch}
-                onChange={(e) => setTrendyolCatSearch(e.target.value)}
-                placeholder="Kategori adı ile filtrele..."
-                className="w-full border px-3 py-2 rounded text-sm mb-1"
-              />
-              <select
-                value={formData.trendyol_category_id}
-                onChange={(e) => {
-                  const newCatId = e.target.value;
+              <SearchableMapSelect
+                optionsUrl={`/category-mapping/trendyol/options`}
+                value={{ id: formData.trendyol_category_id || "", name: trendyolCatSearch }}
+                onChange={(v) => {
+                  const newCatId = v.id || "";
                   setFormData({ ...formData, trendyol_category_id: newCatId, attribute_mapping: {} });
-                  const found = trendyolCategories.find(c => String(c.id) === newCatId);
-                  if (found) setTrendyolCatSearch(found.name);
-                  fetchTrendyolAttributes(newCatId);
+                  setTrendyolCatSearch(v.name || "");
+                  if (newCatId) fetchTrendyolAttributes(newCatId);
                 }}
-                className="w-full border px-3 py-2 rounded text-sm bg-white"
-                size={trendyolCatSearch ? 5 : 1}
-              >
-                <option value="">-- Seçiniz --</option>
-                {trendyolCategories
-                  .filter(cat => !trendyolCatSearch || cat.name.toLowerCase().includes(trendyolCatSearch.toLowerCase()))
-                  .slice(0, 50)
-                  .map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name} (ID: {cat.id})
-                    </option>
-                  ))
-                }
-              </select>
+                placeholder="Kategori ara... (örn: şort, kadın elbise)"
+                treeMode={true}
+                data-testid="cat-trendyol-search"
+              />
               {formData.trendyol_category_id && (
                 <p className="text-xs text-green-600 mt-1">Seçili ID: {formData.trendyol_category_id}</p>
               )}

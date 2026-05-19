@@ -331,7 +331,8 @@ export default function CategoryMapping() {
                           optionsUrl={`/category-mapping/${active}/options`}
                           value={editVal}
                           onChange={(v) => setEditVal(v)}
-                          placeholder={`${active} kategorisi ara...`}
+                          placeholder={`${active} kategorisi ara... (örn: şort, kadın elbise)`}
+                          treeMode={active === "trendyol"}
                           data-testid={`cat-search-${row.category_id}`}
                         />
                       ) : (

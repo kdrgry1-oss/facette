@@ -58,6 +58,7 @@ import {
 import SizeTablePanel from "./SizeTablePanel";
 import Pagination from "../../components/admin/Pagination";
 import SearchableAttribute from "../../components/admin/product-form/SearchableAttribute";
+import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import SeoTab from "../../components/admin/product-form/SeoTab";
 import StockTab from "../../components/admin/product-form/StockTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
@@ -2314,16 +2315,17 @@ export default function AdminProducts() {
                     <div className="space-y-6">
                       <div className="space-y-2">
                         <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Trendyol Kategorisi</label>
-                        <select
-                          value={formData.trendyol_category_id}
-                          onChange={(e) => setFormData({ ...formData, trendyol_category_id: e.target.value })}
-                          className="w-full border-gray-200 border-2 px-4 py-3 rounded-xl focus:border-orange-500 outline-none transition-all font-bold text-gray-700 bg-gray-50 focus:bg-white"
-                        >
-                          <option value="">Kategori Seçin</option>
-                          {trendyolCategories.map(cat => (
-                            <option key={cat.id} value={cat.id}>{cat.name}</option>
-                          ))}
-                        </select>
+                        <SearchableMapSelect
+                          optionsUrl={`/category-mapping/trendyol/options`}
+                          value={{
+                            id: formData.trendyol_category_id || "",
+                            name: (trendyolCategories.find(c => String(c.id) === String(formData.trendyol_category_id))?.name) || "",
+                          }}
+                          onChange={(v) => setFormData({ ...formData, trendyol_category_id: v.id || "" })}
+                          placeholder="Kategori ara... (örn: şort, kadın elbise)"
+                          treeMode={true}
+                          data-testid="product-trendyol-cat-search"
+                        />
                       </div>
 
                       {/* Hepsiburada Category Mapping */}

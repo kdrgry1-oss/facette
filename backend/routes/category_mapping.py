@@ -98,21 +98,52 @@ async def list_mappings(
 # NOTE: options + bulk-delete + reset-all, generic /{category_id} route'larından
 # ÖNCE tanımlanır; aksi takdirde FastAPI "bulk-delete"/"options" path segment'ini
 # category_id olarak yakalayıp yanlış handler'a yönlendirir.
+def _tr_lower(s: str) -> str:
+    """Türkçe-uyumlu lowercase (İ→i, I→ı)."""
+    if not s:
+        return ""
+    return (
+        s.replace("İ", "i")
+         .replace("I", "ı")
+         .replace("Ş", "ş")
+         .replace("Ğ", "ğ")
+         .replace("Ü", "ü")
+         .replace("Ö", "ö")
+         .replace("Ç", "ç")
+         .lower()
+    )
+
+
 @router.get("/{marketplace}/options")
 async def search_marketplace_categories(
     marketplace: str,
     q: str = "",
-    limit: int = 100,
+    limit: int = 200,
+    mode: str = "flat",
     current_user: dict = Depends(require_admin),
 ):
-    """Pazaryeri kategori ağacından arama. Şu an Trendyol cache'i destekli
-    (trendyol_categories — subCategories düzleştirilir)."""
+    """Pazaryeri kategori ağacından arama.
+
+    - mode=flat (default): {items: [{id, name, full_path, leaf}]} — q ile filtreli.
+      Çoklu kelime AND mantığı (Türkçe-uyumlu) ve full_path üzerinde arama.
+    - mode=tree: {tree: [...nested raw nodes]} — Tree View için ham ağaç.
+    """
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     if marketplace != "trendyol":
-        return {"items": [], "hint": f"{marketplace} için kategori cache yok, manuel ID girin"}
-    q_ = (q or "").strip().lower()
+        return {"items": [], "tree": [], "hint": f"{marketplace} için kategori cache yok, manuel ID girin"}
+
+    # Tree mode — ham ağacı döndür (frontend kendi içinde filtreler ve render eder)
+    if (mode or "flat").lower() == "tree":
+        tree = []
+        async for top in db.trendyol_categories.find({}, {"_id": 0}):
+            tree.append(top)
+        return {"tree": tree, "count": len(tree)}
+
+    # Flat mode (geriye uyumlu)
+    tokens = [t for t in _tr_lower((q or "").strip()).split() if t]
     flat = []
+
     def _walk(nodes, path_prefix=""):
         for n in nodes or []:
             name = n.get("name", "")
@@ -129,9 +160,16 @@ async def search_marketplace_categories(
     async for top in db.trendyol_categories.find({}, {"_id": 0}):
         _walk([top])
 
-    if q_:
-        flat = [c for c in flat if q_ in (c["name"] + " " + c["full_path"]).lower()]
-    return {"items": flat[: max(1, min(500, int(limit)))], "count": len(flat)}
+    if tokens:
+        def _match(c):
+            hay = _tr_lower(c["full_path"])
+            return all(t in hay for t in tokens)
+        flat = [c for c in flat if _match(c)]
+
+    # Sıralama: leaf'ler yukarda, daha kısa path öne
+    flat.sort(key=lambda c: (not c["leaf"], len(c["full_path"])))
+
+    return {"items": flat[: max(1, min(2000, int(limit)))], "count": len(flat)}
 
 
 @router.post("/{marketplace}/bulk-delete")

@@ -2481,3 +2481,41 @@ Kullanıcıdan Doğan portalında manuel kesilmiş bir faturanın UBL XML dosyas
 - Edit modal'a yeni "Teknik Detay" sekmesi → parse edilmiş kumas/kalip/yikama vb. gösterimi
 - Stok adedi senkronizasyonu (şu an Ticimax'tan 0 geliyor — gerçek stok için ayrı SOAP `SelectAsortiMiktar` gerekiyor mu test edilecek)
 - Miu Miu Faz 2 (PLP/PDP) — gerçek varyantlar + özellikler ile
+
+## Iteration 48 — Trendyol Kategori: Ağaç Menü + Türkçe Multi-Word Arama (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Kullanıcı "şort" arattığında Trendyol kategori dropdown'ı bulamıyordu; alt kategoriler düz listede karışıyor, aramayı bulmuyordu. Kullanıcı tüm kategori inputlarında Trendyol'daki gibi Ağaç Menü + tam veri search istedi.
+
+**Backend** — `/app/backend/routes/category_mapping.py`:
+- `/api/category-mapping/{marketplace}/options` endpoint'i yeniden yazıldı
+  - Yeni `?mode=tree` parametresi → tüm Trendyol kategori ağacını nested olarak döner
+  - Türkçe-uyumlu lowercase helper (`_tr_lower` — İ→i, I→ı, Ş→ş, vb.)
+  - **Multi-word AND search**: "kadın şort" yazıldığında her iki kelime de path içinde aranır
+  - Default limit 200'e (max 2000) yükseltildi
+  - Yaprak (leaf) kategoriler ve kısa path'ler üstte gösterilecek şekilde sıralanıyor
+
+**Frontend** — `/app/frontend/src/components/admin/SearchableMapSelect.jsx`:
+- Yeni `treeMode` prop'u eklendi → Tree View (▶/▼ expand/collapse, indented hierarchy)
+- Yeni `leafOnly` prop (treeMode=true iken default) → sadece yaprak kategori seçilebilir
+- Arama yapıldığında eşleşen düğümün tüm parent'ları otomatik açılır
+- Matching kelimeler `<mark>` ile vurgulanır (sarı highlight)
+- Türkçe locale lowercase ile arama (toLocaleLowerCase("tr"))
+- "X yaprak kategori bulundu" sticky header
+
+**Uygulanan ekranlar** — Tüm Trendyol kategori input alanları:
+- `/app/frontend/src/pages/admin/CategoryMapping.jsx` (Düzenle satırı dropdown)
+- `/app/frontend/src/pages/admin/Categories.jsx` (Kategori formu — eski select + filtre input'u SearchableMapSelect ile değiştirildi)
+- `/app/frontend/src/pages/admin/Products.jsx` (Ürün modal — eski select tek-isim listesi SearchableMapSelect ile değiştirildi)
+
+### Test (curl)
+- `?q=şort&limit=20` → 7 alt kategori (Spor Şort, Deniz Şortu, Şort & Bermuda, Hamile Şort, Büyük Beden Şort, Boks Şortu, vb.) ✓
+- `?mode=tree` → 16 top-level kategori (Aksesuar, Anne & Bebek, Ayakkabı, vb.) ✓
+
+### Pending / Next
+- P1: Miu Miu Storefront Faz 2 & 3 (PLP/PDP, Iyzico, Üye/Giriş, Sepet, Favoriler)
+- P1: Cloudflare R2 Object Storage entegrasyonu
+- P2: İYS test (real key)
+- P2: FCM (Push notification)
+- Refactoring: `integrations.py` (>5000 satır) modüllere bölünmeli
