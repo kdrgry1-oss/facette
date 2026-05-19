@@ -1,61 +1,91 @@
-"""Tüm ürünlere sabit/varsayılan değerleri zorla yazar:
-  - Cinsiyet = Kadın
-  - Yaş Grubu = Yetişkin
-  - Menşei   = TR
+"""Tüm ürünlere Trendyol/HB/Temu attribute formundaki BOŞ alanları akıllı
+default'larla doldurur.
 
-Ayrıca KATEGORİ-bazlı default'lar:
-  - Elbise/Tunik kategorisinde "Boy" değeri ürün adından çıkarılır (Maxi/Midi/Mini)
-  - Pantolon/Şort/Etek için "Bel" default
-  - Şort/Bermuda → Kol Boyu = Kolsuz (mantıksız çıkarımı kaldırır)
+Trendyol attribute kütüphanesindeki TAM değerlerle eşleşir:
+  - Cinsiyet      → "Kadın / Kız"
+  - Yaş Grubu     → "Yetişkin"
+  - Menşei        → "TR"
+  - Astar Durumu  → "Astarsız"  (kategori "Ceket/Trençkot/Yelek" ise "Astarlı")
+  - Koleksiyon   → "Casual / Günlük"
+  - Sezon        → "Tüm Sezonlar"
+  - Kapama Şekli → "Kapamasız"
+  - Cep          → "Cepsiz"     (Pantolon/Şort/Bermuda kategorisinde "Yan Cep")
+  - Yaka Tipi   → Kategori-bazlı (Elbise/Bluz/Tunik→"Yuvarlak Yaka"; Şort/Etek/Pantolon→"Yakasız")
+  - Kalıp       → "Regular"     (yoksa)
+  - Bel         → "Normal Bel"  (Pantolon/Etek/Şort'ta yoksa)
+  - Kalınlık    → "Orta"        (yoksa)
+  - Kol Boyu    → Kategori-bazlı (önceden zaten yapıldı)
 
-Mevcut manuel girilen değerler KORUNUR; sadece BOŞ olan alanlar doldurulur.
-
-Run: `python /app/backend/scripts/apply_default_attrs.py`
+Mevcut manuel değerler KORUNUR — sadece boş alanlara yazıyor.
 """
 import asyncio
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from routes.deps import db  # noqa: E402
 
 
-# Tüm ürünlere uygulanacak hard-default'lar
+# Trendyol kütüphanesi formatıyla tam eşleşen değerler
 GLOBAL_DEFAULTS = {
-    "Cinsiyet": "Kadın",
+    "Cinsiyet": "Kadın / Kız",
     "Yaş Grubu": "Yetişkin",
     "Menşei": "TR",
+    "Koleksiyon": "Casual / Günlük",
+    "Sezon": "Tüm Sezonlar",
+    "Kapama Şekli": "Kapamasız",
+    "Astar Durumu": "Astarsız",
+    "Cep": "Cepsiz",
+    "Kalıp": "Regular",
+    "Kalınlık": "Orta",
+}
+
+# Kategori → ek default'lar
+CATEGORY_OVERRIDES = {
+    "ceket":   {"Astar Durumu": "Astarlı", "Yaka Tipi": "Ceket Yaka", "Kapama Şekli": "Düğmeli"},
+    "trençkot": {"Astar Durumu": "Astarlı", "Yaka Tipi": "Klasik Yaka", "Kapama Şekli": "Kuşaklı"},
+    "yelek":   {"Astar Durumu": "Astarlı", "Yaka Tipi": "V Yaka"},
+    "elbise":  {"Yaka Tipi": "Yuvarlak Yaka"},
+    "tunik":   {"Yaka Tipi": "Yuvarlak Yaka"},
+    "bluz":    {"Yaka Tipi": "Yuvarlak Yaka"},
+    "gömlek":  {"Yaka Tipi": "Klasik Yaka", "Kapama Şekli": "Düğmeli"},
+    "kazak":   {"Yaka Tipi": "Yuvarlak Yaka"},
+    "atlet":   {"Yaka Tipi": "Yuvarlak Yaka", "Kol Boyu": "Kolsuz"},
+    "büstiyer": {"Yaka Tipi": "Straplez", "Kol Boyu": "Askılı"},
+    "bandana": {"Yaka Tipi": "Straplez", "Kol Boyu": "Kolsuz"},
+    "şort":    {"Yaka Tipi": "Yakasız", "Kol Boyu": "Yok", "Cep": "Yan Cep", "Bel": "Normal Bel"},
+    "bermuda": {"Yaka Tipi": "Yakasız", "Kol Boyu": "Yok", "Cep": "Yan Cep", "Bel": "Normal Bel"},
+    "pantolon": {"Yaka Tipi": "Yakasız", "Kol Boyu": "Yok", "Cep": "Yan Cep", "Bel": "Normal Bel"},
+    "etek":    {"Yaka Tipi": "Yakasız", "Kol Boyu": "Yok", "Bel": "Normal Bel"},
+    "tulum":   {"Yaka Tipi": "Yuvarlak Yaka", "Bel": "Normal Bel"},
+    "takım":   {"Yaka Tipi": "Yuvarlak Yaka"},
+    "kimono":  {"Yaka Tipi": "Devrik Yaka", "Astar Durumu": "Astarsız"},
 }
 
 
-# Kategori → ek default'lar (örn. tüm "Şort"larda Kol Boyu=Kolsuz)
-CATEGORY_DEFAULTS = {
-    # category name lowercased → defaults dict
-    "şort": {"Kol Boyu": "Kolsuz"},
-    "bermuda": {"Kol Boyu": "Kolsuz"},
-    "askılı": {"Kol Boyu": "Askılı"},
-    "büstiyer": {"Kol Boyu": "Askılı"},
-    "atlet": {"Kol Boyu": "Kolsuz"},
-    "etek": {"Kol Boyu": "Yok"},
-    "pantolon": {"Kol Boyu": "Yok"},
-    "tulum": {},
-}
-
-
-# Üründen "Boy" çıkarımı (sadece elbise/etek/tulum gibi alt kategoriler için)
-BOY_CATEGORIES = {"elbise", "tulum", "etek", "tunik"}
-BOY_KEYWORDS = [
-    ("maxi", "Maxi"),
-    ("midi", "Midi"),
-    ("mini", "Mini"),
-    ("uzun", "Uzun"),
-    ("kısa", "Kısa"),
-]
+BOY_CATEGORIES = ("elbise", "tunik", "etek", "tulum")
+BOY_KEYWORDS = [("maxi", "Maxi"), ("midi", "Midi"), ("mini", "Mini"),
+                ("uzun", "Uzun"), ("kısa", "Kısa")]
 
 
 def _norm(s: str) -> str:
     return (s or "").lower().strip()
+
+
+def _set_if_empty(target: dict, key: str, value: str, counts: dict) -> bool:
+    """Yalnızca boş ise yaz; mevcut değeri override etme. Önceden 'Kadın'
+    yazılmış (yanlış format) varsa onu da düzelt."""
+    cur = target.get(key)
+    if not cur:
+        target[key] = value
+        counts[key] = counts.get(key, 0) + 1
+        return True
+    # Cinsiyet "Kadın" → "Kadın / Kız" düzeltmesi
+    if key == "Cinsiyet" and cur == "Kadın":
+        target[key] = "Kadın / Kız"
+        counts[key + "_fixed"] = counts.get(key + "_fixed", 0) + 1
+        return True
+    return False
 
 
 async def main():
@@ -67,7 +97,7 @@ async def main():
 
     total = len(prods)
     changed = 0
-    counts: dict[str, int] = {}
+    counts: dict = {}
 
     for p in prods:
         cat = _norm(p.get("category_name") or "")
@@ -75,7 +105,6 @@ async def main():
 
         attrs = p.get("attributes") or {}
         if isinstance(attrs, list):
-            # Eski Trendyol array shape'ini dict'e çevir
             new_dict = {}
             for it in attrs:
                 if isinstance(it, dict) and it.get("name"):
@@ -84,38 +113,25 @@ async def main():
         hb = p.get("hepsiburada_attributes") or {}
         temu = p.get("temu_attributes") or {}
 
-        # 1) Global defaults
-        applied_changes = False
-        for k, v in GLOBAL_DEFAULTS.items():
-            for target in (attrs, hb, temu):
-                if not target.get(k):
-                    target[k] = v
-                    counts[k] = counts.get(k, 0) + 1
-                    applied_changes = True
+        # Hangi default'ları uygulayacağız?
+        applied_defaults = dict(GLOBAL_DEFAULTS)
+        # Kategori override
+        for ckey, vals in CATEGORY_OVERRIDES.items():
+            if ckey in cat or ckey in name:
+                applied_defaults.update(vals)
 
-        # 2) Kategori defaults
-        cat_defaults = {}
-        for ckey, vals in CATEGORY_DEFAULTS.items():
-            if ckey in cat:
-                cat_defaults.update(vals)
-        for k, v in cat_defaults.items():
-            for target in (attrs, hb, temu):
-                if not target.get(k):
-                    target[k] = v
-                    counts[k] = counts.get(k, 0) + 1
-                    applied_changes = True
-
-        # 3) "Boy" — sadece elbise/etek/tulum/tunik için ad'dan çıkar
+        # "Boy" — sadece elbise/etek/tulum/tunik için ad'dan çıkar
         if any(c in cat for c in BOY_CATEGORIES) or any(c in name for c in BOY_CATEGORIES):
-            if not attrs.get("Boy"):
-                for kw, val in BOY_KEYWORDS:
-                    if kw in name:
-                        for target in (attrs, hb, temu):
-                            if not target.get("Boy"):
-                                target["Boy"] = val
-                                counts["Boy"] = counts.get("Boy", 0) + 1
-                                applied_changes = True
-                        break
+            for kw, val in BOY_KEYWORDS:
+                if kw in name and "Boy" not in applied_defaults:
+                    applied_defaults["Boy"] = val
+                    break
+
+        applied_changes = False
+        for key, val in applied_defaults.items():
+            for target in (attrs, hb, temu):
+                if _set_if_empty(target, key, val, counts):
+                    applied_changes = True
 
         if applied_changes:
             await db.products.update_one(
@@ -129,7 +145,7 @@ async def main():
             changed += 1
 
     print(f"✅ {changed}/{total} ürüne default uygulandı.")
-    print("Eklenen alan dağılımı (her marketplace için ayrı sayar):")
+    print("Eklenen / düzeltilen alan dağılımı:")
     for k, v in sorted(counts.items(), key=lambda x: -x[1]):
         print(f"   {v:5d}  {k}")
 
