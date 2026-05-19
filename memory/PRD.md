@@ -2694,3 +2694,21 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending
 - Yok
+
+## Iteration 56 — Değer Eşleştirme Modal Arama Kutusu (2026-02-19)
+
+### ✅ Çözülenler
+
+**Eklenen:** "Değer Eşleştirme" modal'ında sağ tarafta tablo başlığı üstüne sticky search input:
+- Türkçe locale-insensitive arama (`toLocaleLowerCase("tr")`)
+- Substring match — "s" yazınca S/STD/Standart/XS satırları kalır
+- Sağda canlı sayaç: "N satır · M eşleşti"
+- X butonu ile temizleme
+- Attribute değiştiğinde arama otomatik sıfırlanır (`useEffect`)
+- Empty state: `"<query>" ile eşleşen değer yok` mesajı
+
+### Files
+- `/app/frontend/src/components/admin/MarketplaceAdvancedMatch.jsx` (state: `valSearch`, filtreleme + render)
+
+### Pending
+- Yok

@@ -566,6 +566,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   const [saving, setSaving] = useState(false);
   const [selectedAttrId, setSelectedAttrId] = useState("");
   const [hint, setHint] = useState("");
+  const [valSearch, setValSearch] = useState("");
+  // Attribute değiştiğinde aramayı sıfırla
+  useEffect(() => { setValSearch(""); }, [selectedAttrId]);
   const color = MP_COLORS[marketplace] || "orange";
 
   const load = useCallback(async () => {
@@ -747,8 +750,34 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
 
             {/* Sağ taraf — değer tablosu */}
             <div className="flex-1 border rounded-lg overflow-auto">
+              {/* Arama kutusu */}
+              <div className="bg-white border-b px-3 py-2 sticky top-0 z-10 flex items-center gap-2">
+                <Search size={14} className="text-gray-400" />
+                <input
+                  type="text"
+                  value={valSearch}
+                  onChange={(e) => setValSearch(e.target.value)}
+                  placeholder={`"${attrName || "değer"}" içinde ara (örn: s, xl, 38)...`}
+                  className="flex-1 text-sm bg-transparent focus:outline-none placeholder:text-gray-400"
+                  data-testid="val-search-input"
+                />
+                {valSearch && (
+                  <button onClick={() => setValSearch("")} className="text-gray-400 hover:text-black" data-testid="val-search-clear">
+                    <X size={14} />
+                  </button>
+                )}
+                <span className="text-[10px] text-gray-400 hidden sm:inline">
+                  {(() => {
+                    const all = localValues[attrName] || [];
+                    const q = (valSearch || "").toLocaleLowerCase("tr").trim();
+                    const filtered = q ? all.filter((v) => String(v).toLocaleLowerCase("tr").includes(q)) : all;
+                    const mappedN = filtered.filter((v) => valueMappings[`${selectedAttrId}|${v}`]).length;
+                    return `${filtered.length} satır · ${mappedN} eşleşti`;
+                  })()}
+                </span>
+              </div>
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0 border-b">
+                <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="text-left px-4 py-2 text-xs text-gray-500">
                       Sistem Değeri <span className="text-gray-400 font-normal">— {attrName}</span>
@@ -757,50 +786,52 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                   </tr>
                 </thead>
                 <tbody>
-                  {(localValues[attrName] || []).length === 0 ? (
-                    <tr><td colSpan={2} className="py-8 text-center text-xs text-gray-400">
-                      Bu kategorideki ürünlerde "{attrName}" özelliği için değer yok.
-                    </td></tr>
-                  ) : (
-                    (_isSizeAttrName(attrName)
-                      ? sortLikeSize(localValues[attrName] || [], (x) => x)
-                      : (localValues[attrName] || [])
-                    ).map((lv) => {
+                  {(() => {
+                    const all = localValues[attrName] || [];
+                    const q = (valSearch || "").toLocaleLowerCase("tr").trim();
+                    const filtered = q ? all.filter((v) => String(v).toLocaleLowerCase("tr").includes(q)) : all;
+                    if (filtered.length === 0) {
+                      return (
+                        <tr><td colSpan={2} className="py-8 text-center text-xs text-gray-400">
+                          {q ? `"${valSearch}" ile eşleşen değer yok` : `Bu kategorideki ürünlerde "${attrName}" özelliği için değer yok.`}
+                        </td></tr>
+                      );
+                    }
+                    const sortedLocal = _isSizeAttrName(attrName) ? sortLikeSize(filtered, (x) => x) : filtered;
+                    return sortedLocal.map((lv) => {
                       const mappedId = valueMappings[`${selectedAttrId}|${lv}`] || "";
                       const isMapped = !!mappedId;
                       const mpVals = currentAttr?.attributeValues || [];
-                      const sortedMp = _isSizeAttrName(attrName)
-                        ? sortLikeSize(mpVals, (v) => v.name)
-                        : mpVals;
+                      const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(mpVals, (v) => v.name) : mpVals;
                       return (
-                      <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
-                        <td className="px-4 py-2 font-medium">
-                          <div className="flex items-center gap-2">
-                            <span>{lv}</span>
-                            {isMapped && (
-                              <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2">
-                          <select
-                            value={mappedId}
-                            onChange={(e) =>
-                              setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
-                            }
-                            className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
-                            data-testid={`adv-valmap-${lv}`}
-                          >
-                            <option value="">— seçilmemiş —</option>
-                            {sortedMp.map((v) => (
-                              <option key={v.id} value={v.id}>{v.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
+                        <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
+                          <td className="px-4 py-2 font-medium">
+                            <div className="flex items-center gap-2">
+                              <span>{lv}</span>
+                              {isMapped && (
+                                <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2">
+                            <select
+                              value={mappedId}
+                              onChange={(e) =>
+                                setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
+                              }
+                              className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
+                              data-testid={`adv-valmap-${lv}`}
+                            >
+                              <option value="">— seçilmemiş —</option>
+                              {sortedMp.map((v) => (
+                                <option key={v.id} value={v.id}>{v.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
                       );
-                    })
-                  )}
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
