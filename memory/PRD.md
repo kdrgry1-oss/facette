@@ -21,19 +21,25 @@ Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli 
 
 
 
-## Iteration 48 (2026-02-18) — Dinamik Attribute Parser + Ticimax Aktif/Pasif Sync + Toggle Bug Fix
+## Iteration 48 (2026-02-18) — Dinamik Attribute Parser + Ticimax Master Eşleme + Pasif Sync + Toggle Bug Fix
 
 ### ✅ Tamamlananlar
 - **Dinamik attribute parser** (`/app/backend/utils/attr_parser.py`):
   - Açıklamadaki TÜM `<strong>Etiket:</strong>Değer` kalıplarını yakalar (predefined liste GEREKTİRMEZ).
   - `<i>/<em>` markup veya bullet'lı (`•`) format için fallback parser (plain-text "Label: value" satırı).
   - Ölçü grupları için alt-attribute çıkarımı (Beden Ölçüleri · Boy/Gogus/Kol_boyu).
-  - **Sonuç**: 319 ürünün **309'unda** zengin attribute (önceden 127). Kumaş Bilgisi, Kalıp, Model Ölçüleri, Yıkama, Bakım, Astar, Cep, Boy, Renk, Web Color vs. otomatik.
-- **Ticimax pasif sync**: `/api/integrations/xml/products/import?deactivate_missing=true` artık feed'de OLMAYAN tüm `xml_feed` ürünleri otomatik `is_active=False` yapar. Response'a `deactivated` sayacı eklendi.
-- **Pasif butonu fix**: `Products.jsx` toggle butonları artık explicit "set to active/passive" mantığı (önceden inverted conditional → tıklanmıyordu). Backend `/api/products/{id}/toggle-active` kullanılıyor.
+  - **Sonuç**: 319 ürünün **309'unda** zengin attribute (önceden 127).
+- **Ticimax MASTER teknik detay eşleme** (`/app/backend/scripts/enrich_attrs_from_ticimax_master.py`):
+  - Ticimax SOAP `SelectTeknikDetayOzellik` + `SelectTeknikDetayDeger` ile master listeyi (18 özellik, 165 değer) çekiyor.
+  - Her ürünün adı + description'unda master değerleri akıllı regex ile arıyor → eşleşeni `attributes[ticimax_*]` olarak ekliyor.
+  - **Sonuç**: **606/608 ürüne** ortalama 4-12 yapılandırılmış özellik atandı: **Web Color (542), Materyal (532), Kalıp (476), Ürün İçerik Bilgisi (450), Boy (375), Kol Boyu (364), Cep (224), Yaka Tipi (221), Kapama Şekli (218), Astar Durumu (205), Desen (191), Bel (157), Kumaş Tipi (140), Kalınlık (116)**.
+  - Background: `SelectUrun` WS yetkisi mevcut Key'de açık olmadığı için ürün-özellik mapping doğrudan SOAP'tan alınamıyor; bu nedenle master+regex eşleme stratejisi devreye alındı.
+- **Ticimax pasif sync**: `/api/integrations/xml/products/import?deactivate_missing=true` → feed'de OLMAYAN tüm `xml_feed` ürünleri otomatik `is_active=False` yapar. Response'a `deactivated` sayacı eklendi.
+- **Pasif butonu fix**: Toggle butonları artık explicit "set to active/passive" mantığı (önceden inverted conditional → tıklanmıyordu). Backend `/api/products/{id}/toggle-active` kullanılıyor.
 
 ### Dosya Değişiklikleri
 - ✏️ `/app/backend/utils/attr_parser.py` (yeni)
+- ✏️ `/app/backend/scripts/enrich_attrs_from_ticimax_master.py` (yeni, MASTER eşleme)
 - ✏️ `/app/backend/routes/integrations.py` (XML import: yeni parser + deactivate_missing)
 - ✏️ `/app/backend/scripts/reparse_product_attrs.py` (yeni parser kullanır)
 - ✏️ `/app/frontend/src/pages/admin/Products.jsx` (toggle bug fix + data-testid)
