@@ -2791,3 +2791,27 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 
 ### Pending
 - Reddedilen 2 ürün için → Trendyol panelinden eski ürün silinmeli veya update endpoint kullanılmalı
+
+## Iteration 60 — Gerçek Trendyol Durum Doğrulama + Bandana Beden Fix (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** Kullanıcı "ürünler Trendyol panelinde yok" diyordu. Sync code'umuz "23 başarılı" dedi ama batch detail API'sinde 24/25 FAILED görünüyordu.
+
+**Gerçek tespit (Trendyol product list API ile doğrulama):**
+- 23 ürün Trendyol'da **gerçekten** var, `approved=True, onSale=True` (önceki batch'lerde başarıyla oluşmuş, son batch duplicate diye reddetmiş)
+- 2 Bandana eklenmemişti — sebep: Trendyol kategori 1046'da **Beden zorunlu**, mapping'de yoktu
+
+**Yapılan:**
+1. Bandana category_mapping (1737)'in default_mappings'ine `338: 6821` ("Tek Ebat") eklendi
+2. 2 Bandana tekrar push edildi → status COMPLETED, başarıyla Trendyol'a yüklendi (approved=False, onay bekliyor)
+
+**Toplam Trendyol durumu:**
+- 23 ürün approved & onSale ✓
+- 2 Bandana Trendyol içerik onayı bekliyor (1-24 saat)
+
+### Notlar
+- Bizim sync code success=23 dediği zaman, Trendyol batch detail'da 24/25 FAILED görünüyor. Sebep: önceki batch'lerden duplicate. Görsel olarak ürünler Trendyol'da var, ama bu bir code bug'ı — successCount yanlış hesaplanıyor olabilir.
+
+### Action Item
+- "Aynı barkodlu ürün var" hatasını success olarak SAYMA yerine "zaten kayıtlı" diye ayrı bir status'le raporla
