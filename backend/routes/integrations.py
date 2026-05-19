@@ -1100,6 +1100,7 @@ async def sync_products_to_trendyol(
         
     try:
         from datetime import datetime, timezone
+        import asyncio as _asyncio
         started_at = datetime.now(timezone.utc).isoformat()
         response = await client.create_products(items_to_send)
         batch_id = response.get("batchRequestId")
@@ -1116,29 +1117,87 @@ async def sync_products_to_trendyol(
                 trendyol_error = "; ".join([
                     (e.get("message") if isinstance(e, dict) else str(e)) for e in trendyol_error
                 ])[:1000]
-        # Save success log
+
+        # 🔍 Gerçek batch sonucunu sorgula: Trendyol asenkron işliyor; 5-15sn'de tamamlanır.
+        # "aktarıldı diyor ama Trendyol'da yok" tuzağını önler.
+        batch_failed_items = []
+        batch_success_count = 0
+        batch_final_status = "INPROGRESS"
+        if batch_id:
+            for attempt in range(6):  # 6 deneme x 2.5sn = max ~15sn
+                await _asyncio.sleep(2.5)
+                try:
+                    br = await client.get_batch_request_result(batch_id)
+                    batch_final_status = (br or {}).get("status") or "INPROGRESS"
+                    if batch_final_status.upper() in ("COMPLETED", "FAILED"):
+                        for it in (br or {}).get("items", []) or []:
+                            if (it.get("status") or "").upper() == "FAILED":
+                                req = it.get("requestItem", {}) or {}
+                                prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                batch_failed_items.append({
+                                    "stock_code": prod.get("stockCode") or req.get("barcode") or "",
+                                    "barcode": prod.get("barcode") or req.get("barcode") or "",
+                                    "title": prod.get("title") or "",
+                                    "reasons": it.get("failureReasons") or [],
+                                })
+                        batch_success_count = max(0, (br or {}).get("itemCount", 0) - (br or {}).get("failedItemCount", 0))
+                        break
+                except Exception as poll_err:
+                    logger.warning(f"Batch poll {attempt+1}/6 failed: {poll_err}")
+
+        # Local "errors" + Trendyol API hataları + Batch failure'ları birleştir
+        all_errors = list(errors)
+        if trendyol_error:
+            all_errors.append(f"Trendyol API: {trendyol_error}")
+        for f in batch_failed_items:
+            reason = "; ".join(f.get("reasons") or [])
+            all_errors.append(f"{f.get('title') or f.get('stock_code')} [{f.get('stock_code')}]: {reason}")
+
+        # Final status hesapla
+        if not batch_id:
+            final_status = "failed"
+        elif batch_failed_items and batch_success_count == 0:
+            final_status = "failed"
+        elif batch_failed_items:
+            final_status = "partial"
+        elif batch_final_status.upper() == "INPROGRESS":
+            final_status = "pending"  # 15sn'de tamamlanmadı, kullanıcıya logdan takibi öneriliyor
+        else:
+            final_status = "success" if not errors else "partial"
+
         log_doc = {
             "id": generate_id(),
             "started_at": started_at,
             "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": ("success" if not errors and batch_id else ("partial" if batch_id else "failed")),
+            "status": final_status,
             "products_attempted": len(products),
-            "products_sent": len(items_to_send) if batch_id else 0,
+            "products_sent": batch_success_count if batch_id else 0,
+            "products_failed": len(batch_failed_items),
             "batch_request_id": batch_id,
-            "errors": errors + ([f"Trendyol API: {trendyol_error}"] if trendyol_error else []),
+            "batch_final_status": batch_final_status,
+            "errors": all_errors,
+            "failed_items": batch_failed_items,
             "trendyol_response": response,
-            "message": f"{len(items_to_send)} ürün aktarıldı." if batch_id else f"Trendyol kabul etmedi: {trendyol_error}"
+            "message": (
+                f"{batch_success_count} ürün başarıyla aktarıldı." if batch_id and batch_final_status.upper() == "COMPLETED" and not batch_failed_items
+                else f"{batch_success_count} başarılı, {len(batch_failed_items)} HATA — detaylar loglarda." if batch_failed_items
+                else f"Batch alındı, Trendyol işliyor (durum: {batch_final_status}). Loglardan takip edin." if batch_id
+                else f"Trendyol kabul etmedi: {trendyol_error}"
+            ),
         }
         await db.trendyol_sync_logs.insert_one(log_doc)
+        # _id ekleniyor MongoDB tarafından — response'a koyma
+        log_doc.pop("_id", None)
         return {
-            "success": bool(batch_id),
-            "message": (f"{len(items_to_send)} ürün Trendyol entegrasyonuna aktarıldı (Batch Request)." if batch_id
-                        else f"Trendyol kabul etmedi: {trendyol_error or 'bilinmeyen hata'}"),
+            "success": bool(batch_id) and not batch_failed_items and batch_final_status.upper() != "FAILED",
+            "message": log_doc["message"],
             "total": len(products),
-            "successful": len(items_to_send) if batch_id else 0,
-            "failed": len(errors) + (0 if batch_id else len(items_to_send)),
+            "successful": batch_success_count if batch_id else 0,
+            "failed": len(batch_failed_items) + (0 if batch_id else len(items_to_send)),
             "batchRequestId": batch_id,
-            "errors": errors + ([f"Trendyol API: {trendyol_error}"] if trendyol_error else []),
+            "batch_final_status": batch_final_status,
+            "failed_items": batch_failed_items,
+            "errors": all_errors,
             "trendyol_response": response,
         }
     except Exception as e:

@@ -2591,3 +2591,30 @@ Validation paneli tüm 4 dokümanı tek tek kontrol ediyordu, görselsizler hata
 
 ### Pending / Next
 - Aynı stock_code'lu duplicate'leri otomatik temizleyecek bir admin endpoint eklenebilir (long-term data hygiene)
+
+## Iteration 52 — Trendyol Push: Gerçek Batch Status Polling (2026-02-19)
+
+### ✅ Çözülenler
+
+**Sorun:** FCSS1400001 (Terra Pamuklu Bağlamalı Kimono Beyaz) için "aktarıldı" mesajı gösteriliyordu, ama Trendyol'da gerçekte oluşmamıştı. Sebep: Trendyol asenkron işliyor; `batchRequestId` alındığı an "başarılı" sayılıyordu. Gerçek batch sonucunu (Kalıp özelliği eksik vb.) sorgulayıp UI'a yansıtmıyorduk.
+
+**Kök Hata (Trendyol'dan):** 
+> `"Zorunlu kategori özellik bilgisi bulunamadı. Eksik özellik Id: 179, Özellik Adı: Kalıp."`
+
+Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'inde eksikti.
+
+**Çözüm:** `/api/integrations/trendyol/products/sync` endpoint'i (`integrations.py`) güncellendi:
+- `client.create_products()` ile batch_id alındıktan sonra **6×2.5sn (max 15sn) polling** ile gerçek batch sonucu sorgulanır
+- `failed_items` listesi (her item için stock_code, title, failureReasons) toplanır
+- `log_doc`'a kaydedilir: `failed_items`, `batch_final_status`, `products_failed`
+- Response'un `success` field'ı artık `batch_failed_items` ve `batch_final_status` da kontrol eder
+- Mesaj: "X başarılı, Y HATA — detaylar loglarda" / "Trendyol kabul etmedi: ..."
+- Status: `success` / `partial` / `failed` / `pending` (15sn'de tamamlanmazsa)
+
+### Test
+- POST `/api/integrations/trendyol/products/sync` `{"stock_codes":["FCSS1400001"]}`:
+  - Önce: `success: true, message: "1 ürün aktarıldı"` (yanlış)
+  - Sonra: `success: false, message: "Trendyol kabul etmedi: ..."` veya `failed_items: [{title, stock_code, reasons:["...Kalıp..."]}]` ✓
+
+### Pending / Next
+- Kimono kategorisi (yerel 1793) için Trendyol 607 + Kalıp default mapping yapılmalı (kullanıcı action)
