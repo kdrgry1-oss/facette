@@ -516,6 +516,8 @@ function FilteredPushPanel({ marketplace, auth }) {
   const [lastResult, setLastResult] = useState(null);
   const [validation, setValidation] = useState(null);
   const [showInvalidOnly, setShowInvalidOnly] = useState(true);
+  const [batchDetail, setBatchDetail] = useState(null);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const supportedMarketplaces = ["trendyol"]; // şu an sadece Trendyol için
   if (!supportedMarketplaces.includes(marketplace)) return null;
@@ -561,6 +563,23 @@ function FilteredPushPanel({ marketplace, auth }) {
       toast.error(e.response?.data?.detail || "Doğrulama başarısız");
     } finally {
       setValidating(false);
+    }
+  };
+
+  const loadBatchDetail = async (batchId) => {
+    if (!batchId) return;
+    setBatchLoading(true);
+    setBatchDetail(null);
+    try {
+      const r = await axios.get(
+        `${API}/integrations/${marketplace}/batch/${batchId}`,
+        { ...auth, timeout: 30000 }
+      );
+      setBatchDetail(r.data);
+    } catch (e) {
+      toast.error("Batch detayı alınamadı: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setBatchLoading(false);
     }
   };
 
@@ -787,6 +806,82 @@ function FilteredPushPanel({ marketplace, auth }) {
           </div>
           {lastResult.message && (
             <div className="px-3 py-2 text-xs text-gray-700 border-b">{lastResult.message}</div>
+          )}
+          {lastResult.batchRequestId && (
+            <div className="px-3 py-2 border-b flex items-center justify-between bg-blue-50">
+              <div className="text-xs text-blue-900">
+                <b>Trendyol Batch'i ardışık işliyor</b> — gerçek SUCCESS/FAILED durumu için detayları çekin.
+              </div>
+              <button
+                onClick={() => loadBatchDetail(lastResult.batchRequestId)}
+                disabled={batchLoading}
+                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold disabled:opacity-50"
+                data-testid="load-batch-detail-btn"
+              >
+                {batchLoading ? "Yükleniyor..." : "Batch Detayını Yükle"}
+              </button>
+            </div>
+          )}
+          {batchDetail && (
+            <div className="px-3 py-2 border-b bg-gray-50" data-testid="batch-detail">
+              <div className="grid grid-cols-4 gap-2 text-center mb-2">
+                <div className="bg-white border rounded p-1.5">
+                  <div className="text-[9px] text-gray-500 uppercase">Status</div>
+                  <div className="text-xs font-bold">{batchDetail.status}</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded p-1.5">
+                  <div className="text-[9px] text-green-700 uppercase">Başarılı</div>
+                  <div className="text-xs font-bold text-green-700">{batchDetail.success_count}</div>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded p-1.5">
+                  <div className="text-[9px] text-red-700 uppercase">Hatalı</div>
+                  <div className="text-xs font-bold text-red-700">{batchDetail.failed_count}</div>
+                </div>
+                <div className="bg-white border rounded p-1.5">
+                  <div className="text-[9px] text-gray-500 uppercase">Toplam</div>
+                  <div className="text-xs font-bold">{batchDetail.item_count}</div>
+                </div>
+              </div>
+              {(batchDetail.top_failures || []).length > 0 && (
+                <div className="mb-2">
+                  <div className="text-[10px] font-bold text-red-800 uppercase mb-1">En Çok Görülen Hatalar</div>
+                  <div className="space-y-0.5">
+                    {batchDetail.top_failures.map((f, i) => (
+                      <div key={i} className="text-[10px] bg-white border border-red-200 rounded px-2 py-1 flex items-start justify-between gap-2">
+                        <span className="text-red-900 flex-1">{f.reason}</span>
+                        <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold shrink-0">×{f.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <details>
+                <summary className="text-[10px] text-gray-500 cursor-pointer hover:text-black">Tüm Item Detayları ({batchDetail.items?.length || 0})</summary>
+                <div className="mt-1 max-h-60 overflow-auto bg-white border rounded">
+                  <table className="w-full text-[10px]">
+                    <tbody>
+                      {(batchDetail.items || []).map((it, i) => (
+                        <tr key={i} className={`border-b ${it.status === "SUCCESS" ? "" : "bg-red-50/30"}`}>
+                          <td className="px-2 py-1 font-mono">{it.requestItem?.barcode || it.requestItem?.product?.barcode || "-"}</td>
+                          <td className="px-2 py-1">
+                            {it.status === "SUCCESS" ? (
+                              <span className="text-green-700 font-bold">✓ SUCCESS</span>
+                            ) : (
+                              <div>
+                                <span className="text-red-700 font-bold">✗ {it.status}</span>
+                                {(it.failureReasons || []).slice(0, 2).map((fr, j) => (
+                                  <div key={j} className="text-red-900 mt-0.5 break-words">{fr}</div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
           )}
           {(lastResult.errors || []).length > 0 && (
             <div className="px-3 py-2">

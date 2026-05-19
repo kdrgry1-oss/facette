@@ -4,7 +4,46 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 53 (2026-05-19) — Trendyol Sync KRITIK Bug Fix + Hata Detay UI
+## Iteration 54 (2026-05-19) — Trendyol Batch Detail + 4 KRITIK Bug Fix
+
+### 🚨 KRITIK Bug 1: attribute resolve_attributes LIST gibi iter ediyordu
+Ürünlerin `attributes` alanı sistemde **DICT** ({key: {label, value}}) olarak saklanıyor; `resolve_attributes` LIST gibi iter ediyordu → Trendyol'a `attributes: []` boş gönderiliyordu → "Zorunlu kategori özellik bilgisi bulunamadı (Cinsiyet, Kumaş Tipi, Boy)" hataları.
+
+**Fix**: `_collect_local_values` yardımcı fonksiyonu eklendi — dict/list dual format + variant.color/size otomatik mapleme.
+
+### 🚨 KRITIK Bug 2: allowCustom=false attribute'lara customAttributeValue gönderiyorduk
+Trendyol "1182 için kategori özellik değeri geçerli değildir" hatası — bizim mapping'imizde olmayan değerler için `customAttributeValue` gönderiyorduk ama attribute custom kabul etmiyordu.
+
+**Fix**: `_get_attr_meta(mp_cat_id)` ile cache'den her attribute'un meta'sı çekilir (`allow_custom`, `required`, `valid_value_ids`). `_push()` helper:
+- `attributeValueId` cache'de yoksa → custom dene (varsa allowCustom)
+- `customAttributeValue` allowCustom=false ise → atla (sessiz)
+- "Materyal Analiz Testi / Dosya Linki" tipi attribute'ları skip et (dosya url'i bekler)
+
+### 🚨 KRITIK Bug 3: Sync category mapping zinciri eksikti
+Product `category_id=None` ise sync hiç category_mapping bulamıyordu. Validate de doğru yapmıyordu.
+
+**Fix** (hem sync hem validate):
+1. `category_id` → category_mappings
+2. (yoksa) `category_name` → categories → system_id → category_mappings
+3. (yoksa) categories.trendyol_category_id (legacy fallback)
+
+### ✅ Yeni Endpoint: Batch Status Detail
+- `GET /api/integrations/trendyol/batch/{batch_id}` — Trendyol batch'inin gerçek SUCCESS/FAILED durumunu döndürür
+- Yanıt: `{status, item_count, success_count, failed_count, top_failures, items[], raw}`
+
+### ✅ Frontend Batch Detail Panel
+- "Batch Detayını Yükle" butonu (mavi banner)
+- 4 sayaç (Status/Başarılı/Hatalı/Toplam)
+- "En çok görülen hatalar" listesi (×count)
+- "Tüm Item Detayları" collapsible — her barkod için SUCCESS/FAILED ve failureReasons
+
+### ✅ Test Sonuçları
+- **FCSS0600002** (Alen Askılı Midi Elbise — 2 ürün × 4 varyant): 
+  - Sync: 8 başarı + 2 hata ("En az 1 görsel gerekli" — 2 ürün görselsiz)
+  - Batch Detayı: COMPLETED, item-bazlı SUCCESS/FAILED gösteriliyor
+  - Ham Trendyol cevabı debug'da
+
+
 
 ### 🚨 KRITIK Bug 1: Yanlış Trendyol API Endpoint URL
 Tüm sync çağrıları "Service Unavailable" alıyordu. Sebep: Trendyol Aug 2026'da URL formatını değiştirmiş.

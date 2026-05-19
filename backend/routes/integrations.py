@@ -381,6 +381,11 @@ async def validate_products_for_trendyol(
     all_cats = await db.categories.find({}, {"_id": 0}).to_list(length=5000)
     cat_by_id = {str(c.get("id")): c for c in all_cats}
     cat_by_name = {(c.get("name") or "").strip(): c for c in all_cats}
+    cm_by_name = {}
+    for c in all_cats:
+        nm = (c.get("name") or "").strip()
+        if nm and str(c.get("id")) in cm_by_local:
+            cm_by_name[nm] = cm_by_local[str(c.get("id"))]
 
     # Trendyol mp_cat -> required attribute listesini cache'le
     attr_cache: dict = {}
@@ -414,7 +419,10 @@ async def validate_products_for_trendyol(
 
         cat_id = p.get("category_id")
         cat_name = p.get("category_name") or ""
+        # Sync ile aynı sıra: category_id → category_name → categories.trendyol_category_id
         cm = cm_by_local.get(str(cat_id)) if cat_id else None
+        if not cm and cat_name:
+            cm = cm_by_name.get(cat_name.strip())
         cat_doc = cat_by_id.get(str(cat_id)) or cat_by_name.get(cat_name.strip())
 
         mp_cat_id = None
@@ -553,6 +561,52 @@ async def validate_products_for_trendyol(
     }
 
 
+@router.get("/trendyol/batch/{batch_id}")
+async def get_trendyol_batch_status(
+    batch_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Trendyol batch işleminin (ürün oluşturma vb.) gerçek durumunu döndürür.
+    UI'da kullanıcı 'Detayları Gör' butonuna basınca her item'ın SUCCESS/FAILED
+    durumu ve failureReasons listesini görür."""
+    config = await get_trendyol_config()
+    if not config or not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu aktif değil")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(
+        supplier_id=config["supplier_id"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        mode=config.get("mode", "live"),
+    )
+    try:
+        data = await client.get_batch_request_result(batch_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Trendyol batch detayı alınamadı: {e}")
+
+    items = data.get("items") or []
+    success_count = sum(1 for it in items if str(it.get("status")).upper() == "SUCCESS")
+    failed_count = sum(1 for it in items if str(it.get("status")).upper() == "FAILED")
+    # Hata özetlerini topla
+    fail_freq: dict = {}
+    for it in items:
+        for fr in (it.get("failureReasons") or []):
+            key = str(fr).split(".")[0][:120]
+            fail_freq[key] = fail_freq.get(key, 0) + 1
+    return {
+        "batch_id": batch_id,
+        "status": data.get("status"),
+        "source_type": data.get("sourceType"),
+        "item_count": data.get("itemCount") or len(items),
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "top_failures": [{"reason": k, "count": v} for k, v in
+                         sorted(fail_freq.items(), key=lambda x: -x[1])[:10]],
+        "items": items,
+        "raw": data,
+    }
+
+
 @router.post("/trendyol/products/sync")
 async def sync_products_to_trendyol(
     request: Request,
@@ -648,108 +702,209 @@ async def sync_products_to_trendyol(
     
     items_to_send = []
     errors = []
-    
-    def resolve_attributes(base_attrs, product, variant, category):
-        item_attrs = base_attrs.copy()
+
+    # Trendyol kategori özellik cache'lerini bu sync için yükle (attribute meta + geçerli value_id'ler)
+    _attr_meta_cache: dict = {}
+
+    async def _get_attr_meta(mp_cat_id):
+        if mp_cat_id in _attr_meta_cache:
+            return _attr_meta_cache[mp_cat_id]
+        meta: dict = {}
+        try:
+            cache = await db.trendyol_category_attributes.find_one(
+                {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                {"_id": 0},
+            )
+        except Exception:
+            cache = None
+        for a in (cache or {}).get("attributes", []) or []:
+            aid = a.get("id") or a.get("attribute", {}).get("id")
+            if aid is None:
+                continue
+            valid_value_ids = {str(v.get("id")) for v in (a.get("attributeValues") or []) if v.get("id") is not None}
+            meta[int(aid)] = {
+                "allow_custom": bool(a.get("allowCustom") or a.get("attribute", {}).get("allowCustom")),
+                "required": bool(a.get("required")),
+                "valid_value_ids": valid_value_ids,
+                "name": a.get("name") or a.get("attribute", {}).get("name") or "",
+            }
+        _attr_meta_cache[mp_cat_id] = meta
+        return meta
+
+    def _collect_local_values(product, variant):
+        """Ürünün ve varyantın attribute değerlerini lokalName(lower) → value şeklinde toplar.
+        attributes hem LIST hem DICT formatını destekler."""
+        out = {}
+        def _put(nm, vv):
+            if not nm or vv in (None, ""): return
+            out.setdefault(str(nm).lower().strip(), str(vv))
+
+        def _walk(attrs):
+            if isinstance(attrs, dict):
+                for k, v in attrs.items():
+                    if isinstance(v, dict):
+                        nm = v.get("label") or v.get("name") or k
+                        vv = v.get("value") or v.get("attribute_value")
+                        _put(nm, vv)
+                    elif v is not None:
+                        _put(k, v)
+            elif isinstance(attrs, list):
+                for a in attrs:
+                    if isinstance(a, dict):
+                        nm = a.get("label") or a.get("name") or a.get("type") or a.get("attribute_name")
+                        vv = a.get("value") or a.get("attribute_value")
+                        _put(nm, vv)
+        _walk(product.get("attributes"))
+        _walk((product.get("trendyol_attributes_labels") or {}))  # opsiyonel
+        if variant:
+            _walk(variant.get("attributes"))
+            if variant.get("color"):
+                _put("Renk", variant["color"])
+                _put("Web Color", variant["color"])
+            if variant.get("size"):
+                _put("Beden", variant["size"])
+                _put("Boy", variant["size"])
+        return out
+
+    def resolve_attributes(base_attrs, product, variant, category, meta):
+        """meta = _get_attr_meta sonucu: {attr_id: {allow_custom, required, valid_value_ids, name}}
+        Geçersiz value_id ya da allow_custom=False olan custom değerleri SESSİZCE atlar."""
+        item_attrs = list(base_attrs)
         processed = {int(a["attributeId"]) for a in item_attrs if "attributeId" in a}
         
-        attr_mappings = category.get("attribute_mappings", [])
-        val_mappings = category.get("value_mappings", {})
-        default_mappings = category.get("default_mappings", {})
+        attr_mappings = category.get("attribute_mappings", []) or []
+        val_mappings = category.get("value_mappings", {}) or {}
+        default_mappings = category.get("default_mappings", {}) or {}
+
+        local_vals = _collect_local_values(product, variant)
+
+        def _push(ty_id: int, value_id=None, custom=None):
+            """Cache'e karşı doğrulayarak append."""
+            am = meta.get(ty_id) or {}
+            # Dosya linki / sertifika gerektiren attribute'ları skip (custom text kabul etmez)
+            am_name = (am.get("name") or "").lower()
+            if any(p in am_name for p in ["analiz testi", "test raporu", "sertifika dosya", "dosya linki"]):
+                return False
+            if value_id is not None:
+                vid = str(value_id)
+                # Cache'de yoksa custom'a düşür
+                if am.get("valid_value_ids") and vid not in am["valid_value_ids"]:
+                    if am.get("allow_custom") and custom:
+                        item_attrs.append({"attributeId": ty_id, "customAttributeValue": str(custom)})
+                        processed.add(ty_id)
+                        return True
+                    return False
+                item_attrs.append({"attributeId": ty_id, "attributeValueId": int(vid)})
+                processed.add(ty_id)
+                return True
+            if custom is not None:
+                if not am.get("allow_custom"):
+                    return False
+                item_attrs.append({"attributeId": ty_id, "customAttributeValue": str(custom)})
+                processed.add(ty_id)
+                return True
+            return False
         
         for mapping in attr_mappings:
-            ty_id = mapping.get("trendyol_attr_id")
+            # Yeni format: mp_attr_id, eski format: trendyol_attr_id
+            ty_id = mapping.get("mp_attr_id") or mapping.get("trendyol_attr_id")
             if not ty_id: continue
-            ty_id = int(ty_id)
+            try:
+                ty_id = int(ty_id)
+            except (ValueError, TypeError):
+                continue
             if ty_id in processed:
                 continue
                 
-            local_key = str(mapping.get("local_attr")).lower()
+            local_attr_name = str(mapping.get("local_attr") or "").strip()
+            local_key = local_attr_name.lower()
             local_val = None
-            
+
             if variant:
-                if local_key in ["renk", "color"]:
+                if local_key in ["renk", "color", "web color"]:
                     local_val = variant.get("color")
                 elif local_key in ["beden", "boy", "size"]:
-                    local_val = variant.get("size")
+                    local_val = variant.get("size") or local_vals.get(local_key)
                     
             if not local_val:
-                for a in product.get("attributes", []):
-                    if str(a.get("type")).lower() == local_key:
-                        local_val = a.get("value")
-                        break
+                local_val = local_vals.get(local_key)
+            if not local_val and local_attr_name:
+                local_val = local_vals.get(local_attr_name.lower())
                         
             if local_val:
                 str_ty_id = str(ty_id)
-                if str_ty_id in val_mappings and str(local_val) in val_mappings[str_ty_id]:
-                    mapped_val = val_mappings[str_ty_id][str(local_val)]
-                    if mapped_val:
-                        if str(mapped_val).isdigit():
-                            item_attrs.append({
-                                "attributeId": ty_id,
-                                "attributeValueId": int(mapped_val)
-                            })
-                        else:
-                            item_attrs.append({
-                                "attributeId": ty_id,
-                                "customAttributeValue": str(mapped_val)
-                            })
-                        processed.add(ty_id)
-                        continue
+                # value_mapping format: "343|Erkek" → "value_id"
+                mapped_val = val_mappings.get(f"{str_ty_id}|{local_val}")
+                # eski yapı: {"343": {"Erkek": "value_id"}}
+                if not mapped_val and str_ty_id in val_mappings and isinstance(val_mappings[str_ty_id], dict):
+                    mapped_val = val_mappings[str_ty_id].get(str(local_val))
+                if mapped_val:
+                    if str(mapped_val).isdigit():
+                        if _push(ty_id, value_id=mapped_val, custom=local_val):
+                            continue
+                    else:
+                        if _push(ty_id, custom=mapped_val):
+                            continue
+                # Mapping yok ama allow_custom varsa local_val'i custom olarak yolla
+                if _push(ty_id, custom=local_val):
+                    continue
                 
+            # Default mapping
             str_ty_id = str(ty_id)
             if str_ty_id in default_mappings and default_mappings[str_ty_id]:
                 def_val = default_mappings[str_ty_id]
                 if str(def_val).isdigit():
-                    item_attrs.append({
-                        "attributeId": ty_id,
-                        "attributeValueId": int(def_val)
-                    })
+                    _push(ty_id, value_id=def_val, custom=local_val)
                 else:
-                    item_attrs.append({
-                        "attributeId": ty_id,
-                        "customAttributeValue": str(def_val)
-                    })
-                processed.add(ty_id)
+                    _push(ty_id, custom=def_val)
 
+        # Default mapping'de olup attribute_mappings'de olmayanları da ekle
         for ty_str, def_val in default_mappings.items():
             if not def_val: continue
             try: ty_id = int(ty_str)
-            except: continue
+            except (ValueError, TypeError): continue
             if ty_id not in processed:
                 if str(def_val).isdigit():
-                    item_attrs.append({
-                        "attributeId": ty_id,
-                        "attributeValueId": int(def_val)
-                    })
+                    _push(ty_id, value_id=def_val)
                 else:
-                    item_attrs.append({
-                        "attributeId": ty_id,
-                        "customAttributeValue": str(def_val)
-                    })
-                processed.add(ty_id)
+                    _push(ty_id, custom=def_val)
                 
         return item_attrs
     
     for product in products:
         try:
-            # 1. Category Mapping check — önce yeni category_mappings, sonra eski categories.trendyol_category_id
+            # 1. Category Mapping check — önce category_id, sonra category_name üzerinden category_mappings
             trendyol_cat_id = None
             category = None
             cat_id = product.get("category_id")
+            cat_name = (product.get("category_name") or "").strip()
             cm = None
+
+            # 1a. Doğrudan category_id ile mapping arayalım
             if cat_id:
                 cm = await db.category_mappings.find_one(
                     {"category_id": str(cat_id), "marketplace": "trendyol"}, {"_id": 0}
                 )
-                if cm and cm.get("marketplace_category_id"):
-                    trendyol_cat_id = cm["marketplace_category_id"]
-                    category = cm  # category_mappings doc — attribute_mappings, default_mappings içerir
-            if not trendyol_cat_id:
-                cat_doc = await db.categories.find_one({"name": product.get("category_name")})
+
+            # 1b. Bulunamadıysa: kategori adından sistem kategorisini, oradan mapping'i bul
+            if not cm and cat_name:
+                sys_cat = await db.categories.find_one({"name": cat_name}, {"_id": 0, "id": 1, "trendyol_category_id": 1})
+                if sys_cat and sys_cat.get("id"):
+                    cm = await db.category_mappings.find_one(
+                        {"category_id": str(sys_cat["id"]), "marketplace": "trendyol"}, {"_id": 0}
+                    )
+
+            if cm and cm.get("marketplace_category_id"):
+                trendyol_cat_id = cm["marketplace_category_id"]
+                category = cm  # category_mappings doc — attribute_mappings, default_mappings içerir
+
+            # 1c. Eski legacy fallback: db.categories.trendyol_category_id
+            if not trendyol_cat_id and cat_name:
+                cat_doc = await db.categories.find_one({"name": cat_name})
                 if cat_doc and cat_doc.get("trendyol_category_id"):
                     trendyol_cat_id = cat_doc["trendyol_category_id"]
                     category = cat_doc
+
             if not trendyol_cat_id:
                 errors.append(f"{product.get('name')} - Trendyol kategori eşleştirmesi (Mapping) yok.")
                 continue
@@ -790,6 +945,9 @@ async def sync_products_to_trendyol(
             if not base_item["images"]:
                 errors.append(f"{product.get('name')} - En az 1 görsel gerekli.")
                 continue
+
+            # 3b. Trendyol attribute meta (cache) — value_id ve allowCustom validasyonu için
+            meta = await _get_attr_meta(trendyol_cat_id)
             
             # 4. Handle Variants or No-Variants
             variants = product.get("variants", [])
@@ -801,7 +959,7 @@ async def sync_products_to_trendyol(
                 item["barcode"] = product.get("barcode")
                 item["stockCode"] = product.get("stock_code") or product.get("barcode")
                 item["quantity"] = int(product.get("stock", 0))
-                item["attributes"] = resolve_attributes(attributes, product, None, category)
+                item["attributes"] = resolve_attributes(attributes, product, None, category, meta)
                 items_to_send.append(item)
             else:
                 for v in variants:
@@ -812,7 +970,7 @@ async def sync_products_to_trendyol(
                     item["barcode"] = v.get("barcode")
                     item["stockCode"] = v.get("stock_code") or v.get("barcode")
                     item["quantity"] = int(v.get("stock", 0))
-                    item["attributes"] = resolve_attributes(attributes, product, v, category)
+                    item["attributes"] = resolve_attributes(attributes, product, v, category, meta)
                     items_to_send.append(item)
                     
         except Exception as e:
