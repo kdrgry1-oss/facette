@@ -212,7 +212,7 @@ export default function CustomerSegments() {
 function CampaignModal({ recipients, segmentLabel, onClose }) {
   const [subject, setSubject] = useState("");
   const [html, setHtml] = useState(
-    `<div style="font-family:Mulish,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px;color:#000;">\n  <h1 style="font-size:22px;font-weight:300;letter-spacing:0.05em;margin-bottom:16px;">Merhaba,</h1>\n  <p style="font-size:14px;line-height:1.6;color:#333;">\n    Sizin için özel bir teklifimiz var...\n  </p>\n  <a href="https://category-mapping-1.preview.emergentagent.com" style="display:inline-block;background:#000;color:#fff;padding:14px 32px;text-decoration:none;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-top:16px;">Alışverişe Başla</a>\n</div>`
+    `<div style="font-family:Mulish,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:32px;color:#000;">\n  <h1 style="font-size:22px;font-weight:300;letter-spacing:0.05em;margin-bottom:16px;">Merhaba,</h1>\n  <p style="font-size:14px;line-height:1.6;color:#333;">\n    Sizin için özel bir teklifimiz var...\n  </p>\n  <a href="https://facette-admin-1.preview.emergentagent.com" style="display:inline-block;background:#000;color:#fff;padding:14px 32px;text-decoration:none;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-top:16px;">Alışverişe Başla</a>\n</div>`
   );
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);

@@ -4,6 +4,26 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 62 (2026-05-19) — Trendyol UPSERT Akışı (Duplicate Barcode Fix)
+
+### 🐛 Bug — "Aynı barkodlu ürün bulunduğundan oluşturulamaz"
+Kullanıcının paylaştığı 14-16 barkod Trendyol'a aktarılamıyordu. Eski yanlış kayıtlar yüzünden Trendyol `create_products` (POST) çağrısını reddediyordu.
+
+**Root cause**: Önceki iterasyonda `stock_code` yanlışlıkla barkod olarak gönderilmişti. Excel ile DB düzeltildi ancak Trendyol panelinde eski stockCode kayıtları farklı bir barkodla durduğu için yeni POST reddediliyordu.
+
+**Fix** (`/app/backend/routes/integrations.py` → `sync_products_to_trendyol`):
+1. **Duplicate hata tespiti**: `_is_duplicate_error(reasons)` helper — "Aynı barkodlu", "zaten mevcut", "productMainId", "bulunduğundan" pattern'lerini yakalar
+2. **Otomatik UPSERT (PUT)**: Create batch'inde duplicate yüzünden FAILED olan item'lar otomatik olarak `client.update_products(items)` ile yeniden gönderilir
+3. **Update batch poll**: PUT batch'i de 6×2.5sn polling ile takip edilir, başarılı/başarısız itemları ayrıştırılır
+4. **Result merge**: Upsert ile düzelen item'lar `batch_failed_items`'tan çıkartılır, `batch_success_count`'a eklenir
+5. **Log fields**: `upsert_attempted`, `upsert_succeeded`, `upsert_batch_id`, `upsert_final_status`, `upsert_failed_items` log'a yazılır
+
+### ✅ Test
+- 14 problemli barkod yeniden push edildi → **11 ürün / 37 varyant SUCCESS, 0 FAILED**
+- Trendyol artık barkodları kabul ediyor; upsert güvenlik ağı ileride duplicate çakışmaları için aktif
+
+
+
 ## Iteration 61 (2026-05-19) — Description Eksik / HTML İçeren Açıklama Fix
 
 ### 🐛 Bug — "Açıklama alanı boş olamaz"
@@ -1240,7 +1260,7 @@ Admin'in tek tıkla (veya cron ile her 2 saatte bir) Ticimax SOAP'tan canlı sto
 
 ### MNG Webhook URL (admin'e tanımlatılacak)
 ```
-https://category-mapping-1.preview.emergentagent.com/api/orders/cargo/mng-webhook
+https://facette-admin-1.preview.emergentagent.com/api/orders/cargo/mng-webhook
 ```
 (Production'da REACT_APP_BACKEND_URL'a göre değişir; UI'da auto-render ediliyor)
 
@@ -1324,7 +1344,7 @@ https://category-mapping-1.preview.emergentagent.com/api/orders/cargo/mng-webhoo
 ### Pending User Manual Tasks
 - Account/üye sayfası overhaul (büyük scope, ayrı iterasyon)
 - e-Fatura QA (manuel test gerekli — 1 kurumsal sipariş ile end-to-end)
-- MNG'ye webhook URL bildirimi: `https://category-mapping-1.preview.emergentagent.com/api/orders/cargo/mng-webhook`
+- MNG'ye webhook URL bildirimi: `https://facette-admin-1.preview.emergentagent.com/api/orders/cargo/mng-webhook`
 
 
 ## Iteration 25 (2026-05-06) — Mulish Font + Suud-Style Combo + Mobile UX Overhaul

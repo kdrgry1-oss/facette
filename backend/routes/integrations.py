@@ -1070,7 +1070,16 @@ async def sync_products_to_trendyol(
                         continue
                     item = base_item.copy()
                     item["barcode"] = v.get("barcode")
-                    item["stockCode"] = v.get("stock_code") or v.get("barcode")
+                    # ⚠️ Trendyol stockCode'u seller başına UNIQUE olmalı.
+                    # Tüm varyantlara aynı parent stockCode gönderirsek 1. dışındaki tümü REDDEDİLİR.
+                    # Çözüm: varyantın kendi stock_code'unu kullan; YOKSA barkodu stockCode olarak ver
+                    # (barkod kesinlikle benzersizdir).
+                    v_stock = v.get("stock_code") or v.get("sku")
+                    parent_stock = product.get("stock_code") or product.get("sku")
+                    if v_stock and v_stock != parent_stock:
+                        item["stockCode"] = v_stock  # varyantın kendi unique kodu varsa kullan
+                    else:
+                        item["stockCode"] = v.get("barcode")  # aksi halde barkodu kullan (her zaman unique)
                     item["quantity"] = int(v.get("stock", 0))
                     item["attributes"] = resolve_attributes(attributes, product, v, category, meta)
                     items_to_send.append(item)
@@ -1148,13 +1157,131 @@ async def sync_products_to_trendyol(
                 except Exception as poll_err:
                     logger.warning(f"Batch poll {attempt+1}/6 failed: {poll_err}")
 
+        # 🔁 UPSERT AKIŞI: Trendyol "duplicate barcode/stockCode" hatası dönen item'ları
+        # update_products (PUT) ile tekrar gönder. Bu, Trendyol'da eski hatalı kayıt
+        # olan ürünleri (eski yanlış barkod ile) ezerek günceller.
+        upsert_attempted = 0
+        upsert_succeeded = 0
+        upsert_failed_items = []
+        upsert_batch_id = None
+        upsert_final_status = None
+
+        def _is_duplicate_error(reasons):
+            """Trendyol'un duplicate (çakışma) hatalarını tespit eder."""
+            if not reasons:
+                return False
+            text = " ".join([
+                (r.get("message") if isinstance(r, dict) else str(r)) for r in reasons
+            ]).lower()
+            patterns = [
+                "aynı barkodlu",
+                "ayni barkodlu",
+                "aynı barkod",
+                "barkod zaten",
+                "stockcode zaten",
+                "stok kodu zaten",
+                "duplicate barcode",
+                "duplicate stockcode",
+                "already exist",
+                "zaten mevcut",
+                "zaten kayıtlı",
+                "zaten kayitli",
+                "productmainid",
+                "bulunduğundan",
+                "bulundugundan",
+            ]
+            return any(p in text for p in patterns)
+
+        # Hangi item'lar duplicate yüzünden patladı?
+        duplicate_failed = [f for f in batch_failed_items if _is_duplicate_error(f.get("reasons"))]
+        if batch_id and duplicate_failed:
+            # items_to_send içinden duplicate'leri eşleştirip update payload'u kur
+            failed_keys = set()
+            for f in duplicate_failed:
+                if f.get("barcode"):
+                    failed_keys.add(("b", str(f["barcode"])))
+                if f.get("stock_code"):
+                    failed_keys.add(("s", str(f["stock_code"])))
+            items_to_update = []
+            for it in items_to_send:
+                k_b = ("b", str(it.get("barcode") or ""))
+                k_s = ("s", str(it.get("stockCode") or ""))
+                if k_b in failed_keys or k_s in failed_keys:
+                    items_to_update.append(it)
+
+            if items_to_update:
+                upsert_attempted = len(items_to_update)
+                logger.info(f"Trendyol UPSERT: {upsert_attempted} item duplicate yüzünden PUT (update_products) ile tekrar gönderiliyor.")
+                try:
+                    upd_resp = await client.update_products(items_to_update)
+                    upsert_batch_id = (upd_resp or {}).get("batchRequestId")
+                    if upsert_batch_id:
+                        # Update batch'ini de poll et
+                        for attempt in range(6):
+                            await _asyncio.sleep(2.5)
+                            try:
+                                ubr = await client.get_batch_request_result(upsert_batch_id)
+                                upsert_final_status = (ubr or {}).get("status") or "INPROGRESS"
+                                if upsert_final_status.upper() in ("COMPLETED", "FAILED"):
+                                    for uit in (ubr or {}).get("items", []) or []:
+                                        if (uit.get("status") or "").upper() == "FAILED":
+                                            req = uit.get("requestItem", {}) or {}
+                                            prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                            upsert_failed_items.append({
+                                                "stock_code": prod.get("stockCode") or req.get("barcode") or "",
+                                                "barcode": prod.get("barcode") or req.get("barcode") or "",
+                                                "title": prod.get("title") or "",
+                                                "reasons": uit.get("failureReasons") or [],
+                                            })
+                                    upsert_succeeded = max(
+                                        0,
+                                        (ubr or {}).get("itemCount", 0) - (ubr or {}).get("failedItemCount", 0),
+                                    )
+                                    break
+                            except Exception as up_poll_err:
+                                logger.warning(f"Upsert batch poll {attempt+1}/6 failed: {up_poll_err}")
+                    else:
+                        # update_products response'unda batchRequestId yok — API rejected
+                        upd_err = (upd_resp or {}).get("message") or str(upd_resp)[:500]
+                        logger.warning(f"Trendyol UPSERT update_products reddetti: {upd_err}")
+                except Exception as up_err:
+                    logger.error(f"Trendyol UPSERT update_products exception: {up_err}")
+
+        # Upsert ile düzelen item'ları batch_failed_items'tan düş (artık başarılı sayılırlar)
+        if upsert_succeeded > 0 and duplicate_failed:
+            # upsert_failed_items'da kalanlar gerçekten hâlâ patlayanlar
+            still_failed_keys = set()
+            for f in upsert_failed_items:
+                if f.get("barcode"):
+                    still_failed_keys.add(str(f["barcode"]))
+                if f.get("stock_code"):
+                    still_failed_keys.add(str(f["stock_code"]))
+
+            def _still_failed(f):
+                if not _is_duplicate_error(f.get("reasons")):
+                    return True  # duplicate olmayan eski hata: dokunma, hâlâ failed
+                return (
+                    str(f.get("barcode") or "") in still_failed_keys
+                    or str(f.get("stock_code") or "") in still_failed_keys
+                )
+
+            batch_failed_items = [f for f in batch_failed_items if _still_failed(f)]
+            batch_success_count = batch_success_count + upsert_succeeded
+
         # Local "errors" + Trendyol API hataları + Batch failure'ları birleştir
         all_errors = list(errors)
         if trendyol_error:
             all_errors.append(f"Trendyol API: {trendyol_error}")
         for f in batch_failed_items:
-            reason = "; ".join(f.get("reasons") or [])
+            reason = "; ".join([
+                (r.get("message") if isinstance(r, dict) else str(r)) for r in (f.get("reasons") or [])
+            ])
             all_errors.append(f"{f.get('title') or f.get('stock_code')} [{f.get('stock_code')}]: {reason}")
+        for f in upsert_failed_items:
+            reason = "; ".join([
+                (r.get("message") if isinstance(r, dict) else str(r)) for r in (f.get("reasons") or [])
+            ])
+            all_errors.append(f"[UPDATE] {f.get('title') or f.get('stock_code')} [{f.get('stock_code')}]: {reason}")
 
         # Final status hesapla
         if not batch_id:
@@ -1178,11 +1305,16 @@ async def sync_products_to_trendyol(
             "products_failed": len(batch_failed_items),
             "batch_request_id": batch_id,
             "batch_final_status": batch_final_status,
+            "upsert_attempted": upsert_attempted,
+            "upsert_succeeded": upsert_succeeded,
+            "upsert_batch_id": upsert_batch_id,
+            "upsert_final_status": upsert_final_status,
+            "upsert_failed_items": upsert_failed_items,
             "errors": all_errors,
             "failed_items": batch_failed_items,
             "trendyol_response": response,
             "message": (
-                f"{batch_success_count} ürün başarıyla aktarıldı." if batch_id and batch_final_status.upper() == "COMPLETED" and not batch_failed_items
+                f"{batch_success_count} ürün başarıyla aktarıldı." + (f" ({upsert_succeeded} adet UPDATE ile)." if upsert_succeeded else "") if batch_id and batch_final_status.upper() == "COMPLETED" and not batch_failed_items
                 else f"{batch_success_count} başarılı, {len(batch_failed_items)} HATA — detaylar loglarda." if batch_failed_items
                 else f"Batch alındı, Trendyol işliyor (durum: {batch_final_status}). Loglardan takip edin." if batch_id
                 else f"Trendyol kabul etmedi: {trendyol_error}"
@@ -1200,6 +1332,10 @@ async def sync_products_to_trendyol(
             "batchRequestId": batch_id,
             "batch_final_status": batch_final_status,
             "failed_items": batch_failed_items,
+            "upsert_attempted": upsert_attempted,
+            "upsert_succeeded": upsert_succeeded,
+            "upsert_batch_id": upsert_batch_id,
+            "upsert_failed_items": upsert_failed_items,
             "errors": all_errors,
             "trendyol_response": response,
         }

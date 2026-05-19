@@ -111,6 +111,33 @@ class TrendyolClient:
                 logger.error(f"Trendyol Product API Error: {str(e)}")
                 raise
 
+    async def update_products(self, items: List[Dict]) -> Dict:
+        """
+        Updates existing products on Trendyol (matched by stockCode or barcode).
+        Endpoint: PUT /integration/product/sellers/{sellerId}/products
+        Use this when create_products fails with "Aynı barkodlu ürün var" — Trendyol
+        rejects creates when stockCode+seller is already registered with a different barcode.
+        Update changes existing record's barcode/attributes/prices.
+        """
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            headers = self._get_headers()
+            try:
+                response = await client.put(url, headers=headers, json={"items": items})
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Trendyol Product Update Error: {e.response.text}")
+                try:
+                    return e.response.json()
+                except Exception:
+                    raise
+            except Exception as e:
+                logger.error(f"Trendyol Update API Error: {str(e)}")
+                raise
+
+
+
     async def get_batch_request_result(self, batch_request_id: str) -> Dict:
         """
         Checks the status of a batch request (e.g. product creation, price/inventory updates).
