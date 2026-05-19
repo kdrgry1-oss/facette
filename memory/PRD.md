@@ -2742,3 +2742,30 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 ### Pending / Next
 - Kullanıcı: Ticimax admin panelinden 293 ürünün doğru barkodlarını kopyalayıp `/admin/barkod-sorunlari` sayfasından düzeltsin
 - Veya: Ticimax WS API key'i yenilersek, otomatik backfill scripti yazılabilir
+
+## Iteration 58 — Excel'den Barkod Toplu Düzeltme (2026-02-19)
+
+### ✅ Çözülenler
+
+**Yapılan:** Kullanıcının yüklediği Ticimax Excel export'undan (TicimaxExport (4).xls — 1063 satır, 114 sütun) barkodlar DB'ye otomatik aktarıldı.
+
+**İşleyiş:**
+1. Excel `dtype={"BARKOD": str, "STOKKODU": str}` ile okundu (bilimsel notation sorununu önler)
+2. `VARYASYON` sütunundan ("Renk Seçiniz;BEJ,Beden Seçiniz;STD") renk + beden parse edildi
+3. İki lookup tablosu kuruldu: `by_stock[STOKKODU] → BARKOD` ve `by_name_size[(ürün_adı_lower, beden_normalize)] → BARKOD`
+4. Her ürün için:
+   - Ana ürün: stock_code → barcode
+   - Her varyant: önce variant.stock_code, sonra (product_name, variant.size) ile eşleştirildi
+   - `barcode_uncertain: false` set edildi, audit note eklendi
+
+### Sonuç
+- **543 ana ürün barkodu düzeltildi**
+- **1396 varyant barkodu düzeltildi**
+- Toplam 1939 doğru eşleşme
+- 0 eşleşmeyen ürün
+- 4 satır Excel'de zaten BARKOD boştu
+
+**Doğrulama:**
+- 609 üründen **606'sı (%99.5) barkod sağlam**
+- Kalan 3: KARGO, BANKA KOMİSYONU, DENEME (sistem dummy'leri, normal)
+- Örnek: "Gri Düğmeli Blazer Ceket" S=8683851513299 (doğru), M=8683851513282 (önceden hatalı kopya idi)
