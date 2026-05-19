@@ -4,6 +4,48 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 64 (2026-05-19) — Ticimax Excel ile Toplu Ürün Güncelleme
+
+### 🎯 İstek
+Kullanıcı `TicimaxExport.xls` (1063 satır) yükledi:
+> "ürün id kart id gibi alanları aç ve exceldeki barkodları referans alarak tüm ürünleri barkodlara ait bilgilerle güncelle"
+> "exceldeki barkodlarım güncel onu referans alıp güncelleme sağla. gidip sağdan soldan kafana göre barkod alma"
+
+### 🔧 Yapılanlar
+1. **Yeni script**: `/app/backend/scripts/sync_from_ticimax_excel.py` — Excel'i parse edip her BARKOD için:
+   - `products.urun_karti_id` ← URUNKARTIID (parent product Ticimax kart ID)
+   - `products.variants[i].urun_id` ← URUNID (variant Ticimax ID)
+   - `products.list_price` ← SATISFIYATI
+   - `products.sale_price` ← INDIRIMLIFIYAT (0 ise hiç bir kampanya yok)
+   - `products.cost_price` ← ALISFIYATI
+   - `products.description` ← ACIKLAMA (mevcut açıklama boşsa)
+   - `variants[i].size` / `variants[i].color` ← Beden sütunu (SIZE_TOKENS whitelist ile):
+     - "S/M/L/XL/STD/2X/30/36/38..." vb. → size
+     - "Siyah/Bej/Acı Kahve/..." vb. (renk) → color (size=STD'e düşer)
+
+2. **Model güncellemesi** (`/app/backend/models.py`):
+   - `ProductVariant`: `urun_id`, `stock_code` opsiyonel str alanları eklendi
+   - `ConfigDict(extra="allow")` ile esnek alan kabulü
+
+3. **Admin UI** (`/app/frontend/src/pages/admin/Products.jsx`):
+   - Envanter & Kimlik panelinde "Ticimax Senkron" bölümü: Kart ID (URUNKARTIID) ve Ürün ID (URUNID) display + edit
+   - `data-testid`: `input-urun-karti-id`, `input-urun-id`
+
+4. **Veri temizliği**:
+   - İlk run "Beden=Siyah" gibi Ticimax yanılgısı yüzünden 532 ürünün size'ı renk değerine dönmüştü → SIZE_TOKENS whitelist ile düzeltildi
+   - Trendyol restore'undan kalan "Standart"/"Normal Boy" gibi hatalı 311 variant size değeri "STD"ye çekildi
+
+### ✅ Sonuç
+- **609 üründen 600'üne `urun_karti_id` atandı** (Excel'de olmayan 9 ürün kullanıcı tarafından yeni eklenmiş)
+- **1786 varyanta `urun_id` atandı**
+- Fiyatlar, açıklamalar, beden/renk Excel referansıyla senkronize
+- DB'de 721 barkod Excel'de olup henüz DB'de olmayan (kullanıcı bunları henüz eklememiş ürünler)
+
+### ⚠ Not
+- Excel "Beden" sütununda Ticimax bazı ürünler için renk yazıyor (Ticimax export bug). Script bunu otomatik çözüyor: renk değerleri color'a, gerçek bedenler size'a düşüyor.
+
+
+
 ## Iteration 63 (2026-05-19) — Smart Conflict Resolution + Ghost Scanner + DB Duplicate Detector
 
 ### 🐛 Bug — "Trendyol'a aktarıldı diyor ama panelde yok"

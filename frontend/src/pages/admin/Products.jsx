@@ -149,6 +149,7 @@ export default function AdminProducts() {
     price: 0, sale_price: null, category_name: "", brand: "FACETTE",
     images: [], is_active: true, is_featured: false, is_new: false,
     stock: 0, stock_code: "", barcode: "", sku: "",
+    urun_karti_id: "", urun_id: "",
     // Ticimax fields
     variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
     supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
@@ -867,6 +868,8 @@ export default function AdminProducts() {
       stock_code: product.stock_code || "",
       barcode: product.barcode || "",
       sku: product.sku || "",
+      urun_karti_id: product.urun_karti_id || "",
+      urun_id: product.urun_id || "",
       variation_code: product.variation_code || "",
       gtip_code: product.gtip_code || "",
       unit: product.unit || "ADET",
@@ -934,6 +937,7 @@ export default function AdminProducts() {
       price: 0, sale_price: null, category_name: "", brand: "FACETTE",
       images: [], is_active: true, is_featured: false, is_new: false,
       stock: 0, stock_code: "", barcode: "", sku: "",
+      urun_karti_id: "", urun_id: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
       supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0,
     // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
@@ -1649,6 +1653,36 @@ export default function AdminProducts() {
                           placeholder="FACETTE"
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
                         />
+                      </div>
+
+                      {/* Ticimax Senkronizasyon Kimlikleri */}
+                      <div className="pt-3 border-t">
+                        <div className="text-xs font-bold text-gray-500 uppercase mb-2">Ticimax Senkron</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1">Kart ID (ÜRÜNKARTIID)</label>
+                            <input
+                              type="text"
+                              value={formData.urun_karti_id || ""}
+                              onChange={(e) => setFormData({ ...formData, urun_karti_id: e.target.value })}
+                              placeholder="—"
+                              data-testid="input-urun-karti-id"
+                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1">Ürün ID (Ana)</label>
+                            <input
+                              type="text"
+                              value={formData.urun_id || ""}
+                              onChange={(e) => setFormData({ ...formData, urun_id: e.target.value })}
+                              placeholder="—"
+                              data-testid="input-urun-id"
+                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">Ticimax export'undan otomatik yazılır. Varyantların ID'leri her varyantta `urun_id` olarak tutulur.</p>
                       </div>
                     </div>
 

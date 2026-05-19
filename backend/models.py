@@ -57,6 +57,9 @@ class ProductVariant(BaseModel):
     sku: Optional[str] = None
     stock: int = 0
     price_adjustment: float = 0
+    urun_id: Optional[str] = None  # Ticimax variant ID (URUNID)
+    stock_code: Optional[str] = None  # variant stok kodu (varyantın kendi STOKKODU)
+    model_config = ConfigDict(extra="allow")
 
 # Product Models - Extended with Ticimax fields
 class ProductBase(BaseModel):
