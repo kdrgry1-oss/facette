@@ -1271,16 +1271,32 @@ async def sync_products_to_trendyol(
                         continue  # kullanıcı bu barkodu istemedi, atla
                     item = base_item.copy()
                     item["barcode"] = v.get("barcode")
-                    # ⚠️ Trendyol stockCode'u seller başına UNIQUE olmalı.
-                    # Tüm varyantlara aynı parent stockCode gönderirsek 1. dışındaki tümü REDDEDİLİR.
-                    # Çözüm: varyantın kendi stock_code'unu kullan; YOKSA barkodu stockCode olarak ver
-                    # (barkod kesinlikle benzersizdir).
-                    v_stock = v.get("stock_code") or v.get("sku")
-                    parent_stock = product.get("stock_code") or product.get("sku")
+                    # ⚠️ Trendyol stockCode'u seller başına UNIQUE olmalı, AMA panel
+                    # tarafında insan-okunabilir olması için parent stok kodu
+                    # (FCSS.../FCFW...) ile başlamalı.
+                    # Strateji:
+                    #   1) Varyantın kendi unique stock_code'u varsa (parent'tan farklı) onu kullan
+                    #   2) Yoksa "{parent}-{size}-{color}" formatla unique yap (ör. FCSS2700002-L-Aci-Kahve)
+                    #   3) Son çare: "{parent}-{barcode-son-4}" (size/color yok diye)
+                    import re as _re_sc
+                    v_stock = (v.get("stock_code") or v.get("sku") or "").strip()
+                    parent_stock = (product.get("stock_code") or product.get("sku") or "").strip()
+                    def _slug(s):
+                        s = _re_sc.sub(r"[^A-Za-z0-9]+", "-", str(s or "")).strip("-")
+                        return s[:24]
                     if v_stock and v_stock != parent_stock:
-                        item["stockCode"] = v_stock  # varyantın kendi unique kodu varsa kullan
+                        item["stockCode"] = v_stock
+                    elif parent_stock:
+                        size_part = _slug(v.get("size"))
+                        color_part = _slug(v.get("color"))
+                        suffix = "-".join([p for p in [size_part, color_part] if p])
+                        if not suffix:
+                            # barkodun son 4 hanesi
+                            bc_tail = str(v.get("barcode") or "")[-4:]
+                            suffix = bc_tail or "V"
+                        item["stockCode"] = f"{parent_stock}-{suffix}"
                     else:
-                        item["stockCode"] = v.get("barcode")  # aksi halde barkodu kullan (her zaman unique)
+                        item["stockCode"] = v.get("barcode")  # son çare
                     item["quantity"] = int(v.get("stock", 0))
                     item["attributes"] = resolve_attributes(attributes, product, v, category, meta)
                     items_to_send.append(item)
