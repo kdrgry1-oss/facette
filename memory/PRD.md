@@ -4,6 +4,24 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 70 (2026-05-20) — Barkod Düzeltme (Name+Size Referans)
+
+### 🎯 İstek
+Kullanıcı: "daha önce barkod ve beden güncellemesi sırasında bazı barkodlar yanlışlıkla değişti. URUNADI ve BEDEN'i referans alıp yeni doğru barkodlara güncelle."
+
+### 🔧 Yapılan
+1. **`scripts/replace_barcodes_by_name_size.py`**: Excel'in (URUNADI, BEDEN) → BARKOD eşleşmesini DB'de uyguladı. Case-insensitive normalize. variant.barcode, sku, urun_id ve parent.urun_karti_id güncellendi.
+2. **`scripts/add_missing_by_name_v4.py`**: DB'de eşleşmeyen 243 satırı yeni varyant veya yeni ürün olarak ekledi.
+
+### ✅ Sonuç
+- **872 varyant barkodu Excel'den doğru değere güncellendi** (303 ürün etkilendi)
+- **243 eksik varyant DB'ye eklendi** (4'ü mevcut doc'a append, 86 yeni doc oluştu)
+- **938 toplam ürün** (önceki 852'den +86)
+- **0 eksik barkod** ✓ — Excel'in 1192 satırının tümü DB'de
+- Search testi: Gri Blazer, Haki Trençkot, Kahverengi Blazer, Camel Trençkot hepsi doğru sonuçlarla bulunuyor
+
+
+
 ## Iteration 69 (2026-05-20) — Trendyol Push: 8 Barkod Çözüm Akışı
 
 ### 🐛 Bulunan Birden Çok Bug
