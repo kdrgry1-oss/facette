@@ -4,6 +4,35 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 71 (2026-05-20) — Duplicate Doc Merge (Resim/Fiyat/Stok Onarımı)
+
+### 🐛 Şikayet
+"resimler fiyatlar stok adetleri gitti"
+
+### 🔍 Root Cause
+Önceki barkod-değiştirme + eksik-varyant-ekleme script'leri DB'de **aynı (stock_code, color) için 2-4 doc** yaratmıştı:
+- Bir doc'ta: ESKİ varyantlar + RESİM + FİYAT + STOK (zengin)
+- Diğer doc'ta: YENİ Excel barkodları + boş resim/fiyat/stok (boş)
+Kullanıcı barkod aratınca "boş" doc gelirdi → "veri yok" yanılgısı.
+
+### 🔧 Fix
+`scripts/merge_duplicate_product_docs.py`:
+- `(stock_code, color_norm)` bazında grupla
+- Her gruptan EN ZENGİN doc (resim+price+stock skoru) ana doc seçilir
+- Diğer doc'ların varyantları ana doc'a MERGE edilir (aynı barkod varsa eksik alanları doldur, yoksa yeni varyant olarak ekle)
+- Eksik parent alanları (price=0, images=[], description="") diğer doc'lardan kopyalanır
+- Boş kalan duplicate doc'lar silinir
+
+### ✅ Sonuç
+- **271 duplicate grup birleştirildi**
+- **436 fazla doc silindi** (938 → 502 ürün)
+- **513 varyant cross-doc merge edildi**
+- **51 alan zenginleştirildi** (price/list_price/images/description boş olanlar dolduruldu)
+- 405 ürün resimli, 420 fiyatlı, 361 stoklu
+- FCSS2700005, FCSS0600002, FCSS1800013, FCFW1300002 hepsi resim+fiyat+stok ile tam
+
+
+
 ## Iteration 70 (2026-05-20) — Barkod Düzeltme (Name+Size Referans)
 
 ### 🎯 İstek
