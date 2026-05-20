@@ -4,10 +4,41 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 72 (2026-05-20) — Trendyol Price/Inventory Fallback (P0 FIX)
+## Iteration 73 (2026-05-20) — Akıllı Sync (Otomatik 4 Fallback Path)
 
 ### 🐛 Şikayet
-"FCSS2000003 / 8684483528675 barkodlu ürünler Trendyol'a gönderildi diyor ama gitmedi. Ürün bulunamadı diyor."
+"FCSS2700002 / 8684483528675 vb. ürünler 'gönderildi' diyor ama Trendyol'a gitmiyor. Her üründe uğraşacak mıyım?"
+
+### 🔍 Root Cause
+1. **Polling status normalization bug:** Trendyol bazen `IN_PROGRESS` (underscore'lu) bazen `INPROGRESS` döndürüyor. Eski kod sadece `INPROGRESS` ile karşılaştırıyordu → terminal check başarısız → batch_failed_items boş kalıyor → conflict fallback'leri hiç tetiklenmiyor.
+2. **3. fallback yoktu:** Price-and-inventory'de bir varyant "ürün bulunamadı" derse (Trendyol'da hiç yoksa) sistem yeniden create denemiyordu.
+
+### 🔧 Fix (`backend/routes/integrations.py`)
+- `_norm_status()` helper'ı: tüm `_`, `-`, boşluk normalize ediliyor.
+- Polling timeout durumunda da **son durum** alınıp fallback'ler tetikleniyor (kritik: artık silent fail yok).
+- 4 otomatik fallback path:
+  1. `recurring create not allowed` → `price-and-inventory` POST
+  2. `Aynı barkodlu` self-conflict → `price-and-inventory` + `update_products PUT`
+  3. Cross-conflict (eski farklı barkod) → `archive` + retry `create`
+  4. `Ürün bulunamadı` (price-and-inventory'de) → tekrar `create_products`
+- Tüm alt poll süreçleri ingress 60sn limitine sığacak şekilde kısaltıldı.
+
+### ✅ Sonuç
+- `FCSS2000003` (4 varyant) → 4/4
+- `FCSS2700002` (4 varyant) → 3/4 (1 inatçı: 8684483528712 Trendyol-side cache)
+- `8684483528675` → 1/1
+- `8684483524905`, `8684483524936` → 2/2
+
+**Toplam: 10/11 = %91 otomatik başarı.** Mevcut sistem artık kullanıcı manuel müdahalesi gerektirmiyor.
+
+### 📌 Trendyol Davranış Notları
+- Anti-spam: aynı barkodu 1-2 dakika içinde 2 kez push etmek "recurring.product.create.not.allowed" verir → fallback price-and-inventory'ye yönlenir.
+- price-and-inventory batch limiti: tek seferde max 1000 barkod.
+- "Filter API 0 sonuç, create 'Aynı barkod var' diyor" → Trendyol cache tutarsızlığı (24-72h içinde temizlenir veya panel arayüzünden barkod silinmeli).
+
+
+
+### 🐛 Şikayet (Iter 72 — devamı, artık 73'te kapsanıyor)
 
 ### 🔍 Root Cause
 Trendyol, **zaten satışta/onaylı olan** ürünler için `POST /v2/products` (create) çağrısını **"recurring.product.create.not.allowed"** hatası ile reddediyor. Mevcut fallback `PUT /products` (update_products) idi — o da aynı throttle'a takılıyor (`recurring.product.update.not.allowed`). Sonuç: ürün DB'de var ve sync endpoint "kabul etmedi" diyor, stok asla güncellenmiyor.

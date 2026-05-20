@@ -1387,8 +1387,13 @@ async def sync_products_to_trendyol(
         batch_failed_items = []
         batch_success_count = 0
         batch_final_status = "INPROGRESS"
+
+        def _norm_status(s: str) -> str:
+            """Trendyol bazen 'IN_PROGRESS' bazen 'INPROGRESS' döndürüyor — normalize."""
+            return (s or "").upper().replace("_", "").replace(" ", "").replace("-", "")
+
         if batch_id:
-            for attempt in range(12):  # 12 deneme x 2.5sn = max ~30sn
+            for attempt in range(16):  # 16 deneme x 2.5sn = max ~40sn (ingress 60sn limitine güvenli)
                 await _asyncio.sleep(2.5)
                 try:
                     br = await client.get_batch_request_result(batch_id)
@@ -1402,7 +1407,7 @@ async def sync_products_to_trendyol(
                         len(items) >= item_count
                         and all(s in terminal_set for s in statuses_present)
                     )
-                    if batch_final_status.upper() in ("COMPLETED", "FAILED") and all_terminal:
+                    if _norm_status(batch_final_status) in ("COMPLETED", "FAILED") and all_terminal:
                         batch_failed_items = []
                         for it in items:
                             if (it.get("status") or "").upper() == "FAILED":
@@ -1419,6 +1424,30 @@ async def sync_products_to_trendyol(
                         break
                 except Exception as poll_err:
                     logger.warning(f"Batch poll {attempt+1}/12 failed: {poll_err}")
+
+        # 🛟 Polling timeout durumunda da elde olan son durumu işle — fallback'ler
+        # böylece her senaryoda tetiklenir (kritik: aksi halde duplicate'lar sessizce kalır).
+        if batch_id and not batch_failed_items and batch_success_count == 0:
+            try:
+                br = await client.get_batch_request_result(batch_id)
+                items = (br or {}).get("items", []) or []
+                if items:
+                    batch_final_status = (br or {}).get("status") or batch_final_status
+                    for it in items:
+                        if (it.get("status") or "").upper() == "FAILED":
+                            req = it.get("requestItem", {}) or {}
+                            prod = req.get("product", {}) if isinstance(req, dict) else {}
+                            batch_failed_items.append({
+                                "stock_code": prod.get("stockCode") or req.get("barcode") or "",
+                                "barcode": prod.get("barcode") or req.get("barcode") or "",
+                                "title": prod.get("title") or "",
+                                "reasons": it.get("failureReasons") or [],
+                            })
+                    batch_success_count = sum(
+                        1 for it in items if (it.get("status") or "").upper() == "SUCCESS"
+                    )
+            except Exception as final_poll_err:
+                logger.warning(f"Final batch poll failed: {final_poll_err}")
 
         # 🔁 SMART CONFLICT RESOLUTION:
         # - "Self duplicate" (sent_bc == conflict_bc) → PUT (update_products)
@@ -1468,6 +1497,23 @@ async def sync_products_to_trendyol(
             m = re.search(r"Barkod[:\s]+(\d{6,})", text)
             return m.group(1) if m else None
 
+        def _is_not_found_error(reasons):
+            """Trendyol'un 'ürün bulunamadı' (price-and-inventory'de Trendyol'da olmayan
+            barkod) hatasını tespit eder."""
+            if not reasons:
+                return False
+            text = " ".join([
+                (r.get("message") if isinstance(r, dict) else str(r)) for r in reasons
+            ]).lower()
+            patterns = [
+                "ürün bulunamadı",
+                "urun bulunamadi",
+                "product not found",
+                "tedarikçi id si",
+                "tedarikci id si",
+            ]
+            return any(p in text for p in patterns)
+
         # Hangi item'lar duplicate yüzünden patladı?
         duplicate_failed = [f for f in batch_failed_items if _is_duplicate_error(f.get("reasons"))]
         if batch_id and duplicate_failed:
@@ -1500,11 +1546,11 @@ async def sync_products_to_trendyol(
                     archived_barcodes = old_barcodes_to_archive
                     # Archive batch poll
                     if archive_batch_id:
-                        for attempt in range(8):
-                            await _asyncio.sleep(2.0)
+                        for attempt in range(5):
+                            await _asyncio.sleep(1.5)
                             try:
                                 abr = await client.get_batch_request_result(archive_batch_id)
-                                if (abr or {}).get("status", "").upper() in ("COMPLETED", "FAILED"):
+                                if _norm_status((abr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
                                     break
                             except Exception:
                                 pass
@@ -1519,12 +1565,12 @@ async def sync_products_to_trendyol(
                         retry_resp = await client.create_products(retry_items)
                         retry_create_batch_id = (retry_resp or {}).get("batchRequestId")
                         if retry_create_batch_id:
-                            for attempt in range(8):
-                                await _asyncio.sleep(2.5)
+                            for attempt in range(5):
+                                await _asyncio.sleep(2.0)
                                 try:
                                     rbr = await client.get_batch_request_result(retry_create_batch_id)
                                     rstatus = (rbr or {}).get("status") or "INPROGRESS"
-                                    if rstatus.upper() in ("COMPLETED", "FAILED"):
+                                    if _norm_status(rstatus) in ("COMPLETED", "FAILED"):
                                         for rit in (rbr or {}).get("items", []) or []:
                                             if (rit.get("status") or "").upper() == "FAILED":
                                                 req = rit.get("requestItem", {}) or {}
@@ -1576,11 +1622,11 @@ async def sync_products_to_trendyol(
                         if pi_batch:
                             logger.info(f"Self-conflict price-and-inventory batch: {pi_batch}")
                             # Polling — kısa süre içinde tamamlanır
-                            for attempt in range(8):
-                                await _asyncio.sleep(2.0)
+                            for attempt in range(5):
+                                await _asyncio.sleep(1.5)
                                 try:
                                     pbr = await client.get_batch_request_result(pi_batch)
-                                    if (pbr or {}).get("status", "").upper() in ("COMPLETED", "FAILED"):
+                                    if _norm_status((pbr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
                                         break
                                 except Exception:
                                     pass
@@ -1593,12 +1639,12 @@ async def sync_products_to_trendyol(
                     upd_resp = await client.update_products(self_conflicts)
                     upsert_batch_id = (upd_resp or {}).get("batchRequestId")
                     if upsert_batch_id:
-                        for attempt in range(8):
-                            await _asyncio.sleep(2.5)
+                        for attempt in range(5):
+                            await _asyncio.sleep(2.0)
                             try:
                                 ubr = await client.get_batch_request_result(upsert_batch_id)
                                 upsert_final_status = (ubr or {}).get("status") or "INPROGRESS"
-                                if upsert_final_status.upper() in ("COMPLETED", "FAILED"):
+                                if _norm_status(upsert_final_status) in ("COMPLETED", "FAILED"):
                                     put_succeeded = max(
                                         0,
                                         (ubr or {}).get("itemCount", 0) - (ubr or {}).get("failedItemCount", 0),
@@ -1623,6 +1669,69 @@ async def sync_products_to_trendyol(
                         logger.warning(f"Trendyol PUT update_products reddetti: {upd_err}")
                 except Exception as up_err:
                     logger.error(f"Trendyol PUT update_products exception: {up_err}")
+
+        # 🔁 3. FALLBACK: Price-and-inventory "ürün bulunamadı" hatası verirse
+        # → Bu varyant Trendyol'da hiç yok. Asıl payload ile create_products'a gönder.
+        # (Recurring fallback'te tüm itemlar price-and-inventory'ye yönlendirilince,
+        # Trendyol'da olmayan varyantlar "ürün bulunamadı" der; onları create'e geri gönderelim.)
+        not_found_failed = [f for f in batch_failed_items if _is_not_found_error(f.get("reasons"))]
+        if not_found_failed:
+            items_by_barcode = {str(it.get("barcode") or ""): it for it in items_to_send}
+            nf_create_items = []
+            for f in not_found_failed:
+                bc = str(f.get("barcode") or "")
+                payload = items_by_barcode.get(bc)
+                if payload:
+                    nf_create_items.append(payload)
+            if nf_create_items:
+                upsert_attempted += len(nf_create_items)
+                try:
+                    nf_resp = await client.create_products(nf_create_items)
+                    nf_batch = (nf_resp or {}).get("batchRequestId")
+                    if nf_batch:
+                        logger.info(f"Not-found → create_products fallback batch: {nf_batch}")
+                        if not retry_create_batch_id:
+                            retry_create_batch_id = nf_batch
+                        for attempt in range(5):
+                            await _asyncio.sleep(2.0)
+                            try:
+                                nbr = await client.get_batch_request_result(nf_batch)
+                                if _norm_status((nbr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
+                                    nf_succeeded = 0
+                                    nf_failed_barcodes = set()
+                                    for nit in (nbr or {}).get("items", []) or []:
+                                        if (nit.get("status") or "").upper() == "SUCCESS":
+                                            nf_succeeded += 1
+                                        else:
+                                            req = nit.get("requestItem", {}) or {}
+                                            prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                            bc_n = prod.get("barcode") or req.get("barcode") or ""
+                                            nf_failed_barcodes.add(str(bc_n))
+                                            upsert_failed_items.append({
+                                                "stock_code": prod.get("stockCode") or bc_n,
+                                                "barcode": bc_n,
+                                                "title": prod.get("title") or "",
+                                                "reasons": nit.get("failureReasons") or [],
+                                                "phase": "not_found_create",
+                                            })
+                                    upsert_succeeded += nf_succeeded
+                                    # not-found-success olanları batch_failed_items'tan düş
+                                    succeeded_barcodes = {
+                                        str(f.get("barcode"))
+                                        for f in not_found_failed
+                                        if str(f.get("barcode")) not in nf_failed_barcodes
+                                    }
+                                    if succeeded_barcodes:
+                                        batch_failed_items = [
+                                            f for f in batch_failed_items
+                                            if str(f.get("barcode")) not in succeeded_barcodes
+                                        ]
+                                        batch_success_count += nf_succeeded
+                                    break
+                            except Exception as nf_poll_err:
+                                logger.warning(f"Not-found-create poll {attempt+1}/5 failed: {nf_poll_err}")
+                except Exception as nf_err:
+                    logger.error(f"Not-found → create_products exception: {nf_err}")
 
         # Upsert ile düzelen item'ları batch_failed_items'tan düş
         if upsert_succeeded > 0 and duplicate_failed:
@@ -1661,8 +1770,8 @@ async def sync_products_to_trendyol(
             final_status = "failed"
         elif batch_failed_items:
             final_status = "partial"
-        elif batch_final_status.upper() == "INPROGRESS":
-            final_status = "pending"  # 15sn'de tamamlanmadı, kullanıcıya logdan takibi öneriliyor
+        elif _norm_status(batch_final_status) == "INPROGRESS":
+            final_status = "pending"  # 60sn'de tamamlanmadı, kullanıcıya logdan takibi öneriliyor
         else:
             final_status = "success" if not errors else "partial"
 
@@ -1689,7 +1798,7 @@ async def sync_products_to_trendyol(
             "failed_items": batch_failed_items,
             "trendyol_response": response,
             "message": (
-                f"{batch_success_count} ürün başarıyla aktarıldı." + (f" ({upsert_succeeded} adet UPDATE ile)." if upsert_succeeded else "") if batch_id and batch_final_status.upper() == "COMPLETED" and not batch_failed_items
+                f"{batch_success_count} ürün başarıyla aktarıldı." + (f" ({upsert_succeeded} adet UPDATE ile)." if upsert_succeeded else "") if batch_id and _norm_status(batch_final_status) == "COMPLETED" and not batch_failed_items
                 else f"{batch_success_count} başarılı, {len(batch_failed_items)} HATA — detaylar loglarda." if batch_failed_items
                 else f"Batch alındı, Trendyol işliyor (durum: {batch_final_status}). Loglardan takip edin." if batch_id
                 else f"Trendyol kabul etmedi: {trendyol_error}"
@@ -1699,7 +1808,7 @@ async def sync_products_to_trendyol(
         # _id ekleniyor MongoDB tarafından — response'a koyma
         log_doc.pop("_id", None)
         return {
-            "success": bool(batch_id) and not batch_failed_items and batch_final_status.upper() != "FAILED",
+            "success": bool(batch_id) and not batch_failed_items and _norm_status(batch_final_status) != "FAILED",
             "message": log_doc["message"],
             "total": len(products),
             "successful": batch_success_count if batch_id else 0,
