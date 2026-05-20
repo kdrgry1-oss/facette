@@ -4,6 +4,35 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 68 (2026-05-19) — Eksik Ürün/Varyantları Excel'den Tamamlama
+
+### 🎯 İstek
+"Ticimax'taki barkodlardan sistemde aratıyorum yok. Tüm ürünleri çektiğine emin misin?"
+
+### 📊 Tespit
+- Excel'de 1059 barkod var
+- DB'de 362 barkod vardı → **721 eksik**:
+  - 686 eksik varyant (parent ürün var, S/M/L/XS bedenleri eklenmemiş)
+  - 35 tamamen yeni ürün hiç import edilmemiş
+
+### 🔧 3 Adımlı Düzeltme
+1. **`scripts/add_missing_products_from_excel.py`**: 721 eksik barkodu DB'ye ekledi. (35 tamamen yeni ürün + 686 eksik varyant). Renk extraction "UPPERCASE trailing tag" mantığıyla.
+2. **`scripts/split_multicolor_docs_by_kartid.py`**: Excel'in URUNKARTIID = renk varyantı kuralıyla aynı doc'a düşmüş 2-3 renk variant'larını ayrı doc'lara böldü. **79 doc split edildi, 131 yeni doc oluştu, 391 varyant taşındı**.
+3. **`scripts/fix_colors_from_name.py`**: Türkçe-aware title-case ile URUNADI'dan rengi düzgün çıkardı ("Etek Antrasit" yanılgısı → "Antrasit"; "HAKİ" Türkçe karakter sorunu → "Haki"). **781 ürün, 1472 varyant** rengi düzeltildi.
+
+### ✅ Sonuç
+- **DB toplam: 852 ürün** (önceki 609'dan +243)
+- **Eksik barkod: 0** (Excel'deki 1059 barkodun hepsi DB'de bulunuyor)
+- Renk dağılımı temiz: Siyah=157, Acı Kahve=137, Bej=79, Ekru=60, Beyaz=48, Bordo, Lacivert, Mavi, Açık Mavi/Pembe, Mint vb.
+- FCSS2700005 Palma: 5 beden (L/M/S/XL/XS), Siyah ✓
+- FCSS0700006 Pareo Etek: 2 doc (Antrasit + Beyaz), her biri L/M/S/XS ✓
+- FCSS0300001 Mira Büstiyer: 2 doc (Ekru + Siyah) ✓
+
+### ⚠ Bilinen Tutarsızlıklar
+- Bazı stok kodlarında (örn FCSS0600002) eski + yeni doc'lar dupe duruyor (Bordo x2, Siyah x2). Bunlar Barkod Sorunları sayfasından manuel temizlenebilir veya kalıcı dedup script ile birleştirilebilir.
+
+
+
 ## Iteration 67 (2026-05-19) — Direct Beden Mapping (V3 Excel)
 
 ### 🎯 Yeni Excel
