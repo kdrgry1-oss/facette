@@ -1332,21 +1332,51 @@ async def sync_products_to_trendyol(
                 ])[:1000]
 
             # 🛟 FALLBACK: "Tekrarlı ürün oluşturma isteği atılamaz" (Trendyol anti-spam)
-            # geldiyse update_products (PUT) endpoint'ini dene — bu farklı endpoint
-            # ve idempotency check'ten geçer. PUT mevcut ürünleri günceller, yok olan
-            # için 404 alır ama batch_id döner.
-            if trendyol_error and ("tekrarl" in trendyol_error.lower() or "duplicate request" in trendyol_error.lower()):
-                logger.info("Trendyol create reddetti (tekrarlı). update_products fallback deneniyor.")
+            # geldiyse, ürün zaten Trendyol'da yaşıyor demektir → create yerine
+            # price-and-inventory POST (stok/fiyat) ile güncellemeyi dene. Bu endpoint
+            # farklı bir kapı (inventory/...) ve recurring throttling'e takılmaz.
+            # Hala başarısızsa update_products (PUT) ile son bir deneme yap.
+            if trendyol_error and (
+                "tekrarl" in trendyol_error.lower()
+                or "duplicate request" in trendyol_error.lower()
+                or "recurring" in trendyol_error.lower()
+            ):
+                logger.info("Trendyol create reddetti (tekrarlı). price-and-inventory fallback deneniyor.")
                 try:
-                    upd_response = await client.update_products(items_to_send)
-                    upd_batch = (upd_response or {}).get("batchRequestId")
-                    if upd_batch:
-                        batch_id = upd_batch
-                        response = upd_response
+                    pi_items = []
+                    for it in items_to_send:
+                        if not it.get("barcode"):
+                            continue
+                        entry = {
+                            "barcode": str(it.get("barcode")),
+                            "quantity": int(it.get("quantity", 0)),
+                        }
+                        if it.get("salePrice") is not None:
+                            try: entry["salePrice"] = float(it["salePrice"])
+                            except Exception: pass
+                        if it.get("listPrice") is not None:
+                            try: entry["listPrice"] = float(it["listPrice"])
+                            except Exception: pass
+                        pi_items.append(entry)
+                    pi_response = await client.update_price_and_inventory(pi_items) if pi_items else {}
+                    pi_batch = (pi_response or {}).get("batchRequestId")
+                    if pi_batch:
+                        batch_id = pi_batch
+                        response = pi_response
                         trendyol_error = None
-                        logger.info(f"Trendyol update_products fallback başarılı: batch={upd_batch}")
+                        logger.info(f"Trendyol price-and-inventory fallback başarılı: batch={pi_batch}")
+                    else:
+                        # Son çare: update_products PUT
+                        logger.info("price-and-inventory de batch_id dönmedi. update_products fallback.")
+                        upd_response = await client.update_products(items_to_send)
+                        upd_batch = (upd_response or {}).get("batchRequestId")
+                        if upd_batch:
+                            batch_id = upd_batch
+                            response = upd_response
+                            trendyol_error = None
+                            logger.info(f"Trendyol update_products fallback başarılı: batch={upd_batch}")
                 except Exception as upd_err:
-                    logger.error(f"update_products fallback exception: {upd_err}")
+                    logger.error(f"Update fallback exception: {upd_err}")
 
         # 🔍 Gerçek batch sonucunu sorgula: Trendyol asenkron işliyor; 5-15sn'de tamamlanır.
         # "aktarıldı diyor ama Trendyol'da yok" tuzağını önler.
@@ -1517,8 +1547,47 @@ async def sync_products_to_trendyol(
                     except Exception as re_err:
                         logger.error(f"Retry create after archive error: {re_err}")
 
-            # 2) SELF CONFLICTS: PUT update_products
+            # 2) SELF CONFLICTS: PUT update_products + price-and-inventory POST
+            # PUT mevcut ürünün kategori/attribute/image alanlarını günceller; ancak
+            # stok/fiyat değerleri için Trendyol'un ayrı bir endpoint'i daha güvenilir
+            # (`/inventory/.../price-and-inventory`). Stok güncellemesinin Trendyol
+            # panelinde garantili yansıması için ikisini birden çalıştırıyoruz.
             if self_conflicts:
+                # 2a) Önce price-and-inventory POST (stok/fiyat senkronu)
+                try:
+                    pi_items = []
+                    for it in self_conflicts:
+                        if not it.get("barcode"):
+                            continue
+                        entry = {
+                            "barcode": str(it.get("barcode")),
+                            "quantity": int(it.get("quantity", 0)),
+                        }
+                        if it.get("salePrice") is not None:
+                            try: entry["salePrice"] = float(it["salePrice"])
+                            except Exception: pass
+                        if it.get("listPrice") is not None:
+                            try: entry["listPrice"] = float(it["listPrice"])
+                            except Exception: pass
+                        pi_items.append(entry)
+                    if pi_items:
+                        pi_resp = await client.update_price_and_inventory(pi_items)
+                        pi_batch = (pi_resp or {}).get("batchRequestId")
+                        if pi_batch:
+                            logger.info(f"Self-conflict price-and-inventory batch: {pi_batch}")
+                            # Polling — kısa süre içinde tamamlanır
+                            for attempt in range(8):
+                                await _asyncio.sleep(2.0)
+                                try:
+                                    pbr = await client.get_batch_request_result(pi_batch)
+                                    if (pbr or {}).get("status", "").upper() in ("COMPLETED", "FAILED"):
+                                        break
+                                except Exception:
+                                    pass
+                except Exception as pi_err:
+                    logger.warning(f"Self-conflict price-and-inventory exception: {pi_err}")
+
+                # 2b) Sonra update_products PUT (kategori/attribute/image senkronu)
                 upsert_attempted += len(self_conflicts)
                 try:
                     upd_resp = await client.update_products(self_conflicts)

@@ -4,6 +4,30 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 72 (2026-05-20) — Trendyol Price/Inventory Fallback (P0 FIX)
+
+### 🐛 Şikayet
+"FCSS2000003 / 8684483528675 barkodlu ürünler Trendyol'a gönderildi diyor ama gitmedi. Ürün bulunamadı diyor."
+
+### 🔍 Root Cause
+Trendyol, **zaten satışta/onaylı olan** ürünler için `POST /v2/products` (create) çağrısını **"recurring.product.create.not.allowed"** hatası ile reddediyor. Mevcut fallback `PUT /products` (update_products) idi — o da aynı throttle'a takılıyor (`recurring.product.update.not.allowed`). Sonuç: ürün DB'de var ve sync endpoint "kabul etmedi" diyor, stok asla güncellenmiyor.
+
+### 🔧 Fix
+`backend/routes/integrations.py` (sync_products_to_trendyol):
+1. **Recurring fallback** artık önce `POST /integration/inventory/.../price-and-inventory` ile barkod bazlı stok+fiyat güncelliyor (anti-spam throttle'a takılmıyor). Başarısızsa `update_products` PUT'a düşüyor.
+2. **Self-conflict fallback** ("Aynı barkodlu ürününüz bulunduğundan...") durumunda da önce price-and-inventory tetiklenip stok/fiyat senkronu garantileniyor, ardından PUT update kategori/attribute/image için çalışıyor.
+
+### ✅ Sonuç
+- `8684483528675` → SUCCESS (qty=46, price=2760)
+- `8684483524905`, `8684483524936` → 2/2 SUCCESS (handoff'ta sıkışmıştı)
+- `FCSS2000003` (4 varyant) → 4/4 SUCCESS (`8684483526220` dahil — eski self-conflict çözüldü)
+
+### 📌 Bilinmesi Gerekenler
+- `update_price_and_inventory` Trendyol limit: tek batch'te max 1000 barkod.
+- Tüm fallback'ler async batch döndürür; UI logundan COMPLETED durumu izlenmeli.
+
+
+
 ## Iteration 71 (2026-05-20) — Duplicate Doc Merge (Resim/Fiyat/Stok Onarımı)
 
 ### 🐛 Şikayet
