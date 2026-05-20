@@ -966,6 +966,49 @@ async def sync_products_to_trendyol(
     products = await db.products.find(query).to_list(length=None)
     # 🛡️ Aynı stock_code ile dublike doküman varsa, görseli/source'u en iyi olanı seç
     products = _dedupe_products_by_stock_code(products)
+
+    # 🔍 Hangi stok kodları / barkodlar DB'de bulundu? Bulunmayanları topla.
+    not_found_codes = []
+    if barcodes or stock_codes:
+        found_barcodes = set()
+        found_stock_codes = set()
+        for p in products:
+            if p.get("barcode"): found_barcodes.add(str(p["barcode"]))
+            if p.get("stock_code"): found_stock_codes.add(str(p["stock_code"]))
+            if p.get("sku"): found_stock_codes.add(str(p["sku"]))
+            for v in (p.get("variants") or []):
+                if v.get("barcode"): found_barcodes.add(str(v["barcode"]))
+                if v.get("stock_code"): found_stock_codes.add(str(v["stock_code"]))
+        requested = set([str(c) for c in (barcodes or [])] + [str(c) for c in (stock_codes or [])])
+        not_found_codes = sorted([c for c in requested if c not in found_barcodes and c not in found_stock_codes])
+
+    # ❗ Hiç ürün bulunamadıysa anında net mesajla dön — kullanıcı "DB'de yok mu, validasyon mu hatalı?" diye anlamayabiliyor
+    if not products:
+        from datetime import datetime, timezone
+        msg = (
+            f"DB'de bu kod(lar)la ürün bulunamadı: {', '.join(not_found_codes[:10])}"
+            + (f" (+{len(not_found_codes)-10} daha)" if len(not_found_codes) > 10 else "")
+        ) if not_found_codes else "Sorgu kriterlerine uyan ürün bulunamadı."
+        await db.trendyol_sync_logs.insert_one({
+            "id": generate_id(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "failed",
+            "products_attempted": 0,
+            "products_sent": 0,
+            "batch_request_id": None,
+            "errors": [msg],
+            "not_found_codes": not_found_codes,
+            "message": msg,
+        })
+        return {
+            "success": False,
+            "message": msg,
+            "total": 0,
+            "successful": 0,
+            "failed": 0,
+            "not_found_codes": not_found_codes,
+            "errors": [msg],
+        }
     
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -1262,7 +1305,22 @@ async def sync_products_to_trendyol(
                 # sadece o barkodları batch'e ekle. Aksi halde parent'ın tüm varyantları
                 # gönderilir → Trendyol'da kardeş varyantlar zaten varsa duplicate hatası
                 # oluşur ve yeni eklenmek istenen barkod da reject olur.
-                requested_set = set(barcodes) if barcodes else None
+                # AMA: Kullanıcı stok kodu girip parent ürünü hedeflediyse, tüm varyantlar
+                # gönderilmelidir (stockCode == "FCSSxxx" hiçbir varyant barkoduyla
+                # eşleşmediği için aksi halde sıfır varyant gönderilir).
+                product_match_by_stock = False
+                if stock_codes:
+                    sc_set = set(str(s) for s in stock_codes)
+                    if (
+                        str(product.get("stock_code") or "") in sc_set
+                        or str(product.get("sku") or "") in sc_set
+                        or any(str(v.get("stock_code") or "") in sc_set for v in variants)
+                    ):
+                        product_match_by_stock = True
+                if product_match_by_stock:
+                    requested_set = None  # tüm varyantları gönder
+                else:
+                    requested_set = set(barcodes) if barcodes else None
                 for v in variants:
                     if not v.get("barcode") or v.get("barcode_uncertain"):
                         errors.append(f"{product.get('name')} - Varyant ({v.get('size') or v.get('color') or '?'}) barkodu yok / belirsiz.")
@@ -1291,8 +1349,13 @@ async def sync_products_to_trendyol(
             errors.append(f"{product.get('name')} - Hazırlama Hatası: {str(e)}")
             
     if not items_to_send:
-        # Save failure log
+        # Save failure log — products bulundu ama validasyondan geçemedi
         from datetime import datetime, timezone
+        first_reason = errors[0] if errors else "Bilinmeyen validasyon hatası."
+        msg = (
+            f"{len(products)} ürün DB'de bulundu ama Trendyol'a gönderilemedi. "
+            f"İlk hata: {first_reason}"
+        )
         log_doc = {
             "id": generate_id(),
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -1301,15 +1364,17 @@ async def sync_products_to_trendyol(
             "products_sent": 0,
             "batch_request_id": None,
             "errors": errors,
-            "message": "Gönderilecek geçerli ürün bulunamadı."
+            "not_found_codes": not_found_codes,
+            "message": msg,
         }
         await db.trendyol_sync_logs.insert_one(log_doc)
         return {
             "success": False,
-            "message": "Trendyol'a gönderilecek geçerli ürün bulunamadı. Lütfen eksikleri giderin.",
+            "message": msg,
             "total": len(products),
             "successful": 0,
             "failed": len(errors),
+            "not_found_codes": not_found_codes,
             "errors": errors
         }
         
