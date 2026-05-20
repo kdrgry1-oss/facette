@@ -1258,10 +1258,17 @@ async def sync_products_to_trendyol(
                 item["attributes"] = resolve_attributes(attributes, product, None, category, meta)
                 items_to_send.append(item)
             else:
+                # 🎯 Eğer kullanıcı barcodes parametresi ile spesifik barkodlar istediyse,
+                # sadece o barkodları batch'e ekle. Aksi halde parent'ın tüm varyantları
+                # gönderilir → Trendyol'da kardeş varyantlar zaten varsa duplicate hatası
+                # oluşur ve yeni eklenmek istenen barkod da reject olur.
+                requested_set = set(barcodes) if barcodes else None
                 for v in variants:
                     if not v.get("barcode") or v.get("barcode_uncertain"):
                         errors.append(f"{product.get('name')} - Varyant ({v.get('size') or v.get('color') or '?'}) barkodu yok / belirsiz.")
                         continue
+                    if requested_set and str(v.get("barcode")) not in requested_set:
+                        continue  # kullanıcı bu barkodu istemedi, atla
                     item = base_item.copy()
                     item["barcode"] = v.get("barcode")
                     # ⚠️ Trendyol stockCode'u seller başına UNIQUE olmalı.
@@ -1323,6 +1330,23 @@ async def sync_products_to_trendyol(
                 trendyol_error = "; ".join([
                     (e.get("message") if isinstance(e, dict) else str(e)) for e in trendyol_error
                 ])[:1000]
+
+            # 🛟 FALLBACK: "Tekrarlı ürün oluşturma isteği atılamaz" (Trendyol anti-spam)
+            # geldiyse update_products (PUT) endpoint'ini dene — bu farklı endpoint
+            # ve idempotency check'ten geçer. PUT mevcut ürünleri günceller, yok olan
+            # için 404 alır ama batch_id döner.
+            if trendyol_error and ("tekrarl" in trendyol_error.lower() or "duplicate request" in trendyol_error.lower()):
+                logger.info("Trendyol create reddetti (tekrarlı). update_products fallback deneniyor.")
+                try:
+                    upd_response = await client.update_products(items_to_send)
+                    upd_batch = (upd_response or {}).get("batchRequestId")
+                    if upd_batch:
+                        batch_id = upd_batch
+                        response = upd_response
+                        trendyol_error = None
+                        logger.info(f"Trendyol update_products fallback başarılı: batch={upd_batch}")
+                except Exception as upd_err:
+                    logger.error(f"update_products fallback exception: {upd_err}")
 
         # 🔍 Gerçek batch sonucunu sorgula: Trendyol asenkron işliyor; 5-15sn'de tamamlanır.
         # "aktarıldı diyor ama Trendyol'da yok" tuzağını önler.

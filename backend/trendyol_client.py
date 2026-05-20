@@ -176,15 +176,15 @@ class TrendyolClient:
 
     async def archive_products(self, barcodes: List[str]) -> Dict:
         """
-        Ürünleri arşivler (panelde görünmez yapar, stockCode iadesi sağlar).
-        Endpoint: POST /integration/product/sellers/{sellerId}/products/archive
-        items format: [{"barcode": "..."}, ...]
+        Ürünleri arşivler. Trendyol v3:
+          PUT /integration/product/sellers/{sellerId}/products/archive-state
+          Body: {"items":[{"barcode":"...","archived":true}, ...]}
         """
-        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/archive"
-        items = [{"barcode": b} for b in barcodes if b]
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/archive-state"
+        items = [{"barcode": b, "archived": True} for b in barcodes if b]
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.post(url, headers=self._get_headers(), json={"items": items})
+                response = await client.put(url, headers=self._get_headers(), json={"items": items})
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -198,12 +198,12 @@ class TrendyolClient:
                 raise
 
     async def unarchive_products(self, barcodes: List[str]) -> Dict:
-        """Arşivden çıkarır. Endpoint: POST /integration/product/sellers/{sellerId}/products/unarchive"""
-        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/unarchive"
-        items = [{"barcode": b} for b in barcodes if b]
+        """Arşivden çıkar: PUT archive-state with archived=False."""
+        url = f"{self.base_url}/product/sellers/{self.supplier_id}/products/archive-state"
+        items = [{"barcode": b, "archived": False} for b in barcodes if b]
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.post(url, headers=self._get_headers(), json={"items": items})
+                response = await client.put(url, headers=self._get_headers(), json={"items": items})
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:

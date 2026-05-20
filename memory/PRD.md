@@ -4,6 +4,30 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 69 (2026-05-20) — Trendyol Push: 8 Barkod Çözüm Akışı
+
+### 🐛 Bulunan Birden Çok Bug
+
+1. **`barcodes=[...]` filter parametresi sync logic'ine bağlı değildi**: Sync, kullanıcı 1 barkod istese bile parent ürünün TÜM varyantlarını batch'e ekliyordu. Trendyol kardeşleri zaten varsa "duplicate" hatası fırlatıyordu ve istenen yeni barkod da reject oluyordu. **Fix**: `requested_set = set(barcodes)` ile variant loop'ta filtre eklendi.
+
+2. **`archive_products` endpoint URL'i YANLIŞTI**: `POST /products/archive` → 404. Doğrusu: `PUT /products/archive-state` body `{"items":[{"barcode":"...","archived":true}]}`.
+
+3. **`update_products` fallback eklendi**: Trendyol create endpoint "Tekrarlı ürün oluşturma isteği atılamaz" döndüğünde (idempotency anti-spam) otomatik PUT update_products denenir.
+
+### ✅ Bu sayede:
+- 5 conflict barkod (8684483527432, 8684483526282, 8684483526794, 8684483527173, 8684483528613) Trendyol'da **arşivlendi (archived=True)**
+- Mevcut Trendyol varyantlarının fiyatı/stok/açıklaması PUT update ile başarıyla güncellendi
+
+### ⚠ Trendyol API Davranış Engeli
+**Arşivlenen ürünler hâlâ duplicate kontrolüne dahil ediliyor.** Yeni create denemelerinde "Aynı barkodlu... Barkod: 8684483527173 (archived)" hatası alıyoruz. Bu **Trendyol API'nin tasarım sorunu** — archive yeterli değil, **gerçek DELETE** gerekiyor ki barcode/stockCode slot'u tamamen boşalsın.
+
+### Çözüm Önerileri Kullanıcıya
+1. **Trendyol panelinden manuel SİLME** (önerilen): conflict 5 barkodu Trendyol'a giriş yapıp seçip "Sil" butonuna basın.
+2. **Trendyol destek ticket'ı**: Arşivlenmiş ürünlerin barkodlarını duplicate kontrolünden çıkarmalarını isteyin.
+3. **Yeni stockCode**: 5 ürüne farklı stockCode atayıp Trendyol'a yeni ürün olarak push (ama parent ürünle ayrı listelenir).
+
+
+
 ## Iteration 68 (2026-05-19) — Eksik Ürün/Varyantları Excel'den Tamamlama
 
 ### 🎯 İstek
