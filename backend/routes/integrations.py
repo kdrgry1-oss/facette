@@ -1271,32 +1271,18 @@ async def sync_products_to_trendyol(
                         continue  # kullanıcı bu barkodu istemedi, atla
                     item = base_item.copy()
                     item["barcode"] = v.get("barcode")
-                    # ⚠️ Trendyol stockCode'u seller başına UNIQUE olmalı, AMA panel
-                    # tarafında insan-okunabilir olması için parent stok kodu
-                    # (FCSS.../FCFW...) ile başlamalı.
-                    # Strateji:
-                    #   1) Varyantın kendi unique stock_code'u varsa (parent'tan farklı) onu kullan
-                    #   2) Yoksa "{parent}-{size}-{color}" formatla unique yap (ör. FCSS2700002-L-Aci-Kahve)
-                    #   3) Son çare: "{parent}-{barcode-son-4}" (size/color yok diye)
-                    import re as _re_sc
-                    v_stock = (v.get("stock_code") or v.get("sku") or "").strip()
+                    # stockCode = parent stok kodu (FCSS.../FCFW...). Trendyol unique
+                    # check'i barcode üzerinden yapar, stockCode aynı olabilir.
                     parent_stock = (product.get("stock_code") or product.get("sku") or "").strip()
-                    def _slug(s):
-                        s = _re_sc.sub(r"[^A-Za-z0-9]+", "-", str(s or "")).strip("-")
-                        return s[:24]
+                    v_stock = (v.get("stock_code") or v.get("sku") or "").strip()
+                    # Varyantın kendi unique stock_code'u parent'tan farklıysa onu kullan,
+                    # değilse parent stock_code'u gönder.
                     if v_stock and v_stock != parent_stock:
                         item["stockCode"] = v_stock
                     elif parent_stock:
-                        size_part = _slug(v.get("size"))
-                        color_part = _slug(v.get("color"))
-                        suffix = "-".join([p for p in [size_part, color_part] if p])
-                        if not suffix:
-                            # barkodun son 4 hanesi
-                            bc_tail = str(v.get("barcode") or "")[-4:]
-                            suffix = bc_tail or "V"
-                        item["stockCode"] = f"{parent_stock}-{suffix}"
+                        item["stockCode"] = parent_stock
                     else:
-                        item["stockCode"] = v.get("barcode")  # son çare
+                        item["stockCode"] = v.get("barcode")
                     item["quantity"] = int(v.get("stock", 0))
                     item["attributes"] = resolve_attributes(attributes, product, v, category, meta)
                     items_to_send.append(item)
@@ -1655,8 +1641,8 @@ async def sync_products_to_trendyol(
                     upd_resp = await client.update_products(self_conflicts)
                     upsert_batch_id = (upd_resp or {}).get("batchRequestId")
                     if upsert_batch_id:
-                        for attempt in range(5):
-                            await _asyncio.sleep(2.0)
+                        for attempt in range(8):
+                            await _asyncio.sleep(2.5)
                             try:
                                 ubr = await client.get_batch_request_result(upsert_batch_id)
                                 upsert_final_status = (ubr or {}).get("status") or "INPROGRESS"
