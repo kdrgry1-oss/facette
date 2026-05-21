@@ -1603,62 +1603,105 @@ async def sync_products_to_trendyol(
                 else:
                     self_conflicts.append(payload)
 
-            # 1) CROSS CONFLICTS: ARCHIVE old + RETRY CREATE
+            # 1) CROSS CONFLICTS: önce PUT update_products dene (mevcut Trendyol kaydının
+            #    barkodunu yenisi ile değiştir), olmazsa ARCHIVE old + RETRY CREATE.
             if cross_conflicts:
-                old_barcodes_to_archive = list({c[1] for c in cross_conflicts})
-                logger.info(f"Trendyol CROSS-CONFLICT: {len(old_barcodes_to_archive)} eski barkod arşivlenecek: {old_barcodes_to_archive[:5]}…")
+                cross_items = [c[2] for c in cross_conflicts]
+                # 1a) PUT update_products: stockCode ile match → barcode update
+                put_cross_succeeded_barcodes = set()
                 try:
-                    arch_resp = await client.archive_products(old_barcodes_to_archive)
-                    archive_batch_id = (arch_resp or {}).get("batchRequestId")
-                    archived_barcodes = old_barcodes_to_archive
-                    # Archive batch poll
-                    if archive_batch_id:
-                        for attempt in range(5):
-                            await _asyncio.sleep(1.5)
+                    upsert_attempted += len(cross_items)
+                    upd_cross_resp = await client.update_products(cross_items)
+                    upd_cross_batch = (upd_cross_resp or {}).get("batchRequestId")
+                    if upd_cross_batch:
+                        logger.info(f"Cross-conflict PUT update_products batch: {upd_cross_batch}")
+                        if not upsert_batch_id:
+                            upsert_batch_id = upd_cross_batch
+                        for attempt in range(6):
+                            await _asyncio.sleep(2.0)
                             try:
-                                abr = await client.get_batch_request_result(archive_batch_id)
-                                if _norm_status((abr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
+                                ucbr = await client.get_batch_request_result(upd_cross_batch)
+                                if _norm_status((ucbr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
+                                    for uit in (ucbr or {}).get("items", []) or []:
+                                        req = uit.get("requestItem", {}) or {}
+                                        prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                        bc_u = prod.get("barcode") or req.get("barcode") or ""
+                                        if (uit.get("status") or "").upper() == "SUCCESS":
+                                            put_cross_succeeded_barcodes.add(str(bc_u))
+                                        else:
+                                            upsert_failed_items.append({
+                                                "stock_code": prod.get("stockCode") or bc_u,
+                                                "barcode": bc_u,
+                                                "title": prod.get("title") or "",
+                                                "reasons": uit.get("failureReasons") or [],
+                                                "phase": "cross_put_update",
+                                            })
+                                    upsert_succeeded += len(put_cross_succeeded_barcodes)
                                     break
-                            except Exception:
-                                pass
-                except Exception as ae:
-                    logger.error(f"Archive products error: {ae}")
+                            except Exception as uc_poll_err:
+                                logger.warning(f"Cross PUT poll {attempt+1}/8 failed: {uc_poll_err}")
+                except Exception as uc_err:
+                    logger.warning(f"Cross-conflict PUT update_products exception: {uc_err}")
 
-                # Retry CREATE with the new barcodes
-                retry_items = [c[2] for c in cross_conflicts]
-                if retry_items:
-                    upsert_attempted += len(retry_items)
+                # Hâlâ başarısız olan cross item'lar için archive + retry create
+                remaining_cross = [
+                    c for c in cross_conflicts
+                    if str(c[2].get("barcode") or "") not in put_cross_succeeded_barcodes
+                ]
+                if remaining_cross:
+                    old_barcodes_to_archive = list({c[1] for c in remaining_cross})
+                    logger.info(f"Trendyol CROSS-CONFLICT: {len(old_barcodes_to_archive)} eski barkod arşivlenecek: {old_barcodes_to_archive[:5]}…")
                     try:
-                        retry_resp = await client.create_products(retry_items)
-                        retry_create_batch_id = (retry_resp or {}).get("batchRequestId")
-                        if retry_create_batch_id:
+                        arch_resp = await client.archive_products(old_barcodes_to_archive)
+                        archive_batch_id = (arch_resp or {}).get("batchRequestId")
+                        archived_barcodes = old_barcodes_to_archive
+                        # Archive batch poll
+                        if archive_batch_id:
                             for attempt in range(5):
-                                await _asyncio.sleep(2.0)
+                                await _asyncio.sleep(1.5)
                                 try:
-                                    rbr = await client.get_batch_request_result(retry_create_batch_id)
-                                    rstatus = (rbr or {}).get("status") or "INPROGRESS"
-                                    if _norm_status(rstatus) in ("COMPLETED", "FAILED"):
-                                        for rit in (rbr or {}).get("items", []) or []:
-                                            if (rit.get("status") or "").upper() == "FAILED":
-                                                req = rit.get("requestItem", {}) or {}
-                                                prod = req.get("product", {}) if isinstance(req, dict) else {}
-                                                upsert_failed_items.append({
-                                                    "stock_code": prod.get("stockCode") or req.get("barcode") or "",
-                                                    "barcode": prod.get("barcode") or req.get("barcode") or "",
-                                                    "title": prod.get("title") or "",
-                                                    "reasons": rit.get("failureReasons") or [],
-                                                    "phase": "retry_create",
-                                                })
-                                        retry_create_succeeded = max(
-                                            0,
-                                            (rbr or {}).get("itemCount", 0) - (rbr or {}).get("failedItemCount", 0),
-                                        )
-                                        upsert_succeeded += retry_create_succeeded
+                                    abr = await client.get_batch_request_result(archive_batch_id)
+                                    if _norm_status((abr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
                                         break
-                                except Exception as rp:
-                                    logger.warning(f"Retry-create poll {attempt+1}/8 failed: {rp}")
-                    except Exception as re_err:
-                        logger.error(f"Retry create after archive error: {re_err}")
+                                except Exception:
+                                    pass
+                    except Exception as ae:
+                        logger.error(f"Archive products error: {ae}")
+
+                    # Retry CREATE with the new barcodes
+                    retry_items = [c[2] for c in remaining_cross]
+                    if retry_items:
+                        try:
+                            retry_resp = await client.create_products(retry_items)
+                            retry_create_batch_id = (retry_resp or {}).get("batchRequestId")
+                            if retry_create_batch_id:
+                                for attempt in range(5):
+                                    await _asyncio.sleep(2.0)
+                                    try:
+                                        rbr = await client.get_batch_request_result(retry_create_batch_id)
+                                        rstatus = (rbr or {}).get("status") or "INPROGRESS"
+                                        if _norm_status(rstatus) in ("COMPLETED", "FAILED"):
+                                            for rit in (rbr or {}).get("items", []) or []:
+                                                if (rit.get("status") or "").upper() == "FAILED":
+                                                    req = rit.get("requestItem", {}) or {}
+                                                    prod = req.get("product", {}) if isinstance(req, dict) else {}
+                                                    upsert_failed_items.append({
+                                                        "stock_code": prod.get("stockCode") or req.get("barcode") or "",
+                                                        "barcode": prod.get("barcode") or req.get("barcode") or "",
+                                                        "title": prod.get("title") or "",
+                                                        "reasons": rit.get("failureReasons") or [],
+                                                        "phase": "retry_create",
+                                                    })
+                                            retry_create_succeeded = max(
+                                                0,
+                                                (rbr or {}).get("itemCount", 0) - (rbr or {}).get("failedItemCount", 0),
+                                            )
+                                            upsert_succeeded += retry_create_succeeded
+                                            break
+                                    except Exception as rp:
+                                        logger.warning(f"Retry-create poll {attempt+1}/5 failed: {rp}")
+                        except Exception as re_err:
+                            logger.error(f"Retry create after archive error: {re_err}")
 
             # 2) SELF CONFLICTS: PUT update_products + price-and-inventory POST
             # PUT mevcut ürünün kategori/attribute/image alanlarını günceller; ancak
