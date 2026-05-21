@@ -1603,45 +1603,12 @@ async def sync_products_to_trendyol(
                 else:
                     self_conflicts.append(payload)
 
-            # 1) CROSS CONFLICTS: önce PUT update_products dene (mevcut Trendyol kaydının
-            #    barkodunu yenisi ile değiştir), olmazsa ARCHIVE old + RETRY CREATE.
+            # 1) CROSS CONFLICTS: önce ARCHIVE + RETRY CREATE.
+            # (Önceki versiyonlarda PUT update_products deneniyordu ama Trendyol
+            # stockCode altında çoklu kayıt olduğunda hayalet SUCCESS dönüyor → kaldırıldı.)
             if cross_conflicts:
                 cross_items = [c[2] for c in cross_conflicts]
-                # 1a) PUT update_products: stockCode ile match → barcode update
-                put_cross_succeeded_barcodes = set()
-                try:
-                    upsert_attempted += len(cross_items)
-                    upd_cross_resp = await client.update_products(cross_items)
-                    upd_cross_batch = (upd_cross_resp or {}).get("batchRequestId")
-                    if upd_cross_batch:
-                        logger.info(f"Cross-conflict PUT update_products batch: {upd_cross_batch}")
-                        if not upsert_batch_id:
-                            upsert_batch_id = upd_cross_batch
-                        for attempt in range(6):
-                            await _asyncio.sleep(2.0)
-                            try:
-                                ucbr = await client.get_batch_request_result(upd_cross_batch)
-                                if _norm_status((ucbr or {}).get("status", "")) in ("COMPLETED", "FAILED"):
-                                    for uit in (ucbr or {}).get("items", []) or []:
-                                        req = uit.get("requestItem", {}) or {}
-                                        prod = req.get("product", {}) if isinstance(req, dict) else {}
-                                        bc_u = prod.get("barcode") or req.get("barcode") or ""
-                                        if (uit.get("status") or "").upper() == "SUCCESS":
-                                            put_cross_succeeded_barcodes.add(str(bc_u))
-                                        else:
-                                            upsert_failed_items.append({
-                                                "stock_code": prod.get("stockCode") or bc_u,
-                                                "barcode": bc_u,
-                                                "title": prod.get("title") or "",
-                                                "reasons": uit.get("failureReasons") or [],
-                                                "phase": "cross_put_update",
-                                            })
-                                    upsert_succeeded += len(put_cross_succeeded_barcodes)
-                                    break
-                            except Exception as uc_poll_err:
-                                logger.warning(f"Cross PUT poll {attempt+1}/8 failed: {uc_poll_err}")
-                except Exception as uc_err:
-                    logger.warning(f"Cross-conflict PUT update_products exception: {uc_err}")
+                put_cross_succeeded_barcodes = set()  # şimdilik boş (PUT yok)
 
                 # Hâlâ başarısız olan cross item'lar için archive + retry create
                 remaining_cross = [
@@ -1649,10 +1616,47 @@ async def sync_products_to_trendyol(
                     if str(c[2].get("barcode") or "") not in put_cross_succeeded_barcodes
                 ]
                 if remaining_cross:
-                    old_barcodes_to_archive = list({c[1] for c in remaining_cross})
-                    logger.info(f"Trendyol CROSS-CONFLICT: {len(old_barcodes_to_archive)} eski barkod arşivlenecek: {old_barcodes_to_archive[:5]}…")
+                    # 🧹 AGRESİF TEMİZLİK: cross-conflict varsa, conflict'in tek barkodunu
+                    # arşivlemek yetmez. Trendyol cache'inde aynı stockCode altında onlarca
+                    # eski varyant olabiliyor. DB'de OLMAYAN tüm Trendyol barkodlarını
+                    # bul ve arşivle. Sonra retry create yapılabilir.
+                    old_barcodes_to_archive: set = set()
+                    db_barcodes_per_sc: dict = {}
+                    # 1) cross_conflicts'tan stockCode'ları topla, her stockCode için DB barkodlarını çek
+                    stock_codes_in_play: set = set()
+                    for c in remaining_cross:
+                        old_barcodes_to_archive.add(c[1])
+                        sc = (c[2] or {}).get("productMainId") or (c[2] or {}).get("stockCode")
+                        if sc:
+                            stock_codes_in_play.add(str(sc))
+                    for sc in stock_codes_in_play:
+                        # DB'deki barkodlar (bu stockCode için)
+                        if sc not in db_barcodes_per_sc:
+                            db_prod = await db.products.find_one(
+                                {"$or": [{"stock_code": sc}, {"sku": sc}, {"variants.stock_code": sc}]},
+                                {"_id": 0, "barcode": 1, "variants.barcode": 1, "stock_code": 1}
+                            )
+                            db_bcs = set()
+                            if db_prod:
+                                if db_prod.get("barcode"):
+                                    db_bcs.add(str(db_prod.get("barcode")))
+                                for v in (db_prod.get("variants") or []):
+                                    if v.get("barcode"):
+                                        db_bcs.add(str(v.get("barcode")))
+                            db_barcodes_per_sc[sc] = db_bcs
+                        # 2) Trendyol'da bu stockCode altındaki tüm barkodları çek
+                        try:
+                            tr_resp = await client.get_filtered_products(stock_code=sc, archived=False, size=100)
+                            for p in (tr_resp or {}).get("content", []):
+                                tr_bc = p.get("barcode")
+                                if tr_bc and str(tr_bc) not in db_barcodes_per_sc[sc]:
+                                    old_barcodes_to_archive.add(str(tr_bc))
+                        except Exception as fe:
+                            logger.warning(f"get_filtered_products(stock_code={sc}) failed: {fe}")
+                    old_barcodes_to_archive = list(old_barcodes_to_archive)
+                    logger.info(f"Trendyol CROSS-CONFLICT (deep): {len(old_barcodes_to_archive)} eski barkod arşivlenecek: {old_barcodes_to_archive[:10]}…")
                     try:
-                        arch_resp = await client.archive_products(old_barcodes_to_archive)
+                        arch_resp = await client.archive_products(old_barcodes_to_archive) if old_barcodes_to_archive else {}
                         archive_batch_id = (arch_resp or {}).get("batchRequestId")
                         archived_barcodes = old_barcodes_to_archive
                         # Archive batch poll
