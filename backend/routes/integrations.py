@@ -1921,6 +1921,38 @@ async def sync_products_to_trendyol(
         await db.trendyol_sync_logs.insert_one(log_doc)
         # _id ekleniyor MongoDB tarafından — response'a koyma
         log_doc.pop("_id", None)
+
+        # 🤖 OTOMATİK RETRY KUYRUĞU: "Aynı barkod var" / "ürün bulunamadı" / "Trendyol cache"
+        # tipi sıkışmalarda barkodları otomatik kuyruğa ekle (saatte bir retry edilir).
+        # Header'da X-Internal-Retry varsa atla (loop önlemi).
+        try:
+            from fastapi import Request as _Req  # noqa
+            # request header'ına direkt erişim yok; bunun yerine Request inject etmiyoruz.
+            # Bunun yerine sadece "stuck" tipi hataları kuyruğa al.
+            stuck_barcodes = []
+            for f in batch_failed_items:
+                reasons_text = " ".join([
+                    (r.get("message") if isinstance(r, dict) else str(r))
+                    for r in (f.get("reasons") or [])
+                ]).lower()
+                if any(p in reasons_text for p in ["aynı barkodlu", "ayni barkodlu", "ürün bulunamadı", "urun bulunamadi", "tedarikçi id si", "tedarikci id si"]):
+                    if f.get("barcode"):
+                        stuck_barcodes.append(str(f["barcode"]))
+            for f in upsert_failed_items:
+                reasons_text = " ".join([
+                    (r.get("message") if isinstance(r, dict) else str(r))
+                    for r in (f.get("reasons") or [])
+                ]).lower()
+                if any(p in reasons_text for p in ["aynı barkodlu", "ayni barkodlu", "ürün bulunamadı", "urun bulunamadi"]):
+                    if f.get("barcode"):
+                        stuck_barcodes.append(str(f["barcode"]))
+            if stuck_barcodes:
+                from routes.trendyol_retry_queue import add_to_queue as _add_to_queue
+                added = await _add_to_queue(db, stuck_barcodes, reason="Trendyol cache conflict — auto-queued")
+                logger.info(f"Trendyol auto-queue: {added} barkod retry kuyruğuna eklendi")
+        except Exception as q_err:
+            logger.warning(f"Auto-queue failed: {q_err}")
+
         return {
             "success": bool(batch_id) and not batch_failed_items and _norm_status(batch_final_status) != "FAILED",
             "message": log_doc["message"],

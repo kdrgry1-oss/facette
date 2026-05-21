@@ -4,7 +4,69 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
-## Iteration 73 (2026-05-20) — Akıllı Sync (Otomatik 4 Fallback Path)
+## Iteration 75 (2026-05-21) — Ticimax Tam Resync + Frontend Temizliği 📊
+
+### 🎯 Kullanıcı İsteği
+"Ürün sayfasında barkod sütunu görünmesin. Ticimax'tan ürünleri fiyatları stokları barkodları indirimli fiyatları stok kodlarını ürün id'lerini ürün kart id'lerini yeniden temiz bir şekilde işle. ... TÜKETİCİ yi falan gir gördüğün bütün sütunları gir."
+
+### 🔧 Yapılanlar
+**1. Frontend (`Products.jsx`):**
+- Ürün listesi tablosundan **"Barkod" sütunu kaldırıldı**.
+- Şimdiki kolonlar: ☑ | Görsel | Ürün Adı | Stok Kodu | Bedenler | Fiyat | İşlemler | Eklenme Tarihi.
+
+**2. Backend — `backend/scripts/ticimax_full_resync.py`:**
+TicimaxExport (5).xls dosyasındaki 1192 satır (393 parent) tek bir akışta işlendi:
+- URUNKARTIID'e göre gruplandı → her parent ürünü temsil eder.
+- DB'de match: önce `urun_karti_id`, yoksa `stock_code + color`, son çare `name+color` regex.
+- Her parent için tüm alanlar Excel'den yazıldı (Single Source of Truth):
+  - `urun_karti_id`, `stock_code`, `sku`, `vendor`, `description`, `breadcrumb`, `category_name`/`category_id`
+  - `price` (SATISFIYATI), `sale_price` (INDIRIMLIFIYAT), `member_price_1` (UYETIPIFIYAT1), `cost_price` (ALISFIYATI), `vat_rate` (KDVORANI)
+  - `variants[].size`, `color`, `barcode`, `stock_code`, `urun_id`, `price`, `sale_price`
+
+### ✅ Sonuçlar
+- **332 ürün güncellendi** (DB'de var olan parent'lar).
+- **61 yeni ürün eklendi** (DB'de yok olan parent'lar).
+- **1192 varyant** birebir Excel ile senkron (renk + beden + barkod + stock_code + urun_id).
+- **0 orphan** (Excel'de olmayan urun_karti_id'li DB ürünü yok).
+
+### 📌 Verilen Örnek Doğrulamalar
+- `8684483528712` → Norya Mini Şort Acı Kahve L | sc=FCSS2700002 | fiyat=1490, alış=358, tedarikçi=FACETTE
+- `8684483528781` → Helia Oversize Gömlek Ekru M/L | sc=FCSS0900008 | fiyat=1690, alış=550
+- `8684483528903` → Evrin Modal Bluz Etek Takım Ekru L | sc=FCSS2000005 | fiyat=2440, alış=715
+
+## Iteration 74 (2026-05-20) — Otomatik Trendyol Retry Kuyruğu 🤖
+
+
+### 🐛 Şikayet
+"FCSS0900008 6 ürün gönderildi diyor ama gitmiyor, bıktım artık çöz şunu."
+
+### 🔍 Root Cause
+Trendyol "Aynı barkodlu ürün var" hatası veriyor ama referans verdiği eski barkod public filter API'de görünmüyor (Trendyol-side cache tutarsızlığı). Sistem **archive + retry create + price-and-inventory + PUT update** yollarını denedi; Trendyol kabul etmedi. Tek pragmatik çözüm: zaman içinde cache temizliğini beklemek.
+
+### 🔧 Yeni Mimari (`backend/routes/trendyol_retry_queue.py`)
+**Otomatik retry kuyruğu** kuruldu:
+
+1. **`trendyol_stuck_queue` MongoDB collection** — Trendyol cache hatası verenler kaydediliyor.
+2. **Otomatik ekleme:** `sync_products_to_trendyol` içinde "Aynı barkodlu" / "ürün bulunamadı" / "tedarikçi id si" pattern'i tespit edilince barkod kuyruğa eklenir.
+3. **Saatlik background task:** `lifespan` startup'ta `asyncio.create_task(background_retry_loop(...))` başlatılıyor. Her saat başı kuyruktaki pending barkodları sync'e gönderiyor.
+4. **Sahte SUCCESS koruması:** Trendyol batch SUCCESS dese bile filter API ile gerçekten kayıtlı mı doğrulanıyor → değilse hala stuck.
+5. **Max 12 deneme (12 saat)** sonra otomatik retry durur (manual müdahale gerekir).
+
+### 📡 Yeni Endpoints
+- `GET /api/integrations/trendyol/retry-queue/list?resolved=false`
+- `POST /api/integrations/trendyol/retry-queue/run-now`
+- `POST /api/integrations/trendyol/retry-queue/add` (manuel barkod ekleme)
+- `DELETE /api/integrations/trendyol/retry-queue/barcode/{barcode}`
+
+### ✅ Test Sonuçları
+- 10 barkod kuyruğa eklendi.
+- İlk run-now: **2 barkod (8684483528712, 8684483528767) gerçekten Trendyol'da bulundu** → kuyruktan çıkarıldı.
+- Diğer 8'i hala stuck — saatlik retry ile cache temizlenince otomatik geçecek.
+
+### 📌 Frontend (sonraki turda)
+- BarcodeIssues sayfasına "Sıkışmış Kuyruk" tab'ı eklenebilir.
+
+
 
 ### 🐛 Şikayet
 "FCSS2700002 / 8684483528675 vb. ürünler 'gönderildi' diyor ama Trendyol'a gitmiyor. Her üründe uğraşacak mıyım?"

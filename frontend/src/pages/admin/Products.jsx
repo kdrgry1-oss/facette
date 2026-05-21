@@ -1283,7 +1283,6 @@ export default function AdminProducts() {
               <th>Görsel</th>
               <th>Ürün Adı</th>
               <th>Stok Kodu</th>
-              <th>Barkod</th>
               <th>Bedenler</th>
               <th>Fiyat</th>
               <th>İşlemler</th>
@@ -1292,9 +1291,9 @@ export default function AdminProducts() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-8">Yükleniyor...</td></tr>
+              <tr><td colSpan={8} className="text-center py-8">Yükleniyor...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
+              <tr><td colSpan={8} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
             ) : (
               products.map((product) => (
                 <tr key={product.id} data-testid={`product-row-${product.id}`}>
@@ -1333,9 +1332,6 @@ export default function AdminProducts() {
                     <p className="text-xs text-gray-500">{product.category_name}</p>
                   </td>
                   <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || product.sku || '-'}</td>
-                  <td className="text-xs text-gray-600 font-mono">
-                    {product.barcode || product.variants?.find(v => v.barcode)?.barcode || '-'}
-                  </td>
                   <td>
                     {product.variants?.length > 0 ? (
                       <button 

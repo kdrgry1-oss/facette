@@ -81,6 +81,7 @@ from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
 from routes.integrations_temu import router as integrations_temu_router
+from routes.trendyol_retry_queue import router as trendyol_retry_queue_router, background_retry_loop as trendyol_retry_bg_loop
 from routes.customer_risk import router as customer_risk_router
 from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
@@ -173,6 +174,14 @@ async def lifespan(app: FastAPI):
         start_scheduler()
     except Exception as e:
         logger.warning(f"Scheduler start warning: {e}")
+
+    # Start Trendyol stuck barcode retry queue (saatte bir)
+    try:
+        import asyncio as _asyncio
+        _asyncio.create_task(trendyol_retry_bg_loop(lambda: db))
+        logger.info("Trendyol retry queue background loop started (her saat)")
+    except Exception as e:
+        logger.warning(f"Trendyol retry loop start warning: {e}")
 
     yield
     
@@ -394,6 +403,7 @@ api_router.include_router(dogan_router, prefix="/integrations")
 api_router.include_router(trendyol_qna_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(integrations_temu_router, prefix="/integrations")
+api_router.include_router(trendyol_retry_queue_router)
 api_router.include_router(admin_router)
 api_router.include_router(customer_router)
 api_router.include_router(variants_router)
