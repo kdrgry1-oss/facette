@@ -28,17 +28,29 @@ from .integrations_iyzico import (  # eski import yollarını korumak için re-e
 import httpx
 
 async def get_trendyol_config():
-    """Get Trendyol configuration from DB or env"""
+    """Get Trendyol configuration from DB or env.
+    NOTE: default_markup için Ana Ayarlar > trendyol_markup ÖNCELİKLİ — kullanıcı UI'da
+    en son nereye girerse oradan okunur."""
     settings = await db.settings.find_one({"id": "trendyol"})
+    # Main settings'ten markup override
+    main_settings = await db.settings.find_one({"id": "main"}) or {}
+    main_markup = main_settings.get("trendyol_markup")
+    try:
+        main_markup_f = float(main_markup) if (main_markup is not None and main_markup != "") else None
+    except Exception:
+        main_markup_f = None
+
     if settings:
         mode = settings.get("mode", "sandbox")
+        local_markup = settings.get("default_markup", 0) or 0
+        effective_markup = main_markup_f if main_markup_f is not None else local_markup
         return {
             "api_key": settings.get("api_key", ""),
             "api_secret": settings.get("api_secret", ""),
             "supplier_id": settings.get("supplier_id", ""),
             "is_active": settings.get("is_active", False),
             "mode": mode,
-            "default_markup": settings.get("default_markup", 0),
+            "default_markup": effective_markup,
             "base_url": 'https://api.trendyol.com' if mode == 'live' else 'https://stageapigw.trendyol.com'
         }
     
@@ -80,14 +92,20 @@ def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_con
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
     config = await get_trendyol_config()
-    
-    # Also check main settings for trendyol_markup as fallback
-    default_markup = config.get("default_markup", 0)
-    if default_markup == 0:
-        main_settings = await db.settings.find_one({"id": "main"})
-        if main_settings and main_settings.get("trendyol_markup"):
-            default_markup = main_settings.get("trendyol_markup", 0)
-    
+
+    # Single source of truth: Ana Ayarlar sayfasındaki `trendyol_markup`
+    # main settings'ten yazıldıysa ÖNCELİKLİ olarak onu kullan; aksi halde
+    # Trendyol Integration kartındaki default_markup'a düş.
+    main_settings = await db.settings.find_one({"id": "main"})
+    main_markup = (main_settings or {}).get("trendyol_markup")
+    if main_markup is not None and main_markup != "":
+        try:
+            default_markup = float(main_markup)
+        except Exception:
+            default_markup = config.get("default_markup", 0) or 0
+    else:
+        default_markup = config.get("default_markup", 0) or 0
+
     # Mask secrets
     return {
         "supplier_id": config.get("supplier_id", ""),
@@ -138,6 +156,17 @@ async def save_trendyol_settings(
         {"$set": update_data},
         upsert=True
     )
+
+    # SSOT: trendyol_markup'i main settings'e de yansıt (UI'da ana ayarlar sayfası bu key'i okur)
+    try:
+        await db.settings.update_one(
+            {"id": "main"},
+            {"$set": {"trendyol_markup": update_data["default_markup"]}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+
     return {"success": True, "message": "Trendyol ayarları kaydedildi"}
 
 
