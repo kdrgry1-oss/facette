@@ -4,6 +4,38 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 77 (2026-02 fork) — Ticimax Storefront Scrape ile 4 Ürün Çekme 🕷️
+
+### 🎯 Kullanıcı İsteği
+"2889, 2879, 2840, 2839 ticimax'te bu ürün kartı id'lerine sahip ürünleri sisteme çek."
+
+### 🚧 Engel
+Ticimax `UrunServis` SOAP servisi, WS Yetki Kodu'na (SSIQWRIYHQ…) "Ürün Servis" yetkisi vermiyor → `SelectUrun` / `SelectVaryasyon` boş dönüyor (sessiz fail). Önceki ajan burada kullanıcıyı admin paneline yönlendirip BLOCKED bırakmıştı.
+
+### 💡 Çözüm — Storefront Scraper (yeni dosya)
+`/app/backend/scripts/ticimax_pull_via_storefront.py`:
+1. `https://www.facette.com.tr/sitemap/products/0.xml` üzerinden 281 ürün URL'i çekilir.
+2. URL slug'ı sonundaki `-<ID>` suffix hedef URUNKARTIID'lerle eşleştirilir.
+3. Her ürün detay sayfasındaki `var productDetailModel = {…}` JS nesnesi brace-balance ile parse edilir.
+4. `productDetailModel.products` (varyantlar+barkod+stok+fiyat+KDV), `productVariantData` (beden eşleşmesi), `productImages`, `breadCrumb` → DB schema'sına çevrilir, upsert edilir.
+
+### ✅ Sonuç (DB'de doğrulandı)
+| URUNKARTIID | Ürün | Stok Kodu | Varyant | Fiyat (KDV dahil) |
+|---|---|---|---|---|
+| 2839 | Velora Dantelli Saten Takım **Haki** | FCSS2000002 | 4 (XS,S,M,L) | 2800 / 2380 TL |
+| 2840 | Velora Dantelli Saten Takım **Bej**  | FCSS2000002 | 4 (XS,S,M,L) | 2800 / 2380 TL |
+| 2879 | Metal Aksesuarlı Crop Blazer Ceket **Siyah** | FCSS0400012 | 2 (XS/S, M/L) | 2700 TL |
+| 2889 | Monarc Bluz Pantolon Takım **Ekru**  | FCSS2000008 | 4 (XS,S,M,L) | 3490 TL |
+
+Tüm ürünlerde 6 görsel + breadcrumb (`GİYİM > … > Kategori`) + KDV oranı (10%) + canlı barkodlar (8684483526xxx, 8684483527xxx) + stok adetleri DB'ye yazıldı. Stats: `updated=4, created=0, variants=14, errors=[]`.
+
+### 📌 Notlar
+- Bu yöntem Ticimax API yetkisi gerektirmez ve canlı storefront ile tamamen tutarlıdır.
+- Aynı script tek/birkaç URUNKARTIID için manuel çalıştırılabilir: `python3 scripts/ticimax_pull_via_storefront.py 2839 2840`
+- Bulk resync için Excel SSOT yöntemi hâlâ tercih edilmeli; bu script "elle 1-N ürün ekleme" senaryosu için.
+
+
+
 ## Iteration 75 (2026-05-21) — Ticimax Tam Resync + Frontend Temizliği 📊
 
 ### 🎯 Kullanıcı İsteği
