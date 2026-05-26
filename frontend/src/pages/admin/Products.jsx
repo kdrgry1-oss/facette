@@ -69,6 +69,78 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 //   /app/frontend/src/components/admin/product-form/*
 // (Products.jsx'i kısaltma refactor'unun 1. adımı).
 
+/**
+ * DescriptionEditor — Açıklama alanı için Kaynak / Önizleme toggle'lı editör.
+ * - "Kaynak"  : HTML kaynak kodunu textarea içinde düzenle.
+ * - "Önizleme": HTML'i canlı olarak render et (read-only).
+ * - "Bölünmüş": iki yan yana panel (kaynak + canlı).
+ * Trendyol'a aktarımda HTML temizleme backend tarafında yapılır.
+ */
+function DescriptionEditor({ value, onChange }) {
+  const [mode, setMode] = useState("split"); // "source" | "preview" | "split"
+  const tabBtn = (m, label) => (
+    <button
+      type="button"
+      onClick={() => setMode(m)}
+      data-testid={`desc-mode-${m}`}
+      className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-colors ${
+        mode === m ? "bg-black text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  const stripHtml = (html) => {
+    if (!html) return "";
+    const t = document.createElement("div");
+    t.innerHTML = html;
+    return (t.textContent || t.innerText || "").trim();
+  };
+  const charsHtml = (value || "").length;
+  const charsPlain = stripHtml(value || "").length;
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+        <div className="flex gap-1">
+          {tabBtn("source", "Kaynak")}
+          {tabBtn("preview", "Önizleme")}
+          {tabBtn("split", "Bölünmüş")}
+        </div>
+        <div className="text-[10px] text-gray-500 font-mono">
+          HTML: {charsHtml} kr · Metin: {charsPlain} kr
+        </div>
+      </div>
+      <div className={mode === "split" ? "grid grid-cols-2 gap-0" : ""}>
+        {(mode === "source" || mode === "split") && (
+          <textarea
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            rows={10}
+            data-testid="desc-source-textarea"
+            className={`w-full px-3 py-2.5 outline-none transition-all text-xs font-mono leading-relaxed ${
+              mode === "split" ? "border-r border-gray-200" : ""
+            }`}
+            placeholder="Ürün açıklaması (HTML destekli). Örn: <p>Pamuklu kumaş…</p>"
+          />
+        )}
+        {(mode === "preview" || mode === "split") && (
+          <div
+            data-testid="desc-preview"
+            className="w-full px-3 py-2.5 text-sm prose prose-sm max-w-none bg-white min-h-[252px] max-h-[440px] overflow-y-auto"
+            dangerouslySetInnerHTML={{ __html: value || "<p class='text-gray-400 italic'>Önizleme burada görünecek…</p>" }}
+          />
+        )}
+      </div>
+      <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-200 text-[10px] text-amber-800">
+        <strong>Not:</strong> Trendyol'a aktarımda HTML etiketleri otomatik temizlenip
+        düz metin (paragraflar ve satır sonları korunarak) gönderilir.
+      </div>
+    </div>
+  );
+}
+
+
+
 export default function AdminProducts() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
@@ -1574,12 +1646,9 @@ export default function AdminProducts() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Açıklama</label>
-                        <textarea
+                        <DescriptionEditor
                           value={formData.description}
-                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                          rows={6}
-                          className="w-full border-gray-200 border px-3 py-2.5 rounded-lg focus:border-black outline-none transition-all text-sm"
-                          placeholder="Ürün detaylarını buraya yazın..."
+                          onChange={(val) => setFormData({ ...formData, description: val })}
                         />
                       </div>
                     </div>

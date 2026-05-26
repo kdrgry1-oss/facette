@@ -1276,15 +1276,26 @@ async def sync_products_to_trendyol(
                             "customAttributeValue": str(val_id)
                         })
             
-            # Description (HTML temizle, min 30 karakter Trendyol gereksinimi)
+            # Description (HTML → düz metin: br/li/p satır sonuna, entity decode, min 30 karakter)
             import re as _re
+            import html as _html
             raw_desc = (product.get("description") or product.get("short_description")
                         or product.get("long_description") or "").strip()
-            # HTML tag'lerini temizle
-            clean_desc = _re.sub(r"<[^>]+>", " ", raw_desc)
-            clean_desc = _re.sub(r"&nbsp;", " ", clean_desc)
-            clean_desc = _re.sub(r"&amp;", "&", clean_desc)
-            clean_desc = _re.sub(r"\s+", " ", clean_desc).strip()
+            # 1) Blok/satır kıran tagları newline'a çevir (görsel paragraf yapısı korunur).
+            _desc = raw_desc
+            _desc = _re.sub(r"<\s*br\s*/?\s*>", "\n", _desc, flags=_re.IGNORECASE)
+            _desc = _re.sub(r"</\s*(p|div|li|h[1-6]|tr)\s*>", "\n", _desc, flags=_re.IGNORECASE)
+            _desc = _re.sub(r"<\s*li\b[^>]*>", "• ", _desc, flags=_re.IGNORECASE)
+            # 2) Tüm kalan HTML tag'lerini at.
+            _desc = _re.sub(r"<[^>]+>", " ", _desc)
+            # 3) HTML entity'leri decode et (&nbsp;, &amp;, &uuml; vb.).
+            _desc = _html.unescape(_desc)
+            # 4) Yatay boşlukları sıkıştır ama satır sonlarını koru.
+            _desc = _re.sub(r"[ \t]+", " ", _desc)
+            _desc = _re.sub(r"\n[ \t]+", "\n", _desc)
+            _desc = _re.sub(r"[ \t]+\n", "\n", _desc)
+            _desc = _re.sub(r"\n{3,}", "\n\n", _desc)
+            clean_desc = _desc.strip()
             if not clean_desc or len(clean_desc) < 30:
                 # Description yoksa veya çok kısaysa ürün adından bir minimum açıklama üret
                 fallback = (product.get("name") or "").strip()
