@@ -385,6 +385,10 @@ app.add_middleware(ErrorTrackingMiddleware)
 # Main API Router
 api_router = APIRouter(prefix="/api")
 
+# Documentation download (public — markdown indir)
+from routes.docs import router as docs_router
+api_router.include_router(docs_router)
+
 # Include all route modules
 api_router.include_router(auth_router)
 api_router.include_router(products_router)
