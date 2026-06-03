@@ -101,3 +101,74 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Fork (2026-06-03) — Favoriler + Ticimax Excel Upload + CAPI Regresyon
+
+backend:
+  - task: "Favoriler (Wishlist) API"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/customer.py"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Yeni endpointler: GET /favorites, GET /favorites/ids, POST /favorites/{id}, DELETE /favorites/{id}, POST /favorites/merge. Curl ile manuel test edildi (add/list/remove çalışıyor). require_auth gerektirir. favorites koleksiyonu."
+  - task: "Ticimax Excel Ürün Upload"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/integrations.py"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "POST /api/integrations/ticimax/products/upload-excel (multipart file). URUNKARTIID bazında resync. Curl ile create+update test edildi."
+  - task: "CAPI Server-Side Tracking Regresyon"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/capi.py, backend/services/capi/*"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Önceki fork'ta testing_agent ile test edilmedi. GET /api/capi/health çalışıyor (capi_active_pixels:1). POST /api/capi/event regresyon testi gerekli."
+
+frontend:
+  - task: "Favoriler UI (ProductCard, PDP, Header, Account)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/context/FavoritesContext.jsx"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "FavoritesProvider eklendi. ProductCard kalp, PDP favori butonu (pdp-favorite-btn), Header sayaçlı kalp (favorites-btn), Account Favorilerim tab grid. Misafir localStorage, login sonrası merge."
+  - task: "Ticimax Excel Upload Admin Sayfası"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/admin/TicimaxExcelUpload.jsx"
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "/admin/ticimax-excel drag-drop upload + sonuç istatistikleri."
+
+metadata:
+  test_sequence: 1
+
+test_plan:
+  current_focus:
+    - "Favoriler (Wishlist) API"
+    - "Favoriler UI (ProductCard, PDP, Header, Account)"
+    - "Ticimax Excel Ürün Upload"
+    - "CAPI Server-Side Tracking Regresyon"
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Yeni Favoriler sistemi (backend+frontend), Ticimax Excel upload ve bekleyen CAPI regresyonu test edilmeli. Admin: admin@facette.com/admin123."

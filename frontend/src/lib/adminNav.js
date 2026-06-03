@@ -128,6 +128,7 @@ export const navigationGroups = [
     icon: Cable,
     children: [
       { label: "Pazaryerleri Hub", path: "/admin/pazaryerleri", icon: Store },
+      { label: "Ticimax Excel Yükle", path: "/admin/ticimax-excel", icon: FileText },
       { label: "Detaylı Aktarım & Eşleştirme", path: "/admin/entegrasyonlar", icon: Cable },
       { label: "Entegrasyon Logları", path: "/admin/entegrasyon-loglari", icon: FileText },
       { label: "Aktarılamayanlar", path: "/admin/aktarilamayanlar", icon: FileText },

@@ -1,13 +1,15 @@
 import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Bookmark, ShoppingBag } from "lucide-react";
+import { Heart, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
+import { useFavorites } from "../context/FavoritesContext";
 import { toast } from "sonner";
 
 export default function ProductCard({ product }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isFavorite, setIsFavorite] = useState(false);
   const { addItem } = useCart();
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const isFav = isFavorite(product.id);
   const imageContainerRef = useRef(null);
 
   // Remove duplicate first image
@@ -30,8 +32,7 @@ export default function ProductCard({ product }) {
   const handleFavorite = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsFavorite(!isFavorite);
-    toast.success(isFavorite ? "Favorilerden çıkarıldı" : "Favorilere eklendi");
+    toggleFavorite(product);
   };
 
   // Handle mouse move for image hover change
@@ -76,10 +77,10 @@ export default function ProductCard({ product }) {
             className="absolute top-3 right-3 z-10"
             data-testid={`favorite-${product.id}`}
           >
-            <Bookmark 
+            <Heart 
               size={20} 
               strokeWidth={1.5}
-              className={`transition-colors ${isFavorite ? "fill-black text-black" : "text-gray-400 hover:text-black"}`} 
+              className={`transition-colors ${isFav ? "fill-red-500 text-red-500" : "text-gray-400 hover:text-black"}`} 
             />
           </button>
 

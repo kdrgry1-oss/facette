@@ -29,7 +29,9 @@ import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
+import ProductCard from "../components/ProductCard";
 import { useAuth } from "../context/AuthContext";
+import { useFavorites } from "../context/FavoritesContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -730,16 +732,60 @@ function AddressesPane({ loading, addresses, editing, setEditing, form, setForm,
 /* ═══════════════════════════════ FAVORITES ═══════════════════════════════ */
 
 function FavoritesPane() {
-  return (
-    <div className="bg-white border border-gray-100 py-20 px-6 text-center max-w-4xl">
-      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-        <Heart size={20} className="text-gray-400" />
+  const { count } = useFavorites();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true);
+    axios
+      .get(`${API}/favorites`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      })
+      .then((r) => { if (!cancel) setProducts(r.data?.favorites || []); })
+      .catch(() => { if (!cancel) setProducts([]); })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [count]);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-8 max-w-4xl">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="animate-pulse">
+            <div className="aspect-[3/4] bg-gray-100" />
+            <div className="h-3 bg-gray-100 mt-3 w-3/4" />
+            <div className="h-3 bg-gray-100 mt-2 w-1/3" />
+          </div>
+        ))}
       </div>
-      <p className="text-sm text-gray-500 mb-1 tracking-wide">Henüz favori ürününüz yok</p>
-      <p className="text-xs text-gray-400 mb-6">Beğendiğiniz ürünleri kalp ikonu ile favorilerinize ekleyin.</p>
-      <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
-        Ürünleri Keşfet
-      </a>
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <div className="bg-white border border-gray-100 py-20 px-6 text-center max-w-4xl" data-testid="favorites-empty">
+        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+          <Heart size={20} className="text-gray-400" />
+        </div>
+        <p className="text-sm text-gray-500 mb-1 tracking-wide">Henüz favori ürününüz yok</p>
+        <p className="text-xs text-gray-400 mb-6">Beğendiğiniz ürünleri kalp ikonu ile favorilerinize ekleyin.</p>
+        <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
+          Ürünleri Keşfet
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl" data-testid="favorites-grid">
+      <p className="text-xs text-gray-500 mb-5 tracking-wide">{products.length} favori ürün</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-8">
+        {products.map((p) => (
+          <ProductCard key={p.id} product={p} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 Integration routes - Trendyol, MNG Kargo, GIB, Netgsm, Ticimax, XML Feed
 Not: Iyzico kısmı `integrations_iyzico.py` modülüne taşındı (2026-04-23).
 """
-from fastapi import APIRouter, HTTPException, Query, Depends, Response, BackgroundTasks, Request, Body
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, BackgroundTasks, Request, Body, UploadFile, File
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import os
@@ -4277,6 +4277,223 @@ async def import_ticimax_members(
         "pages_fetched": page - 1,
         "message": f"{imported} yeni üye, {updated} güncellendi. {linked_users} mevcut hesap Ticimax üyesiyle eşleşti."
     }
+
+
+@router.post("/ticimax/products/upload-excel")
+async def upload_ticimax_products_excel(
+    file: UploadFile = File(..., description="TicimaxExport .xls/.xlsx dosyası"),
+    default_stock: int = Query(5, description="Excel'de stok yoksa varsayılan stok adedi"),
+    current_user: dict = Depends(require_admin),
+):
+    """Ticimax ürün Excel'ini (drag-drop UI'dan) yükleyip TAM resync yapar.
+
+    `scripts/ticimax_full_resync.py` ile aynı mantık: URUNKARTIID'e göre gruplar,
+    DB'de eşleştirir (urun_karti_id > stock_code+color > name+color), eşleşeni günceller,
+    eşleşmeyeni yeni ürün olarak ekler.
+
+    Beklenen sütunlar: URUNKARTIID, URUNID, STOKKODU, BARKOD, URUNADI, ACIKLAMA,
+    BREADCRUMBKAT, TEDARIKCI, ALISFIYATI, SATISFIYATI, INDIRIMLIFIYAT, UYETIPIFIYAT1,
+    KDVORANI, RENK, BEDEN
+    """
+    import tempfile, unicodedata
+    from uuid import uuid4
+    from fastapi.concurrency import run_in_threadpool
+
+    filename = (file.filename or "").lower()
+    if not (filename.endswith(".xls") or filename.endswith(".xlsx")):
+        raise HTTPException(status_code=400, detail="Sadece .xls veya .xlsx dosyası yükleyin")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Dosya boş")
+
+    suffix = ".xlsx" if filename.endswith(".xlsx") else ".xls"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.write(raw)
+    tmp.close()
+    tmp_path = tmp.name
+
+    def _slugify(text):
+        t = unicodedata.normalize("NFKD", str(text or ""))
+        t = "".join(c for c in t if not unicodedata.combining(c))
+        t = re.sub(r"[^a-zA-Z0-9]+", "-", t).strip("-").lower()
+        return t[:200] or "urun"
+
+    def _read_df():
+        import pandas as pd
+        engine = "openpyxl" if suffix == ".xlsx" else None
+        try:
+            return pd.read_excel(tmp_path, engine=engine)
+        except Exception:
+            # .xls aslında xlsx içeriği olabilir → openpyxl dene, yoksa xlrd
+            try:
+                return pd.read_excel(tmp_path, engine="openpyxl")
+            except Exception:
+                return pd.read_excel(tmp_path, engine="xlrd")
+
+    try:
+        df = await run_in_threadpool(_read_df)
+    except Exception as e:
+        os.unlink(tmp_path)
+        raise HTTPException(status_code=400, detail=f"Excel okunamadı: {e}")
+
+    required_cols = {"URUNKARTIID", "URUNADI", "BARKOD"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        os.unlink(tmp_path)
+        raise HTTPException(status_code=400, detail=f"Eksik sütunlar: {', '.join(missing)}")
+
+    import pandas as pd
+
+    def _f(x, default=0.0):
+        try:
+            if pd.isna(x):
+                return default
+            return float(x)
+        except Exception:
+            return default
+
+    def _s(x, default=""):
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            return default
+        return str(x).strip()
+
+    def _int(x, default=0):
+        try:
+            if pd.isna(x):
+                return default
+            return int(x)
+        except Exception:
+            return default
+
+    def _has(col):
+        return col in df.columns
+
+    def _cell(row, col, default=""):
+        return _s(row[col]) if _has(col) else default
+
+    def _category_from_breadcrumb(crumb):
+        if not crumb:
+            return ""
+        parts = [p.strip() for p in crumb.split(">") if p.strip()]
+        return parts[-1] if parts else ""
+
+    sys_cats = await db.categories.find({}, {"_id": 0}).to_list(None)
+    cat_by_name = {(c.get("name") or "").strip().lower(): c for c in sys_cats}
+
+    stats = {
+        "parents_in_excel": 0,
+        "parents_updated_db": 0,
+        "parents_created_new": 0,
+        "variants_total": 0,
+        "errors": [],
+    }
+
+    by_kart = df.groupby("URUNKARTIID", sort=False)
+    for kart_id_raw, grp in by_kart:
+        try:
+            stats["parents_in_excel"] += 1
+            kart_id = str(_int(kart_id_raw))
+            first = grp.iloc[0]
+
+            urun_adi = _cell(first, "URUNADI")
+            renk = _cell(first, "RENK")
+            base_name = urun_adi
+            if renk and base_name.lower().endswith(" " + renk.lower()):
+                base_name = base_name[: -(len(renk) + 1)].strip()
+
+            list_price = _f(first["SATISFIYATI"]) if _has("SATISFIYATI") else 0.0
+            sale_price = (_f(first["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0) or list_price
+            member_price_1 = (_f(first["UYETIPIFIYAT1"]) if _has("UYETIPIFIYAT1") else 0.0) or list_price
+            cost_price = _f(first["ALISFIYATI"]) if _has("ALISFIYATI") else 0.0
+            vat_rate = _f(first["KDVORANI"], 10) if _has("KDVORANI") else 10
+            vendor = _cell(first, "TEDARIKCI", "FACETTE")
+            description = _cell(first, "ACIKLAMA")
+            breadcrumb = _cell(first, "BREADCRUMBKAT")
+            category_leaf = _category_from_breadcrumb(breadcrumb)
+            cat_doc = cat_by_name.get(category_leaf.lower()) if category_leaf else None
+            parent_stock_code = _cell(first, "STOKKODU")
+
+            variants = []
+            for _, row in grp.iterrows():
+                v = {
+                    "size": (_cell(row, "BEDEN").upper() or "STD"),
+                    "color": (_cell(row, "RENK").title() or renk.title()),
+                    "barcode": _cell(row, "BARKOD"),
+                    "stock_code": _cell(row, "STOKKODU"),
+                    "urun_id": _cell(row, "URUNID"),
+                    "stock": default_stock,
+                    "price": _f(row["SATISFIYATI"]) if _has("SATISFIYATI") else list_price,
+                    "sale_price": (_f(row["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0) or (_f(row["SATISFIYATI"]) if _has("SATISFIYATI") else list_price),
+                }
+                variants.append(v)
+                stats["variants_total"] += 1
+
+            existing = await db.products.find_one({"urun_karti_id": kart_id})
+            if not existing and parent_stock_code:
+                existing = await db.products.find_one({
+                    "$or": [
+                        {"stock_code": parent_stock_code, "color": renk.title()},
+                        {"variants.stock_code": parent_stock_code, "color": renk.title()},
+                    ]
+                })
+            if not existing and renk:
+                existing = await db.products.find_one({
+                    "name": {"$regex": f"^{re.escape(base_name)}.*{re.escape(renk)}$", "$options": "i"}
+                })
+
+            update_doc = {
+                "name": urun_adi,
+                "color": renk.title(),
+                "stock_code": parent_stock_code,
+                "sku": parent_stock_code,
+                "urun_karti_id": kart_id,
+                "price": list_price,
+                "sale_price": sale_price,
+                "member_price_1": member_price_1,
+                "cost_price": cost_price,
+                "vat_rate": vat_rate,
+                "vendor": vendor,
+                "vendor_name": vendor,
+                "description": description,
+                "category_name": category_leaf,
+                "breadcrumb": breadcrumb,
+                "variants": variants,
+            }
+            if cat_doc:
+                update_doc["category_id"] = cat_doc.get("id")
+                update_doc["category_name"] = cat_doc.get("name")
+
+            if existing:
+                await db.products.update_one({"id": existing["id"]}, {"$set": update_doc})
+                stats["parents_updated_db"] += 1
+            else:
+                new_doc = {
+                    "id": str(uuid4()),
+                    "slug": _slugify(urun_adi),
+                    "is_active": True,
+                    "is_published": True,
+                    "images": [],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    **update_doc,
+                }
+                await db.products.insert_one(new_doc)
+                stats["parents_created_new"] += 1
+        except Exception as e:
+            stats["errors"].append(f"KART {kart_id_raw}: {e}")
+
+    try:
+        os.unlink(tmp_path)
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "message": f"{stats['parents_updated_db']} güncellendi, {stats['parents_created_new']} yeni eklendi, {stats['variants_total']} varyant işlendi",
+        "filename": file.filename,
+        "stats": stats,
+    }
+
 
 
 @router.post("/ticimax/members/import-excel")

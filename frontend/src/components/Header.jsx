@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Search, User, ShoppingBag, Menu, X } from "lucide-react";
+import { Search, User, ShoppingBag, Menu, X, Heart } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
+import { useFavorites } from "../context/FavoritesContext";
 import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
 import axios from "axios";
@@ -66,6 +67,7 @@ export default function Header({ hideMenu = false }) {
   
   const { itemCount, setIsOpen } = useCart();
   const { user } = useAuth();
+  const { count: favCount } = useFavorites();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -240,6 +242,14 @@ export default function Header({ hideMenu = false }) {
                   <button onClick={() => setSearchOpen(true)} className="p-2 hover:opacity-60" aria-label="Ara" data-testid="search-btn">
                     <Search size={17} strokeWidth={1.4} />
                   </button>
+                  <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Favoriler" data-testid="favorites-btn">
+                    <Heart size={17} strokeWidth={1.4} />
+                    {favCount > 0 && (
+                      <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 bg-red-500 text-white text-[8px] font-light rounded-full flex items-center justify-center">
+                        {favCount}
+                      </span>
+                    )}
+                  </Link>
                   <Link to={user ? "/hesabim" : "/giris"} className="hidden lg:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
                     <User size={17} strokeWidth={1.4} />
                   </Link>

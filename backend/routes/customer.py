@@ -140,3 +140,84 @@ async def delete_address(
         raise HTTPException(status_code=404, detail="Adres bulunamadı")
     
     return {"success": True}
+
+
+# ==================== FAVORITES (WISHLIST) ====================
+
+@router.get("/favorites/ids")
+async def get_my_favorite_ids(current_user: dict = Depends(require_auth)):
+    """Sadece favori ürün ID'lerini döndürür (UI kalp durumu için hızlı)."""
+    docs = await db.favorites.find(
+        {"user_id": current_user.get("id")}, {"_id": 0, "product_id": 1}
+    ).to_list(1000)
+    return {"product_ids": [d["product_id"] for d in docs]}
+
+
+@router.get("/favorites")
+async def get_my_favorites(current_user: dict = Depends(require_auth)):
+    """Favori ürünlerin tam objelerini döndürür."""
+    docs = await db.favorites.find(
+        {"user_id": current_user.get("id")}, {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+    product_ids = [d["product_id"] for d in docs]
+    if not product_ids:
+        return {"favorites": []}
+    products = await db.products.find(
+        {"id": {"$in": product_ids}}, {"_id": 0}
+    ).to_list(1000)
+    by_id = {p["id"]: p for p in products}
+    # favorilerin eklenme sırasını koru
+    ordered = [by_id[pid] for pid in product_ids if pid in by_id]
+    return {"favorites": ordered}
+
+
+@router.post("/favorites/{product_id}")
+async def add_favorite(product_id: str, current_user: dict = Depends(require_auth)):
+    """Ürünü favorilere ekler (idempotent)."""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    await db.favorites.update_one(
+        {"user_id": current_user.get("id"), "product_id": product_id},
+        {"$setOnInsert": {
+            "id": generate_id(),
+            "user_id": current_user.get("id"),
+            "product_id": product_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"success": True, "is_favorite": True}
+
+
+@router.delete("/favorites/{product_id}")
+async def remove_favorite(product_id: str, current_user: dict = Depends(require_auth)):
+    """Ürünü favorilerden çıkarır."""
+    await db.favorites.delete_one({
+        "user_id": current_user.get("id"),
+        "product_id": product_id,
+    })
+    return {"success": True, "is_favorite": False}
+
+
+@router.post("/favorites/merge")
+async def merge_favorites(payload: dict, current_user: dict = Depends(require_auth)):
+    """Misafir (localStorage) favorilerini login sonrası hesaba taşır."""
+    ids = payload.get("product_ids") or []
+    added = 0
+    for pid in ids:
+        if not pid:
+            continue
+        res = await db.favorites.update_one(
+            {"user_id": current_user.get("id"), "product_id": pid},
+            {"$setOnInsert": {
+                "id": generate_id(),
+                "user_id": current_user.get("id"),
+                "product_id": pid,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+        if res.upserted_id is not None:
+            added += 1
+    return {"success": True, "merged": added}

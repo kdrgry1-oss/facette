@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
+import { FavoritesProvider } from "./context/FavoritesContext";
 import { bootstrapNative } from "./lib/native";
 
 // Pages
@@ -87,6 +88,7 @@ import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
 import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import Themes from "./pages/admin/Themes";
+import TicimaxExcelUpload from "./pages/admin/TicimaxExcelUpload";
 import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
 import { trackVisit } from "./lib/attribution";
 
@@ -103,6 +105,7 @@ function App() {
   return (
     <AuthProvider>
       <CartProvider>
+        <FavoritesProvider>
         <BrowserRouter>
           <Toaster position="top-center" richColors />
           <MarketingPixelsInjector />
@@ -136,6 +139,7 @@ function App() {
               <Route path="kategoriler" element={<AdminCategories />} />
               <Route path="varyantlar" element={<AdminVariants />} />
               <Route path="ozellik-import" element={<AttributeImport />} />
+              <Route path="ticimax-excel" element={<TicimaxExcelUpload />} />
               <Route path="sorular" element={<AdminQuestions />} />
               <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
               <Route path="bannerlar" element={<AdminBanners />} />
@@ -225,6 +229,7 @@ function App() {
             </Route>
           </Routes>
         </BrowserRouter>
+        </FavoritesProvider>
       </CartProvider>
     </AuthProvider>
   );

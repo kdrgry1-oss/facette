@@ -7,6 +7,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { useCart } from "../context/CartContext";
+import { useFavorites } from "../context/FavoritesContext";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -14,6 +15,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function ProductDetail() {
   const { slug } = useParams();
   const { addItem } = useCart();
+  const { isFavorite, toggleFavorite } = useFavorites();
   const [product, setProduct] = useState(null);
   const [similarProducts, setSimilarProducts] = useState([]);
   const [comboProducts, setComboProducts] = useState([]);
@@ -387,8 +389,15 @@ export default function ProductDetail() {
               >
                 {product.variants?.length > 0 && !selectedVariant ? "Beden Seçiniz" : "Sepete Ekle"}
               </button>
-              <button className="w-12 h-12 border border-gray-300 flex items-center justify-center hover:border-black">
-                <Heart size={18} strokeWidth={1.5} />
+              <button
+                onClick={() => toggleFavorite(product)}
+                data-testid="pdp-favorite-btn"
+                aria-label="Favorilere ekle"
+                className={`w-12 h-12 border flex items-center justify-center transition-colors ${
+                  isFavorite(product.id) ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-black"
+                }`}
+              >
+                <Heart size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-red-500 text-red-500" : ""} />
               </button>
             </div>
 

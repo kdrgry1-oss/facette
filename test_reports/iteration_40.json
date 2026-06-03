@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 40 testing (Favorites/Wishlist + Ticimax Excel Upload + CAPI regression) — Backend pytest: 12 passed, 1 xfail (real bug found in /api/favorites/merge route shadowing). Frontend: storefront favorite heart fills red + 'Favorilere eklendi' toast + header favorites-btn counter increments to 1 (guest localStorage). PDP pdp-favorite-btn renders & clicks. /admin/ticimax-excel renders all 3 testids (page/dropzone/file-input). /hesabim?tab=favorites shows correct empty state for admin (favorites-grid only renders when items exist). Ticimax Excel happy path + update path verified; bad extension and missing columns both return 400. CAPI /event returns non-blocking 200 in <1s, capi_event_queue/logs receive the event_id correctly.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/favorites/merge",
+        "issue": "Route is shadowed by POST /api/favorites/{product_id}. In customer.py the parameter route (line 174) is registered BEFORE the literal /merge route (line 203). Result: POST /api/favorites/merge → matched by /{product_id} with product_id='merge' → 404 'Ürün bulunamadı'. Frontend guest→login favorite merge silently fails.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/integrations/ticimax/products/upload-excel",
+        "issue": "On valid upload only 1 of 2 distinct URUNKARTIID parents from the Excel ended up in DB and the stored urun_karti_id value was '0' (not the original kid). Stats returned parents_in_excel=2 / variants_total>=6 (correct) and 2nd run reported parents_updated_db>=2 — but DB scan showed only one row matched by name prefix. Possible loss/overwrite when URUNKARTIID is a string (test used 'TEST_ITER40_<hex>'). Worth verifying the URUNKARTIID coercion path (likely _int() applied somewhere)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration40_favorites_ticimax_capi.py",
+    "/app/test_reports/pytest/iteration40.xml"
+  ],
+  "action_items": [
+    "Fix POST /api/favorites/merge route shadowing — move @router.post('/favorites/merge') ABOVE @router.post('/favorites/{product_id}') in /app/backend/routes/customer.py (or rename param route to /favorites/item/{product_id}).",
+    "Investigate Ticimax Excel upload URUNKARTIID handling — confirm string-valued URUNKARTIID survives parsing. Looks like values are coerced to int(0) when not numeric, causing all rows to collide under urun_karti_id='0'."
+  ],
+  "critical_code_review_comments": [
+    "routes/customer.py:174 vs :203 — FastAPI registration order makes /favorites/{product_id} swallow /favorites/merge. Always declare literal sub-paths BEFORE path-parameter routes.",
+    "routes/customer.py:174 add_favorite — no normalization on product_id (e.g., trimming). Accepts any string; only 404's if product doesn't exist. Minor risk: unicode/whitespace product_ids could create stale rows.",
+    "routes/customer.py:204 merge_favorites — no rate limit; a logged-in user could spam huge product_ids[] to inflate favorites collection. Suggest cap to e.g. 200 ids per call.",
+    "routes/integrations.py:4340 — required_cols only checks {URUNKARTIID,URUNADI,BARKOD}; review_request lists 15 expected cols. Other optional cols silently default to empty/0 — acceptable, but consider warning when key pricing cols missing.",
+    "routes/capi.py:117 capi_event — payload is unbounded; items: List[CapiItem] without max_length. Risk of large payload DoS. Suggest pydantic conlist(max_items=200).",
+    "routes/capi.py:200 capi_health — uses count_documents on each request without cache; cheap but consider 30s memoize if traffic grows.",
+    "frontend ProductDetail.jsx/Header.jsx — favorites counter uses localStorage in guest mode; merge endpoint failure (see HIGH bug) means logged-in users LOSE their guest favorites. End-to-end loss path."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration40_favorites_ticimax_capi.py (created)"
+  ],
+  "success_rate": {
+    "backend": "92% (12/13 passed, 1 xfail — real bug in /favorites/merge route shadowing)",
+    "frontend": "100% (all data-testids render; heart click + toast + counter + PDP fav + admin/ticimax-excel page + /hesabim?tab=favorites empty state all verified)"
+  },
+  "test_credentials": "admin@facette.com / admin123 (POST /api/auth/login?email=&password=)",
+  "seed_data_creation": "Created 2 test ticimax parents (TEST_ITER40_<uuid>) — cleaned up via DB delete_many. Created 1 capi test event (event_id=test-iter40-<uuid>) — cleaned up. Favorites: admin user briefly favorited a product then removed in tests; final state clean.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_iteration40_favorites_ticimax_capi.py (13 tests, ~6s). Key bug: /api/favorites/merge shadowing — verify the route order fix by re-running test_merge_favorites (should switch from XFAIL to PASS, remove the pytest.xfail guard). Ticimax DB-side anomaly (urun_karti_id stored as '0' for string kids) needs investigation; might affect 2nd-run match path correctness. CAPI capi_event_logs/capi_event_queue both confirmed writing. /api/marketing-pixels/active-public accessible unauthenticated (returns dict). For frontend favorites end-to-end: need to login first as admin, THEN add favorite on storefront, THEN check /hesabim?tab=favorites; in this iter we tested guest path which uses localStorage.",
+  "rca_of_the_issue": "RCA — POST /api/favorites/merge → 404: FastAPI matches routes in declaration order. In customer.py the order is GET/ids → GET/ → POST/{product_id} (line 174) → DELETE/{product_id} (line 193) → POST/merge (line 203). So an incoming POST /favorites/merge first hits POST /favorites/{product_id} with product_id='merge', the handler checks db.products.find_one({'id': 'merge'}) → None → raises 404 'Ürün bulunamadı'. Reproduction: `curl -X POST .../api/favorites/merge -H 'Authorization: Bearer <admin>' -H 'Content-Type: application/json' -d '{\"product_ids\":[]}'` → 404. Mitigation: Move the POST /favorites/merge route definition above POST /favorites/{product_id} (single block reordering, ~10 line move). No client/contract change needed."
+}
