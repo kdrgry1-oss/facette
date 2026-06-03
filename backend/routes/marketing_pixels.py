@@ -207,6 +207,26 @@ class PixelReq(BaseModel):
     extra: Optional[dict] = None
 
 
+@router.get("/active-public")
+async def list_active_public(response: Response):
+    """Frontend'in <head> ve <body> sonuna enjekte edeceği kodlar.
+    Auth yok — sadece aktif pixel'lerin önceden kaydedilmiş snippet'leri döner.
+    60 saniye cache edilir (her sayfa yüklemesinde DB yorma).
+
+    ÖNEMLİ: /{pid} dynamic route'undan ÖNCE tanımlı olmalı, aksi halde
+    'active-public' string'i pid parametresi olarak yakalanıp 401 dönülür.
+    """
+    rows = await db.marketing_pixels.find(
+        {"is_active": True}, {"_id": 0, "provider": 1, "name": 1, "head_snippet": 1, "body_snippet": 1}
+    ).to_list(length=50)
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
+    return {
+        "head": "\n".join([r.get("head_snippet") or "" for r in rows if r.get("head_snippet")]),
+        "body": "\n".join([r.get("body_snippet") or "" for r in rows if r.get("body_snippet")]),
+        "count": len(rows),
+    }
+
+
 @router.get("/providers")
 async def get_providers(current_user: dict = Depends(require_admin)):
     return {"providers": PIXEL_PROVIDERS}
@@ -231,13 +251,24 @@ async def upsert_pixel(req: PixelReq, current_user: dict = Depends(require_admin
     if req.provider not in valid:
         raise HTTPException(status_code=400, detail=f"Geçersiz sağlayıcı. Geçerli: {sorted(valid)}")
 
-    # Kullanıcı head_snippet yazmadıysa tag_id üzerinden template'le üret
+    # Kullanıcı head_snippet yazmadıysa veya bir önceki otomatik template'i koruyorsa,
+    # tag_id'ye göre snippet'i regenerate et (tag_id değiştirildiğinde stale kalmasın diye).
     head = (req.head_snippet or "").strip()
     body = (req.body_snippet or "").strip()
-    if not head and req.tag_id:
+
+    # Sistem template'ı (header comment'le başlar). Bu pattern'ler için otomatik regenerate.
+    AUTO_TEMPLATE_MARKERS = (
+        "<!-- Google Analytics 4 -->", "<!-- Meta Pixel -->",
+        "<!-- Google Ads", "<!-- TikTok Pixel -->",
+        "<!-- Pinterest Tag -->", "<!-- Snap Pixel Code -->",
+        "<!-- Google Tag Manager -->", "<!-- Yandex.Metrika counter -->",
+        "<!-- Hotjar Tracking Code -->", "<!-- Microsoft Clarity -->",
+    )
+    is_auto_template = head and any(m in head for m in AUTO_TEMPLATE_MARKERS)
+    if req.tag_id and (not head or is_auto_template):
         tpl = _template_snippet(req.provider, req.tag_id.strip())
         head = tpl.get("head") or ""
-        body = tpl.get("body") or ""
+        body = tpl.get("body") or body
 
     now_iso = datetime.now(timezone.utc).isoformat()
     data = {
@@ -449,20 +480,3 @@ async def delete_pixel(pid: str, current_user: dict = Depends(require_admin)):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
     return {"success": True}
-
-
-@router.get("/active-public")
-async def list_active_public(response: Response):
-    """Frontend'in <head> ve <body> sonuna enjekte edeceği kodlar.
-    Auth yok — sadece aktif pixel'lerin önceden kaydedilmiş snippet'leri döner.
-    60 saniye cache edilir (her sayfa yüklemesinde DB yorma).
-    """
-    rows = await db.marketing_pixels.find(
-        {"is_active": True}, {"_id": 0, "provider": 1, "name": 1, "head_snippet": 1, "body_snippet": 1}
-    ).to_list(length=50)
-    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
-    return {
-        "head": "\n".join([r.get("head_snippet") or "" for r in rows if r.get("head_snippet")]),
-        "body": "\n".join([r.get("body_snippet") or "" for r in rows if r.get("body_snippet")]),
-        "count": len(rows),
-    }
