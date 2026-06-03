@@ -200,6 +200,17 @@ async def create_order(
         logger.warning(f"Attribution resolve failed: {att_err}")
         order["attribution"] = {"channel": "direct", "source": "", "medium": "", "campaign": "", "session_id": ""}
 
+    # Influencer linking — aff_id (çerez) önce, kupon fallback override
+    try:
+        from .influencers import resolve_influencer_for_order
+        aff_id = (order.get("attribution") or {}).get("aff_id") or order_data.get("aff_id")
+        link = await resolve_influencer_for_order(aff_id, order.get("coupon_code"))
+        if link:
+            order["influencer_id"] = link["influencer_id"]
+            order["influencer_via"] = link["via"]
+    except Exception as inf_err:
+        logger.warning(f"Influencer link failed: {inf_err}")
+
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 

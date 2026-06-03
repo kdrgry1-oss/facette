@@ -511,6 +511,10 @@ from routes.themes import admin_router as themes_admin_router, public_router as 
 api_router.include_router(themes_admin_router)
 api_router.include_router(themes_public_router)
 
+# Influencer CRM & Seeding & ROI (Modül 3 + 4)
+from routes.influencers import router as influencers_router
+api_router.include_router(influencers_router)
+
 # Root endpoint
 @api_router.get("/")
 async def root():

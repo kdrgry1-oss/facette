@@ -111,6 +111,7 @@ export const navigationGroups = [
       { label: "Ürün Yorumları", path: "/admin/yorumlar", icon: MessageSquare },
       { label: "Terkedilmiş Sepetler", path: "/admin/terkedilmis-sepet", icon: ShoppingCart },
       { label: "Kaynak & Funnel", path: "/admin/kaynak", icon: TrendingUp },
+      { label: "Influencer / İş Birlikleri", path: "/admin/influencer", icon: TrendingUp },
     ],
   },
   {

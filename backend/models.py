@@ -301,3 +301,67 @@ class VariantOption(VariantOptionBase):
     id: str = Field(default_factory=generate_id)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+# =============================================================================
+# Influencer CRM Models (Modül 3)
+# =============================================================================
+
+DEFAULT_CAMPAIGN_DIRECTIVES = (
+    "İçerik Standartları:\n"
+    "• Format: 9:16 dikey video (Reels/TikTok/Shorts)\n"
+    "• Marka mention: @facette etiketi zorunlu\n"
+    "• Min. süre: 15 saniye, ürün net görünmeli\n"
+    "• Story'de takip linki (swipe-up) + indirim kuponu paylaşılmalı\n"
+    "• Paylaşım sonrası içerik linki sisteme girilmeli"
+)
+
+
+class InfluencerBase(BaseModel):
+    name: str
+    platform: str = "instagram"            # instagram | tiktok | youtube | x
+    handle: Optional[str] = None           # @kullaniciadi
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    follower_count: int = 0
+    coupon_code: Optional[str] = None      # influencer'a özel kupon (fallback attribution)
+    aff_id: Optional[str] = None           # takip linki parametresi (aff_id=...)
+    commission_rate: float = 0.0           # % komisyon
+    # Kargo adresi (seeding gönderileri için)
+    shipping_address: Optional[Dict[str, Any]] = None  # {full_name, phone, il, ilce, adres}
+    notes: Optional[str] = None
+    is_active: bool = True
+
+
+class Influencer(InfluencerBase):
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(default_factory=generate_id)
+    total_revenue: float = 0.0
+    total_orders: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class InfluencerCampaignBase(BaseModel):
+    influencer_id: str
+    title: str
+    fee_paid: float = 0.0                   # ödenen ücret
+    product_cost: float = 0.0               # gönderilen ürün maliyeti
+    cargo_cost: float = 0.0                  # kargo maliyeti
+    sent_products: List[Dict[str, Any]] = Field(default_factory=list)  # [{name, barcode, qty}]
+    directives: str = DEFAULT_CAMPAIGN_DIRECTIVES
+    status: str = "draft"                    # draft | shipped | shared | completed | cancelled
+    cargo_status: str = "pending"            # pending | created | shipped | delivered
+    cargo_barcode: Optional[str] = None
+    cargo_tracking_no: Optional[str] = None
+    shared: bool = False
+    shared_at: Optional[str] = None
+    content_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class InfluencerCampaign(InfluencerCampaignBase):
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(default_factory=generate_id)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

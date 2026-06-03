@@ -64,6 +64,7 @@ import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import BlockedCustomers from "./pages/admin/BlockedCustomers";
 import ProductionPlan from "./pages/admin/ProductionPlan";
 import MarketingPixels from "./pages/admin/MarketingPixels";
+import Influencers from "./pages/admin/Influencers";
 import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
@@ -159,6 +160,7 @@ function App() {
               <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
               <Route path="uretim-plani" element={<ProductionPlan />} />
               <Route path="ayarlar/pixel" element={<MarketingPixels />} />
+              <Route path="influencer" element={<Influencers />} />
               <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
               <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
               <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />

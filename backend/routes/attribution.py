@@ -149,6 +149,7 @@ async def track_visit(payload: dict, request: Request):
     landing = (payload.get("landing_page") or "").strip()
     gclid = (payload.get("gclid") or "").strip()
     fbclid = (payload.get("fbclid") or "").strip()
+    aff_id = (payload.get("aff_id") or "").strip()
     ua = request.headers.get("user-agent", "")
     ip = request.client.host if request.client else ""
     device = detect_device(ua)
@@ -163,6 +164,7 @@ async def track_visit(payload: dict, request: Request):
         "utm_content": utm_content,
         "gclid": gclid,
         "fbclid": fbclid,
+        "aff_id": aff_id,
         "referrer": referrer,
         "landing_page": landing,
         "channel": channel,
@@ -179,6 +181,8 @@ async def track_visit(payload: dict, request: Request):
                     "visit_count": (existing.get("visit_count") or 1) + 1,
                     "user_agent": ua,
                     "ip": ip,
+                    # aff_id ilk yakalandığında sabitlenir (override etme)
+                    **({"aff_id": aff_id} if (aff_id and not existing.get("aff_id")) else {}),
                 },
                 "$push": {"touches": {"$each": [touch], "$slice": -20}},
             },
@@ -191,6 +195,7 @@ async def track_visit(payload: dict, request: Request):
                 "last_touch": touch,
                 "touches": [touch],
                 "visit_count": 1,
+                "aff_id": aff_id,
                 "user_agent": ua,
                 "ip": ip,
                 "device": device,
@@ -298,6 +303,7 @@ async def resolve_attribution_for_order(session_id: Optional[str], inline_attrib
             "content": ft.get("utm_content", ""),
             "referrer": ft.get("referrer", ""),
             "landing_page": ft.get("landing_page", ""),
+            "aff_id": ft.get("aff_id", ""),
             "session_id": session_id or "",
             "first_touch_at": ft.get("ts", ""),
             "last_touch_at": ft.get("ts", ""),
@@ -350,6 +356,7 @@ async def resolve_attribution_for_order(session_id: Optional[str], inline_attrib
         "last_touch_channel": lt.get("channel", ""),
         "last_touch_source": lt.get("utm_source", ""),
         "last_touch_campaign": lt.get("utm_campaign", ""),
+        "aff_id": sess.get("aff_id") or ft.get("aff_id", ""),
         "session_id": session_id,
         "first_touch_at": ft.get("ts", ""),
         "last_touch_at": lt.get("ts", ""),

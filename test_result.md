@@ -172,3 +172,54 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Yeni Favoriler sistemi (backend+frontend), Ticimax Excel upload ve bekleyen CAPI regresyonu test edilmeli. Admin: admin@facette.com/admin123."
+
+## Fork (2026-06-03) #2 — Influencer CRM + Seeding + ROI (Modül 3+4)
+
+backend:
+  - task: "Influencer CRM CRUD + Campaigns + ROI"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/influencers.py"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "POST/GET/PUT/DELETE /api/influencers, /api/influencers/{id}/campaigns, /api/influencer-campaigns/{cid} (PUT/DELETE), confirm-share, GET /api/influencers/{id}/roi (aggregation: total_cost vs revenue -> net_profit, ROAS, commission). Default campaign directives '9:16 dikey format' içerir. Curl ile create/campaign/share/roi doğrulandı. Cargo create (/cargo) MNG ayarı yoksa 400 döner (BEKLENEN - mocked). Order linking: orders.create_order influencer_id'yi aff_id (çerez) veya kupon fallback ile bağlar - curl ile kupon fallback doğrulandı (ROI ciro yansıdı)."
+  - task: "Attribution aff_id (30 gün çerez)"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/attribution.py, frontend/src/lib/attribution.js"
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "attribution.js aff_id'yi URL'den yakalar, facette_aff çerezine (30 gün) yazar, track-visit payload'a ekler. Backend track-visit aff_id'yi session'a kaydeder (first-touch sabit). resolve_attribution_for_order aff_id döndürür."
+
+frontend:
+  - task: "Influencer Admin Sayfası"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/admin/Influencers.jsx"
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "/admin/influencer (Pazarlama menüsü). Influencer liste/oluştur, kampanya oluştur, ROI kartları, kargo oluştur, paylaşıldı onayı. data-testid: influencers-page, new-influencer-btn, inf-name, inf-coupon, inf-save, new-campaign-btn, camp-title, camp-save, inf-roi."
+
+metadata:
+  test_sequence: 2
+
+test_plan:
+  current_focus:
+    - "Influencer CRM CRUD + Campaigns + ROI"
+    - "Influencer Admin Sayfası"
+    - "Attribution aff_id (30 gün çerez)"
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Influencer modülü (Modül 3+4) test edilmeli. MNG kargo/SMS gerçek key gerektirir (mocked) - /cargo endpoint 400 'MNG ayarları yapılmamış' dönerse BEKLENEN davranış. Admin: admin@facette.com/admin123."

@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 41 — Influencer CRM + Seeding + ROI module (Modül 3+4) backend + frontend tested. Backend pytest 15/16 PASSED (1 real bug: cargo endpoint returns 500 instead of 400 due to wrong import path). All CRUD, campaign default directives (9:16 dikey), confirm-share, cargo-webhook (no-match + match), order coupon-linking to influencer_id/influencer_via='coupon', ROI math (fee 5000+ürün 1200+kargo 150 = total_cost 6350, revenue=1000, net_profit=-5350, roas=0.16, commission_due=100 @ 10%), and cascade delete verified. Frontend /admin/influencer page: new-influencer-btn + modal + inf-name/inf-coupon/inf-save → list updates with new card; card click opens DetailModal with inf-roi cards + new-campaign-btn → camp-title/camp-save creates campaign; 'Kampanya oluşturuldu' toast visible.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/influencer-campaigns/{cid}/cargo",
+        "issue": "Returns 500 Internal Server Error (not the expected 400 for missing MNG settings). Root cause: routes/influencers.py line 242 does `from .integrations import _get_mng_settings` but _get_mng_settings is defined in routes/orders.py (line 1288), NOT integrations.py. ImportError propagates uncaught → 500. Problem statement explicitly says '500 dönmemeli'.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin/influencer DetailModal", "issues": ["Modal header row appears to bleed slightly into the admin top-nav (admin menu text visible behind modal title at top). Minor z-index/overlay tuning recommended; backdrop is z-50 which is fine but admin nav may render above."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration41_influencer.py",
+    "/app/test_reports/pytest/iteration41.xml"
+  ],
+  "action_items": [
+    "FIX: routes/influencers.py:242 — change `from .integrations import _get_mng_settings` to `from .orders import _get_mng_settings` (the function lives in routes/orders.py line 1288). This will make the cargo endpoint return the proper 400 'MNG Kargo ayarları yapılmamış' (or proceed if settings exist) instead of 500.",
+    "Optional: wrap the MNG import + call in try/except so any future import slip degrades to 400 instead of 500."
+  ],
+  "critical_code_review_comments": [
+    "routes/influencers.py:242 — Wrong relative import of _get_mng_settings (HIGH bug, see action items).",
+    "routes/influencers.py:34-59 resolve_influencer_for_order — coupon match uses regex with user-supplied code without escaping; benign here (code is already upper-cased and short) but consider re.escape for safety.",
+    "routes/influencers.py:154-160 delete_influencer — cascades campaigns but leaves orders with influencer_id pointing to a deleted influencer (orphan references). Consider unset influencer_id on orders OR refuse delete when orders exist.",
+    "routes/influencers.py:366-435 get_influencer_roi — total_orders count uses influencer_id only; if orders later are repointed via aff_id resolve, no period filter exists. Consider start/end query params for time-windowed ROI.",
+    "models.py:330 Influencer.shipping_address — typed as Dict[str, Any] (no schema validation on il/ilce/adres). Field-level Pydantic model would catch missing fields earlier (currently caught at cargo creation only).",
+    "models.py:310 DEFAULT_CAMPAIGN_DIRECTIVES — contains '9:16 dikey video' but spec/tests refer to '9:16 dikey format'. Both pass the substring check '9:16 dikey' but be consistent in copy.",
+    "frontend/Influencers.jsx:184 createCargo — error toast shows e.response?.data?.detail; with the current 500 bug the UI shows generic 'Internal Server Error' which is poor UX. Once backend fix lands, message becomes informative."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration41_influencer.py (created — 16 tests, ~3s)"
+  ],
+  "success_rate": {
+    "backend": "94% (15/16 passed — the 1 failure is the real /cargo 500 bug)",
+    "frontend": "100% (influencers-page, new-influencer-btn, inf-name, inf-coupon, inf-save, influencer-card-*, inf-roi, new-campaign-btn, camp-title, camp-save all functional; toasts confirmed)"
+  },
+  "test_credentials": "admin@facette.com / admin123 via POST /api/auth/login?email=&password=",
+  "seed_data_creation": "Created TEST_Inf_<hex> influencer + 1 campaign + 1 order (1000 TL, coupon-linked) for ROI math validation, plus TEST_UIInf via UI smoke test. All cleaned up (db.influencers + db.influencer_campaigns + matching test orders deleted after test run).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes the import in routes/influencers.py:242 (change `from .integrations import _get_mng_settings` → `from .orders import _get_mng_settings`), re-run: pytest /app/backend/tests/test_iteration41_influencer.py::test_cargo_no_500 — should turn green (will likely return 400 'MNG Kargo ayarları yapılmamış' which is acceptable per spec). All other influencer endpoints (CRUD, campaigns, confirm-share, cargo-webhook, ROI, order coupon linking, cascade delete) are PASSING — no regression expected. Frontend /admin/influencer flow fully working.",
+  "rca_of_the_issue": "RCA — POST /api/influencer-campaigns/{cid}/cargo → 500: In /app/backend/routes/influencers.py line 242, `from .integrations import _get_mng_settings` raises ImportError because the helper is defined in /app/backend/routes/orders.py (line 1288), not integrations.py. FastAPI's exception middleware converts the ImportError into a 500 Internal Server Error with `{detail: 'Internal Server Error'}`. Reproduction: 1) login as admin, 2) POST /api/influencers (create), 3) POST /api/influencers/{id}/campaigns, 4) POST /api/influencer-campaigns/{cid}/cargo → 500. Mitigation: 1-line fix — replace `.integrations` with `.orders` on that import. No contract change. Optionally guard with try/except to fail with 400 'Kargo entegrasyonu yapılandırılmamış' for resilience."
+}
