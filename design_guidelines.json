@@ -1,102 +1,114 @@
 {
-  "project_name": "Facette - Premium E-Commerce",
-  "status": "Awaiting user decision on design direction",
-  "theme": "light",
-  "archetype": "5 (Jewel & Luxury) / 1 (Organic & Earthy) Hybrid",
-  "target_audience": "Premium women's fashion and home customers in Turkey",
-  "design_directions": {
-    "Option_A_Editorial_Luxury": {
-      "inspiration": "Miu Miu",
-      "vibe": "Fashion-forward, editorial, bold, high-contrast, avant-garde.",
-      "colors": {
-        "background": "#FAFAFA",
-        "surface": "#FFFFFF",
-        "text_primary": "#0A0A0A",
-        "text_secondary": "#555555",
-        "accent": "#E60000",
-        "border": "#E5E5E5"
-      },
-      "typography": {
-        "headings": "Cabinet Grotesk (Variable weight, high contrast)",
-        "body": "Inter or DM Sans",
-        "style": "Massive typography, very light/thin mixed with ultra black for tension."
-      },
-      "layout_rules": {
-        "hero": "Asymmetric layout, full-bleed images with overlapping typography.",
-        "product_grid": "Irregular bento-style grid, varying image sizes (2x1, 1x1).",
-        "pdp": "Immersive sticky scroll gallery on desktop, full-screen swipeable cards on mobile.",
-        "mobile_nav": "Sticky bottom bar with transparent crystal glassmorphism."
-      }
+  "project_name": "FACETTE E-Commerce Storefront",
+  "theme_strategy": {
+    "mode": "dark",
+    "archetype": "5 (Luxury)",
+    "description": "Miu Miu ve Prada esinli, sessiz lüks (quiet luxury) ve editöryel kurguya sahip, premium dark mode. İçerik ve fotoğraf odaklı, minimal arayüz."
+  },
+  "typography": {
+    "fonts": {
+      "heading": "'Cormorant Garamond', serif",
+      "body": "'Mulish', sans-serif"
     },
-    "Option_B_Refined_Minimal": {
-      "inspiration": "Zara Home",
-      "vibe": "Calm, functional, extremely minimal, lifestyle-led.",
-      "colors": {
-        "background": "#F7F6F2",
-        "surface": "#FFFFFF",
-        "text_primary": "#2C2C2A",
-        "text_secondary": "#7A7A76",
-        "accent": "#A39B8B",
-        "border": "#E2DFD8"
-      },
-      "typography": {
-        "headings": "Cormorant Garamond (Elegant Serif)",
-        "body": "Outfit or Manrope (Clean Sans)",
-        "style": "Generous letter spacing, small labels, subtle hierarchy."
-      },
-      "layout_rules": {
-        "hero": "Cinematic full-screen lifestyle image, centered subtle typography.",
-        "product_grid": "Strict, clean 2-column (mobile) or 4-column (desktop) symmetric grid.",
-        "pdp": "Clean split screen: left gallery, right sticky details.",
-        "mobile_nav": "Hidden until scroll up, minimalist hamburger menu."
-      }
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-light tracking-tight text-[#FAFAFA] uppercase",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-light tracking-tight text-[#FAFAFA]",
+      "h3": "text-xl sm:text-2xl font-light text-[#FAFAFA]",
+      "body": "text-base font-light text-[#D1D1D1] tracking-wide leading-relaxed",
+      "body_small": "text-sm font-light text-[#A3A3A3] tracking-wide",
+      "overline": "text-xs font-semibold uppercase tracking-[0.2em] text-[#D4AF37]"
     },
-    "Option_C_Turkish_Luxury": {
-      "inspiration": "Vakko",
-      "vibe": "Classic, rich, formal luxury, structured.",
-      "colors": {
-        "background": "#FFFFFF",
-        "surface": "#F9F9F9",
-        "text_primary": "#1A1B26",
-        "text_secondary": "#4A4D64",
-        "accent": "#CBA052",
-        "border": "#EAEAEA"
-      },
-      "typography": {
-        "headings": "Playfair Display",
-        "body": "Work Sans",
-        "style": "Capitalized headings, formal serif, gold/champagne accents."
-      },
-      "layout_rules": {
-        "hero": "Structured carousel with framing borders, classic CTA buttons.",
-        "product_grid": "Uniform grid with elegant hover effects (second image on hover).",
-        "pdp": "Traditional layout, large image with breadcrumbs and accordion details.",
-        "mobile_nav": "Classic top nav with prominent cart and account icons."
-      }
+    "rules": "Hiyerarşide kontrast yarat. Mulish fontunu küçük yazılarda (body, menü, buton) geniş harf aralığı (tracking-widest) ile kullan. Cormorant Garamond fontunu devasa, ince ve zarif başlıklar için kullan."
+  },
+  "colors": {
+    "css_variables": {
+      "--background": "#0F0F11",
+      "--surface": "#1A1A1D",
+      "--surface-hover": "#222225",
+      "--primary-accent": "#D4AF37",
+      "--text-primary": "#FAFAFA",
+      "--text-secondary": "#A3A3A3",
+      "--border-color": "#2C2C2E",
+      "--error": "#FF3B30",
+      "--success": "#34C759"
+    },
+    "rules": "Kesinlikle saf siyah (#000000) kullanma. Arka plan her zaman #0F0F11. D4AF37 (Altın) rengini CTA, vurgu veya aktif durumlarda ölçülü kullan."
+  },
+  "spacing_and_layout": {
+    "general": "Standart tasarımlara göre 2x daha fazla boşluk kullan (örn. p-12, py-24, gap-12). Lüks, boşluklarda (negative space) yatar.",
+    "container": "max-w-[1440px] mx-auto px-4 md:px-8",
+    "grid_systems": {
+      "lookbook_bento": "Asimetrik grid. grid-cols-1 md:grid-cols-12 gap-4 md:gap-8. Büyük görseller col-span-8 row-span-2, destekleyici görseller col-span-4.",
+      "plp_grid": "Cardless (Kartsız) grid. grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 md:gap-x-6 gap-y-12 md:gap-y-16."
     }
   },
-  "global_components_inventory": {
-    "shadcn_customizations": {
-      "Button": "Remove default rounded-md. Use rounded-none for Option A & B. Add subtle hover scale.",
-      "Card": "Avoid default borders. Use border-transparent with soft shadow for Option C, purely flat for Option A/B.",
-      "Accordion": "Use for PDP details (Shipping, Materials). Remove default underline on hover.",
-      "Sheet": "Use for Mobile Drawer Nav and Mini-cart. Customize overlay to backdrop-blur-md.",
-      "Select": "Use for size/color variants. Style to match minimal inputs with 1px border.",
-      "Carousel": "Use for Homepage hero and PDP mobile gallery."
+  "components": {
+    "buttons": {
+      "primary": "bg-[#D4AF37] text-[#0F0F11] font-bold tracking-[0.15em] uppercase text-sm py-4 px-8 rounded-none hover:bg-[#FAFAFA] transition-colors duration-300",
+      "secondary": "bg-transparent text-[#FAFAFA] border border-[#D4AF37] font-semibold tracking-[0.15em] uppercase text-sm py-4 px-8 rounded-none hover:bg-[#D4AF37] hover:text-[#0F0F11] transition-colors duration-300",
+      "ghost": "text-[#A3A3A3] hover:text-[#D4AF37] tracking-[0.15em] uppercase text-sm transition-colors duration-300 underline underline-offset-4"
+    },
+    "header": {
+      "style": "sticky top-0 z-50 backdrop-blur-xl bg-[#0F0F11]/80 border-b border-[#2C2C2E]/50.",
+      "announcement_bar": "bg-[#D4AF37] text-[#0F0F11] text-xs font-bold tracking-widest uppercase py-2 text-center"
+    },
+    "product_card": {
+      "style": "Kartsız (Cardless) yapı. Arka plan yok, kenarlık yok.",
+      "image": "Görsel konteyneri aspect-[3/4] veya aspect-[4/5]. Hover durumunda görsel scale-105 olmalı (duration-700 ease-out).",
+      "details": "Görselin altında sola dayalı. Üstte marka/isim (Mulish text-sm), altta fiyat (Mulish text-sm text-[#D4AF37])."
+    },
+    "inputs_and_forms": {
+      "style": "Shadcn UI Input, Select, Checkbox kullan. Vercel tarzı yuvarlak hatları kaldır (rounded-none). Arka plan bg-transparent, border-b border-[#2C2C2E], focus:border-[#D4AF37]."
     }
   },
-  "implementation_roadmap": [
-    "Phase 1: Setup - Configure Tailwind config, variables, and fonts based on user's selected Option.",
-    "Phase 2: Global Layout - Implement Header (Mega-menu Desktop, Drawer Mobile) & Footer.",
-    "Phase 3: Homepage - Build Hero, Lookbook section, and curated Product Carousels.",
-    "Phase 4: PLP - Implement Product Grid, Filters Drawer, and Sort Dropdown.",
-    "Phase 5: PDP - Build Image Gallery, Sticky Cart, Size Guide Modal, and Accordion details.",
-    "Phase 6: Cart & Checkout - Implement Mini-cart Drawer, single-page seamless checkout (Iyzico integration UI)."
-  ],
-  "accessibility_and_performance": {
-    "motion": "Use Framer Motion for page transitions. Respect prefers-reduced-motion.",
-    "images": "Lazy load all non-hero images. Max height 80vh on mobile to prevent blocking.",
-    "testing": "All interactive elements MUST have data-testid attributes (e.g., data-testid='add-to-cart-btn')."
+  "page_blueprints": {
+    "home": {
+      "hero": "Tam ekran (h-screen) hero görsel/video. Gradient overlay (siyah/50'den saydama). Merkezde H1 (FACETTE) ve Primary CTA (Keşfet).",
+      "editorial_categories": "Büyük, asimetrik tipografi ve tam genişlikte görsellerle kategori geçişleri.",
+      "product_scroller": "Yatay kaydırılabilir, ürünlerin arasında büyük boşluklar olan (gap-12) öne çıkan ürünler.",
+      "lookbook": "Bento asimetrik grid ile sezon koleksiyonu mozaik görünümü.",
+      "newsletter": "Minimalist, devasa bir başlık ('GİZLİ DÜNYAMIZA KATILIN') ve sadece email inputu ile zarif bir form."
+    },
+    "category_plp": {
+      "header": "Sol üstte sade breadcrumb. Sağ üstte filtre ve sıralama (Shadcn Dropdown veya Sheet).",
+      "layout": "Sol menü kullanma. Filtreleri Sheet (çekmece) olarak aç, böylece ürün alanı tam ekranı kaplasın.",
+      "grid": "Ürünler büyük (2, 3 veya 4 kolon). Kenarlıksız cardless yapı."
+    },
+    "product_detail_pdp": {
+      "layout": "Desktop için 50/50 veya 60/40 Split Screen. Sol taraf büyük aşağı kaydırılabilir veya carousel görsel galerisi (aspect-[3/4]). Sağ taraf sticky (sabit) ürün bilgileri.",
+      "actions": "Beden ve renk varyantları için yuvarlak, 1px kenarlıklı zarif seçim kutuları (Shadcn Radio Group özel stili).",
+      "content": "Açıklama alanı HTML içerik alacak, akordiyon (Shadcn Accordion) kullanılarak 'Detaylar', 'Beden Önerisi', 'Teslimat' gizlenecek."
+    },
+    "cart_and_checkout": {
+      "cart": "Sayfadan ziyade Shadcn Sheet kullanarak sağdan açılan şık bir sepet. Sepet boşsa 'Sepetiniz lüksle dolmayı bekliyor' gibi zarif metinler.",
+      "checkout": "Adım adım, distraction-free (dikkat dağıtmayan) ödeme sayfası. Form alanları zarif, iyzico mock entegrasyonu."
+    },
+    "auth_and_account": {
+      "login": "Ortada tek kolonlu minimal form, ekranın diğer yarısı yüksek kaliteli editoryal görsel.",
+      "account": "Sade yan menü (Siparişlerim, Adreslerim, Favoriler). Veriler tablo (Shadcn Table) yerine geniş satır kartları olarak listelenmeli."
+    }
   },
-  "instructions_to_main_agent": "Wait for the user to specify their chosen design direction (A, B, or C). Once selected, apply the exact typography, colors, and layout rules for that option across the implementation phases."
+  "motion_and_animations": {
+    "scrolling": "Kesinlikle yumuşak kaydırma (Smooth Scrolling - e.g., Lenis) kullanılmalı. Sayfa aşağı kaydıkça öğelere ağırlık hissi verir.",
+    "hover": "Görsellerde çok yavaş bir büyüme (scale-105, 1.2s ease-out). Butonlarda keskin renk değişimi.",
+    "entrance": "Staggered fade-up (aşağıdan yukarı beliren) metinler. Liste elemanları birbiri ardına gelmeli."
+  },
+  "media": {
+    "hero_background": "https://images.unsplash.com/photo-1779912217733-0b7df75b5083?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxmYXNoaW9uJTIwZWRpdG9yaWFsJTIwbW9kZWwlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODA0OTY2MDd8MA&ixlib=rb-4.1.0&q=85",
+    "lookbook_1": "https://images.unsplash.com/photo-1779911915361-11658900633c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHw0fHxmYXNoaW9uJTIwZWRpdG9yaWFsJTIwbW9kZWwlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODA0OTY2MDd8MA&ixlib=rb-4.1.0&q=85",
+    "lookbook_2": "https://images.unsplash.com/photo-1771072426459-1ab467cd80f0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwzfHxmYXNoaW9uJTIwZWRpdG9yaWFsJTIwbW9kZWwlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODA0OTY2MDd8MA&ixlib=rb-4.1.0&q=85",
+    "runway_model": "https://images.pexels.com/photos/14604107/pexels-photo-14604107.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "product_1": "https://images.pexels.com/photos/8306359/pexels-photo-8306359.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "product_2": "https://images.pexels.com/photos/35596695/pexels-photo-35596695.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "auth_bg": "https://images.unsplash.com/photo-1779911915533-51df473c20d2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxmYXNoaW9uJTIwZWRpdG9yaWFsJTIwbW9kZWwlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODA0OTY2MDd8MA&ixlib=rb-4.1.0&q=85"
+  },
+  "instructions_to_main_agent": [
+    "Projeyi React JS + Tailwind CSS ile oluştur. TypeScript (tsx) KULLANMA. Sadece .js/.jsx kullan.",
+    "Verilen fontları (Cormorant Garamond ve Mulish) index.css içinde Google Fonts veya benzeri yolla import et.",
+    "Tüm bileşenlerde test edilebilirlik için 'data-testid' özniteliklerini ekle (örn: data-testid='add-to-cart-btn').",
+    "Lucide-react ikon kütüphanesini kullan.",
+    "Shadcn UI bileşenlerini kullanırken, Vercel/SaaS görünümünü yok etmek için yuvarlak köşeleri (rounded) sıfırla (rounded-none).",
+    "Tasarımı uygularken KESİNLİKLE JSON içerisindeki media URL'lerini kullan, placeholder (yer tutucu) görsel KULLANMA.",
+    "Formlar, modal/dialog, sepet (sheet) işlemleri için Shadcn yapılarını özelleştir."
+  ]
 }
