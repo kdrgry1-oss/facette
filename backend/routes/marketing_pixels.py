@@ -24,8 +24,11 @@ Admin dışında kimse yeni kod ekleyemez.
 """
 from datetime import datetime, timezone
 from typing import Optional, List
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from .deps import db, require_admin, generate_id
 
@@ -33,14 +36,17 @@ router = APIRouter(prefix="/marketing-pixels", tags=["marketing-pixels"])
 
 
 PIXEL_PROVIDERS = [
-    {"key": "ga4", "name": "Google Analytics 4"},
-    {"key": "meta", "name": "Meta Pixel (Facebook)"},
-    {"key": "google_ads", "name": "Google Ads Conversion"},
-    {"key": "tiktok", "name": "TikTok Pixel"},
-    {"key": "yandex", "name": "Yandex Metrica"},
-    {"key": "hotjar", "name": "Hotjar"},
-    {"key": "clarity", "name": "Microsoft Clarity"},
-    {"key": "custom", "name": "Özel Kod"},
+    {"key": "ga4", "name": "Google Analytics 4", "supports_capi": True},
+    {"key": "meta", "name": "Meta Pixel (Facebook) + CAPI", "supports_capi": True},
+    {"key": "google_ads", "name": "Google Ads (Enhanced Conv)", "supports_capi": True},
+    {"key": "tiktok", "name": "TikTok Pixel + Events API", "supports_capi": True},
+    {"key": "pinterest", "name": "Pinterest + Conversions API", "supports_capi": True},
+    {"key": "snapchat", "name": "Snapchat + Conversions API", "supports_capi": True},
+    {"key": "gtm", "name": "Google Tag Manager (container)", "supports_capi": False},
+    {"key": "yandex", "name": "Yandex Metrica", "supports_capi": False},
+    {"key": "hotjar", "name": "Hotjar", "supports_capi": False},
+    {"key": "clarity", "name": "Microsoft Clarity", "supports_capi": False},
+    {"key": "custom", "name": "Özel Kod", "supports_capi": False},
 ]
 
 
@@ -99,6 +105,50 @@ src="https://www.facebook.com/tr?id={tag_id}&ev=PageView&noscript=1"/></noscript
 }}(window, document, 'ttq');
 </script>
 """.strip()
+    elif provider == "pinterest" and tag_id:
+        # tag_id = Pinterest TAG ID for browser pixel (PT-XXXX)
+        head = f"""
+<!-- Pinterest Tag -->
+<script>
+!function(e){{if(!window.pintrk){{window.pintrk = function () {{
+window.pintrk.queue.push(Array.prototype.slice.call(arguments))}};var
+n=window.pintrk;n.queue=[],n.version="3.0";var
+t=document.createElement("script");t.async=!0,t.src=e;var
+r=document.getElementsByTagName("script")[0];
+r.parentNode.insertBefore(t,r)}}}}("https://s.pinimg.com/ct/core.js");
+pintrk('load', '{tag_id}');
+pintrk('page');
+</script>
+<noscript><img height="1" width="1" style="display:none;" alt="" src="https://ct.pinterest.com/v3/?event=init&tid={tag_id}&noscript=1" /></noscript>
+""".strip()
+    elif provider == "snapchat" and tag_id:
+        head = f"""
+<!-- Snap Pixel Code -->
+<script type='text/javascript'>
+(function(e,t,n){{if(e.snaptr)return;var a=e.snaptr=function(){{
+a.handleRequest?a.handleRequest.apply(a,arguments):a.queue.push(arguments)}};
+a.queue=[];var s='script';r=t.createElement(s);r.async=!0;
+r.src=n;var u=t.getElementsByTagName(s)[0];
+u.parentNode.insertBefore(r,u);}})(window,document,'https://sc-static.net/scevent.min.js');
+snaptr('init', '{tag_id}', {{}});
+snaptr('track', 'PAGE_VIEW');
+</script>
+""".strip()
+    elif provider == "gtm" and tag_id:
+        # tag_id = GTM-XXXX container id
+        head = f"""
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':
+new Date().getTime(),event:'gtm.js'}});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+}})(window,document,'script','dataLayer','{tag_id}');</script>
+""".strip()
+        body = f"""
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id={tag_id}"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+""".strip()
     elif provider == "yandex" and tag_id:
         head = f"""
 <!-- Yandex Metrica -->
@@ -146,6 +196,15 @@ class PixelReq(BaseModel):
     head_snippet: Optional[str] = ""  # özel kod / override
     body_snippet: Optional[str] = ""
     is_active: bool = True
+    # ---- CAPI (Server-Side Conversions API) fields ----
+    capi_enabled: Optional[bool] = False
+    access_token: Optional[str] = ""        # plain (taşıma için; vault'ta saklamak öneriliyor)
+    vault_key: Optional[str] = ""           # secrets_vault collection key
+    env_token_key: Optional[str] = ""       # env override (örn META_CAPI_TOKEN)
+    test_event_code: Optional[str] = ""     # Meta TEST00001, GA4 debug, …
+    tenant_id: Optional[str] = None         # multi-tenant (SaaS)
+    # Provider'a özel ekstra (Pinterest ad_account_id, Snapchat conversion_event vs)
+    extra: Optional[dict] = None
 
 
 @router.get("/providers")
@@ -156,6 +215,13 @@ async def get_providers(current_user: dict = Depends(require_admin)):
 @router.get("")
 async def list_pixels(current_user: dict = Depends(require_admin)):
     rows = await db.marketing_pixels.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=200)
+    # Token'ları maskele
+    for r in rows:
+        if r.get("access_token"):
+            r["_has_token"] = True
+            r["access_token"] = "***"
+        else:
+            r["_has_token"] = bool(r.get("vault_key") or r.get("env_token_key"))
     return {"items": rows}
 
 
@@ -181,9 +247,45 @@ async def upsert_pixel(req: PixelReq, current_user: dict = Depends(require_admin
         "head_snippet": head,
         "body_snippet": body,
         "is_active": req.is_active,
+        # CAPI fields
+        "capi_enabled": bool(req.capi_enabled),
+        "vault_key": (req.vault_key or "").strip() or None,
+        "env_token_key": (req.env_token_key or "").strip() or None,
+        "test_event_code": (req.test_event_code or "").strip() or None,
+        "tenant_id": req.tenant_id,
+        "extra": req.extra or {},
         "updated_at": now_iso,
         "updated_by": current_user.get("email", ""),
     }
+    # Access token: vault'a şifreli olarak yazılır; plain MongoDB'de tutulmaz
+    if req.access_token:
+        # Eğer vault_key belirtilmemişse otomatik üret (SaaS-safe)
+        if not (req.vault_key or req.env_token_key):
+            from hashlib import sha1
+            sig = sha1(f"{req.provider}-{(req.tag_id or '').strip()}-{req.tenant_id or 'default'}".encode()).hexdigest()[:10]
+            req.vault_key = f"capi_{req.provider}_{sig}"
+            data["vault_key"] = req.vault_key
+        # Vault'a yaz (env_token_key yoksa)
+        if req.vault_key and not req.env_token_key:
+            try:
+                from security.crypto import encrypt as _vault_encrypt
+                enc = _vault_encrypt(req.access_token.strip())
+                await db.vault_secrets.update_one(
+                    {"key": req.vault_key.strip()},
+                    {"$set": {
+                        "key": req.vault_key.strip(),
+                        "value_enc": enc,
+                        "description": f"CAPI {req.provider} token — {req.name or req.tag_id}",
+                        "scope": "capi",
+                        "updated_by": current_user.get("email"),
+                        "updated_at": now_iso,
+                    }, "$setOnInsert": {"created_at": now_iso}},
+                    upsert=True,
+                )
+            except Exception as e:
+                logger.warning(f"Vault upsert failed: {e}")
+        # PLAIN text token'ı MongoDB'de tutma
+        data["access_token"] = ""
 
     if req.id:
         existing = await db.marketing_pixels.find_one({"id": req.id}, {"_id": 0, "id": 1})
@@ -197,6 +299,84 @@ async def upsert_pixel(req: PixelReq, current_user: dict = Depends(require_admin
         await db.marketing_pixels.insert_one(data)
     data.pop("_id", None)
     return {"success": True, "pixel": data}
+
+
+@router.post("/test-connection")
+async def test_capi_connection(req: PixelReq, current_user: dict = Depends(require_admin)):
+    """CAPI bağlantısını test event göndererek dener.
+
+    Frontend'den ya kayıtlı pixel id'yi referans edebilir ya da form verisini
+    doğrudan yollayabilir. test_event_code önerilir (canlı raporu kirletmemek için).
+    """
+    from datetime import datetime
+    from services.capi.orchestrator import _resolve_access_token, PROVIDERS
+
+    provider = req.provider.lower()
+    mod = PROVIDERS.get(provider)
+    if not mod:
+        raise HTTPException(status_code=400,
+                            detail=f"Bu sağlayıcı için CAPI desteklenmiyor: {provider}")
+
+    # Resolve token: from form, else from existing record's vault/env
+    token = (req.access_token or "").strip()
+    if not token and req.id:
+        existing = await db.marketing_pixels.find_one({"id": req.id}, {"_id": 0})
+        if existing:
+            token = await _resolve_access_token(existing) or ""
+
+    pixel_id = (req.tag_id or "").strip()
+    if not pixel_id or not token:
+        raise HTTPException(status_code=400,
+                            detail="Test için pixel_id ve access_token gerekli.")
+
+    res = await mod.test_connection(
+        pixel_id=pixel_id, access_token=token,
+        test_event_code=(req.test_event_code or "").strip() or None,
+    )
+    # Persist tester log
+    await db.capi_event_logs.insert_one({
+        "id": generate_id(),
+        "provider": provider, "event_name": "test_connection",
+        "tenant_id": req.tenant_id, "ok": bool(res.get("ok")),
+        "status": res.get("status"), "response": res.get("response") or {},
+        "error": res.get("error"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "is_test": True,
+    })
+    return res
+
+
+@router.get("/{pid}")
+async def get_pixel(pid: str, current_user: dict = Depends(require_admin)):
+    px = await db.marketing_pixels.find_one({"id": pid}, {"_id": 0})
+    if not px:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    # Token'ı maskele
+    if px.get("access_token"):
+        px["access_token"] = "***"
+        px["_has_token"] = True
+    return {"pixel": px}
+
+
+@router.get("/capi/queue/status")
+async def capi_queue_status(current_user: dict = Depends(require_admin)):
+    """Stuck CAPI eventlerin özet durumu."""
+    pending = await db.capi_event_queue.count_documents({"dead": {"$ne": True}})
+    dead = await db.capi_event_queue.count_documents({"dead": True})
+    total_logs = await db.capi_event_logs.count_documents({})
+    last_failed = await db.capi_event_logs.find(
+        {"ok": False}, {"_id": 0}
+    ).sort("created_at", -1).limit(10).to_list(10)
+    return {"pending": pending, "dead": dead,
+            "total_logs": total_logs, "recent_failures": last_failed}
+
+
+@router.post("/capi/queue/run-now")
+async def capi_queue_run_now(current_user: dict = Depends(require_admin)):
+    """Tüm bekleyen kuyruğu hemen tetikle (cron'u beklemeden)."""
+    from services.capi.orchestrator import retry_queue_once
+    res = await retry_queue_once(db)
+    return res
 
 
 @router.delete("/{pid}")

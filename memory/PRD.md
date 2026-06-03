@@ -4,6 +4,65 @@
 Facette e-ticaret uygulaması - React + FastAPI + MongoDB tabanlı admin paneli ve mağaza yönetimi. Trendyol entegrasyonu, ürün yönetimi, stok takibi, sipariş yönetimi ve toplu işlem özellikleri.
 
 
+## Iteration 78 (2026-02 fork) — Server-Side CAPI + DataLayer + SaaS-Ready Pixel Yönetimi ⚡
+
+### 🎯 Kullanıcı İsteği
+"Bu seviyede bir Server-Side Tracking ve CAPI entegrasyonu... 5 platform (Meta + Google + TikTok + Pinterest + Snapchat), multi-tenant, vault şifreli token, dedup (event_id + event_time + email hash), GTM hibrit, async retry queue, offline conversions (havale + iade)"
+
+### ✅ Tamamlanan Mimari
+
+**Backend** — `/app/backend/services/capi/`:
+- `hash_utils.py` — PII SHA-256 hash (email, phone E.164, name, city, country, zip)
+- `meta.py` — Meta CAPI (Graph API v18.0) + 11 event mapping
+- `google_ads.py` — GA4 Measurement Protocol + Enhanced Conversions
+- `tiktok.py` — TikTok Events API v1.3
+- `pinterest.py` — Pinterest Conversions API v5
+- `snapchat.py` — Snap Conversions API v3
+- `orchestrator.py` — Tüm provider'lara paralel `asyncio.gather` fan-out + retry queue (max 5 deneme, exponential backoff: 1/5/15/60/240 dk)
+
+**Backend routes**:
+- `routes/capi.py` — `POST /api/capi/event` (frontend mirror), `GET /api/capi/health`
+- `routes/marketing_pixels.py` — extend: CAPI alanları, test-connection endpoint, queue status/run-now, GTM/Pinterest/Snapchat snippet inject. Plain token MongoDB'de SAKLANMAZ → otomatik Fernet (AES) vault'a yazılır.
+- `routes/orders.py` — Status hook'u: `confirmed+paid` → `purchase` CAPI; `cancelled+paid` → `refund` CAPI. Yeni `PUT /orders/{id}/mark-paid` endpoint'i (havale onayı → offline conversion).
+
+**Frontend**:
+- `lib/dataLayer.js` — GA4 e-commerce schema (`view_item`, `view_item_list`, `add_to_cart`, `remove_from_cart`, `begin_checkout`, `add_payment_info`, `purchase`, `search`) + native pixel calls (fbq/ttq/snaptr/pintrk) + backend mirror.
+- `utils/pixelEvents.js` — eski API'yi dataLayer.js'e proxy'leyen bridge (geriye uyumlu, mevcut sayfalar otomatik CAPI kazandı).
+- `pages/admin/MarketingPixels.jsx` — yeniden tasarlandı: provider dropdown CAPI rozetiyle, amber CAPI paneli (Access Token, Test Event Code, Vault Key, Env Key, Tenant ID), test bağlantı butonu, kuyruk status göstergesi + manuel tetikleme.
+
+### 🔐 SaaS & Güvenlik Akışı
+
+1. Admin Token girer → backend otomatik `vault_key` üretir (`capi_<provider>_<sha1>`) → `security.crypto.encrypt` (Fernet) → `vault_secrets` collection'a yazar.
+2. MongoDB'de plain token **YOK** (`access_token: ""`).
+3. Orchestrator dispatch sırasında `get_secret(vault_key)` ile decrypt eder.
+4. **Multi-tenant**: `tenant_id` field'ı ile her hesap kendi pixel'ini izole eder.
+5. **Env override**: `env_token_key` belirtilirse OS env'i önceliklidir (CI/CD'de güvenli).
+
+### 📊 Test Sonuçları (Uçtan Uca Canlı)
+- `POST /api/capi/event` → 200 OK (non-blocking, ~30ms)
+- Background dispatch → vault'tan token okundu → Meta'ya gerçek HTTPS isteği gitti
+- Meta `400 Invalid OAuth access token` döndü (fake token verdik — altyapı doğrulandı)
+- Failed events → `capi_event_queue` (otomatik 30 dk'da bir retry)
+- Vault decrypt test: `SECRET_TEST_TOKEN_v3` → ✅ doğru decrypt
+- Frontend MarketingPixels UI: Meta seçilince amber CAPI paneli açılıyor, "Bağlantıyı Test Et" butonu canlı
+
+### 🔄 Edge Cases (Tamamlandı)
+- ✅ Havale 'paid' işaretlendiğinde → offline `purchase` CAPI eventi
+- ✅ Sipariş `cancelled` + ödendi → `refund` CAPI eventi (value × -1)
+- ✅ Async fire-and-forget — checkout sayfası beklemez
+- ✅ Network/timeout → kuyruğa alır, üstel backoff ile retry
+
+### 📁 Yeni Dosyalar
+- `/app/backend/services/capi/__init__.py`, `hash_utils.py`, `meta.py`, `tiktok.py`, `google_ads.py`, `pinterest.py`, `snapchat.py`, `orchestrator.py`
+- `/app/backend/routes/capi.py`
+- `/app/frontend/src/lib/dataLayer.js`
+
+### 🆕 Yeni Collections
+- `capi_event_logs` — Tüm event gönderim logları (test_connection dahil)
+- `capi_event_queue` — Başarısız event'ler retry için
+
+
+
 ## Iteration 77 (2026-02 fork) — Ticimax Storefront Scrape ile 4 Ürün Çekme 🕷️
 
 ### 🎯 Kullanıcı İsteği

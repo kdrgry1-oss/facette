@@ -82,6 +82,8 @@ from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
 from routes.integrations_temu import router as integrations_temu_router
 from routes.trendyol_retry_queue import router as trendyol_retry_queue_router, background_retry_loop as trendyol_retry_bg_loop
+from routes.capi import router as capi_router
+from services.capi.orchestrator import background_retry_loop as capi_retry_bg_loop
 from routes.customer_risk import router as customer_risk_router
 from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
@@ -182,6 +184,14 @@ async def lifespan(app: FastAPI):
         logger.info("Trendyol retry queue background loop started (her saat)")
     except Exception as e:
         logger.warning(f"Trendyol retry loop start warning: {e}")
+
+    # Start CAPI (Conversions API) retry queue (30 dk'da bir)
+    try:
+        import asyncio as _asyncio
+        _asyncio.create_task(capi_retry_bg_loop(lambda: db, interval_seconds=1800))
+        logger.info("CAPI retry queue background loop started (her 30 dk)")
+    except Exception as e:
+        logger.warning(f"CAPI retry loop start warning: {e}")
 
     yield
     
@@ -408,6 +418,7 @@ api_router.include_router(trendyol_qna_router, prefix="/integrations")
 api_router.include_router(integrations_router, prefix="/integrations")
 api_router.include_router(integrations_temu_router, prefix="/integrations")
 api_router.include_router(trendyol_retry_queue_router)
+api_router.include_router(capi_router)
 api_router.include_router(admin_router)
 api_router.include_router(customer_router)
 api_router.include_router(variants_router)

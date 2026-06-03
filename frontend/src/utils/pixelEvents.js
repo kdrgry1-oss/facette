@@ -1,120 +1,79 @@
 /**
  * =============================================================================
- * pixelEvents.js — FAZ 9 Potansiyel İyileştirme
+ * pixelEvents.js — Backwards-compatible bridge to new dataLayer.js
  * =============================================================================
- * Meta Pixel + GA4 için e-ticaret olay tetikleyici helper'ı.
+ * Eski API (trackViewContent, trackAddToCart, trackInitiateCheckout, trackPurchase)
+ * geriye uyumlu olacak şekilde, yeni `lib/dataLayer.js` (GA4 schema + CAPI
+ * mirror + event_id dedup) üzerinden çalıştırılır.
  *
- * Kullanım:
- *   import { trackViewContent, trackAddToCart, trackPurchase } from "./pixelEvents";
- *   trackAddToCart({ product_id, name, price, currency: "TRY", quantity });
- *
- * Backend tarafında marketing_pixels aktif olmalı. Bu helper yalnızca
- * window.fbq ve window.gtag varsa çağrı yapar — pasif ise sessizce no-op olur.
+ * Bu sayede mevcut sayfalardaki import'ları değiştirmeden sunucu taraflı
+ * (Conversions API) gönderim devreye girer.
  * =============================================================================
  */
+import {
+  trackViewItem,
+  trackAddToCart as _trackAddToCart,
+  trackBeginCheckout,
+  trackPurchase as _trackPurchase,
+  trackViewItemList,
+  trackAddPaymentInfo,
+  trackRemoveFromCart,
+  trackSearch as _trackSearch,
+} from "../lib/dataLayer";
 
-const CURRENCY = "TRY";
-
-function _fbq(...args) {
-  if (typeof window !== "undefined" && typeof window.fbq === "function") {
-    try { window.fbq(...args); } catch { /* no-op */ }
-  }
-}
-
-function _gtag(...args) {
-  if (typeof window !== "undefined" && typeof window.gtag === "function") {
-    try { window.gtag(...args); } catch { /* no-op */ }
-  }
-}
-
-/** Ürün detay görüntüleme */
-export function trackViewContent({ product_id, name, category, price }) {
-  _fbq("track", "ViewContent", {
-    content_type: "product",
-    content_ids: [product_id],
-    content_name: name,
-    content_category: category,
-    currency: CURRENCY,
-    value: Number(price) || 0,
-  });
-  _gtag("event", "view_item", {
-    currency: CURRENCY,
-    value: Number(price) || 0,
-    items: [{
-      item_id: product_id, item_name: name, item_category: category,
-      price: Number(price) || 0, quantity: 1,
-    }],
+/** Ürün detay görüntüleme — eski imza */
+export function trackViewContent({ product_id, name, category, price, brand, color }) {
+  return trackViewItem({
+    product: {
+      id: product_id, name, category_name: category,
+      brand: brand || "FACETTE", color: color || "",
+      sale_price: Number(price) || 0, price: Number(price) || 0,
+    },
   });
 }
 
-/** Sepete ekleme */
-export function trackAddToCart({ product_id, name, category, price, quantity = 1 }) {
-  const value = (Number(price) || 0) * (quantity || 1);
-  _fbq("track", "AddToCart", {
-    content_type: "product",
-    content_ids: [product_id],
-    content_name: name,
-    currency: CURRENCY,
-    value,
-  });
-  _gtag("event", "add_to_cart", {
-    currency: CURRENCY,
-    value,
-    items: [{
-      item_id: product_id, item_name: name, item_category: category,
-      price: Number(price) || 0, quantity,
-    }],
+/** Sepete ekleme — eski imza */
+export function trackAddToCart({ product_id, name, category, price, quantity = 1, size, color }) {
+  return _trackAddToCart({
+    product: {
+      id: product_id, name, category_name: category,
+      sale_price: Number(price) || 0, price: Number(price) || 0,
+    },
+    variant: size || color ? { size, color, price: Number(price) || 0 } : null,
+    quantity,
   });
 }
 
-/** Checkout başladı */
-export function trackInitiateCheckout({ total, items = [] }) {
-  _fbq("track", "InitiateCheckout", {
-    currency: CURRENCY,
-    value: Number(total) || 0,
-    num_items: items.length,
-    content_ids: items.map((i) => i.product_id || i.productId).filter(Boolean),
-  });
-  _gtag("event", "begin_checkout", {
-    currency: CURRENCY,
-    value: Number(total) || 0,
-    items: items.map((i) => ({
-      item_id: i.product_id || i.productId, item_name: i.name,
-      price: Number(i.price) || 0, quantity: Number(i.quantity || 1),
-    })),
+/** Checkout başladı — eski imza */
+export function trackInitiateCheckout({ total, items = [], coupon }) {
+  const mapped = items.map((i) => ({
+    item_id: String(i.product_id || i.productId || i.id || ""),
+    item_name: i.name || i.title || "",
+    price: Number(i.price) || 0,
+    quantity: Number(i.quantity) || 1,
+  }));
+  return trackBeginCheckout({
+    items: mapped, value: Number(total) || 0, coupon,
   });
 }
 
-/** Satın alma tamamlandı (conversion) */
-export function trackPurchase({ order_id, total, tax = 0, shipping = 0, items = [] }) {
-  _fbq("track", "Purchase", {
-    currency: CURRENCY,
-    value: Number(total) || 0,
-    content_type: "product",
-    content_ids: items.map((i) => i.product_id || i.productId).filter(Boolean),
-    num_items: items.length,
-  });
-  _gtag("event", "purchase", {
-    transaction_id: order_id,
-    currency: CURRENCY,
-    value: Number(total) || 0,
-    tax: Number(tax) || 0,
-    shipping: Number(shipping) || 0,
-    items: items.map((i) => ({
-      item_id: i.product_id || i.productId, item_name: i.name,
-      price: Number(i.price) || 0, quantity: Number(i.quantity || 1),
-    })),
+/** Satın alma tamamlandı — eski imza */
+export function trackPurchase({ order_id, total, items = [], coupon, currency = "TRY", user }) {
+  const mapped = items.map((i) => ({
+    item_id: String(i.product_id || i.productId || i.id || ""),
+    item_name: i.name || i.title || "",
+    price: Number(i.price) || 0,
+    quantity: Number(i.quantity) || 1,
+  }));
+  return _trackPurchase({
+    orderNumber: order_id, value: Number(total) || 0,
+    items: mapped, coupon, currency, user,
   });
 }
 
-/** Arama */
-export function trackSearch(query) {
-  _fbq("track", "Search", { search_string: query });
-  _gtag("event", "search", { search_term: query });
-}
-
-/** Üyelik tamamlandı */
-export function trackCompleteRegistration(method = "email") {
-  _fbq("track", "CompleteRegistration", { status: true });
-  _gtag("event", "sign_up", { method });
-}
+// Re-exports — new API kullanmak isteyenler için
+export {
+  trackViewItem, trackViewItemList,
+  trackAddPaymentInfo, trackRemoveFromCart, trackBeginCheckout,
+};
+export const trackSearch = _trackSearch;
