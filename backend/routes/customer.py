@@ -171,6 +171,31 @@ async def get_my_favorites(current_user: dict = Depends(require_auth)):
     return {"favorites": ordered}
 
 
+@router.post("/favorites/merge")
+async def merge_favorites(payload: dict, current_user: dict = Depends(require_auth)):
+    """Misafir (localStorage) favorilerini login sonrası hesaba taşır.
+    NOT: Bu literal route, /favorites/{product_id} parametre route'undan ÖNCE
+    tanımlanmalı yoksa FastAPI 'merge'i product_id olarak yakalar."""
+    ids = (payload.get("product_ids") or [])[:200]
+    added = 0
+    for pid in ids:
+        if not pid:
+            continue
+        res = await db.favorites.update_one(
+            {"user_id": current_user.get("id"), "product_id": pid},
+            {"$setOnInsert": {
+                "id": generate_id(),
+                "user_id": current_user.get("id"),
+                "product_id": pid,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+        if res.upserted_id is not None:
+            added += 1
+    return {"success": True, "merged": added}
+
+
 @router.post("/favorites/{product_id}")
 async def add_favorite(product_id: str, current_user: dict = Depends(require_auth)):
     """Ürünü favorilere ekler (idempotent)."""
@@ -198,26 +223,3 @@ async def remove_favorite(product_id: str, current_user: dict = Depends(require_
         "product_id": product_id,
     })
     return {"success": True, "is_favorite": False}
-
-
-@router.post("/favorites/merge")
-async def merge_favorites(payload: dict, current_user: dict = Depends(require_auth)):
-    """Misafir (localStorage) favorilerini login sonrası hesaba taşır."""
-    ids = payload.get("product_ids") or []
-    added = 0
-    for pid in ids:
-        if not pid:
-            continue
-        res = await db.favorites.update_one(
-            {"user_id": current_user.get("id"), "product_id": pid},
-            {"$setOnInsert": {
-                "id": generate_id(),
-                "user_id": current_user.get("id"),
-                "product_id": pid,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }},
-            upsert=True,
-        )
-        if res.upserted_id is not None:
-            added += 1
-    return {"success": True, "merged": added}

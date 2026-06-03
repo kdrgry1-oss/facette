@@ -4393,7 +4393,14 @@ async def upload_ticimax_products_excel(
     for kart_id_raw, grp in by_kart:
         try:
             stats["parents_in_excel"] += 1
-            kart_id = str(_int(kart_id_raw))
+            # URUNKARTIID numerikse int-string normalize; değilse ham string koru
+            try:
+                if pd.isna(kart_id_raw):
+                    kart_id = ""
+                else:
+                    kart_id = str(int(float(kart_id_raw)))
+            except (ValueError, TypeError):
+                kart_id = _s(kart_id_raw)
             first = grp.iloc[0]
 
             urun_adi = _cell(first, "URUNADI")
