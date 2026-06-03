@@ -28,11 +28,24 @@ EVENT_MAP = {
 
 
 def _build_user(ud: dict) -> dict:
+    """Snapchat Conversions API v3 — TÜM advanced matching.
+    Doc: https://developers.snap.com/api/marketing-api/Conversions-API/Parameters
+    """
     out = {}
-    if ud.get("em"): out["em"] = ud["em"]
-    if ud.get("ph"): out["ph"] = ud["ph"]
-    if ud.get("external_id"): out["uuid_c1"] = ud["external_id"]
+    # Hashed
+    for k_in, k_out in [
+        ("em", "em"), ("ph", "ph"), ("fn", "fn"), ("ln", "ln"),
+        ("ct", "ct"), ("st", "st"), ("zp", "zp"), ("country", "country"),
+        ("ge", "ge"), ("db", "db"),
+        ("external_id", "uuid_c1"),
+        ("madid", "hashed_mobile_ad_id"),
+        ("idfa", "hashed_idfa"), ("idfv", "hashed_idfv"),
+    ]:
+        v = ud.get(k_in)
+        if v: out[k_out] = v
+    # Raw cookies
     if ud.get("sc_click_id"): out["sc_click_id"] = ud["sc_click_id"]
+    if ud.get("sc_cookie1"):  out["sc_cookie1"] = ud["sc_cookie1"]
     if ud.get("client_ip_address"): out["client_ip_address"] = ud["client_ip_address"]
     if ud.get("client_user_agent"): out["client_user_agent"] = ud["client_user_agent"]
     return out
@@ -41,14 +54,22 @@ def _build_user(ud: dict) -> dict:
 def _build_custom(event: dict) -> dict:
     items = event.get("items") or []
     ids = [str(it.get("item_id") or it.get("id") or "") for it in items]
-    return {
+    brands = list({(it.get("item_brand") or "FACETTE") for it in items})
+    cd = {
         "currency": event.get("currency") or "TRY",
         "price": float(event.get("value") or 0.0),
         "transaction_id": str(event.get("order_id") or ""),
         "item_ids": ids,
+        "brands": brands,
         "number_items": sum(int(it.get("quantity") or 1) for it in items),
         "item_category": event.get("category") or "",
     }
+    if event.get("description"):     cd["description"] = event["description"]
+    if event.get("search_string"):   cd["search_string"] = event["search_string"]
+    if event.get("payment_type"):    cd["payment_info_available"] = True
+    if (event.get("discount") or 0) > 0:
+        cd["sign_up_method"] = ""  # placeholder; Snap'in resmi discount field'i yok
+    return cd
 
 
 async def send(

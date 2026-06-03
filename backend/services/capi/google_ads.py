@@ -126,12 +126,27 @@ async def send(
         "client_id": user_data.get("external_id") or user_data.get("em") or event_id,
         "events": [{"name": ga_event, "params": params_body}],
     }
-    # User properties (hashed PII) — Google Ads Enhanced Conversions
+    # Optional user_id (CRM identifier - cross-device tracking)
+    if user_data.get("external_id"):
+        payload["user_id"] = user_data["external_id"]
+    # Enhanced Conversions — hashed PII as user properties + user_data
     user_props = {}
-    if user_data.get("em"): user_props["sha256_email"] = {"value": user_data["em"]}
-    if user_data.get("ph"): user_props["sha256_phone"] = {"value": user_data["ph"]}
+    if user_data.get("em"): user_props["sha256_email_address"] = {"value": user_data["em"]}
+    if user_data.get("ph"): user_props["sha256_phone_number"] = {"value": user_data["ph"]}
+    if user_data.get("fn"): user_props["sha256_first_name"] = {"value": user_data["fn"]}
+    if user_data.get("ln"): user_props["sha256_last_name"] = {"value": user_data["ln"]}
+    if user_data.get("street"): user_props["sha256_street"] = {"value": user_data["street"]}
+    if user_data.get("ct"): user_props["sha256_city"] = {"value": user_data["ct"]}
+    if user_data.get("st"): user_props["region"] = {"value": user_data["st"]}
+    if user_data.get("zp"): user_props["postal_code"] = {"value": user_data["zp"]}
+    if user_data.get("country"): user_props["country_code"] = {"value": user_data["country"]}
     if user_props:
         payload["user_properties"] = user_props
+    # Google Ads click ID propagation (GA4 ↔ Ads attribution)
+    if user_data.get("gclid") or user_data.get("wbraid") or user_data.get("gbraid"):
+        params_body["gclid"] = user_data.get("gclid") or ""
+        if user_data.get("wbraid"): params_body["wbraid"] = user_data["wbraid"]
+        if user_data.get("gbraid"): params_body["gbraid"] = user_data["gbraid"]
 
     params = {"measurement_id": mid, "api_secret": api_secret}
     if test_event_code:

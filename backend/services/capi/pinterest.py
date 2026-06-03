@@ -35,25 +35,40 @@ EVENT_MAP = {
 
 
 def _build_user(ud: dict) -> dict:
+    """Pinterest Conversions API v5 — TÜM hashed fields list olarak.
+    Doc: https://developers.pinterest.com/docs/conversions/conversions/
+    """
     out = {}
-    if ud.get("em"): out["em"] = [ud["em"]]
-    if ud.get("ph"): out["ph"] = [ud["ph"]]
-    if ud.get("external_id"): out["external_id"] = [ud["external_id"]]
+    # Hashed arrays
+    for k in ("em", "ph", "fn", "ln", "ct", "st", "zp", "country",
+              "external_id", "ge", "db", "hashed_maids"):
+        v = ud.get(k)
+        if v:
+            out[k] = [v] if not isinstance(v, list) else v
+    # Madid mapped to hashed_maids
+    if ud.get("madid"):
+        out.setdefault("hashed_maids", []).append(ud["madid"])
+    # Raw context
     if ud.get("client_ip_address"): out["client_ip_address"] = ud["client_ip_address"]
     if ud.get("client_user_agent"): out["client_user_agent"] = ud["client_user_agent"]
-    if ud.get("epik"): out["click_id"] = ud["epik"]
+    if ud.get("epik"):       out["click_id"] = ud["epik"]
     return out
 
 
 def _build_custom_data(event: dict) -> dict:
     contents = []
     for it in (event.get("items") or []):
-        contents.append({
+        c = {
             "id": str(it.get("item_id") or it.get("id") or ""),
+            "item_name": it.get("item_name") or "",
+            "item_brand": it.get("item_brand") or "",
+            "item_category": it.get("item_category") or "",
             "item_price": str(float(it.get("price") or 0)),
             "quantity": int(it.get("quantity") or 1),
-        })
-    return {
+        }
+        if it.get("sku"): c["sku"] = it["sku"]
+        contents.append(c)
+    cd = {
         "currency": event.get("currency") or "TRY",
         "value": str(float(event.get("value") or 0.0)),
         "content_ids": [c["id"] for c in contents],
@@ -61,7 +76,12 @@ def _build_custom_data(event: dict) -> dict:
         "num_items": sum(c["quantity"] for c in contents),
         "order_id": str(event.get("order_id") or ""),
         "content_category": event.get("category") or "",
+        "content_name": event.get("content_name") or "",
+        "content_brand": event.get("content_brand") or "FACETTE",
     }
+    if event.get("search_string"):
+        cd["search_string"] = event["search_string"]
+    return cd
 
 
 async def send(

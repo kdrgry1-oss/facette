@@ -62,16 +62,31 @@ class CapiEventReq(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     city: Optional[str] = None
+    state: Optional[str] = None
     country: Optional[str] = "TR"
     zipcode: Optional[str] = None
+    street: Optional[str] = None
+    date_of_birth: Optional[str] = None             # YYYY-MM-DD
+    gender: Optional[str] = None                    # m/f/erkek/kadın
     external_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+    fb_login_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    madid: Optional[str] = None
+    idfa: Optional[str] = None
+    idfv: Optional[str] = None
+    locale: Optional[str] = None
     # Click IDs (cookies)
     fbp: Optional[str] = None
     fbc: Optional[str] = None
     gclid: Optional[str] = None
+    wbraid: Optional[str] = None
+    gbraid: Optional[str] = None
     ttclid: Optional[str] = None
+    ttp: Optional[str] = None
     epik: Optional[str] = None
     sc_click_id: Optional[str] = None
+    sc_cookie1: Optional[str] = None
     # Event payload (GA4 e-commerce Enhanced schema)
     currency: Optional[str] = "TRY"
     value: Optional[float] = 0.0
@@ -117,11 +132,20 @@ async def capi_event(req: CapiEventReq, request: Request,
     user_data = build_user_data(
         email=req.email, phone=req.phone,
         first_name=req.first_name, last_name=req.last_name,
-        city=req.city, country=req.country, zipcode=req.zipcode,
+        city=req.city, state=req.state, country=req.country,
+        zipcode=req.zipcode, street=req.street,
+        date_of_birth=req.date_of_birth, gender=req.gender,
         external_id=req.external_id,
+        subscription_id=req.subscription_id, fb_login_id=req.fb_login_id,
+        lead_id=req.lead_id,
+        madid=req.madid, idfa=req.idfa, idfv=req.idfv,
         client_ip=client_ip, user_agent=user_agent,
-        fbp=req.fbp, fbc=req.fbc, gclid=req.gclid,
-        ttclid=req.ttclid, epik=req.epik, sc_click_id=req.sc_click_id,
+        locale=req.locale,
+        fbp=req.fbp, fbc=req.fbc,
+        gclid=req.gclid, wbraid=req.wbraid, gbraid=req.gbraid,
+        ttclid=req.ttclid, ttp=req.ttp,
+        epik=req.epik,
+        sc_click_id=req.sc_click_id, sc_cookie1=req.sc_cookie1,
     )
 
     event_payload = {

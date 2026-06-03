@@ -31,33 +31,68 @@ EVENT_MAP = {
 
 
 def _build_user(ud: dict) -> dict:
+    """TikTok Events API v1.3 'user' fields (advanced matching).
+    Doc: https://business-api.tiktok.com/portal/docs?id=1771101303285761
+    """
     out = {}
-    if ud.get("em"):       out["email"] = ud["em"]
-    if ud.get("ph"):       out["phone"] = ud["ph"]
-    if ud.get("external_id"): out["external_id"] = ud["external_id"]
-    if ud.get("ttclid"):   out["ttclid"] = ud["ttclid"]
+    # Hashed identifiers
+    for k_in, k_out in [
+        ("em", "email"), ("ph", "phone_number"),
+        ("external_id", "external_id"),
+        ("fn", "first_name"), ("ln", "last_name"),
+        ("ct", "city"), ("st", "state"), ("zp", "zip_code"), ("country", "country"),
+        ("madid", "mobile_advertising_id"),
+        ("idfa", "idfa"), ("idfv", "idfv"),
+        ("ge", "gender"), ("db", "date_of_birth"),
+    ]:
+        v = ud.get(k_in)
+        if v: out[k_out] = v
+    # Raw context
+    if ud.get("ttclid"):       out["ttclid"] = ud["ttclid"]
+    if ud.get("ttp"):          out["ttp"] = ud["ttp"]
     if ud.get("client_ip_address"): out["ip"] = ud["client_ip_address"]
     if ud.get("client_user_agent"): out["user_agent"] = ud["client_user_agent"]
+    if ud.get("locale"):       out["locale"] = ud["locale"]
     return out
 
 
 def _build_properties(event: dict) -> dict:
+    """TikTok properties (custom_data) — tüm desteklenen alanlar."""
     contents = []
     for it in (event.get("items") or []):
-        contents.append({
+        c = {
             "content_id": str(it.get("item_id") or it.get("id") or ""),
             "content_name": it.get("item_name") or it.get("name") or "",
+            "content_category": it.get("item_category") or "",
             "content_type": "product",
+            "brand": it.get("item_brand") or "",
             "quantity": int(it.get("quantity") or 1),
             "price": float(it.get("price") or 0),
-        })
-    return {
+        }
+        if it.get("sku"):
+            c["sku"] = it["sku"]
+        contents.append(c)
+    props = {
         "currency": event.get("currency") or "TRY",
         "value": float(event.get("value") or 0.0),
         "contents": contents,
         "content_type": "product",
         "order_id": str(event.get("order_id") or ""),
     }
+    if event.get("category"):
+        props["content_category"] = event["category"]
+    if event.get("coupon"):
+        props["coupon_code"] = event["coupon"]
+    if event.get("description"):
+        props["description"] = event["description"]
+    if event.get("search_string") or event.get("query"):
+        props["query"] = event.get("search_string") or event.get("query")
+    # Tax / shipping / discount (TikTok'da resmi std olmadığı için custom field olarak gönderilir)
+    if (event.get("discount") or 0) > 0: props["discount"] = float(event["discount"])
+    if (event.get("shipping") or 0) > 0: props["shipping"] = float(event["shipping"])
+    if (event.get("tax") or 0) > 0:      props["tax"] = float(event["tax"])
+    if event.get("payment_type"):        props["payment_method"] = event["payment_type"]
+    return props
 
 
 async def send(

@@ -34,22 +34,32 @@ function readCookie(name) {
   return m ? decodeURIComponent(m[2]) : null;
 }
 
-/** Click ID + cookie aggregator (Meta fbp/fbc, Google gclid, TikTok ttclid, …) */
+/** Click ID + cookie aggregator (Meta fbp/fbc, Google gclid/wbraid/gbraid,
+ *  TikTok ttclid/ttp, Pinterest epik, Snapchat sc_click_id/sc_cookie1). */
 export function collectClickIds() {
   const ids = {
     fbp: readCookie("_fbp"),
     fbc: readCookie("_fbc"),
     gclid: readCookie("_gcl_aw") || readCookie("gclid"),
+    wbraid: readCookie("wbraid"),
+    gbraid: readCookie("gbraid"),
     ttclid: readCookie("ttclid"),
+    ttp: readCookie("_ttp"),
     epik: readCookie("_epik"),
     sc_click_id: readCookie("sc_click_id"),
+    sc_cookie1: readCookie("_scid"),
   };
   // URL parameters also seed click IDs (first-touch attribution)
   if (typeof window !== "undefined") {
     const usp = new URLSearchParams(window.location.search);
-    ["gclid", "ttclid", "epik"].forEach((k) => {
-      if (usp.get(k)) ids[k === "epik" ? "epik" : k] = usp.get(k);
+    ["gclid", "wbraid", "gbraid", "ttclid", "epik"].forEach((k) => {
+      if (usp.get(k)) ids[k] = usp.get(k);
     });
+    // _fbc'yi sentetik olarak fbclid'den üret (Meta önerisi)
+    const fbclid = usp.get("fbclid");
+    if (fbclid && !ids.fbc) {
+      ids.fbc = `fb.1.${Date.now()}.${fbclid}`;
+    }
   }
   return ids;
 }

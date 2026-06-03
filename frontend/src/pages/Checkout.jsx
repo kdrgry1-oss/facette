@@ -129,6 +129,18 @@ export default function Checkout() {
     try {
       const res = await axios.post(`${API}/payment/callback?token=${token}`);
       if (res.data.success) {
+        const _userInfo = {
+          email: shippingAddress.email || user?.email || "",
+          phone: shippingAddress.phone || user?.phone || "",
+          first_name: shippingAddress.first_name || "",
+          last_name: shippingAddress.last_name || "",
+          city: shippingAddress.city || "",
+          state: shippingAddress.district || shippingAddress.state || "",
+          country: shippingAddress.country || "TR",
+          zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
+          street: shippingAddress.address || "",
+          external_id: user?.id || "",
+        };
         trackPurchase({
           order_id: res.data.orderNumber,
           total: res.data.amount || grandTotal,
@@ -146,6 +158,7 @@ export default function Checkout() {
           discount, shipping: shippingCost, tax: 0,
           payment_type: paymentMethod,
           shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
+          user: _userInfo,
         });
         clearCart();
         setPaymentStep("success");
@@ -318,6 +331,18 @@ export default function Checkout() {
           toast.error(paymentRes.data.error || "Ödeme başlatılamadı");
         }
       } else {
+        const _userInfo = {
+          email: shippingAddress.email || user?.email || "",
+          phone: shippingAddress.phone || user?.phone || "",
+          first_name: shippingAddress.first_name || "",
+          last_name: shippingAddress.last_name || "",
+          city: shippingAddress.city || "",
+          state: shippingAddress.district || shippingAddress.state || "",
+          country: shippingAddress.country || "TR",
+          zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
+          street: shippingAddress.address || "",
+          external_id: user?.id || "",
+        };
         trackPurchase({
           order_id: orderRes.data.order_number, total: grandTotal,
           items: items.map((it) => ({
@@ -334,6 +359,7 @@ export default function Checkout() {
           discount, shipping: shippingCost, tax: 0,
           payment_type: paymentMethod,
           shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
+          user: _userInfo,
         });
         // ÖNCE paymentStep'i "success"'e çevir (useEffect'in /sepet'e yönlendirmesini önler)
         setPaymentStep("success");

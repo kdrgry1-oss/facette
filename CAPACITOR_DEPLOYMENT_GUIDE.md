@@ -82,7 +82,7 @@ const config: CapacitorConfig = {
   bundledWebRuntime: false,
   server: {
     // Production'da kaldır - sadece development için
-    // url: 'https://facette-erp-2.preview.emergentagent.com',
+    // url: 'https://facette-admin-2.preview.emergentagent.com',
     cleartext: false,
     androidScheme: 'https',
   },

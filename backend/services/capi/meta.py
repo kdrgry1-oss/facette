@@ -40,18 +40,30 @@ EVENT_MAP = {
 
 
 def _build_user_data(ud: dict) -> dict:
-    """Meta accepts: em, ph, fn, ln, ct, country, zp, external_id, fbp, fbc,
-    client_ip_address, client_user_agent."""
+    """Meta CAPI'nin desteklediği TÜM Advanced Matching parametreleri.
+    Doc: https://developers.facebook.com/docs/marketing-api/conversions-api/parameters/customer-information-parameters
+    """
+    HASHED_ARRAY_FIELDS = (
+        "em", "ph", "fn", "ln", "f5first", "f5last", "fi",
+        "ct", "st", "zp", "country",
+        "db", "doby", "dobm", "dobd",
+        "ge", "external_id",
+        "madid",
+    )
+    RAW_SCALAR_FIELDS = (
+        "client_ip_address", "client_user_agent",
+        "fbp", "fbc",
+        "subscription_id", "fb_login_id", "lead_id",
+    )
     out = {}
-    for k in ("em", "ph", "fn", "ln", "ct", "country", "zp", "external_id",
-              "fbp", "fbc", "client_ip_address", "client_user_agent"):
+    for k in HASHED_ARRAY_FIELDS:
         v = ud.get(k)
         if v:
-            # Hashed fields go in arrays per Meta spec
-            if k in ("em", "ph", "fn", "ln", "ct", "country", "zp", "external_id"):
-                out[k] = [v] if not isinstance(v, list) else v
-            else:
-                out[k] = v
+            out[k] = [v] if not isinstance(v, list) else v
+    for k in RAW_SCALAR_FIELDS:
+        v = ud.get(k)
+        if v:
+            out[k] = v
     return out
 
 

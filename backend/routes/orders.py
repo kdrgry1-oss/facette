@@ -396,8 +396,12 @@ async def update_order_status(
                 "first_name": addr.get("first_name") or (addr.get("full_name") or "").split(" ")[0],
                 "last_name": addr.get("last_name") or " ".join((addr.get("full_name") or "").split(" ")[1:]),
                 "city": addr.get("city"),
+                "state": addr.get("district") or addr.get("state"),
                 "country": addr.get("country") or "TR",
                 "zipcode": addr.get("zipcode") or addr.get("postal_code"),
+                "street": addr.get("address") or addr.get("address_line1"),
+                "date_of_birth": (order_doc.get("customer") or {}).get("date_of_birth"),
+                "gender": (order_doc.get("customer") or {}).get("gender"),
                 "external_id": order_doc.get("customer_id") or order_doc.get("user_id"),
             }
             from services.capi.hash_utils import build_user_data
@@ -494,8 +498,12 @@ async def mark_order_paid(
                 first_name=addr.get("first_name") or (addr.get("full_name") or "").split(" ")[0],
                 last_name=addr.get("last_name") or " ".join((addr.get("full_name") or "").split(" ")[1:]),
                 city=addr.get("city"),
+                state=addr.get("district") or addr.get("state"),
                 country=addr.get("country") or "TR",
                 zipcode=addr.get("zipcode") or addr.get("postal_code"),
+                street=addr.get("address") or addr.get("address_line1"),
+                date_of_birth=(order_doc.get("customer") or {}).get("date_of_birth"),
+                gender=(order_doc.get("customer") or {}).get("gender"),
                 external_id=order_doc.get("customer_id") or order_doc.get("user_id"),
             )
             items_payload = []

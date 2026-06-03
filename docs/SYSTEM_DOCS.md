@@ -561,7 +561,7 @@ DB_NAME=facette
 
 # Auth
 JWT_SECRET=********
-CORS_ORIGINS=https://facette-erp-2.preview.emergentagent.com,…
+CORS_ORIGINS=https://facette-admin-2.preview.emergentagent.com,…
 
 # Emergent LLM (OpenAI/Claude/Gemini)
 EMERGENT_LLM_KEY=sk-emergent-********
@@ -609,7 +609,7 @@ CACHE_DEFAULT_TTL=300
 ### 11.2 `frontend/.env`
 
 ```ini
-REACT_APP_BACKEND_URL=https://facette-erp-2.preview.emergentagent.com
+REACT_APP_BACKEND_URL=https://facette-admin-2.preview.emergentagent.com
 WDS_SOCKET_PORT=443
 ENABLE_HEALTH_CHECK=true
 ```
