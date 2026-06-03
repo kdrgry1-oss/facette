@@ -36,9 +36,10 @@ EVENT_MAP = {
 
 
 def _items_to_ga4(items: list) -> list:
+    """GA4 spec'e göre item parametrelerini hazırla."""
     out = []
     for it in (items or []):
-        out.append({
+        item = {
             "item_id": str(it.get("item_id") or it.get("id") or ""),
             "item_name": it.get("item_name") or it.get("name") or "",
             "item_category": it.get("item_category") or "",
@@ -46,7 +47,26 @@ def _items_to_ga4(items: list) -> list:
             "item_variant": it.get("item_variant") or "",
             "price": float(it.get("price") or 0),
             "quantity": int(it.get("quantity") or 1),
-        })
+            "currency": it.get("currency") or "TRY",
+            "discount": float(it.get("discount") or 0),
+            "affiliation": it.get("affiliation") or "FACETTE Online",
+        }
+        for k in ("item_category2", "item_category3", "item_category4", "item_category5"):
+            if it.get(k):
+                item[k] = it[k]
+        if it.get("item_list_id"):
+            item["item_list_id"] = it["item_list_id"]
+        if it.get("item_list_name"):
+            item["item_list_name"] = it["item_list_name"]
+        if it.get("index") is not None:
+            item["index"] = it["index"]
+        if it.get("coupon"):
+            item["coupon"] = it["coupon"]
+        if it.get("promotion_id"):
+            item["promotion_id"] = it["promotion_id"]
+        if it.get("promotion_name"):
+            item["promotion_name"] = it["promotion_name"]
+        out.append(item)
     return out
 
 
@@ -77,7 +97,7 @@ async def send(
 
     ga_event = EVENT_MAP.get(event_name, event_name)
 
-    # Build the payload
+    # Build the payload — GA4 e-commerce schema (Enhanced)
     params_body = {
         "currency": event_payload.get("currency") or "TRY",
         "value": float(event_payload.get("value") or 0.0),
@@ -86,7 +106,21 @@ async def send(
         "items": _items_to_ga4(event_payload.get("items") or []),
         "engagement_time_msec": 100,
         "session_id": user_data.get("external_id") or event_id,
+        # Enhanced parametreleri
+        "discount": float(event_payload.get("discount") or 0.0),
+        "tax": float(event_payload.get("tax") or 0.0),
+        "shipping": float(event_payload.get("shipping") or 0.0),
+        "payment_type": event_payload.get("payment_type") or "",
+        "shipping_tier": event_payload.get("shipping_tier") or "",
+        "affiliation": event_payload.get("affiliation") or "FACETTE Online",
+        "item_list_id": event_payload.get("list_id") or "",
+        "item_list_name": event_payload.get("list_name") or "",
     }
+    # Promosyon (varsa)
+    if event_payload.get("promotion_id"):
+        params_body["promotion_id"] = event_payload["promotion_id"]
+    if event_payload.get("promotion_name"):
+        params_body["promotion_name"] = event_payload["promotion_name"]
 
     payload = {
         "client_id": user_data.get("external_id") or user_data.get("em") or event_id,

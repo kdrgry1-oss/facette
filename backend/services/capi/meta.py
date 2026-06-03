@@ -56,7 +56,10 @@ def _build_user_data(ud: dict) -> dict:
 
 
 def _build_custom_data(event: dict) -> dict:
-    """Maps GA4 e-commerce items → Meta contents."""
+    """Maps GA4 e-commerce items → Meta custom_data (Enhanced).
+    Meta'nın Conversions API Standard Parameters'i göz önüne alınır:
+    https://developers.facebook.com/docs/marketing-api/conversions-api/parameters/custom-data
+    """
     cd = {
         "currency": event.get("currency") or "TRY",
         "value": float(event.get("value") or 0.0),
@@ -68,19 +71,49 @@ def _build_custom_data(event: dict) -> dict:
         for it in items:
             cid = str(it.get("item_id") or it.get("id") or "")
             ids.append(cid)
-            contents.append({
+            content = {
                 "id": cid,
                 "quantity": int(it.get("quantity") or 1),
                 "item_price": float(it.get("price") or 0),
-            })
+                # Meta destekli ek alanlar
+                "title": it.get("item_name") or "",
+                "category": it.get("item_category") or "",
+                "brand": it.get("item_brand") or "",
+                "variant": it.get("item_variant") or "",
+            }
+            # Kalem bazlı indirim — Meta için "delivery_category" gibi standart bir
+            # field yok ama custom_properties altında saklarız (Meta'nın delivery_category
+            # 'home_delivery' veya 'in_store' içindir).
+            if (it.get("discount") or 0) > 0:
+                content["discount"] = float(it.get("discount") or 0)
+            if it.get("list_price"):
+                content["list_price"] = float(it.get("list_price"))
+            if it.get("sku"):
+                content["sku"] = it.get("sku")
+            if it.get("barcode"):
+                content["barcode"] = it.get("barcode")
+            contents.append(content)
         cd["content_ids"] = ids
         cd["contents"] = contents
         cd["num_items"] = sum(int(i.get("quantity") or 1) for i in items)
         cd["content_type"] = "product"
+    # Sipariş bilgileri
     if event.get("order_id"):
         cd["order_id"] = str(event["order_id"])
     if event.get("coupon"):
-        cd["coupon"] = event["coupon"]
+        cd["coupon_code"] = event["coupon"]   # Meta std field name
+    # İndirim & vergi & kargo (Meta custom_properties standart olmadığı için
+    # üst seviyede de gönderiyoruz; bunlar 'custom_properties' altında da görünür)
+    if (event.get("discount") or 0) > 0:
+        cd["discount_amount"] = float(event.get("discount") or 0)
+    if (event.get("shipping") or 0) > 0:
+        cd["shipping_amount"] = float(event.get("shipping") or 0)
+    if (event.get("tax") or 0) > 0:
+        cd["tax_amount"] = float(event.get("tax") or 0)
+    if event.get("payment_type"):
+        cd["payment_type"] = event["payment_type"]
+    if event.get("affiliation"):
+        cd["affiliation"] = event["affiliation"]
     return cd
 
 

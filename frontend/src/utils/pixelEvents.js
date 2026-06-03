@@ -16,7 +16,7 @@ import {
   trackBeginCheckout,
   trackPurchase as _trackPurchase,
   trackViewItemList,
-  trackAddPaymentInfo,
+  trackAddPaymentInfo as _trackAddPaymentInfo,
   trackRemoveFromCart,
   trackSearch as _trackSearch,
 } from "../lib/dataLayer";
@@ -44,36 +44,65 @@ export function trackAddToCart({ product_id, name, category, price, quantity = 1
   });
 }
 
-/** Checkout başladı — eski imza */
-export function trackInitiateCheckout({ total, items = [], coupon }) {
+/** Checkout başladı — eski imza + yeni zengin alanlar */
+export function trackInitiateCheckout({ total, items = [], coupon = "", discount = 0, shipping_cost = 0, tax = 0 }) {
   const mapped = items.map((i) => ({
     item_id: String(i.product_id || i.productId || i.id || ""),
     item_name: i.name || i.title || "",
+    item_brand: i.brand || "FACETTE",
+    item_category: i.category || i.categoryName || "",
+    item_variant: `${i.size || ""} ${i.color || ""}`.trim(),
     price: Number(i.price) || 0,
+    list_price: Number(i.list_price || i.price) || 0,
+    sale_price: Number(i.sale_price || i.price) || 0,
+    discount: Math.max(0, Number(i.list_price || i.price) - Number(i.price)),
+    sku: i.sku || "", size: i.size || "", color: i.color || "",
     quantity: Number(i.quantity) || 1,
+    coupon: coupon || "",
   }));
+  const originalTotal = mapped.reduce((s, x) => s + x.list_price * x.quantity, 0);
   return trackBeginCheckout({
-    items: mapped, value: Number(total) || 0, coupon,
+    items: mapped, value: Number(total) || 0, coupon, discount,
+    original_value: originalTotal, shipping: shipping_cost, tax,
   });
 }
 
-/** Satın alma tamamlandı — eski imza */
-export function trackPurchase({ order_id, total, items = [], coupon, currency = "TRY", user }) {
+/** Satın alma tamamlandı — eski imza + zengin alanlar */
+export function trackPurchase({ order_id, total, items = [], coupon = "", currency = "TRY",
+                                discount = 0, shipping = 0, tax = 0,
+                                shipping_tier = "", payment_type = "", user }) {
   const mapped = items.map((i) => ({
     item_id: String(i.product_id || i.productId || i.id || ""),
     item_name: i.name || i.title || "",
+    item_brand: i.brand || "FACETTE",
+    item_category: i.category || i.categoryName || "",
+    item_variant: `${i.size || ""} ${i.color || ""}`.trim(),
     price: Number(i.price) || 0,
+    list_price: Number(i.list_price || i.price) || 0,
+    sale_price: Number(i.sale_price || i.price) || 0,
+    discount: Math.max(0, Number(i.list_price || i.price) - Number(i.price)),
+    sku: i.sku || "", size: i.size || "", color: i.color || "",
     quantity: Number(i.quantity) || 1,
+    coupon: coupon || "",
   }));
+  const originalTotal = mapped.reduce((s, x) => s + x.list_price * x.quantity, 0);
   return _trackPurchase({
     orderNumber: order_id, value: Number(total) || 0,
     items: mapped, coupon, currency, user,
+    discount, original_value: originalTotal,
+    shipping, tax, shipping_tier, payment_type,
   });
 }
 
 // Re-exports — new API kullanmak isteyenler için
 export {
   trackViewItem, trackViewItemList,
-  trackAddPaymentInfo, trackRemoveFromCart, trackBeginCheckout,
+  trackRemoveFromCart, trackBeginCheckout,
 };
 export const trackSearch = _trackSearch;
+
+/** Add Payment Info — eski API ile uyumlu, zengin alanları forward'lar */
+export function trackAddPaymentInfo(payload) {
+  // payload zaten yeni format'ta gelirse direkt forward
+  return _trackAddPaymentInfo(payload);
+}

@@ -95,8 +95,19 @@ export default function Checkout() {
   useEffect(() => {
     if (items.length === 0) { setAvailableCoupons([]); return; }
     trackInitiateCheckout({
-      total,
-      items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
+      total: grandTotal,
+      items: items.map((it) => ({
+        product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
+        category: it.category || it.categoryName || "",
+        sku: it.sku || it.stockCode || "",
+        size: it.size || "", color: it.color || "",
+        list_price: it.list_price || it.price,
+        sale_price: it.sale_price || it.price,
+        brand: it.brand || "FACETTE",
+        breadcrumb: it.breadcrumb || "",
+      })),
+      discount, shipping_cost: shippingCost,
+      coupon: appliedCoupon?.code || "",
     });
     axios.post(`${API}/coupons/available`, {
       cart_total: total,
@@ -104,7 +115,8 @@ export default function Checkout() {
       items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
     }).then((r) => setAvailableCoupons(r.data?.items || []))
       .catch(() => setAvailableCoupons([]));
-  }, [items, total, user?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
 
   // Payment callback
   useEffect(() => {
@@ -120,7 +132,20 @@ export default function Checkout() {
         trackPurchase({
           order_id: res.data.orderNumber,
           total: res.data.amount || grandTotal,
-          items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
+          items: items.map((it) => ({
+            product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
+            category: it.category || it.categoryName || "",
+            sku: it.sku || it.stockCode || "",
+            size: it.size || "", color: it.color || "",
+            list_price: it.list_price || it.price,
+            sale_price: it.sale_price || it.price,
+            brand: it.brand || "FACETTE",
+            breadcrumb: it.breadcrumb || "",
+          })),
+          coupon: appliedCoupon?.code || "",
+          discount, shipping: shippingCost, tax: 0,
+          payment_type: paymentMethod,
+          shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
         });
         clearCart();
         setPaymentStep("success");
@@ -294,8 +319,21 @@ export default function Checkout() {
         }
       } else {
         trackPurchase({
-          order_id: orderRes.data.order_number, total: grandTotal, shipping: shippingCost,
-          items: items.map((it) => ({ product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity })),
+          order_id: orderRes.data.order_number, total: grandTotal,
+          items: items.map((it) => ({
+            product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
+            category: it.category || it.categoryName || "",
+            sku: it.sku || it.stockCode || "",
+            size: it.size || "", color: it.color || "",
+            list_price: it.list_price || it.price,
+            sale_price: it.sale_price || it.price,
+            brand: it.brand || "FACETTE",
+            breadcrumb: it.breadcrumb || "",
+          })),
+          coupon: appliedCoupon?.code || "",
+          discount, shipping: shippingCost, tax: 0,
+          payment_type: paymentMethod,
+          shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
         });
         // ÖNCE paymentStep'i "success"'e çevir (useEffect'in /sepet'e yönlendirmesini önler)
         setPaymentStep("success");
@@ -565,18 +603,30 @@ export default function Checkout() {
                           checked={paymentMethod === key}
                           onChange={(e) => {
                             setPaymentMethod(e.target.value);
-                            // GA4 + CAPI: add_payment_info
+                            // GA4 + CAPI: add_payment_info — zengin payload
                             try {
                               const mappedItems = (items || []).map((it) => ({
-                                item_id: String(it.product_id || it.id || ""),
+                                item_id: String(it.product_id || it.productId || it.id || it.sku || ""),
                                 item_name: it.name || "",
+                                item_brand: it.brand || "FACETTE",
+                                item_category: it.category || it.categoryName || "",
+                                item_variant: `${it.size || ""} ${it.color || ""}`.trim(),
                                 price: Number(it.price) || 0,
+                                list_price: Number(it.list_price || it.price) || 0,
+                                sale_price: Number(it.sale_price || it.price) || 0,
+                                discount: Math.max(0, Number(it.list_price || it.price) - Number(it.price)),
+                                sku: it.sku || it.stockCode || "",
+                                size: it.size || "", color: it.color || "",
                                 quantity: Number(it.quantity) || 1,
+                                coupon: appliedCoupon?.code || "",
                               }));
                               trackAddPaymentInfo({
                                 items: mappedItems,
-                                value: total,
+                                value: grandTotal,
                                 currency: "TRY",
+                                coupon: appliedCoupon?.code || "",
+                                discount, shipping: shippingCost, tax: 0,
+                                payment_type: key,
                               });
                             } catch (_) { /* silent */ }
                           }}

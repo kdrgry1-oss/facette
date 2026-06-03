@@ -25,9 +25,31 @@ class CapiItem(BaseModel):
     item_name: Optional[str] = None
     item_brand: Optional[str] = None
     item_category: Optional[str] = None
+    item_category2: Optional[str] = None
+    item_category3: Optional[str] = None
+    item_category4: Optional[str] = None
+    item_category5: Optional[str] = None
     item_variant: Optional[str] = None
-    price: Optional[float] = 0.0
+    item_list_id: Optional[str] = None
+    item_list_name: Optional[str] = None
+    index: Optional[int] = None
+    affiliation: Optional[str] = None
+    # Fiyat
+    price: Optional[float] = 0.0          # ödenen (sale) unit price
+    list_price: Optional[float] = 0.0     # liste fiyatı (indirimsiz)
+    sale_price: Optional[float] = 0.0
+    discount: Optional[float] = 0.0       # kalem bazlı pozitif indirim
+    currency: Optional[str] = "TRY"
     quantity: Optional[int] = 1
+    # Varyant
+    sku: Optional[str] = None
+    size: Optional[str] = None
+    color: Optional[str] = None
+    barcode: Optional[str] = None
+    # Promosyon
+    coupon: Optional[str] = None
+    promotion_id: Optional[str] = None
+    promotion_name: Optional[str] = None
 
 
 class CapiEventReq(BaseModel):
@@ -42,7 +64,7 @@ class CapiEventReq(BaseModel):
     city: Optional[str] = None
     country: Optional[str] = "TR"
     zipcode: Optional[str] = None
-    external_id: Optional[str] = None        # customer/user id
+    external_id: Optional[str] = None
     # Click IDs (cookies)
     fbp: Optional[str] = None
     fbc: Optional[str] = None
@@ -50,17 +72,31 @@ class CapiEventReq(BaseModel):
     ttclid: Optional[str] = None
     epik: Optional[str] = None
     sc_click_id: Optional[str] = None
-    # Event payload (GA4 e-commerce schema)
+    # Event payload (GA4 e-commerce Enhanced schema)
     currency: Optional[str] = "TRY"
     value: Optional[float] = 0.0
     items: Optional[List[CapiItem]] = None
     order_id: Optional[str] = None
     coupon: Optional[str] = None
     category: Optional[str] = None
+    # Promosyon & İndirim
+    discount: Optional[float] = 0.0
+    original_value: Optional[float] = 0.0
+    tax: Optional[float] = 0.0
+    shipping: Optional[float] = 0.0
+    # Ödeme & Kargo
+    payment_type: Optional[str] = None
+    shipping_tier: Optional[str] = None
+    # Liste / atıf
+    affiliation: Optional[str] = None
+    list_id: Optional[str] = None
+    list_name: Optional[str] = None
+    promotion_id: Optional[str] = None
+    promotion_name: Optional[str] = None
     # Context
     event_source_url: Optional[str] = None
     tenant_id: Optional[str] = None
-    providers: Optional[List[str]] = None    # restrict to specific providers
+    providers: Optional[List[str]] = None
 
 
 @router.post("/event")
@@ -95,6 +131,18 @@ async def capi_event(req: CapiEventReq, request: Request,
         "order_id": req.order_id,
         "coupon": req.coupon,
         "category": req.category,
+        # Enhanced e-commerce ek alanları
+        "discount": req.discount,
+        "original_value": req.original_value,
+        "tax": req.tax,
+        "shipping": req.shipping,
+        "payment_type": req.payment_type,
+        "shipping_tier": req.shipping_tier,
+        "affiliation": req.affiliation,
+        "list_id": req.list_id,
+        "list_name": req.list_name,
+        "promotion_id": req.promotion_id,
+        "promotion_name": req.promotion_name,
     }
 
     event_id = req.event_id  # may be None — orchestrator will gen
