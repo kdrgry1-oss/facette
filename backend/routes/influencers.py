@@ -238,9 +238,13 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
     if not (il and ilce and adres and phone):
         raise HTTPException(status_code=400, detail="Influencer kargo adresi eksik (il, ilçe, adres, telefon gerekli)")
 
-    # MNG ayarları
-    from .integrations import _get_mng_settings
-    mng = await _get_mng_settings()
+    # MNG ayarları (helper orders.py içinde tanımlı)
+    try:
+        from .orders import _get_mng_settings
+        mng = await _get_mng_settings()
+    except Exception as e:
+        logger.warning(f"MNG settings load failed: {e}")
+        raise HTTPException(status_code=400, detail="Kargo entegrasyonu yapılandırılmamış")
     username = mng.get("username")
     password = mng.get("password")
     if not (username and password):
@@ -249,14 +253,17 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
     siparis_no = f"INF{campaign_id[:8].upper()}"
     icerik = ", ".join([p.get("name", "Ürün") for p in (camp.get("sent_products") or [])]) or "Numune Ürün"
 
-    from mng_kargo_client import create_shipment, get_mng_barcode_by_siparis_no
+    from mng_kargo_client import create_shipment
     from fastapi.concurrency import run_in_threadpool
 
     def _ship():
         return create_shipment(
             username=username, password=password, siparis_no=siparis_no,
-            icerik=icerik, alici_ad=full_name, il=il, ilce=ilce, adres=adres,
-            tel_cep=phone, gn_sms=1, platform_adi="FACETTE",
+            icerik=icerik, hizmet_sekli="NORMAL", teslim_sekli=1,
+            al_sms=0, gn_sms=1 if phone else 0,
+            parca_list="1:1:20:30:15:;",
+            alici_ad=full_name, il=il, ilce=ilce, adres=adres,
+            tel_cep=phone, odeme_sekli="P", platform_adi="", platform_kodu="",
         )
 
     try:

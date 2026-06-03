@@ -3337,3 +3337,24 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 ### Action Item
 - Kullanıcı: Trendyol panelinden eski yanlış barkodlu ürünleri silsin
 - Veya: Trendyol UPDATE endpoint entegrasyonu yapılmalı (öncelikli) — Iteration 60'ta önerildi
+
+---
+## CHANGELOG — Fork 2026-06-03
+
+### Tamamlanan (test edildi)
+1. **Favoriler/Wishlist** (backend `customer.py` + `FavoritesContext.jsx`): GET/POST/DELETE/merge /api/favorites. Storefront kalp ikonları (ProductCard, PDP), Header sayaçlı kalp, Account favoriler grid, misafir localStorage→login merge. testing_agent iteration_40 PASS.
+2. **Ticimax Excel Upload** (`/admin/ticimax-excel`, integrations.py `upload_ticimax_products_excel`): drag-drop .xls/.xlsx, URUNKARTIID bazında resync (create+update). PASS.
+3. **Influencer CRM + Seeding + ROI** (Modül 3+4, `routes/influencers.py`, `models.py`, `Influencers.jsx`):
+   - CRUD influencers + campaigns (default directives "9:16 dikey format").
+   - MNG Kargo seeding barkod üretimi (GERÇEK MNG entegrasyonu çalışıyor — test barkodu 1766996280 üretildi).
+   - Netgsm SMS direkt gönderim (aktif SMS sağlayıcı Twilio'da geçersiz key → MOCKED; kullanıcı geçerli key girmeli).
+   - confirm-share (manuel paylaşım onayı) + Meta webhook stub + cargo-webhook (statü→SMS).
+   - ROI: total_cost (ücret+ürün+kargo) vs ciro → net_profit, ROAS, komisyon. testing_agent iteration_41 PASS (cargo import bug fix'lendi).
+4. **Attribution aff_id** (30 günlük çerez): attribution.js + attribution.py. Order linking: aff_id (çerez) → influencer, kupon fallback override.
+
+### Bekleyen / Backlog
+- P1: Cloudflare R2 object storage (kullanıcı R2 key'leri verecek VEYA Emergent storage).
+- P1: İptal/İade iş akışı (el yazısı notlardan karar ağacı `/app/memory/orders_returns_spec.md` — kullanıcı onayı bekliyor).
+- P2: Eksik "Terra Kimono" ürünü (URUNKARTIID kullanıcıdan).
+- P2: Storefront premium (Miu Miu) tam redesign — mevcut beyaz minimalist korundu.
+- Refactor: integrations.py 6000+ satır.
