@@ -379,6 +379,70 @@ async def capi_queue_run_now(current_user: dict = Depends(require_admin)):
     return res
 
 
+@router.get("/capi/logs")
+async def capi_logs(
+    current_user: dict = Depends(require_admin),
+    limit: int = 100,
+    skip: int = 0,
+    provider: Optional[str] = None,
+    event_name: Optional[str] = None,
+    ok: Optional[bool] = None,
+):
+    """Son CAPI gönderim loglarını filtreyle getir."""
+    q = {}
+    if provider: q["provider"] = provider
+    if event_name: q["event_name"] = event_name
+    if ok is not None: q["ok"] = ok
+    items = await db.capi_event_logs.find(q, {"_id": 0}).sort("created_at", -1).skip(skip).limit(min(limit, 500)).to_list(limit)
+    total = await db.capi_event_logs.count_documents(q)
+    return {"items": items, "total": total}
+
+
+@router.get("/capi/queue")
+async def capi_queue(
+    current_user: dict = Depends(require_admin),
+    limit: int = 100,
+    dead: Optional[bool] = None,
+):
+    """Bekleyen / ölü kuyruktaki event'leri getir."""
+    q = {}
+    if dead is not None:
+        q["dead"] = dead if dead else {"$ne": True}
+    items = await db.capi_event_queue.find(q, {"_id": 0}).sort("next_try_at", 1).limit(min(limit, 500)).to_list(limit)
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/capi/queue/{qid}/retry")
+async def capi_retry_one(qid: str, current_user: dict = Depends(require_admin)):
+    """Tek bir kuyruk öğesini hemen denemek için işaretle (next_try_at=now)."""
+    res = await db.capi_event_queue.update_one(
+        {"id": qid},
+        {"$set": {"next_try_at": datetime.now(timezone.utc).isoformat(),
+                  "dead": False}},
+    )
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Kuyruk öğesi bulunamadı")
+    return {"ok": True, "id": qid}
+
+
+@router.delete("/capi/queue/{qid}")
+async def capi_delete_one(qid: str, current_user: dict = Depends(require_admin)):
+    res = await db.capi_event_queue.delete_one({"id": qid})
+    return {"ok": True, "deleted": res.deleted_count}
+
+
+@router.delete("/capi/logs/clear-old")
+async def capi_logs_clear_old(
+    current_user: dict = Depends(require_admin),
+    days: int = 30,
+):
+    """X günden eski logları temizle."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    res = await db.capi_event_logs.delete_many({"created_at": {"$lt": cutoff}})
+    return {"ok": True, "deleted": res.deleted_count, "older_than_days": days}
+
+
 @router.delete("/{pid}")
 async def delete_pixel(pid: str, current_user: dict = Depends(require_admin)):
     res = await db.marketing_pixels.delete_one({"id": pid})

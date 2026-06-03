@@ -154,6 +154,7 @@ export const navigationGroups = [
       { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       { label: "Pazarlama Pixelleri", path: "/admin/ayarlar/pixel", icon: Code },
+      { label: "CAPI Loglar & Kuyruk", path: "/admin/ayarlar/capi-loglar", icon: Code },
       { label: "Sosyal Giriş Ayarları", path: "/admin/ayarlar/sosyal-giris", icon: Lock },
       { label: "Döviz Kurları", path: "/admin/doviz", icon: Settings },
       { label: "Kullanıcılar & Roller", path: "/admin/kullanicilar", icon: Shield },

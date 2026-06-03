@@ -5,6 +5,7 @@ import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
+import { trackViewItemList } from "../lib/dataLayer";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -39,9 +40,19 @@ export default function Category() {
       if (maxPrice) url += `&max_price=${maxPrice}`;
       
       const res = await axios.get(url);
-      setProducts(res.data?.products || []);
+      const fetched = res.data?.products || [];
+      setProducts(fetched);
       setTotal(res.data?.total || 0);
       setPages(res.data?.pages || 1);
+      // GA4 + CAPI: view_item_list
+      if (fetched.length > 0) {
+        try {
+          trackViewItemList({
+            products: fetched.slice(0, 24),
+            listName: slug || "all",
+          });
+        } catch (_) { /* silent */ }
+      }
     } catch (err) {
       console.error(err);
     } finally {

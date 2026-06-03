@@ -8,7 +8,7 @@ import Footer from "../components/Footer";
 import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
-import { trackInitiateCheckout, trackPurchase } from "../utils/pixelEvents";
+import { trackInitiateCheckout, trackPurchase, trackAddPaymentInfo } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -563,7 +563,23 @@ export default function Checkout() {
                       <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                         <input type="radio" name="payment" value={key}
                           checked={paymentMethod === key}
-                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          onChange={(e) => {
+                            setPaymentMethod(e.target.value);
+                            // GA4 + CAPI: add_payment_info
+                            try {
+                              const mappedItems = (items || []).map((it) => ({
+                                item_id: String(it.product_id || it.id || ""),
+                                item_name: it.name || "",
+                                price: Number(it.price) || 0,
+                                quantity: Number(it.quantity) || 1,
+                              }));
+                              trackAddPaymentInfo({
+                                items: mappedItems,
+                                value: total,
+                                currency: "TRY",
+                              });
+                            } catch (_) { /* silent */ }
+                          }}
                           className="accent-black" />
                         <Icon size={16} className={paymentMethod === key ? "text-black" : "text-gray-500"} />
                         <span>{label}</span>

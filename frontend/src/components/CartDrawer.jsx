@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
 import { useCart } from "../context/CartContext";
+import { trackRemoveFromCart } from "../lib/dataLayer";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -142,7 +143,21 @@ export default function CartDrawer() {
                         </button>
                       </div>
                       <button
-                        onClick={() => removeItem(item.id)}
+                        onClick={() => {
+                          try {
+                            trackRemoveFromCart({
+                              product: {
+                                id: item.product_id || item.id,
+                                name: item.name,
+                                sale_price: item.price,
+                                price: item.price,
+                              },
+                              variant: { size: item.size, color: item.color, price: item.price },
+                              quantity: item.quantity || 1,
+                            });
+                          } catch (_) { /* silent */ }
+                          removeItem(item.id);
+                        }}
                         className="text-[11px] text-black/55 hover:text-black underline"
                         data-testid={`remove-${item.id}`}
                       >
