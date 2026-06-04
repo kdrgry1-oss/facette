@@ -1466,14 +1466,14 @@ export default function AdminProducts() {
                   )}
                 </button>
               </th>
+              <SortTH field="urun_karti_id" label="Ürün Kart ID" />
               <th>Görsel</th>
               <SortTH field="name" label="Ürün Adı" />
-              <SortTH field="urun_karti_id" label="Ürün Kart ID" />
-              <th>Ürün ID</th>
               <SortTH field="stock_code" label="Stok Kodu" />
               <th>Bedenler</th>
               <SortTH field="price" label="Fiyat" />
-              <SortTH field="is_active" label="İşlemler" firstDir="desc" />
+              <SortTH field="is_active" label="Durum" firstDir="desc" />
+              <th>İşlemler</th>
               <SortTH field="created_at" label="Eklenme Tarihi" firstDir="desc" />
             </tr>
           </thead>
@@ -1498,6 +1498,9 @@ export default function AdminProducts() {
                       )}
                     </button>
                   </td>
+                  <td className="text-sm font-mono whitespace-nowrap text-gray-700 font-semibold" data-testid={`product-kartid-${product.id}`}>
+                    {product.urun_karti_id || '-'}
+                  </td>
                   <td>
                     {product.images?.[0] ? (
                       <div className="relative group/img overflow-visible z-0 hover:z-50">
@@ -1518,17 +1521,6 @@ export default function AdminProducts() {
                       {product.name}
                     </a>
                     <p className="text-xs text-gray-500">{product.category_name}</p>
-                  </td>
-                  <td className="text-sm font-mono whitespace-nowrap text-gray-600" data-testid={`product-kartid-${product.id}`}>
-                    {product.urun_karti_id || '-'}
-                  </td>
-                  <td className="text-xs font-mono text-gray-500 max-w-[140px]" data-testid={`product-urunid-${product.id}`}>
-                    {(() => {
-                      const ids = [...new Set((product.variants || []).map(v => v.urun_id).filter(Boolean))];
-                      if (ids.length === 0) return '-';
-                      if (ids.length <= 2) return ids.join(', ');
-                      return `${ids.slice(0, 2).join(', ')} +${ids.length - 2}`;
-                    })()}
                   </td>
                   <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || product.sku || '-'}</td>
                   <td>
@@ -1560,7 +1552,7 @@ export default function AdminProducts() {
                     )}
                   </td>
                   <td>
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1 items-start">
                       <div className="flex gap-1 items-center">
                         <button
                           onClick={() => setProductActive(product, true)}
@@ -1578,6 +1570,14 @@ export default function AdminProducts() {
                         >
                           P
                         </button>
+                      </div>
+                      <div className={`text-xs font-medium ${(product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : product.stock || 0) < 5 ? 'text-red-600' : 'text-gray-500'}`}>
+                        Stok: {product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : (product.stock || 0)}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="flex gap-1 items-center">
                         <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Hızlı Düzenle (Modal)" data-testid={`product-edit-modal-${product.id}`}>
                           <Edit size={16} />
                         </button>
@@ -1621,10 +1621,6 @@ export default function AdminProducts() {
                         >
                           <Trash2 size={16} />
                         </button>
-                      </div>
-                      <div className={`text-xs font-medium ${(product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : product.stock || 0) < 5 ? 'text-red-600' : 'text-gray-500'}`}>
-                        Stok: {product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : (product.stock || 0)}
-                      </div>
                     </div>
                   </td>
                   <td className="text-xs text-gray-400 whitespace-nowrap">
@@ -2790,6 +2786,7 @@ export default function AdminProducts() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
+                    <th className="text-left px-4 py-3 font-bold text-gray-600">Ürün ID</th>
                     <th className="text-left px-4 py-3 font-bold text-gray-600">Beden / Renk</th>
                     <th className="text-left px-4 py-3 font-bold text-gray-600">Stok Kodu</th>
                     <th className="text-left px-4 py-3 font-bold text-gray-600">Barkod</th>
@@ -2801,6 +2798,9 @@ export default function AdminProducts() {
                 <tbody className="divide-y divide-gray-100">
                   {selectedProductForVariants.variants?.map((variant, idx) => (
                     <tr key={variant.id || idx} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap" data-testid={`variant-urunid-${idx}`}>
+                        {variant.urun_id || '-'}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
                           <span className="font-bold text-gray-900 text-lg">{variant.size || "-"}</span>
