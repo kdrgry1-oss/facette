@@ -3358,3 +3358,17 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 - P2: Eksik "Terra Kimono" ürünü (URUNKARTIID kullanıcıdan).
 - P2: Storefront premium (Miu Miu) tam redesign — mevcut beyaz minimalist korundu.
 - Refactor: integrations.py 6000+ satır.
+
+---
+## CHANGELOG — Fork 2026-06-04
+
+### Meta CAPI Token Yardımcısı (Seçenek B) — test edildi (iter42)
+- MarketingPixels.jsx: provider'a özel "Token nasıl alınır" rehberi (data-testid capi-token-guide) — Meta/GA4/Google Ads/TikTok/Pinterest/Snapchat. Mevcut "Bağlantıyı Test Et" butonu zaten vardı.
+- ga4 CAPI provider listesine eklendi (orchestrator'da zaten destekli, MP endpoint).
+
+### Amazon SP-API Entegrasyonu — backend curl + frontend test edildi (iter42)
+- ÖNEMLİ: SP-API artık AWS IAM/SigV4 GEREKTİRMİYOR (Ekim 2023). Sadece LWA token.
+- backend/routes/amazon_spapi.py: config (vault'a şifreli client_secret + refresh_token), refresh→access token exchange, /status, /config, /test (marketplaceParticipations), /orders (Orders API örnek), OAuth authorize-url + callback.
+- frontend/src/pages/admin/AmazonSpApi.jsx (/admin/amazon): kimlik formu, test, sipariş önizleme, rehber. Pazaryerleri menüsünde.
+- Marketplace TR: A33AVAJ2PDY3EV, region EU (sellingpartnerapi-eu.amazon.com).
+- BEKLEYEN (kullanıcıdan): LWA Client Secret + Refresh Token (self-authorization). Client ID alındı.

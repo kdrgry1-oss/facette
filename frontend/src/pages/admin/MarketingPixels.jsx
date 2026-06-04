@@ -54,6 +54,17 @@ const CAPI_TOKEN_GUIDE = {
     linkText: "Events Manager'ı aç →",
   },
   google_ads: {
+    title: "Google Ads / GA4 Measurement Protocol API Secret nasıl alınır?",
+    steps: [
+      "Google Analytics → Yönetici (Admin) → Veri Akışları → web akışını seç.",
+      "'Measurement Protocol API secrets' → 'Create' ile secret oluştur.",
+      "Secret value'yu kopyala, Access Token alanına yapıştır.",
+      "Etiket alanına Measurement ID (G-XXXX) gir, kaydet ve test et.",
+    ],
+    link: "https://analytics.google.com/",
+    linkText: "Google Analytics'i aç →",
+  },
+  ga4: {
     title: "GA4 Measurement Protocol API Secret nasıl alınır?",
     steps: [
       "Google Analytics → Yönetici (Admin) → Veri Akışları (Data Streams) → web akışını seç.",
@@ -94,7 +105,7 @@ const CAPI_TOKEN_GUIDE = {
 };
 
 
-const CAPI_PROVIDERS = ["meta", "google_ads", "tiktok", "pinterest", "snapchat"];
+const CAPI_PROVIDERS = ["meta", "ga4", "google_ads", "tiktok", "pinterest", "snapchat"];
 
 const blankForm = {
   provider: "meta", name: "", tag_id: "",
