@@ -204,7 +204,7 @@ export default function AdminProducts() {
   const [filters, setFilters] = useState({
     // Durum & kategori
     status: "all",
-    category: "",
+    category_id: "",
     // Kimlik & metin
     urun_karti_id: "",
     varyasyon_id: "",
@@ -251,7 +251,7 @@ export default function AdminProducts() {
     attr_value: "",
   });
   const FILTERS_INITIAL = {
-    status: "all", category: "", urun_karti_id: "", varyasyon_id: "", name: "",
+    status: "all", category_id: "", urun_karti_id: "", varyasyon_id: "", name: "",
     stock_code: "", gtip: "", barcode: "", breadcrumb: "", brand: "", supplier: "",
     tag: "", ozel1: "", ozel2: "", ozel3: "", ozel4: "", ozel5: "",
     seo_title: "", seo_keywords: "", seo_desc: "",
@@ -606,7 +606,7 @@ export default function AdminProducts() {
 
       // Doğrudan geçen parametreler (backend ile aynı ad)
       [
-        'status', 'category', 'urun_karti_id', 'varyasyon_id', 'name', 'stock_code',
+        'status', 'category_id', 'urun_karti_id', 'varyasyon_id', 'name', 'stock_code',
         'gtip', 'barcode', 'breadcrumb', 'brand', 'supplier', 'tag',
         'min_stock', 'max_stock', 'min_price', 'max_price',
         'date_from', 'date_to', 'pub_date_from', 'pub_date_to',

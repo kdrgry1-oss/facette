@@ -32,6 +32,7 @@ async def get_products(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
     category: Optional[str] = None,
+    category_id: Optional[str] = None,
     search: Optional[str] = None,
     sort: str = Query("created_at"),
     order: str = Query("desc"),
@@ -199,6 +200,10 @@ async def get_products(
     # GELİŞMİŞ FİLTRELER (Ticimax paneli)
     # ============================================================
     # --- Metin (regex) filtreleri ---
+    if category_id:
+        # category_ids atalar dahil tutulduğu için üst kategori seçilince
+        # tüm alt kategori ürünleri de eşleşir (ağaç filtreleme).
+        and_clauses.append({"category_ids": category_id})
     if urun_karti_id:
         and_clauses.append({"urun_karti_id": {"$regex": re.escape(urun_karti_id.strip()), "$options": "i"}})
     if varyasyon_id:

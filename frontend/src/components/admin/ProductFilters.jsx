@@ -10,6 +10,7 @@
  */
 import React from "react";
 import { RotateCcw, Search } from "lucide-react";
+import CategoryTreeSelect from "./CategoryTreeSelect";
 
 const EVET_HAYIR = [
   { v: "", l: "Seçiniz" },
@@ -151,12 +152,11 @@ export const ProductFilters = ({ filters, update, onApply, onClear, categories =
           <Text label="Barkod" k="barcode" value={filters.barcode} update={update} />
           <div>
             <label className={labelCls}>Kategori</label>
-            <select value={filters.category || ""} onChange={(e) => update("category", e.target.value)} className={inputCls} data-testid="pf-category">
-              <option value="">Tüm Kategoriler</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.slug}>{c.name}</option>
-              ))}
-            </select>
+            <CategoryTreeSelect
+              categories={categories}
+              value={filters.category_id}
+              onChange={(id) => update("category_id", id)}
+            />
           </div>
           <Text label="Breadcrumb Kategori" k="breadcrumb" value={filters.breadcrumb} update={update} />
           <Text label="Marka" k="brand" value={filters.brand} update={update} />
