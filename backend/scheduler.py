@@ -377,6 +377,75 @@ async def _ticimax_sync_orders():
 
 
 
+DEFAULT_PII_RETENTION_DAYS = 30
+PII_RETENTION_PLATFORMS = ["amazon"]  # varsayılan kapsam: Amazon SP-API kaynaklı siparişler
+
+
+async def _pii_retention_purge():
+    """Amazon DPP uyumu — PII saklama süresi (varsayılan 30 gün) dolan siparişlerde
+    kişisel verileri (isim, telefon, e-posta, adres) anonimleştirir.
+    Muhasebe için sipariş no/tutar/ürün korunur; sadece kişisel tanımlayıcılar silinir.
+    Config: db.settings id='pii_retention' { enabled, days, platforms }.
+    """
+    from routes.deps import db
+    try:
+        cfg = await db.settings.find_one({"id": "pii_retention"}) or {}
+        if cfg.get("enabled") is False:
+            return
+        days = int(cfg.get("days") or DEFAULT_PII_RETENTION_DAYS)
+        platforms = cfg.get("platforms") or PII_RETENTION_PLATFORMS
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        query = {
+            "platform": {"$in": platforms},
+            "status": {"$in": ["shipped", "delivered", "completed"]},
+            "pii_redacted": {"$ne": True},
+            "$or": [
+                {"shipped_at": {"$lt": cutoff}},
+                {"delivered_at": {"$lt": cutoff}},
+                {"updated_at": {"$lt": cutoff}},
+            ],
+        }
+        redacted = 0
+        async for order in db.orders.find(query, {"_id": 0, "id": 1}):
+            await db.orders.update_one(
+                {"id": order["id"]},
+                {"$set": {
+                    "shipping_address.first_name": "[silindi]",
+                    "shipping_address.last_name": "",
+                    "shipping_address.full_name": "[silindi]",
+                    "shipping_address.phone": "[silindi]",
+                    "shipping_address.email": "[silindi]",
+                    "shipping_address.address": "[silindi]",
+                    "shipping_address.address_line": "[silindi]",
+                    "billing_address.first_name": "[silindi]",
+                    "billing_address.phone": "[silindi]",
+                    "billing_address.email": "[silindi]",
+                    "billing_address.address": "[silindi]",
+                    "customer_email": "[silindi]",
+                    "customer_phone": "[silindi]",
+                    "customer_name": "[silindi]",
+                    "buyer_email": "[silindi]",
+                    "user_data": None,
+                    "pii_redacted": True,
+                    "pii_redacted_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+            redacted += 1
+        if redacted:
+            logger.info(f"[scheduler][pii] {redacted} siparişte PII anonimleştirildi (>{days} gün, {platforms})")
+            await db.audit_logs.insert_one({
+                "id": str(uuid.uuid4()),
+                "action": "pii_retention_purge",
+                "category": "compliance",
+                "details": {"redacted": redacted, "days": days, "platforms": platforms},
+                "actor": "system_scheduler",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+    except Exception as e:
+        logger.exception(f"[scheduler] pii_retention_purge failed: {e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -449,6 +518,15 @@ def start_scheduler():
         _daily_stockout_alert,
         CronTrigger(hour=9, minute=0),
         id="daily_stockout_alert",
+        max_instances=1, coalesce=True,
+    )
+    # Amazon DPP — PII saklama süresi dolan siparişlerde kişisel verileri anonimleştir
+    # (her gün 03:00 UTC). Amazon "Restricted" rol uyumu için kritik kontrol.
+    _scheduler.add_job(
+        _pii_retention_purge,
+        CronTrigger(hour=3, minute=0),
+        id="pii_retention_purge",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1, coalesce=True,
     )
     _scheduler.start()

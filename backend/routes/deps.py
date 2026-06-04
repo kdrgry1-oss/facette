@@ -397,3 +397,32 @@ async def generate_barcode_from_range(used_barcodes_set=None) -> str:
             return barcode
     
     return None
+
+
+# =============================================================================
+# Şifre Politikası (Amazon DPP uyumu — personel/admin hesapları)
+# Amazon, Amazon verisine erişen personel için min 12 karakter + karmaşıklık ister.
+# Müşteri (storefront) hesaplarına UYGULANMAZ; mevcut login akışını bozmaz.
+# =============================================================================
+import re as _re_pw
+
+
+def validate_strong_password(password: str) -> None:
+    """Personel/admin şifresi için güç doğrulaması. Zayıfsa HTTPException(400) atar."""
+    pw = password or ""
+    errors = []
+    if len(pw) < 12:
+        errors.append("en az 12 karakter")
+    if not _re_pw.search(r"[A-ZÇĞİÖŞÜ]", pw):
+        errors.append("en az 1 büyük harf")
+    if not _re_pw.search(r"[a-zçğıöşü]", pw):
+        errors.append("en az 1 küçük harf")
+    if not _re_pw.search(r"[0-9]", pw):
+        errors.append("en az 1 rakam")
+    if not _re_pw.search(r"[^A-Za-z0-9]", pw):
+        errors.append("en az 1 özel karakter")
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail="Personel şifresi şu kuralları sağlamalı: " + ", ".join(errors) + ".",
+        )

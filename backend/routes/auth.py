@@ -13,6 +13,7 @@ from .deps import (
     is_account_locked, register_failed_login, reset_failed_login,
     is_ip_blocked, register_failed_login_ip,
     client_ip_from_request, limiter,
+    validate_strong_password,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -226,7 +227,10 @@ async def change_password(
     new = safe_str((payload or {}).get("new_password", ""), 200)
     if not cur or not new:
         raise HTTPException(status_code=400, detail="Mevcut ve yeni şifre zorunlu")
-    if len(new) < 6:
+    # Personel/admin hesapları için güçlü şifre politikası (Amazon DPP); müşteri min 6
+    if current_user.get("is_admin"):
+        validate_strong_password(new)
+    elif len(new) < 6:
         raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
     user = await db.users.find_one({"id": current_user["id"]})
     if not user or not verify_password(cur, user.get("password", "")):

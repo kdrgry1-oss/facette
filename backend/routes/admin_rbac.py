@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
 
-from .deps import db, require_admin, hash_password
+from .deps import db, require_admin, hash_password, validate_strong_password
 from permissions import PERMISSION_TREE, DEFAULT_ROLES, ALL_PERMISSION_KEYS
 
 router = APIRouter(prefix="/admin", tags=["admin-rbac"])
@@ -122,6 +122,7 @@ async def create_panel_user(payload: dict, current_user: dict = Depends(require_
     password = payload.get("password", "")
     if not email or not password:
         raise HTTPException(status_code=400, detail="E-posta ve parola zorunlu")
+    validate_strong_password(password)
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Bu e-posta zaten kayıtlı")
     doc = {
@@ -152,7 +153,9 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
         if f in payload:
             update[f] = payload[f]
     if payload.get("password"):
+        validate_strong_password(payload["password"])
         update["password"] = hash_password(payload["password"])
+        update["password_changed_at"] = datetime.now(timezone.utc).isoformat()
     await db.users.update_one({"id": user_id}, {"$set": update})
     return {"success": True}
 

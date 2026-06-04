@@ -3372,3 +3372,11 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 - frontend/src/pages/admin/AmazonSpApi.jsx (/admin/amazon): kimlik formu, test, sipariş önizleme, rehber. Pazaryerleri menüsünde.
 - Marketplace TR: A33AVAJ2PDY3EV, region EU (sellingpartnerapi-eu.amazon.com).
 - BEKLEYEN (kullanıcıdan): LWA Client Secret + Refresh Token (self-authorization). Client ID alındı.
+
+### Amazon DPP Uyum (Veri Koruma Politikası) — 2026-06-04
+- PII saklama/otomatik silme: scheduler `_pii_retention_purge` (her gün 03:00 UTC), Amazon siparişlerinde gönderimden 30 gün sonra PII anonimleştirir. Config: db.settings id='pii_retention'.
+- routes/compliance.py: /api/compliance/pii-retention (status/config/run) + /dpp-checklist (14 madde sistem eşleştirmesi).
+- Şifre politikası: deps.validate_strong_password (min 12 + büyük/küçük/rakam/özel). Personel/admin uçlarına uygulandı (admin_rbac create/update panel user, auth change-password admin için). Müşteri kaydı etkilenmedi. Login bozulmadı (admin123 çalışıyor).
+- Dokümanlar: docs/DATA_PROTECTION_POLICY.md, docs/INCIDENT_RESPONSE_PLAN.md.
+- Frontend: /admin/dpp-uyum (Compliance.jsx) — checklist + PII retention yönetimi.
+- MFA (TOTP) admin için: roadmap (henüz yok).

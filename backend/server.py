@@ -519,6 +519,10 @@ api_router.include_router(influencers_router)
 from routes.amazon_spapi import router as amazon_spapi_router
 api_router.include_router(amazon_spapi_router)
 
+# Amazon DPP / Compliance (PII retention + checklist)
+from routes.compliance import router as compliance_router
+api_router.include_router(compliance_router)
+
 # Root endpoint
 @api_router.get("/")
 async def root():

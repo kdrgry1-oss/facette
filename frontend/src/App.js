@@ -66,6 +66,7 @@ import ProductionPlan from "./pages/admin/ProductionPlan";
 import MarketingPixels from "./pages/admin/MarketingPixels";
 import Influencers from "./pages/admin/Influencers";
 import AmazonSpApi from "./pages/admin/AmazonSpApi";
+import Compliance from "./pages/admin/Compliance";
 import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
@@ -163,6 +164,7 @@ function App() {
               <Route path="ayarlar/pixel" element={<MarketingPixels />} />
               <Route path="influencer" element={<Influencers />} />
               <Route path="amazon" element={<AmazonSpApi />} />
+              <Route path="dpp-uyum" element={<Compliance />} />
               <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
               <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
               <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
