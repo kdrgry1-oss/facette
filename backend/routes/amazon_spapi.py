@@ -255,16 +255,21 @@ async def spapi_orders(
     }
 
 
+def _public_base() -> str:
+    return (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL") or "").rstrip("/")
+
+
 @router.get("/authorize-url")
 async def spapi_authorize_url(current_user: dict = Depends(require_admin)):
     """OAuth consent URL (website workflow). App ID (solution id) gerektirir."""
     cfg = await _get_config()
     if not cfg or not cfg.get("app_id"):
         raise HTTPException(status_code=400, detail="App ID (Solution ID, amzn1.sp.solution.xxx) kaydedilmemiş")
+    if not cfg.get("client_secret_enc"):
+        raise HTTPException(status_code=400, detail="Önce Client Secret kaydedin")
     region = cfg.get("region") or DEFAULT_REGION
     base = SELLERCENTRAL_CONSENT.get(region, SELLERCENTRAL_CONSENT["eu"])
-    backend_url = os.environ.get("REACT_APP_BACKEND_URL") or ""
-    redirect_uri = f"{backend_url}/api/amazon/spapi/oauth/callback"
+    redirect_uri = f"{_public_base()}/api/amazon/spapi/oauth/callback"
     state = _secrets.token_urlsafe(24)
     await db.integration_settings.update_one(
         {"key": CONFIG_KEY}, {"$set": {"oauth_state": state, "oauth_redirect": redirect_uri}}
@@ -280,12 +285,12 @@ async def spapi_oauth_callback(request: Request, spapi_oauth_code: str = None,
     """Amazon OAuth dönüşü — spapi_oauth_code -> refresh_token (vault'a kaydedilir)."""
     from security.crypto import encrypt
     cfg = await _get_config(include_secrets=True)
-    frontend = (os.environ.get("REACT_APP_BACKEND_URL") or "").replace("/api", "")
+    frontend = _public_base()
     if not spapi_oauth_code or not cfg:
         return RedirectResponse(url=f"{frontend}/admin/amazon?status=error")
     if cfg.get("oauth_state") and state and state != cfg.get("oauth_state"):
         return RedirectResponse(url=f"{frontend}/admin/amazon?status=state_mismatch")
-    redirect_uri = cfg.get("oauth_redirect") or f"{os.environ.get('REACT_APP_BACKEND_URL')}/api/amazon/spapi/oauth/callback"
+    redirect_uri = cfg.get("oauth_redirect") or f"{_public_base()}/api/amazon/spapi/oauth/callback"
     try:
         td = await _exchange_code_for_refresh(cfg["client_id"], cfg["client_secret"], spapi_oauth_code, redirect_uri)
     except HTTPException:

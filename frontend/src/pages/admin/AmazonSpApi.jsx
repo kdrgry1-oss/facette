@@ -6,10 +6,11 @@ import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  ShoppingCart, CheckCircle, XCircle, RefreshCw, Save, Zap, Package, ExternalLink, KeyRound,
+  ShoppingCart, CheckCircle, XCircle, RefreshCw, Save, Zap, Package, ExternalLink, KeyRound, Link2,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const REDIRECT_URI = `${process.env.REACT_APP_BACKEND_URL}/api/amazon/spapi/oauth/callback`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 
 export default function AmazonSpApi() {
@@ -41,6 +42,33 @@ export default function AmazonSpApi() {
   }, []);
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  // OAuth callback dönüş durumu
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const st = params.get("status");
+    if (st === "connected") { toast.success("Amazon yetkilendirme başarılı ✓"); loadStatus(); }
+    else if (st === "state_mismatch") toast.error("Güvenlik doğrulaması başarısız (state)");
+    else if (st === "exchange_failed") toast.error("Token alınamadı — Client Secret'ı kontrol edin");
+    else if (st === "no_refresh_token") toast.error("Refresh token alınamadı");
+    else if (st === "error") toast.error("Yetkilendirme iptal edildi/başarısız");
+    if (st) window.history.replaceState({}, "", "/admin/amazon");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connectOAuth = async () => {
+    try {
+      const r = await axios.get(`${API}/amazon/spapi/authorize-url`, auth());
+      window.location.href = r.data.url;
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Yetkilendirme başlatılamadı");
+    }
+  };
+
+  const copyRedirect = () => {
+    navigator.clipboard?.writeText(REDIRECT_URI);
+    toast.success("Redirect URI kopyalandı");
+  };
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -125,16 +153,30 @@ export default function AmazonSpApi() {
       {/* Rehber */}
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-5 text-sm text-gray-700">
         <div className="font-semibold text-orange-900 mb-2 flex items-center gap-1">
-          <KeyRound size={14} /> Kimlik bilgilerini nasıl alırsın?
+          <KeyRound size={14} /> Bağlantı yöntemleri (uygulaman: <b>rooftr</b>)
         </div>
-        <ol className="list-decimal list-inside space-y-1">
-          <li><b>Client ID & Secret:</b> Seller Central → Apps & Services → Develop Apps → uygulamanı seç → "LWA credentials" altında Client ID ve "View" / "Generate" ile Client Secret.</li>
-          <li><b>Refresh Token (self-authorization):</b> Aynı sayfada uygulamanın yanındaki <b>Authorize</b> (yetkilendir) → kendi mağazanı onayla → çıkan <b>refresh token</b>'ı kopyala.</li>
-          <li>Bu üç değeri aşağıya gir ve <b>Kaydet</b> → ardından <b>Bağlantıyı Test Et</b>.</li>
+        <p className="font-medium text-orange-900 mb-1">Yöntem 1 — Tek tık OAuth (önerilen):</p>
+        <ol className="list-decimal list-inside space-y-1 mb-3">
+          <li><b>Developer Central → Develop Apps</b> içinde "rooftr" uygulamanı aç (NOT: "Manage Your Solutions" başka geliştiricilerin uygulamalarını gösterir).</li>
+          <li>App ayarlarında <b>App ID (Solution ID, amzn1.sp.solution.xxx)</b>'i kopyala → aşağıdaki "App ID" alanına gir.</li>
+          <li>App'in <b>Login with Amazon</b> ayarlarında <b>"Allowed Return URLs"</b> listesine şu adresi ekle:</li>
         </ol>
-        <a href="https://sellercentral.amazon.com.tr/apps/manage" target="_blank" rel="noreferrer"
+        <div className="flex items-center gap-2 bg-white border rounded px-2 py-1.5 font-mono text-xs mb-3 break-all">
+          <span className="flex-1">{REDIRECT_URI}</span>
+          <button onClick={copyRedirect} className="text-orange-700 hover:underline shrink-0">kopyala</button>
+        </div>
+        <ol className="list-decimal list-inside space-y-1 mb-3" start="4">
+          <li>Client ID + Client Secret + App ID'yi aşağıya girip <b>Kaydet</b>.</li>
+          <li><b>"Amazon ile Bağlan"</b> butonuna bas → rooftr yetki ekranı açılır → onayla. Refresh token otomatik alınır.</li>
+        </ol>
+        <p className="font-medium text-orange-900 mb-1">Yöntem 2 — Self-authorization (manuel):</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Develop Apps → rooftr → <b>Authorize</b> (kendi mağazanı yetkilendir) → çıkan <b>Refresh Token</b>'ı kopyala.</li>
+          <li>Aşağıdaki "Refresh Token" alanına yapıştır + Client Secret'ı gir → <b>Kaydet</b> → <b>Bağlantıyı Test Et</b>.</li>
+        </ol>
+        <a href="https://sellercentral.amazon.com.tr/sellingpartner/developerconsole" target="_blank" rel="noreferrer"
           className="inline-flex items-center gap-1 mt-2 text-orange-800 underline font-medium">
-          Seller Central — Uygulamalarım <ExternalLink size={12} />
+          Developer Central'ı aç <ExternalLink size={12} />
         </a>
       </div>
 
@@ -173,6 +215,11 @@ export default function AmazonSpApi() {
           <button onClick={save} disabled={saving} data-testid="amazon-save-btn"
             className="inline-flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800 disabled:opacity-50">
             <Save size={16} /> {saving ? "Kaydediliyor..." : "Kaydet"}
+          </button>
+          <button onClick={connectOAuth} disabled={!status?.configured || !status?.has_client_secret || !status?.app_id} data-testid="amazon-oauth-btn"
+            title={!status?.app_id ? "Önce App ID + Client Secret kaydedin" : ""}
+            className="inline-flex items-center gap-2 bg-[#FF9900] text-black font-medium px-4 py-2 rounded-lg text-sm hover:bg-[#e88b00] disabled:opacity-50">
+            <Link2 size={16} /> Amazon ile Bağlan
           </button>
           <button onClick={test} disabled={testing || !status?.connected} data-testid="amazon-test-btn"
             className="inline-flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50">
