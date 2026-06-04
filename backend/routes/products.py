@@ -52,6 +52,8 @@ async def get_products(
     """Get products with filtering and pagination"""
     skip = (page - 1) * limit
     query = {}
+    # Çöp kutusundaki (soft-deleted) ürünler normal listelerde/storefront'ta görünmez
+    query["is_deleted"] = {"$ne": True}
     
     # Status default to active for storefront compatibility unless specified differently
     if status == "all":
@@ -179,6 +181,27 @@ async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
     """Ürün kartında tüm Ticimax (113) alanını gruplu render etmek için şema."""
     from ticimax_schema import build_schema
     return {"groups": build_schema()}
+
+@router.get("/trash/list")
+async def list_trashed_products(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    search: Optional[str] = None,
+    current_user: dict = Depends(require_admin)
+):
+    """Çöp kutusundaki (soft-deleted) ürünleri listeler."""
+    skip = (page - 1) * limit
+    query = {"is_deleted": True}
+    if search:
+        esc = re.escape(search.strip())
+        query["$or"] = [
+            {"name": {"$regex": esc, "$options": "i"}},
+            {"stock_code": {"$regex": esc, "$options": "i"}},
+            {"urun_karti_id": {"$regex": esc, "$options": "i"}},
+        ]
+    products = await db.products.find(query, {"_id": 0}).sort("deleted_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.products.count_documents(query)
+    return {"products": products, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 @router.get("/{product_id}")
 async def get_product(product_id: str):
@@ -346,12 +369,48 @@ async def delete_product(
     product_id: str,
     current_user: dict = Depends(require_admin)
 ):
-    """Delete product (admin only)"""
+    """Ürünü çöp kutusuna taşır (soft delete). Kalıcı silme için /permanent kullanın."""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0, "is_active": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    await db.products.update_one(
+        {"id": product_id},
+        {"$set": {
+            "is_deleted": True,
+            "is_active": False,
+            "prev_active": product.get("is_active", True),
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"message": "Ürün çöp kutusuna taşındı"}
+
+@router.post("/{product_id}/restore")
+async def restore_product(
+    product_id: str,
+    current_user: dict = Depends(require_admin)
+):
+    """Çöp kutusundaki ürünü geri yükler."""
+    product = await db.products.find_one({"id": product_id}, {"_id": 0, "prev_active": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    await db.products.update_one(
+        {"id": product_id},
+        {"$set": {"is_deleted": False, "is_active": product.get("prev_active", True),
+                  "updated_at": datetime.now(timezone.utc).isoformat()},
+         "$unset": {"deleted_at": "", "prev_active": ""}}
+    )
+    return {"message": "Ürün geri yüklendi"}
+
+@router.delete("/{product_id}/permanent")
+async def permanent_delete_product(
+    product_id: str,
+    current_user: dict = Depends(require_admin)
+):
+    """Ürünü veritabanından KALICI olarak siler (geri alınamaz)."""
     result = await db.products.delete_one({"id": product_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
-    
-    return {"message": "Ürün silindi"}
+    return {"message": "Ürün kalıcı olarak silindi"}
 
 @router.post("/{product_id}/toggle-active")
 async def toggle_product_active(

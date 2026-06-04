@@ -775,16 +775,59 @@ export default function AdminProducts() {
    *   kaldırılması gerekir (P2 backlog).
    */
   const handleDelete = async (id) => {
-    if (!await window.appConfirm("Ürünü silmek istediğinize emin misiniz?")) return;
+    if (!await window.appConfirm("Ürünü çöp kutusuna taşımak istediğinize emin misiniz?")) return;
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API}/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success("Ürün silindi");
+      toast.success("Ürün çöp kutusuna taşındı");
       fetchProducts();
     } catch (err) {
       console.error("Silme hatası:", err);
-      toast.error(err.response?.data?.detail || "Silme başarısız. Yetkinizi kontrol edin.");
+      toast.error(err.response?.data?.detail || "İşlem başarısız. Yetkinizi kontrol edin.");
     }
+  };
+
+  // ===== Çöp Kutusu =====
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashItems, setTrashItems] = useState([]);
+  const [trashTotal, setTrashTotal] = useState(0);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [trashSearch, setTrashSearch] = useState("");
+
+  const fetchTrash = async (q = "") => {
+    setTrashLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/products/trash/list`, {
+        params: { limit: 500, search: q || undefined },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setTrashItems(res.data.products || []);
+      setTrashTotal(res.data.total || 0);
+    } catch (err) {
+      toast.error("Çöp kutusu yüklenemedi");
+    } finally {
+      setTrashLoading(false);
+    }
+  };
+  const openTrash = () => { setTrashOpen(true); fetchTrash(); };
+  const restoreProduct = async (id) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API}/products/${id}/restore`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Ürün geri yüklendi");
+      fetchTrash(trashSearch);
+      fetchProducts();
+    } catch { toast.error("Geri yükleme başarısız"); }
+  };
+  const permanentDelete = async (id) => {
+    if (!await window.appConfirm("Bu ürün KALICI olarak silinecek ve geri alınamayacak. Emin misiniz?")) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${API}/products/${id}/permanent`, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Ürün kalıcı olarak silindi");
+      fetchTrash(trashSearch);
+    } catch { toast.error("Kalıcı silme başarısız"); }
   };
 
   /**
@@ -1204,6 +1247,15 @@ export default function AdminProducts() {
           >
             <Store size={16} />
             Barkod ile Trendyol'a Aktar
+          </button>
+          <button
+            onClick={openTrash}
+            data-testid="open-trash-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-all font-medium text-sm shadow-sm border border-gray-200"
+            title="Silinen ürünleri görüntüle ve geri yükle"
+          >
+            <Trash2 size={16} />
+            Çöp Kutusu
           </button>
           <button 
             onClick={() => { resetForm(); setModalOpen(true); }}
@@ -2931,6 +2983,61 @@ export default function AdminProducts() {
               </button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Çöp Kutusu */}
+      <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
+        <DialogContent className="max-w-4xl max-h-[88vh] overflow-y-auto" data-testid="trash-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 size={18} /> Çöp Kutusu
+              <span className="text-sm font-normal text-gray-500" data-testid="trash-total">({trashTotal} ürün)</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              data-testid="trash-search"
+              value={trashSearch}
+              onChange={(e) => { setTrashSearch(e.target.value); fetchTrash(e.target.value); }}
+              placeholder="Çöp kutusunda ara (ad / stok kodu / kart id)"
+              className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
+            />
+          </div>
+          {trashLoading ? (
+            <div className="py-10 text-center text-gray-400 text-sm">Yükleniyor…</div>
+          ) : trashItems.length === 0 ? (
+            <div className="py-10 text-center text-gray-400 text-sm" data-testid="trash-empty">Çöp kutusu boş.</div>
+          ) : (
+            <div className="space-y-2">
+              {trashItems.map((p) => (
+                <div key={p.id} data-testid={`trash-item-${p.id}`} className="flex items-center gap-3 border rounded-lg px-3 py-2">
+                  <div className="w-10 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
+                    {p.images?.[0] && <img src={p.images[0]} alt="" className="w-full h-full object-cover" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-800 truncate">{p.name}</div>
+                    <div className="text-xs text-gray-400">Kart: {p.urun_karti_id || "-"} · Stok kodu: {p.stock_code || "-"}</div>
+                  </div>
+                  <button
+                    onClick={() => restoreProduct(p.id)}
+                    data-testid={`trash-restore-${p.id}`}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700"
+                  >
+                    <RefreshCw size={14} /> Geri Yükle
+                  </button>
+                  <button
+                    onClick={() => permanentDelete(p.id)}
+                    data-testid={`trash-permanent-${p.id}`}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
+                  >
+                    <Trash2 size={14} /> Kalıcı Sil
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
