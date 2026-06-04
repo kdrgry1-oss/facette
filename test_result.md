@@ -223,3 +223,63 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Influencer modülü (Modül 3+4) test edilmeli. MNG kargo/SMS gerçek key gerektirir (mocked) - /cargo endpoint 400 'MNG ayarları yapılmamış' dönerse BEKLENEN davranış. Admin: admin@facette.com/admin123."
+
+## Fork (2026-06-04) #3 — TOTP MFA + Amazon DPP Compliance + Privacy Page
+
+backend:
+  - task: "TOTP MFA (2FA)"
+    implemented: true
+    working: "NA"
+    file: "backend/routes/mfa.py, backend/routes/auth.py"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Endpoints: /api/auth/mfa/{status,setup,enable,disable,verify}. Login MFA gate: mfa_enabled ise {mfa_required, mfa_token}. Curl ile full flow test edildi (setup->enable->login challenge->verify->disable). pyotp+qrcode. mfa_secret AES vault'ta. Admin'de MFA KAPALI bırakıldı (normal login bozulmaz)."
+  - task: "Compliance / PII Retention / DPP"
+    implemented: true
+    working: true
+    file: "backend/routes/compliance.py, scheduler.py"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Curl ile test edildi: dpp-checklist (14), pii-retention status/config/run, scheduler purge job. Şifre politikası (min12+complexity) personel uçlarına uygulandı, login bozulmadı."
+
+frontend:
+  - task: "MFA UI (login challenge + setup card)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/admin/AdminLogin.jsx, Compliance.jsx, context/AuthContext.jsx"
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "AdminLogin MFA kod adımı (admin-mfa-form, admin-mfa-code-input, admin-mfa-verify-btn). Compliance/DPP sayfasında MfaCard (mfa-setup-btn, mfa-qr, mfa-enable-code, mfa-enable-btn, mfa-disable-btn). AuthContext.verifyMfa eklendi."
+  - task: "Gizlilik (Privacy) sayfası /gizlilik"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/GizlilikPolitikasi.jsx"
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Screenshot ile render doğrulandı (Header+Footer+içerik). data-testid privacy-policy-page."
+
+metadata:
+  test_sequence: 3
+
+test_plan:
+  current_focus:
+    - "TOTP MFA (2FA)"
+    - "MFA UI (login challenge + setup card)"
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "MFA frontend+integration test edilmeli. ÖNEMLİ: Test sonunda admin'de MFA'yı MUTLAKA DISABLE edin (admin123 normal login kalmalı). TOTP kodları pyotp ile üretilebilir. Admin: admin@facette.com/admin123, /admin/login."

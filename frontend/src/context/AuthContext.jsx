@@ -31,6 +31,19 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await axios.post(`${API}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`);
+    if (res.data?.mfa_required) {
+      return { mfaRequired: true, mfaToken: res.data.mfa_token };
+    }
+    const { token: newToken, user: userData } = res.data;
+    localStorage.setItem("token", newToken);
+    axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
+    setToken(newToken);
+    setUser(userData);
+    return userData;
+  };
+
+  const verifyMfa = async (mfaToken, code) => {
+    const res = await axios.post(`${API}/auth/mfa/verify`, { mfa_token: mfaToken, code });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
@@ -65,6 +78,7 @@ export function AuthProvider({ children }) {
         loading,
         isAdmin: user?.is_admin || false,
         login,
+        verifyMfa,
         register,
         logout,
       }}

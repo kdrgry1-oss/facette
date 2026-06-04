@@ -8,6 +8,7 @@ import { bootstrapNative } from "./lib/native";
 
 // Pages
 import Home from "./pages/Home";
+import GizlilikPolitikasi from "./pages/GizlilikPolitikasi";
 import Category from "./pages/Category";
 import ProductDetail from "./pages/ProductDetail";
 import Cart from "./pages/Cart";
@@ -121,6 +122,7 @@ function App() {
             <Route path="/odeme" element={<Checkout />} />
             <Route path="/arama" element={<Search />} />
             <Route path="/sayfa/:slug" element={<StaticPage />} />
+            <Route path="/gizlilik" element={<GizlilikPolitikasi />} />
             <Route path="/hesabim" element={<Account />} />
             <Route path="/giris" element={<Login />} />
             <Route path="/siparis-takip" element={<TrackOrder />} />

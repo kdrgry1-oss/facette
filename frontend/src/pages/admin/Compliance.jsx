@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { ShieldCheck, CheckCircle, Server, FileText, Cog, Trash2, RefreshCw, Play } from "lucide-react";
+import { ShieldCheck, CheckCircle, Server, FileText, Cog, Trash2, RefreshCw, Play, Smartphone } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -75,6 +75,9 @@ export default function Compliance() {
         </p>
       </div>
 
+      {/* MFA */}
+      <MfaCard />
+
       {/* PII Retention */}
       {retention && (
         <div className="bg-white border rounded-xl p-5 mb-6" data-testid="pii-retention-card">
@@ -127,6 +130,86 @@ export default function Compliance() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function MfaCard() {
+  const [enabled, setEnabled] = useState(null);
+  const [setup, setSetup] = useState(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API}/auth/mfa/status`, auth());
+      setEnabled(r.data.mfa_enabled);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const startSetup = async () => {
+    setBusy(true);
+    try {
+      const r = await axios.post(`${API}/auth/mfa/setup`, {}, auth());
+      setSetup(r.data);
+    } catch { toast.error("Kurulum başlatılamadı"); }
+    finally { setBusy(false); }
+  };
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      await axios.post(`${API}/auth/mfa/enable`, { code }, auth());
+      toast.success("MFA etkinleştirildi ✓");
+      setSetup(null); setCode(""); loadStatus();
+    } catch (e) { toast.error(e.response?.data?.detail || "Kod doğrulanamadı"); }
+    finally { setBusy(false); }
+  };
+
+  const disable = async () => {
+    const c = prompt("MFA'yı kapatmak için Authenticator kodunu gir:");
+    if (!c) return;
+    try {
+      await axios.post(`${API}/auth/mfa/disable`, { code: c }, auth());
+      toast.success("MFA kapatıldı");
+      loadStatus();
+    } catch (e) { toast.error(e.response?.data?.detail || "Kapatılamadı"); }
+  };
+
+  return (
+    <div className="bg-white border rounded-xl p-5 mb-6" data-testid="mfa-card">
+      <h2 className="font-semibold flex items-center gap-2 mb-3">
+        <Smartphone size={16} className="text-indigo-500" /> Çok Faktörlü Doğrulama (MFA / 2FA)
+        {enabled && <span className="text-[11px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Aktif</span>}
+      </h2>
+      {enabled ? (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-600">Hesabın TOTP MFA ile korunuyor. Girişte Authenticator kodu istenir.</p>
+          <button onClick={disable} className="text-sm text-red-600 border px-3 py-1.5 rounded-lg hover:bg-red-50" data-testid="mfa-disable-btn">Devre Dışı Bırak</button>
+        </div>
+      ) : setup ? (
+        <div className="flex flex-col md:flex-row gap-5 items-start">
+          <img src={setup.qr_code} alt="MFA QR" className="w-40 h-40 border rounded" data-testid="mfa-qr" />
+          <div className="flex-1">
+            <p className="text-sm text-gray-600 mb-1">1. Google Authenticator / Authy ile QR'ı tara.</p>
+            <p className="text-xs text-gray-400 mb-2 break-all">Manuel anahtar: <span className="font-mono">{setup.secret}</span></p>
+            <p className="text-sm text-gray-600 mb-2">2. Uygulamadaki 6 haneli kodu gir:</p>
+            <div className="flex gap-2">
+              <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} maxLength={6}
+                placeholder="000000" className="inp w-32 text-center tracking-widest" data-testid="mfa-enable-code" />
+              <button onClick={enable} disabled={busy || code.length !== 6} className="bg-black text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50" data-testid="mfa-enable-btn">Etkinleştir</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-600">Amazon DPP için önerilir. Authenticator uygulamasıyla 2 adımlı doğrulama.</p>
+          <button onClick={startSetup} disabled={busy} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50" data-testid="mfa-setup-btn">
+            {busy ? "..." : "MFA Kur"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

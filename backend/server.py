@@ -523,6 +523,10 @@ api_router.include_router(amazon_spapi_router)
 from routes.compliance import router as compliance_router
 api_router.include_router(compliance_router)
 
+# TOTP MFA (çok faktörlü doğrulama) — Amazon DPP uyumu
+from routes.mfa import router as mfa_router
+api_router.include_router(mfa_router)
+
 # Root endpoint
 @api_router.get("/")
 async def root():

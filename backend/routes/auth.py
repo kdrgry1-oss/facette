@@ -126,6 +126,17 @@ async def login(
         raise HTTPException(status_code=403, detail="Hesabınız devre dışı")
 
     await reset_failed_login(email)
+
+    # MFA aktifse: tam token verme, ikinci adım iste
+    if user.get("mfa_enabled"):
+        from .mfa import create_mfa_pending_token
+        await write_audit_log("login_mfa_challenge", user_id=user["id"], email=email,
+                              ip=ip, user_agent=ua, success=True)
+        return {
+            "mfa_required": True,
+            "mfa_token": create_mfa_pending_token(user["id"]),
+        }
+
     token = create_token(user["id"], user.get("is_admin", False))
     await write_audit_log("login", user_id=user["id"], email=email,
                           ip=ip, user_agent=ua, success=True)
