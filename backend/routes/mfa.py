@@ -117,7 +117,8 @@ async def mfa_disable(payload: dict, current_user: dict = Depends(require_auth))
 
 @router.post("/verify")
 async def mfa_verify(payload: dict):
-    """Login 2. adımı: mfa_token + TOTP kodu -> tam JWT."""
+    """Login 2. adımı: mfa_token + TOTP kodu -> tam JWT.
+    Brute-force koruması: kullanıcı başına 5 dakikada en fazla 10 hatalı deneme."""
     mfa_token = (payload or {}).get("mfa_token")
     code = (payload or {}).get("code")
     if not mfa_token or not code:
@@ -132,9 +133,29 @@ async def mfa_verify(payload: dict):
     user = await db.users.find_one({"id": decoded["user_id"]}, {"_id": 0})
     if not user or not user.get("mfa_enabled"):
         raise HTTPException(status_code=400, detail="MFA aktif değil")
+
+    # Brute-force kilidi
+    now = datetime.now(timezone.utc)
+    fails = user.get("mfa_fail_count") or 0
+    win = user.get("mfa_fail_window")
+    try:
+        win_dt = datetime.fromisoformat(win) if win else None
+    except Exception:
+        win_dt = None
+    if win_dt and (now - win_dt) < timedelta(minutes=5) and fails >= 10:
+        raise HTTPException(status_code=429, detail="Çok fazla hatalı deneme, 5 dakika sonra tekrar deneyin")
+
     secret = decrypt(user.get("mfa_secret_enc")) if user.get("mfa_secret_enc") else None
     if not _verify_totp(secret, code):
+        # pencere dışındaysa sıfırla, içindeyse artır
+        if win_dt and (now - win_dt) < timedelta(minutes=5):
+            await db.users.update_one({"id": user["id"]}, {"$inc": {"mfa_fail_count": 1}})
+        else:
+            await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_fail_count": 1, "mfa_fail_window": now.isoformat()}})
         raise HTTPException(status_code=401, detail="Kod doğrulanamadı")
+
+    # başarı -> sayaç sıfırla
+    await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_fail_count": 0}, "$unset": {"mfa_fail_window": ""}})
 
     token = create_token(user["id"], user.get("is_admin", False))
     return {

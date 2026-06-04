@@ -3380,3 +3380,9 @@ Kategori 607 (Kimono & Kaftan) için Kalıp özelliği zorunlu; ürün mapping'i
 - Dokümanlar: docs/DATA_PROTECTION_POLICY.md, docs/INCIDENT_RESPONSE_PLAN.md.
 - Frontend: /admin/dpp-uyum (Compliance.jsx) — checklist + PII retention yönetimi.
 - MFA (TOTP) admin için: roadmap (henüz yok).
+
+### TOTP MFA + Privacy Page — 2026-06-04 (test edildi iter43 %100)
+- backend/routes/mfa.py: /api/auth/mfa/{status,setup,enable,disable,verify}. Login MFA gate (auth.py:128). pyotp+qrcode, mfa_secret AES vault. verify brute-force rate limit (5dk/10).
+- Frontend: AdminLogin MFA challenge, Compliance.jsx MfaCard, AuthContext.verifyMfa.
+- /gizlilik public gizlilik politikası sayfası (GizlilikPolitikasi.jsx).
+- MFA admin'de opsiyonel (kapalı bırakıldı, /admin/dpp-uyum'dan açılır).
