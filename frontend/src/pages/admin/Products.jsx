@@ -533,7 +533,7 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       let url = `${API}/products?page=${page}&limit=${pageSize}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
-      if (filters.status && filters.status !== 'all') url += `&status=${filters.status}`;
+      if (filters.status) url += `&status=${filters.status}`;
       if (filters.category) url += `&category=${encodeURIComponent(filters.category)}`;
       if (filters.stock_code) url += `&stock_code=${encodeURIComponent(filters.stock_code)}`;
       if (filters.barcode) url += `&barcode=${encodeURIComponent(filters.barcode)}`;
