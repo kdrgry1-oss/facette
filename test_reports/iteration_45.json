@@ -29,7 +29,7 @@
   ],
   "success_rate": { "backend": "100% (3/3)", "frontend": "100% (Ticimax sekme yok, 'Ticimax' metni yok, 5 sekme x toplam 12 gömülü grup render, SATISFIYATI edit+save+toast+persistence doğrulandı, urun_karti_id=1221 attributes Sezon/Bel doğrulandı)" },
   "test_credentials": "admin@facette.com / admin123 — login QUERY PARAM şart: POST /api/auth/login?email=...&password=...",
-  "seed_data_creation": "Test sırasında bir Blazer ürününün (id=90ea7a46-dc42-4e22-aca3-821bc6829257) SATISFIYATI 2800->2799 yapıldı, sonrasında 2800'e geri yüklendi (doğrulandı). Veri drift yok.",
+  "seed_data_creation": "Test sırasında bir Blazer ürününün (id=erp-sync-core) SATISFIYATI 2800->2799 yapıldı, sonrasında 2800'e geri yüklendi (doğrulandı). Veri drift yok.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
   "context_for_next_testing_agent": "Iteration 44'teki ayrı 'Ticimax (113)' sekmesi tamamen kaldırılmış. Artık 113 alan mevcut sekmelere (Temel/Fiyat/SEO/Stok/Trendyol Ayarları) gömülü ve UI'da 'Ticimax' kelimesi geçmiyor. detail-group-{label} ve detail-field-{KEY} testid'leri kullanılabilir. UrunTeknikDetaylari uzun-format import çalışıyor: urun_karti_id=1221 için attributes['Sezon']='FALL-WİNTER', attributes['Bel']='Normal Bel'. Eşleşmeyen ürünlerde (Excel'de yoksa) attributes'a yeni anahtar gelmeyebilir.",
