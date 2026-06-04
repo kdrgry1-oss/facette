@@ -174,6 +174,12 @@ async def get_products(
         "pages": (total + limit - 1) // limit
     }
 
+@router.get("/meta/ticimax-schema")
+async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
+    """Ürün kartında tüm Ticimax (113) alanını gruplu render etmek için şema."""
+    from ticimax_schema import build_schema
+    return {"groups": build_schema()}
+
 @router.get("/{product_id}")
 async def get_product(product_id: str):
     """Get single product by ID or slug"""

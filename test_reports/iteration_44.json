@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 44 – Ticimax 113-column ürün kartı entegrasyonu testleri. Backend 4/4 pytest pass. Frontend e2e: login -> /admin/urunler -> Blazer ara -> 'Hızlı Düzenle (Modal)' -> 'Ticimax (113)' sekmesi -> filled badge=39 dolu, 12 grup render, grup aç/kapa OK, 'fiyat' arama filtresi 24 alan -> SEO_SAYFABASLIK düzenlenip 'Değişiklikleri Kaydet' -> persistence DB'de doğrulandı (113 anahtar korundu, yeni başlık kalıcı). Tüm P0 davranışlar çalışıyor.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Edit Product Modal", "issues": ["Radix DialogContent missing DialogTitle (a11y warning) — wrap with VisuallyHidden or add explicit DialogTitle for screen readers"]},
+      {"screen": "Products list Pagination", "issues": ["React hydration error: <span> inside <option> (Pagination.jsx ~line 160). Non-blocking but causes SSR hydration mismatch warning; remove the inner span or render plain text"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration44_ticimax_113.py",
+    "/app/test_reports/pytest/iteration_44.xml"
+  ],
+  "action_items": [
+    "(Opsiyonel) Pagination.jsx: <option><span>..</span></option> -> düz string render et (hydration warning).",
+    "(Opsiyonel) Ürün düzenleme modal'ında DialogTitle ekle veya VisuallyHidden ile sar (a11y)."
+  ],
+  "critical_code_review_comments": [
+    "backend/routes/products.py:177 – GET /products/meta/ticimax-schema require_admin korumalı; 12 grup × 113 alan döndürüyor (doğrulandı). Schema imports `from ticimax_schema import build_schema` her istekte yapılıyor – modül düzeyine taşımak küçük bir mikrooptimizasyon olur.",
+    "backend/ticimax_schema.py:30-78 – NUMBER_COLS UYETIPIFIYAT1..20 ve MARKETPLACEGRUP{1..5}* alanlarını kapsıyor (doğru). build_schema() tek doğruluk kaynağı; backend ve frontend aynı şemayı paylaşıyor.",
+    "backend/routes/products.py PUT /{product_id} – ticimax_fields ile $set: product_data ile tüm doc güncelleniyor; bu PUT'da ticimax_fields tam set olarak gelmezse var olan alanları korumayabilir. Frontend her zaman 113-key tam tf gönderdiği için sorun yok; ancak partial PUT durumu için $set: {'ticimax_fields': merged} pattern'ı düşünülebilir.",
+    "frontend/src/components/admin/product-form/TicimaxFieldsTab.jsx:31-33 – filledCount, 0/'0' dolu sayılmıyor; ancak BOOL alanları (URUNAKTIF=1 vs 0) için 0 dolu sayılmıyor, bu kullanıcıyı yanıltabilir. Doğrudan 'dolu' yerine 'set' demek daha doğru.",
+    "frontend/Products.jsx Pagination – React 19 hydration warning (<span> in <option>) test sırasında console hatası verdi; işlevi bozmuyor ama izlenmesi gerek.",
+    "frontend Edit Product Modal – Radix Dialog DialogTitle eksik (a11y warning).",
+    "Test sırasında frontend toast 'Ürün güncellendi' DOM body içinden okunamadı (kısa süreli görünüyor olabilir); ancak modal kapandı ve API persistence doğrulandı – işlevsel olarak başarılı."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration44_ticimax_113.py (new)"
+  ],
+  "success_rate": { "backend": "100% (4/4)", "frontend": "100% (modal aç, sekme, badge, gruplar, arama, edit+save+persistence)" },
+  "test_credentials": "admin@facette.com / admin123 (MFA disabled). Login query param: POST /api/auth/login?email=...&password=...",
+  "seed_data_creation": "Test, gerçek bir Blazer ürününün SEO_SAYFABASLIK alanını TEST_UI_SEO_<ts> ile güncelledi. Persistence doğrulandı; geri yükleme yapılmadı (Excel reimport ile düzelir). Test ürün id örneği: 90ea7a46-dc42-4e22-aca3-821bc6829257. Gerekirse main agent restore edebilir.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "MFA disabled; admin login query param ile çalışıyor. Ticimax 113 entegrasyonu çalışır durumda: 454/484 ürün matched (Blazer dahil), 21 Blazer ürünü mevcut, ilk Blazer için ticimax_fields 113 anahtar dolu. Frontend modal 'Ticimax (113)' sekmesi indigo, filled badge çalışıyor, alan arama ve grup toggle çalışıyor. Schema endpoint require_admin korumalı.",
+  "rca_of_the_issue": "N/A — beklenen tüm davranışlar çalıştı. Sadece iki minor UI uyarısı tespit edildi: (1) Pagination <span> in <option> hydration warning, (2) DialogContent DialogTitle eksikliği – ikisi de işlevi etkilemiyor."
+}

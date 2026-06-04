@@ -34,7 +34,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, Database } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -62,6 +62,7 @@ import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import SeoTab from "../../components/admin/product-form/SeoTab";
 import StockTab from "../../components/admin/product-form/StockTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
+import TicimaxFieldsTab from "../../components/admin/product-form/TicimaxFieldsTab";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -247,8 +248,12 @@ export default function AdminProducts() {
     markup_rate: 0,
     hepsiburada_attributes: {},
     temu_attributes: {},
-    combine_products: []
+    combine_products: [],
+    ticimax_fields: {}
   });
+  const [ticimaxSchema, setTicimaxSchema] = useState([]);
+  const [ticimaxGroupOpen, setTicimaxGroupOpen] = useState({});
+  const [ticimaxFieldSearch, setTicimaxFieldSearch] = useState("");
 
   const [trendyolAttributesList, setTrendyolAttributesList] = useState([]);
   const [trendyolCategories, setTrendyolCategories] = useState([]);
@@ -313,6 +318,14 @@ export default function AdminProducts() {
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
   }, [page, pageSize, search, JSON.stringify(filters)]);
+
+  // Ticimax 113-alan şemasını bir kez çek (Ticimax sekmesi için)
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    axios.get(`${API}/products/meta/ticimax-schema`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => setTicimaxSchema(res.data.groups || []))
+      .catch(() => setTicimaxSchema([]));
+  }, []);
 
   // Open size-table editor when deep-linked from /admin/olcu-tablolari
   useEffect(() => {
@@ -998,6 +1011,7 @@ export default function AdminProducts() {
         }
         return base;
       })(),
+      ticimax_fields: product.ticimax_fields || {},
     });
     setModalOpen(true);
   };
@@ -1027,6 +1041,7 @@ export default function AdminProducts() {
       variants: [], newVariant: {},
       combine_products: [],
       attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR" },
+      ticimax_fields: {},
     });
   };
 
@@ -1557,6 +1572,9 @@ export default function AdminProducts() {
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
                  <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
                  <TabsTrigger value="combine" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Kombin</TabsTrigger>
+                 <TabsTrigger value="ticimax" data-testid="product-tab-ticimax" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all flex gap-2">
+                   <Database size={16} /> Ticimax (113)
+                 </TabsTrigger>
                  <TabsTrigger value="trendyol" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all ml-auto flex gap-2">
                    <Store size={16} /> Trendyol Ayarları
                  </TabsTrigger>
@@ -2612,6 +2630,20 @@ export default function AdminProducts() {
               {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}
               <TabsContent value="stock" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <StockTab formData={formData} setFormData={setFormData} />
+              </TabsContent>
+
+              {/* Ticimax 113-Alan Tab */}
+              <TabsContent value="ticimax" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <TicimaxFieldsTab
+                  schema={ticimaxSchema}
+                  values={formData.ticimax_fields || {}}
+                  onChange={(key, val) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      ticimax_fields: { ...(prev.ticimax_fields || {}), [key]: val },
+                    }))
+                  }
+                />
               </TabsContent>
             </Tabs>
           </div>
