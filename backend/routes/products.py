@@ -207,7 +207,7 @@ async def list_trashed_products(
 async def get_product(product_id: str):
     """Get single product by ID or slug"""
     product = await db.products.find_one(
-        {"$or": [{"id": product_id}, {"slug": product_id}]},
+        {"$or": [{"id": product_id}, {"slug": product_id}, {"slug_aliases": product_id}]},
         {"_id": 0}
     )
     if not product:
