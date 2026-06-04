@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 46 — Gelişmiş Ticimax-tarzı 3 kolonlu filtre paneli (Products.jsx + ProductFilters.jsx) e2e doğrulandı. Backend pytest 14/14 PASS. Frontend e2e: admin login -> /admin/urunler. Header 'Ürünler (346)'. 'Gelişmiş Filtreleme' butonu paneli açıyor, 59 adet pf-* data-testid render ediliyor (pf-supplier, pf-urun_karti_id, pf-status, pf-min_price, pf-attr_key, pf-is_showcase, pf-clear-btn dahil). pf-supplier=Miss Perry -> 1 ürün. pf-clear-btn -> 346 geri döndü. pf-urun_karti_id=1221 -> 1. pf-is_showcase=Hayır -> 5. /api/products/meta/filter-options require_admin korumalı; payload {brands, suppliers, currencies, attribute_groups} doğru. Yeni filtreler (supplier, tf_VITRIN 1/0, min/max_price, attr_key+attr_value, discounted, has_image, multi_barcode, has_variants, tfmin_ALISFIYATI, urun_karti_id, gtip, breadcrumb, tag, name, varyasyon_id) hepsi 200 ve beklenen sonuçlar. Çöp Kutusu butonu görünür (regresyon ok).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Products list Pagination", "issues": ["React hydration error: <span> inside <option> (Pagination.jsx ~line 160). Iteration_44'ten beri açık, işlevsel etki yok."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration46_advanced_filters.py",
+    "/app/test_reports/pytest/iteration_46.xml"
+  ],
+  "action_items": [
+    "(Opsiyonel/devam eden) Pagination.jsx <option> içinde <span> kaldırılıp düz string render edilsin (hydration warning)."
+  ],
+  "critical_code_review_comments": [
+    "backend/routes/products.py:30-323 — get_products() artık ~70 parametre alıyor + Request.query_params üzerinden dinamik tf_/tfmin_/tfmax_ parametrelerini tarıyor. Çalışıyor, ancak fonksiyon 290+ satır oldu; tf_ generic handler ayrı bir helper'a (build_ticimax_filters(request)) çekilirse okunabilirlik artar.",
+    "products.py:298 — tf_<COL>=__nonempty__ için {'$nin': ['', None, 0]} kullanılıyor; metin alanlarında 0'ı dolu saymaması doğru, ancak metinsel '0' string'i de eleniyor. Bu BOOL/numeric için bilinçli; text alanlar için _nonempty_ pek mantıklı değil — sorun değil.",
+    "products.py:307-308 — range_acc'da tfmin_/tfmax_ alanları regex değil sayısal karşılaştırma yapıyor; BOOL kolonlar için range mantıksız ancak input alanında tipik olarak görünmüyor; ek validate eklenebilir.",
+    "products.py:331-364 /meta/filter-options — attributes taraması find().to_list YERİNE async for ile streaming yapıyor, iyi. Ancak büyük katalogda her istekte tüm ürünlerin attributes'unu tarıyor; 5dk TTL'li basit in-memory cache fayda sağlar.",
+    "ProductFilters.jsx — 59 pf-* testid mevcut; tüm select'ler native <select> (shadcn değil), bu sayede playwright select_option ile sorunsuz çalışıyor (iyi tercih).",
+    "Products.jsx ~1395-1425 — fetchProducts useEffect bağımlılığı JSON.stringify(filters) ile güncellendiğinde otomatik refetch ediliyor; iyi. Ancak her tuş vuruşunda fetch atıyor (input alanlarda); 300-500ms debounce ileride performans için önerilir.",
+    "Pagination.jsx ~160 — <option><span data-ve-dynamic=true>...</span></option> hydration uyarısı veriyor; düz {label} yeterli."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration46_advanced_filters.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 pytest)",
+    "frontend": "100% (panel açılış, 59 pf-* testid, supplier=Miss Perry=1, clear=346, urun_karti_id=1221=>1, is_showcase=Hayır=>5, Çöp Kutusu görünür)"
+  },
+  "test_credentials": "admin@facette.com / admin123 — POST /api/auth/login?email=...&password=... (query param)",
+  "seed_data_creation": "Yok — sadece okuma testleri.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Yeni gelişmiş filtre paneli /admin/urunler altında 'Gelişmiş Filtreleme' butonu ile açılıyor. ProductFilters.jsx tüm alanları native <select>+<input> ile render eder; data-testid='pf-<key>' formatı tutarlı (örn pf-supplier, pf-urun_karti_id, pf-is_showcase, pf-attr_key, pf-clear-btn). Backend /api/products?status=all=346 baz alınmalı. tf_<COL>, tfmin_<COL>, tfmax_<COL> generic parametreler ticimax_fields üzerinde çalışıyor. /api/products/meta/filter-options require_admin korumalı.",
+  "rca_of_the_issue": "N/A — tüm beklenen davranışlar çalışıyor. İlk playwright denemesinde page.wait_for_url('**/admin**') /admin/login'i de match ettiği için login'in tamamlandığını yanıltıcı şekilde rapor etmişti; expect_response ile düzeltildi ve gerçek sonuçlar alındı."
+}

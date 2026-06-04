@@ -1,12 +1,13 @@
 """
 Product routes - CRUD, search, filtering
 """
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range
+from ticimax_schema import BOOL_COLS as TICIMAX_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
 import io
@@ -27,6 +28,7 @@ def generate_slug(name: str) -> str:
 
 @router.get("")
 async def get_products(
+    request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
     category: Optional[str] = None,
@@ -47,11 +49,40 @@ async def get_products(
     stock_code: Optional[str] = None,
     barcode: Optional[str] = None,
     date_from: Optional[str] = None,
-    date_to: Optional[str] = None
+    date_to: Optional[str] = None,
+    # --- Gelişmiş Ticimax tarzı filtreler ---
+    urun_karti_id: Optional[str] = None,
+    varyasyon_id: Optional[str] = None,
+    name: Optional[str] = None,
+    gtip: Optional[str] = None,
+    breadcrumb: Optional[str] = None,
+    supplier: Optional[str] = None,
+    tag: Optional[str] = None,
+    has_image: Optional[str] = None,
+    has_variants: Optional[str] = None,
+    has_video: Optional[str] = None,
+    multi_barcode: Optional[str] = None,
+    discounted: Optional[str] = None,
+    attr_key: Optional[str] = None,
+    attr_value: Optional[str] = None,
+    pub_date_from: Optional[str] = None,
+    pub_date_to: Optional[str] = None,
 ):
-    """Get products with filtering and pagination"""
+    """Get products with filtering and pagination.
+
+    Gelişmiş filtreler (Ticimax paneli ile birebir): yukarıdaki açık parametrelerin
+    yanı sıra `ticimax_fields` ham verisi üzerinde çalışan dinamik parametreler de
+    kabul edilir:
+      - tf_<KOLON>=deger        → ticimax_fields.<KOLON> (BOOL ise eşitlik, değilse regex)
+      - tf_<KOLON>=__nonempty__ → alan dolu (Var)
+      - tf_<KOLON>=__empty__    → alan boş (Yok)
+      - tfmin_<KOLON> / tfmax_<KOLON> → sayısal aralık (ticimax_fields.<KOLON>)
+    Veri henüz yoksa bile yapı hazırdır; senkron aktifleşince otomatik sorgulanır.
+    """
     skip = (page - 1) * limit
     query = {}
+    # `and_clauses` — yeni gelişmiş filtreler birbirini ezmeden eklenir.
+    and_clauses: list = []
     # Çöp kutusundaki (soft-deleted) ürünler normal listelerde/storefront'ta görünmez
     query["is_deleted"] = {"$ne": True}
     
@@ -163,7 +194,122 @@ async def get_products(
             query["price"]["$lte"] = max_price
         else:
             query["price"] = {"$lte": max_price}
-    
+
+    # ============================================================
+    # GELİŞMİŞ FİLTRELER (Ticimax paneli)
+    # ============================================================
+    # --- Metin (regex) filtreleri ---
+    if urun_karti_id:
+        and_clauses.append({"urun_karti_id": {"$regex": re.escape(urun_karti_id.strip()), "$options": "i"}})
+    if varyasyon_id:
+        and_clauses.append({"variants.urun_id": {"$regex": re.escape(varyasyon_id.strip()), "$options": "i"}})
+    if name:
+        and_clauses.append({"name": {"$regex": re.escape(name.strip()), "$options": "i"}})
+    if gtip:
+        ge = re.escape(gtip.strip())
+        and_clauses.append({"$or": [
+            {"gtip_code": {"$regex": ge, "$options": "i"}},
+            {"ticimax_fields.GTIPKODU": {"$regex": ge, "$options": "i"}},
+        ]})
+    if breadcrumb:
+        be = re.escape(breadcrumb.strip())
+        and_clauses.append({"$or": [
+            {"breadcrumb": {"$regex": be, "$options": "i"}},
+            {"breadcrumb_category": {"$regex": be, "$options": "i"}},
+            {"ticimax_fields.BREADCRUMBKAT": {"$regex": be, "$options": "i"}},
+        ]})
+    if supplier:
+        se = re.escape(supplier.strip())
+        and_clauses.append({"$or": [
+            {"supplier": {"$regex": se, "$options": "i"}},
+            {"ticimax_fields.TEDARIKCI": {"$regex": se, "$options": "i"}},
+        ]})
+    if tag:
+        te = re.escape(tag.strip())
+        and_clauses.append({"$or": [
+            {"keywords": {"$regex": te, "$options": "i"}},
+            {"tags": {"$regex": te, "$options": "i"}},
+            {"ticimax_fields.ANAHTARKELIME": {"$regex": te, "$options": "i"}},
+        ]})
+
+    # --- Varlık (Var/Yok) filtreleri ---
+    def _bool_flag(v):
+        return str(v).strip() in ("1", "true", "evet", "yes")
+
+    if has_image is not None and has_image != "":
+        and_clauses.append({"images.0": {"$exists": _bool_flag(has_image)}})
+    if has_variants is not None and has_variants != "":
+        and_clauses.append({"variants.0": {"$exists": _bool_flag(has_variants)}})
+    if has_video is not None and has_video != "":
+        if _bool_flag(has_video):
+            and_clauses.append({"video_url": {"$nin": [None, ""]}})
+        else:
+            and_clauses.append({"$or": [{"video_url": {"$in": [None, ""]}}, {"video_url": {"$exists": False}}]})
+    if multi_barcode is not None and multi_barcode != "":
+        if _bool_flag(multi_barcode):
+            and_clauses.append({"variants.1": {"$exists": True}})
+        else:
+            and_clauses.append({"variants.1": {"$exists": False}})
+    if discounted is not None and discounted != "":
+        if _bool_flag(discounted):
+            and_clauses.append({"$or": [
+                {"sale_price": {"$gt": 0}},
+                {"ticimax_fields.INDIRIMLIFIYAT": {"$gt": 0}},
+            ]})
+
+    # --- Teknik detay (attributes) filtresi ---
+    if attr_key:
+        if attr_value:
+            and_clauses.append({f"attributes.{attr_key}.value": {"$regex": re.escape(attr_value.strip()), "$options": "i"}})
+        else:
+            and_clauses.append({f"attributes.{attr_key}": {"$exists": True}})
+
+    # --- Yayın tarihi aralığı (ticimax_fields.YAYINTARIHI, metinsel ISO karşılaştırma) ---
+    if pub_date_from or pub_date_to:
+        pub_q = {}
+        if pub_date_from:
+            pub_q["$gte"] = pub_date_from
+        if pub_date_to:
+            pub_q["$lte"] = pub_date_to + "T23:59:59"
+        and_clauses.append({"ticimax_fields.YAYINTARIHI": pub_q})
+
+    # --- Dinamik ticimax_fields parametreleri (tf_ / tfmin_ / tfmax_) ---
+    range_acc: dict = {}
+    for pkey, pval in request.query_params.items():
+        if pval is None or pval == "":
+            continue
+        if pkey.startswith("tfmin_"):
+            col = pkey[6:]
+            try:
+                range_acc.setdefault(col, {})["$gte"] = float(pval)
+            except ValueError:
+                pass
+        elif pkey.startswith("tfmax_"):
+            col = pkey[6:]
+            try:
+                range_acc.setdefault(col, {})["$lte"] = float(pval)
+            except ValueError:
+                pass
+        elif pkey.startswith("tf_"):
+            col = pkey[3:]
+            field = f"ticimax_fields.{col}"
+            if pval == "__nonempty__":
+                and_clauses.append({field: {"$nin": ["", None, 0]}})
+            elif pval == "__empty__":
+                and_clauses.append({"$or": [{field: {"$in": ["", None, 0]}}, {field: {"$exists": False}}]})
+            elif col in TICIMAX_BOOL_COLS:
+                try:
+                    and_clauses.append({field: int(float(pval))})
+                except ValueError:
+                    pass
+            else:
+                and_clauses.append({field: {"$regex": re.escape(str(pval).strip()), "$options": "i"}})
+    for col, rng in range_acc.items():
+        and_clauses.append({f"ticimax_fields.{col}": rng})
+
+    if and_clauses:
+        query.setdefault("$and", []).extend(and_clauses)
+
     sort_order = -1 if order == "desc" else 1
     
     products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
@@ -181,6 +327,41 @@ async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
     """Ürün kartında tüm Ticimax (113) alanını gruplu render etmek için şema."""
     from ticimax_schema import build_schema
     return {"groups": build_schema()}
+
+@router.get("/meta/filter-options")
+async def get_filter_options(current_user: dict = Depends(require_admin)):
+    """Gelişmiş filtre panelinin dropdown'larını besleyen dinamik veri.
+
+    Markalar, tedarikçiler, para birimleri ve teknik detay (attribute) grupları
+    canlı katalogdan distinct çekilir. Böylece sistem aktifleştikçe seçenekler
+    otomatik büyür.
+    """
+    base = {"is_deleted": {"$ne": True}}
+    brands = [b for b in await db.products.distinct("brand", base) if b]
+    suppliers = sorted(set(
+        [s for s in await db.products.distinct("supplier", base) if s]
+        + [s for s in await db.products.distinct("ticimax_fields.TEDARIKCI", base) if s]
+    ))
+    currencies = sorted(set(
+        [c for c in await db.products.distinct("currency", base) if c]
+        + [c for c in await db.products.distinct("ticimax_fields.PARABIRIMI", base) if c]
+    ))
+    # Teknik detay grupları: attributes anahtarları + label'ları
+    attr_groups: dict = {}
+    async for d in db.products.find(base, {"attributes": 1, "_id": 0}):
+        a = d.get("attributes")
+        if isinstance(a, dict):
+            for k, v in a.items():
+                if k not in attr_groups:
+                    label = v.get("label") if isinstance(v, dict) else None
+                    attr_groups[k] = label or k
+    attr_options = [{"key": k, "label": lbl} for k, lbl in sorted(attr_groups.items(), key=lambda x: str(x[1]))]
+    return {
+        "brands": sorted(brands),
+        "suppliers": suppliers,
+        "currencies": currencies,
+        "attribute_groups": attr_options,
+    }
 
 @router.get("/trash/list")
 async def list_trashed_products(

@@ -63,6 +63,7 @@ import SeoTab from "../../components/admin/product-form/SeoTab";
 import StockTab from "../../components/admin/product-form/StockTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
 import ProductDetailFields from "../../components/admin/product-form/ProductDetailFields";
+import ProductFilters from "../../components/admin/ProductFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -201,20 +202,73 @@ export default function AdminProducts() {
   const [techApplying, setTechApplying] = useState(false);
 
   const [filters, setFilters] = useState({
+    // Durum & kategori
     status: "all",
     category: "",
-    brand: "",
+    // Kimlik & metin
+    urun_karti_id: "",
+    varyasyon_id: "",
+    name: "",
     stock_code: "",
+    gtip: "",
     barcode: "",
-    min_stock: "",
-    max_stock: "",
-    is_showcase: false,
-    is_new: false,
-    is_opportunity: false,
-    is_free_shipping: false,
-    date_from: "",
-    date_to: ""
+    breadcrumb: "",
+    brand: "",
+    supplier: "",
+    tag: "",
+    ozel1: "", ozel2: "", ozel3: "", ozel4: "", ozel5: "",
+    seo_title: "", seo_keywords: "", seo_desc: "",
+    // Aralıklar
+    min_stock: "", max_stock: "",
+    min_price: "", max_price: "",
+    min_indirimli: "", max_indirimli: "",
+    min_alis: "", max_alis: "",
+    min_piyasa: "", max_piyasa: "",
+    // Tarih
+    date_from: "", date_to: "",
+    pub_date_from: "", pub_date_to: "",
+    // Dropdown / bayraklar (Seçiniz="" | Evet="1" | Hayır="0")
+    kdv_dahil: "",
+    para_birimi: "",
+    kart_aktif: "",
+    is_showcase: "",
+    is_opportunity: "",
+    is_new: "",
+    is_free_shipping: "",
+    has_image: "",
+    has_variants: "",
+    multi_barcode: "",
+    has_video: "",
+    discounted: "",
+    sureli_indirim: "",
+    yemek_karti: "",
+    teslim_goster: "",
+    ayni_gun: "",
+    entegrasyon: "",
+    mp1: "", mp2: "", mp3: "", mp4: "", mp5: "",
+    // Teknik detay
+    attr_key: "",
+    attr_value: "",
   });
+  const FILTERS_INITIAL = {
+    status: "all", category: "", urun_karti_id: "", varyasyon_id: "", name: "",
+    stock_code: "", gtip: "", barcode: "", breadcrumb: "", brand: "", supplier: "",
+    tag: "", ozel1: "", ozel2: "", ozel3: "", ozel4: "", ozel5: "",
+    seo_title: "", seo_keywords: "", seo_desc: "",
+    min_stock: "", max_stock: "", min_price: "", max_price: "",
+    min_indirimli: "", max_indirimli: "", min_alis: "", max_alis: "",
+    min_piyasa: "", max_piyasa: "", date_from: "", date_to: "",
+    pub_date_from: "", pub_date_to: "", kdv_dahil: "", para_birimi: "",
+    kart_aktif: "", is_showcase: "", is_opportunity: "", is_new: "",
+    is_free_shipping: "", has_image: "", has_variants: "", multi_barcode: "",
+    has_video: "", discounted: "", sureli_indirim: "", yemek_karti: "",
+    teslim_goster: "", ayni_gun: "", entegrasyon: "",
+    mp1: "", mp2: "", mp3: "", mp4: "", mp5: "", attr_key: "", attr_value: "",
+  };
+  const [filterOptions, setFilterOptions] = useState({ brands: [], suppliers: [], currencies: [], attribute_groups: [] });
+  // Tek noktadan filtre güncelleme: değişimde sayfayı 1'e çek.
+  const updateFilter = (key, value) => { setFilters((f) => ({ ...f, [key]: value })); setPage(1); };
+  const clearFilters = () => { setFilters(FILTERS_INITIAL); setPage(1); };
   const [showFilters, setShowFilters] = useState(false);
   // Tablo sıralaması (3 durumlu: yön -> ters -> varsayılan)
   const [sortBy, setSortBy] = useState({ field: null, dir: null });
@@ -325,6 +379,10 @@ export default function AdminProducts() {
     axios.get(`${API}/products/meta/ticimax-schema`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => setTicimaxSchema(res.data.groups || []))
       .catch(() => setTicimaxSchema([]));
+    // Gelişmiş filtre paneli dropdown verileri (marka/tedarikçi/para birimi/teknik detay)
+    axios.get(`${API}/products/meta/filter-options`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => setFilterOptions(res.data || {}))
+      .catch(() => {});
   }, []);
 
   // Open size-table editor when deep-linked from /admin/olcu-tablolari
@@ -533,16 +591,49 @@ export default function AdminProducts() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `${API}/products?page=${page}&limit=${pageSize}`;
-      if (search) url += `&search=${encodeURIComponent(search)}`;
-      if (filters.status) url += `&status=${filters.status}`;
-      if (filters.category) url += `&category=${encodeURIComponent(filters.category)}`;
-      if (filters.stock_code) url += `&stock_code=${encodeURIComponent(filters.stock_code)}`;
-      if (filters.barcode) url += `&barcode=${encodeURIComponent(filters.barcode)}`;
-      if (filters.date_from) url += `&date_from=${filters.date_from}`;
-      if (filters.date_to) url += `&date_to=${filters.date_to}`;
-      if (sortBy.field) url += `&sort=${sortBy.field}&order=${sortBy.dir}`;
-      const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      const p = new URLSearchParams();
+      p.set('page', page);
+      p.set('limit', pageSize);
+      if (search) p.set('search', search);
+      if (sortBy.field) { p.set('sort', sortBy.field); p.set('order', sortBy.dir); }
+
+      const f = filters;
+      const set = (key, val) => { if (val !== "" && val !== undefined && val !== null) p.set(key, val); };
+
+      // Doğrudan geçen parametreler (backend ile aynı ad)
+      [
+        'status', 'category', 'urun_karti_id', 'varyasyon_id', 'name', 'stock_code',
+        'gtip', 'barcode', 'breadcrumb', 'brand', 'supplier', 'tag',
+        'min_stock', 'max_stock', 'min_price', 'max_price',
+        'date_from', 'date_to', 'pub_date_from', 'pub_date_to',
+        'has_image', 'has_variants', 'has_video', 'multi_barcode', 'discounted',
+        'is_free_shipping', 'is_showcase', 'is_opportunity', 'is_new',
+        'attr_key', 'attr_value',
+      ].forEach((k) => set(k, f[k]));
+
+      // ticimax_fields sayısal aralıkları
+      const rangeMap = {
+        min_indirimli: 'tfmin_INDIRIMLIFIYAT', max_indirimli: 'tfmax_INDIRIMLIFIYAT',
+        min_alis: 'tfmin_ALISFIYATI', max_alis: 'tfmax_ALISFIYATI',
+        min_piyasa: 'tfmin_PIYASAFIYATI', max_piyasa: 'tfmax_PIYASAFIYATI',
+      };
+      Object.entries(rangeMap).forEach(([k, param]) => set(param, f[k]));
+
+      // ticimax_fields tekil alanları (tf_)
+      const tfMap = {
+        kdv_dahil: 'tf_KDVDAHIL', kart_aktif: 'tf_KARTAKTIF', para_birimi: 'tf_PARABIRIMI',
+        yemek_karti: 'tf_YEMEKKARTIODEMEYASAKLILISTESI',
+        teslim_goster: 'tf_TAHMINITESLIMSURESIGOSTER', ayni_gun: 'tf_TAHMINITESLIMSURESIAYNIGUN',
+        sureli_indirim: 'tf_SURELIINDIRIMOZELLIK', entegrasyon: 'tf_ENTEGRASYONGUNCELLEMEAKTIF',
+        mp1: 'tf_MARKETPLACEAKTIF', mp2: 'tf_MARKETPLACEAKTIF2', mp3: 'tf_MARKETPLACEAKTIF3',
+        mp4: 'tf_MARKETPLACEAKTIF4', mp5: 'tf_MARKETPLACEAKTIF5',
+        ozel1: 'tf_OZELALAN1', ozel2: 'tf_OZELALAN2', ozel3: 'tf_OZELALAN3',
+        ozel4: 'tf_OZELALAN4', ozel5: 'tf_OZELALAN5',
+        seo_title: 'tf_SEO_SAYFABASLIK', seo_keywords: 'tf_SEO_ANAHTARKELIME', seo_desc: 'tf_SEO_SAYFAACIKLAMA',
+      };
+      Object.entries(tfMap).forEach(([k, param]) => set(param, f[k]));
+
+      const res = await axios.get(`${API}/products?${p.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts(res.data?.products || []);
       setTotal(res.data?.total || 0);
     } catch (err) {
@@ -1323,72 +1414,15 @@ export default function AdminProducts() {
         </button>
       </div>
 
-      {/* Advanced Filters Panel */}
+      {/* Advanced Filters Panel — Ticimax tarzı 3 kolonlu gelişmiş filtre */}
       {showFilters && (
-        <div className="bg-white p-4 rounded-lg shadow-sm border mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Durum</label>
-            <select
-              value={filters.status}
-              onChange={(e) => { setFilters({...filters, status: e.target.value}); setPage(1); }}
-              className="w-full border px-3 py-2 rounded text-sm focus:ring-1 focus:ring-black outline-none"
-            >
-              <option value="all">Tümü (Aktif & Pasif)</option>
-              <option value="active">Sadece Aktifler</option>
-              <option value="passive">Sadece Pasifler</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Kategori</label>
-            <select
-              value={filters.category}
-              onChange={(e) => { setFilters({...filters, category: e.target.value}); setPage(1); }}
-              className="w-full border px-3 py-2 rounded text-sm focus:ring-1 focus:ring-black outline-none"
-            >
-              <option value="">Tüm Kategoriler</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.slug}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="lg:col-span-2">
-            <label className="block text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Arama Detayı</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Stok Kodu"
-                value={filters.stock_code}
-                onChange={(e) => setFilters({...filters, stock_code: e.target.value})}
-                className="w-full border px-3 py-2 rounded text-sm outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Barkod"
-                value={filters.barcode}
-                onChange={(e) => setFilters({...filters, barcode: e.target.value})}
-                className="w-full border px-3 py-2 rounded text-sm outline-none"
-              />
-            </div>
-          </div>
-          <div className="lg:col-span-2">
-            <label className="block text-xs text-gray-500 font-medium mb-1 uppercase tracking-wider">Eklenme Tarihi Aralığı</label>
-            <div className="flex gap-2 items-center">
-              <input
-                type="date"
-                value={filters.date_from}
-                onChange={(e) => { setFilters({...filters, date_from: e.target.value}); setPage(1); }}
-                className="w-full border px-3 py-2 rounded text-sm outline-none focus:ring-1 focus:ring-black"
-              />
-              <span className="text-gray-400 text-xs">-</span>
-              <input
-                type="date"
-                value={filters.date_to}
-                onChange={(e) => { setFilters({...filters, date_to: e.target.value}); setPage(1); }}
-                className="w-full border px-3 py-2 rounded text-sm outline-none focus:ring-1 focus:ring-black"
-              />
-            </div>
-          </div>
-        </div>
+        <ProductFilters
+          filters={filters}
+          update={updateFilter}
+          onClear={clearFilters}
+          categories={categories}
+          filterOptions={filterOptions}
+        />
       )}
 
       {/* =================================================================
