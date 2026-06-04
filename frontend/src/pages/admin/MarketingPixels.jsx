@@ -40,6 +40,60 @@ const TOKEN_HINTS = {
   snapchat: "Snap Marketing API Access Token",
 };
 
+const CAPI_TOKEN_GUIDE = {
+  meta: {
+    title: "Meta CAPI Token nasıl alınır?",
+    steps: [
+      "Events Manager'a git (business.facebook.com/events_manager).",
+      "Veri kaynağını (Pixel/Dataset) seç → Ayarlar (Settings).",
+      "Conversions API bölümüne in → 'Erişim Belirteci Oluştur' (Generate access token).",
+      "Çıkan token 'EAA' ile başlar ve ~180+ karakterdir. Kopyala, üstteki Access Token alanına yapıştır.",
+      "Pixel/Dataset ID'yi de yukarıdaki 'Etiket / Pixel ID' alanına gir, kaydet ve 'Bağlantıyı Test Et' ile doğrula.",
+    ],
+    link: "https://business.facebook.com/events_manager2",
+    linkText: "Events Manager'ı aç →",
+  },
+  google_ads: {
+    title: "GA4 Measurement Protocol API Secret nasıl alınır?",
+    steps: [
+      "Google Analytics → Yönetici (Admin) → Veri Akışları (Data Streams) → web akışını seç.",
+      "'Measurement Protocol API secrets' → 'Create' ile yeni secret oluştur.",
+      "Secret value'yu kopyala, Access Token alanına yapıştır.",
+      "Etiket alanına Measurement ID (G-XXXX) gir, kaydet ve test et.",
+    ],
+    link: "https://analytics.google.com/",
+    linkText: "Google Analytics'i aç →",
+  },
+  tiktok: {
+    title: "TikTok Events API Access Token nasıl alınır?",
+    steps: [
+      "TikTok Events Manager → Pixel/Event seç → Settings → 'Generate Access Token'.",
+      "Token'ı kopyala, Access Token alanına yapıştır; Pixel Code'u Etiket alanına gir.",
+    ],
+    link: "https://ads.tiktok.com/i18n/events_manager",
+    linkText: "TikTok Events Manager'ı aç →",
+  },
+  pinterest: {
+    title: "Pinterest Conversions API Token nasıl alınır?",
+    steps: [
+      "Pinterest Ads → Conversions → API access → 'Generate token' (conversions scope).",
+      "Token'ı Access Token alanına yapıştır; Tag ID'yi Etiket alanına gir.",
+    ],
+    link: "https://ads.pinterest.com/",
+    linkText: "Pinterest Ads'i aç →",
+  },
+  snapchat: {
+    title: "Snapchat Conversions API Token nasıl alınır?",
+    steps: [
+      "Snapchat Ads Manager → Events Manager → Pixel → Conversions API → token oluştur.",
+      "Token'ı Access Token alanına yapıştır; Pixel ID'yi Etiket alanına gir.",
+    ],
+    link: "https://ads.snapchat.com/",
+    linkText: "Snapchat Ads'i aç →",
+  },
+};
+
+
 const CAPI_PROVIDERS = ["meta", "google_ads", "tiktok", "pinterest", "snapchat"];
 
 const blankForm = {
@@ -225,6 +279,26 @@ export default function MarketingPixels() {
               <KeyRound size={14} /> Server-Side (CAPI) Ayarları
               <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded ml-1">SaaS / White-label uyumlu</span>
             </h3>
+
+            {/* Token nasıl alınır rehberi */}
+            {CAPI_TOKEN_GUIDE[form.provider] && (
+              <div className="bg-white border border-amber-200 rounded p-3 text-xs text-gray-700" data-testid="capi-token-guide">
+                <div className="font-semibold text-amber-900 mb-1 flex items-center gap-1">
+                  <KeyRound size={12} /> {CAPI_TOKEN_GUIDE[form.provider].title}
+                </div>
+                <ol className="list-decimal list-inside space-y-0.5">
+                  {CAPI_TOKEN_GUIDE[form.provider].steps.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ol>
+                {CAPI_TOKEN_GUIDE[form.provider].link && (
+                  <a href={CAPI_TOKEN_GUIDE[form.provider].link} target="_blank" rel="noreferrer"
+                    className="inline-block mt-2 text-amber-800 underline font-medium">
+                    {CAPI_TOKEN_GUIDE[form.provider].linkText || "İlgili sayfayı aç →"}
+                  </a>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-700 mb-1">Access Token  <span className="text-amber-700">(şifreli vault'a kaydedilir)</span></label>

@@ -515,6 +515,10 @@ api_router.include_router(themes_public_router)
 from routes.influencers import router as influencers_router
 api_router.include_router(influencers_router)
 
+# Amazon Selling Partner API (SP-API) — LWA only, no SigV4
+from routes.amazon_spapi import router as amazon_spapi_router
+api_router.include_router(amazon_spapi_router)
+
 # Root endpoint
 @api_router.get("/")
 async def root():

@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only smoke test for iteration 42 — Amazon SP-API page + Meta CAPI token guide. Admin login (admin@facette.com/admin123) → /admin/amazon renders correctly with amazon-spapi-page, amazon-status-disconnected, all 3 form inputs (client-id/client-secret/refresh-token) and 3 action buttons. amazon-test-btn + amazon-orders-btn are correctly disabled while not connected. Saving client_id='amzn1.application-oa2-client.test123' via amazon-save-btn shows 'Ayarlar kaydedildi' toast and the value persists after reload (status still 'disconnected' as expected since no refresh_token). Meta CAPI guide on /admin/ayarlar/pixel: with provider='meta' the capi-token-guide block renders steps including 'Events Manager' and 'Erişim Belirteci Oluştur'; capi-test-connection button still rendered. Cleanup done: DB integration_settings key='amazon_spapi' row deleted (1 row).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "MarketingPixels.jsx — CAPI_TOKEN_GUIDE map / CAPI_PROVIDERS list",
+        "issue": "Spec says 'Provider ga4 seçilince GA4 Measurement Protocol rehberi görünür', but selecting 'Google Analytics 4' (value='ga4') renders NO guide. Two compounding mismatches: (1) CAPI_PROVIDERS = ['meta','google_ads','tiktok','pinterest','snapchat'] does NOT include 'ga4', so the entire CAPI section (and thus capi-token-guide) is hidden when ga4 is selected. (2) The GA4 Measurement Protocol guide is keyed under 'google_ads' instead of 'ga4' (CAPI_TOKEN_GUIDE.google_ads.title = 'GA4 Measurement Protocol API Secret nasıl alınır?'). Result: the GA4 measurement-protocol guide is only reachable via the 'Google Ads (Enhanced Conv)' option — which is semantically wrong. For 'meta', everything works as specified.",
+        "selector": "[data-testid=\"capi-token-guide\"]",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "MarketingPixels.jsx: add 'ga4' to CAPI_PROVIDERS list AND add a CAPI_TOKEN_GUIDE.ga4 entry (or rename current 'google_ads' guide → 'ga4'). Decide which provider key represents the GA4 Measurement Protocol vs Google Ads Enhanced Conversions and disambiguate. Without this fix, selecting the 'ga4' provider hides the entire CAPI section, contradicting the iteration-42 spec."
+  ],
+  "critical_code_review_comments": [
+    "MarketingPixels.jsx:43-94 — CAPI_TOKEN_GUIDE.google_ads.title literally reads 'GA4 Measurement Protocol API Secret nasıl alınır?' which is confusing: that flow belongs to GA4 (analytics), not Google Ads conversion tracking. Two separate guides should exist: one for ga4 (MP API Secret) and one for google_ads (Enhanced Conversions Customer ID + OAuth).",
+    "MarketingPixels.jsx:97 — CAPI_PROVIDERS hard-coded; consider deriving from backend /providers response (each provider already exposes supports_capi).",
+    "AmazonSpApi.jsx:114-122 — 'Bağlı' is decided purely by status?.connected from backend; the page should also surface has_client_secret separately so admins know secret is stored even before refresh_token is added (currently only the placeholder hints at it).",
+    "AmazonSpApi.jsx:177-184 — disabling Test/Orders buttons solely on !status?.connected is correct for UX, but there's no inline hint telling the admin WHY they're greyed out (e.g. tooltip: 'Önce refresh token girip kaydedin'). Minor UX polish."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "skipped (frontend-only request)", "frontend": "~92% — Amazon flow 100%, Meta guide 100%, GA4 guide visibility FAILS per spec" },
+  "test_credentials": "admin@facette.com / admin123 via /admin/login",
+  "seed_data_creation": "Created 1 integration_settings row (key=amazon_spapi, client_id=amzn1.application-oa2-client.test123) during the save test, then deleted it post-test (db.integration_settings.delete_many({'key':'amazon_spapi'}) → 1 row removed).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Amazon SP-API frontend flow is fully working (render + save + persistence + disconnected status + disabled buttons). The only outstanding gap is the GA4 provider guide on MarketingPixels.jsx: 'ga4' is missing from CAPI_PROVIDERS and from CAPI_TOKEN_GUIDE map. After main agent fixes that, retest by selecting 'Google Analytics 4' in the provider dropdown and verifying [data-testid=capi-token-guide] becomes visible with GA4 Measurement Protocol steps.",
+  "rca_of_the_issue": "RCA — GA4 guide hidden: In /app/frontend/src/pages/admin/MarketingPixels.jsx line 97 CAPI_PROVIDERS only contains ['meta','google_ads','tiktok','pinterest','snapchat']. The 'isCapi' check (line 134) gates the entire CAPI section (incl. capi-token-guide block at line 285); since 'ga4' is not in the list, the section never renders for ga4. Additionally, CAPI_TOKEN_GUIDE has a 'google_ads' key whose copy describes the GA4 Measurement Protocol flow — the wrong key was used. Fix: add 'ga4' to CAPI_PROVIDERS and add CAPI_TOKEN_GUIDE.ga4 (move the existing google_ads steps to ga4; write a distinct entry for true Google Ads Enhanced Conversions if needed)."
+}
