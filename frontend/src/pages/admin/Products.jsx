@@ -216,6 +216,8 @@ export default function AdminProducts() {
     date_to: ""
   });
   const [showFilters, setShowFilters] = useState(false);
+  // Tablo sıralaması (3 durumlu: yön -> ters -> varsayılan)
+  const [sortBy, setSortBy] = useState({ field: null, dir: null });
 
   const [formData, setFormData] = useState({
     name: "", slug: "", description: "", short_description: "",
@@ -315,7 +317,7 @@ export default function AdminProducts() {
     fetchTrendyolCategories();
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
-  }, [page, pageSize, search, JSON.stringify(filters)]);
+  }, [page, pageSize, search, JSON.stringify(filters), JSON.stringify(sortBy)]);
 
   // Ürün detay alan şemasını bir kez çek (sekmelere gömülü ek alanlar için)
   useEffect(() => {
@@ -539,6 +541,7 @@ export default function AdminProducts() {
       if (filters.barcode) url += `&barcode=${encodeURIComponent(filters.barcode)}`;
       if (filters.date_from) url += `&date_from=${filters.date_from}`;
       if (filters.date_to) url += `&date_to=${filters.date_to}`;
+      if (sortBy.field) url += `&sort=${sortBy.field}&order=${sortBy.dir}`;
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       setProducts(res.data?.products || []);
       setTotal(res.data?.total || 0);
@@ -1093,6 +1096,37 @@ export default function AdminProducts() {
       .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   };
 
+  // Sıralanabilir sütun başlığı: 1. tık yön, 2. tık ters, 3. tık varsayılan
+  const handleSort = (field, firstDir = "asc") => {
+    setPage(1);
+    setSortBy((prev) => {
+      if (prev.field !== field) return { field, dir: firstDir };
+      const opposite = firstDir === "asc" ? "desc" : "asc";
+      if (prev.dir === firstDir) return { field, dir: opposite };
+      return { field: null, dir: null };
+    });
+  };
+  const SortTH = ({ field, label, firstDir = "asc", className = "" }) => {
+    const isActive = sortBy.field === field;
+    return (
+      <th
+        onClick={() => handleSort(field, firstDir)}
+        data-testid={`sort-${field}`}
+        className={`cursor-pointer select-none hover:text-orange-600 ${className}`}
+        title="Sıralamak için tıkla"
+      >
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {isActive ? (
+            sortBy.dir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />
+          ) : (
+            <ChevronDown size={13} className="opacity-25" />
+          )}
+        </span>
+      </th>
+    );
+  };
+
   // Detay alanlarını (ek ürün bilgileri) ilgili sekmelerin içinde render eder.
   const updateDetailField = (key, val) =>
     setFormData((prev) => ({
@@ -1433,19 +1467,21 @@ export default function AdminProducts() {
                 </button>
               </th>
               <th>Görsel</th>
-              <th>Ürün Adı</th>
-              <th>Stok Kodu</th>
+              <SortTH field="name" label="Ürün Adı" />
+              <SortTH field="urun_karti_id" label="Ürün Kart ID" />
+              <th>Ürün ID</th>
+              <SortTH field="stock_code" label="Stok Kodu" />
               <th>Bedenler</th>
-              <th>Fiyat</th>
-              <th>İşlemler</th>
-              <th>Eklenme Tarihi</th>
+              <SortTH field="price" label="Fiyat" />
+              <SortTH field="is_active" label="İşlemler" firstDir="desc" />
+              <SortTH field="created_at" label="Eklenme Tarihi" firstDir="desc" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="text-center py-8">Yükleniyor...</td></tr>
+              <tr><td colSpan={10} className="text-center py-8">Yükleniyor...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
             ) : (
               products.map((product) => (
                 <tr key={product.id} data-testid={`product-row-${product.id}`}>
@@ -1482,6 +1518,17 @@ export default function AdminProducts() {
                       {product.name}
                     </a>
                     <p className="text-xs text-gray-500">{product.category_name}</p>
+                  </td>
+                  <td className="text-sm font-mono whitespace-nowrap text-gray-600" data-testid={`product-kartid-${product.id}`}>
+                    {product.urun_karti_id || '-'}
+                  </td>
+                  <td className="text-xs font-mono text-gray-500 max-w-[140px]" data-testid={`product-urunid-${product.id}`}>
+                    {(() => {
+                      const ids = [...new Set((product.variants || []).map(v => v.urun_id).filter(Boolean))];
+                      if (ids.length === 0) return '-';
+                      if (ids.length <= 2) return ids.join(', ');
+                      return `${ids.slice(0, 2).join(', ')} +${ids.length - 2}`;
+                    })()}
                   </td>
                   <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || product.sku || '-'}</td>
                   <td>
