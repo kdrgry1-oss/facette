@@ -34,7 +34,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, Database } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -62,7 +62,7 @@ import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import SeoTab from "../../components/admin/product-form/SeoTab";
 import StockTab from "../../components/admin/product-form/StockTab";
 import CombineProductsTab from "../../components/admin/product-form/CombineProductsTab";
-import TicimaxFieldsTab from "../../components/admin/product-form/TicimaxFieldsTab";
+import ProductDetailFields from "../../components/admin/product-form/ProductDetailFields";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -252,8 +252,6 @@ export default function AdminProducts() {
     ticimax_fields: {}
   });
   const [ticimaxSchema, setTicimaxSchema] = useState([]);
-  const [ticimaxGroupOpen, setTicimaxGroupOpen] = useState({});
-  const [ticimaxFieldSearch, setTicimaxFieldSearch] = useState("");
 
   const [trendyolAttributesList, setTrendyolAttributesList] = useState([]);
   const [trendyolCategories, setTrendyolCategories] = useState([]);
@@ -319,7 +317,7 @@ export default function AdminProducts() {
     fetchGlobalSettings();
   }, [page, pageSize, search, JSON.stringify(filters)]);
 
-  // Ticimax 113-alan şemasını bir kez çek (Ticimax sekmesi için)
+  // Ürün detay alan şemasını bir kez çek (sekmelere gömülü ek alanlar için)
   useEffect(() => {
     const token = localStorage.getItem('token');
     axios.get(`${API}/products/meta/ticimax-schema`, { headers: { Authorization: `Bearer ${token}` } })
@@ -1052,6 +1050,21 @@ export default function AdminProducts() {
       .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   };
 
+  // Detay alanlarını (ek ürün bilgileri) ilgili sekmelerin içinde render eder.
+  const updateDetailField = (key, val) =>
+    setFormData((prev) => ({
+      ...prev,
+      ticimax_fields: { ...(prev.ticimax_fields || {}), [key]: val },
+    }));
+  const renderDetailFields = (groupLabels) => (
+    <ProductDetailFields
+      schema={ticimaxSchema}
+      groupLabels={groupLabels}
+      values={formData.ticimax_fields || {}}
+      onChange={updateDetailField}
+    />
+  );
+
   const handleDuplicate = async (product) => {
     try {
       const token = localStorage.getItem('token');
@@ -1150,8 +1163,8 @@ export default function AdminProducts() {
           </button>
           <button
             onClick={async () => {
-              if (!window.confirm("TÜM ürünlerin Trendyol/HB/Temu özelliklerini Ticimax'tan otomatik doldur?\n\nMevcut manuel girilen değerler korunur.")) return;
-              const t = toast.loading("Ticimax'tan teknik detaylar eşleniyor...");
+              if (!window.confirm("TÜM ürünlerin Trendyol/HB/Temu özelliklerini otomatik doldur?\n\nMevcut manuel girilen değerler korunur.")) return;
+              const t = toast.loading("Teknik detaylar eşleniyor...");
               try {
                 const token = localStorage.getItem('token');
                 const res = await axios.post(
@@ -1169,10 +1182,10 @@ export default function AdminProducts() {
             }}
             data-testid="ticimax-tekdetay-sync-btn"
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-all font-medium text-sm shadow-sm"
-            title="Ticimax master listesinden tüm ürünlerin teknik detaylarını eşler"
+            title="Ana listeden tüm ürünlerin teknik detaylarını eşler"
           >
             <RefreshCw size={16} />
-            Ticimax'tan Otomatik Doldur
+            Otomatik Doldur
           </button>
           <button
             onClick={() => techFileInputRef.current?.click()}
@@ -1572,9 +1585,6 @@ export default function AdminProducts() {
                  <TabsTrigger value="attributes" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Özellikler</TabsTrigger>
                  <TabsTrigger value="sizetable" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Ölçü Tablosu</TabsTrigger>
                  <TabsTrigger value="combine" className="data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:shadow-sm px-6 py-2 text-sm font-medium rounded-lg transition-all">Kombin</TabsTrigger>
-                 <TabsTrigger value="ticimax" data-testid="product-tab-ticimax" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all flex gap-2">
-                   <Database size={16} /> Ticimax (113)
-                 </TabsTrigger>
                  <TabsTrigger value="trendyol" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white px-6 py-2 text-sm font-medium rounded-lg transition-all ml-auto flex gap-2">
                    <Store size={16} /> Trendyol Ayarları
                  </TabsTrigger>
@@ -1741,7 +1751,7 @@ export default function AdminProducts() {
 
                       {/* Ticimax Senkronizasyon Kimlikleri */}
                       <div className="pt-3 border-t">
-                        <div className="text-xs font-bold text-gray-500 uppercase mb-2">Ticimax Senkron</div>
+                        <div className="text-xs font-bold text-gray-500 uppercase mb-2">Entegrasyon Kodları</div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="block text-[10px] text-gray-400 mb-1">Kart ID (ÜRÜNKARTIID)</label>
@@ -1766,7 +1776,7 @@ export default function AdminProducts() {
                             />
                           </div>
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-1">Ticimax export'undan otomatik yazılır. Varyantların ID'leri her varyantta `urun_id` olarak tutulur.</p>
+                        <p className="text-[10px] text-gray-400 mt-1">Ürün içe aktarımından otomatik yazılır. Varyantların ID'leri her varyantta `urun_id` olarak tutulur.</p>
                       </div>
                     </div>
 
@@ -1804,6 +1814,7 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
+                {renderDetailFields(["Kimlik & Kodlar", "Temel Bilgiler", "Tarihler"])}
               </TabsContent>
 
               {/* Pricing Tab */}
@@ -1850,7 +1861,7 @@ export default function AdminProducts() {
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all font-bold text-purple-600"
                           data-testid="product-member-price-1"
                         />
-                        <p className="text-[10px] text-gray-400 mt-1">Ticimax UYETIPIFIYAT1'den çekilir. Storefront'ta üye tipi 1 grubuna özel fiyat olarak gösterilir.</p>
+                        <p className="text-[10px] text-gray-400 mt-1">Üye Tipi 1 fiyatından çekilir. Storefront'ta üye tipi 1 grubuna özel fiyat olarak gösterilir.</p>
                       </div>
                       {/* FAZ 7 — İmalat modülü için */}
                       <div>
@@ -1968,6 +1979,7 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
+                {renderDetailFields(["Fiyatlandırma", "Üye Tipi Fiyatları"])}
               </TabsContent>
 
               {/* Attributes Tab */}
@@ -2560,6 +2572,7 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
+                {renderDetailFields(["Pazaryeri Entegrasyonu"])}
               </TabsContent>
 
               {/* Images Tab */}
@@ -2616,6 +2629,7 @@ export default function AdminProducts() {
               {/* SEO Tab */}
               <TabsContent value="seo" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <SeoTab formData={formData} setFormData={setFormData} />
+                {renderDetailFields(["SEO & Adwords"])}
               </TabsContent>
 
               {/* Combine Products Tab — Kombin Ürün Atama */}
@@ -2630,20 +2644,7 @@ export default function AdminProducts() {
               {/* Stock Tab — hızlı stok güncelleme; tam CRUD için "Varyantlar" sekmesi */}
               <TabsContent value="stock" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <StockTab formData={formData} setFormData={setFormData} />
-              </TabsContent>
-
-              {/* Ticimax 113-Alan Tab */}
-              <TabsContent value="ticimax" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <TicimaxFieldsTab
-                  schema={ticimaxSchema}
-                  values={formData.ticimax_fields || {}}
-                  onChange={(key, val) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      ticimax_fields: { ...(prev.ticimax_fields || {}), [key]: val },
-                    }))
-                  }
-                />
+                {renderDetailFields(["Stok & Durum", "Puan", "Sipariş Limitleri & Ödeme", "Boyut & Kargo", "Teslimat"])}
               </TabsContent>
             </Tabs>
           </div>
@@ -2981,7 +2982,7 @@ function TeknikDetayPanel({ details = {}, onChange }) {
         <div>
           <h3 className="text-base font-bold text-emerald-800">Teknik Detay</h3>
           <p className="text-xs text-emerald-700/70 mt-0.5">
-            Ticimax açıklamasından otomatik parse edilen özellikler. Düzenleyebilir veya yeni alan ekleyebilirsiniz.
+            Ürün açıklamasından otomatik parse edilen özellikler. Düzenleyebilir veya yeni alan ekleyebilirsiniz.
           </p>
         </div>
         <span className="text-xs font-semibold text-emerald-700 bg-emerald-200/60 px-2 py-1 rounded">

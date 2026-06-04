@@ -4,77 +4,44 @@ import { Textarea } from "../../ui/textarea";
 import { Switch } from "../../ui/switch";
 import { Label } from "../../ui/label";
 import { Badge } from "../../ui/badge";
-import { ChevronDown, ChevronRight, Search, Database } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 /**
- * Ticimax 113-alan düzenleme sekmesi.
- * Şema backend'den (/products/meta/ticimax-schema) gruplu gelir; alanlar
- * generic olarak render edilir ve formData.ticimax_fields'a yazılır.
+ * Ürün kartı içindeki mevcut sekmelere gömülen, gruplu ek alan editörü.
+ * `groupLabels` ile yalnızca ilgili gruplar render edilir; değerler
+ * formData.ticimax_fields üzerinden okunur/yazılır (kullanıcıya görünür
+ * herhangi bir "Ticimax" etiketi yoktur).
  */
-export default function TicimaxFieldsTab({ schema = [], values = {}, onChange }) {
-  const [open, setOpen] = useState({ 0: true });
-  const [search, setSearch] = useState("");
+export default function ProductDetailFields({ schema = [], groupLabels = [], values = {}, onChange }) {
+  const groups = useMemo(
+    () => schema.filter((g) => groupLabels.includes(g.label)),
+    [schema, groupLabels]
+  );
+  const [open, setOpen] = useState(() => ({ 0: true }));
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return schema;
-    const q = search.toLowerCase();
-    return schema
-      .map((g) => ({
-        ...g,
-        fields: g.fields.filter(
-          (f) => f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q)
-        ),
-      }))
-      .filter((g) => g.fields.length > 0);
-  }, [schema, search]);
-
-  const filledCount = Object.values(values || {}).filter(
-    (v) => v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0"
-  ).length;
-
-  if (!schema.length) {
-    return (
-      <div className="text-sm text-gray-500 py-10 text-center" data-testid="ticimax-empty">
-        Ticimax şeması yükleniyor veya bulunamadı.
-      </div>
-    );
-  }
-
+  if (!groups.length) return null;
   const set = (key, val) => onChange && onChange(key, val);
 
   return (
-    <div className="space-y-4" data-testid="ticimax-fields-tab">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Database size={16} className="text-indigo-600" />
-          <span>113 Ticimax alanı</span>
-          <Badge variant="secondary" data-testid="ticimax-filled-count">{filledCount} dolu</Badge>
-        </div>
-        <div className="relative w-full sm:w-72">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input
-            data-testid="ticimax-field-search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Alan ara (ör. SEO, fiyat, barkod)"
-            className="pl-9 h-9"
-          />
-        </div>
-      </div>
-
-      {filtered.map((group, gi) => {
-        const isOpen = search.trim() ? true : !!open[gi];
+    <div className="space-y-3" data-testid="product-detail-fields">
+      {groups.map((group, gi) => {
+        const isOpen = !!open[gi];
+        const filled = group.fields.filter((f) => {
+          const v = values?.[f.key];
+          return v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0";
+        }).length;
         return (
-          <div key={group.label} className="border border-gray-200 rounded-xl overflow-hidden">
+          <div key={group.label} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
             <button
               type="button"
-              data-testid={`ticimax-group-${gi}`}
+              data-testid={`detail-group-${group.label}`}
               onClick={() => setOpen((p) => ({ ...p, [gi]: !p[gi] }))}
               className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors"
             >
-              <span className="font-medium text-sm text-gray-800">{group.label}</span>
+              <span className="font-semibold text-xs uppercase tracking-widest text-gray-700">{group.label}</span>
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-xs">{group.fields.length}</Badge>
+                {filled > 0 && <Badge variant="secondary" className="text-[10px]">{filled} dolu</Badge>}
+                <Badge variant="outline" className="text-[10px]">{group.fields.length}</Badge>
                 {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               </div>
             </button>
@@ -82,10 +49,10 @@ export default function TicimaxFieldsTab({ schema = [], values = {}, onChange })
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 {group.fields.map((f) => {
                   const val = values?.[f.key];
-                  const testid = `ticimax-field-${f.key}`;
+                  const testid = `detail-field-${f.key}`;
                   if (f.type === "bool") {
                     return (
-                      <div key={f.key} className="flex items-center justify-between border rounded-lg px-3 py-2 bg-white">
+                      <div key={f.key} className="flex items-center justify-between border rounded-lg px-3 py-2">
                         <Label className="text-xs text-gray-700">{f.label}</Label>
                         <Switch
                           data-testid={testid}
