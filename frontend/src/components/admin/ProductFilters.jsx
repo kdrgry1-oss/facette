@@ -9,7 +9,7 @@
  * data-testid kuralı: her alan benzersiz `pf-<key>` test id'sine sahiptir.
  */
 import React from "react";
-import { X, RotateCcw } from "lucide-react";
+import { RotateCcw, Search } from "lucide-react";
 
 const EVET_HAYIR = [
   { v: "", l: "Seçiniz" },
@@ -104,23 +104,40 @@ function DateRange({ label, kFrom, kTo, filters, update }) {
   );
 }
 
-export const ProductFilters = ({ filters, update, onClear, categories = [], filterOptions = {} }) => {
+export const ProductFilters = ({ filters, update, onApply, onClear, categories = [], filterOptions = {} }) => {
   const { suppliers = [], currencies = [], attribute_groups = [] } = filterOptions;
 
   const currencyOpts = [{ v: "", l: "Seçiniz" }, ...currencies.map((c) => ({ v: c, l: c }))];
   const attrOpts = [{ v: "", l: "Seçiniz" }, ...attribute_groups.map((a) => ({ v: a.key, l: a.label }))];
 
+  // Enter'a basınca girilen filtreleri uygula (herhangi bir alandan).
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onApply && onApply();
+    }
+  };
+
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border mb-6" data-testid="product-filters-panel">
+    <div className="bg-white p-4 rounded-lg shadow-sm border mb-6" data-testid="product-filters-panel" onKeyDown={handleKeyDown}>
       <div className="flex items-center justify-between mb-3 pb-2 border-b">
         <h3 className="text-sm font-semibold text-gray-800">Gelişmiş Filtreleme</h3>
-        <button
-          onClick={onClear}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 border rounded hover:bg-gray-50"
-          data-testid="pf-clear-btn"
-        >
-          <RotateCcw size={14} /> Filtreleri Temizle
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onClear}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 border rounded hover:bg-gray-50"
+            data-testid="pf-clear-btn"
+          >
+            <RotateCcw size={14} /> Filtreleri Temizle
+          </button>
+          <button
+            onClick={onApply}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium text-white bg-black rounded hover:bg-gray-800"
+            data-testid="pf-apply-btn"
+          >
+            <Search size={14} /> Listele
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
@@ -204,6 +221,24 @@ export const ProductFilters = ({ filters, update, onClear, categories = [], filt
           <Text label="SEO Keywords" k="seo_keywords" value={filters.seo_keywords} update={update} />
           <Text label="SEO Description" k="seo_desc" value={filters.seo_desc} update={update} />
         </div>
+      </div>
+
+      {/* Alt aksiyon çubuğu — uzun panelde aşağıda da Listele/Temizle erişilebilir */}
+      <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t">
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-600 border rounded hover:bg-gray-50"
+          data-testid="pf-clear-btn-bottom"
+        >
+          <RotateCcw size={15} /> Filtreleri Temizle
+        </button>
+        <button
+          onClick={onApply}
+          className="flex items-center gap-1.5 px-6 py-2 text-sm font-medium text-white bg-black rounded hover:bg-gray-800"
+          data-testid="pf-apply-btn-bottom"
+        >
+          <Search size={15} /> Listele
+        </button>
       </div>
     </div>
   );
