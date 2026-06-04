@@ -154,6 +154,7 @@ export const ProductFilters = ({ filters, update, onApply, onClear, categories =
             <label className={labelCls}>Kategori</label>
             <CategoryTreeSelect
               categories={categories}
+              counts={filterOptions.category_counts || {}}
               value={filters.category_id}
               onChange={(id) => update("category_id", id)}
             />

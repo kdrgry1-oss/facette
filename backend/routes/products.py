@@ -361,11 +361,22 @@ async def get_filter_options(current_user: dict = Depends(require_admin)):
                     label = v.get("label") if isinstance(v, dict) else None
                     attr_groups[k] = label or k
     attr_options = [{"key": k, "label": lbl} for k, lbl in sorted(attr_groups.items(), key=lambda x: str(x[1]))]
+    # Kategori başına ürün sayısı (category_ids atalar dahil → üst kategori toplamı verir)
+    category_counts: dict = {}
+    pipeline = [
+        {"$match": {"is_deleted": {"$ne": True}}},
+        {"$unwind": "$category_ids"},
+        {"$group": {"_id": "$category_ids", "count": {"$sum": 1}}},
+    ]
+    async for row in db.products.aggregate(pipeline):
+        if row.get("_id"):
+            category_counts[str(row["_id"])] = row["count"]
     return {
         "brands": sorted(brands),
         "suppliers": suppliers,
         "currencies": currencies,
         "attribute_groups": attr_options,
+        "category_counts": category_counts,
     }
 
 @router.get("/trash/list")

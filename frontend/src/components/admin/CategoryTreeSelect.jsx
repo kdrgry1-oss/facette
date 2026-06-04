@@ -17,7 +17,7 @@ const norm = (s) =>
     .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g")
     .replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c");
 
-export const CategoryTreeSelect = ({ categories = [], value = "", onChange }) => {
+export const CategoryTreeSelect = ({ categories = [], counts = {}, value = "", onChange }) => {
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
@@ -109,6 +109,14 @@ export const CategoryTreeSelect = ({ categories = [], value = "", onChange }) =>
           <span className="text-sm flex-1 truncate" onClick={() => select(cat.id, cat.name)}>
             {cat.name}
           </span>
+          {counts[cat.id] != null && (
+            <span
+              className={`text-[11px] tabular-nums shrink-0 px-1.5 py-0.5 rounded-full ${value === cat.id ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"}`}
+              data-testid={`cattree-count-${cat.id}`}
+            >
+              {counts[cat.id]}
+            </span>
+          )}
         </div>
         {hasChildren && isOpen && children.map((ch) => renderNode(ch, depth + 1))}
       </div>
