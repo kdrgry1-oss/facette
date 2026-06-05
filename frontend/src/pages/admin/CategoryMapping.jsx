@@ -876,6 +876,20 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                                 Eksik özellikler: {r.missing_required_attrs.map((m) => m.name).join(", ")}
                               </div>
                             )}
+                            {(r.unmatched_values || []).length > 0 && (
+                              <div className="mt-1" data-testid={`unmatched-${r.stock_code}`}>
+                                <div className="text-[10px] font-semibold text-gray-700 mb-0.5">Karşılığı olmayan değerler (eşleştirilecek):</div>
+                                <div className="flex flex-wrap gap-1">
+                                  {r.unmatched_values.map((u, k) => (
+                                    <span key={k} className="inline-flex items-center gap-1 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5 text-[10px]">
+                                      <span className="text-gray-600">{u.attr_name}:</span>
+                                      <span className="font-semibold text-amber-800">{u.local_value}</span>
+                                      {u.required && <span className="text-red-600 font-bold">*</span>}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                             {(r.warnings || []).length > 0 && (
                               <div className="text-[10px] text-gray-500 mt-0.5">
                                 Uyarı: {r.warnings.join(", ")}
