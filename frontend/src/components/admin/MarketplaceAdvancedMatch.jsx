@@ -189,6 +189,11 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
       const id = String(a.id ?? a.attribute?.id ?? "");
       const name = (a.name || a.attribute?.name || "").toLowerCase().trim();
       if (next[id]) { alreadyMapped++; return; }
+      // Trendyol "Materyal Bileşeni" → bizdeki veri "Ürün İçerik Bilgisi"nde
+      if (name.includes("materyal bileşeni")) {
+        const ic = globalAttrs.find((ga) => (ga.name || "").toLowerCase().includes("içerik"));
+        if (ic) { next[id] = ic.name; count++; return; }
+      }
       const g = globalAttrs.find((ga) => {
         const gn = (ga.name || "").toLowerCase().trim();
         return (
@@ -579,9 +584,17 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
         axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/attributes`, { headers: auth() }),
         axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/values`, { headers: auth() }),
       ]);
-      const attrs = (a.data?.attributes || []).filter((x) => x.attributeValues?.length > 0);
+      const lv = v.data?.local_values || {};
+      // Listeli (attributeValues) özelliklerin yanı sıra, serbest-metin (allowCustom)
+      // ama sistemde değeri OLAN özellikleri de göster (ör. Materyal Bileşeni → Ürün İçerik Bilgisi).
+      const attrs = (a.data?.attributes || []).filter((x) => {
+        const nm = x.name || x.attribute?.name;
+        const hasVals = (x.attributeValues?.length || 0) > 0;
+        const isCustom = x.allowCustom || x.attribute?.allowCustom;
+        return hasVals || (isCustom && (lv[nm]?.length || 0) > 0);
+      });
       setMpAttrs(attrs);
-      setLocalValues(v.data?.local_values || {});
+      setLocalValues(lv);
       setValueMappings(v.data?.value_mappings || {});
       setHint(a.data?.hint || "");
       if (attrs.length && !selectedAttrId) setSelectedAttrId(String(attrs[0].id || attrs[0].attribute?.id));
@@ -814,19 +827,25 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                             </div>
                           </td>
                           <td className="px-4 py-2">
-                            <select
-                              value={mappedId}
-                              onChange={(e) =>
-                                setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
-                              }
-                              className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
-                              data-testid={`adv-valmap-${lv}`}
-                            >
-                              <option value="">— seçilmemiş —</option>
-                              {sortedMp.map((v) => (
-                                <option key={v.id} value={v.id}>{v.name}</option>
-                              ))}
-                            </select>
+                            {sortedMp.length === 0 ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1" data-testid={`adv-valmap-auto-${lv}`}>
+                                ✓ Otomatik gönderilir (serbest metin)
+                              </span>
+                            ) : (
+                              <select
+                                value={mappedId}
+                                onChange={(e) =>
+                                  setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
+                                }
+                                className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
+                                data-testid={`adv-valmap-${lv}`}
+                              >
+                                <option value="">— seçilmemiş —</option>
+                                {sortedMp.map((v) => (
+                                  <option key={v.id} value={v.id}>{v.name}</option>
+                                ))}
+                              </select>
+                            )}
                           </td>
                         </tr>
                       );

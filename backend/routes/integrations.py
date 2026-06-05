@@ -1275,7 +1275,19 @@ async def sync_products_to_trendyol(
                     _push(ty_id, value_id=def_val)
                 else:
                     _push(ty_id, custom=def_val)
-                
+
+        # 🎯 GARANTİ: Trendyol "Materyal Bileşeni" (serbest metin / allowCustom) alanı,
+        # mapping yapılmamış olsa bile HER kategoride ürünün "Ürün İçerik Bilgisi"
+        # değerinden otomatik gönderilir. local_vals["materyal bileşeni"] köprü ile dolar.
+        icerik_val = local_vals.get("materyal bileşeni")
+        if icerik_val:
+            for m_ty_id, m_meta in meta.items():
+                if m_ty_id in processed:
+                    continue
+                mname = (m_meta.get("name") or "").lower()
+                if "materyal bileşeni" in mname and m_meta.get("allow_custom"):
+                    _push(m_ty_id, custom=icerik_val)
+
         return item_attrs
     
     for product in products:

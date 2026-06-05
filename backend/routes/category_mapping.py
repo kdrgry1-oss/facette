@@ -431,6 +431,9 @@ async def bulk_auto_match_attributes(
         nm = (mp_name or "").lower().strip()
         if not nm:
             return None
+        # Trendyol "Materyal Bileşeni" → bizdeki veri "Ürün İçerik Bilgisi"nde durur
+        if "materyal bileşeni" in nm:
+            return "Ürün İçerik Bilgisi"
         for ga in global_attrs:
             gn = (ga.get("name") or "").lower().strip()
             if not gn:
@@ -731,10 +734,14 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     global_attrs = await db.attributes.find({}, {"_id": 0}).to_list(length=2000)
     def _match_global(nm: str):
         n = (nm or "").lower().strip()
-        if not n: return None
+        if not n:
+            return None
+        if "materyal bileşeni" in n:
+            return "Ürün İçerik Bilgisi"
         for ga in global_attrs:
             gn = (ga.get("name") or "").lower().strip()
-            if not gn: continue
+            if not gn:
+                continue
             if gn == n or n in gn or gn in n:
                 return ga.get("name")
             if (n in ("color", "web color", "renk") and gn == "renk") or \
@@ -747,7 +754,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     for a in mp_attrs:
         aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
         nm = a.get("name") or a.get("attribute", {}).get("name") or ""
-        if not aid or aid in existing_ids: continue
+        if not aid or aid in existing_ids:
+            continue
         local = _match_global(nm)
         if local:
             existing_attr_maps.append({"local_attr": local, "mp_attr_id": int(aid) if aid.isdigit() else aid})
@@ -764,7 +772,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     # Lokal değerleri topla (ürünlerden + global attributes + ticimax master)
     local_values: dict = {}
     def _add(nm, vv):
-        if not nm or vv in (None, ""): return
+        if not nm or vv in (None, ""):
+            return
         local_values.setdefault(str(nm).strip(), set()).add(str(vv).strip())
     def _walk(attrs):
         if isinstance(attrs, dict):
@@ -780,13 +789,15 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     cat_doc = await db.categories.find_one({"id": category_id}, {"_id": 0, "name": 1})
     cat_name = (cat_doc or {}).get("name", "") or ""
     or_q = [{"category_id": category_id}]
-    if cat_name: or_q.append({"category_name": cat_name})
+    if cat_name:
+        or_q.append({"category_name": cat_name})
     async for p in db.products.find({"$or": or_q}, {"_id": 0, "attributes": 1, "variants": 1}):
         _walk(p.get("attributes"))
         for v in p.get("variants", []) or []:
             _walk(v.get("attributes"))
             if v.get("color"):
-                _add("Renk", v["color"]); _add("Web Color", v["color"])
+                _add("Renk", v["color"])
+                _add("Web Color", v["color"])
             if v.get("size"):
                 _add("Beden", v["size"])
     async for ga in db.attributes.find({}, {"_id": 0, "name": 1, "values": 1}):
@@ -803,7 +814,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
         aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
         nm = a.get("name") or a.get("attribute", {}).get("name") or ""
         mp_values = a.get("attributeValues") or []
-        if not aid or not mp_values: continue
+        if not aid or not mp_values:
+            continue
         is_size = _is_size_attr(nm)
         candidates = local_values.get(nm, [])
         # Beden için sistem global "Beden" set'ini de ekle (cross-attribute kazanç)
@@ -811,7 +823,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
             candidates = list(set(list(candidates) + local_values["Beden"]))
         for lv in candidates:
             key = f"{aid}|{lv}"
-            if val_mappings.get(key): continue
+            if val_mappings.get(key):
+                continue
             if is_size:
                 found = _match_size_value(lv, mp_values)
             else:
@@ -827,7 +840,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     for a in mp_attrs:
         aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
         nm = a.get("name") or a.get("attribute", {}).get("name") or ""
-        if not aid or default_mappings.get(aid): continue
+        if not aid or default_mappings.get(aid):
+            continue
         v = _resolve_company_value(nm, company)
         if v:
             default_mappings[aid] = v
@@ -838,7 +852,8 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     for a in mp_attrs:
         aid = str(a.get("id") or a.get("attribute", {}).get("id") or "")
         nm = (a.get("name") or a.get("attribute", {}).get("name") or "").lower()
-        if not aid: continue
+        if not aid:
+            continue
         # Yaş Grubu özel
         if "yaş grubu" in nm or "yas grubu" in nm:
             if not default_mappings.get(aid):
@@ -1417,6 +1432,14 @@ async def get_advanced_values(
                 local_values.setdefault(nm, set()).add(sv)
 
     out = {k: sorted(list(v)) for k, v in local_values.items()}
+    # Trendyol "Materyal Bileşeni" serbest metin alanı için değerleri
+    # "Ürün İçerik Bilgisi" (ve kumaş içeriği) kaynaklarından köprüle —
+    # böylece değer-eşleştirme ekranında da görünür.
+    _icerik = set()
+    for _src in ("Ürün İçerik Bilgisi", "Kumaş Bilgisi", "Kumaş İçeriği", "Ürün İçeriği", "Kumaş içeriği"):
+        _icerik |= set(out.get(_src, []))
+    if _icerik:
+        out["Materyal Bileşeni"] = sorted(set(out.get("Materyal Bileşeni", [])) | _icerik)
     mapping = await db.category_mappings.find_one(
         {"category_id": local_category_id, "marketplace": marketplace}, {"_id": 0}
     ) or {}
