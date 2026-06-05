@@ -12,6 +12,7 @@ from .variants import router as variants_router
 from .webhooks import router as webhooks_router
 from .attributes import router as attributes_router
 from .upload import router as upload_router
+from .upload import files_router as upload_files_router
 from .settings import router as settings_router
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "webhooks_router",
     "attributes_router",
     "upload_router",
+    "upload_files_router",
     "settings_router",
 ]

@@ -36,6 +36,7 @@ from routes import (
     webhooks_router,
     attributes_router,
     upload_router,
+    upload_files_router,
     settings_router,
 )
 from routes.vendors import router as vendors_router
@@ -425,6 +426,7 @@ api_router.include_router(variants_router)
 api_router.include_router(webhooks_router)
 api_router.include_router(attributes_router)
 api_router.include_router(upload_router)
+api_router.include_router(upload_files_router)
 api_router.include_router(settings_router)
 api_router.include_router(vendors_router, prefix="/vendors")
 api_router.include_router(admin_rbac_router)
