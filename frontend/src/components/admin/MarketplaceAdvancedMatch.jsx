@@ -158,7 +158,7 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
         </button>
       </PopoverTrigger>
       <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]" align="start">
-        <Command>
+        <Command filter={(val, search) => (_normVal(val).includes(_normVal(search)) ? 1 : 0)}>
           <CommandInput placeholder="Değer ara..." data-testid={`${testId}-search`} />
           <CommandList>
             <CommandEmpty>Eşleşen değer yok</CommandEmpty>
