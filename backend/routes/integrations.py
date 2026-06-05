@@ -395,6 +395,28 @@ def _norm_val(s: str) -> str:
     Örn. 'Kısa / Mini' ≈ 'Kısa/Mini' ≈ 'kisamini'."""
     return re.sub(r"[^a-z0-9]", "", _normalize_attr_key(s))
 
+
+# Açık ve evrensel (kategoriden bağımsız) değer eşanlamlıları: lokal değer (norm) →
+# kabul edilebilir Trendyol değer adları (norm). Sadece anlamı net olanlar; belirsiz
+# olanlar (Sezon, Materyal vb.) kullanıcının kategori bazında eşleştirmesine bırakılır.
+_VALUE_SYNONYMS = {
+    "yakasiz": ["sifiryaka", "yakayok"],
+    "sifiryaka": ["yakasiz"],
+}
+
+
+def _resolve_value_id(name_map: dict, local_val: str):
+    """local_val'i Trendyol value_id'ye çöz: önce birebir (norm), sonra eşanlamlı."""
+    if not name_map or local_val in (None, ""):
+        return None
+    nv = _norm_val(str(local_val))
+    if nv in name_map:
+        return name_map[nv]
+    for syn in _VALUE_SYNONYMS.get(nv, []):
+        if syn in name_map:
+            return name_map[syn]
+    return None
+
 # Trendyol özellik adı -> bu değeri besleyebilecek lokal özellik kaynakları (normalize edilmiş).
 # Trendyol "Materyal Bileşeni" (serbest metin, allowCustom) bizdeki "Ürün İçerik Bilgisi"ne karşılık gelir.
 _TRENDYOL_ATTR_SYNONYMS = {
@@ -722,7 +744,7 @@ async def validate_products_for_trendyol(
                     for v in (a.get("attributeValues") or [])
                     if v.get("id") is not None and v.get("name")
                 }
-                if vname_map.get(_norm_val(str(lval))):
+                if _resolve_value_id(vname_map, lval):
                     continue
                 unmatched_values.append({
                     "mp_attr_id": int(aid),
@@ -1324,7 +1346,7 @@ async def sync_products_to_trendyol(
                 am_meta = meta.get(ty_id) or {}
                 name_map = am_meta.get("value_name_to_id") or {}
                 if name_map:
-                    auto_vid = name_map.get(_norm_val(str(local_val)))
+                    auto_vid = _resolve_value_id(name_map, local_val)
                     if auto_vid and _push(ty_id, value_id=auto_vid, custom=local_val):
                         continue
                 # Mapping yok ama allow_custom varsa local_val'i custom olarak yolla
@@ -1380,7 +1402,7 @@ async def sync_products_to_trendyol(
             if not lval:
                 continue
             name_map = m_meta.get("value_name_to_id") or {}
-            auto_vid = name_map.get(_norm_val(str(lval)))
+            auto_vid = _resolve_value_id(name_map, lval)
             if auto_vid:
                 _push(m_ty_id, value_id=auto_vid, custom=lval)
             else:
