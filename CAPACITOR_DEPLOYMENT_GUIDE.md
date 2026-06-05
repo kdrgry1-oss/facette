@@ -82,7 +82,7 @@ const config: CapacitorConfig = {
   bundledWebRuntime: false,
   server: {
     // Production'da kaldır - sadece development için
-    // url: 'https://erp-sync-core.preview.emergentagent.com',
+    // url: 'https://marketplace-sync-hub-5.preview.emergentagent.com',
     cleartext: false,
     androidScheme: 'https',
   },
