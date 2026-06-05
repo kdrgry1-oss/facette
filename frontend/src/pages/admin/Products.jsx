@@ -34,7 +34,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -156,6 +156,7 @@ export default function AdminProducts() {
   const [barcodePushOpen, setBarcodePushOpen] = useState(false);
   const [barcodePushText, setBarcodePushText] = useState("");
   const [barcodePushLoading, setBarcodePushLoading] = useState(false);
+  const [validationBlock, setValidationBlock] = useState(null);
   // URL'den ürün ID'si — `/admin/urunler/{productId}` ile gelen direct link
   const { productId: urlProductId } = useParams();
   const navigate = useNavigate();
@@ -3041,9 +3042,33 @@ export default function AdminProducts() {
                     .filter(Boolean);
                   if (!codes.length) return;
                   setBarcodePushLoading(true);
+                  const token = localStorage.getItem('token');
+                  // 1) ÖNCE DOĞRULA — Trendyol karşılığı olmayan değer/eksik varsa AKTARMA, uyar.
+                  const tv = toast.loading(`${codes.length} ürün doğrulanıyor...`);
+                  try {
+                    const vr = await axios.post(
+                      `${API}/integrations/trendyol/products/validate`,
+                      { barcodes: codes, stock_codes: codes },
+                      { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+                    );
+                    toast.dismiss(tv);
+                    const blocked = (vr.data?.results || []).filter(
+                      (r) => !r.is_valid || (r.unmatched_values || []).length || (r.missing_required_attrs || []).length
+                    );
+                    if (blocked.length) {
+                      setBarcodePushLoading(false);
+                      setValidationBlock(blocked);
+                      return; // AKTARMA — kullanıcı eşleştirmeyi yapsın
+                    }
+                  } catch (e) {
+                    toast.dismiss(tv);
+                    toast.error(e.response?.data?.detail || "Doğrulama başarısız");
+                    setBarcodePushLoading(false);
+                    return;
+                  }
+                  // 2) Doğrulama temiz → aktar
                   const t = toast.loading(`${codes.length} kod Trendyol'a aktarılıyor...`);
                   try {
-                    const token = localStorage.getItem('token');
                     // Hem barkod hem stok_kodu olarak dene — backend ikisini de kontrol eder
                     const res = await axios.post(
                       `${API}/integrations/trendyol/products/sync`,
@@ -3071,6 +3096,71 @@ export default function AdminProducts() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Aktarım Engellendi — Trendyol karşılığı olmayan değerler */}
+      <Dialog open={!!validationBlock} onOpenChange={(o) => { if (!o) setValidationBlock(null); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="validation-block-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle size={20} /> Aktarım Durduruldu — Eşleştirme Gerekli
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-600 mb-3">
+            Aşağıdaki ürünlerde bazı değerlerin <b>Trendyol karşılığı bulunamadı</b>. Yanlış aktarımı
+            önlemek için bu ürünler <b>gönderilmedi</b>. Lütfen ilgili kategoride değer eşleştirmesini
+            yapın, ardından tekrar aktarın.
+          </p>
+          <div className="space-y-3">
+            {(validationBlock || []).map((r, i) => (
+              <div key={i} className="border border-red-200 bg-red-50/50 rounded-lg p-3" data-testid={`vblock-item-${i}`}>
+                <div className="font-semibold text-sm text-gray-900 mb-1">
+                  {r.name || r.stock_code} <span className="text-gray-400 font-normal">({r.stock_code})</span>
+                </div>
+                {(r.errors || []).filter((e) => !e.includes("karşılığı yok")).map((e, j) => (
+                  <div key={j} className="text-xs text-red-600">• {e}</div>
+                ))}
+                {(r.unmatched_values || []).length > 0 && (
+                  <div className="mt-1.5">
+                    <div className="text-xs font-medium text-gray-700 mb-1">Karşılığı olmayan değerler:</div>
+                    <ul className="text-xs text-gray-700 space-y-0.5">
+                      {r.unmatched_values.map((u, k) => (
+                        <li key={k} className="flex items-center gap-1.5" data-testid={`vblock-${r.stock_code}-${u.mp_attr_id}`}>
+                          <span className="px-1.5 py-0.5 bg-white border border-gray-300 rounded">{u.attr_name}</span>
+                          <span className="text-gray-400">=</span>
+                          <span className="font-semibold text-amber-700">{u.local_value}</span>
+                          {u.required && <span className="text-[10px] text-red-600 font-bold ml-1">(ZORUNLU)</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(r.missing_required_attrs || []).length > 0 && (
+                  <div className="text-xs text-red-600 mt-1">
+                    Eksik zorunlu özellik: {r.missing_required_attrs.map((m) => m.name).join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 mt-4 pt-3 border-t">
+            <button
+              onClick={() => setValidationBlock(null)}
+              className="px-4 py-2 text-sm text-gray-600 border rounded hover:bg-gray-50"
+              data-testid="vblock-close-btn"
+            >
+              Kapat
+            </button>
+            <button
+              onClick={() => { setValidationBlock(null); navigate("/admin/kategori-eslestir"); }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-black rounded hover:bg-gray-800"
+              data-testid="vblock-open-mapping-btn"
+            >
+              <Store size={15} /> Eşleştirme Ekranını Aç
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
 
       {/* Çöp Kutusu */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>

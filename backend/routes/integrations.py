@@ -561,6 +561,7 @@ async def validate_products_for_trendyol(
         errors: list[str] = []
         warnings: list[str] = []
         missing_required_attrs: list[dict] = []
+        unmatched_values: list[dict] = []
 
         cat_id = p.get("category_id")
         cat_name = p.get("category_name") or ""
@@ -636,7 +637,11 @@ async def validate_products_for_trendyol(
 
             def _walk(attrs):
                 if isinstance(attrs, dict):
-                    for k, v in attrs.items():
+                    items = sorted(
+                        attrs.items(),
+                        key=lambda kv: 1 if str(kv[0]).lower().startswith("ticimax_") else 0,
+                    )
+                    for k, v in items:
                         if isinstance(v, dict):
                             nm = v.get("label") or v.get("name") or k
                             vv = v.get("value") or v.get("attribute_value")
@@ -658,7 +663,6 @@ async def validate_products_for_trendyol(
                     _add_lv("Web Color", v["color"])
                 if v.get("size"):
                     _add_lv("Beden", v["size"])
-                    _add_lv("Boy", v["size"])
             _bridge_trendyol_attr_synonyms(local_vals)
 
             for ra in req_attrs:
@@ -684,6 +688,51 @@ async def validate_products_for_trendyol(
             if missing_required_attrs:
                 errors.append(f"{len(missing_required_attrs)} zorunlu özellik eksik")
 
+            # 🔎 Listeli (enum) değerlerin Trendyol karşılığı var mı? Yoksa aktarım engellenir
+            # (allowCustom alanlar serbest metindir, her zaman gönderilir → kontrol edilmez).
+            val_mappings_v = (cm or {}).get("value_mappings", {}) or {}
+            try:
+                _cache_attrs = await db.trendyol_category_attributes.find_one(
+                    {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                    {"_id": 0},
+                )
+            except Exception:
+                _cache_attrs = None
+            local_norm_index_v = {}
+            for lk, lv in local_vals.items():
+                local_norm_index_v.setdefault(_normalize_attr_key(lk), lv)
+            for a in (_cache_attrs or {}).get("attributes", []) or []:
+                aid = a.get("id") or a.get("attribute", {}).get("id")
+                if aid is None:
+                    continue
+                if bool(a.get("allowCustom") or a.get("attribute", {}).get("allowCustom")):
+                    continue
+                aname = a.get("name") or a.get("attribute", {}).get("name") or ""
+                lval = local_norm_index_v.get(_normalize_attr_key(aname))
+                if not lval:
+                    la = mp_id_to_local.get(str(aid))
+                    if la:
+                        lval = local_vals.get(la.lower())
+                if not lval:
+                    continue
+                if val_mappings_v.get(f"{aid}|{lval}"):
+                    continue
+                vname_map = {
+                    _norm_val(v.get("name")): str(v.get("id"))
+                    for v in (a.get("attributeValues") or [])
+                    if v.get("id") is not None and v.get("name")
+                }
+                if vname_map.get(_norm_val(str(lval))):
+                    continue
+                unmatched_values.append({
+                    "mp_attr_id": int(aid),
+                    "attr_name": aname,
+                    "local_value": lval,
+                    "required": bool(a.get("required")),
+                })
+            if unmatched_values:
+                errors.append(f"{len(unmatched_values)} değerin Trendyol karşılığı yok (eşleştirme gerekli)")
+
         is_valid = len(errors) == 0
         if is_valid:
             valid_count += 1
@@ -701,6 +750,7 @@ async def validate_products_for_trendyol(
             "errors": errors,
             "warnings": warnings,
             "missing_required_attrs": missing_required_attrs,
+            "unmatched_values": unmatched_values,
         })
 
     # Eksik attribute istatistikleri (en sık eksik olanları üstte göster)
@@ -1157,7 +1207,14 @@ async def sync_products_to_trendyol(
 
         def _walk(attrs):
             if isinstance(attrs, dict):
-                for k, v in attrs.items():
+                # Çakışan mükerrer özelliklerde TEMİZ (güncel, elle/teknik) anahtarlar
+                # önce işlenir; `ticimax_*` (eski/ham 113-kolon) anahtarları yalnızca
+                # fallback olur. _put setdefault olduğundan ilk gelen kazanır.
+                items = sorted(
+                    attrs.items(),
+                    key=lambda kv: 1 if str(kv[0]).lower().startswith("ticimax_") else 0,
+                )
+                for k, v in items:
                     if isinstance(v, dict):
                         nm = v.get("label") or v.get("name") or k
                         vv = v.get("value") or v.get("attribute_value")
