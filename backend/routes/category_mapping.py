@@ -1410,21 +1410,30 @@ async def get_advanced_values(
             if v.get("size"):
                 _add("Beden", v["size"])
 
-    # 2) Global /api/attributes içerisindeki tüm değerleri birleştir
+    # 🎯 Bu kategorideki ürünlerden GELEN özellik adları. Bu adlar için global
+    # `attributes` / ticimax master değerleriyle KİRLETME yapılmaz — yalnızca
+    # ürünlerin gerçek özellik değerleri gösterilir. (örn. "Boy" özelliğine
+    # global attributes'taki ölçü/numara değerleri 150-200, "30 ML", veya "Cep"e
+    # 1-2-3-4 gibi alakasız değerler karışmasın → "başka yerden çekme" sorunu).
+    product_value_names = {k.casefold() for k in local_values.keys()}
+
+    # 2) Global /api/attributes içerisindeki değerleri SADECE üründe karşılığı
+    #    OLMAYAN özellik adları için (fallback) birleştir.
     async for ga in db.attributes.find({}, {"_id": 0, "name": 1, "values": 1}):
         nm = (ga.get("name") or "").strip()
-        if not nm:
+        if not nm or nm.casefold() in product_value_names:
             continue
         for val in ga.get("values", []) or []:
             sv = str(val).strip()
             if sv:
                 local_values.setdefault(nm, set()).add(sv)
 
-    # 3) Ticimax master değerlerini (`ticimax_attribute_master`) birleştir.
+    # 3) Ticimax master değerlerini (`ticimax_attribute_master`) — yine sadece
+    #    üründe karşılığı olmayan özellik adları için (fallback).
     #    Format: {ozellik_id, ozellik_tanim, degerler:[{id,tanim}, ...]}
     async for tm in db.ticimax_attribute_master.find({}, {"_id": 0}):
         nm = (tm.get("ozellik_tanim") or "").strip()
-        if not nm:
+        if not nm or nm.casefold() in product_value_names:
             continue
         for d in tm.get("degerler") or []:
             sv = (d.get("tanim") or "").strip() if isinstance(d, dict) else str(d).strip()

@@ -17,11 +17,15 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon, FileJson,
+  Search, RefreshCw, Check, X, Store, AlertCircle, ArrowRight, Link as LinkIcon, FileJson, ChevronsUpDown,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../ui/dialog";
+import { Popover, PopoverTrigger, PopoverContent } from "../ui/popover";
+import {
+  Command, CommandInput, CommandList, CommandEmpty, CommandItem, CommandGroup,
+} from "../ui/command";
 import AttrCacheUploadDialog from "./AttrCacheUploadDialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -52,6 +56,14 @@ function _sizeRank(name) {
   // Diğer (XL/L, M/S, Onesize varyantları vs) → 3
   return [3, n];
 }
+// Türkçe duyarsız + boşluk/noktalama temizleyen agresif normalize (backend _norm_val ile uyumlu)
+function _normVal(s) {
+  let x = (s || "").toString().toLocaleLowerCase("tr");
+  const map = { "ı": "i", "İ": "i", "ş": "s", "ğ": "g", "ü": "u", "ö": "o", "ç": "c" };
+  x = x.replace(/[ışğüöçİ]/g, (ch) => map[ch] || ch);
+  return x.replace(/[^a-z0-9]/g, "");
+}
+
 function sortLikeSize(arr, getName) {
   return [...(arr || [])].sort((a, b) => {
     const ra = _sizeRank(getName(a));
@@ -120,6 +132,59 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Aranabilir Trendyol Değer Seçici (Popover + Command) ───────────────────
+function SearchableValueSelect({ value, options, onChange, placeholder, testId, color = "orange" }) {
+  const [open, setOpen] = React.useState(false);
+  const selected = (options || []).find((o) => String(o.id) === String(value));
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          className={`flex items-center justify-between gap-2 border rounded px-2 py-1 text-sm w-full text-left ${
+            selected ? `bg-${color}-50 border-${color}-300 font-semibold text-${color}-900` : "bg-white"
+          }`}
+          data-testid={testId}
+        >
+          <span className={`truncate ${selected ? "" : "text-gray-400"}`}>
+            {selected ? selected.name : (placeholder || "— seçilmemiş —")}
+          </span>
+          <ChevronsUpDown size={14} className="shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]" align="start">
+        <Command>
+          <CommandInput placeholder="Değer ara..." data-testid={`${testId}-search`} />
+          <CommandList>
+            <CommandEmpty>Eşleşen değer yok</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="__none__"
+                onSelect={() => { onChange(""); setOpen(false); }}
+              >
+                <span className="text-gray-400">— seçilmemiş —</span>
+              </CommandItem>
+              {(options || []).map((opt) => (
+                <CommandItem
+                  key={opt.id}
+                  value={`${opt.name} ${opt.id}`}
+                  onSelect={() => { onChange(String(opt.id)); setOpen(false); }}
+                  data-testid={`${testId}-opt-${opt.id}`}
+                >
+                  <Check size={14} className={String(opt.id) === String(value) ? "opacity-100 text-green-600" : "opacity-0"} />
+                  <span className="truncate">{opt.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -572,6 +637,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   const [selectedAttrId, setSelectedAttrId] = useState("");
   const [hint, setHint] = useState("");
   const [valSearch, setValSearch] = useState("");
+  const [attrSearch, setAttrSearch] = useState("");
   // Attribute değiştiğinde aramayı sıfırla
   useEffect(() => { setValSearch(""); }, [selectedAttrId]);
   const color = MP_COLORS[marketplace] || "orange";
@@ -622,11 +688,15 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     } finally { setSaving(false); }
   };
 
-  // Otomatik değer eşleştirme — TÜM attribute'lardaki TÜM değerleri tarar
+  // Otomatik değer eşleştirme — TÜM attribute'lardaki TÜM değerleri tarar.
+  // ÖNCELİK: birebir (normalize) eşleşme > eşanlamlı > tek-aday substring.
+  // Ayrıca: yanlış kaydedilmiş (substring kaynaklı, örn. "Cepli"→"Kargo Cepli")
+  // eşleşmeleri, birebir karşılığı varsa OTOMATİK DÜZELTİR.
   const handleAutoMatchValues = () => {
     const next = { ...valueMappings };
     let matched = 0;
     let already = 0;
+    let corrected = 0;
     const perAttr = {};
     // Alias tablosu — en yaygın Türkçe↔İngilizce & beden kısaltmaları
     const aliases = {
@@ -644,36 +714,67 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       const localVals = localValues[mpAttr.name || mpAttr.attribute?.name] || [];
       let localMatched = 0;
 
+      // Trendyol değerlerinin normalize haritası (birebir eşleşme için)
+      const exactMap = {};
+      mpValues.forEach((mv) => {
+        const n = _normVal(mv.name);
+        if (n && !(n in exactMap)) exactMap[n] = mv;
+      });
+
       localVals.forEach((lv) => {
         const key = `${id}|${lv}`;
-        if (next[key]) { already++; return; }
-        const lvLower = String(lv).toLowerCase().trim();
-        const candidates = aliases[lvLower] || [];
-        const found = mpValues.find((mv) => {
-          const mvN = (mv.name || "").toLowerCase().trim();
-          return (
-            mvN === lvLower ||
-            mvN.includes(lvLower) ||
-            lvLower.includes(mvN) ||
-            candidates.some((a) => mvN === a || mvN.includes(a))
-          );
-        });
-        if (found) {
-          next[key] = String(found.id);
-          matched++;
-          localMatched++;
+        const lvN = _normVal(lv);
+        const lvLower = String(lv).toLocaleLowerCase("tr").trim();
+        // 1) Birebir (normalize) eşleşme
+        let best = exactMap[lvN] || null;
+        // 2) Eşanlamlı
+        if (!best) {
+          const cands = aliases[lvLower] || [];
+          for (const a of cands) {
+            const m = exactMap[_normVal(a)];
+            if (m) { best = m; break; }
+          }
         }
+        // 3) Tek-aday substring (yalnızca tek bir Trendyol değeri içeriyorsa ve isim ≥3 karakter)
+        if (!best && lvN.length >= 3) {
+          const subs = mpValues.filter((mv) => {
+            const mvN = _normVal(mv.name);
+            return mvN.includes(lvN);
+          });
+          if (subs.length === 1) best = subs[0];
+        }
+
+        if (!best) return;
+
+        if (next[key]) {
+          // Zaten eşli — ama birebir karşılık varsa ve mevcut eşleşme ondan FARKLIYSA düzelt.
+          if (exactMap[lvN] && String(next[key]) !== String(exactMap[lvN].id)) {
+            next[key] = String(exactMap[lvN].id);
+            corrected++;
+            localMatched++;
+          } else {
+            already++;
+          }
+          return;
+        }
+        next[key] = String(best.id);
+        matched++;
+        localMatched++;
       });
       if (localMatched) perAttr[mpAttr.name || mpAttr.attribute?.name] = localMatched;
     });
 
     setValueMappings(next);
-    if (matched) {
+    if (matched || corrected) {
       const top = Object.entries(perAttr).sort((a, b) => b[1] - a[1]).slice(0, 5)
         .map(([k, n]) => `${k} (${n})`).join(", ");
-      toast.success(`${matched} değer eşleşti${already ? ` · ${already} zaten eşliydi` : ""}${top ? ` · En çok: ${top}` : ""}`);
+      const parts = [];
+      if (matched) parts.push(`${matched} değer eşleşti`);
+      if (corrected) parts.push(`${corrected} yanlış eşleşme düzeltildi`);
+      if (already) parts.push(`${already} zaten doğru`);
+      toast.success(`${parts.join(" · ")}${top ? ` · En çok: ${top}` : ""}`);
     } else if (already) {
-      toast.info(`Tüm değerler zaten eşli (${already})`);
+      toast.info(`Tüm değerler zaten doğru eşli (${already})`);
     } else {
       toast.info("Eşleştirilecek değer bulunamadı");
     }
@@ -726,8 +827,33 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
               <div className="bg-gray-50 px-3 py-2 border-b text-[11px] font-bold text-gray-600 uppercase tracking-wide">
                 Özellikler ({mpAttrs.length})
               </div>
+              {/* Özellik arama kutusu */}
+              <div className="px-2 py-2 border-b bg-white flex items-center gap-1.5">
+                <Search size={13} className="text-gray-400 shrink-0" />
+                <input
+                  type="text"
+                  value={attrSearch}
+                  onChange={(e) => setAttrSearch(e.target.value)}
+                  placeholder="Özellik ara..."
+                  className="flex-1 text-xs bg-transparent focus:outline-none placeholder:text-gray-400"
+                  data-testid="attr-search-input"
+                />
+                {attrSearch && (
+                  <button onClick={() => setAttrSearch("")} className="text-gray-400 hover:text-black" data-testid="attr-search-clear">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
               <div className="overflow-auto flex-1 divide-y">
-                {mpAttrs.map((a) => {
+                {(() => {
+                  const aq = (attrSearch || "").toLocaleLowerCase("tr").trim();
+                  const visible = aq
+                    ? mpAttrs.filter((a) => (a.name || a.attribute?.name || "").toLocaleLowerCase("tr").includes(aq))
+                    : mpAttrs;
+                  if (visible.length === 0) {
+                    return <div className="px-3 py-4 text-xs text-gray-400 text-center">"{attrSearch}" ile eşleşen özellik yok</div>;
+                  }
+                  return visible.map((a) => {
                   const id = String(a.id ?? a.attribute?.id);
                   const name = a.name || a.attribute?.name;
                   const localCount = (localValues[name] || []).length;
@@ -757,7 +883,8 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       </span>
                     </button>
                   );
-                })}
+                  });
+                })()}
               </div>
             </aside>
 
@@ -832,19 +959,16 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                                 ✓ Otomatik gönderilir (serbest metin)
                               </span>
                             ) : (
-                              <select
+                              <SearchableValueSelect
                                 value={mappedId}
-                                onChange={(e) =>
-                                  setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
+                                options={sortedMp}
+                                onChange={(val) =>
+                                  setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: val }))
                                 }
-                                className={`border rounded px-2 py-1 text-sm w-full ${isMapped ? "bg-green-50 border-green-300 font-semibold text-green-900" : "bg-white"}`}
-                                data-testid={`adv-valmap-${lv}`}
-                              >
-                                <option value="">— seçilmemiş —</option>
-                                {sortedMp.map((v) => (
-                                  <option key={v.id} value={v.id}>{v.name}</option>
-                                ))}
-                              </select>
+                                placeholder="— seçilmemiş —"
+                                color={color}
+                                testId={`adv-valmap-${lv}`}
+                              />
                             )}
                           </td>
                         </tr>

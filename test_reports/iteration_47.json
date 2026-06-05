@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 47 — Trendyol 'Değer Eşleştirme' modal UX iyileştirmeleri e2e doğrulandı (frontend-only). Admin login (admin@facette.com/admin123) → /admin/kategori-eslestir → category-mapping-page görünür. cat-val-6846 (Ceket) ile Değer Eşleştirme modalı açılıyor. Modalda 31 özellik sekmesi, sol attr-search-input 'Boy' → 2 sekme, attr-search-clear → 31 geri. Boy sekmesi 7 değer (Crop, Ekstra Kısa/Süper Mini, Kısa, Normal Boy, Orta, Regular, Uzun) gösteriyor — temiz set (eskiden 150-200, 30 ML gibi çöp). Sağdaki Trendyol seçici aranabilir combobox: adv-valmap-Crop tıklandı → popover içinde adv-valmap-Crop-search açıldı, 27 opsiyon, adv-valmap-Crop-opt-10623288 seçildi. STATE PERSISTENCE OK: Boy→Cep→Boy geçişinden sonra combobox 'Super Crop' (cmdk CommandItem değeri 'name id' olduğundan ilk satır seçimi 'Super Crop' opsiyonuna düşmüş — state korunuyor). 'Tümünü Otomatik Eşleştir' toast: '2 değer eşleşti · 11 yanlış eşleşme düzeltildi · 73 zaten doğru · En çok: Materyal (4), Boy (3), Cep (1), Kalınlık (1), Kol Boyu (1)' — exact-first + yanlış eşleşme düzeltme çalışıyor. 'Değerleri Kaydet' → 'Değer eşleştirmeleri kaydedildi' toast'u, modal kapanıyor; tekrar açıldığında Boy sekmesi yeşil sayaç (29 lokal / 7 eşleşti) ile geliyor ve combobox 'Crop' değerini koruyor (backend toplu kayıt OK).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Değer Eşleştirme Modal (Radix DialogContent)", "issues": ["A11y warning: 'Missing Description or aria-describedby={undefined} for DialogContent' — DialogDescription eklenmeli (sadece konsol uyarısı, fonksiyonel etki yok)."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Opsiyonel A11y) AdvancedValueMatchModal ve AdvancedAttributeMatchModal DialogHeader içine <DialogDescription> ya da DialogContent'e aria-describedby eklensin."
+  ],
+  "critical_code_review_comments": [
+    "MarketplaceAdvancedMatch.jsx:175 — SearchableValueSelect CommandItem 'value' prop'u `${opt.name} ${opt.id}` formatında; cmdk arama 'name + id' string'i üzerinde çalışıyor. Türkçe normalize (örn 'Süper' → 'super') cmdk default filter ile yapılmıyor; özellikle Türkçe karakter içeren opsiyonlarda arama yanıltıcı olabilir. İleride <Command filter={(value, search) => _normVal(value).includes(_normVal(search)) ? 1 : 0}> eklenebilir.",
+    "MarketplaceAdvancedMatch.jsx ~960 — adv-valmap-{lv} testid'i Türkçe karakter ve boşluk içerebilir (örn 'adv-valmap-Ekstra Kısa / Süper Mini'). Playwright tarafında çalıştı ama CSS selektörü için kırılgan; sanitize edilirse (slug) daha sağlam olur.",
+    "MarketplaceAdvancedMatch.jsx attrSearch/valSearch filtreleri toLocaleLowerCase('tr') ile Türkçe duyarlı, iyi tercih. Persistence için valueMappings tek state objesinde tutuluyor (key = `${attrId}|${localValue}`) — sekme değişiminde temizlenmiyor, beklendiği gibi çalışıyor.",
+    "Modal A11y: DialogContent için DialogDescription yok; Radix konsol uyarısı veriyor. Diğer modallerle aynı pattern.",
+    "Boy/Cep değerleri artık global/master kirliliği olmadan ürün-attribute'lerden temiz geliyor (Boy: 7 değer, Cep: 22 değer); önceki çöp veriler (150-200, '30 ML' vb) yok."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100% — 9/9 senaryo: login, sayfa yüklenmesi, Değer modal açılışı, attr-search filtre+clear, attr sekme tıklama, aranabilir Trendyol combobox, opsiyon seçimi, sekmeler arası state persistence, otomatik eşleştirme exact-first + correction toast, Değerleri Kaydet + reopen persistence"
+  },
+  "test_credentials": "admin@facette.com / admin123",
+  "seed_data_creation": "Yok — mevcut Ceket (cat_val 6846) kategorisi üzerinde okuma+1 attribute eşleştirme kaydedildi (Boy.Crop → Crop opt 10623288).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Değer Eşleştirme modalı için kritik selektörler: [data-testid='cat-val-6846'] (Ceket) → modal → [data-testid='attr-search-input'] + [data-testid='attr-search-clear'] → [data-testid='adv-attr-tab-<id>'] (örn 48=Boy, 101=Cep) → [data-testid='adv-valmap-<localValue>'] (combobox) → click → popover içinde [data-testid='adv-valmap-<localValue>-search'] ve [data-testid='adv-valmap-<localValue>-opt-<mpId>']. Toplu işlemler: [data-testid='adv-auto-match-values-btn'] ve [data-testid='adv-val-save']. State valueMappings objesinde `${attrId}|${localValue}` key'i ile saklanıyor; sekmeler arası gezilse de kaybolmuyor. Save sonrası backend POST /api/category-mapping/{mp}/{local_cat_id}/values yapılıyor ve tekrar açıldığında geri yükleniyor.",
+  "rca_of_the_issue": "N/A — tüm istenen davranışlar (1) sol attr arama (2) sağ aranabilir combobox (3) sekmeler arası state persistence (4) Boy/Cep temiz değer kaynağı (5) exact-first auto-match + yanlış eşleşme düzeltme (örn 'Cepli'→'Kargo Cepli' korreksiyon mesajı toast'ta '11 yanlış eşleşme düzeltildi' olarak görüldü) — hepsi PASS."
+}
