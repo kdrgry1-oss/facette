@@ -388,6 +388,13 @@ def _normalize_attr_key(s: str) -> str:
         s = s.replace(a, b)
     return s.strip()
 
+
+def _norm_val(s: str) -> str:
+    """Listeli özellik değerlerini eşlerken kullanılan agresif normalize:
+    Türkçe duyarsız + boşluk/eğik çizgi/noktalama tamamen kaldırılır.
+    Örn. 'Kısa / Mini' ≈ 'Kısa/Mini' ≈ 'kisamini'."""
+    return re.sub(r"[^a-z0-9]", "", _normalize_attr_key(s))
+
 # Trendyol özellik adı -> bu değeri besleyebilecek lokal özellik kaynakları (normalize edilmiş).
 # Trendyol "Materyal Bileşeni" (serbest metin, allowCustom) bizdeki "Ürün İçerik Bilgisi"ne karşılık gelir.
 _TRENDYOL_ATTR_SYNONYMS = {
@@ -1123,10 +1130,17 @@ async def sync_products_to_trendyol(
             if aid is None:
                 continue
             valid_value_ids = {str(v.get("id")) for v in (a.get("attributeValues") or []) if v.get("id") is not None}
+            # Normalize edilmiş "değer adı → value_id" haritası (isimle otomatik eşleştirme için)
+            value_name_to_id = {}
+            for v in (a.get("attributeValues") or []):
+                if v.get("id") is None or not v.get("name"):
+                    continue
+                value_name_to_id[_norm_val(v["name"])] = str(v["id"])
             meta[int(aid)] = {
                 "allow_custom": bool(a.get("allowCustom") or a.get("attribute", {}).get("allowCustom")),
                 "required": bool(a.get("required")),
                 "valid_value_ids": valid_value_ids,
+                "value_name_to_id": value_name_to_id,
                 "name": a.get("name") or a.get("attribute", {}).get("name") or "",
             }
         _attr_meta_cache[mp_cat_id] = meta
@@ -1165,7 +1179,6 @@ async def sync_products_to_trendyol(
                 _put("Web Color", variant["color"])
             if variant.get("size"):
                 _put("Beden", variant["size"])
-                _put("Boy", variant["size"])
         _bridge_trendyol_attr_synonyms(out)
         return out
 
@@ -1227,7 +1240,7 @@ async def sync_products_to_trendyol(
             if variant:
                 if local_key in ["renk", "color", "web color"]:
                     local_val = variant.get("color")
-                elif local_key in ["beden", "boy", "size"]:
+                elif local_key in ["beden", "size"]:
                     local_val = variant.get("size") or local_vals.get(local_key)
                     
             if not local_val:
@@ -1249,6 +1262,14 @@ async def sync_products_to_trendyol(
                     else:
                         if _push(ty_id, custom=mapped_val):
                             continue
+                # Kaydedilmiş eşleştirme yok → listeli (enum) değeri ADIYLA otomatik eşle.
+                # Örn. local "Dokuma"/"Örme"/"Kısa" → Trendyol value_id (Türkçe/boşluk duyarsız).
+                am_meta = meta.get(ty_id) or {}
+                name_map = am_meta.get("value_name_to_id") or {}
+                if name_map:
+                    auto_vid = name_map.get(_norm_val(str(local_val)))
+                    if auto_vid and _push(ty_id, value_id=auto_vid, custom=local_val):
+                        continue
                 # Mapping yok ama allow_custom varsa local_val'i custom olarak yolla
                 if _push(ty_id, custom=local_val):
                     continue
@@ -1287,6 +1308,26 @@ async def sync_products_to_trendyol(
                 mname = (m_meta.get("name") or "").lower()
                 if "materyal bileşeni" in mname and m_meta.get("allow_custom"):
                     _push(m_ty_id, custom=icerik_val)
+
+        # 🎯 GENEL GARANTİ: Trendyol özellik adı ile lokal özellik adı eşleşen ama
+        # attribute_mappings'te tanımlanmamış alanları (Boy, Desen, Kumaş Tipi vb.)
+        # otomatik gönder. Listeli alanlar değeri ADIYLA value_id'ye eşlenir,
+        # serbest alanlar custom olarak yollanır.
+        local_norm_index = {}
+        for lk, lv in local_vals.items():
+            local_norm_index.setdefault(_normalize_attr_key(lk), lv)
+        for m_ty_id, m_meta in meta.items():
+            if m_ty_id in processed:
+                continue
+            lval = local_norm_index.get(_normalize_attr_key(m_meta.get("name") or ""))
+            if not lval:
+                continue
+            name_map = m_meta.get("value_name_to_id") or {}
+            auto_vid = name_map.get(_norm_val(str(lval)))
+            if auto_vid:
+                _push(m_ty_id, value_id=auto_vid, custom=lval)
+            else:
+                _push(m_ty_id, custom=lval)
 
         return item_attrs
     
