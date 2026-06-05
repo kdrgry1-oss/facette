@@ -317,8 +317,8 @@ export default function PageDesign() {
         }
       });
       
-      if (res.data.path) {
-        const url = `${API.replace('/api', '')}/api/files/${res.data.path}`;
+      if (res.data.url || res.data.path) {
+        const url = `${API.replace('/api', '')}${res.data.url || `/api/upload/files/${res.data.path}`}`;
         const newImages = [...formData.images];
         const newLinks = [...formData.links];
         
