@@ -25,7 +25,6 @@ from .integrations_iyzico import (  # eski import yollarını korumak için re-e
 )
 
 # ==================== TRENDYOL ====================
-import httpx
 
 async def get_trendyol_config():
     """Get Trendyol configuration from DB or env.
@@ -207,9 +206,10 @@ async def get_trendyol_status():
 @router.get("/trendyol/debug")
 async def debug_trendyol_orders():
     config = await get_trendyol_config()
-    import sys, os
+    import sys
+    import os
     import time
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -235,7 +235,8 @@ async def debug_trendyol_orders():
 async def sync_trendyol_categories(current_user: dict = Depends(require_admin)):
     """Sync and save category tree from Trendyol API to local DB"""
     config = await get_trendyol_config()
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -264,7 +265,8 @@ async def sync_trendyol_categories(current_user: dict = Depends(require_admin)):
 async def get_trendyol_category_attributes(category_id: int, current_user: dict = Depends(require_admin)):
     """Get attributes for a specific category (From DB or Trendyol API directly)"""
     config = await get_trendyol_config()
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -299,7 +301,8 @@ async def get_trendyol_category_attributes(category_id: int, current_user: dict 
 async def sync_trendyol_brands(current_user: dict = Depends(require_admin)):
     """Sync brands from Trendyol API to local DB"""
     config = await get_trendyol_config()
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -375,6 +378,44 @@ def _dedupe_products_by_stock_code(products: list) -> list:
             deduped.append(best)
     deduped.extend(out_no_key)
     return deduped
+
+
+def _normalize_attr_key(s: str) -> str:
+    """Türkçe duyarsız normalize (İ/ı/ş/ğ/ü/ö/ç + birleşik nokta)."""
+    s = (s or "").casefold()
+    for a, b in (("ı", "i"), ("İ", "i"), ("ş", "s"), ("ğ", "g"),
+                 ("ü", "u"), ("ö", "o"), ("ç", "c"), ("\u0307", "")):
+        s = s.replace(a, b)
+    return s.strip()
+
+# Trendyol özellik adı -> bu değeri besleyebilecek lokal özellik kaynakları (normalize edilmiş).
+# Trendyol "Materyal Bileşeni" (serbest metin, allowCustom) bizdeki "Ürün İçerik Bilgisi"ne karşılık gelir.
+_TRENDYOL_ATTR_SYNONYMS = {
+    "materyal bileşeni": ["urun icerik bilgisi", "kumas bilgisi", "kumas icerigi", "urun icerigi", "icerik bilgisi"],
+}
+# Materyal Bileşeni'ne köprülenirken atlanacak açıkça hatalı (yaş/cinsiyet) değerler.
+_BAD_COMPOSITION_VALUES = {"yetişkin", "yetiskin", "genç", "genc", "çocuk", "cocuk", "bebek", "kadın", "kadin", "erkek", "unisex"}
+
+
+def _bridge_trendyol_attr_synonyms(local_vals: dict) -> dict:
+    """Trendyol özellik adlarıyla (ör. 'Materyal Bileşeni') lokal özellik adları
+    (ör. 'Ürün İçerik Bilgisi') farklı olabilir. Eksik Trendyol anahtarını uygun
+    lokal kaynaktan köprüler. local_vals: {lower(label): value}."""
+    if not local_vals:
+        return local_vals
+    norm_index: dict = {}
+    for k, v in local_vals.items():
+        norm_index.setdefault(_normalize_attr_key(k), v)
+    for target, sources in _TRENDYOL_ATTR_SYNONYMS.items():
+        if target in local_vals and local_vals.get(target):
+            continue
+        for src in sources:
+            val = norm_index.get(src)
+            if val and str(val).strip().casefold() not in _BAD_COMPOSITION_VALUES:
+                local_vals[target] = val
+                break
+    return local_vals
+
 
 
 async def _build_product_query_from_payload(payload: dict) -> dict:
@@ -611,6 +652,7 @@ async def validate_products_for_trendyol(
                 if v.get("size"):
                     _add_lv("Beden", v["size"])
                     _add_lv("Boy", v["size"])
+            _bridge_trendyol_attr_synonyms(local_vals)
 
             for ra in req_attrs:
                 ra_id = str(ra.get("id") or ra.get("attribute", {}).get("id") or "")
@@ -726,9 +768,9 @@ async def trendyol_barcode_duplicates(current_user: dict = Depends(require_admin
     Bu Trendyol'a aktarımı bloklayan ana sebep oluyor. Manuel düzeltme için liste döner.
     """
     pipeline = [
-        {"$match": {"variants.barcode": {"$ne": None, "$ne": ""}}},
+        {"$match": {"variants.barcode": {"$nin": [None, ""]}}},
         {"$unwind": "$variants"},
-        {"$match": {"variants.barcode": {"$ne": None, "$ne": ""}}},
+        {"$match": {"variants.barcode": {"$nin": [None, ""]}}},
         {"$group": {
             "_id": "$variants.barcode",
             "count": {"$sum": 1},
@@ -770,7 +812,8 @@ async def trendyol_ghost_scanner(
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
 
-    import sys, os as _os
+    import sys
+    import os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
 
@@ -871,7 +914,8 @@ async def trendyol_archive_barcodes(
     if len(barcodes) > 1000:
         raise HTTPException(status_code=400, detail="Tek seferde max 1000 barkod arşivlenebilir.")
 
-    import sys, os as _os
+    import sys
+    import os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
 
@@ -957,10 +1001,11 @@ async def sync_products_to_trendyol(
             try:
                 from bson.objectid import ObjectId
                 cat = await db.categories.find_one({"_id": ObjectId(cat_id)})
-            except:
+            except Exception:
                 cat = await db.categories.find_one({"id": cat_id})
-                
-            if not cat: continue
+
+            if not cat:
+                continue
             
             cat_q = {"category_name": cat.get("name")}
             if filters.get("stock_code"):
@@ -1002,12 +1047,17 @@ async def sync_products_to_trendyol(
         found_barcodes = set()
         found_stock_codes = set()
         for p in products:
-            if p.get("barcode"): found_barcodes.add(str(p["barcode"]))
-            if p.get("stock_code"): found_stock_codes.add(str(p["stock_code"]))
-            if p.get("sku"): found_stock_codes.add(str(p["sku"]))
+            if p.get("barcode"):
+                found_barcodes.add(str(p["barcode"]))
+            if p.get("stock_code"):
+                found_stock_codes.add(str(p["stock_code"]))
+            if p.get("sku"):
+                found_stock_codes.add(str(p["sku"]))
             for v in (p.get("variants") or []):
-                if v.get("barcode"): found_barcodes.add(str(v["barcode"]))
-                if v.get("stock_code"): found_stock_codes.add(str(v["stock_code"]))
+                if v.get("barcode"):
+                    found_barcodes.add(str(v["barcode"]))
+                if v.get("stock_code"):
+                    found_stock_codes.add(str(v["stock_code"]))
         requested = set([str(c) for c in (barcodes or [])] + [str(c) for c in (stock_codes or [])])
         not_found_codes = sorted([c for c in requested if c not in found_barcodes and c not in found_stock_codes])
 
@@ -1039,7 +1089,8 @@ async def sync_products_to_trendyol(
             "errors": [msg],
         }
     
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -1086,7 +1137,8 @@ async def sync_products_to_trendyol(
         attributes hem LIST hem DICT formatını destekler."""
         out = {}
         def _put(nm, vv):
-            if not nm or vv in (None, ""): return
+            if not nm or vv in (None, ""):
+                return
             out.setdefault(str(nm).lower().strip(), str(vv))
 
         def _walk(attrs):
@@ -1114,6 +1166,7 @@ async def sync_products_to_trendyol(
             if variant.get("size"):
                 _put("Beden", variant["size"])
                 _put("Boy", variant["size"])
+        _bridge_trendyol_attr_synonyms(out)
         return out
 
     def resolve_attributes(base_attrs, product, variant, category, meta):
@@ -1158,7 +1211,8 @@ async def sync_products_to_trendyol(
         for mapping in attr_mappings:
             # Yeni format: mp_attr_id, eski format: trendyol_attr_id
             ty_id = mapping.get("mp_attr_id") or mapping.get("trendyol_attr_id")
-            if not ty_id: continue
+            if not ty_id:
+                continue
             try:
                 ty_id = int(ty_id)
             except (ValueError, TypeError):
@@ -1210,9 +1264,12 @@ async def sync_products_to_trendyol(
 
         # Default mapping'de olup attribute_mappings'de olmayanları da ekle
         for ty_str, def_val in default_mappings.items():
-            if not def_val: continue
-            try: ty_id = int(ty_str)
-            except (ValueError, TypeError): continue
+            if not def_val:
+                continue
+            try:
+                ty_id = int(ty_str)
+            except (ValueError, TypeError):
+                continue
             if ty_id not in processed:
                 if str(def_val).isdigit():
                     _push(ty_id, value_id=def_val)
@@ -1459,11 +1516,15 @@ async def sync_products_to_trendyol(
                             "quantity": int(it.get("quantity", 0)),
                         }
                         if it.get("salePrice") is not None:
-                            try: entry["salePrice"] = float(it["salePrice"])
-                            except Exception: pass
+                            try:
+                                entry["salePrice"] = float(it["salePrice"])
+                            except Exception:
+                                pass
                         if it.get("listPrice") is not None:
-                            try: entry["listPrice"] = float(it["listPrice"])
-                            except Exception: pass
+                            try:
+                                entry["listPrice"] = float(it["listPrice"])
+                            except Exception:
+                                pass
                         pi_items.append(entry)
                     pi_response = await client.update_price_and_inventory(pi_items) if pi_items else {}
                     pi_batch = (pi_response or {}).get("batchRequestId")
@@ -1647,7 +1708,6 @@ async def sync_products_to_trendyol(
             # (Önceki versiyonlarda PUT update_products deneniyordu ama Trendyol
             # stockCode altında çoklu kayıt olduğunda hayalet SUCCESS dönüyor → kaldırıldı.)
             if cross_conflicts:
-                cross_items = [c[2] for c in cross_conflicts]
                 put_cross_succeeded_barcodes = set()  # şimdilik boş (PUT yok)
 
                 # Hâlâ başarısız olan cross item'lar için archive + retry create
@@ -1764,11 +1824,15 @@ async def sync_products_to_trendyol(
                             "quantity": int(it.get("quantity", 0)),
                         }
                         if it.get("salePrice") is not None:
-                            try: entry["salePrice"] = float(it["salePrice"])
-                            except Exception: pass
+                            try:
+                                entry["salePrice"] = float(it["salePrice"])
+                            except Exception:
+                                pass
                         if it.get("listPrice") is not None:
-                            try: entry["listPrice"] = float(it["listPrice"])
-                            except Exception: pass
+                            try:
+                                entry["listPrice"] = float(it["listPrice"])
+                            except Exception:
+                                pass
                         pi_items.append(entry)
                     if pi_items:
                         pi_resp = await client.update_price_and_inventory(pi_items)
@@ -2064,7 +2128,8 @@ async def _sync_inventory_to_trendyol(products: list):
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
         
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -2252,10 +2317,11 @@ async def fix_product_barcode(
 
 
 @router.get("/trendyol/products/batch-status/{batch_id}")
-async def get_trendyol_batch_status(batch_id: str, current_user: dict = Depends(require_admin)):
+async def get_trendyol_batch_status_v2(batch_id: str, current_user: dict = Depends(require_admin)):
     """Check the status of a batch request"""
     config = await get_trendyol_config()
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
@@ -2273,7 +2339,6 @@ async def get_trendyol_batch_status(batch_id: str, current_user: dict = Depends(
         raise HTTPException(status_code=500, detail="Batch durumu alınamadı.")
 
 from pydantic import BaseModel
-from typing import List, Optional
 
 class TrendyolOrderPreviewReq(BaseModel):
     order_number: Optional[str] = None
@@ -2410,7 +2475,8 @@ async def preview_trendyol_orders(req: TrendyolOrderPreviewReq, current_user: di
     config = await get_trendyol_config()
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     client = TrendyolClient(
@@ -2469,9 +2535,10 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
     
-    import sys, os
+    import sys
+    import os
     import time
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     from .deps import generate_id
@@ -2625,9 +2692,10 @@ async def get_local_category_values(local_category_id: str, current_user: dict =
     for p in products:
         # Pull from variants (standard for clothing)
         for v in p.get("variants", []):
-            if v.get("color"): 
+            if v.get("color"):
                 c = str(v["color"]).strip()
-                if c and c.lower() != "none": val_map["Renk"].add(c)
+                if c and c.lower() != "none":
+                    val_map["Renk"].add(c)
             if v.get("size"): 
                 s = str(v["size"]).strip()
                 if s and s.lower() != "none":
@@ -2796,7 +2864,8 @@ async def get_trendyol_cargo_label(cargo_tracking_number: str, current_user: dic
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
         
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     from fastapi.responses import Response
@@ -2889,13 +2958,16 @@ async def import_ticimax_categories(
     include_subcategories=True (varsayılan): Tüm kategori hiyerarşisini recursive çeker.
     include_subcategories=False: Sadece kök kategorileri çeker.
     """
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     if include_subcategories:
         from ticimax_client import get_all_categories as tc_get_categories
     else:
         from ticimax_client import get_categories as _tc_root
-        tc_get_categories = lambda: _tc_root(parent_id=0)
+
+        def tc_get_categories():
+            return _tc_root(parent_id=0)
 
     try:
         raw_categories = tc_get_categories()
@@ -3066,7 +3138,8 @@ async def sync_ticimax_variants(
     Rate limit ~15sn/istek olduğundan page_size 500 ile 50 sayfa (25.000 varyant)
     tipik 13 dakika sürer; arka planda çalışır.
     """
-    import sys as _sys, os as _os
+    import sys as _sys
+    import os as _os
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
     from ticimax_client import _urun_client
     from zeep import helpers as _zh
@@ -3199,7 +3272,8 @@ async def sync_ticimax_teknik_detay(
     use_cache=True: DB'deki master cache'i kullan (~3 sn, anında).
     use_cache=False: Ticimax SOAP'a sorgu at, master'ı yenile (~30 sn, rate limit).
     """
-    import sys as _sys, os as _os
+    import sys as _sys
+    import os as _os
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
     from scripts.enrich_attrs_from_ticimax_master import (
         fetch_master, enrich_products, _build_value_pattern,
@@ -3313,7 +3387,8 @@ async def ticimax_test_connection(
     Ticimax SOAP servislerine erişim testi. Hangi servislere yetkiniz var,
     hangileri reddediliyor onu gösterir.
     """
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import check_urun_service_access, get_product_count, _uye_client, TICIMAX_API_KEY
 
@@ -3363,7 +3438,8 @@ async def import_ticimax_products(
     aktif=0: Sadece pasif ürünler.
     aktif=-1: Tüm ürünler (aktif + pasif).
     """
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import (
         get_products as tc_get_products,
@@ -3679,8 +3755,8 @@ async def import_ticimax_orders(
     
     Default: TÜM siparişler (pazaryeri + site, telefonlu + telefonsuz). Filtreler opsiyonel.
     """
-    import sys, os
-    from datetime import timedelta
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import get_orders as tc_get_orders, get_order_items
 
@@ -3717,7 +3793,8 @@ async def import_ticimax_orders(
         orders_raw.extend(page_orders)
         # NOT: filter sonrası length kontrolü güvenilir değil (post-filter düşürebilir).
         # Sadece tamamen boş sayfa gelince dur — yoksa pages parametresine kadar devam.
-        import time as _t; _t.sleep(0.4)
+        import time as _t
+        _t.sleep(0.4)
 
     logger.info(f"Ticimax: toplam {len(orders_raw)} site siparişi çekildi")
 
@@ -3931,8 +4008,8 @@ async def backfill_broken_ticimax_orders(
     "Bozuk" kriteri: shipping_address.first_name boş VEYA total = 0 VEYA items boş.
     Yalnızca `imported_from = ticimax_cron` veya `source = ticimax` siparişler hedef alınır.
     """
-    import sys, os
-    from datetime import timedelta
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import get_orders as tc_get_orders
     from ticimax_order_parser import parse_ticimax_order
@@ -3989,7 +4066,8 @@ async def backfill_broken_ticimax_orders(
         if not page_orders:
             break
         fetched_raw.extend(page_orders)
-        import time as _t; _t.sleep(0.3)
+        import time as _t
+        _t.sleep(0.3)
 
     # 3) Parse et + bozuk olanlara denk gelirse update et
     fixed = 0
@@ -4103,7 +4181,8 @@ async def import_ticimax_members(
     Aynı zamanda mevcut `users` koleksiyonunda mail veya telefon eşleşirse `ticimax_uye_id`
     alanı set edilir (auth-side hesap bilgileri korunur).
     """
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import get_members, get_member_addresses
 
@@ -4257,7 +4336,8 @@ async def import_ticimax_members(
 
         page += 1
         # Rate limit
-        import time as _t; _t.sleep(0.5)
+        import time as _t
+        _t.sleep(0.5)
 
     await db.settings.update_one(
         {"id": "ticimax"},
@@ -4295,7 +4375,8 @@ async def upload_ticimax_products_excel(
     BREADCRUMBKAT, TEDARIKCI, ALISFIYATI, SATISFIYATI, INDIRIMLIFIYAT, UYETIPIFIYAT1,
     KDVORANI, RENK, BEDEN
     """
-    import tempfile, unicodedata
+    import tempfile
+    import unicodedata
     from uuid import uuid4
     from fastapi.concurrency import run_in_threadpool
 
@@ -4935,7 +5016,6 @@ async def sync_trendyol_claims(
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
 
     from trendyol_client import TrendyolClient
-    from datetime import timedelta
 
     client = TrendyolClient(
         supplier_id=config["supplier_id"],
@@ -5082,7 +5162,7 @@ async def sync_trendyol_claims(
                 if claim_date:
                     try:
                         created_date_str = datetime.fromtimestamp(claim_date / 1000, tz=timezone.utc).isoformat()
-                    except:
+                    except Exception:
                         created_date_str = str(claim_date)
 
                 # Fatura numarasını çıkar: sipariş verisinden veya claim'den
@@ -5262,6 +5342,40 @@ async def get_trendyol_claims(
             "total_refund": total_refund
         }
     }
+
+@router.get("/trendyol/claims/issue-reasons")
+async def get_trendyol_issue_reasons(current_user: dict = Depends(require_admin)):
+    """Fetch claim issue reasons from Trendyol"""
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(
+        supplier_id=config["supplier_id"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        mode=config["mode"]
+    )
+
+    try:
+        url = f"{client.base_url}/order/sellers/{client.supplier_id}/claim-issue-reasons"
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
+            headers = client._get_headers()
+            response = await http_client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch issue reasons: {str(e)}")
+        # Return common fallback reasons
+        return [
+            {"id": 1, "name": "Kullanım Hatası / Tüketici Kaynaklı Hasar"},
+            {"id": 2, "name": "Ürün Orijinal Kutusunda / Ambalajında Değil"},
+            {"id": 4, "name": "Eksik Aksesuar / Parça"},
+            {"id": 6, "name": "İade Süresi Geçmiş"},
+            {"id": 21, "name": "Ürün Kullanılmış / Etiketi Koparılmış"}
+        ]
+
 
 @router.get("/trendyol/claims/{claim_id}")
 async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(require_admin)):
@@ -5548,7 +5662,7 @@ async def update_trendyol_category_stock_price(
 # ==================== TRENDYOL KARGO ETİKETİ ====================
 
 @router.get("/trendyol/cargo/label/{shipment_package_id}")
-async def get_trendyol_cargo_label(
+async def get_trendyol_cargo_label_pkg(
     shipment_package_id: str,
     current_user: dict = Depends(require_admin)
 ):
@@ -5596,39 +5710,6 @@ async def get_trendyol_cargo_label(
 
 
 # ==================== TRENDYOL CLAIMS APPROVE/ISSUE ====================
-
-@router.get("/trendyol/claims/issue-reasons")
-async def get_trendyol_issue_reasons(current_user: dict = Depends(require_admin)):
-    """Fetch claim issue reasons from Trendyol"""
-    config = await get_trendyol_config()
-    if not config["is_active"]:
-        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
-
-    from trendyol_client import TrendyolClient
-    client = TrendyolClient(
-        supplier_id=config["supplier_id"],
-        api_key=config["api_key"],
-        api_secret=config["api_secret"],
-        mode=config["mode"]
-    )
-
-    try:
-        url = f"{client.base_url}/order/sellers/{client.supplier_id}/claim-issue-reasons"
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
-            headers = client._get_headers()
-            response = await http_client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        logger.error(f"Failed to fetch issue reasons: {str(e)}")
-        # Return common fallback reasons
-        return [
-            {"id": 1, "name": "Kullanım Hatası / Tüketici Kaynaklı Hasar"},
-            {"id": 2, "name": "Ürün Orijinal Kutusunda / Ambalajında Değil"},
-            {"id": 4, "name": "Eksik Aksesuar / Parça"},
-            {"id": 6, "name": "İade Süresi Geçmiş"},
-            {"id": 21, "name": "Ürün Kullanılmış / Etiketi Koparılmış"}
-        ]
 
 @router.post("/trendyol/claims/{claim_id}/approve")
 async def approve_trendyol_claim(
@@ -5944,16 +6025,20 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                         if sz:
                             m_key = f"{ty_attr_id}:{sz}"
                             v_id = val_mappings.get(m_key)
-                            if v_id: v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
-                            else: v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": sz})
+                            if v_id:
+                                v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
+                            else:
+                                v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": sz})
                     
                     elif local_name.lower() == "renk":
                         clr = v.get("color")
                         if clr:
                             m_key = f"{ty_attr_id}:{clr}"
                             v_id = val_mappings.get(m_key)
-                            if v_id: v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
-                            else: v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": clr})
+                            if v_id:
+                                v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
+                            else:
+                                v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": clr})
 
                 # Pricing with price_diff
                 diff = float(v.get("price_diff", 0) or 0)
@@ -6162,7 +6247,8 @@ async def get_marketplace_status(marketplace: str):
 async def test_marketplace_connection(marketplace: str, current_user: dict = Depends(require_admin)):
     """REAL connection test — Hepsiburada/Temu use Basic Auth against a known probe endpoint.
     Returns success=False with a concrete error message when credentials fail or are missing."""
-    import httpx, base64
+    import httpx
+    import base64
     if marketplace not in ALLOWED_MARKETPLACES:
         raise HTTPException(status_code=404, detail="Bilinmeyen pazaryeri")
     settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
@@ -6205,7 +6291,8 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
             if len(api_key) < 8 or len(app_secret) < 8:
                 return {"success": False, "message": "Temu App Key/Secret çok kısa, doğru girdiğinize emin olun"}
             # Gerçek Temu Open Platform probe — bg.temu.com /api/v1/seller/info endpoint'i
-            import time, json as _json
+            import time
+            import json as _json
             mode_ = settings.get("mode", "sandbox")
             # Temu Open Platform hostları — sandbox vs live farklı
             host = (
