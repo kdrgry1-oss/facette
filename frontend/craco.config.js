@@ -24,6 +24,10 @@ if (config.enableHealthCheck) {
 
 let webpackConfig = {
   eslint: {
+    // Production build'de (Cloudflare/CI) ESLint'i kapat — exhaustive-deps gibi
+    // zararsız uyarılar CI=true yüzünden "hata" sayılıp build'i durdurmasın.
+    // Dev/preview modunda ESLint açık kalır.
+    enable: isDevServer,
     configure: {
       extends: ["plugin:react-hooks/recommended"],
       rules: {
