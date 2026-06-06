@@ -7,7 +7,8 @@
 const TCMX = "static.ticimax.cloud";
 
 export function optimizeImg(url, width = 800, quality = 90) {
-  if (!url || typeof url !== "string") return url;
+  // Boş/geçersiz değerlerde src="" uyarısını ve gereksiz isteği önlemek için undefined döndür
+  if (!url || typeof url !== "string") return undefined;
 
   // Ticimax Cloudflare CDN
   if (url.includes(TCMX)) {
