@@ -1,36 +1,37 @@
 <analysis>**original_problem_statement**: 
-The user wants to resolve UI/UX issues, fix variant ordering on product pages, implement a Gelince Haber Ver (Notify when in stock) feature, restructure product slugs to prevent collisions (), fix a broken Google Login, and urgently improve PageSpeed/CLS issues (image loading delays, flash of stale content, ORB blocks). PRODUCT REQUIREMENTS: Fast, robust UI, proper image caching/resizing, exact matches for product attributes with Ticimax, functional storefront routing.
+The user requested fixing severe PageSpeed and CLS issues (images flashing and loading slowly), a broken Google login, missing Iyzico payment functionality (cart addition to checkout flow), syncing stock from a provided  file, fixing a white-page crash on the checkout success page, fixing product URLs resolving with UUIDs instead of slugs, investigating intermittent production bugs (old banners appearing, login failures), addressing code quality security warnings, and finally, guidance on migrating the platform to a self-hosted environment with Cloudflare R2.
+PRODUCT REQUIREMENTS: Fast loading (WebP images), seamless checkout and payment integration (Iyzico), reliable canonical routing, and accurate stock synchronization.
 
-**User's preferred language**: Turkish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only).
+**User's preferred language**: Turkish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in Turkish only)
 
 **what currently exists?** 
-A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have been successfully migrated to . Image upload/serving has been refactored for on-the-fly resizing using Pillow. Google Auth endpoint has been implemented. Stock notification system is built and wired.
+A deployed React 19 + FastAPI + MongoDB e-commerce platform. Image serving is optimized with on-the-fly WebP conversion. Google Auth is functioning. Iyzico payment forms and callbacks are fully implemented. Stock is synchronized with Ticimax. Checkout success page TDZ errors are resolved. Canonical product URL routing is implemented. Hardcoded secrets have been moved to . 
 
 **Last working item**:
-    - Last item agent was working: The agent was optimizing image loading and CLS (Cumulative Layout Shift) in  and . The agent created an image helper () to resize Ticimax CDN and local images on the fly, and was applying  containers to hero banners to fix layout shifts.
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use?: screenshot tool (to verify frontend layout/CLS) and curl (to verify backend  resize endpoint).
+    - Last item agent was working: The agent provided the user with migration guidance via the  after the user requested to move the entire platform out of Emergent to a self-hosted environment using Cloudflare R2. 
+    - Status: BLOCKED (Waiting for the user to contact Emergent support to obtain database dumps and media files).
+    - Agent Testing Done: N/A
+    - Which testing method agent to use? NA
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Performance/PageSpeed & CLS Fixes (P0)
-     - Attempted fixes: Created , updated  (HeroSlider, FullBanner, HalfBanners, InstaShop) to use optimized images and explicit aspect ratios.
-     - Next debug checklist: Verify  mega menu images and  are fully utilizing . Run frontend lint to catch any React strict-mode issues from the batch edit. Test frontend with the screenshot tool to ensure no layout shift occurs and images load via the new resize API. Check  to ensure Google login is fully functional.
-     - Why fix this issue and what will be achieved with the fix?: User complained about terrible PageSpeed scores, broken Google Login, and flashing images. Fixes core web vitals.
-     - Status: IN PROGRESS
-     - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: both
-     - Blocked on other issue: None
-
-  - Issue 2: Meta CAPI Server-side Token Invalid (P1)
-     - Attempted fixes: Agent updated the Meta Pixel ID, but Meta threw . The token provided in the user's PDF was broken/corrupted by line breaks.
-     - Next debug checklist: Wait for the user to provide a valid, unbroken CAPI Access Token (requested in previous messages). Once provided, update the vault via the backend or direct script.
+  - Issue 1: Meta CAPI Server-side Token Invalid (P1)
+     - Attempted fixes: Agent updated the Meta Pixel ID previously, but Meta threw . The token provided in the user's PDF was corrupted by line breaks.
+     - Next debug checklist: Wait for the user to provide a valid, unbroken CAPI Access Token. Update the vault via the backend.
      - Why fix this issue and what will be achieved with the fix?: Server-side conversion tracking is currently failing.
      - Status: BLOCKED
      - Is recurring issue?: N
      - Should Test frontend/backend/both after fix?: backend
-     - Blocked on other issue: Blocked waiting on user to provide the correct token.
+     - Blocked on other issue: User action pending.
+
+  - Issue 2: Production Environment Intermittent Data Inconsistencies (P1)
+     - Attempted fixes: Investigated code for caching or state issues. Identified that the issue stems from production infrastructure (multiple replicas/caching out of sync).
+     - Next debug checklist: Support advised the user to redeploy the application and wait 15 minutes. If it persists, the user must contact Emergent Support.
+     - Why fix this issue and what will be achieved with the fix?: Prevents old banners from flashing and random login failures on the live site.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue?: Y
+     - Should Test frontend/backend/both after fix?: NA (Infrastructure level)
+     - Blocked on other issue: Pending user redeployment.
 
 **In progress Task List**:
   - Task 1: Optimize integration routes for new slug structure (P1)
@@ -38,11 +39,11 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have 
      - What will be achieved with this?: Keeps new product imports consistent with the newly migrated slug structure.
      - Status: NOT STARTED
      - Should Test frontend/backend/both after fix?: backend
-     - Blocked on something: None
+     - Blocked on something: None.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Cloudflare R2 (Image) & Bunny Stream (Video) CDN Integration (Blocked waiting for User API keys).
+    - P1: Cloudflare R2 (Image) CDN Integration. User mentioned activating this service but pivoting to migrating the *entire server*. Confirm if they still want to integrate R2 into the *current* Emergent codebase.
     - P1: Native Webmail (IMAP/SMTP) embedded in Admin Panel using Zoho/Yandex free tiers.
     
     Future Tasks:
@@ -51,21 +52,23 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have 
     - P2: Order Cancellations & Returns Flow (ERP logic in ).
 
 **Completed work in this session**
-- Category filtering bug showing 0 products (DONE - Regex/breadcrumb matching updated)
-- Meta Pixel public snippet ID updated and verified (DONE)
-- Flash of stale content on Home page fixed (DONE - Skeleton loader added)
-- Variant sorting by admin pool order implemented on Product Detail Page (DONE)
-- Gelince Haber Ver (Notify when in stock) backend route and frontend UI implemented (DONE)
-- Product slugs migrated to  format (408 products migrated, 0 collisions) (DONE)
-- Google Auth  backend endpoint created (DONE)
-- Hero Image relative URL fix &  created for on-the-fly resizing (DONE)
+- Image WebP Optimization & CLS fixes in Header, Home, ProductCard via  (DONE)
+- Backup original images script  executed (DONE)
+- Google Login token mapping fix in  and  (DONE)
+- Iyzico Payment Initialization & Callback (, ) + Unit Tests (DONE)
+- Ticimax XLS Stock Sync () - deactivated 42 out-of-stock products (DONE)
+- Checkout Success page white screen / TDZ error fix () (DONE)
+- Product Canonical URL Redirects mapping UUID to Slug () (DONE)
+- Admin Product List  URL fix () (DONE)
+- Code Quality: Moved hardcoded secrets to  from  and  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None.
+   - Code Quality recommendations flagged large components (, , etc.) and missing hook dependencies. 
+   - These were intentionally skipped to avoid destabilizing the live production app with massive refactors. Only critical security fixes (hardcoded keys) were applied.
 
 **Known issue recurrence from previous fork**
-  - **Environment Confusion:** The user is looking at the PRODUCTION environment, which may lack some data, while testing is done in PREVIEW. If the user reports issues, ensure you specify whether changes are applied to the preview environment.
-  - **React Linting Rigidity:** React compiler is extremely strict about  (e.g., using  instead of ) and . Use async IIFEs for data fetching in .
+  - **Environment Confusion:** The user frequently tests on PRODUCTION () while the agent modifies PREVIEW. Data mismatches (like the number of products) exist between DBs. Always remind the user to *redeploy* preview changes to production.
+  - **React Linting Rigidity:**  and  throw heavy false positives. Attempting to disable them via  breaks the  build. Ignore these specific lint errors as long as the application compiles cleanly ().
 
 **Code Architecture**
 - React 19, FastAPI, MongoDB (Motor).
@@ -73,28 +76,30 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have 
 - Authentication: Emergent Managed Auth (Google).
 
 **Key Technical Concepts**
-- On-the-fly Image Resizing: Intercepts  and uses Python Pillow to resize/cache images to improve PageSpeed.
-- React Strict Mode: Stale closures and TDZ (Temporal Dead Zone) errors are common if hooks aren't formatted cleanly.
+- On-the-fly Image Resizing: Uses Python Pillow to dynamically resize and compress to WebP format ().
+- Iyzico Payment Integration: Requires generating an  signature. Handled via  initializing checkout form HTML.
+- Canonical Routing: If a product is visited by UUID,  fetches it and issues a canonical redirect to its slug URL.
 
 **key DB schema**
   - : 
-  - : 
-  - : 
+  - : Includes logic for tracking , , and .
 
 **changes in tech stack**
-  - None, but added dynamic image resizing logic in backend.
+  - Added  utility script usage for reading  (XLSX compressed) exports.
 
 **All files of reference** 
--  (Created in this session)
-- 
-- 
-- 
-- 
-- 
-- 
+-  (Created)
+-  (Created)
+-  (Created)
+-  (Created)
+-  (Updated derived constants causing TDZ)
+-  (Updated canonical redirect logic)
+-  (Moved secrets to .env)
+-  (Moved secrets to .env)
 
 **Areas that need refactoring**: 
--  needs to be updated to match the new slug generation format so future Ticimax pulls do not break the URL structure.
+-  still needs slug generation alignment (Task 1).
+- Large components like  and  can be broken down if requested, but handle with extreme caution.
 
 **key api endpoints**
 - 
@@ -102,44 +107,44 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have 
 - 
 
 **Critical Info for New Agent** 
-- **Image URLs:** Avoid using absolute pod URLs for images; they trigger ORB blockers and cause 404s in production. Always use relative .
-- **Google Auth:** The user reported Google Auth was failing. The previous agent added the missing  endpoint using the Emergent playbook, but it needs to be tested on the frontend.
-- **Do not modify unrelated code:** The user gets agitated if you alter files outside the scope of their request. Focus strictly on finishing the PageSpeed/Image logic and the integration routes slug fix.
+- **Platform Migration Request:** The user has requested to move their entire infrastructure out of Emergent hosting. Guidance has been provided. Await user confirmation on whether they want to proceed with further development in Emergent, or wait for them to export their DB.
+- **Do not blindly fix all ESLint errors:** If you encounter  errors in existing code, verify using . Disabling these rules explicitly will crash the build.
 
 **documents and test reports created in this job** 
   - 
   - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. *User*: yap hepsini (Do all tasks).
- 2. *User*: Noticed old images flashing for a second when site loads.
- 3. *User*: Asked to apply Notify me improvement. Noticed variant ordering is wrong compared to screenshot. Pointed out product links aren't formatted correctly ( vs ).
- 4. *User*: Google login is broken. PageSpeed Insights scores are terrible. Menu hover and homepage flashes old images/loads slowly. Asked if serving images from DB instead of Ticimax cloud would fix speed.
- 5. *Agent (PENDING)*: Agent created  and modified  to optimize images and prevent CLS, but the context window ended before linting/testing the batch changes.
+ 1. *User*: Pointed out  page was blank white on production.
+ 2. *Agent*: Found TDZ bug in , fixed it, pushed to preview, and asked user to redeploy.
+ 3. *User*: Asked why product URLs resolve with UUID () instead of proper slugs.
+ 4. *Agent*: Fixed  to fetch UUID and canonically redirect to slug, resolving SEO and linking issues.
+ 5. *User*: Complained about intermittent production issues: old banners flashing, admin login failing intermittently (bir giriyor bir girmiyor).
+ 6. *Agent*: Confirmed code/MongoDB uses single state. Used  to identify it as a multi-replica production infrastructure desync. Advised user to redeploy. Fixed  admin link undefined bug.
+ 7. *User (System)*: Emitted massive Code Review warning list.
+ 8. *Agent*: Applied only safe/critical security fixes (moving hardcoded API keys to ), documented false positives to avoid breaking live deployment.
+ 9. *User*: Activated Cloudflare R2, requested guidance to migrate entire hosting and database environment out of Emergent for better control.
+ 10. *Agent (PENDING)*: Relayed  guidance on how to export MongoDB, request media files, and migrate platform. Waiting for user response.
 
 **Project Health Check:**
-- Broken: Meta CAPI server-side tracking (Requires User to provide a valid token).
+- Broken: Meta CAPI (Requires User token).
 - Mocked: None.
 
 **3rd Party Integrations** 
-- Ticimax / Trendyol — Requires User API Key
+- Ticimax / Trendyol — Requires User API Key (Moved to )
+- Iyzico (Payments) — Requires User API Key 
 - Meta CAPI (Pixel) — Requires User API Key (Token broken)
 - Google Auth — Uses Emergent Managed Auth
 
 **Testing status**
-  - Testing agent used after significant changes: NO
+  - Testing agent used after significant changes: YES
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None
+  - Test files created: 
   - Known regressions: None
 
 **Credentials to test flow:**
 - Admin Panel:  / 
 
 **What agent forgot to execute**
-- The agent batched edits in  and  for PageSpeed/Image optimizations but did not run  or verify the visual layout using the  before the session ended. Also did not test if Google Auth is fully working after adding the endpoint.
-
-**Debugging checklist for current issue**
-    Issue: PageSpeed/CLS and Image Optimizations
-    Frontend files to check: , , .
-    Backend files to check: 
-    Checklist: Verify that  is imported and used correctly. Ensure  doesn't break image source paths. Test the backend  function to ensure Pillow resizes images correctly without 500 errors. Verify Google Login button initiates the flow correctly.</analysis>
+- Did not integrate Cloudflare R2 logic directly into the app because the user shifted the request from an integration to migrating the entire server infrastructure out of Emergent.
+-  slug logic rewrite is still pending.</analysis>
