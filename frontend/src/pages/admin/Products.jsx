@@ -709,7 +709,7 @@ export default function AdminProducts() {
         });
         console.log("Upload response for", file.name, ":", res.data);
         if (res.data.url) {
-          const fullUrl = `${API.replace('/api', '')}${res.data.url}`;
+          const fullUrl = res.data.url.startsWith('http') ? res.data.url : `${API.replace('/api', '')}${res.data.url}`;
           console.log("Adding image URL:", fullUrl);
           newImages.push(fullUrl);
         }

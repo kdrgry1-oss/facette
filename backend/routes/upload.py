@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 from datetime import datetime, timezone
 import base64
 import uuid
 import os
 
 from .deps import db, get_current_user, logger
+from services import r2_storage as r2
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 # Geriye dönük uyumluluk: bazı kayıtlarda görsel URL'si /api/files/... olarak saklandı
@@ -15,14 +16,15 @@ APP_NAME = "facette"
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Production'da pod diski kalıcı değil ve birden fazla replica var; bu yüzden
-# görsel içeriği MongoDB'de (paylaşımlı + kalıcı) saklanır, disk yalnızca hız önbelleği.
+# Yeni yüklemeler Cloudflare R2'ye (S3 uyumlu) gider ve doğrudan R2 CDN'den
+# sunulur. Bu, MongoDB'yi base64 görsel yükünden kurtarır ve yüklemeyi hızlandırır.
+# R2 yapılandırılmamışsa eski davranışa (MongoDB + disk) düşer.
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.post("/image")
 async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
-    """Görseli MongoDB'ye (kalıcı) + diske (önbellek) yükle."""
+    """Görseli Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Sadece resim dosyaları yüklenebilir")
 
@@ -33,14 +35,33 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
     ext = file.filename.split(".")[-1].lower() if "." in (file.filename or "") else "jpg"
     filename = f"{uuid.uuid4()}.{ext}"
 
-    # Diske yaz (best-effort önbellek)
+    # 1) Cloudflare R2 (tercih edilen)
+    if r2.is_enabled():
+        key = f"uploads/{filename}"
+        try:
+            public_url = r2.put_object(key, data, file.content_type)
+            await db.files.insert_one({
+                "id": str(uuid.uuid4()),
+                "storage_path": filename,
+                "r2_key": key,
+                "r2_url": public_url,
+                "original_filename": file.filename,
+                "content_type": file.content_type,
+                "size": len(data),
+                "is_deleted": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return {"success": True, "path": filename, "url": public_url}
+        except Exception as e:
+            logger.error(f"R2 upload failed, falling back to db/disk: {e}")
+
+    # 2) Fallback: MongoDB (kalıcı) + disk (önbellek)
     try:
         with open(os.path.join(UPLOAD_DIR, filename), "wb") as f:
             f.write(data)
     except Exception as e:
         logger.warning(f"upload disk write failed: {e}")
 
-    # MongoDB'ye kalıcı sakla (replica'lar arası erişilebilir)
     await db.files.insert_one({
         "id": str(uuid.uuid4()),
         "storage_path": filename,
@@ -59,11 +80,16 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
     }
 
 
-async def _serve(path: str, w: int = 0, q: int = 90) -> Response:
+async def _serve(path: str, w: int = 0, q: int = 90):
     record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+
+    # 0) R2'ye taşınmış/yüklenmişse → R2 public URL'ine yönlendir (CDN servis eder)
+    if record and record.get("r2_url"):
+        return RedirectResponse(url=record["r2_url"], status_code=302)
+
     content = None
     ctype = (record or {}).get("content_type", "image/jpeg")
-    # 1) Önce MongoDB içeriği (production'da güvenilir kaynak)
+    # 1) MongoDB içeriği (eski yüklemeler için güvenilir kaynak)
     if record and record.get("data_b64"):
         try:
             content = base64.b64decode(record["data_b64"])
@@ -82,7 +108,6 @@ async def _serve(path: str, w: int = 0, q: int = 90) -> Response:
     headers = {"Cache-Control": "public, max-age=31536000, immutable"}
 
     # On-the-fly optimize/resize — yalnızca ?w= verildiyse ve raster görselse.
-    # WebP'e çevirip boyutu küçültür → LCP/ağırlık ciddi düşer.
     if w and w > 0 and ctype.startswith("image/") and "svg" not in ctype:
         try:
             from PIL import Image

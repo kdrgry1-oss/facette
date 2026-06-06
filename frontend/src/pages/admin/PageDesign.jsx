@@ -318,7 +318,8 @@ export default function PageDesign() {
       });
       
       if (res.data.url || res.data.path) {
-        const url = `${API.replace('/api', '')}${res.data.url || `/api/upload/files/${res.data.path}`}`;
+        const raw = res.data.url || `/api/upload/files/${res.data.path}`;
+        const url = raw.startsWith('http') ? raw : `${API.replace('/api', '')}${raw}`;
         const newImages = [...formData.images];
         const newLinks = [...formData.links];
         
