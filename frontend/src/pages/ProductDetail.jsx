@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function ProductDetail() {
   const { slug } = useParams();
+  const navigate = useNavigate();
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const [product, setProduct] = useState(null);
@@ -67,6 +68,11 @@ export default function ProductDetail() {
       try {
         const res = await axios.get(`${API}/products/${slug}`);
         setProduct(res.data);
+
+        // Canonical URL: ürün id/eski slug ile açıldıysa doğru slug'a yönlendir (SEO + tutarlı URL)
+        if (res.data?.slug && res.data.slug !== slug) {
+          navigate(`/${res.data.slug}`, { replace: true });
+        }
 
         // FAZ 9+ — Pixel ViewContent event
         trackViewContent({
