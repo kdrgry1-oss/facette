@@ -34,7 +34,7 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
         setValues(d.values || {});
       }
     } catch (err) {
-      /* silently ignore first-time */
+      /* İlk yüklemede beden tablosu henüz yoksa 404 beklenir — kasıtlı sessiz geçiş */
     } finally {
       setLoading(false);
     }

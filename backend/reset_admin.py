@@ -19,7 +19,7 @@ async def reset():
     client = AsyncIOMotorClient(MONGO_URL)
     db = client[db_name]
     
-    new_password = "admin123"
+    new_password = os.environ.get("ADMIN_RESET_PASSWORD", "admin123")
     hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
     
     result = await db.users.update_one(

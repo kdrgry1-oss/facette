@@ -6439,6 +6439,8 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
                 "timestamp": ts,
             }
             sign_base = app_secret + "".join(f"{k}{v}" for k, v in sorted(body.items())) + app_secret
+            # NOT: Temu Open Platform imza algoritması olarak MD5 ZORUNLU kılar
+            # (API kontratı gereği; güvenlik tercihi değil — değiştirmek imzayı bozar).
             body["sign"] = hashlib.md5(sign_base.encode()).hexdigest().upper()
             try:
                 async with httpx.AsyncClient(timeout=15) as c:

@@ -14,14 +14,17 @@ Gerçek WSDL imzaları (doğrulanmış):
   SelectUyeler    : UyeKodu, f:UyeFiltre, s:UyeSayfalama
   SelectUyeAdres  : UyeKodu, uyeID
 """
-import logging, warnings, time
+import logging
+import warnings
+import time
+import os
 from typing import List, Dict, Optional, Any
 
 warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 
-TICIMAX_DOMAIN  = "www.facette.com.tr"
-TICIMAX_API_KEY = "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+TICIMAX_DOMAIN  = os.environ.get("TICIMAX_DOMAIN") or "www.facette.com.tr"
+TICIMAX_API_KEY = os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
 RATE_LIMIT_SLEEP = 13   # Ticimax rate limit: 12 sn, biz 13 sn bekliyoruz
 
 URUN_WSDL    = f"https://{TICIMAX_DOMAIN}/Servis/UrunServis.svc?wsdl"
@@ -163,7 +166,6 @@ def get_all_categories(wscode: str = TICIMAX_API_KEY,
     alt kategorilerini de çeker (2 seviye derinlik yeterli).
     sleep_between: rate limit için her API çağrısı arasında bekleme (sn)
     """
-    import time
     all_cats: List[Dict] = []
     seen_ids = set()
 
@@ -397,7 +399,6 @@ def get_orders(page: int = 1, page_size: int = 50,
                 continue
             is_mp = bool(o.get("IsMarketplace") or o.get("PazaryeriIhracat"))
             kaynak = str(o.get("Kaynak") or "").lower()
-            kaynak_id = o.get("SiparisKaynagi") or 0
             mp_butik = o.get("PazaryeriButikId") or 0
             if exclude_marketplace:
                 if is_mp:
