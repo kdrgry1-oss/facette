@@ -6312,6 +6312,8 @@ async def get_marketplace_settings(marketplace: str, current_user: dict = Depend
         settings["api_secret"] = "********"
     if settings.get("password"):
         settings["password"] = "********"
+    if settings.get("secret_key"):
+        settings["secret_key"] = "********"
     return settings
 
 
@@ -6325,7 +6327,7 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
     if payload.get("is_active"):
         existing = await db.settings.find_one({"id": marketplace}, {"_id": 0}) or {}
         fields_by_mp = {
-            "hepsiburada": ["merchant_id", "username", "password"],
+            "hepsiburada": ["merchant_id", "secret_key", "dev_username"],
             "temu": ["api_key", "api_secret"],
         }
         required = fields_by_mp.get(marketplace, ["api_key", "api_secret"])
@@ -6346,6 +6348,7 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
         "id": marketplace,
         "merchant_id": payload.get("merchant_id", ""),
         "username": payload.get("username", ""),
+        "dev_username": payload.get("dev_username", ""),
         "api_key": payload.get("api_key", ""),
         "mode": payload.get("mode", "sandbox"),
         "is_active": payload.get("is_active", False),
@@ -6357,6 +6360,8 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
         update_data["api_secret"] = payload.get("api_secret")
     if payload.get("password") and payload.get("password") != "********":
         update_data["password"] = payload.get("password")
+    if payload.get("secret_key") and payload.get("secret_key") != "********":
+        update_data["secret_key"] = payload.get("secret_key")
 
     await db.settings.update_one({"id": marketplace}, {"$set": update_data}, upsert=True)
     return {"success": True, "message": f"{marketplace.capitalize()} ayarları kaydedildi"}
@@ -6392,21 +6397,23 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
     try:
         if marketplace == "hepsiburada":
             merchant_id = (settings.get("merchant_id") or "").strip()
-            username = (settings.get("username") or "").strip()
-            password = (settings.get("password") or "").strip()
-            if not (merchant_id and username and password):
-                return {"success": False, "message": "Hepsiburada için Merchant ID, Kullanıcı Adı ve Şifre zorunlu"}
+            # Secret Key (yeni model). Eski kayitlarda 'password' alaninda olabilir.
+            secret_key = (settings.get("secret_key") or settings.get("password") or "").strip()
+            dev_username = (settings.get("dev_username") or "").strip()
+            if not (merchant_id and secret_key and dev_username):
+                return {"success": False, "message": "Hepsiburada için Merchant ID, Secret Key ve Developer Username zorunlu"}
             mode = settings.get("mode", "sandbox")
-            host = "https://listing-external-sit.hepsiburada.com" if mode == "sandbox" else "https://listing-external.hepsiburada.com"
-            url = f"{host}/listings/merchantid/{merchant_id}?offset=0&limit=1"
-            token = base64.b64encode(f"{username}:{password}".encode()).decode()
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(url, headers={"Authorization": f"Basic {token}", "User-Agent": f"{username} - SelfIntegration", "Accept": "application/json"})
+            host = "https://mpop-sit.hepsiburada.com" if mode == "sandbox" else "https://mpop.hepsiburada.com"
+            url = f"{host}/product/api/categories/get-all-categories?page=0&size=1"
+            # Basic Auth: kullanici adi = Merchant ID, sifre = Secret Key. User-Agent = Developer Username.
+            token = base64.b64encode(f"{merchant_id}:{secret_key}".encode()).decode()
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.get(url, headers={"Authorization": f"Basic {token}", "User-Agent": dev_username, "Accept": "application/json"})
             if r.status_code == 200:
                 return {"success": True, "message": f"Hepsiburada bağlantısı başarılı ({mode})"}
             if r.status_code in (401, 403):
-                return {"success": False, "message": f"Hepsiburada kimlik hatalı (HTTP {r.status_code}). Merchant ID / Kullanıcı Adı / Şifreyi kontrol edin."}
-            # 400 body'sinden errorCode parse et
+                return {"success": False, "message": f"Hepsiburada kimlik hatalı (HTTP {r.status_code}). Merchant ID / Secret Key / Developer Username kontrol edin."}
+            # diger durumlarda body'den mesaj parse et
             try:
                 err_body = r.json()
                 err_msg = err_body.get("message") or err_body.get("errorMessage") or err_body.get("detail") or ""

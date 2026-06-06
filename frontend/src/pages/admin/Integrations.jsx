@@ -41,7 +41,7 @@ export default function Integrations() {
   // Hepsiburada state
   const [hbModalOpen, setHbModalOpen] = useState(false);
   const [hbSettings, setHbSettings] = useState({
-    merchant_id: "", username: "", api_key: "", api_secret: "",
+    merchant_id: "", secret_key: "", dev_username: "", api_key: "", api_secret: "",
     mode: "sandbox", is_active: false, default_markup: 0
   });
   const [hbTesting, setHbTesting] = useState(false);
@@ -1046,30 +1046,32 @@ export default function Integrations() {
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('hepsiburada', hbSettings, setHbModalOpen); }} className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-xs text-blue-800">
-              Hepsiburada <strong>Basic Auth</strong> kullanır: Merchant ID + Kullanıcı Adı + Şifre. API Key/Secret yoktur.
-              Bilgileri HB Merchant Panel → <em>API Bilgileri</em> ekranından alırsınız.
+              Hepsiburada <strong>Basic Auth</strong> kullanır: kullanıcı adı = <strong>Merchant ID</strong>, şifre = <strong>Secret Key</strong>.
+              İsteklerde ayrıca <strong>Developer Username</strong> (User-Agent) gönderilir. Bilgileri HB Geliştirici/Merchant Panel → <em>API Bilgileri</em> ekranından alırsınız.
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Merchant ID *</label>
               <input data-testid="hb-merchant-id" type="text" required value={hbSettings.merchant_id}
                 onChange={(e) => setHbSettings({ ...hbSettings, merchant_id: e.target.value })}
-                placeholder="örn: 54321abc"
+                placeholder="örn: e88383f6-478d-4b36-9d44-..."
                 className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Basic Auth kullanıcı adı olarak da bu değer kullanılır.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Kullanıcı Adı *</label>
-              <input data-testid="hb-username" type="text" required value={hbSettings.username || ''}
-                onChange={(e) => setHbSettings({ ...hbSettings, username: e.target.value })}
-                placeholder="hbseller_api_user"
+              <label className="block text-sm font-medium mb-1">Secret Key *</label>
+              <input data-testid="hb-secret-key" type="password" value={hbSettings.secret_key || ''}
+                onChange={(e) => setHbSettings({ ...hbSettings, secret_key: e.target.value })}
+                placeholder={hbSettings.secret_key === "********" ? "********" : "Hepsiburada API parolası"}
                 className="w-full border px-3 py-2 rounded text-sm" />
+              <p className="text-xs text-gray-500 mt-1">Basic Auth şifresi. Mevcut değer maskelenir; değiştirmek için yeni girin.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">API Şifre *</label>
-              <input data-testid="hb-password" type="password" value={hbSettings.password || ''}
-                onChange={(e) => setHbSettings({ ...hbSettings, password: e.target.value })}
-                placeholder={hbSettings.password === "********" ? "********" : "API şifresi"}
+              <label className="block text-sm font-medium mb-1">Developer Username *</label>
+              <input data-testid="hb-dev-username" type="text" required value={hbSettings.dev_username || ''}
+                onChange={(e) => setHbSettings({ ...hbSettings, dev_username: e.target.value })}
+                placeholder="örn: ceyjewelry_dev"
                 className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Mevcut şifre güvenlik için maskelenir. Değiştirmek için yeni girin.</p>
+              <p className="text-xs text-gray-500 mt-1">API isteklerinde User-Agent başlığı olarak gönderilir.</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Ortam</label>
