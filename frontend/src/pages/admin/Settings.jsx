@@ -4,6 +4,47 @@ import { toast } from "sonner";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+function MaintenanceSubscribers() {
+  const [data, setData] = useState({ total: 0, subscribers: [] });
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    axios
+      .get(`${API}/settings/maintenance/subscribers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setData(res.data))
+      .catch(() => {});
+  }, []);
+
+  const downloadCsv = () => {
+    const rows = ["email,created_at", ...data.subscribers.map((s) => `${s.email},${s.created_at}`)];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bakim-aboneleri.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-amber-200 flex items-center justify-between" data-testid="maintenance-subscribers">
+      <p className="text-sm text-amber-900">
+        <strong data-testid="maintenance-subscriber-count">{data.total}</strong> kişi açılış bildirimi için e-posta bıraktı.
+      </p>
+      {data.total > 0 && (
+        <button
+          type="button"
+          onClick={downloadCsv}
+          className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded font-bold hover:bg-amber-600 transition-colors"
+          data-testid="maintenance-subscribers-export"
+        >
+          CSV İndir
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState({
     site_name: "FACETTE",
@@ -121,6 +162,7 @@ export default function AdminSettings() {
           <p className="text-xs text-amber-700 mt-3">
             Bakım modu açıkken yalnızca admin hesabıyla giriş yapan kullanıcılar siteyi normal görür. <strong>/admin</strong> paneline erişim her zaman açıktır.
           </p>
+          <MaintenanceSubscribers />
         </div>
 
         {/* General */}

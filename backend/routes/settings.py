@@ -1,9 +1,35 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any
+from datetime import datetime, timezone
+import re
 
 from .deps import db, require_admin
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+@router.post("/maintenance/notify")
+async def maintenance_notify_subscribe(payload: dict):
+    """Public: bakım modu sırasında 'açılınca haber ver' e-posta toplama."""
+    email = (payload.get("email") or "").strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi giriniz.")
+    existing = await db.maintenance_subscribers.find_one({"email": email})
+    if existing:
+        return {"message": "E-posta adresiniz zaten kayıtlı. Açılınca size haber vereceğiz."}
+    await db.maintenance_subscribers.insert_one({
+        "email": email,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "notified": False,
+    })
+    return {"message": "Teşekkürler! Site açılır açılmaz size haber vereceğiz."}
+
+@router.get("/maintenance/subscribers")
+async def maintenance_subscribers_list(current_user: dict = Depends(require_admin)):
+    """Admin: bakım modu e-posta aboneleri."""
+    items = await db.maintenance_subscribers.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    return {"total": len(items), "subscribers": items}
 
 @router.get("/maintenance")
 async def get_maintenance_status():
