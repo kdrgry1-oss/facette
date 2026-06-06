@@ -26,6 +26,30 @@ def generate_slug(name: str) -> str:
     slug = re.sub(r'-+', '-', slug).strip('-')
     return slug
 
+
+def _slug_to_diacritic_regex(slug: str) -> str:
+    """Türkçe karakter DUYARSIZ regex deseni üretir.
+
+    Storefront menüsü Türkçe karaktersiz slug gönderir (örn. 'takim', 'tisort',
+    'giyim') ama DB'de kategori adları/breadcrumb Türkçe karakterlidir
+    ('Takım', 'Tişört', 'GİYİM'). Düz regex (case-insensitive) 'i'≠'ı', 's'≠'ş'
+    olduğu için eşleşmez. Bu helper her belirsiz latin harfi, Türkçe varyantları
+    da kapsayan bir karakter sınıfına çevirir → 'giyim' deseni 'GİYİM'i de yakalar.
+    """
+    char_map = {
+        'i': '[iıİI]', 'o': '[oöÖO]', 'u': '[uüÜU]',
+        's': '[sşŞS]', 'c': '[cçÇC]', 'g': '[gğĞG]',
+    }
+    parts = []
+    for ch in slug:
+        if ch in '-_ ':
+            parts.append(r'[\s_>-]*')
+        elif ch in char_map:
+            parts.append(char_map[ch])
+        else:
+            parts.append(re.escape(ch))
+    return ''.join(parts)
+
 @router.get("")
 async def get_products(
     request: Request,
@@ -141,28 +165,37 @@ async def get_products(
             pass
     
     if category:
-        # Türkçe karakter dönüşümü (giyim -> GİYİM, aksesuar -> AKSESUAR)
-        tr_upper_map = {'i': 'İ', 'ı': 'I', 'g': 'G', 'ğ': 'Ğ', 'u': 'U', 'ü': 'Ü', 's': 'S', 'ş': 'Ş', 'o': 'O', 'ö': 'Ö', 'c': 'C', 'ç': 'Ç'}
-        category_upper = category.upper()
-        for lower, upper in tr_upper_map.items():
-            category_upper = category_upper.replace(lower.upper(), upper)
-        
-        # Slug formatını normal metne çevir (en-yeniler -> en yeniler)
-        category_spaced = category.replace('-', ' ')
-        category_spaced_upper = category_spaced.upper()
-        for lower, upper in tr_upper_map.items():
-            category_spaced_upper = category_spaced_upper.replace(lower.upper(), upper)
-        
-        query["$or"] = [
-            {"category_name": {"$regex": category, "$options": "i"}},
-            {"category_name": {"$regex": category_spaced, "$options": "i"}},
-            {"category_name": {"$regex": category_spaced_upper, "$options": "i"}},
-            {"category_slug": category},
-            {"breadcrumb": {"$regex": category, "$options": "i"}},
-            {"breadcrumb": {"$regex": category_upper, "$options": "i"}},
-            {"breadcrumb": {"$regex": category_spaced, "$options": "i"}},
-            {"breadcrumb": {"$regex": category_spaced_upper, "$options": "i"}}
-        ]
+        # =====================================================================
+        # KATEGORİ FİLTRESİ — Türkçe karakter duyarsız + breadcrumb ağaç eşleşmesi
+        # Storefront 'takim'/'tisort'/'giyim' gibi diakritiksiz slug yollar; DB
+        # 'Takım'/'Tişört'/'GİYİM' tutar. _slug_to_diacritic_regex ile eşleştirilir.
+        # =====================================================================
+        cat_slug = category.strip().lower()
+        SPECIAL_NEWEST = {"en-yeniler", "en-yeni", "yeniler", "tum-urunler", "tumu", "all"}
+        if cat_slug in SPECIAL_NEWEST:
+            # Üst kategori değil — tüm aktif ürünler default sıralama (created_at desc)
+            pass
+        elif cat_slug == "sale":
+            and_clauses.append({"$or": [
+                {"sale_price": {"$gt": 0}},
+                {"discount_price": {"$gt": 0}},
+                {"is_on_sale": True},
+                {"sale_active": True},
+            ]})
+        else:
+            dia = _slug_to_diacritic_regex(cat_slug)
+            # Slug'tan tam kategori adını çöz (generate_slug ile ters eşleme)
+            distinct_names = await db.products.distinct("category_name", {"is_deleted": {"$ne": True}})
+            matched_names = [n for n in distinct_names if n and generate_slug(n) == cat_slug]
+            cat_or = []
+            if matched_names:
+                cat_or.append({"category_name": {"$in": matched_names}})
+            # Kategori adı tam eşleşme (diakritik duyarsız)
+            cat_or.append({"category_name": {"$regex": f"^{dia}$", "$options": "i"}})
+            # Breadcrumb segment eşleşmesi: üst kategori (GİYİM>...) ya da yaprak (...>Şort)
+            cat_or.append({"breadcrumb": {"$regex": f"(?:^|>){dia}(?:>|$)", "$options": "i"}})
+            cat_or.append({"category_slug": cat_slug})
+            and_clauses.append({"$or": cat_or})
     
     if search:
         import re as _re
