@@ -48,11 +48,11 @@ const AKSESUAR_MENU = [
 // Menu images for right side
 const MENU_IMAGES = {
   giyim: [
-    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-65777bd3-0-800.webp",
-    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp"
+    "https://cdn.facette.com.tr/pagedesign/title-65777bd3-0-1920.webp",
+    "https://cdn.facette.com.tr/pagedesign/title-7b3e27f9-5-1920.webp"
   ],
   aksesuar: [
-    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp"
+    "https://cdn.facette.com.tr/pagedesign/title-7b3e27f9-5-1920.webp"
   ]
 };
 

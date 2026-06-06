@@ -5,15 +5,30 @@
 //   query param'larıyla backend on-the-fly WebP resize devreye girer.
 
 const TCMX = "static.ticimax.cloud";
-// R2'ye taşınan ürün görselleri bu boyutlarda WebP olarak üretildi (responsive).
+// Cloudflare R2 özel domaini — Image Transformations (cdn-cgi/image) ile dinamik
+// AVIF/WebP + resize sunar (Ticimax ile aynı yöntem).
+const R2_CDN = "cdn.facette.com.tr";
+// Eski r2.dev (transform desteklemez) — kalan referanslar için boyut-eşleme fallback.
 const R2_SIZES = [400, 800, 1280, 1920];
 
 export function optimizeImg(url, width = 800, quality = 90) {
   // Boş/geçersiz değerlerde src="" uyarısını ve gereksiz isteği önlemek için undefined döndür
   if (!url || typeof url !== "string") return undefined;
 
-  // Cloudflare R2 (kendi CDN'imiz) — URL'deki boyutu istenen genişliğe en yakın
-  // üretilmiş boyutla değiştirir: ...img0-800.webp → ...img0-400.webp
+  // Cloudflare R2 özel domain → cdn-cgi/image ile dinamik resize + format=auto (AVIF/WebP)
+  if (url.includes(R2_CDN)) {
+    let path = url;
+    const m = url.match(/cdn\.facette\.com\.tr\/cdn-cgi\/image\/[^/]+\/(.*)$/i);
+    if (m) {
+      path = `https://${R2_CDN}/${m[1]}`;
+    }
+    return path.replace(
+      `https://${R2_CDN}/`,
+      `https://${R2_CDN}/cdn-cgi/image/width=${width},quality=${quality},format=auto/`
+    );
+  }
+
+  // Eski r2.dev URL'leri (transform yok) → en yakın üretilmiş boyutu seç
   if (url.includes("r2.dev")) {
     const m = url.match(/-(\d+)\.webp(\?.*)?$/i);
     if (m) {
