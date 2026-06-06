@@ -101,7 +101,7 @@ export default function Cart() {
                   className="flex gap-4 sm:gap-6 py-6"
                   data-testid={`cart-item-${item.id}`}
                 >
-                  <Link to={`/urun/${item.slug || item.productId || ""}`} className="shrink-0">
+                  <Link to={`/${item.slug || item.productId || ""}`} className="shrink-0">
                     <img
                       src={item.image}
                       alt={item.name}
@@ -112,7 +112,7 @@ export default function Cart() {
                     <div className="flex justify-between items-start gap-3">
                       <div className="min-w-0">
                         <Link
-                          to={`/urun/${item.slug || item.productId || ""}`}
+                          to={`/${item.slug || item.productId || ""}`}
                           className="block"
                         >
                           <h3 className="text-sm sm:text-base font-medium leading-tight line-clamp-2 hover:underline">
@@ -215,11 +215,11 @@ export default function Cart() {
                   const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                   return (
                     <div key={p.id} className="snap-start shrink-0 w-[44vw]" data-testid={`cart-suggestion-${p.id}`}>
-                      <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
                         <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                       </Link>
                       <div className="mt-2">
-                        <Link to={`/urun/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">{p.name}</Link>
+                        <Link to={`/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">{p.name}</Link>
                         <div className="flex items-baseline gap-1.5 mt-0.5">
                           {hasDiscount ? (
                             <>
@@ -243,11 +243,11 @@ export default function Cart() {
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
                   <div key={p.id} className="group relative">
-                    <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
                       <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                     </Link>
                     <div className="mt-2.5">
-                      <Link to={`/urun/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
+                      <Link to={`/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
                         {hasDiscount ? (
                           <>
@@ -286,7 +286,7 @@ export default function Cart() {
                 return (
                   <Link
                     key={p.id}
-                    to={`/urun/${p.slug || p.id}`}
+                    to={`/${p.slug || p.id}`}
                     className="group block"
                     data-testid={`checkout-deal-${p.id}`}
                   >

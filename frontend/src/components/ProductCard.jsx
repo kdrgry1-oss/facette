@@ -56,7 +56,7 @@ export default function ProductCard({ product }) {
 
   return (
     <div className="product-card group" data-testid={`product-card-${product.id}`}>
-      <Link to={`/urun/${product.slug || product.id}`}>
+      <Link to={`/${product.slug || product.id}`}>
         {/* Image Container */}
         <div 
           ref={imageContainerRef}

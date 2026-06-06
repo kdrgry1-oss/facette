@@ -303,7 +303,7 @@ export default function Header({ hideMenu = false }) {
                     activeMegaProducts.map((p) => (
                       <Link
                         key={p.id}
-                        to={`/urun/${p.slug || p.id}`}
+                        to={`/${p.slug || p.id}`}
                         className="block w-44 group"
                         onClick={() => setActiveMenu(null)}
                       >
@@ -372,7 +372,7 @@ export default function Header({ hideMenu = false }) {
                     activeMegaProducts.map((p) => (
                       <Link
                         key={p.id}
-                        to={`/urun/${p.slug || p.id}`}
+                        to={`/${p.slug || p.id}`}
                         className="block w-44 group"
                         onClick={() => setActiveMenu(null)}
                       >
@@ -535,7 +535,7 @@ export default function Header({ hideMenu = false }) {
                   <h3 className="text-[10px] tracking-widest uppercase text-gray-500 mb-4">ÜRÜNLER</h3>
                   <div className="grid grid-cols-3 gap-3">
                     {searchResults.map((p) => (
-                      <button key={p.id} onClick={() => { navigate(`/urun/${p.slug}`); setSearchOpen(false); }} className="text-left">
+                      <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left">
                         <div className="aspect-[3/4] bg-gray-50 mb-2 overflow-hidden">
                           <img src={p.images?.[0]} alt={p.name} className="w-full h-full object-cover" />
                         </div>

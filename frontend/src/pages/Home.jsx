@@ -15,7 +15,7 @@ const DEFAULT_HERO_BANNERS = [
 ];
 
 const DEFAULT_INSTASHOP = [
-  { id: 1, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9.jpg", link: "/urun/basic-atki" },
+  { id: 1, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9.jpg", link: "/basic-atki" },
   { id: 2, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-114d3d37-9c7f-495c-8bc2-28d32781818d.jpg", link: "/kategori/ceket" },
   { id: 3, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-e18eff06-8597-4f10-92cb-64b11151a74d.jpg", link: "/kategori/kaban" },
   { id: 4, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0.jpg", link: "/kategori/pantolon" },

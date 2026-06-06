@@ -411,7 +411,7 @@ export default function ProductDetail() {
                     return (
                       <Link
                         key={p.id}
-                        to={`/urun/${p.slug || p.id}`}
+                        to={`/${p.slug || p.id}`}
                         className="shrink-0 w-[64px] group"
                         data-testid={`combo-mini-${p.id}`}
                         title={p.name}
@@ -495,7 +495,7 @@ export default function ProductDetail() {
                       className="snap-start shrink-0 w-[44vw]"
                       data-testid={`combo-product-${p.id}`}
                     >
-                      <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
                         <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                         <button
                           type="button"
@@ -507,7 +507,7 @@ export default function ProductDetail() {
                         </button>
                       </Link>
                       <div className="mt-2">
-                        <Link to={`/urun/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">
+                        <Link to={`/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">
                           {p.name}
                         </Link>
                         <div className="flex items-baseline gap-1.5 mt-0.5">
@@ -533,7 +533,7 @@ export default function ProductDetail() {
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
                   <div key={p.id} className="group relative">
-                    <Link to={`/urun/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
                       <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                       <button
                         type="button"
@@ -545,7 +545,7 @@ export default function ProductDetail() {
                       </button>
                     </Link>
                     <div className="mt-2.5">
-                      <Link to={`/urun/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
+                      <Link to={`/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
                         {hasDiscount ? (
                           <>
@@ -649,7 +649,7 @@ function ColorSiblings({ productId, currentColor }) {
         {siblings.map((s) => (
           <a
             key={s.id}
-            href={`/urun/${s.slug || s.id}`}
+            href={`/${s.slug || s.id}`}
             className="w-12 h-12 border border-gray-300 hover:border-black bg-white overflow-hidden flex-shrink-0 transition-colors"
             title={`${s.color || s.name || ""}`}
             data-testid={`color-sibling-${s.id}`}

@@ -117,7 +117,6 @@ function App() {
             {/* Storefront */}
             <Route path="/" element={<Home />} />
             <Route path="/kategori/:slug" element={<Category />} />
-            <Route path="/urun/:slug" element={<ProductDetail />} />
             <Route path="/sepet" element={<Cart />} />
             <Route path="/odeme" element={<Checkout />} />
             <Route path="/arama" element={<Search />} />
@@ -129,6 +128,12 @@ function App() {
             <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
             <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
             <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
+
+            {/* Ürün detay — SEO dostu kök URL: /dokulu-blazer-etek-takim-beyaz-2602
+                (React Router v6 statik rotaları dinamikten önce sıralar, bu yüzden
+                /sepet, /giris vb. her zaman önceliklidir). /urun/:slug geriye dönük uyumluluk için korunur. */}
+            <Route path="/urun/:slug" element={<ProductDetail />} />
+            <Route path="/:slug" element={<ProductDetail />} />
 
             {/* Theme storefront preview (Phase 1) */}
             <Route path="/tema/:slug" element={<MiuMiuTheme />} />

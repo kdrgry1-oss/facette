@@ -163,21 +163,6 @@ export default function AdminSettings() {
           </div>
         </div>
 
-        {/* Rotating Texts */}
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h2 className="text-lg font-medium mb-4">Dönen Yazılar (Header)</h2>
-          <div>
-            <label className="block text-sm font-medium mb-1">Yazılar (satır satır)</label>
-            <textarea
-              value={settings.rotating_texts?.join("\n") || ""}
-              onChange={(e) => setSettings({ ...settings, rotating_texts: e.target.value.split("\n").filter(Boolean) })}
-              rows={4}
-              placeholder="Yeni Sezon Ürünleri&#10;Ücretsiz Kargo&#10;Güvenli Alışveriş"
-              className="w-full border px-3 py-2 rounded text-sm"
-            />
-          </div>
-        </div>
-
         {/* Contact */}
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h2 className="text-lg font-medium mb-4">İletişim Bilgileri</h2>

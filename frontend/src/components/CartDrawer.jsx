@@ -97,7 +97,7 @@ export default function CartDrawer() {
               {items.map((item) => (
                 <li key={item.id} className="flex gap-4 py-5">
                   <Link
-                    to={`/urun/${item.slug || item.productId}`}
+                    to={`/${item.slug || item.productId}`}
                     onClick={() => setIsOpen(false)}
                     className="flex-shrink-0"
                   >
@@ -109,7 +109,7 @@ export default function CartDrawer() {
                   </Link>
                   <div className="flex-1 min-w-0">
                     <Link
-                      to={`/urun/${item.slug || item.productId}`}
+                      to={`/${item.slug || item.productId}`}
                       onClick={() => setIsOpen(false)}
                       className="block hover:underline"
                     >
@@ -184,7 +184,7 @@ export default function CartDrawer() {
                   {suggestions.map((s) => (
                     <Link
                       key={s.id}
-                      to={`/urun/${s.slug || s.id}`}
+                      to={`/${s.slug || s.id}`}
                       className="flex-shrink-0 w-20 group"
                       onClick={() => setIsOpen(false)}
                       data-testid={`drawer-combo-${s.id}`}
@@ -210,7 +210,7 @@ export default function CartDrawer() {
                   {bestsellers.map((s) => (
                     <Link
                       key={s.id}
-                      to={`/urun/${s.slug || s.id}`}
+                      to={`/${s.slug || s.id}`}
                       className="flex-shrink-0 w-20 group"
                       onClick={() => setIsOpen(false)}
                       data-testid={`drawer-bs-${s.id}`}
