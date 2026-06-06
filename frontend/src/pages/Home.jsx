@@ -252,6 +252,27 @@ function RotatingText({ block }) {
   );
 }
 
+// İlk yükleme skeleton'u — page-blocks fetch tamamlanana kadar gösterilir.
+// Böylece hardcoded DEFAULT_HERO_BANNERS (eski görseller) bir an flash etmez.
+function HomeSkeleton() {
+  return (
+    <div data-testid="home-skeleton">
+      <div className="w-full aspect-[16/7] bg-stone-100 animate-pulse" />
+      <section className="max-w-screen-2xl mx-auto px-4 py-12">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="animate-pulse">
+              <div className="aspect-[3/4] bg-stone-100 mb-3" />
+              <div className="h-3 bg-stone-100 w-3/4 mb-2" />
+              <div className="h-3 bg-stone-100 w-1/3" />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // Block Renderer
 function BlockRenderer({ block, products }) {
   let component = null;
@@ -283,32 +304,30 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    let active = true;
+    (async () => {
+      try {
+        const [productsRes, blocksRes] = await Promise.all([
+          axios.get(`${API}/products?limit=100&sort=created_at&order=desc`),
+          axios.get(`${API}/page-blocks?page=home`).catch(() => ({ data: [] }))
+        ]);
+        if (!active) return;
+        setProducts(productsRes.data?.products || []);
 
-  const fetchData = async () => {
-    try {
-      const [productsRes, blocksRes] = await Promise.all([
-        axios.get(`${API}/products?limit=100&sort=created_at&order=desc`),
-        axios.get(`${API}/page-blocks?page=home`).catch(() => ({ data: [] }))
-      ]);
-      
-      setProducts(productsRes.data?.products || []);
-      
-      const isPreview = new URLSearchParams(window.location.search).get('preview') === 'true';
-      
-      // Sort blocks by sort_order and filter active ones
-      const activeBlocks = (blocksRes.data || [])
-        .filter(b => isPreview || b.is_active)
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-      
-      setBlocks(activeBlocks);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+        const isPreview = new URLSearchParams(window.location.search).get('preview') === 'true';
+        // Sort blocks by sort_order and filter active ones (non-mutating)
+        const activeBlocks = (blocksRes.data || [])
+          .filter(b => isPreview || b.is_active)
+          .toSorted((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        setBlocks(activeBlocks);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   // Check if we have CMS blocks to render
   const hasCMSBlocks = blocks.length > 0;
@@ -328,8 +347,11 @@ export default function Home() {
       {rotatingBlock && <RotatingText block={rotatingBlock} />}
       <Header />
       
-      {/* Render CMS Blocks if available */}
-      {hasCMSBlocks ? (
+      {/* İlk yüklemede eski görsellerin (hardcoded default) flash etmemesi için
+          page-blocks fetch tamamlanana kadar skeleton göster. */}
+      {loading ? (
+        <HomeSkeleton />
+      ) : hasCMSBlocks ? (
         <>
           {flowBlocks.map((block) => (
             <BlockRenderer key={block.id} block={block} products={products} />
