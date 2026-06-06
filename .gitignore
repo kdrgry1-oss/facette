@@ -246,3 +246,11 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# --- Hassas veri / yedekler ---
+backend/imports/
+db_backup/*.archive.gz
+data_export/
+backend/scripts/backups/
+*.xlsx
+*.archive.gz
