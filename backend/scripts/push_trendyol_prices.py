@@ -100,9 +100,12 @@ async def main():
         batch_ids.append(bid)
         print(f"  parti {i // 100 + 1}: {len(chunk)} item → batchRequestId={bid} | resp={str(res)[:120]}")
 
-    # Ürünlere kalıcı multiplier yaz (gelecekteki pushlar da zamlı gitsin)
-    await db.products.update_many({"is_active": True}, {"$set": {"trendyol_multiplier": markup}})
+    # Global markup ayarını güncelle (admin panelden tek yerden yönetilsin)
+    from datetime import datetime, timezone
+    await db.settings.update_one({"id": "main"}, {"$set": {"trendyol_markup": markup}}, upsert=True)
+    await db.settings.update_one({"id": "trendyol"}, {"$set": {"default_markup": markup, "updated_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
     print(f"\nUYGULANDI ✅ | {len(items)} item gönderildi | batch sayısı: {len(batch_ids)}")
+    print(f"Global Trendyol markup ayarı %{markup} olarak kaydedildi (admin panelden değiştirilebilir).")
     print("Batch durumlarını Trendyol panelinden veya batch-request API'sinden kontrol edebilirsiniz.")
     print("batch_ids:", batch_ids)
 

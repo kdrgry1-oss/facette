@@ -5633,7 +5633,7 @@ async def update_trendyol_stock_price(
     # Varyantlı ürün mü?
     items = []
     variants = product.get("variants", [])
-    trendyol_multiplier = product.get("trendyol_multiplier", 0)
+    trendyol_multiplier = product.get("trendyol_multiplier") or config.get("default_markup", 0) or 0
     base_price = product.get("price", 0)
     sale_price = product.get("sale_price") or base_price
     
@@ -5668,15 +5668,7 @@ async def update_trendyol_stock_price(
         raise HTTPException(status_code=400, detail="Ürünün barkodu bulunamadı")
 
     try:
-        url = f"{client.base_url}/sapigw/suppliers/{client.supplier_id}/products/price-and-inventory"
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
-            headers = client._get_headers()
-            response = await http_client.put(url, headers=headers, json={"items": items})
-            response.raise_for_status()
-            result = response.json()
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Trendyol stock/price update error: {e.response.status_code} - {e.response.text}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"Trendyol API hatası: {e.response.text}")
+        result = await client.update_price_and_inventory(items)
     except Exception as e:
         logger.error(f"Trendyol stock/price update error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -5734,7 +5726,7 @@ async def update_trendyol_category_stock_price(
 
     items = []
     for product in products:
-        trendyol_multiplier = product.get("trendyol_multiplier", 0)
+        trendyol_multiplier = product.get("trendyol_multiplier") or config.get("default_markup", 0) or 0
         base_price = product.get("price", 0)
         sale_price = product.get("sale_price") or base_price
         
@@ -5769,18 +5761,13 @@ async def update_trendyol_category_stock_price(
     if not items:
         raise HTTPException(status_code=400, detail="Bu kategorideki ürünlerin barkodu bulunamadı")
 
-    # Trendyol max 1000 item per request
+    # Trendyol max 1000 item per request (v2 client metodu — güncel endpoint)
     batch_ids = []
     for i in range(0, len(items), 1000):
         chunk = items[i:i+1000]
         try:
-            url = f"{client.base_url}/sapigw/suppliers/{client.supplier_id}/products/price-and-inventory"
-            async with httpx.AsyncClient(timeout=30.0) as http_client:
-                headers = client._get_headers()
-                response = await http_client.put(url, headers=headers, json={"items": chunk})
-                response.raise_for_status()
-                result = response.json()
-                batch_ids.append(result.get("batchRequestId", ""))
+            result = await client.update_price_and_inventory(chunk)
+            batch_ids.append(result.get("batchRequestId", ""))
         except Exception as e:
             logger.error(f"Trendyol category stock/price update error: {str(e)}")
 
