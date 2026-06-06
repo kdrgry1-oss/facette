@@ -6,6 +6,13 @@
         <meta name="theme-color" content="#000000" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <!-- LCP görseli ve diğer tüm ürün görselleri bu CDN'den gelir → bağlantıyı
+             erkenden kur (preconnect), ilk görsel daha hızlı boyansın. -->
+        <link rel="preconnect" href="https://cdn.facette.com.tr" crossorigin />
+        <link rel="dns-prefetch" href="https://cdn.facette.com.tr" />
+        <!-- Analitik/piksel host'ları için dns-prefetch (bağlantı ısınması) -->
+        <link rel="dns-prefetch" href="https://us.i.posthog.com" />
+        <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
         <!--
         manifest.json provides metadata used when your web app is installed on a

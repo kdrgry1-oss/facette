@@ -27,6 +27,14 @@ def generate_slug(name: str) -> str:
     return slug
 
 
+def slug_with_card_id(name: str, card_id) -> str:
+    """Ürün slug'ını her zaman `{urun-adi}-{kart_id}` biçiminde üretir; böylece
+    tüm ürün linkleri TEK formatta olur. card_id yoksa çağıran iç id'yi geçer."""
+    base = generate_slug(name or "") or "urun"
+    cid = str(card_id).strip() if card_id not in (None, "") else ""
+    return f"{base}-{cid}" if cid else base
+
+
 def _slug_to_diacritic_regex(slug: str) -> str:
     """Türkçe karakter DUYARSIZ regex deseni üretir.
 
@@ -537,10 +545,12 @@ async def create_product(
         if barcode:
             product_data["barcode"] = barcode
 
+    _pid = await generate_short_id("products")
+    _card = product_data.get("csv_card_id") or product_data.get("urun_karti_id") or _pid
     product = {
-        "id": await generate_short_id("products"),
+        "id": _pid,
         "name": product_data.get("name", ""),
-        "slug": product_data.get("slug") or generate_slug(product_data.get("name", "")),
+        "slug": product_data.get("slug") or slug_with_card_id(product_data.get("name", ""), _card),
         "description": product_data.get("description", ""),
         "short_description": product_data.get("short_description", ""),
         "price": float(product_data.get("price", 0)),
@@ -596,9 +606,18 @@ async def update_product(
     if not existing:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     
-    # Update slug if name changed
+    # Update slug if name changed — format: isim-kartid (tüm linkler tek biçim).
+    # Eski slug, kırılan link/SEO olmaması için slug_aliases'a eklenir.
     if product_data.get("name") and product_data.get("name") != existing.get("name"):
-        product_data["slug"] = generate_slug(product_data["name"])
+        _card = existing.get("csv_card_id") or existing.get("urun_karti_id") or product_id
+        new_slug = slug_with_card_id(product_data["name"], _card)
+        old_slug = existing.get("slug")
+        product_data["slug"] = new_slug
+        if old_slug and old_slug != new_slug:
+            aliases = list(existing.get("slug_aliases") or [])
+            if old_slug not in aliases:
+                aliases.append(old_slug)
+            product_data["slug_aliases"] = aliases
     
     
     # Auto-generate barcodes for variants if missing

@@ -103,7 +103,7 @@ function HalfBanners({ block }) {
   // eşit boyutta ve sayfaya sığarak (object-cover ile) görünür. Eski/karışık
   // kayıtlı boyutların yerleşimi bozmasını engeller. Admin isterse
   // block.settings.aspect ("16 / 9" gibi) ile değiştirebilir.
-  const aspect = block?.settings?.aspect || "1 / 1";
+  const aspect = block?.settings?.aspect || "16 / 9";
   return (
     <div className="grid grid-cols-2" data-testid="half-banners">
       {block.images.slice(0, 2).map((img, index) => (
