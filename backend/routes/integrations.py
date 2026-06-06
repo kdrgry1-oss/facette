@@ -4697,9 +4697,15 @@ async def upload_ticimax_products_excel(
                 await db.products.update_one({"id": existing["id"]}, {"$set": update_doc})
                 stats["parents_updated_db"] += 1
             else:
+                # Slug çakışmasını önle: temiz slug kullan, ancak başka bir ürün
+                # aynı slug'ı kullanıyorsa benzersizlik için kart_id ekle.
+                base_slug = _slugify(urun_adi)
+                slug = base_slug
+                if await db.products.find_one({"slug": slug}):
+                    slug = f"{base_slug}-{kart_id}" if kart_id else f"{base_slug}-{str(uuid4())[:6]}"
                 new_doc = {
                     "id": str(uuid4()),
-                    "slug": _slugify(urun_adi),
+                    "slug": slug,
                     "is_active": True,
                     "is_published": True,
                     "images": [],

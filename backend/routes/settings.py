@@ -5,6 +5,21 @@ from .deps import db, require_admin
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
+@router.get("/maintenance")
+async def get_maintenance_status():
+    """Public, lightweight maintenance-mode status used by the storefront gate."""
+    settings = await db.settings.find_one(
+        {"id": "main"},
+        {"_id": 0, "maintenance_mode": 1, "maintenance_title": 1, "maintenance_message": 1, "logo_url": 1, "site_name": 1},
+    ) or {}
+    return {
+        "maintenance_mode": bool(settings.get("maintenance_mode", False)),
+        "maintenance_title": settings.get("maintenance_title") or "Sitemiz sizin için yenileniyor",
+        "maintenance_message": settings.get("maintenance_message") or "Çok yakında, daha iyi bir alışveriş deneyimiyle buradayız. Anlayışınız için teşekkür ederiz.",
+        "logo_url": settings.get("logo_url") or "",
+        "site_name": settings.get("site_name") or "FACETTE",
+    }
+
 @router.get("")
 async def get_settings():
     """Get global settings"""

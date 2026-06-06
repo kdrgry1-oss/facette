@@ -1,22 +1,22 @@
 <analysis>**original_problem_statement**: 
-The user requested fixing severe PageSpeed and CLS issues (images flashing and loading slowly), a broken Google login, missing Iyzico payment functionality (cart addition to checkout flow), syncing stock from a provided  file, fixing a white-page crash on the checkout success page, fixing product URLs resolving with UUIDs instead of slugs, investigating intermittent production bugs (old banners appearing, login failures), addressing code quality security warnings, and finally, guidance on migrating the platform to a self-hosted environment with Cloudflare R2.
-PRODUCT REQUIREMENTS: Fast loading (WebP images), seamless checkout and payment integration (Iyzico), reliable canonical routing, and accurate stock synchronization.
+The user requested fixing severe PageSpeed and CLS issues (images flashing and loading slowly), broken Google login, missing Iyzico payment functionality, syncing stock from an Excel file, fixing product URLs resolving with UUIDs instead of slugs, fixing production intermittent data inconsistencies, and migrating the platform to a self-hosted environment using Cloudflare R2 and their own CDN.
+PRODUCT REQUIREMENTS: Fast loading (AVIF/WebP images via Cloudflare), seamless checkout (Iyzico), reliable canonical routing, accurate stock synchronization, and a self-hosted architecture.
 
 **User's preferred language**: Turkish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in Turkish only)
 
 **what currently exists?** 
-A deployed React 19 + FastAPI + MongoDB e-commerce platform. Image serving is optimized with on-the-fly WebP conversion. Google Auth is functioning. Iyzico payment forms and callbacks are fully implemented. Stock is synchronized with Ticimax. Checkout success page TDZ errors are resolved. Canonical product URL routing is implemented. Hardcoded secrets have been moved to . 
+A deployed React 19 + FastAPI + MongoDB e-commerce platform. The app has been fully decoupled from Ticimax. All product and CMS images have been migrated to Cloudflare R2 and are served via the user's custom domain () utilizing Cloudflare Image Transformations (AVIF + dynamic resize). Slugs have been cleaned up (IDs removed where possible). Trendyol integration is actively pushing prices with a 25% markup. The codebase is prepared for self-hosting ( created). The user is currently setting up a MongoDB Atlas cluster to migrate the database.
 
 **Last working item**:
-    - Last item agent was working: The agent provided the user with migration guidance via the  after the user requested to move the entire platform out of Emergent to a self-hosted environment using Cloudflare R2. 
-    - Status: BLOCKED (Waiting for the user to contact Emergent support to obtain database dumps and media files).
-    - Agent Testing Done: N/A
-    - Which testing method agent to use? NA
+    - Last item agent was working: The agent was about to implement a Maintenance Mode (Bakım Modu) feature that the user requested while waiting for their MongoDB Atlas M10 cluster to finish provisioning.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use? Frontend testing agent / Screenshot tool.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
   - Issue 1: Meta CAPI Server-side Token Invalid (P1)
-     - Attempted fixes: Agent updated the Meta Pixel ID previously, but Meta threw . The token provided in the user's PDF was corrupted by line breaks.
+     - Attempted fixes: Agent updated the Meta Pixel ID previously, but Meta threw . The token provided was corrupted.
      - Next debug checklist: Wait for the user to provide a valid, unbroken CAPI Access Token. Update the vault via the backend.
      - Why fix this issue and what will be achieved with the fix?: Server-side conversion tracking is currently failing.
      - Status: BLOCKED
@@ -24,26 +24,24 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Image serving is op
      - Should Test frontend/backend/both after fix?: backend
      - Blocked on other issue: User action pending.
 
-  - Issue 2: Production Environment Intermittent Data Inconsistencies (P1)
-     - Attempted fixes: Investigated code for caching or state issues. Identified that the issue stems from production infrastructure (multiple replicas/caching out of sync).
-     - Next debug checklist: Support advised the user to redeploy the application and wait 15 minutes. If it persists, the user must contact Emergent Support.
-     - Why fix this issue and what will be achieved with the fix?: Prevents old banners from flashing and random login failures on the live site.
-     - Status: USER VERIFICATION PENDING
-     - Is recurring issue?: Y
-     - Should Test frontend/backend/both after fix?: NA (Infrastructure level)
-     - Blocked on other issue: Pending user redeployment.
-
 **In progress Task List**:
-  - Task 1: Optimize integration routes for new slug structure (P1)
-     - Where to resume: . Ensure future Ticimax XML syncs use the new  format to prevent schema regressions.
-     - What will be achieved with this?: Keeps new product imports consistent with the newly migrated slug structure.
+  - Task 1: Implement Maintenance Mode (Bakım Modu) (P0)
+     - Where to resume: Modify frontend  or layout to show a full-screen Sitemiz sizin için yenileniyor message based on a global backend setting, configurable via the Admin panel.
+     - What will be achieved with this?: Allows the user to block customer access gracefully while they complete their server migration.
      - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: backend
+     - Should Test frontend/backend/both after fix?: both
      - Blocked on something: None.
+
+  - Task 2: Migrate Preview DB to User's MongoDB Atlas (P0)
+     - Where to resume: The user is creating an Atlas cluster. They provided the password () but need to provide the full connection string (). Once provided, use  to upload  to their Atlas cluster.
+     - What will be achieved with this?: Finalizes the data export step of the self-hosting migration.
+     - Status: BLOCKED
+     - Should Test frontend/backend/both after fix?: NA
+     - Blocked on something: Waiting for user to provide the Atlas connection string.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Cloudflare R2 (Image) CDN Integration. User mentioned activating this service but pivoting to migrating the *entire server*. Confirm if they still want to integrate R2 into the *current* Emergent codebase.
+    - P1: Optimize integration routes for new slug structure (). Ensure future Ticimax XML syncs use the new  format to prevent schema regressions.
     - P1: Native Webmail (IMAP/SMTP) embedded in Admin Panel using Zoho/Yandex free tiers.
     
     Future Tasks:
@@ -52,99 +50,102 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Image serving is op
     - P2: Order Cancellations & Returns Flow (ERP logic in ).
 
 **Completed work in this session**
-- Image WebP Optimization & CLS fixes in Header, Home, ProductCard via  (DONE)
-- Backup original images script  executed (DONE)
-- Google Login token mapping fix in  and  (DONE)
-- Iyzico Payment Initialization & Callback (, ) + Unit Tests (DONE)
-- Ticimax XLS Stock Sync () - deactivated 42 out-of-stock products (DONE)
-- Checkout Success page white screen / TDZ error fix () (DONE)
-- Product Canonical URL Redirects mapping UUID to Slug () (DONE)
-- Admin Product List  URL fix () (DONE)
-- Code Quality: Moved hardcoded secrets to  from  and  (DONE)
+- Full Cloudflare R2 Integration (, ) (DONE)
+- Migrated 2000+ Ticimax product images and DB disk images to R2 generating responsive WebP/AVIF (DONE)
+- Connected Custom CDN  to R2 utilizing Cloudflare Image Transformations (DONE)
+- Synced products from Excel (), deleting 49 invalid/test products (DONE)
+- Cleaned Product Slugs (Removed trailing IDs for 227 products, kept old slugs as alias) (DONE)
+- Fixed missing Cart Upsell images by adding frontend fallbacks to  (DONE)
+- Fixed Trendyol integration: Pushed live prices to Trendyol with 25% global markup and fixed the 2-minute cron job to retain the 25% markup (DONE)
+- Generated final database dump for self-hosting migration () and created  guide (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Code Quality recommendations flagged large components (, , etc.) and missing hook dependencies. 
-   - These were intentionally skipped to avoid destabilizing the live production app with massive refactors. Only critical security fixes (hardcoded keys) were applied.
+   - Issue 1: 18 recently active products lack any images in the DB.
+     - Debug checklist: Documented and informed user. User must manually upload these via admin panel.
+     - Why to solve this issue and what will be achieved with this?: Prevents blank placeholders on PDP and Cart.
+     - Should Test frontend/backend/both after fix: NA
+     - Is recurring issue?: N
 
 **Known issue recurrence from previous fork**
-  - **Environment Confusion:** The user frequently tests on PRODUCTION () while the agent modifies PREVIEW. Data mismatches (like the number of products) exist between DBs. Always remind the user to *redeploy* preview changes to production.
-  - **React Linting Rigidity:**  and  throw heavy false positives. Attempting to disable them via  breaks the  build. Ignore these specific lint errors as long as the application compiles cleanly ().
+  - **Environment Confusion:** The user tests on PRODUCTION () while the agent modifies PREVIEW. Data mismatches existed. *Resolution context:* The user is now migrating away from Emergent hosting to their own self-hosted setup, so they will use the provided DB dump.
+  - **React Linting Rigidity:**  and  throw heavy false positives. Attempting to disable them via  breaks the  build. Ignore these specific lint errors.
 
 **Code Architecture**
 - React 19, FastAPI, MongoDB (Motor).
 - Shadcn UI, Tailwind CSS.
-- Authentication: Emergent Managed Auth (Google).
+- Cloudflare R2 for Object Storage.
 
 **Key Technical Concepts**
-- On-the-fly Image Resizing: Uses Python Pillow to dynamically resize and compress to WebP format ().
-- Iyzico Payment Integration: Requires generating an  signature. Handled via  initializing checkout form HTML.
-- Canonical Routing: If a product is visited by UUID,  fetches it and issues a canonical redirect to its slug URL.
+- Cloudflare Image Transformations: Images are uploaded to R2 and served via  using  URL formatting to deliver AVIF and dynamic resizing on the fly.
+- Trendyol API: Cron job pushes prices every 2 minutes applying the  (currently 25%).
+- Canonical Routing: If a product is visited by an old alias slug,  fetches it and issues a canonical redirect to its clean slug.
 
 **key DB schema**
   - : 
-  - : Includes logic for tracking , , and .
 
 **changes in tech stack**
-  - Added  utility script usage for reading  (XLSX compressed) exports.
+  - Added  for Cloudflare R2 S3-compatible integration.
+  - Prepared codebase for Self-Hosting (MongoDB Atlas, Railway, Cloudflare Pages).
 
 **All files of reference** 
 -  (Created)
+-  (Updated to upload to R2 and return absolute CDN URLs)
+-  (Updated to format URLs with Cloudflare  params)
+-  (Updated Trendyol markup logic for cron and endpoints)
+-  (Created & Executed)
 -  (Created)
--  (Created)
--  (Created)
--  (Updated derived constants causing TDZ)
--  (Updated canonical redirect logic)
--  (Moved secrets to .env)
--  (Moved secrets to .env)
+-  (Created - Final DB dump)
 
 **Areas that need refactoring**: 
--  still needs slug generation alignment (Task 1).
-- Large components like  and  can be broken down if requested, but handle with extreme caution.
+- Large components like  and  can be broken down if requested.
 
 **key api endpoints**
-- 
-- 
-- 
+-  (Uploads to R2, returns  URL)
+-  (Returns products for upsell, now handles empty images robustly)
 
 **Critical Info for New Agent** 
-- **Platform Migration Request:** The user has requested to move their entire infrastructure out of Emergent hosting. Guidance has been provided. Await user confirmation on whether they want to proceed with further development in Emergent, or wait for them to export their DB.
+- **Migration in Progress:** The user is mid-migration to self-hosting. DO NOT attempt to write to the Emergent production database. You are waiting for their MongoDB Atlas connection string to upload the  dump.
 - **Do not blindly fix all ESLint errors:** If you encounter  errors in existing code, verify using . Disabling these rules explicitly will crash the build.
 
 **documents and test reports created in this job** 
   - 
   - 
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. *User*: Pointed out  page was blank white on production.
- 2. *Agent*: Found TDZ bug in , fixed it, pushed to preview, and asked user to redeploy.
- 3. *User*: Asked why product URLs resolve with UUID () instead of proper slugs.
- 4. *Agent*: Fixed  to fetch UUID and canonically redirect to slug, resolving SEO and linking issues.
- 5. *User*: Complained about intermittent production issues: old banners flashing, admin login failing intermittently (bir giriyor bir girmiyor).
- 6. *Agent*: Confirmed code/MongoDB uses single state. Used  to identify it as a multi-replica production infrastructure desync. Advised user to redeploy. Fixed  admin link undefined bug.
- 7. *User (System)*: Emitted massive Code Review warning list.
- 8. *Agent*: Applied only safe/critical security fixes (moving hardcoded API keys to ), documented false positives to avoid breaking live deployment.
- 9. *User*: Activated Cloudflare R2, requested guidance to migrate entire hosting and database environment out of Emergent for better control.
- 10. *Agent (PENDING)*: Relayed  guidance on how to export MongoDB, request media files, and migrate platform. Waiting for user response.
+ 1. *User*: Asked how to do the potential improvement (Cloudflare custom domain).
+ 2. *Agent*: Guided user to map  and enable Image Transformations.
+ 3. *User*: Completed CF steps.
+ 4. *Agent*: Updated code/DB to use CDN, verified AVIF delivery. Guided user on caching.
+ 5. *User*: Complained that the live prod site still showed old images.
+ 6. *Agent*: Explained preview vs prod DB separation. Created a DB dump () for self-hosting.
+ 7. *User*: Asked to filter DB to exactly 349 products based on excel and clean slugs.
+ 8. *Agent*: Cleaned slugs (227 clean, 132 kept IDs to avoid name collisions).
+ 9. *User*: Complained Trendyol prices pushed automatically without the 25% markup.
+ 10. *Agent*: Fixed Trendyol cron job to use 25% markup. Created final DB dump (). Guided user to set up MongoDB Atlas.
+ 11. *User (PENDING)*: User is creating the Atlas cluster. Provided the DB password () but has not yet provided the connection string. Requested a Maintenance Mode feature while waiting.
 
 **Project Health Check:**
 - Broken: Meta CAPI (Requires User token).
 - Mocked: None.
 
 **3rd Party Integrations** 
-- Ticimax / Trendyol — Requires User API Key (Moved to )
+- Cloudflare R2 / Pages — Requires User Account
+- MongoDB Atlas — Requires User Account (Pending Connection String)
+- Ticimax / Trendyol — Requires User API Key 
 - Iyzico (Payments) — Requires User API Key 
 - Meta CAPI (Pixel) — Requires User API Key (Token broken)
 - Google Auth — Uses Emergent Managed Auth
 
 **Testing status**
-  - Testing agent used after significant changes: YES
+  - Testing agent used after significant changes: YES (iteration 48)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-  - Known regressions: None
+  - Test files created: None this session.
+  - Known regressions: None.
 
 **Credentials to test flow:**
 - Admin Panel:  / 
+- Atlas Password:  (Connection string pending from user)
 
 **What agent forgot to execute**
-- Did not integrate Cloudflare R2 logic directly into the app because the user shifted the request from an integration to migrating the entire server infrastructure out of Emergent.
--  slug logic rewrite is still pending.</analysis>
+- The agent was about to start building the Maintenance Mode feature when the session ended.</analysis>

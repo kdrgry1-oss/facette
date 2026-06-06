@@ -74,6 +74,55 @@ export default function AdminSettings() {
       </div>
 
       <div className="space-y-6">
+        {/* Maintenance Mode */}
+        <div className="bg-amber-50 p-6 rounded-lg shadow-sm border border-amber-200" data-testid="maintenance-settings">
+          <h2 className="text-lg font-medium mb-4 text-amber-900 flex items-center gap-2">
+            <span className="w-2 h-6 bg-amber-500 rounded-full inline-block"></span>
+            Bakım Modu (Bakım Modu)
+          </h2>
+          <label className="flex items-center gap-3 cursor-pointer mb-4">
+            <input
+              type="checkbox"
+              checked={settings.maintenance_mode || false}
+              onChange={(e) => setSettings({ ...settings, maintenance_mode: e.target.checked })}
+              className="w-5 h-5"
+              data-testid="maintenance-mode-toggle"
+            />
+            <span className="text-sm font-medium">
+              Bakım modunu etkinleştir (müşteriler tam ekran bakım mesajı görür, admin erişimi açık kalır)
+            </span>
+          </label>
+          {settings.maintenance_mode && (
+            <div className="grid md:grid-cols-2 gap-4 mt-2">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1 text-amber-900">Başlık</label>
+                <input
+                  type="text"
+                  value={settings.maintenance_title || ""}
+                  onChange={(e) => setSettings({ ...settings, maintenance_title: e.target.value })}
+                  placeholder="Sitemiz sizin için yenileniyor"
+                  className="w-full border border-amber-200 px-3 py-2 rounded text-sm focus:outline-none focus:border-amber-500"
+                  data-testid="maintenance-title-input"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1 text-amber-900">Mesaj</label>
+                <textarea
+                  value={settings.maintenance_message || ""}
+                  onChange={(e) => setSettings({ ...settings, maintenance_message: e.target.value })}
+                  rows={2}
+                  placeholder="Çok yakında, daha iyi bir alışveriş deneyimiyle buradayız."
+                  className="w-full border border-amber-200 px-3 py-2 rounded text-sm focus:outline-none focus:border-amber-500"
+                  data-testid="maintenance-message-input"
+                />
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-amber-700 mt-3">
+            Bakım modu açıkken yalnızca admin hesabıyla giriş yapan kullanıcılar siteyi normal görür. <strong>/admin</strong> paneline erişim her zaman açıktır.
+          </p>
+        </div>
+
         {/* General */}
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h2 className="text-lg font-medium mb-4">Genel Ayarlar</h2>

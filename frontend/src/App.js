@@ -72,6 +72,7 @@ import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
+import MaintenanceGate from "./components/MaintenanceGate";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
 import FailedTransfers from "./pages/admin/FailedTransfers";
@@ -113,6 +114,7 @@ function App() {
         <BrowserRouter>
           <Toaster position="top-center" richColors />
           <MarketingPixelsInjector />
+          <MaintenanceGate>
           <Routes>
             {/* Storefront */}
             <Route path="/" element={<Home />} />
@@ -241,6 +243,7 @@ function App() {
               <Route path="gorevler" element={<AdminTasks />} />
             </Route>
           </Routes>
+          </MaintenanceGate>
         </BrowserRouter>
         </FavoritesProvider>
       </CartProvider>
