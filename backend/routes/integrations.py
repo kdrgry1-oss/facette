@@ -2273,25 +2273,34 @@ async def _sync_inventory_to_trendyol(products: list):
     )
     
     items_to_send = []
-    
+    # Global markup (Ana Ayarlar/Trendyol default_markup) uygula — cron ile manuel push
+    # AYNI mantıkta çalışsın (aksi halde otomatik senkron zammı geri alıyordu).
+    default_markup = float(config.get("default_markup", 0) or 0)
+
     for product in products:
+        _mult = product.get("trendyol_multiplier")
+        markup = float(_mult) if (_mult is not None and float(_mult) > 0) else default_markup
+        factor = 1 + markup / 100.0
+        base_price = float(product.get("price", 0) or 0) * factor
+        sale_price = float(product.get("sale_price") or product.get("price", 0) or 0) * factor
         variants = product.get("variants", [])
         if not variants:
             if product.get("barcode"):
                 items_to_send.append({
                     "barcode": product["barcode"],
                     "quantity": int(product.get("stock", 0)),
-                    "salePrice": float(product.get("sale_price") or product.get("price", 0)),
-                    "listPrice": float(product.get("price", 0))
+                    "salePrice": round(sale_price, 2),
+                    "listPrice": round(base_price, 2)
                 })
         else:
             for v in variants:
                 if v.get("barcode"):
+                    diff = float(v.get("price_diff") or 0)
                     items_to_send.append({
                         "barcode": v["barcode"],
                         "quantity": int(v.get("stock", 0)),
-                        "salePrice": float(product.get("sale_price") or product.get("price", 0)),
-                        "listPrice": float(product.get("price", 0))
+                        "salePrice": round(sale_price + diff, 2),
+                        "listPrice": round(base_price + diff, 2)
                     })
     
     from datetime import datetime, timezone
