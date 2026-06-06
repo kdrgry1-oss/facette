@@ -152,17 +152,6 @@ export default function Header({ hideMenu = false }) {
       {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
       {!isCheckout && <CountdownBar />}
 
-      {/* Statik üst duyuru — countdown ile beraber HER ZAMAN görünür.
-          Admin > Sayfa Tasarımı'ndaki "rotating_text" bloğundan yönetilebilir;
-          o blok aktif değilse de varsayılan "500 TL Üzeri Ücretsiz Kargo" gösterilir. */}
-      {!isCheckout && (
-        <div className="bg-white text-black border-b border-gray-100 text-center py-1">
-          <p className="text-[9px] md:text-[10px] tracking-[0.3em] uppercase font-light text-gray-700">
-            500 TL Üzeri Ücretsiz Kargo · İlk Üyeliklere Özel %10 İndirim
-          </p>
-        </div>
-      )}
-
       {/* Main Header */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-black/5 transition-all duration-300">
         <div className="max-w-screen-2xl mx-auto px-3 md:px-6">

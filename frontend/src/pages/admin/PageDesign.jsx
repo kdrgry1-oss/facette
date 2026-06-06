@@ -599,7 +599,7 @@ export default function PageDesign() {
             <p className="text-sm font-medium text-blue-900">Sürükle & Bırak ile Düzenle</p>
             <p className="text-xs text-blue-700 mt-1">
               Blokları sol taraftaki tutma noktasından sürükleyerek sıralayabilirsiniz. 
-              Değişikliklerinizi kaydetmek için yeşil "Sıralamayı Kaydet" butonuna tıklayın.
+              Değişikliklerinizi kaydetmek için yeşil &quot;Sıralamayı Kaydet&quot; butonuna tıklayın.
             </p>
           </div>
         </div>
@@ -763,7 +763,7 @@ export default function PageDesign() {
                 />
                 <span className="text-sm">Yayında (Ana sayfada müşterilere göster)</span>
               </label>
-              <p className="text-xs text-gray-500 ml-6 block w-full">- Seçilmezse "Taslak" olur, sadece önizlemede görünür.</p>
+              <p className="text-xs text-gray-500 ml-6 block w-full">- Seçilmezse &quot;Taslak&quot; olur, sadece önizlemede görünür.</p>
             </div>
 
             {/* Visibility Toggles (Mobile / Desktop) */}
@@ -855,7 +855,7 @@ export default function PageDesign() {
                   placeholder="Yazı bloğu içeriği..."
                   className="w-full border px-3 py-2 rounded h-24"
                 />
-                <div className="mt-2 text-xs text-gray-500">Buton Linki eklemek isterseniz Görseller altındaki link yapısını veya doğrudan buraya buton şeklinde eklemeyi desteklemediğimiz için, text bloklarında ilk link URL'i buton linki olarak kullanılır.</div>
+                <div className="mt-2 text-xs text-gray-500">Buton Linki eklemek isterseniz Görseller altındaki link yapısını veya doğrudan buraya buton şeklinde eklemeyi desteklemediğimiz için, text bloklarında ilk link URL&apos;i buton linki olarak kullanılır.</div>
                 <input
                   type="text"
                   value={formData.links[0] || ""}
@@ -880,49 +880,6 @@ export default function PageDesign() {
                   placeholder="https://.../video.mp4"
                   className="w-full border px-3 py-2 rounded text-sm"
                 />
-              </div>
-            )}
-
-            {formData.type === "rotating_text" && (
-              <div>
-                <label className="block text-sm font-medium mb-1">Dönen Metinler</label>
-                <div className="space-y-2">
-                  {(formData.settings?.texts || []).map((txt, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={txt}
-                        onChange={(e) => {
-                          const newTexts = [...(formData.settings.texts || [])];
-                          newTexts[index] = e.target.value;
-                          setFormData({ ...formData, settings: { ...formData.settings, texts: newTexts } });
-                        }}
-                        className="flex-1 border px-3 py-1.5 rounded text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newTexts = [...(formData.settings.texts || [])];
-                          newTexts.splice(index, 1);
-                          setFormData({ ...formData, settings: { ...formData.settings, texts: newTexts } });
-                        }}
-                        className="px-2 bg-red-50 text-red-600 rounded hover:bg-red-100"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newTexts = [...(formData.settings?.texts || []), "Yeni Metin"];
-                      setFormData({ ...formData, settings: { ...formData.settings, texts: newTexts } });
-                    }}
-                    className="text-sm text-blue-600 font-medium"
-                  >
-                    + Yeni Metin Ekle
-                  </button>
-                </div>
               </div>
             )}
 
@@ -1058,6 +1015,99 @@ export default function PageDesign() {
             )}
 
 
+            {formData.type === "rotating_text" && (
+              <div className="space-y-4 bg-amber-50/40 border border-amber-200 rounded-lg p-4">
+                <p className="text-xs text-amber-800">
+                  📢 Bu blok sitenin <strong>üst duyuru barında</strong> (header altı) görünür.
+                  Birden fazla metin eklersen sırayla döner.
+                </p>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-2">Duyuru Metinleri</label>
+                  <div className="space-y-2">
+                    {(formData.settings?.texts || [""]).map((txt, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={txt}
+                          onChange={(e) => {
+                            const arr = [...(formData.settings?.texts || [""])];
+                            arr[i] = e.target.value;
+                            setFormData({ ...formData, settings: { ...formData.settings, texts: arr } });
+                          }}
+                          placeholder="Örn: 500 TL Üzeri Ücretsiz Kargo"
+                          className="flex-1 border border-gray-300 px-3 py-2 rounded text-sm"
+                          data-testid={`rotating-text-input-${i}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const arr = [...(formData.settings?.texts || [""])];
+                            arr.splice(i, 1);
+                            setFormData({ ...formData, settings: { ...formData.settings, texts: arr.length ? arr : [""] } });
+                          }}
+                          className="text-red-500 hover:text-red-700 px-2 py-2 shrink-0"
+                          title="Sil"
+                          data-testid={`rotating-text-remove-${i}`}
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, settings: { ...formData.settings, texts: [...(formData.settings?.texts || [""]), ""] } })}
+                    className="mt-2 text-xs bg-stone-800 text-white px-3 py-1.5 rounded hover:bg-black"
+                    data-testid="rotating-text-add"
+                  >+ Metin Ekle</button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Arka Plan</label>
+                    <div className="flex gap-2">
+                      <input type="color" value={formData.settings?.bg_color || "#ffffff"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="w-10 h-10 border border-gray-300 rounded cursor-pointer" />
+                      <input type="text" value={formData.settings?.bg_color || "#ffffff"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="flex-1 border border-gray-300 px-2 py-2 rounded text-sm font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Yazı Rengi</label>
+                    <div className="flex gap-2">
+                      <input type="color" value={formData.settings?.text_color || "#374151"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, text_color: e.target.value } })}
+                        className="w-10 h-10 border border-gray-300 rounded cursor-pointer" />
+                      <input type="text" value={formData.settings?.text_color || "#374151"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, text_color: e.target.value } })}
+                        className="flex-1 border border-gray-300 px-2 py-2 rounded text-sm font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1">Dönüş Süresi (saniye)</label>
+                  <input type="number" min="2" value={formData.settings?.interval || 4}
+                    onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, interval: Number(e.target.value) } })}
+                    className="w-28 border border-gray-300 px-3 py-2 rounded text-sm" />
+                </div>
+
+                {/* Canlı Önizleme */}
+                <div className="border-t border-amber-200 pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-amber-800">📺 Canlı Önizleme</p>
+                  <div className="text-center py-1.5 rounded border border-gray-200"
+                    style={{ backgroundColor: formData.settings?.bg_color || "#ffffff" }}>
+                    <p className="text-[10px] tracking-[0.3em] uppercase font-light"
+                      style={{ color: formData.settings?.text_color || "#374151" }}>
+                      {(formData.settings?.texts || []).filter((t) => (t || "").trim())[0] || "Metin girilmedi"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
             {formData.type === "product_slider" && (
               <div>
                 <label className="block text-sm font-medium mb-2">Ürün Seçimi</label>
@@ -1158,6 +1208,18 @@ export default function PageDesign() {
   );
 }
 
+// Mini countdown kutusu (modül seviyesinde — render içinde tanımlanmaz)
+function MiniCountBox({ v, l, bg, fg }) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1 text-xs font-semibold tabular-nums"
+        style={{ backgroundColor: fg, color: bg }}>{pad(v)}</span>
+      <span className="text-[10px] tracking-wider">{l}</span>
+    </span>
+  );
+}
+
 // Mini preview countdown for the form (admin-side, isolated)
 function CountdownPreviewMini({ endAt, bg, fg }) {
   const [now, setNow] = useState(Date.now());
@@ -1173,17 +1235,12 @@ function CountdownPreviewMini({ endAt, bg, fg }) {
   const h = Math.floor((ms % 86400000) / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   const s = Math.floor((ms % 60000) / 1000);
-  const pad = (n) => String(n).padStart(2, "0");
-  const Box = ({ v, l }) => (
-    <span className="inline-flex items-center gap-1">
-      <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1 text-xs font-semibold tabular-nums"
-        style={{ backgroundColor: fg, color: bg }}>{pad(v)}</span>
-      <span className="text-[10px] tracking-wider">{l}</span>
-    </span>
-  );
   return (
     <span className="flex items-center gap-2">
-      <Box v={d} l="GÜN" /><Box v={h} l="SAAT" /><Box v={m} l="DK" /><Box v={s} l="SN" />
+      <MiniCountBox v={d} l="GÜN" bg={bg} fg={fg} />
+      <MiniCountBox v={h} l="SAAT" bg={bg} fg={fg} />
+      <MiniCountBox v={m} l="DK" bg={bg} fg={fg} />
+      <MiniCountBox v={s} l="SN" bg={bg} fg={fg} />
     </span>
   );
 }

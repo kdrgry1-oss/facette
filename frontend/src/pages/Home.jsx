@@ -220,18 +220,34 @@ function VideoBanner({ block }) {
 
 function RotatingText({ block }) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const texts = block?.settings?.texts || ["Ücretsiz Kargo", "Güvenli Ödeme", "Kolay İade"];
+  const texts = (block?.settings?.texts || ["500 TL Üzeri Ücretsiz Kargo"]).filter((t) => (t || "").trim());
 
   useEffect(() => {
+    if (texts.length < 2) return;
+    const sec = Math.max(2, Number(block?.settings?.interval) || 4);
     const interval = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % texts.length);
-    }, 3000);
+    }, sec * 1000);
     return () => clearInterval(interval);
-  }, [texts.length]);
+  }, [texts.length, block]);
+
+  if (texts.length === 0) return null;
+  const bg = block?.settings?.bg_color || "#ffffff";
+  const fg = block?.settings?.text_color || "#374151";
 
   return (
-    <div className="bg-black text-white py-2 text-center text-xs tracking-wider" data-testid="rotating-text">
-      <span className="animate-fade-in">{texts[currentIndex]}</span>
+    <div
+      className="text-center py-1 border-b border-gray-100"
+      style={{ backgroundColor: bg }}
+      data-testid="rotating-text"
+    >
+      <span
+        key={currentIndex}
+        className="text-[9px] md:text-[10px] tracking-[0.3em] uppercase font-light"
+        style={{ color: fg }}
+      >
+        {texts[currentIndex % texts.length]}
+      </span>
     </div>
   );
 }
@@ -302,14 +318,20 @@ export default function Home() {
   const hasProductSlider = blocks.some(b => b.type === "product_slider");
   const hasInstaShop = blocks.some(b => b.type === "instashop");
 
+  // Üst duyuru barı (rotating_text) — orijinaldeki gibi en üstte (header üstü) gösterilir,
+  // blok akışında tekrar render edilmemesi için ayrılır.
+  const rotatingBlock = blocks.find(b => b.type === "rotating_text");
+  const flowBlocks = blocks.filter(b => b.type !== "rotating_text");
+
   return (
     <div className="min-h-screen bg-white" data-testid="home-page">
+      {rotatingBlock && <RotatingText block={rotatingBlock} />}
       <Header />
       
       {/* Render CMS Blocks if available */}
       {hasCMSBlocks ? (
         <>
-          {blocks.map((block) => (
+          {flowBlocks.map((block) => (
             <BlockRenderer key={block.id} block={block} products={products} />
           ))}
           
