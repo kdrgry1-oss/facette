@@ -34,10 +34,13 @@ export default function ProductDetail() {
   });
   // Size Table (HTML) - fetched via public endpoint. Hooks must live at top level.
   const [sizeTableData, setSizeTableData] = useState(null);
+  // "Gelince Haber Ver" — stokta olmayan beden için e-posta toplama
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [notifySubmitting, setNotifySubmitting] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    fetchProduct();
   }, [slug]);
 
   // Sticky header on scroll
@@ -58,66 +61,67 @@ export default function ProductDetail() {
       .catch(() => { /* no table */ });
   }, [product?.id]);
 
-  const fetchProduct = async () => {
-    setLoading(true);
-    try {
-      const res = await axios.get(`${API}/products/${slug}`);
-      setProduct(res.data);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/products/${slug}`);
+        setProduct(res.data);
 
-      // FAZ 9+ — Pixel ViewContent event
-      trackViewContent({
-        product_id: res.data.id,
-        name: res.data.name,
-        category: res.data.category_name,
-        price: res.data.sale_price || res.data.price,
-      });
-      
-      if (res.data?.variants?.length > 0) {
-        const firstAvailable = res.data.variants.find(v => v.stock > 0);
-        if (firstAvailable) {
-          setSelectedVariant(firstAvailable);
-          setSelectedSize(firstAvailable.size);
-        }
-      }
-      
-      // Fetch similar products
-      try {
-        const similarRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
-        setSimilarProducts(similarRes.data || []);
-      } catch {
-        // Fallback to category-based similar products
-        if (res.data?.category_name) {
-          const fallbackRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
-          setSimilarProducts(fallbackRes.data?.products?.filter(p => p.id !== res.data.id) || []);
-        }
-      }
-      
-      // Fetch combo products ("Stilini tamamla")
-      try {
-        const comboRes = await axios.get(`${API}/products/${res.data.id}/combine-products`);
-        const comboItems = comboRes.data?.items || [];
-        setComboProducts(comboItems);
-        // Fallback: kombin atanmamışsa cart-suggestions çağırarak kategori bazlı öner
-        if (comboItems.length === 0) {
-          try {
-            const fb = await axios.post(`${API}/products/cart-suggestions`, {
-              product_ids: [res.data.id],
-              limit: 4,
-            });
-            setComboProducts(fb.data?.items || []);
-          } catch {
-            // ignore
+        // FAZ 9+ — Pixel ViewContent event
+        trackViewContent({
+          product_id: res.data.id,
+          name: res.data.name,
+          category: res.data.category_name,
+          price: res.data.sale_price || res.data.price,
+        });
+
+        if (res.data?.variants?.length > 0) {
+          const firstAvailable = res.data.variants.find(v => v.stock > 0);
+          if (firstAvailable) {
+            setSelectedVariant(firstAvailable);
+            setSelectedSize(firstAvailable.size);
           }
         }
-      } catch {
-        setComboProducts([]);
+
+        // Fetch similar products
+        try {
+          const similarRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
+          setSimilarProducts(similarRes.data || []);
+        } catch {
+          // Fallback to category-based similar products
+          if (res.data?.category_name) {
+            const fallbackRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
+            setSimilarProducts(fallbackRes.data?.products?.filter(p => p.id !== res.data.id) || []);
+          }
+        }
+
+        // Fetch combo products ("Stilini tamamla")
+        try {
+          const comboRes = await axios.get(`${API}/products/${res.data.id}/combine-products`);
+          const comboItems = comboRes.data?.items || [];
+          setComboProducts(comboItems);
+          // Fallback: kombin atanmamışsa cart-suggestions çağırarak kategori bazlı öner
+          if (comboItems.length === 0) {
+            try {
+              const fb = await axios.post(`${API}/products/cart-suggestions`, {
+                product_ids: [res.data.id],
+                limit: 4,
+              });
+              setComboProducts(fb.data?.items || []);
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          setComboProducts([]);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+  }, [slug]);
 
   const handleAddToCart = () => {
     if (product.variants?.length > 0 && !selectedVariant) {
@@ -147,9 +151,32 @@ export default function ProductDetail() {
   };
 
   const handleSizeSelect = (variant) => {
-    if (variant.stock > 0) {
-      setSelectedVariant(variant);
-      setSelectedSize(variant.size);
+    setSelectedVariant(variant);
+    setSelectedSize(variant.size);
+    // Beden değişince açık bildirim formunu kapat (stoklu bedene geçilirse gizlenir)
+    if (variant.stock > 0) setNotifyOpen(false);
+  };
+
+  const handleStockNotify = async () => {
+    const email = notifyEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("Lütfen geçerli bir e-posta adresi giriniz");
+      return;
+    }
+    setNotifySubmitting(true);
+    try {
+      const res = await axios.post(`${API}/stock-notify`, {
+        product_id: product.id,
+        size: selectedVariant?.size || selectedSize || "",
+        email,
+      });
+      toast.success(res.data?.message || "Talebiniz alındı, stoğa girince haber vereceğiz.");
+      setNotifyOpen(false);
+      setNotifyEmail("");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Bir hata oluştu, lütfen tekrar deneyin.");
+    } finally {
+      setNotifySubmitting(false);
     }
   };
 
@@ -344,23 +371,28 @@ export default function ProductDetail() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {sizes.map((variant, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSizeSelect(variant)}
-                    disabled={variant.stock === 0}
-                    data-testid={`size-btn-${variant.size}`}
-                    className={`min-w-[44px] h-9 px-3 border text-xs transition-all ${
-                      selectedSize === variant.size 
-                        ? "border-black bg-black text-white" 
-                        : variant.stock === 0 
-                          ? "border-gray-200 text-gray-300 cursor-not-allowed line-through bg-gray-50" 
-                          : "border-gray-300 hover:border-black"
-                    }`}
-                  >
-                    {variant.size}
-                  </button>
-                ))}
+                {sizes.map((variant, index) => {
+                  const isSelected = selectedSize === variant.size;
+                  const isOOS = variant.stock === 0;
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => handleSizeSelect(variant)}
+                      data-testid={`size-btn-${variant.size}`}
+                      className={`min-w-[44px] h-9 px-3 border text-xs transition-all ${
+                        isSelected
+                          ? isOOS
+                            ? "border-red-500 bg-red-50 text-red-600 line-through"
+                            : "border-black bg-black text-white"
+                          : isOOS
+                            ? "border-gray-200 text-gray-300 line-through bg-gray-50 hover:border-gray-400"
+                            : "border-gray-300 hover:border-black"
+                      }`}
+                    >
+                      {variant.size}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -376,30 +408,75 @@ export default function ProductDetail() {
             )}
 
             {/* Add to Cart */}
-            <div className="flex gap-2 mb-6">
-              <button 
-                onClick={handleAddToCart}
-                data-testid="add-to-cart-btn"
-                disabled={product.variants?.length > 0 && !selectedVariant}
-                className={`flex-1 py-3 text-xs uppercase tracking-wider transition-colors ${
-                  product.variants?.length > 0 && !selectedVariant
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-black text-white hover:bg-gray-900"
-                }`}
-              >
-                {product.variants?.length > 0 && !selectedVariant ? "Beden Seçiniz" : "Sepete Ekle"}
-              </button>
-              <button
-                onClick={() => toggleFavorite(product)}
-                data-testid="pdp-favorite-btn"
-                aria-label="Favorilere ekle"
-                className={`w-12 h-12 border flex items-center justify-center transition-colors ${
-                  isFavorite(product.id) ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-black"
-                }`}
-              >
-                <Heart size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-red-500 text-red-500" : ""} />
-              </button>
-            </div>
+            {(() => {
+              const oosSelected = selectedVariant && selectedVariant.stock === 0;
+              return (
+                <div className="mb-6">
+                  <div className="flex gap-2">
+                    {oosSelected ? (
+                      <button
+                        onClick={() => setNotifyOpen((v) => !v)}
+                        data-testid="notify-toggle-btn"
+                        className="flex-1 py-3 text-xs uppercase tracking-wider transition-colors border border-black bg-white text-black hover:bg-black hover:text-white"
+                      >
+                        Gelince Haber Ver
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleAddToCart}
+                        data-testid="add-to-cart-btn"
+                        disabled={product.variants?.length > 0 && !selectedVariant}
+                        className={`flex-1 py-3 text-xs uppercase tracking-wider transition-colors ${
+                          product.variants?.length > 0 && !selectedVariant
+                            ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                            : "bg-black text-white hover:bg-gray-900"
+                        }`}
+                      >
+                        {product.variants?.length > 0 && !selectedVariant ? "Beden Seçiniz" : "Sepete Ekle"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => toggleFavorite(product)}
+                      data-testid="pdp-favorite-btn"
+                      aria-label="Favorilere ekle"
+                      className={`w-12 h-12 border flex items-center justify-center transition-colors ${
+                        isFavorite(product.id) ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-black"
+                      }`}
+                    >
+                      <Heart size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-red-500 text-red-500" : ""} />
+                    </button>
+                  </div>
+
+                  {/* Stok bildirim formu */}
+                  {oosSelected && notifyOpen && (
+                    <div className="mt-3 border border-black/10 bg-gray-50 p-3" data-testid="stock-notify-form">
+                      <p className="text-[11px] text-black/60 mb-2">
+                        <span className="font-medium text-black">{selectedVariant.size}</span> bedeni tükendi. Stoğa girince e-posta ile haber verelim.
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="email"
+                          value={notifyEmail}
+                          onChange={(e) => setNotifyEmail(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleStockNotify(); }}
+                          placeholder="E-posta adresiniz"
+                          data-testid="stock-notify-email-input"
+                          className="flex-1 h-10 px-3 border border-gray-300 text-xs focus:outline-none focus:border-black"
+                        />
+                        <button
+                          onClick={handleStockNotify}
+                          disabled={notifySubmitting}
+                          data-testid="stock-notify-submit-btn"
+                          className="px-4 h-10 text-xs uppercase tracking-wider bg-black text-white hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                          {notifySubmitting ? "Gönderiliyor..." : "Gönder"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Görünümü Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
             {comboProducts.length > 0 && (

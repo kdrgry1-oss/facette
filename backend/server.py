@@ -400,6 +400,9 @@ api_router = APIRouter(prefix="/api")
 from routes.docs import router as docs_router
 api_router.include_router(docs_router)
 
+from routes.stock_notify import router as stock_notify_router
+api_router.include_router(stock_notify_router)
+
 # Include all route modules
 api_router.include_router(auth_router)
 api_router.include_router(products_router)
