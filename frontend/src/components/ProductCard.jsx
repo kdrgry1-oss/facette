@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Heart, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
+import { optimizeImg } from "../lib/img";
 import { toast } from "sonner";
 
 export default function ProductCard({ product }) {
@@ -65,10 +66,11 @@ export default function ProductCard({ product }) {
           onMouseLeave={handleMouseLeave}
         >
           <img
-            src={images[currentImageIndex] || "/placeholder.jpg"}
+            src={optimizeImg(images[currentImageIndex] || "/placeholder.jpg", 700)}
             alt={product.name}
             className="w-full h-full object-cover object-top transition-opacity duration-200"
             loading="lazy"
+            decoding="async"
           />
           
           {/* Favorite Button - Top Right */}

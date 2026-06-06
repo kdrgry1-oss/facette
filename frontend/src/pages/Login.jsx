@@ -11,7 +11,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, register, user, setUser } = useAuth();
+  const { login, register, user, loginWithToken } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   // FAZ 3+ — Hangi sosyal sağlayıcılar aktif?
@@ -44,8 +44,8 @@ export default function Login() {
     try {
       const res = await axios.post(`${API}/auth/google/session?session_id=${sessionId}`);
       if (res.data.success) {
-        localStorage.setItem('token', res.data.token);
-        setUser(res.data.user);
+        // localStorage + axios Authorization header + context state'i senkron yerleştir
+        loginWithToken(res.data.token, res.data.user);
         toast.success("Google ile giriş başarılı!");
         // Clear hash and redirect
         window.history.replaceState(null, '', window.location.pathname);

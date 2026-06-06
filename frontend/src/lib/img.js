@@ -6,7 +6,7 @@
 
 const TCMX = "static.ticimax.cloud";
 
-export function optimizeImg(url, width = 800, quality = 80) {
+export function optimizeImg(url, width = 800, quality = 90) {
   if (!url || typeof url !== "string") return url;
 
   // Ticimax Cloudflare CDN

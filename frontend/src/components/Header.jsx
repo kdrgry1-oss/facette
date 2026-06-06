@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useFavorites } from "../context/FavoritesContext";
 import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
+import { optimizeImg } from "../lib/img";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -55,6 +56,46 @@ const MENU_IMAGES = {
   ]
 };
 
+// Mega menü sağ panel — ürünler yüklenirken iskelet gösterir (eski/yanlış görsel flash'ını önler).
+function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNavigate }) {
+  if (loading) {
+    return [0, 1, 2].map((i) => (
+      <div key={i} className="w-44" data-testid="mega-product-skeleton">
+        <div className="w-44 h-56 bg-stone-100 animate-pulse" />
+        <div className="h-2.5 bg-stone-100 mt-2 w-3/4 animate-pulse" />
+        <div className="h-2.5 bg-stone-100 mt-1 w-1/3 animate-pulse" />
+      </div>
+    ));
+  }
+  if (products.length > 0) {
+    return products.map((p) => (
+      <Link
+        key={p.id}
+        to={`/${p.slug || p.id}`}
+        className="block w-44 group"
+        onClick={onNavigate}
+      >
+        <div className="w-44 h-56 overflow-hidden bg-stone-100">
+          <img
+            src={optimizeImg((p.images && p.images[0]) || p.image || "", 400)}
+            alt={p.name}
+            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
+        <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
+        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+      </Link>
+    ));
+  }
+  return fallback.map((img, i) => (
+    <Link key={i} to={fallbackLink} className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={onNavigate}>
+      <img src={optimizeImg(img, 400)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+    </Link>
+  ));
+}
+
 export default function Header({ hideMenu = false }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -86,6 +127,8 @@ export default function Header({ hideMenu = false }) {
   // Aktif olarak gösterilecek ürün listesi: önce alt kategori hover, yoksa ana kategori (3 ürün)
   const activeMegaSlug = hoveredCategory || activeMenu;
   const activeMegaProducts = (megaProducts[activeMegaSlug] || []).slice(0, 3);
+  // Henüz fetch tamamlanmadıysa (undefined) yükleniyor → iskelet göster, fallback görsel flash etme
+  const megaLoading = Boolean(activeMegaSlug) && megaProducts[activeMegaSlug] === undefined;
 
   // Mega menü kapanma timer'ı — fare üzerine geldiğinde anında kapanmasın, 200ms gecikme
   const [closeTimer, setCloseTimer] = useState(null);
@@ -108,12 +151,20 @@ export default function Header({ hideMenu = false }) {
   }, [searchOpen]);
 
   useEffect(() => {
-    if (searchQuery.length >= 1) {
-      const timer = setTimeout(() => performSearch(searchQuery), 300);
-      return () => clearTimeout(timer);
-    } else {
-      setSearchResults([]);
-    }
+    const q = searchQuery;
+    const timer = setTimeout(async () => {
+      if (q.length < 1) {
+        setSearchResults([]);
+        return;
+      }
+      try {
+        const res = await axios.get(`${API}/products?search=${encodeURIComponent(q)}&limit=6`);
+        setSearchResults(res.data?.products || []);
+      } catch (err) {
+        console.error(err);
+      }
+    }, q.length >= 1 ? 300 : 0);
+    return () => clearTimeout(timer);
   }, [searchQuery]);
 
   const fetchPopularSearches = async () => {
@@ -129,19 +180,10 @@ export default function Header({ hideMenu = false }) {
     }
   };
 
-  const performSearch = async (query) => {
-    try {
-      const res = await axios.get(`${API}/products?search=${encodeURIComponent(query)}&limit=6`);
-      setSearchResults(res.data?.products || []);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      navigate(`/arama?q=${encodeURIComponent(searchQuery)}`);
+  const submitSearch = () => {
+    const q = searchQuery.trim();
+    if (q) {
+      navigate(`/arama?q=${encodeURIComponent(q)}`);
       setSearchOpen(false);
       setSearchQuery("");
     }
@@ -299,32 +341,13 @@ export default function Header({ hideMenu = false }) {
                 
                 {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
                 <div className="flex-shrink-0 flex gap-3 min-w-[564px]">
-                  {activeMegaProducts.length > 0 ? (
-                    activeMegaProducts.map((p) => (
-                      <Link
-                        key={p.id}
-                        to={`/${p.slug || p.id}`}
-                        className="block w-44 group"
-                        onClick={() => setActiveMenu(null)}
-                      >
-                        <div className="w-44 h-56 overflow-hidden bg-stone-100">
-                          <img
-                            src={(p.images && p.images[0]) || p.image || ""}
-                            alt={p.name}
-                            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-                          />
-                        </div>
-                        <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
-                      </Link>
-                    ))
-                  ) : (
-                    MENU_IMAGES.giyim.map((img, i) => (
-                      <Link key={i} to="/kategori/giyim" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
-                        <img src={img} alt="" className="w-full h-full object-cover" />
-                      </Link>
-                    ))
-                  )}
+                  <MegaProductsPanel
+                    products={activeMegaProducts}
+                    loading={megaLoading}
+                    fallback={MENU_IMAGES.giyim}
+                    fallbackLink="/kategori/giyim"
+                    onNavigate={() => setActiveMenu(null)}
+                  />
                 </div>
               </div>
             </div>
@@ -501,7 +524,7 @@ export default function Header({ hideMenu = false }) {
             <div className="flex justify-end mb-6">
               <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }}><X size={22} /></button>
             </div>
-            <form onSubmit={handleSearch} className="mb-10">
+            <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="mb-10">
               <div className="relative">
                 <Search size={18} className="absolute left-0 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -537,7 +560,7 @@ export default function Header({ hideMenu = false }) {
                     {searchResults.map((p) => (
                       <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left">
                         <div className="aspect-[3/4] bg-gray-50 mb-2 overflow-hidden">
-                          <img src={p.images?.[0]} alt={p.name} className="w-full h-full object-cover" />
+                          <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-xs line-clamp-1">{p.name}</p>
                         <p className="text-xs">{p.price?.toFixed(2).replace('.', ',')} TL</p>

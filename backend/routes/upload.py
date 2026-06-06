@@ -59,7 +59,7 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
     }
 
 
-async def _serve(path: str, w: int = 0, q: int = 82) -> Response:
+async def _serve(path: str, w: int = 0, q: int = 90) -> Response:
     record = await db.files.find_one({"storage_path": path, "is_deleted": False})
     content = None
     ctype = (record or {}).get("content_type", "image/jpeg")
@@ -102,11 +102,11 @@ async def _serve(path: str, w: int = 0, q: int = 82) -> Response:
 
 
 @router.get("/files/{path:path}")
-async def get_file(path: str, w: int = 0, q: int = 82):
+async def get_file(path: str, w: int = 0, q: int = 90):
     return await _serve(path, w, q)
 
 
 @files_router.get("/{path:path}")
-async def get_file_legacy(path: str, w: int = 0, q: int = 82):
+async def get_file_legacy(path: str, w: int = 0, q: int = 90):
     """Eski kayıtlardaki /api/files/... URL'lerini de servis et (resize destekli)."""
     return await _serve(path, w, q)

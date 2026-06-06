@@ -7,14 +7,12 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem("token"));
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem("token")));
 
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
       fetchUser();
-    } else {
-      setLoading(false);
     }
   }, [token]);
 
@@ -40,6 +38,15 @@ export function AuthProvider({ children }) {
     setToken(newToken);
     setUser(userData);
     return userData;
+  };
+
+  // Sosyal giriş (Google) sonrası: backend'den dönen JWT token + user'ı tam olarak yerleştir.
+  // localStorage + axios Authorization header + context state hepsi senkron olmalı.
+  const loginWithToken = (newToken, userData) => {
+    localStorage.setItem("token", newToken);
+    axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
+    setToken(newToken);
+    setUser(userData);
   };
 
   const verifyMfa = async (mfaToken, code) => {
@@ -78,6 +85,7 @@ export function AuthProvider({ children }) {
         loading,
         isAdmin: user?.is_admin || false,
         login,
+        loginWithToken,
         verifyMfa,
         register,
         logout,

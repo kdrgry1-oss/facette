@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
+import { optimizeImg } from "../lib/img";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
@@ -245,7 +246,7 @@ export default function ProductDetail() {
         <div className="fixed left-0 right-0 z-50 bg-white border-t md:border-t-0 md:border-b shadow-[0_-4px_20px_rgba(0,0,0,0.05)] md:shadow-sm bottom-0 md:top-0 md:bottom-auto pb-[env(safe-area-inset-bottom)]" data-testid="sticky-product-bar">
           <div className="max-w-screen-2xl mx-auto px-3 md:px-4 py-2.5 md:py-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <img src={displayImages[0]} alt="" className="w-10 h-12 object-cover bg-stone-100" />
+              <img src={optimizeImg(displayImages[0], 150)} alt="" className="w-10 h-12 object-cover bg-stone-100" />
               <div className="min-w-0">
                 <p className="text-[12px] md:text-sm font-light line-clamp-1">{product.name}</p>
                 <p className="text-[12px] md:text-sm tabular-nums">{displayPrice.toFixed(2).replace('.', ',')} TL</p>
@@ -310,10 +311,12 @@ export default function ProductDetail() {
                 {displayImages.map((img, index) => (
                   <div key={index} className="snap-center shrink-0 w-screen aspect-[3/4] bg-stone-50">
                     <img
-                      src={img}
+                      src={optimizeImg(img, 1200)}
                       alt={`${product.name} ${index + 1}`}
                       className="w-full h-full object-cover object-top"
                       loading={index === 0 ? "eager" : "lazy"}
+                      fetchPriority={index === 0 ? "high" : "auto"}
+                      decoding="async"
                     />
                   </div>
                 ))}
@@ -335,9 +338,12 @@ export default function ProductDetail() {
               {displayImages.map((img, index) => (
                 <div key={index} className="relative aspect-[3/4] bg-stone-50">
                   <img
-                    src={img}
+                    src={optimizeImg(img, 1200)}
                     alt={`${product.name} ${index + 1}`}
                     className="w-full h-full object-cover object-top"
+                    loading={index === 0 ? "eager" : "lazy"}
+                    fetchPriority={index === 0 ? "high" : "auto"}
+                    decoding="async"
                   />
                 </div>
               ))}
@@ -494,7 +500,7 @@ export default function ProductDetail() {
                         title={p.name}
                       >
                         <div className="relative w-16 h-20 bg-stone-100 overflow-hidden">
-                          <img src={img} alt={p.name} className="w-full h-full object-cover group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" />
+                          <img src={optimizeImg(img, 200)} alt={p.name} className="w-full h-full object-cover group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-[9px] text-black/50 tabular-nums mt-1 truncate">
                           {((p.discount_price && p.discount_price > 0) ? p.discount_price : p.price || 0).toFixed(0)} TL
@@ -573,7 +579,7 @@ export default function ProductDetail() {
                       data-testid={`combo-product-${p.id}`}
                     >
                       <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
-                        <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                        <img src={optimizeImg(img, 700)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                         <button
                           type="button"
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -732,7 +738,7 @@ function ColorSiblings({ productId, currentColor }) {
             data-testid={`color-sibling-${s.id}`}
           >
             {s.image
-              ? <img src={s.image} alt={s.color || ""} className="w-full h-full object-cover" />
+              ? <img src={optimizeImg(s.image, 150)} alt={s.color || ""} className="w-full h-full object-cover" loading="lazy" decoding="async" />
               : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
           </a>
         ))}

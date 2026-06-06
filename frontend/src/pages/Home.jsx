@@ -91,7 +91,7 @@ function FullBanner({ block }) {
   const dims = block?.settings?.img_dims?.[0];
   return (
     <Link to={block.links?.[0] || "/"} className="block w-full bg-stone-100" data-testid="full-banner" style={{ aspectRatio: aspectFromDims(dims, "16 / 6") }}>
-      <img src={optimizeImg(block.images[0], 1920, 82)} alt={block.title || ""} className="w-full h-full object-cover block" loading="lazy" decoding="async" />
+      <img src={optimizeImg(block.images[0], 1920)} alt={block.title || ""} className="w-full h-full object-cover block" loading="lazy" decoding="async" />
     </Link>
   );
 }
@@ -103,7 +103,7 @@ function HalfBanners({ block }) {
     <div className="grid grid-cols-2" data-testid="half-banners">
       {block.images.slice(0, 2).map((img, index) => (
         <Link key={index} to={block.links?.[index] || "/"} className="block bg-stone-100" style={{ aspectRatio: aspectFromDims(dimsArr[index], "1 / 1") }}>
-          <img src={optimizeImg(img, 1000, 82)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
+          <img src={optimizeImg(img, 1000)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
         </Link>
       ))}
     </div>
@@ -156,7 +156,7 @@ function InstaShop({ block }) {
         <div className="grid grid-cols-5 gap-1">
           {images.slice(0, 5).map((img, index) => (
             <Link key={index} to={links[index] || "/"} className="block overflow-hidden group">
-              <img src={img} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" />
+              <img src={optimizeImg(img, 600)} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
             </Link>
           ))}
         </div>
@@ -400,16 +400,16 @@ export default function Home() {
 
           {/* Full Width Banner */}
           <Link to="/kategori/en-yeniler" className="block">
-            <img src="https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-cb23757c-6.jpg" alt="" className="w-full h-auto block" />
+            <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-cb23757c-6.jpg", 1920)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
           </Link>
 
           {/* Two Half-Width Banners */}
           <div className="grid grid-cols-2">
             <Link to="/kategori/gomlek" className="block">
-              <img src="https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg" alt="" className="w-full h-auto block" />
+              <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
             <Link to="/kategori/aksesuar" className="block">
-              <img src="https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg" alt="" className="w-full h-auto block" />
+              <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
           </div>
 
