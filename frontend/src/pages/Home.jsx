@@ -98,11 +98,16 @@ function FullBanner({ block }) {
 
 function HalfBanners({ block }) {
   if (!block?.images || block.images.length < 2) return null;
-  const dimsArr = block?.settings?.img_dims || [];
+  // İki banner için TEK ve tutarlı en-boy oranı. Yüklenen görselin piksel
+  // boyutundan bağımsız: hangi boyutta görsel eklenirse eklensin, ikisi de
+  // eşit boyutta ve sayfaya sığarak (object-cover ile) görünür. Eski/karışık
+  // kayıtlı boyutların yerleşimi bozmasını engeller. Admin isterse
+  // block.settings.aspect ("16 / 9" gibi) ile değiştirebilir.
+  const aspect = block?.settings?.aspect || "1 / 1";
   return (
     <div className="grid grid-cols-2" data-testid="half-banners">
       {block.images.slice(0, 2).map((img, index) => (
-        <Link key={index} to={block.links?.[index] || "/"} className="block bg-stone-100" style={{ aspectRatio: aspectFromDims(dimsArr[index], "1 / 1") }}>
+        <Link key={index} to={block.links?.[index] || "/"} className="block bg-stone-100 overflow-hidden" style={{ aspectRatio: aspect }}>
           <img src={optimizeImg(img, 1000)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
         </Link>
       ))}
