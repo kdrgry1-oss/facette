@@ -74,6 +74,14 @@ export default function Checkout() {
     eInvoice_user: false,  // E-Fatura mükellefi mi
   });
 
+  // Sipariş tutarları (türetilmiş) — useEffect'lerden ÖNCE tanımlanmalı (TDZ hatası önlenir)
+  const freeShippingLimit = 500;
+  const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
+  const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
+  const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
+  const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
+  const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+
   // Load saved addresses for logged-in users
   useEffect(() => {
     if (!user) return;
@@ -175,13 +183,6 @@ export default function Checkout() {
     toast.success("Ödemeniz başarıyla tamamlandı!");
     setTimeout(() => navigate(`/order-success/${orderNumber}`), 1200);
   };
-
-  const freeShippingLimit = 500;
-  const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
-  const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
-  const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
-  const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
-  const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
 
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
