@@ -415,6 +415,85 @@ async def forgot_password_reset(req: OTPResetReq):
     await db.password_reset_otps.delete_one({"_id": rec["_id"]})
     return {"success": True, "message": "Şifreniz güncellendi"}
 
+@router.post("/google/session")
+async def google_session(request: Request, session_id: str = Query(...)):
+    """Emergent-managed Google Auth — session_id'yi kullanıcı + app JWT token'a çevirir.
+
+    Frontend, auth.emergentagent.com'dan dönen session_id'yi buraya POST eder.
+    Backend, Emergent session-data API'sini çağırıp kullanıcıyı oluşturur/günceller
+    ve uygulamanın kendi JWT token'ını döndürür (mevcut JWT auth ile uyumlu).
+    """
+    import httpx
+    session_id = safe_str(session_id, 512)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": session_id},
+            )
+    except Exception:
+        raise HTTPException(status_code=502, detail="Kimlik doğrulama servisine ulaşılamadı")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Google oturumu doğrulanamadı")
+
+    data = resp.json()
+    email = safe_str(data.get("email", ""), 256).lower().strip()
+    if not is_safe_email(email):
+        raise HTTPException(status_code=400, detail="Google hesabından geçerli e-posta alınamadı")
+    name = safe_str(data.get("name", ""), 200)
+    picture = safe_str(data.get("picture", ""), 500)
+    first_name, _, last_name = name.partition(" ")
+    ip = client_ip_from_request(request)
+    ua = request.headers.get("user-agent")
+
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        user = {
+            "id": generate_id(),
+            "email": email,
+            "password": hash_password(uuid.uuid4().hex),  # Google kullanıcısı — kullanılamaz şifre
+            "first_name": first_name or name or email.split("@")[0],
+            "last_name": last_name or "",
+            "phone": "",
+            "is_admin": False,
+            "is_active": True,
+            "auth_provider": "google",
+            "picture": picture,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.users.insert_one(user)
+    else:
+        updates = {}
+        if not user.get("auth_provider"):
+            updates["auth_provider"] = "google"
+        if picture and not user.get("picture"):
+            updates["picture"] = picture
+        if updates:
+            await db.users.update_one({"id": user["id"]}, {"$set": updates})
+
+    if not user.get("is_active", True):
+        await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
+                              user_agent=ua, success=False, meta={"reason": "inactive"})
+        raise HTTPException(status_code=403, detail="Hesabınız devre dışı")
+
+    token = create_token(user["id"])
+    await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
+                          user_agent=ua, success=True)
+    return {
+        "success": True,
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "first_name": user.get("first_name", ""),
+            "last_name": user.get("last_name", ""),
+            "is_admin": user.get("is_admin", False),
+            "picture": user.get("picture", ""),
+        },
+    }
+
+
 @router.get("/google/login")
 async def google_login(request: Request):
     """Initiate Google OAuth login"""
