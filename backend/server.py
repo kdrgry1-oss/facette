@@ -403,6 +403,9 @@ api_router.include_router(docs_router)
 from routes.stock_notify import router as stock_notify_router
 api_router.include_router(stock_notify_router)
 
+from routes.payment import router as payment_router
+api_router.include_router(payment_router)
+
 # Include all route modules
 api_router.include_router(auth_router)
 api_router.include_router(products_router)

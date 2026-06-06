@@ -118,60 +118,62 @@ export default function Checkout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
 
-  // Payment callback
+  // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {
-    const token = searchParams.get("token");
-    if (token) handlePaymentCallback(token);
+    const status = searchParams.get("status");
+    const orderNum = searchParams.get("order");
+    if (status === "success") {
+      handlePaymentSuccess(orderNum);
+    } else if (status === "fail") {
+      setPaymentStep("error");
+      toast.error("Ödeme tamamlanamadı. Lütfen tekrar deneyin.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const handlePaymentCallback = async (token) => {
+  const handlePaymentSuccess = async (orderNumber) => {
+    if (!orderNumber) return;
     setPaymentStep("processing");
+    let amount = grandTotal;
     try {
-      const res = await axios.post(`${API}/payment/callback?token=${token}`);
-      if (res.data.success) {
-        const _userInfo = {
-          email: shippingAddress.email || user?.email || "",
-          phone: shippingAddress.phone || user?.phone || "",
-          first_name: shippingAddress.first_name || "",
-          last_name: shippingAddress.last_name || "",
-          city: shippingAddress.city || "",
-          state: shippingAddress.district || shippingAddress.state || "",
-          country: shippingAddress.country || "TR",
-          zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
-          street: shippingAddress.address || "",
-          external_id: user?.id || "",
-        };
-        trackPurchase({
-          order_id: res.data.orderNumber,
-          total: res.data.amount || grandTotal,
-          items: items.map((it) => ({
-            product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
-            category: it.category || it.categoryName || "",
-            sku: it.sku || it.stockCode || "",
-            size: it.size || "", color: it.color || "",
-            list_price: it.list_price || it.price,
-            sale_price: it.sale_price || it.price,
-            brand: it.brand || "FACETTE",
-            breadcrumb: it.breadcrumb || "",
-          })),
-          coupon: appliedCoupon?.code || "",
-          discount, shipping: shippingCost, tax: 0,
-          payment_type: paymentMethod,
-          shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
-          user: _userInfo,
-        });
-        clearCart();
-        setPaymentStep("success");
-        toast.success("Ödemeniz başarıyla tamamlandı!");
-        setTimeout(() => navigate(`/order-success/${res.data.orderNumber}`), 1500);
-      } else {
-        setPaymentStep("error");
-        toast.error(res.data.error || "Ödeme başarısız");
-      }
-    } catch (err) {
-      setPaymentStep("error");
-      toast.error("Ödeme doğrulanamadı");
-    }
+      const r = await axios.get(`${API}/orders/by-number/${orderNumber}`);
+      amount = r.data?.total || grandTotal;
+    } catch (e) { /* sessiz */ }
+    const _userInfo = {
+      email: shippingAddress.email || user?.email || "",
+      phone: shippingAddress.phone || user?.phone || "",
+      first_name: shippingAddress.first_name || "",
+      last_name: shippingAddress.last_name || "",
+      city: shippingAddress.city || "",
+      state: shippingAddress.district || shippingAddress.state || "",
+      country: shippingAddress.country || "TR",
+      zipcode: shippingAddress.zipcode || shippingAddress.postal_code || "",
+      street: shippingAddress.address || "",
+      external_id: user?.id || "",
+    };
+    trackPurchase({
+      order_id: orderNumber,
+      total: amount,
+      items: items.map((it) => ({
+        product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
+        category: it.category || it.categoryName || "",
+        sku: it.sku || it.stockCode || "",
+        size: it.size || "", color: it.color || "",
+        list_price: it.list_price || it.price,
+        sale_price: it.sale_price || it.price,
+        brand: it.brand || "FACETTE",
+        breadcrumb: it.breadcrumb || "",
+      })),
+      coupon: appliedCoupon?.code || "",
+      discount, shipping: shippingCost, tax: 0,
+      payment_type: paymentMethod,
+      shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
+      user: _userInfo,
+    });
+    clearCart();
+    setPaymentStep("success");
+    toast.success("Ödemeniz başarıyla tamamlandı!");
+    setTimeout(() => navigate(`/order-success/${orderNumber}`), 1200);
   };
 
   const freeShippingLimit = 500;
@@ -318,16 +320,18 @@ export default function Checkout() {
       setOrderId(newOrderId);
 
       if (paymentMethod === "credit_card") {
-        const callbackUrl = `${window.location.origin}/odeme`;
+        const callbackUrl = `${API}/payment/callback`;
+        const returnUrl = `${window.location.origin}/odeme`;
         const paymentRes = await axios.post(
-          `${API}/payment/initialize?order_id=${newOrderId}&callback_url=${encodeURIComponent(callbackUrl)}`
+          `${API}/payment/initialize?order_id=${newOrderId}&callback_url=${encodeURIComponent(callbackUrl)}&return_url=${encodeURIComponent(returnUrl)}`
         );
         if (paymentRes.data.success && paymentRes.data.paymentPageUrl) {
           window.location.href = paymentRes.data.paymentPageUrl;
-        } else if (paymentRes.data.checkoutFormContent) {
+        } else if (paymentRes.data.success && paymentRes.data.checkoutFormContent) {
           setPaymentUrl(paymentRes.data.checkoutFormContent);
           setPaymentStep("iframe");
         } else {
+          setLoading(false);
           toast.error(paymentRes.data.error || "Ödeme başlatılamadı");
         }
       } else {
@@ -376,13 +380,14 @@ export default function Checkout() {
   };
 
   // Boş sepet → /sepet'e yönlendir (render içinde değil, useEffect'te)
+  // Ödeme dönüşünde (?status=...) yönlendirme yapma — başarı/başarısızlık ekranı gösterilecek
   useEffect(() => {
-    if (items.length === 0 && paymentStep === "form") {
+    if (items.length === 0 && paymentStep === "form" && !searchParams.get("status")) {
       navigate("/sepet");
     }
-  }, [items.length, paymentStep, navigate]);
+  }, [items.length, paymentStep, navigate, searchParams]);
 
-  if (items.length === 0 && paymentStep === "form") return null;
+  if (items.length === 0 && paymentStep === "form" && !searchParams.get("status")) return null;
 
   if (paymentStep === "success") {
     return (
@@ -795,8 +800,8 @@ export default function Checkout() {
                       onChange={(e) => setAcceptTerms(e.target.checked)}
                       className="mt-0.5 accent-black" data-testid="accept-terms-checkbox" />
                     <span>
-                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-black">Ön Bilgilendirme Koşulları</a>'nı ve{" "}
-                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-black">Mesafeli Satış Sözleşmesi</a>'ni okudum, onaylıyorum.
+                      <a href="/sayfa/on-bilgilendirme" target="_blank" rel="noreferrer" className="underline hover:text-black">Ön Bilgilendirme Koşulları</a>{"'"}nı ve{" "}
+                      <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-black">Mesafeli Satış Sözleşmesi</a>{"'"}ni okudum, onaylıyorum.
                     </span>
                   </label>
                 </div>
