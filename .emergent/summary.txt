@@ -1,163 +1,159 @@
 <analysis>**original_problem_statement**: 
-Kullanıcı facette e-ticaret markası için kapsamlı bir e-ticaret admin paneli ve ERP sistemi istemektedir. (Ticimax senkronizasyonları, Doğan e-Dönüşüm, DHL E-Commerce [eski adıyla MNG], Trendyol entegrasyonları). 
-PRODUCT REQUIREMENTS:
-- Ticimax sipariş, ürün ve canlı stok senkronizasyonu.
-- Gelişmiş Suud Collection stili UI/UX (Mega menü, Countdown Bar, Minimal siyah/beyaz Checkout, Dinamik Footer).
-- RFM Müşteri Segmentasyonu ve Resend üzerinden otomatik E-posta kampanyaları.
-- **Kritik Yeni Gereksinim:** Kapsamlı Siber Güvenlik (Cybersecurity) Entegrasyonu. Kullanıcı OWASP Top 10, PCI-DSS veri minimizasyonu, BCrypt/Argon2 kullanımı, CSRF token, XSS/CSP önlemleri, Session Hijacking koruması ve NoSQL Injection önlemlerini içeren çok detaylı bir güvenlik sertleştirmesi (hardening) talep etmiştir.
+Kullanıcı (User) facette e-commerce brand requires a comprehensive e-commerce admin panel and ERP system. Recently, the focus has been on fixing Ticimax/Trendyol attribute matching logic, deploying the application, fixing image upload persistence, and refining the storefront UI. The user's latest requests include fixing a category filtering bug (some categories show 0 products), improving the Header Mega Menu hover UX (dropdowns close too fast), adding Meta/Facebook Pixel & CAPI tracking, restoring the missing top white announcement bar text, and allowing redirect links to be added to all images in the Page Design module. PRODUCT REQUIREMENTS: Fast, robust UI, exact matches for product attributes with Ticimax, functional storefront routing.
 
-**User's preferred language**: Turkish (Kullanıcı Türkçe konuşuyor. INSTRUCT next agent to respond in Turkish only / Sonraki ajan SADECE Türkçe yanıt vermelidir.)
+**User's preferred language**: Turkish (You MUST respond to the user in Turkish only).
 
 **what currently exists?** 
-Gelişmiş bir React + FastAPI + MongoDB altyapısı. Ticimax siparişleri, MNG (yeni adıyla DHL E-Commerce) Webhook entegrasyonu, Page Blocks üzerinden yönetilebilen Countdown Bar ve Desktop/Mobile görünürlük ayarları tamamlandı. Mega menü iyileştirildi, ürün sayfasındaki renk varyant kutucukları, Account sayfasında şifre sıfırlama ve kurumsal fatura alanları eklendi. Otomasyon Durumu adında cron job'ları izleyen yeni bir admin paneli yapıldı. Ticimax manuel canlı stok senkronizasyonu () oluşturuldu.
+A deployed React 19 + FastAPI + MongoDB e-commerce platform. Ticimax/Trendyol integration has been heavily refactored so that exact attribute values are synced without global DB pollution. Image uploads have been migrated from the local disk to MongoDB to persist across Kubernetes replicas. Product URLs have been simplified to root level (). A Meta Pixel/CAPI backend infrastructure exists but lacks the specific IDs/Tokens provided by the user.
 
-**Last working item**: 
-    - Last item agent was working: 1) Ticimax stok senkronizasyonunda eşleşmeyi sadece  üzerinden değil,  ve  öncelikli yapacak şekilde güncellemek. 2) Kullanıcının ilettiği devasa **Siber Güvenlik (Cybersecurity) Sertleştirme** listesini (NoSQL Injection, XSS, CSRF, BCrypt şifreleme, Strict JWT doğrulama, HttpOnly Cookie vb.) backend'e entegre etmeye başlamak.
+**Last working item**:
+    - Last item agent was working: The agent was analyzing 5 distinct issues provided in the user's last message: 1) Disappearing white announcement bar text, 2) Categories (Takım, Tişört, Gömlek, vb.) showing 0 products, 3) Header Mega Menu dropdown disappearing too quickly on hover, 4) Meta Pixel integration from an uploaded PDF, 5) Adding redirect links to images in the Page Design module. The agent was inspecting  and  when the context ended.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use?: backend testing agent
+    - Which testing method agent to use?: backend testing agent for category filtering logic; screenshot tool for UI/Hover/Page Design changes.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Kapsamlı Uygulama Güvenliği (Cybersecurity Hardening) (P0)
-     - Attempted fixes: Ajan henüz değişikliklere yeni başlıyordu.
-     - Next debug checklist:  içine CSP (Content Security Policy) header'ları, Rate Limiting (Velocity Checks) middleware'leri eklenmeli.  içinde şifrelerin MD5/SHA1 yerine kesinlikle  ile hashlendiğinden emin olunmalı, JWT Token doğrulamalarında alg=none açığına karşı strict validation uygulanmalı. NoSQL injection'a karşı Pydantic modelleri ve tip doğrulamaları sıkılaştırılmalı.
-     - Why fix this issue and what will be achieved with the fix?: Kullanıcının ilettiği güvenlik yönergelerine (PCI-DSS ve OWASP standartları) tam uyum sağlamak.
+  - Issue 1: Categories showing 0 products (Takım, Tişört, vb.) (P0)
+     - Attempted fixes: Agent verified that products exist in DB, but the  query is failing for certain sub-categories.
+     - Next debug checklist: Check . Verify how  query param is matched against product categories (slug vs. name, or hierarchical parent/child ID matching).
+     - Why fix this issue and what will be achieved with the fix?: Customers cannot see products in major clothing categories on the storefront.
      - Status: IN PROGRESS
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Both
+     - Should Test frontend/backend/both after fix?: backend
      - Blocked on other issue: None
 
+  - Issue 2: Header Mega Menu Hover UX (P1)
+     - Attempted fixes: Agent identified  state logic (, ).
+     - Next debug checklist: Modify  logic in . Add a  (e.g., 200-300ms) before clearing the  state, and clear the timeout if  is triggered again.
+     - Why fix this issue and what will be achieved with the fix?: Prevents user frustration when navigating nested menus.
+     - Status: NOT STARTED
+     - Is recurring issue?: N
+     - Should Test frontend/backend/both after fix?: frontend
+
+  - Issue 3: Missing Announcement Bar Text & Editor Visibility (P1)
+     - Attempted fixes: Agent previously linked the white bar to  block in DB. User says text disappeared (black text on white bg) and they can't see where to edit it in Page Design.
+     - Next debug checklist: Check  to ensure the  block editor is visible and functioning. Check  or  to ensure the text color/bg color is rendering correctly.
+     - Why fix this issue and what will be achieved with the fix?: Restores promo visibility.
+     - Status: NOT STARTED
+     - Is recurring issue?: Y (Agent touched this previously and caused issues).
+     - Should Test frontend/backend/both after fix?: frontend
+
 **In progress Task List**:
-  - Task 1: Ticimax Stok Senkronizasyonunda Barkod/Stok Kodu Eşleşmesi (P1)
-     - Where to resume: .
-     - What will be achieved with this?: Stok eşleşmesinde  yerine daha güvenilir olan  ve  kullanılarak hatalı stok güncellemelerinin önüne geçilecek.
+  - Task 1: Meta Pixel & CAPI Integration (P0)
+     - Where to resume: Read the extracted PDF data from the history (Pixel ID: , plus the CAPI token). Implement the script in  or a global React component, and wire up .
+     - What will be achieved with this?: Facebook conversion tracking.
      - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix?: Backend
-     - Blocked on something: None
+     - Should Test frontend/backend/both after fix?: both
+  
+  - Task 2: Redirect Links for Images in Page Design (P1)
+     - Where to resume: . Add a URL input field next to the image upload logic for blocks like banners/sliders.
+     - What will be achieved with this?: Admins can make storefront images clickable.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix?: frontend
+
+  - Task 3: Order Cancellations & Returns Flow (P2)
+     - Where to resume: .
+     - What will be achieved with this?: Full ERP cancellation/return management.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix?: both
+     - Blocked on something: Complete P0/P1 UI and Category issues first.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P2: Trendyol gerçek 4-5 yıldız yorumlarını çekme ve ürünlere atama.
-    - P2: Trendyol müşteri sorularının çekilmemesi sorunu (geçmiş soruların incelenmesi ve debug edilmesi).
+    - P1: Cloudflare R2 (Image) & Bunny Stream (Video) CDN Integration (Blocked waiting for User API keys).
+    - P1: Native Webmail (IMAP/SMTP) embedded in Admin Panel using Zoho/Yandex free tiers.
     
     Future Tasks:
-    - P3:  dosyasının çok şişmesi (4380 satır) sebebiyle vendor bazlı (Trendyol, Ticimax vb.) bölünerek refactor edilmesi.
+    - P2: Amazon OAuth & APScheduler for 15-min sync.
+    - P2: Firebase FCM push notifications for future mobile app.
 
 **Completed work in this session**
-- Ticimax Sipariş Verilerinin silinmiş gibi görünmesi sorunu çözüldü (Pagination bug ve JSON ayrıştırma hatası giderildi, Account API rotası bağlandı) (DONE)
-- Admin Sayfa Tasarımı:  düzeltildi, blok sıralama endpoint'i yazıldı, Mobil/Masaüstü görünürlük ayarları eklendi. (DONE)
-- MNG Kargo Webhook eklendi, sonrasında sistemdeki tüm MNG Kargo ibareleri DHL E-Commerce olarak değiştirildi. (DONE)
-- RFM Müşteri Segmentasyon UI'ı ve Toplu E-Posta Kampanyası Gönderme Modülü (Resend) eklendi. (DONE)
-- Otomasyon Durumu (Automation Status) adlı admin sayfası yapılarak arka planda çalışan Cron'ların logları ve takibi görselleştirildi. (DONE)
-- Üst bar için Yönetilebilir Countdown (Geri Sayım) Bloğu eklendi. (DONE)
-- Mega Menü: Alt menülerin fareyi çekince hemen kaybolması gecikme (delay) ile çözüldü, ürün sayısı sınırlandı. (DONE)
-- Account: Şifre sıfırlama sayfası, Kurumsal adres giriş alanları (Vergi Dairesi, VKN vb.) eklendi. (DONE)
-- Footer: CMS üzerinden yönetilebilir  yapısı kuruldu. (DONE)
-- Checkout & Order Success sayfaları siyah/beyaz yüksek kontrastlı minimal tasarıma (Suud stili) geçirildi, geri butonları eklendi. (DONE)
+- UI improvements for  (Searchable command, left menu search) (DONE)
+- Massive DB data cleanup ( & ) fixing 600+ attribute mismatches between description and Ticimax master data (DONE)
+- Crop -> Super Crop incorrect mapping globally resolved (DONE)
+- Deployment readiness check passed and app deployed to Emergent (DONE)
+- Image uploads refactored to save/serve from MongoDB instead of local disk for Kubernetes persistence (DONE)
+- Storefront product URLs simplified from  to  (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1:  dosyasının devasa boyutu (4380 satır).
-     - Debug checklist: Modülleri ,  vb. şeklinde bölmek.
-     - Why to solve this issue and what will be achieved with this?: Backend kodunun bakımını kolaylaştırmak.
-     - Should Test frontend/backend/both after fix: Backend
-     - Is recurring issue?: Y
-   - Issue 2:  eksik. Toplu kampanya e-postaları şu an hata veriyor.
-   - Issue 3: Doğan e-Dönüşüm Credentials'larının backend'de boş/yanlış görünmesi.
-   - Issue 4: Trendyol sipariş çekme servisi loglarda errors:null - Invalid Token yetki hatası döndürüyor (Kullanıcının supplier_id ve key'leri canlıya alması gerek).
+   - None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Yok
-  - Recurrence count: 0
-  - Status: RESOLVED
+  - **Unrelated Code Modification:** The previous agent touched  while trying to fix the announcement bar, breaking existing logic and heavily angering the user. **DO NOT touch code outside the immediate scope of the user's request.**
+  - **Environment Confusion:** The user is looking at the PRODUCTION environment, which has an empty database currently. If the user complains about missing data, remind them that the database migration via Emergent Support is still pending.
 
 **Code Architecture**
-- API Routes:  (, ,  yeni eklendi)
-- Background Jobs: 
-- Frontend Admin Pages:  (,  eklendi)
-- Frontend Components:  ( eklendi)
+-  (Refactored to store files in MongoDB as Base64/Binary)
+-  (Contains Mega Menu and Announcement Bar)
+-  (Handles category querying for storefront)
 
 **Key Technical Concepts**
-- Backend: FastAPI, Motor (MongoDB Async), Zeep (SOAP API için), APScheduler (Cron/Background tasks).
-- Security: JWT doğrulama, bcrypt şifreleme, Pydantic ile şema/tip koruması (NoSQL injection önlemi).
+- React 19, FastAPI, MongoDB (Motor).
+- Shadcn UI, Tailwind CSS.
+- Meta CAPI (Conversion API).
 
 **key DB schema**
-  - :  (countdown_bar eklendi),  (bool),  (bool).
-  - : yeni koleksiyon.
-  - : , , ,  alanları eklendi.
+  - : Stores UI blocks for Page Design (e.g., ).
+  - : Stores base64/binary image data for persistent uploads.
 
 **changes in tech stack**
-  - Yeni Cron Job eklendi: Her 4 saatte bir çalışan  ve  yapıları.
+  - Image persistence moved from local filesystem to MongoDB.
 
 **All files of reference** 
-- : Manuel ve Cron tabanlı stok güncelleme modülü (Şu an editleniyordu).
-- : Güvenlik middleware'leri (Rate limit, CSP, CORS) buraya eklenmeli.
-- : Bcrypt ve JWT güvenlik kontrollerinin implementasyon noktası.
-- : Ticimax, Trendyol, Abandoned Cart cron jobları.
-- : Cron loglarının izlendiği ekran.
-- : Sistem mimarisi ve görev geçmişinin loglandığı ana döküman.
+- 
+- 
+- 
+- 
 
 **Areas that need refactoring**: 
--  spagetti koda dönüştü, acilen bölünmesi önerilir.
+-  mega menu hover logic needs a standard  debounce implementation to prevent flickering/closing too fast.
 
 **key api endpoints**
 - 
 - 
-- 
 
 **Critical Info for New Agent** 
-- Kullanıcı çok spesifik ve uzman seviyesinde bir **Siber Güvenlik Sertleştirmesi (Cybersecurity Hardening)** metni iletti. MD5/SHA1 kullanılmaması (sadece Bcrypt), Session Fixation/Hijacking engelleri, JWT  açığının kapatılması, CSP headerları, XSS önlemleri, PCI-DSS veri minimizasyonu, parametrik MongoDB sorguları (NoSQLi önlemi) gibi talepleri var. Backend tarafında bu standartları karşılayacak şekilde ,  ve DB sorgularını gözden geçirerek güvenlik duvarını örmelisiniz.
-- Önce  içindeki Barkod/Stok kodu map'leme işlemini bitirin.
-- Kullanıcıyla iletişimde Türkçe dilini kullanın.
+- **CRITICAL:** The application is now DEPLOYED. There is a PREVIEW environment and a PRODUCTION environment. The user is checking the preview URL but also referring to the live site. Any backend/DB data fixes you do only affect PREVIEW.
+- Production DB is currently empty of products because the user needs to email  to migrate the  you created.
+- The user was highly agitated (senin ırzıni sikerim...) when the agent modified unrelated components. Follow instructions literally and strictly.
 
 **documents and test reports created in this job** 
   - 
-  - 
+  -  (Backup file ready for Support migration)
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. *User*: Bozuk siparişleri düzelt ve devam et.
- 2. *Agent*: (Ticimax pagination bug ve parse sorununu çözerek siparişleri DB'ye çeker. Account ve Admin sayfalarını bağlar).
- 3. *User*: b ile ilerle (P1: Sayfa tasarımı ve MNG webhook testleri).
- 4. *Agent*: (Page blocks sorunlarını ve MNG webhook  rotasını yapar. Test agent ile dener).
- 5. *User*: Sayfa tasarımında blokları mobilde göster/gizle seçenekleri sun. Trendyol siparişleri 2 dk'da 1 çeksin.
- 6. *Agent*: (Visibility özellikleri ve RFM segmentlerine dayalı Resend kampanya modülünü entegre eder).
- 7. *User*: (Ekran görüntüleri iletir) MNG adını DHL E-Commerce yap. Trendyol canlı bilgilerini ekledim. Cron otomasyon durumunu görebileceğim bir panel yap. Üst tarafa ayarlanabilir Countdown ekle. Mega menüde boşluklar çok fazla kayboluyor, Account sayfasında Suud yazıyor düzelt, Adrese Teslimi kaldır vs. (Devasa bir UI fix listesi verir).
- 8. *Agent*: (Wave 1 adı altında tüm UI/UX, Checkout B&W tasarımlar, Footer CMS ve Otomasyon paneli işlerini tek batch'te tamamlar).
- 9. *User*: Ticimax web servis kodu ile ürünlerin güncel stoklarını çek ve panelimizde güncelle.
- 10. *Agent*: ( yazar ve entegre eder).
- 11. *User*: (Bekleyen insan eylemi) Stok eşleşmesini barcode'a göre yap. **Ve ek olarak Uygulama Güvenliği (XSS, CSRF, Injection, JWT, BCrypt, PCI-DSS vb.) için sistemin güvenliğini sağla.** (Devasa bir güvenlik manifestosu gönderir).
- 12. *Agent*: İşleme başlar ancak kesilir. *(Sıradaki işiniz bu güvenlik kurallarını uygulamaktır)*
+ 1. *User*: deploy etmeden önce aşağıda claude opus 4.8 ile yazılımı yaptığını gösteriyordun... kurumsal mailler açabileceğim... alanın eklenmesini istiyorum.
+ 2. *Agent*: Explained agent identity. Asked clarifying questions about email management.
+ 3. *User*: Wants to manage emails. Refused paid services, asked to setup Roundcube locally.
+ 4. *Agent*: Explained Roundcube is technically impossible on this K8s cluster. Proposed Zoho/Yandex free tiers with native webmail built into admin.
+ 5. *User*: kurumsal maili sonraya bırakalım... (Let's postpone corporate mail). Reported 5 new issues: 1) White announcement bar text missing/uneditable. 2) Categories (Takım, Tişört, vb.) showing 0 products. 3) Header menu disappears too fast on hover. 4) Integrate Meta Pixel from PDF. 5) Add redirect links to uploaded images in Page Design.
+ 6. *Agent (PENDING)*: Agent started inspecting  and , extracted PDF info for Pixel, but context window ended before any edits were made.
 
 **Project Health Check:**
-- Broken: Güvenlik sertleştirmesi ve  düzenlemesi yarıda kaldı.
-- Mocked: Yok.
+- Broken: Category filtering endpoint returning 0 products for certain clothing categories.
 
 **3rd Party Integrations** 
-- Ticimax (SOAP WSDL) — Requires User API Key.
-- DHL E-Commerce (Kargo Webhook) — Requires User API Key.
-- Doğan e-Dönüşüm (Fatura) — Requires User API Key.
-- Resend (Email Campaigns) — Requires User API Key (Şu an missing).
-- Trendyol — Requires User API Key.
+- Ticimax / Trendyol — Requires User API Key
+- Meta CAPI (Pixel) — Requires User API Key (Provided in PDF: )
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Iteration 24 for webhook/page blocks).
+  - Testing agent used after significant changes: YES
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-  - Known regressions: Yok.
+  - Test files created: None
+  - Known regressions: Category filtering broken.
 
 **Credentials to test flow:**
-- Facette Admin Paneli:  / 
+- Admin Panel:  / 
 
 **What agent forgot to execute**
-- Son mesajdaki Siber Güvenlik maddelerini uygulamaya başladı ancak tamamlayamadı.  içine güvenlik middleware'leri ve  güncellemeleri atılmalı.
+- The agent was in the middle of analyzing the 5 issues presented in the final user message. No code was written for the category bug, header menu hover, meta pixel, or page design image links.
 
 **Debugging checklist for current issue**
-    Issue: Güvenlik Sertleştirmesi (Cybersecurity Hardening)
-    
+    Issue: Mega Menu Hover UX
     Frontend files to check: 
-    - İsteklerin header'larında veya formlarda XSS açıklarına karşı sanitize işlemlerinin React tarafında default olarak sağlandığından emin olun.
-  
-    Backend files to check:
-    - :  konfigürasyonunu daraltın (Zero Trust).  (Custom veya Starlette) ekleyerek CSP (Content Security Policy) ayarlayın. CSRF Token altyapısı kurun veya SameSite cookie kurallarını katılaştırın. Rate Limiter (Velocity Checks) ekleyin.
-    - :  ile Hash işlemlerinde kesinlikle  kullanıldığını doğrulayın. JWT token doğrulamasında  parametresinin zorunlu ve strict olduğuna emin olun.
-    - : Barkod ve Stok kodu eşleştirme kodunu tamamlayın.</analysis>
+    Checklist: Add  inside component or use . On , do . On , do .
+
+    Issue: Category filtering showing 0 products
+    Backend files to check: 
+    Checklist: Check how the  query parameter filters the MongoDB  collection. Are the slugs matching? Are child categories being included when a parent category is clicked?</analysis>
