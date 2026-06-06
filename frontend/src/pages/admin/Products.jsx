@@ -272,7 +272,7 @@ export default function AdminProducts() {
   // Taslak güncelleme: sadece input state'ini değiştirir, listeyi HEMEN yenilemez.
   const updateFilter = (key, value) => { setFilters((f) => ({ ...f, [key]: value })); };
   // Listele: taslak filtreleri uygula ve ilk sayfadan getir.
-  const applyFilters = () => { setAppliedFilters({ ...filters }); setPage(1); };
+  const applyFilters = () => { setAppliedFilters({ ...filters }); setPage(1); setShowFilters(false); };
   const clearFilters = () => { setFilters(FILTERS_INITIAL); setAppliedFilters(FILTERS_INITIAL); setPage(1); };
   const [showFilters, setShowFilters] = useState(false);
   // Tablo sıralaması (3 durumlu: yön -> ters -> varsayılan)

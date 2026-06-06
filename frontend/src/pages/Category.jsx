@@ -31,6 +31,11 @@ export default function Category() {
     fetchCategories();
   }, [slug, sort, order, minPrice, maxPrice, page]);
 
+  // Sayfa değişince listenin en üstüne kaydır (alttan açılma sorununu giderir)
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [page]);
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
