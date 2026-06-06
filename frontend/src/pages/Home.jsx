@@ -49,7 +49,7 @@ function HeroSlider({ block }) {
             to={links[index] || "/"}
             className={`block transition-opacity duration-700 ${index === currentSlide ? "opacity-100" : "opacity-0 absolute inset-0"}`}
           >
-            <img src={img} alt={block?.title || ""} className="w-full h-auto block" />
+            <img src={img} alt={block?.title || ""} className="w-full h-auto block" fetchPriority={index === 0 ? "high" : "auto"} loading={index === 0 ? "eager" : "lazy"} decoding="async" />
           </Link>
         ))}
       </div>

@@ -442,7 +442,29 @@ async def get_product(product_id: str):
     )
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    # Varyantları global Beden Havuzu (variant_options) sırasına göre diz —
+    # böylece storefront'ta XS, S, M, L, XL... admin'in tanımladığı sırayla görünür.
+    product["variants"] = await _sort_variants_by_pool(product.get("variants") or [])
     return product
+
+
+async def _sort_variants_by_pool(variants: list) -> list:
+    """Ürün varyantlarını `variant_options` (type=size) sort_order'ına göre sıralar.
+    Havuzda olmayan bedenler (kombinasyonlar/numeric) orijinal sırada en sona eklenir
+    (stable sort). Renk sıralaması beden eşitliğinde korunur."""
+    if not variants:
+        return variants
+    size_order = {}
+    async for vo in db.variant_options.find({"type": "size"}, {"_id": 0, "value": 1, "sort_order": 1}):
+        key = str(vo.get("value", "")).strip().lower()
+        if key:
+            size_order[key] = vo.get("sort_order", 9999)
+    if not size_order:
+        return variants
+    def _k(v):
+        s = str(v.get("size", "")).strip().lower()
+        return size_order.get(s, 10000)
+    return sorted(variants, key=_k)
 
 
 @router.get("/{product_id}/color-siblings")
