@@ -754,7 +754,7 @@ function FavoritesPane() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-8 max-w-4xl">
         {[...Array(3)].map((_, i) => (
           <div key={i} className="animate-pulse">
-            <div className="aspect-[3/4] bg-gray-100" />
+            <div className="aspect-[2/3] bg-gray-100" />
             <div className="h-3 bg-gray-100 mt-3 w-3/4" />
             <div className="h-3 bg-gray-100 mt-2 w-1/3" />
           </div>

@@ -202,7 +202,7 @@ button { font-weight: 400; }
 
 /* Quick View Image */
 .quick-image {
-  @apply aspect-[3/4] w-full object-cover;
+  @apply aspect-[2/3] w-full object-cover;
 }
 
 /* Badge */

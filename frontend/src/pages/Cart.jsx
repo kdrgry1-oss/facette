@@ -217,7 +217,7 @@ export default function Cart() {
                   const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                   return (
                     <div key={p.id} className="snap-start shrink-0 w-[44vw]" data-testid={`cart-suggestion-${p.id}`}>
-                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
                         <img src={img} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                       </Link>
                       <div className="mt-2">
@@ -245,7 +245,7 @@ export default function Cart() {
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
                   <div key={p.id} className="group relative">
-                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
                       <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                     </Link>
                     <div className="mt-2.5">
@@ -292,7 +292,7 @@ export default function Cart() {
                     className="group block"
                     data-testid={`checkout-deal-${p.id}`}
                   >
-                    <div className="relative aspect-[3/4] bg-stone-100 overflow-hidden mb-2">
+                    <div className="relative aspect-[2/3] bg-stone-100 overflow-hidden mb-2">
                       <img
                         src={img}
                         alt={p.name}

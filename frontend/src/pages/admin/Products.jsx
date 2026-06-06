@@ -2740,7 +2740,7 @@ export default function AdminProducts() {
 
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {formData.images.map((img, idx) => (
-                      <div key={idx} className="relative group aspect-[3/4] rounded-2xl overflow-hidden border-4 border-white shadow-md hover:shadow-xl transition-all">
+                      <div key={idx} className="relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 border-white shadow-md hover:shadow-xl transition-all">
                         <img src={img} className="w-full h-full object-cover" alt="" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                           <button 

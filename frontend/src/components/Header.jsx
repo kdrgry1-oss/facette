@@ -559,7 +559,7 @@ export default function Header({ hideMenu = false }) {
                   <div className="grid grid-cols-3 gap-3">
                     {searchResults.map((p) => (
                       <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left">
-                        <div className="aspect-[3/4] bg-gray-50 mb-2 overflow-hidden">
+                        <div className="aspect-[2/3] bg-gray-50 mb-2 overflow-hidden">
                           <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-xs line-clamp-1">{p.name}</p>

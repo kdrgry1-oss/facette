@@ -61,7 +61,7 @@ export default function ProductCard({ product }) {
         {/* Image Container */}
         <div 
           ref={imageContainerRef}
-          className="relative aspect-[3/4] bg-white overflow-hidden"
+          className="relative aspect-[2/3] bg-white overflow-hidden"
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >

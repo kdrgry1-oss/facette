@@ -196,7 +196,7 @@ export default function ProductDetail() {
         <Header />
         <div className="max-w-screen-2xl mx-auto px-4 py-8">
           <div className="grid md:grid-cols-2 gap-8">
-            <div className="aspect-[3/4] bg-gray-100 animate-pulse" />
+            <div className="aspect-[2/3] bg-gray-100 animate-pulse" />
             <div className="space-y-4">
               <div className="h-8 bg-gray-100 w-3/4 animate-pulse" />
               <div className="h-6 bg-gray-100 w-1/3 animate-pulse" />
@@ -314,7 +314,7 @@ export default function ProductDetail() {
                 }}
               >
                 {displayImages.map((img, index) => (
-                  <div key={index} className="snap-center shrink-0 w-screen aspect-[3/4] bg-stone-50">
+                  <div key={index} className="snap-center shrink-0 w-screen aspect-[2/3] bg-stone-50">
                     <img
                       src={optimizeImg(img, 1200)}
                       alt={`${product.name} ${index + 1}`}
@@ -341,7 +341,7 @@ export default function ProductDetail() {
             {/* Desktop: 2-col grid */}
             <div className="hidden lg:grid grid-cols-2 gap-2">
               {displayImages.map((img, index) => (
-                <div key={index} className="relative aspect-[3/4] bg-stone-50">
+                <div key={index} className="relative aspect-[2/3] bg-stone-50">
                   <img
                     src={optimizeImg(img, 1200)}
                     alt={`${product.name} ${index + 1}`}
@@ -583,7 +583,7 @@ export default function ProductDetail() {
                       className="snap-start shrink-0 w-[44vw]"
                       data-testid={`combo-product-${p.id}`}
                     >
-                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                      <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
                         <img src={optimizeImg(img, 700)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                         <button
                           type="button"
@@ -621,7 +621,7 @@ export default function ProductDetail() {
                 const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                 return (
                   <div key={p.id} className="group relative">
-                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[3/4]" aria-label={p.name}>
+                    <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
                       <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                       <button
                         type="button"

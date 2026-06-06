@@ -157,7 +157,7 @@ export default function Category() {
             <div className={`grid ${gridClass[gridCols]} gap-4 gap-y-8`}>
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="animate-pulse">
-                  <div className="aspect-[3/4] bg-gray-100 mb-3" />
+                  <div className="aspect-[2/3] bg-gray-100 mb-3" />
                   <div className="h-3 bg-gray-100 w-1/3 mb-2" />
                   <div className="h-4 bg-gray-100 w-3/4 mb-2" />
                   <div className="h-4 bg-gray-100 w-1/4" />
