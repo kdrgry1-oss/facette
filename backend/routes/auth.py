@@ -19,7 +19,7 @@ from .deps import (
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # Google OAuth Configuration
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
 @router.post("/register")
@@ -414,6 +414,84 @@ async def forgot_password_reset(req: OTPResetReq):
     )
     await db.password_reset_otps.delete_one({"_id": rec["_id"]})
     return {"success": True, "message": "Şifreniz güncellendi"}
+
+@router.post("/google")
+async def google_signin(request: Request, payload: dict):
+    """Standart Google Sign-In — frontend GIS'ten gelen ID token'i dogrular,
+    kullaniciyi olusturur/bulur ve uygulama JWT'sini dondurur (kendi Client ID'miz)."""
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+    except Exception:
+        raise HTTPException(status_code=500, detail="Google dogrulama kutuphanesi yuklu degil")
+
+    credential = safe_str((payload or {}).get("credential", ""), 4096)
+    if not credential:
+        raise HTTPException(status_code=400, detail="Google kimlik tokeni eksik")
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Google tokeni dogrulanamadi")
+
+    if not idinfo.get("email_verified", False):
+        raise HTTPException(status_code=400, detail="Google e-postasi dogrulanmamis")
+    email = safe_str(idinfo.get("email", ""), 256).lower().strip()
+    if not is_safe_email(email):
+        raise HTTPException(status_code=400, detail="Google hesabindan gecerli e-posta alinamadi")
+    name = safe_str(idinfo.get("name", ""), 200)
+    picture = safe_str(idinfo.get("picture", ""), 500)
+    first_name, _, last_name = name.partition(" ")
+    ip = client_ip_from_request(request)
+    ua = request.headers.get("user-agent")
+
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        user = {
+            "id": generate_id(),
+            "email": email,
+            "password": hash_password(uuid.uuid4().hex),  # Google kullanicisi
+            "first_name": first_name or name or email.split("@")[0],
+            "last_name": last_name or "",
+            "phone": "",
+            "is_admin": False,
+            "is_active": True,
+            "auth_provider": "google",
+            "picture": picture,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.users.insert_one(user)
+    else:
+        updates = {}
+        if not user.get("auth_provider"):
+            updates["auth_provider"] = "google"
+        if picture and not user.get("picture"):
+            updates["picture"] = picture
+        if updates:
+            await db.users.update_one({"id": user["id"]}, {"$set": updates})
+
+    if not user.get("is_active", True):
+        await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
+                              user_agent=ua, success=False, meta={"reason": "inactive"})
+        raise HTTPException(status_code=403, detail="Hesabiniz devre disi")
+
+    token = create_token(user["id"])
+    await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
+                          user_agent=ua, success=True)
+    return {
+        "success": True,
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "first_name": user.get("first_name", ""),
+            "last_name": user.get("last_name", ""),
+            "is_admin": user.get("is_admin", False),
+            "picture": user.get("picture", ""),
+        },
+    }
+
 
 @router.post("/google/session")
 async def google_session(request: Request, session_id: str = Query(...)):
