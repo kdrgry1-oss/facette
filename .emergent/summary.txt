@@ -1,63 +1,44 @@
 <analysis>**original_problem_statement**: 
-Kullanıcı (User) facette e-commerce brand requires a comprehensive e-commerce admin panel and ERP system. Recently, the focus has been on fixing Ticimax/Trendyol attribute matching logic, deploying the application, fixing image upload persistence, and refining the storefront UI. The user's latest requests include fixing a category filtering bug (some categories show 0 products), improving the Header Mega Menu hover UX (dropdowns close too fast), adding Meta/Facebook Pixel & CAPI tracking, restoring the missing top white announcement bar text, and allowing redirect links to be added to all images in the Page Design module. PRODUCT REQUIREMENTS: Fast, robust UI, exact matches for product attributes with Ticimax, functional storefront routing.
+The user wants to resolve UI/UX issues, fix variant ordering on product pages, implement a Gelince Haber Ver (Notify when in stock) feature, restructure product slugs to prevent collisions (), fix a broken Google Login, and urgently improve PageSpeed/CLS issues (image loading delays, flash of stale content, ORB blocks). PRODUCT REQUIREMENTS: Fast, robust UI, proper image caching/resizing, exact matches for product attributes with Ticimax, functional storefront routing.
 
-**User's preferred language**: Turkish (You MUST respond to the user in Turkish only).
+**User's preferred language**: Turkish (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only).
 
 **what currently exists?** 
-A deployed React 19 + FastAPI + MongoDB e-commerce platform. Ticimax/Trendyol integration has been heavily refactored so that exact attribute values are synced without global DB pollution. Image uploads have been migrated from the local disk to MongoDB to persist across Kubernetes replicas. Product URLs have been simplified to root level (). A Meta Pixel/CAPI backend infrastructure exists but lacks the specific IDs/Tokens provided by the user.
+A deployed React 19 + FastAPI + MongoDB e-commerce platform. Product slugs have been successfully migrated to . Image upload/serving has been refactored for on-the-fly resizing using Pillow. Google Auth endpoint has been implemented. Stock notification system is built and wired.
 
 **Last working item**:
-    - Last item agent was working: The agent was analyzing 5 distinct issues provided in the user's last message: 1) Disappearing white announcement bar text, 2) Categories (Takım, Tişört, Gömlek, vb.) showing 0 products, 3) Header Mega Menu dropdown disappearing too quickly on hover, 4) Meta Pixel integration from an uploaded PDF, 5) Adding redirect links to images in the Page Design module. The agent was inspecting  and  when the context ended.
+    - Last item agent was working: The agent was optimizing image loading and CLS (Cumulative Layout Shift) in  and . The agent created an image helper () to resize Ticimax CDN and local images on the fly, and was applying  containers to hero banners to fix layout shifts.
     - Status: IN PROGRESS
     - Agent Testing Done: N
-    - Which testing method agent to use?: backend testing agent for category filtering logic; screenshot tool for UI/Hover/Page Design changes.
+    - Which testing method agent to use?: screenshot tool (to verify frontend layout/CLS) and curl (to verify backend  resize endpoint).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Categories showing 0 products (Takım, Tişört, vb.) (P0)
-     - Attempted fixes: Agent verified that products exist in DB, but the  query is failing for certain sub-categories.
-     - Next debug checklist: Check . Verify how  query param is matched against product categories (slug vs. name, or hierarchical parent/child ID matching).
-     - Why fix this issue and what will be achieved with the fix?: Customers cannot see products in major clothing categories on the storefront.
+  - Issue 1: Performance/PageSpeed & CLS Fixes (P0)
+     - Attempted fixes: Created , updated  (HeroSlider, FullBanner, HalfBanners, InstaShop) to use optimized images and explicit aspect ratios.
+     - Next debug checklist: Verify  mega menu images and  are fully utilizing . Run frontend lint to catch any React strict-mode issues from the batch edit. Test frontend with the screenshot tool to ensure no layout shift occurs and images load via the new resize API. Check  to ensure Google login is fully functional.
+     - Why fix this issue and what will be achieved with the fix?: User complained about terrible PageSpeed scores, broken Google Login, and flashing images. Fixes core web vitals.
      - Status: IN PROGRESS
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: backend
+     - Should Test frontend/backend/both after fix?: both
      - Blocked on other issue: None
 
-  - Issue 2: Header Mega Menu Hover UX (P1)
-     - Attempted fixes: Agent identified  state logic (, ).
-     - Next debug checklist: Modify  logic in . Add a  (e.g., 200-300ms) before clearing the  state, and clear the timeout if  is triggered again.
-     - Why fix this issue and what will be achieved with the fix?: Prevents user frustration when navigating nested menus.
-     - Status: NOT STARTED
+  - Issue 2: Meta CAPI Server-side Token Invalid (P1)
+     - Attempted fixes: Agent updated the Meta Pixel ID, but Meta threw . The token provided in the user's PDF was broken/corrupted by line breaks.
+     - Next debug checklist: Wait for the user to provide a valid, unbroken CAPI Access Token (requested in previous messages). Once provided, update the vault via the backend or direct script.
+     - Why fix this issue and what will be achieved with the fix?: Server-side conversion tracking is currently failing.
+     - Status: BLOCKED
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: frontend
-
-  - Issue 3: Missing Announcement Bar Text & Editor Visibility (P1)
-     - Attempted fixes: Agent previously linked the white bar to  block in DB. User says text disappeared (black text on white bg) and they can't see where to edit it in Page Design.
-     - Next debug checklist: Check  to ensure the  block editor is visible and functioning. Check  or  to ensure the text color/bg color is rendering correctly.
-     - Why fix this issue and what will be achieved with the fix?: Restores promo visibility.
-     - Status: NOT STARTED
-     - Is recurring issue?: Y (Agent touched this previously and caused issues).
-     - Should Test frontend/backend/both after fix?: frontend
+     - Should Test frontend/backend/both after fix?: backend
+     - Blocked on other issue: Blocked waiting on user to provide the correct token.
 
 **In progress Task List**:
-  - Task 1: Meta Pixel & CAPI Integration (P0)
-     - Where to resume: Read the extracted PDF data from the history (Pixel ID: , plus the CAPI token). Implement the script in  or a global React component, and wire up .
-     - What will be achieved with this?: Facebook conversion tracking.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix?: both
-  
-  - Task 2: Redirect Links for Images in Page Design (P1)
-     - Where to resume: . Add a URL input field next to the image upload logic for blocks like banners/sliders.
-     - What will be achieved with this?: Admins can make storefront images clickable.
+  - Task 1: Optimize integration routes for new slug structure (P1)
+     - Where to resume: . Ensure future Ticimax XML syncs use the new  format to prevent schema regressions.
+     - What will be achieved with this?: Keeps new product imports consistent with the newly migrated slug structure.
      - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: frontend
-
-  - Task 3: Order Cancellations & Returns Flow (P2)
-     - Where to resume: .
-     - What will be achieved with this?: Full ERP cancellation/return management.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: both
-     - Blocked on something: Complete P0/P1 UI and Category issues first.
+     - Should Test frontend/backend/both after fix?: backend
+     - Blocked on something: None
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
@@ -67,93 +48,98 @@ A deployed React 19 + FastAPI + MongoDB e-commerce platform. Ticimax/Trendyol in
     Future Tasks:
     - P2: Amazon OAuth & APScheduler for 15-min sync.
     - P2: Firebase FCM push notifications for future mobile app.
+    - P2: Order Cancellations & Returns Flow (ERP logic in ).
 
 **Completed work in this session**
-- UI improvements for  (Searchable command, left menu search) (DONE)
-- Massive DB data cleanup ( & ) fixing 600+ attribute mismatches between description and Ticimax master data (DONE)
-- Crop -> Super Crop incorrect mapping globally resolved (DONE)
-- Deployment readiness check passed and app deployed to Emergent (DONE)
-- Image uploads refactored to save/serve from MongoDB instead of local disk for Kubernetes persistence (DONE)
-- Storefront product URLs simplified from  to  (DONE)
+- Category filtering bug showing 0 products (DONE - Regex/breadcrumb matching updated)
+- Meta Pixel public snippet ID updated and verified (DONE)
+- Flash of stale content on Home page fixed (DONE - Skeleton loader added)
+- Variant sorting by admin pool order implemented on Product Detail Page (DONE)
+- Gelince Haber Ver (Notify when in stock) backend route and frontend UI implemented (DONE)
+- Product slugs migrated to  format (408 products migrated, 0 collisions) (DONE)
+- Google Auth  backend endpoint created (DONE)
+- Hero Image relative URL fix &  created for on-the-fly resizing (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - None
+   - None.
 
 **Known issue recurrence from previous fork**
-  - **Unrelated Code Modification:** The previous agent touched  while trying to fix the announcement bar, breaking existing logic and heavily angering the user. **DO NOT touch code outside the immediate scope of the user's request.**
-  - **Environment Confusion:** The user is looking at the PRODUCTION environment, which has an empty database currently. If the user complains about missing data, remind them that the database migration via Emergent Support is still pending.
+  - **Environment Confusion:** The user is looking at the PRODUCTION environment, which may lack some data, while testing is done in PREVIEW. If the user reports issues, ensure you specify whether changes are applied to the preview environment.
+  - **React Linting Rigidity:** React compiler is extremely strict about  (e.g., using  instead of ) and . Use async IIFEs for data fetching in .
 
 **Code Architecture**
--  (Refactored to store files in MongoDB as Base64/Binary)
--  (Contains Mega Menu and Announcement Bar)
--  (Handles category querying for storefront)
-
-**Key Technical Concepts**
 - React 19, FastAPI, MongoDB (Motor).
 - Shadcn UI, Tailwind CSS.
-- Meta CAPI (Conversion API).
+- Authentication: Emergent Managed Auth (Google).
+
+**Key Technical Concepts**
+- On-the-fly Image Resizing: Intercepts  and uses Python Pillow to resize/cache images to improve PageSpeed.
+- React Strict Mode: Stale closures and TDZ (Temporal Dead Zone) errors are common if hooks aren't formatted cleanly.
 
 **key DB schema**
-  - : Stores UI blocks for Page Design (e.g., ).
-  - : Stores base64/binary image data for persistent uploads.
+  - : 
+  - : 
+  - : 
 
 **changes in tech stack**
-  - Image persistence moved from local filesystem to MongoDB.
+  - None, but added dynamic image resizing logic in backend.
 
 **All files of reference** 
+-  (Created in this session)
+- 
+- 
 - 
 - 
 - 
 - 
 
 **Areas that need refactoring**: 
--  mega menu hover logic needs a standard  debounce implementation to prevent flickering/closing too fast.
+-  needs to be updated to match the new slug generation format so future Ticimax pulls do not break the URL structure.
 
 **key api endpoints**
 - 
 - 
+- 
 
 **Critical Info for New Agent** 
-- **CRITICAL:** The application is now DEPLOYED. There is a PREVIEW environment and a PRODUCTION environment. The user is checking the preview URL but also referring to the live site. Any backend/DB data fixes you do only affect PREVIEW.
-- Production DB is currently empty of products because the user needs to email  to migrate the  you created.
-- The user was highly agitated (senin ırzıni sikerim...) when the agent modified unrelated components. Follow instructions literally and strictly.
+- **Image URLs:** Avoid using absolute pod URLs for images; they trigger ORB blockers and cause 404s in production. Always use relative .
+- **Google Auth:** The user reported Google Auth was failing. The previous agent added the missing  endpoint using the Emergent playbook, but it needs to be tested on the frontend.
+- **Do not modify unrelated code:** The user gets agitated if you alter files outside the scope of their request. Focus strictly on finishing the PageSpeed/Image logic and the integration routes slug fix.
 
 **documents and test reports created in this job** 
   - 
-  -  (Backup file ready for Support migration)
+  - 
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. *User*: deploy etmeden önce aşağıda claude opus 4.8 ile yazılımı yaptığını gösteriyordun... kurumsal mailler açabileceğim... alanın eklenmesini istiyorum.
- 2. *Agent*: Explained agent identity. Asked clarifying questions about email management.
- 3. *User*: Wants to manage emails. Refused paid services, asked to setup Roundcube locally.
- 4. *Agent*: Explained Roundcube is technically impossible on this K8s cluster. Proposed Zoho/Yandex free tiers with native webmail built into admin.
- 5. *User*: kurumsal maili sonraya bırakalım... (Let's postpone corporate mail). Reported 5 new issues: 1) White announcement bar text missing/uneditable. 2) Categories (Takım, Tişört, vb.) showing 0 products. 3) Header menu disappears too fast on hover. 4) Integrate Meta Pixel from PDF. 5) Add redirect links to uploaded images in Page Design.
- 6. *Agent (PENDING)*: Agent started inspecting  and , extracted PDF info for Pixel, but context window ended before any edits were made.
+ 1. *User*: yap hepsini (Do all tasks).
+ 2. *User*: Noticed old images flashing for a second when site loads.
+ 3. *User*: Asked to apply Notify me improvement. Noticed variant ordering is wrong compared to screenshot. Pointed out product links aren't formatted correctly ( vs ).
+ 4. *User*: Google login is broken. PageSpeed Insights scores are terrible. Menu hover and homepage flashes old images/loads slowly. Asked if serving images from DB instead of Ticimax cloud would fix speed.
+ 5. *Agent (PENDING)*: Agent created  and modified  to optimize images and prevent CLS, but the context window ended before linting/testing the batch changes.
 
 **Project Health Check:**
-- Broken: Category filtering endpoint returning 0 products for certain clothing categories.
+- Broken: Meta CAPI server-side tracking (Requires User to provide a valid token).
+- Mocked: None.
 
 **3rd Party Integrations** 
 - Ticimax / Trendyol — Requires User API Key
-- Meta CAPI (Pixel) — Requires User API Key (Provided in PDF: )
+- Meta CAPI (Pixel) — Requires User API Key (Token broken)
+- Google Auth — Uses Emergent Managed Auth
 
 **Testing status**
-  - Testing agent used after significant changes: YES
+  - Testing agent used after significant changes: NO
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
-  - Known regressions: Category filtering broken.
+  - Known regressions: None
 
 **Credentials to test flow:**
 - Admin Panel:  / 
 
 **What agent forgot to execute**
-- The agent was in the middle of analyzing the 5 issues presented in the final user message. No code was written for the category bug, header menu hover, meta pixel, or page design image links.
+- The agent batched edits in  and  for PageSpeed/Image optimizations but did not run  or verify the visual layout using the  before the session ended. Also did not test if Google Auth is fully working after adding the endpoint.
 
 **Debugging checklist for current issue**
-    Issue: Mega Menu Hover UX
-    Frontend files to check: 
-    Checklist: Add  inside component or use . On , do . On , do .
-
-    Issue: Category filtering showing 0 products
+    Issue: PageSpeed/CLS and Image Optimizations
+    Frontend files to check: , , .
     Backend files to check: 
-    Checklist: Check how the  query parameter filters the MongoDB  collection. Are the slugs matching? Are child categories being included when a parent category is clicked?</analysis>
+    Checklist: Verify that  is imported and used correctly. Ensure  doesn't break image source paths. Test the backend  function to ensure Pillow resizes images correctly without 500 errors. Verify Google Login button initiates the flow correctly.</analysis>
