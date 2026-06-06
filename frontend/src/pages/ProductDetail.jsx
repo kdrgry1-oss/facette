@@ -90,16 +90,15 @@ export default function ProductDetail() {
           }
         }
 
-        // Fetch similar products
+        // Benzer ürünler — kategori bazlı. (Eski /similar endpoint'i backend'de
+        // yok ve her seferinde 404 dönüyordu; doğrudan kategori sorgusu kullanılıyor.)
         try {
-          const similarRes = await axios.get(`${API}/products/${res.data.id}/similar?limit=4`);
-          setSimilarProducts(similarRes.data || []);
-        } catch {
-          // Fallback to category-based similar products
           if (res.data?.category_name) {
-            const fallbackRes = await axios.get(`${API}/products?category=${res.data.category_name}&limit=4`);
+            const fallbackRes = await axios.get(`${API}/products?category=${encodeURIComponent(res.data.category_name)}&limit=4`);
             setSimilarProducts(fallbackRes.data?.products?.filter(p => p.id !== res.data.id) || []);
           }
+        } catch {
+          // benzer ürün getirilemezse sessizce geç
         }
 
         // Fetch combo products ("Stilini tamamla")

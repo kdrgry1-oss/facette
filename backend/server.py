@@ -135,8 +135,17 @@ async def lifespan(app: FastAPI):
         # Create indexes
         await db.products.create_index("slug")
         await db.products.create_index("stock_code")
+        # Performans: ürün listesi/detay sorguları için (Iter perf)
+        await db.products.create_index("id")
+        await db.products.create_index("category_name")
+        await db.products.create_index([("is_active", 1), ("created_at", -1)])
+        await db.products.create_index([("category_ids", 1), ("is_active", 1)])
         await db.orders.create_index("order_number")
         await db.orders.create_index("user_id")
+        # Performans: sipariş listesi tarih/durum/platform filtreleri için
+        await db.orders.create_index([("created_at", -1)])
+        await db.orders.create_index([("status", 1), ("created_at", -1)])
+        await db.orders.create_index([("platform", 1), ("created_at", -1)])
         await db.users.create_index("email", unique=True)
         # Security audit indexes — fast forensic queries as the collection grows
         await db.auth_audit_logs.create_index([("created_at", -1)])

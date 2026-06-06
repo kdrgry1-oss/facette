@@ -1,12 +1,12 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useEffect, lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
 import { FavoritesProvider } from "./context/FavoritesContext";
 import { bootstrapNative } from "./lib/native";
 
-// Pages
+// Storefront sayfaları — hafif ve ilk açılışta gerekli, bu yüzden eager (hemen) yüklenir.
 import Home from "./pages/Home";
 import GizlilikPolitikasi from "./pages/GizlilikPolitikasi";
 import Category from "./pages/Category";
@@ -19,232 +19,75 @@ import Account from "./pages/Account";
 import Login from "./pages/Login";
 import TrackOrder from "./pages/TrackOrder";
 import OrderSuccess from "./pages/OrderSuccess";
+import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
 
-// Admin Pages
-import AdminLayout from "./pages/admin/AdminLayout";
-import AdminDashboard from "./pages/admin/Dashboard";
-import AdminProducts from "./pages/admin/Products";
-import AdminOrders from "./pages/admin/Orders";
-import AdminCategories from "./pages/admin/Categories";
-import AdminVariants from "./pages/admin/Variants";
-import AdminBanners from "./pages/admin/Banners";
-import AdminSettings from "./pages/admin/Settings";
-import AdminCampaigns from "./pages/admin/Campaigns";
-import AdminPages from "./pages/admin/Pages";
-import AdminPageDesign from "./pages/admin/PageDesign";
-import AdminIntegrations from "./pages/admin/Integrations";
-import AdminLogin from "./pages/admin/AdminLogin";
-import AdminReturns from "./pages/admin/Returns";
-import AttributeImport from "./pages/admin/AttributeImport";
-import AdminQuestions from "./pages/admin/Questions";
-import TrendyolLogs from "./pages/admin/TrendyolLogs";
-import BarcodeIssues from "./pages/admin/BarcodeIssues";
-import TrendyolGhostScanner from "./pages/admin/TrendyolGhostScanner";
-import ProductAttributes from "./pages/admin/ProductAttributes";
-import Vendors from "./pages/admin/Vendors";
-import AdminUsersRoles from "./pages/admin/UsersRoles";
-import Manufacturing from "./pages/admin/Manufacturing";
-import Members from "./pages/admin/Members";
-import Attribution from "./pages/admin/Attribution";
-import SizeTablesList from "./pages/admin/SizeTablesList";
-import Coupons from "./pages/admin/Coupons";
-import ProductReviews from "./pages/admin/ProductReviews";
-import AbandonedCarts from "./pages/admin/AbandonedCarts";
-import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
-import { SeoRedirects, SeoMeta } from "./pages/admin/SeoAdmin";
-import {
-  Brands, ProductTags, MemberGroups, Announcements, Popups,
-  StockAlerts, HavaleNotifications, Tickets, ShippingPaymentRules,
-  CurrencyRates, BulkMail, ExtraReports,
-} from "./pages/admin/CatalogExtras";
-import AdminTasks from "./pages/admin/AdminTasks";
-import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
-import CargoSettings from "./pages/admin/CargoSettings";
-import NotificationSettings from "./pages/admin/NotificationSettings";
-import NotificationTemplates from "./pages/admin/NotificationTemplates";
-import BlockedCustomers from "./pages/admin/BlockedCustomers";
-import ProductionPlan from "./pages/admin/ProductionPlan";
-import MarketingPixels from "./pages/admin/MarketingPixels";
-import Influencers from "./pages/admin/Influencers";
-import AmazonSpApi from "./pages/admin/AmazonSpApi";
-import Compliance from "./pages/admin/Compliance";
-import CapiLogs from "./pages/admin/CapiLogs";
-import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
-import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import MaintenanceGate from "./components/MaintenanceGate";
-import MarketplaceHub from "./pages/admin/MarketplaceHub";
-import IntegrationLogs from "./pages/admin/IntegrationLogs";
-import FailedTransfers from "./pages/admin/FailedTransfers";
-import BrandMapping from "./pages/admin/BrandMapping";
-import CategoryMapping from "./pages/admin/CategoryMapping";
-import BulkPriceStock from "./pages/admin/BulkPriceStock";
-import StockAlerts2 from "./pages/admin/StockAlerts";
-import CustomerSegments from "./pages/admin/CustomerSegments";
-import AutomationStatus from "./pages/admin/AutomationStatus";
-import SecurityDashboard from "./pages/admin/SecurityDashboard";
-import SystemHealth from "./pages/admin/SystemHealth";
-import SecretsVault from "./pages/admin/SecretsVault";
-import IysAdmin from "./pages/admin/IysAdmin";
-import MenuSettings from "./pages/admin/MenuSettings";
-import ReportsExtended from "./pages/admin/ReportsExtended";
-import MobileApp from "./pages/admin/MobileApp";
-import AIAssistant from "./pages/admin/AIAssistant";
-import FooterDesign from "./pages/admin/FooterDesign";
-import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
-import Themes from "./pages/admin/Themes";
-import TicimaxExcelUpload from "./pages/admin/TicimaxExcelUpload";
-import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
 
+// Admin paneli (~75 sayfa + ağır kütüphaneler) AYRI bir chunk olarak,
+// sadece /admin'e girilince yüklenir. Storefront ziyaretçileri bunu indirmez.
+const AdminApp = lazy(() => import("./AdminApp"));
+
 function App() {
-  // Fire-and-forget: capture utm/referrer on first paint.
-  if (typeof window !== "undefined" && !window.__FACETTE_TRACKED__) {
-    window.__FACETTE_TRACKED__ = true;
-    trackVisit();
-  }
-  // Capacitor native bootstrap (web mode'da no-op)
-  useEffect(() => { bootstrapNative(); }, []);
+  useEffect(() => {
+    // UTM/referrer yakalama — render'ı bloklamaması için mount sonrası.
+    if (typeof window !== "undefined" && !window.__FACETTE_TRACKED__) {
+      window.__FACETTE_TRACKED__ = true;
+      trackVisit();
+    }
+    // Capacitor native bootstrap (web mode'da no-op)
+    bootstrapNative();
+  }, []);
+
   return (
     <AuthProvider>
       <CartProvider>
         <FavoritesProvider>
-        <BrowserRouter>
-          <Toaster position="top-center" richColors />
-          <MarketingPixelsInjector />
-          <MaintenanceGate>
-          <Routes>
-            {/* Storefront */}
-            <Route path="/" element={<Home />} />
-            <Route path="/kategori/:slug" element={<Category />} />
-            <Route path="/sepet" element={<Cart />} />
-            <Route path="/odeme" element={<Checkout />} />
-            <Route path="/arama" element={<Search />} />
-            <Route path="/sayfa/:slug" element={<StaticPage />} />
-            <Route path="/gizlilik" element={<GizlilikPolitikasi />} />
-            <Route path="/hesabim" element={<Account />} />
-            <Route path="/giris" element={<Login />} />
-            <Route path="/siparis-takip" element={<TrackOrder />} />
-            <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
-            <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
-            <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
+          <BrowserRouter>
+            <Toaster position="top-center" richColors />
+            <MarketingPixelsInjector />
+            <MaintenanceGate>
+              <Routes>
+                {/* Storefront */}
+                <Route path="/" element={<Home />} />
+                <Route path="/kategori/:slug" element={<Category />} />
+                <Route path="/sepet" element={<Cart />} />
+                <Route path="/odeme" element={<Checkout />} />
+                <Route path="/arama" element={<Search />} />
+                <Route path="/sayfa/:slug" element={<StaticPage />} />
+                <Route path="/gizlilik" element={<GizlilikPolitikasi />} />
+                <Route path="/hesabim" element={<Account />} />
+                <Route path="/giris" element={<Login />} />
+                <Route path="/siparis-takip" element={<TrackOrder />} />
+                <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
+                <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
+                <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
 
-            {/* Ürün detay — SEO dostu kök URL: /dokulu-blazer-etek-takim-beyaz-2602
-                (React Router v6 statik rotaları dinamikten önce sıralar, bu yüzden
-                /sepet, /giris vb. her zaman önceliklidir). /urun/:slug geriye dönük uyumluluk için korunur. */}
-            <Route path="/urun/:slug" element={<ProductDetail />} />
-            <Route path="/:slug" element={<ProductDetail />} />
+                {/* Tema önizleme */}
+                <Route path="/tema/:slug" element={<MiuMiuTheme />} />
+                <Route path="/tema" element={<MiuMiuTheme />} />
 
-            {/* Theme storefront preview (Phase 1) */}
-            <Route path="/tema/:slug" element={<MiuMiuTheme />} />
-            <Route path="/tema" element={<MiuMiuTheme />} />
+                {/* Admin — lazy yüklenen ayrı chunk. /admin/login dahil tüm admin
+                    rotaları AdminApp içindeki kendi <Routes>'unda tanımlı. */}
+                <Route
+                  path="/admin/*"
+                  element={
+                    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
+                      <AdminApp />
+                    </Suspense>
+                  }
+                />
 
-            {/* Admin */}
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminDashboard />} />
-              <Route path="urunler" element={<AdminProducts />} />
-              <Route path="urunler/:productId" element={<AdminProducts />} />
-              <Route path="siparisler" element={<AdminOrders />} />
-              <Route path="kategoriler" element={<AdminCategories />} />
-              <Route path="varyantlar" element={<AdminVariants />} />
-              <Route path="ozellik-import" element={<AttributeImport />} />
-              <Route path="ticimax-excel" element={<TicimaxExcelUpload />} />
-              <Route path="sorular" element={<AdminQuestions />} />
-              <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
-              <Route path="bannerlar" element={<AdminBanners />} />
-              <Route path="temalar" element={<Themes />} />
-              <Route path="kampanyalar" element={<AdminCampaigns />} />
-              <Route path="entegrasyonlar" element={<AdminIntegrations />} />
-              <Route path="iadeler" element={<AdminReturns />} />
-              <Route path="sayfalar" element={<AdminPages />} />
-              <Route path="ayarlar" element={<AdminSettings />} />
-              <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />
-              {/* Provider ayarları — Ticimax'teki "E-Arşiv/E-Fatura Ayarları"
-                  ile aynı mantık. Çoklu entegratör şeması backend'de tanımlı. */}
-              <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
-              <Route path="ayarlar/kargo" element={<CargoSettings />} />
-              <Route path="ayarlar/bildirim" element={<NotificationSettings />} />
-              <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
-              <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
-              <Route path="uretim-plani" element={<ProductionPlan />} />
-              <Route path="ayarlar/pixel" element={<MarketingPixels />} />
-              <Route path="influencer" element={<Influencers />} />
-              <Route path="amazon" element={<AmazonSpApi />} />
-              <Route path="dpp-uyum" element={<Compliance />} />
-              <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
-              <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
-              <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
-              {/* Pazaryerleri Yönetimi — her e-ticaret platformunun API bilgileri +
-                  aktarım kuralları + otomatik senkron ayarları. */}
-              <Route path="pazaryerleri" element={<MarketplaceHub />} />
-              {/* Entegrasyon Logları — ürün/sipariş/stok/fiyat aktarımlarının
-                  kayıtları, filtreli arama, Excel export. */}
-              <Route path="entegrasyon-loglari" element={<IntegrationLogs />} />
-              {/* Aktarılamayan sipariş/ürün kayıtları + toplu tekrar-aktar. */}
-              <Route path="aktarilamayanlar" element={<FailedTransfers />} />
-              {/* Multi-marketplace marka eşleştirme. */}
-              <Route path="marka-eslestir" element={<BrandMapping />} />
-              {/* Multi-marketplace kategori eşleştirme */}
-              <Route path="kategori-eslestir" element={<CategoryMapping />} />
-              {/* Toplu Excel ile fiyat/stok güncelleme */}
-              <Route path="toplu-fiyat-stok" element={<BulkPriceStock />} />
-              {/* Kritik stok uyarıları + yeniden sipariş önerileri */}
-              <Route path="stok-uyarilari" element={<StockAlerts2 />} />
-              {/* RFM müşteri segmentasyonu — hedefli pazarlama için */}
-              <Route path="musteri-segmentleri" element={<CustomerSegments />} />
-              <Route path="otomasyon" element={<AutomationStatus />} />
-              <Route path="guvenlik-paneli" element={<SecurityDashboard />} />
-              <Route path="sistem-sagligi" element={<SystemHealth />} />
-              <Route path="secrets-vault" element={<SecretsVault />} />
-              <Route path="iys" element={<IysAdmin />} />
-              <Route path="mobil-uygulama" element={<MobileApp />} />
-              <Route path="ai-asistan" element={<AIAssistant />} />
-              <Route path="footer-tasarim" element={<FooterDesign />} />
-              {/* Marketplace başına net kâr raporu (komisyon + kargo + iade çıkarılmış) */}
-              <Route path="pazaryeri-karlilik" element={<MarketplaceProfit />} />
-              <Route path="trendyol-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
-              <Route path="trendyol-loglar" element={<TrendyolLogs />} />
-              <Route path="barkod-sorunlari" element={<BarcodeIssues />} />
-              <Route path="trendyol-hayalet" element={<TrendyolGhostScanner />} />
-              <Route path="urun-ozellikleri" element={<ProductAttributes />} />
-              <Route path="cariler" element={<Vendors />} />
-              <Route path="kullanicilar" element={<AdminUsersRoles />} />
-              <Route path="imalat" element={<Manufacturing />} />
-              <Route path="uyeler" element={<Members />} />
-              <Route path="kaynak" element={<Attribution />} />
-              <Route path="hepsiburada-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
-              <Route path="temu-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
-              <Route path="olcu-tablolari" element={<SizeTablesList />} />
-              <Route path="kuponlar" element={<Coupons />} />
-              <Route path="yorumlar" element={<ProductReviews />} />
-              <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
-              <Route path="raporlar/satis" element={<SalesReport />} />
-              <Route path="raporlar/urun" element={<ProductsReport />} />
-              <Route path="raporlar/stok" element={<StockReport />} />
-              <Route path="raporlar/uye" element={<MembersReport />} />
-              <Route path="seo/meta" element={<SeoMeta />} />
-              <Route path="seo/yonlendirmeler" element={<SeoRedirects />} />
-              <Route path="markalar" element={<Brands />} />
-              <Route path="etiketler" element={<ProductTags />} />
-              <Route path="uye-gruplari" element={<MemberGroups />} />
-              <Route path="duyurular" element={<Announcements />} />
-              <Route path="popuplar" element={<Popups />} />
-              <Route path="stok-alarm" element={<StockAlerts />} />
-              <Route path="havale-bildirimleri" element={<HavaleNotifications />} />
-              <Route path="tickets" element={<Tickets />} />
-              <Route path="kargo-odeme-kurallari" element={<ShippingPaymentRules />} />
-              <Route path="doviz" element={<CurrencyRates />} />
-              <Route path="toplu-mail" element={<BulkMail />} />
-              <Route path="raporlar/gelismis" element={<ExtraReports />} />
-              <Route path="raporlar/kar-stok" element={<ReportsExtended />} />
-              <Route path="gorevler" element={<AdminTasks />} />
-            </Route>
-          </Routes>
-          </MaintenanceGate>
-        </BrowserRouter>
+                {/* Ürün detay — SEO dostu kök URL. Statik rotalar dinamikten önce
+                    eşleştiği için /sepet, /giris, /admin vb. her zaman önceliklidir. */}
+                <Route path="/urun/:slug" element={<ProductDetail />} />
+                <Route path="/:slug" element={<ProductDetail />} />
+              </Routes>
+            </MaintenanceGate>
+          </BrowserRouter>
         </FavoritesProvider>
       </CartProvider>
     </AuthProvider>
