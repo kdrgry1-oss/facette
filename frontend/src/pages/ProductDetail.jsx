@@ -496,7 +496,7 @@ export default function ProductDetail() {
                 <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Görünümü Tamamla</p>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 lg:mx-0 lg:px-0">
                   {comboProducts.slice(0, 6).map((p) => {
-                    const img = (p.images && p.images[0]) || p.image || "";
+                    const img = (p.images && p.images[0]) || p.image || "/placeholder.jpg";
                     return (
                       <Link
                         key={p.id}

@@ -5,8 +5,10 @@ import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
+import { optimizeImg } from "../lib/img";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const PLACEHOLDER = "/placeholder.jpg";
 
 export default function Cart() {
   const { items, removeItem, updateQuantity, total, itemCount } = useCart();
@@ -103,7 +105,7 @@ export default function Cart() {
                 >
                   <Link to={`/${item.slug || item.productId || ""}`} className="shrink-0">
                     <img
-                      src={item.image}
+                      src={item.image || PLACEHOLDER}
                       alt={item.name}
                       className="w-24 h-32 sm:w-32 sm:h-40 object-cover bg-stone-100"
                     />
@@ -211,7 +213,7 @@ export default function Cart() {
             <div className="md:hidden -mx-4 px-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>
                 {suggestions.map((p) => {
-                  const img = (p.images && p.images[0]) || p.image || "";
+                  const img = optimizeImg((p.images && p.images[0]) || p.image, 500) || PLACEHOLDER;
                   const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
                   return (
                     <div key={p.id} className="snap-start shrink-0 w-[44vw]" data-testid={`cart-suggestion-${p.id}`}>
