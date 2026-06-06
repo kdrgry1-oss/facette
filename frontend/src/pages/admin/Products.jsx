@@ -1557,7 +1557,7 @@ export default function AdminProducts() {
                     )}
                   </td>
                   <td>
-                    <a href={`/${product.slug}`} target="_blank" rel="noopener noreferrer" className="font-medium line-clamp-1 text-orange-600 hover:text-orange-800 hover:underline">
+                    <a href={`/${product.slug || product.id}`} target="_blank" rel="noopener noreferrer" className="font-medium line-clamp-1 text-orange-600 hover:text-orange-800 hover:underline">
                       {product.name}
                     </a>
                     <p className="text-xs text-gray-500">{product.category_name}</p>
