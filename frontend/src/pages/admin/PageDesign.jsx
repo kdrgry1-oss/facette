@@ -232,8 +232,8 @@ export default function PageDesign() {
           type: "hero_slider",
           title: "Hero Slider",
           images: [
-            "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/en-yeniler-dc2e.jpg",
-            "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/ae79c961-ba0b-49e3-b274-2c6cc78ab700.jpg"
+            "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/en-yeniler-dc2e-800.webp",
+            "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/ae79c961-ba0b-49e3-b274-2c6cc78ab700-800.webp"
           ],
           links: ["/kategori/en-yeniler", "/kategori/sale"],
           is_active: true,
@@ -243,7 +243,7 @@ export default function PageDesign() {
           id: "full",
           type: "full_banner",
           title: "Bloom Together",
-          images: ["https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-cb23757c-6.jpg"],
+          images: ["https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-cb23757c-6-800.webp"],
           links: ["/kategori/en-yeniler"],
           is_active: true,
           sort_order: 2
@@ -253,8 +253,8 @@ export default function PageDesign() {
           type: "half_banners",
           title: "Kategori Bannerları",
           images: [
-            "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg",
-            "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg"
+            "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-65777bd3-0-800.webp",
+            "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp"
           ],
           links: ["/kategori/gomlek", "/kategori/aksesuar"],
           is_active: true,

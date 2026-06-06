@@ -11,16 +11,16 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Default/Fallback content
 const DEFAULT_HERO_BANNERS = [
-  { id: 1, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/en-yeniler-dc2e.jpg", link: "/kategori/en-yeniler" },
-  { id: 2, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/ae79c961-ba0b-49e3-b274-2c6cc78ab700.jpg", link: "/kategori/sale" }
+  { id: 1, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/en-yeniler-dc2e-800.webp", link: "/kategori/en-yeniler" },
+  { id: 2, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/ae79c961-ba0b-49e3-b274-2c6cc78ab700-800.webp", link: "/kategori/sale" }
 ];
 
 const DEFAULT_INSTASHOP = [
-  { id: 1, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9.jpg", link: "/basic-atki" },
-  { id: 2, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-114d3d37-9c7f-495c-8bc2-28d32781818d.jpg", link: "/kategori/ceket" },
-  { id: 3, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-e18eff06-8597-4f10-92cb-64b11151a74d.jpg", link: "/kategori/kaban" },
-  { id: 4, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0.jpg", link: "/kategori/pantolon" },
-  { id: 5, image: "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/orj-87d15ba0-0081-4b65-acc5-b12328de368b.jpg", link: "/kategori/elbise" }
+  { id: 1, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9-800.webp", link: "/basic-atki" },
+  { id: 2, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/orj-114d3d37-9c7f-495c-8bc2-28d32781818d-800.webp", link: "/kategori/ceket" },
+  { id: 3, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/orj-e18eff06-8597-4f10-92cb-64b11151a74d-800.webp", link: "/kategori/kaban" },
+  { id: 4, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0-800.webp", link: "/kategori/pantolon" },
+  { id: 5, image: "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/orj-87d15ba0-0081-4b65-acc5-b12328de368b-800.webp", link: "/kategori/elbise" }
 ];
 
 // Block Components
@@ -400,16 +400,16 @@ export default function Home() {
 
           {/* Full Width Banner */}
           <Link to="/kategori/en-yeniler" className="block">
-            <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-cb23757c-6.jpg", 1920)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
+            <img src={optimizeImg("https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-cb23757c-6-800.webp", 1920)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
           </Link>
 
           {/* Two Half-Width Banners */}
           <div className="grid grid-cols-2">
             <Link to="/kategori/gomlek" className="block">
-              <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
+              <img src={optimizeImg("https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-65777bd3-0-800.webp", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
             <Link to="/kategori/aksesuar" className="block">
-              <img src={optimizeImg("https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
+              <img src={optimizeImg("https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
           </div>
 

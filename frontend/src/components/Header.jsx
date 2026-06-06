@@ -48,11 +48,11 @@ const AKSESUAR_MENU = [
 // Menu images for right side
 const MENU_IMAGES = {
   giyim: [
-    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-65777bd3-0.jpg",
-    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg"
+    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-65777bd3-0-800.webp",
+    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp"
   ],
   aksesuar: [
-    "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7/title-7b3e27f9-5.jpg"
+    "https://pub-287559dafa814b76bdf81ca894c818bf.r2.dev/pagedesign/title-7b3e27f9-5-800.webp"
   ]
 };
 

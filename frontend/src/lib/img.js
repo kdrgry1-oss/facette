@@ -5,10 +5,23 @@
 //   query param'larıyla backend on-the-fly WebP resize devreye girer.
 
 const TCMX = "static.ticimax.cloud";
+// R2'ye taşınan ürün görselleri bu boyutlarda WebP olarak üretildi (responsive).
+const R2_SIZES = [400, 800, 1280, 1920];
 
 export function optimizeImg(url, width = 800, quality = 90) {
   // Boş/geçersiz değerlerde src="" uyarısını ve gereksiz isteği önlemek için undefined döndür
   if (!url || typeof url !== "string") return undefined;
+
+  // Cloudflare R2 (kendi CDN'imiz) — URL'deki boyutu istenen genişliğe en yakın
+  // üretilmiş boyutla değiştirir: ...img0-800.webp → ...img0-400.webp
+  if (url.includes("r2.dev")) {
+    const m = url.match(/-(\d+)\.webp(\?.*)?$/i);
+    if (m) {
+      const target = R2_SIZES.find((s) => s >= width) || R2_SIZES[R2_SIZES.length - 1];
+      return url.replace(/-\d+\.webp/i, `-${target}.webp`);
+    }
+    return url;
+  }
 
   // Ticimax Cloudflare CDN
   if (url.includes(TCMX)) {
