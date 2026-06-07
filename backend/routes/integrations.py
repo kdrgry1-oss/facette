@@ -297,6 +297,23 @@ async def get_trendyol_category_attributes(category_id: int, current_user: dict 
         logger.error(f"Error fetching trendyol attributes for category {category_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Özellikler (attributes) alınamadı")
 
+
+@router.get("/hepsiburada/categories/{category_id}/attributes")
+async def get_hepsiburada_category_attributes(category_id: str, current_user: dict = Depends(require_admin)):
+    """Bir HB kategorisinin (canli) ozelliklerini doner — urun editorunun HB bolumu icin.
+    Once cache, yoksa canli cekip cache'ler."""
+    key = int(category_id) if str(category_id).isdigit() else str(category_id)
+    cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
+    if cached and cached.get("_v") == 2 and cached.get("attributes") is not None:
+        return {"success": True, "attributes": cached.get("attributes", []),
+                "media_attributes": cached.get("media_attributes", []),
+                "base_attributes": cached.get("base_attributes", [])}
+    from .category_mapping import _fetch_hb_category_attributes
+    attrs, err = await _fetch_hb_category_attributes(category_id)
+    if err:
+        return {"success": False, "attributes": [], "message": err}
+    return {"success": True, "attributes": attrs}
+
 @router.post("/trendyol/brands/sync")
 async def sync_trendyol_brands(current_user: dict = Depends(require_admin)):
     """Sync brands from Trendyol API to local DB"""

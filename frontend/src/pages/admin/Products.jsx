@@ -315,6 +315,7 @@ export default function AdminProducts() {
   const [ticimaxSchema, setTicimaxSchema] = useState([]);
 
   const [trendyolAttributesList, setTrendyolAttributesList] = useState([]);
+  const [hepsiburadaAttributesList, setHepsiburadaAttributesList] = useState([]);
   const [trendyolCategories, setTrendyolCategories] = useState([]);
   const [globalAttributes, setGlobalAttributes] = useState([]);
   const [globalSizes, setGlobalSizes] = useState([]);
@@ -341,6 +342,22 @@ export default function AdminProducts() {
       }
     }
   }, [formData.trendyol_category_id, formData.category_name, modalOpen, categories]);
+
+  // Hepsiburada: urun editorunun HB bolumu icin HB kategori ozelliklerini canli cek
+  useEffect(() => {
+    if (!modalOpen) return;
+    const hbCatId = formData.hepsiburada_category_id;
+    if (hbCatId) {
+      const token = localStorage.getItem('token');
+      axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => setHepsiburadaAttributesList(res.data.attributes || []))
+        .catch(() => setHepsiburadaAttributesList([]));
+    } else {
+      setHepsiburadaAttributesList([]);
+    }
+  }, [formData.hepsiburada_category_id, modalOpen]);
 
   useEffect(() => {
     if (modalOpen && !editingProduct) {
@@ -2166,8 +2183,22 @@ export default function AdminProducts() {
                                  : 'temu_attributes';
                     const valuesMap = formData[mapKey] || {};
 
-                    const processed = baseList.map(attr => {
-                      const isReq = marketplace === 'trendyol' ? getIsRequired(attr) : false;
+                    // HB bolumu HB'nin kendi kategori ozelliklerinden beslenir
+                    // (Beden/Renk/Cinsiyet + HB enum degerleri). Diger pazaryerleri global listeden.
+                    const hbSource = (hepsiburadaAttributesList || []).map(a => ({
+                      id: a.id,
+                      name: a.name,
+                      values: (a.attributeValues || []).map(v => v.name),
+                      required: !!a.required,
+                    }));
+                    const sourceList = marketplace === 'hepsiburada'
+                      ? hbSource.filter(a => (a.name || '').toLowerCase().includes(attributeSearchTerm.toLowerCase()))
+                      : baseList;
+
+                    const processed = sourceList.map(attr => {
+                      const isReq = marketplace === 'trendyol' ? getIsRequired(attr)
+                                  : marketplace === 'hepsiburada' ? !!attr.required
+                                  : false;
                       const hasVal = !!valuesMap[attr.name];
                       return { attr, isRequired: isReq, hasValue: hasVal };
                     });
