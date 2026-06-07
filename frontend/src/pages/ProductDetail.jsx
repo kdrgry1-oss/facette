@@ -429,7 +429,7 @@ export default function ProductDetail() {
                       <button
                         onClick={() => setNotifyOpen((v) => !v)}
                         data-testid="notify-toggle-btn"
-                        className="flex-1 py-3 text-xs uppercase tracking-wider transition-colors border border-black bg-white text-black hover:bg-black hover:text-white"
+                        className="flex-1 py-2.5 sm:py-3 text-[11px] sm:text-xs uppercase tracking-normal sm:tracking-wider transition-colors border border-black bg-white text-black hover:bg-black hover:text-white"
                       >
                         Gelince Haber Ver
                       </button>
@@ -438,7 +438,7 @@ export default function ProductDetail() {
                         onClick={handleAddToCart}
                         data-testid="add-to-cart-btn"
                         disabled={product.variants?.length > 0 && !selectedVariant}
-                        className={`flex-1 py-3 text-xs uppercase tracking-wider transition-colors ${
+                        className={`flex-1 py-2.5 sm:py-3 text-[11px] sm:text-xs uppercase tracking-normal sm:tracking-wider transition-colors ${
                           product.variants?.length > 0 && !selectedVariant
                             ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                             : "bg-black text-white hover:bg-gray-900"

@@ -137,7 +137,7 @@ export default function Header({ hideMenu = false }) {
     setActiveMenu(m);
   };
   const scheduleClose = () => {
-    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 250);
+    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 450);
     setCloseTimer(t);
   };
   const cancelClose = () => {
