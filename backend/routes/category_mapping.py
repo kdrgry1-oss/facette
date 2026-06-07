@@ -143,6 +143,54 @@ async def _get_hb_client():
     return HepsiburadaClient(mid, sk, du, test=test), None
 
 
+async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
+    """HB kategori ozelliklerini canli ceker, frontend formatina normalize eder, cache'ler.
+    Normalize: {id, name, required, multiValue, type, allowCustom, attributeValues:[{id,name}]}.
+    Enum ozellikler icin gecerli degerleri (iter_attribute_values) da doldurur.
+    Doner: (attrs_list, error)."""
+    client, err = await _get_hb_client()
+    if err:
+        return [], err
+    cid = int(mp_cat_id) if str(mp_cat_id).isdigit() else mp_cat_id
+    try:
+        data = await asyncio.to_thread(client.get_category_attributes, cid)
+    except Exception as e:
+        return [], f"HB özellik çekme hatası: {e}"
+    cat_attrs = (data or {}).get("attributes", []) or []
+    out = []
+    for a in cat_attrs:
+        atype = (a.get("type") or "").lower()
+        norm = {
+            "id": a.get("id"),
+            "name": a.get("name"),
+            "required": bool(a.get("mandatory")),
+            "multiValue": bool(a.get("multiValue")),
+            "type": a.get("type"),
+            "allowCustom": atype != "enum",
+            "attributeValues": [],
+        }
+        if with_values and atype == "enum":
+            try:
+                vals = await asyncio.to_thread(client.iter_attribute_values, cid, a.get("id"))
+                norm["attributeValues"] = [{"id": v.get("id"), "name": v.get("value")}
+                                           for v in (vals or []) if isinstance(v, dict)]
+            except Exception:
+                norm["attributeValues"] = []
+        out.append(norm)
+    try:
+        key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
+        await db.hepsiburada_category_attributes.update_one(
+            {"category_id": key},
+            {"$set": {"category_id": key, "attributes": out,
+                      "base_attributes": (data or {}).get("baseAttributes", []),
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+    return out, None
+
+
 async def _sync_hb_categories(force=False):
     """leaf+active+available HB kategorilerini db.hepsiburada_categories'e cache'ler.
     Eszamanli cagrilarda kilit ile tek seferde calisir."""
@@ -819,6 +867,12 @@ async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
                 )
         except Exception:
             pass
+    if marketplace == "hepsiburada":
+        try:
+            hb_attrs, _e = await _fetch_hb_category_attributes(mp_cat_id)
+            mp_attrs = hb_attrs or mp_attrs
+        except Exception:
+            pass
     if not mp_attrs:
         coll = "trendyol_category_attributes" if marketplace == "trendyol" else f"{marketplace}_category_attributes"
         try:
@@ -1402,6 +1456,27 @@ async def get_advanced_attributes(
             "default_mappings": mapping.get("default_mappings", {}),
             "value_mappings": mapping.get("value_mappings", {}),
             "from_cache": bool(cached),
+        }
+
+    if marketplace == "hepsiburada":
+        key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
+        cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
+        attrs = (cached or {}).get("attributes")
+        if not attrs:
+            attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
+            if hb_err:
+                return {
+                    "attributes": [],
+                    "attribute_mappings": mapping.get("attribute_mappings", []),
+                    "default_mappings": mapping.get("default_mappings", {}),
+                    "value_mappings": mapping.get("value_mappings", {}),
+                    "hint": f"Hepsiburada özellikleri çekilemedi: {hb_err}",
+                }
+        return {
+            "attributes": attrs or [],
+            "attribute_mappings": mapping.get("attribute_mappings", []),
+            "default_mappings": mapping.get("default_mappings", {}),
+            "value_mappings": mapping.get("value_mappings", {}),
         }
 
     # Diğer MP'ler — yerel cache (varsa) veya boş + hint
