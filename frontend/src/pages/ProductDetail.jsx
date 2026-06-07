@@ -10,6 +10,7 @@ import { optimizeImg } from "../lib/img";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
+import { sortLikeSize } from "../utils/sizeSort";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -187,7 +188,7 @@ export default function ProductDetail() {
   };
 
   const sizes = product?.variants?.length > 0 
-    ? product.variants 
+    ? sortLikeSize(product.variants, v => v.size) 
     : ["XS", "S", "M", "L", "XL"].map(s => ({ size: s, stock: 10 }));
 
   if (loading) {
