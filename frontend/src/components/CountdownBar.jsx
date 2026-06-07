@@ -66,11 +66,19 @@ const _splitMessages = (str) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+// Üst bar son görülen halini localStorage'da tutar → tekrar ziyarette/yenilemede
+// barı ANINDA (doğru yükseklik + metinle) gösterir; flaş ve layout kayması olmaz.
+const _CACHE_KEY = "fct_topbar_block_v1";
+const _readBarCache = () => {
+  try { const s = localStorage.getItem(_CACHE_KEY); return s ? JSON.parse(s) : null; }
+  catch (e) { return null; }
+};
+
 export default function CountdownBar() {
-  const [block, setBlock] = useState(null);
+  const [block, setBlock] = useState(_readBarCache);   // önbellekten anında
   const [now, setNow] = useState(Date.now());
   const [msgIdx, setMsgIdx] = useState(0);
-  const [loaded, setLoaded] = useState(false); // page-blocks geldi mi (flaş önleme)
+  const [loaded, setLoaded] = useState(() => _readBarCache() !== null); // cache varsa anında hazır
 
   // Bloğu yükle (sayfa açılışında)
   useEffect(() => {
@@ -80,6 +88,10 @@ export default function CountdownBar() {
         if (!mounted) return;
         const cb = (r.data || []).find((b) => b.type === "countdown_bar" && b.is_active);
         setBlock(cb || null);
+        try {
+          if (cb) localStorage.setItem(_CACHE_KEY, JSON.stringify(cb));
+          else localStorage.removeItem(_CACHE_KEY);
+        } catch (e) {}
       })
       .catch(() => {})
       .finally(() => { if (mounted) setLoaded(true); });
