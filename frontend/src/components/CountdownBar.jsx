@@ -58,9 +58,18 @@ const _diffParts = (target, now) => {
 
 const _pad = (n) => String(n).padStart(2, "0");
 
+// Çoklu duyuru metni: "|" veya yeni satır ile ayrılan metinleri diziye çevirir.
+// Tek metin → tek elemanlı dizi (geriye uyumlu).
+const _splitMessages = (str) =>
+  String(str || "")
+    .split(/\n|\|/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
 export default function CountdownBar() {
   const [block, setBlock] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [msgIdx, setMsgIdx] = useState(0);
 
   // Bloğu yükle (sayfa açılışında)
   useEffect(() => {
@@ -82,44 +91,68 @@ export default function CountdownBar() {
     return () => clearInterval(t);
   }, [block]);
 
-  // Hiç blok yok → orijinal statik fallback metin
+  // ── Geçerli metin alanını ve çoklu mesaj listesini belirle ──────────────────
+  const s = block?.settings || {};
+  const startAt = _parseLocal(s.start_at);
+  const endAt   = _parseLocal(s.end_at);
+  const bg      = s.bg_color   || "#000000";
+  const fg      = s.text_color || "#ffffff";
+  const inWindow =
+    (!startAt || now >= startAt.getTime()) &&
+    (!endAt   || now <= endAt.getTime());
+
+  let rawText;
+  if (!block)          rawText = "500 TL Üzeri Ücretsiz Kargo"; // statik varsayılan
+  else if (!inWindow)  rawText = s.fallback_text || "";          // pencere dışı
+  else                 rawText = s.left_text || "";              // aktif
+
+  const messages = _splitMessages(rawText);
+  const messagesKey = messages.join("||");
+
+  // Çoklu mesaj rotasyonu (4 sn). messagesKey sabit olduğundan saniyelik
+  // tick'lerde interval sıfırlanmaz.
+  useEffect(() => {
+    if (messages.length <= 1) { setMsgIdx(0); return; }
+    const t = setInterval(() => setMsgIdx((i) => (i + 1) % messages.length), 4000);
+    return () => clearInterval(t);
+  }, [messagesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentMsg = messages.length ? messages[msgIdx % messages.length] : "";
+  const multi = messages.length > 1;
+  const fadeStyle = multi ? { animation: "fctMarqueeFade .5s ease" } : undefined;
+  const fadeKeyframes = multi
+    ? <style>{"@keyframes fctMarqueeFade{from{opacity:0}to{opacity:1}}"}</style>
+    : null;
+
+  // Hiç blok yok → orijinal statik metin (tek mesaj)
   if (!block) {
     return (
       <div className="bg-black text-white text-center py-1.5 md:py-2" data-testid="topbar-static">
         <p className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">
-          500 TL Üzeri Ücretsiz Kargo
+          {currentMsg}
         </p>
       </div>
     );
   }
 
-  const s = block.settings || {};
-  const startAt = _parseLocal(s.start_at);
-  const endAt   = _parseLocal(s.end_at);
-  const bg      = s.bg_color   || "#000000";
-  const fg      = s.text_color || "#ffffff";
-
-  // Pencere kontrolü: start_at gelmemişse veya end_at geçmişse → fallback metin
-  const inWindow =
-    (!startAt || now >= startAt.getTime()) &&
-    (!endAt   || now <= endAt.getTime());
-
   if (!inWindow) {
-    // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin (admin set edebilir)
-    const fallback = (s.fallback_text || "").trim();
-    if (!fallback) return null; // tamamen gizle
+    // Bar pasif (planlanmış ya da süresi dolmuş) → fallback metin
+    if (!currentMsg) return null; // tamamen gizle
     return (
       <div className="text-center py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
            data-testid="topbar-fallback">
-        <p className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">{fallback}</p>
+        {fadeKeyframes}
+        <p key={msgIdx} style={fadeStyle}
+           className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">
+          {currentMsg}
+        </p>
       </div>
     );
   }
 
-  // Aktif: sayaç + sol metin
+  // Aktif: sayaç + (dönüşümlü) sol metin
   const target = endAt ? endAt.getTime() : now;
   const { days, hours, mins, secs } = _diffParts(target, now);
-  const leftText  = (s.left_text  || "").trim();
   const timerLbl  = (s.timer_label || "KALAN SÜRE:").trim();
 
   return (
@@ -128,10 +161,12 @@ export default function CountdownBar() {
       style={{ backgroundColor: bg, color: fg }}
       data-testid="topbar-countdown"
     >
+      {fadeKeyframes}
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
-        {leftText && (
-          <p className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light flex-shrink-0">
-            {leftText}
+        {currentMsg && (
+          <p key={msgIdx} style={fadeStyle}
+             className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light flex-shrink-0">
+            {currentMsg}
           </p>
         )}
         <div className="flex items-center gap-2 md:gap-3">
