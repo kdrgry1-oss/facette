@@ -78,12 +78,10 @@ async def get_trendyol_headers():
 
 def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_config: dict) -> float:
     """Calculate price with markup logic"""
-    use_default = product_data.get("use_default_markup", True)
-    if use_default:
-        markup = float(trendyol_config.get("default_markup", 0))
-    else:
-        markup = float(product_data.get("markup_rate", 0))
-    
+    # SSOT: her zaman global default_markup uygulanir; urun bazli override yok sayilir
+    # (kullanici talebi: belirlenen oran disinda fiyat guncellenmez)
+    markup = float(trendyol_config.get("default_markup", 0) or 0)
+
     final_price = base_price * (1 + markup / 100)
     return round(final_price, 2)
 
@@ -5676,7 +5674,7 @@ async def update_trendyol_stock_price(
     # Varyantlı ürün mü?
     items = []
     variants = product.get("variants", [])
-    trendyol_multiplier = product.get("trendyol_multiplier") or config.get("default_markup", 0) or 0
+    trendyol_multiplier = float(config.get("default_markup", 0) or 0)
     base_price = product.get("price", 0)
     sale_price = product.get("sale_price") or base_price
     
@@ -5769,7 +5767,7 @@ async def update_trendyol_category_stock_price(
 
     items = []
     for product in products:
-        trendyol_multiplier = product.get("trendyol_multiplier") or config.get("default_markup", 0) or 0
+        trendyol_multiplier = float(config.get("default_markup", 0) or 0)
         base_price = product.get("price", 0)
         sale_price = product.get("sale_price") or base_price
         
