@@ -9,12 +9,30 @@ import uuid
 
 from .deps import db, logger, get_current_user, require_admin, generate_id
 from .attribution import resolve_attribution_for_order
+from pymongo import ReturnDocument
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
 def generate_order_number() -> str:
     import secrets
     return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
+
+async def next_order_number() -> str:
+    """Kısa, sıralı site sipariş numarası: W10001, W10002, ...
+    Atomik sayaç (db.counters) ile çakışma imkânsız. Sayaç başarısız olursa
+    kısa, W ön ekli bir fallback üretir; sipariş oluşturma asla kırılmaz."""
+    try:
+        doc = await db.counters.find_one_and_update(
+            {"_id": "order_seq"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return f"W{10000 + int(doc['seq'])}"
+    except Exception as e:
+        logger.warning(f"order_seq sayaci basarisiz, fallback kullaniliyor: {e}")
+        import secrets
+        return f"W{int(time.time()) % 1000000}{secrets.token_hex(1).upper()}"
 
 @router.get("")
 async def get_orders(
@@ -157,7 +175,7 @@ async def create_order(
 
     order = {
         "id": generate_id(),
-        "order_number": generate_order_number(),
+        "order_number": await next_order_number(),
         "user_id": current_user.get("id") if current_user else None,
         "items": order_data.get("items", []),
         "shipping_address": order_data.get("shipping_address", {}),
