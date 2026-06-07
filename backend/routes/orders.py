@@ -976,12 +976,31 @@ async def create_invoice_for_order(
         if not prefix:
             prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
 
-    # Aynı prefix ile kesilmiş fatura sayısına göre sıra numarası üret (yıllık)
+    # Sıra numarası: atomik sayaç (db.counters) — başarısız denemede bile ilerler,
+    # aynı numara BİR DAHA üretilmez (Doğan 10009 "duplicate" önlenir).
+    # Taban: panelde en son kesilen no'nun DEVAMI — dogan_edonusum.earchive_start_number
+    # (yıl bazlı: earchive_start_year ilgili yıla eşitse uygulanır).
     year_str = datetime.now(timezone.utc).strftime("%Y")
-    count = await db.orders.count_documents({
-        "invoice_number": {"$regex": f"^{prefix}{year_str}"}
-    })
-    invoice_number = f"{prefix}{year_str}{(count + 1):09d}"
+    seq_key = f"invoice_seq_{prefix}{year_str}"
+    base_start = 0
+    try:
+        if invoice_type == "e-arsiv":
+            if str((dogan_settings or {}).get("earchive_start_year") or "") == year_str:
+                base_start = int((dogan_settings or {}).get("earchive_start_number") or 0)
+        else:
+            if str((dogan_settings or {}).get("einvoice_start_year") or "") == year_str:
+                base_start = int((dogan_settings or {}).get("einvoice_start_number") or 0)
+    except Exception:
+        base_start = 0
+    _existing_ctr = await db.counters.find_one({"_id": seq_key})
+    if _existing_ctr is None and base_start > 0:
+        await db.counters.update_one(
+            {"_id": seq_key}, {"$setOnInsert": {"seq": base_start - 1}}, upsert=True
+        )
+    await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
+    _seq_doc = await db.counters.find_one({"_id": seq_key}) or {}
+    seq = int(_seq_doc.get("seq", 1))
+    invoice_number = f"{prefix}{year_str}{seq:09d}"
     invoice_uuid = generate_id()  # UUID-like
 
     now = datetime.now(timezone.utc)
