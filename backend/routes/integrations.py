@@ -2708,9 +2708,9 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
         mode=config["mode"]
     )
     
-    # Calculate timestamps (e.g. last 15 days as Trendyol recommends no more than 15 days wide searches)
+    # Trendyol siparis ucu en fazla ~2 hafta (14 gun) araliga izin verir.
     now = datetime.now()
-    start = now - timedelta(days=15)
+    start = now - timedelta(days=14)
     end_date_ms = int(now.timestamp() * 1000)
     start_date_ms = int(start.timestamp() * 1000)
     
@@ -2718,9 +2718,20 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     updated_count = 0
     
     try:
-        # Fetch first page of 200 items (in a real scenario we'd paginate if totalElements > size)
-        resp = await client.get_orders(start_date_ms=start_date_ms, end_date_ms=end_date_ms, size=200)
-        content = resp.get("content", [])
+        # TUM sayfalari dolas - daha once tek sayfa (200) cekilip fazlasi atlaniyordu.
+        content = []
+        page = 0
+        MAX_PAGES = 50
+        while page < MAX_PAGES:
+            resp = await client.get_orders(
+                start_date_ms=start_date_ms, end_date_ms=end_date_ms, size=200, page=page
+            )
+            chunk = resp.get("content", []) or []
+            content.extend(chunk)
+            total_pages = resp.get("totalPages") or 0
+            page += 1
+            if not chunk or page >= total_pages:
+                break
         
         for t_order in content:
             order_number = t_order.get("orderNumber")

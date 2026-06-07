@@ -114,13 +114,24 @@ async def _run_trendyol_auto_orders_pull():
             mode=cfg["mode"],
         )
         now_ = _dt.now()
-        start = now_ - _td(days=15)
-        resp = await client.get_orders(
-            start_date_ms=int(start.timestamp() * 1000),
-            end_date_ms=int(now_.timestamp() * 1000),
-            size=200,
-        )
-        content = resp.get("content", [])
+        start = now_ - _td(days=7)
+        start_ms = int(start.timestamp() * 1000)
+        end_ms = int(now_.timestamp() * 1000)
+        # Trendyol tek sayfada en fazla 200 paket dondurur; TUM sayfalari dolas.
+        # (Sayfalama yokken 200'den fazla siparis olunca 201+ hep atlaniyordu.)
+        content = []
+        _page = 0
+        _MAX_PAGES = 50
+        while _page < _MAX_PAGES:
+            _resp = await client.get_orders(
+                start_date_ms=start_ms, end_date_ms=end_ms, size=200, page=_page
+            )
+            _chunk = _resp.get("content", []) or []
+            content.extend(_chunk)
+            _total_pages = _resp.get("totalPages") or 0
+            _page += 1
+            if not _chunk or _page >= _total_pages:
+                break
         imported = 0
         updated = 0
         for t_order in content:
