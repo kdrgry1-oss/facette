@@ -294,3 +294,143 @@ async def cleanup_dry_run(current_user: dict = Depends(require_admin)):
         },
         "note": "DRY-RUN — hicbir veri degistirilmedi.",
     }
+
+
+@router.post("/cleanup/dedupe-barcodes")
+async def cleanup_dedupe_barcodes(payload: dict = None, current_user: dict = Depends(require_admin)):
+    """Ürün İÇİNDE aynı barkodlu mükerrer varyantları siler.
+    Her barkoddan EN YÜKSEK STOKLU olanı tutar, diğer kopyalarını kaldırır.
+    Barkodsuz varyantlara ve farklı barkodlu (aynı beden bile olsa) varyantlara
+    DOKUNMAZ. Başka hiçbir şeyi silmez/değiştirmez.
+
+    payload: {"confirm": true}  -> uygular.   confirm yok/false -> sadece ÖNİZLEME."""
+    payload = payload or {}
+    confirm = bool(payload.get("confirm", False))
+
+    def _norm(s):
+        return str(s or "").strip().lower()
+
+    preview = []
+    total_removed = 0
+    affected = 0
+
+    async for p in db.products.find(
+        {"variants.1": {"$exists": True}},
+        {"_id": 0, "id": 1, "name": 1, "variants": 1},
+    ):
+        variants = p.get("variants") or []
+        by_bc = {}
+        for v in variants:
+            bc = _norm(v.get("barcode"))
+            if bc:
+                by_bc.setdefault(bc, []).append(v)
+        dup_bcs = {bc: vs for bc, vs in by_bc.items() if len(vs) > 1}
+        if not dup_bcs:
+            continue
+
+        # Her mükerrer barkod için EN YÜKSEK STOKLU varyantın indeksini seç
+        best_idx = {}
+        for i, v in enumerate(variants):
+            bc = _norm(v.get("barcode"))
+            if not bc:
+                continue
+            if bc not in best_idx or (v.get("stock") or 0) > (variants[best_idx[bc]].get("stock") or 0):
+                best_idx[bc] = i
+
+        new_variants = []
+        removed_here = 0
+        for i, v in enumerate(variants):
+            bc = _norm(v.get("barcode"))
+            if not bc or len(by_bc.get(bc, [])) == 1 or best_idx.get(bc) == i:
+                new_variants.append(v)   # barkodsuz / tekil / tutulan -> KORU
+            else:
+                removed_here += 1        # aynı barkodun fazlası -> SİL
+
+        if removed_here > 0:
+            affected += 1
+            total_removed += removed_here
+            preview.append({
+                "id": p.get("id"),
+                "name": (p.get("name") or "")[:50],
+                "removed": removed_here,
+                "kept_total": len(new_variants),
+                "barcodes": [
+                    {"barcode": bc, "had": len(vs),
+                     "kept_stock": max(vs, key=lambda x: (x.get("stock") or 0)).get("stock")}
+                    for bc, vs in dup_bcs.items()
+                ][:8],
+            })
+            if confirm:
+                await db.products.update_one(
+                    {"id": p.get("id")},
+                    {"$set": {"variants": new_variants,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+
+    return {
+        "mode": "APPLIED" if confirm else "PREVIEW",
+        "affected_products": affected,
+        "removed_variants": total_removed,
+        "samples": preview[:80],
+        "note": ("Silme uygulandi." if confirm else
+                 "ONIZLEME — hicbir sey silinmedi. Uygulamak icin confirm:true gonder."),
+    }
+
+
+@router.post("/cleanup/combine-dead-refs")
+async def cleanup_combine_dead_refs(payload: dict = None, current_user: dict = Depends(require_admin)):
+    """combine_products ('Görünümü Tamamla') içindeki ÖLÜ referansları temizler:
+    var olmayan / is_active=False / görselsiz ürün id'leri listeden çıkarılır.
+    Ürünleri/varyantları SİLMEZ — sadece kırık işaretçileri temizler.
+
+    payload: {"confirm": true} -> uygular.  confirm yok/false -> ÖNİZLEME."""
+    payload = payload or {}
+    confirm = bool(payload.get("confirm", False))
+
+    prod = {}
+    async for p in db.products.find(
+        {}, {"_id": 0, "id": 1, "is_active": 1, "images": 1, "image": 1}
+    ):
+        if p.get("id") is not None:
+            prod[str(p["id"])] = p
+
+    def _has_image(p):
+        imgs = p.get("images") or []
+        return bool((imgs and str(imgs[0]).strip()) or str(p.get("image") or "").strip())
+
+    preview = []
+    total_removed = 0
+    affected = 0
+    async for p in db.products.find(
+        {"combine_products": {"$exists": True, "$ne": []}},
+        {"_id": 0, "id": 1, "name": 1, "combine_products": 1},
+    ):
+        ids = [str(c) for c in (p.get("combine_products") or [])]
+        good = []
+        bad = 0
+        for cid in ids:
+            ref = prod.get(cid)
+            if ref is not None and ref.get("is_active") is not False and _has_image(ref):
+                good.append(cid)
+            else:
+                bad += 1
+        if bad > 0:
+            affected += 1
+            total_removed += bad
+            preview.append({"id": p.get("id"), "name": (p.get("name") or "")[:50],
+                            "removed": bad, "kept": len(good)})
+            if confirm:
+                await db.products.update_one(
+                    {"id": p.get("id")},
+                    {"$set": {"combine_products": good,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+
+    return {
+        "mode": "APPLIED" if confirm else "PREVIEW",
+        "affected_products": affected,
+        "removed_refs": total_removed,
+        "samples": preview[:80],
+        "note": ("Temizlik uygulandi." if confirm else
+                 "ONIZLEME — hicbir sey degismedi. Uygulamak icin confirm:true gonder."),
+    }

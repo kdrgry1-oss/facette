@@ -70,6 +70,7 @@ export default function CountdownBar() {
   const [block, setBlock] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [msgIdx, setMsgIdx] = useState(0);
+  const [loaded, setLoaded] = useState(false); // page-blocks geldi mi (flaş önleme)
 
   // Bloğu yükle (sayfa açılışında)
   useEffect(() => {
@@ -80,7 +81,8 @@ export default function CountdownBar() {
         const cb = (r.data || []).find((b) => b.type === "countdown_bar" && b.is_active);
         setBlock(cb || null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (mounted) setLoaded(true); });
     return () => { mounted = false; };
   }, []);
 
@@ -123,6 +125,12 @@ export default function CountdownBar() {
   const fadeKeyframes = multi
     ? <style>{"@keyframes fctMarqueeFade{from{opacity:0}to{opacity:1}}"}</style>
     : null;
+
+  // page-blocks henüz dönmedi → nötr, sabit yükseklikli, METİNSİZ bar.
+  // Varsayılan "500 TL" metnini flaşlatmadan yüklemeyi bekler (#17 flaş düzeltmesi).
+  if (!loaded) {
+    return <div className="bg-black" data-testid="topbar-loading" aria-hidden="true" style={{ minHeight: 38 }} />;
+  }
 
   // Hiç blok yok → orijinal statik metin (tek mesaj)
   if (!block) {
