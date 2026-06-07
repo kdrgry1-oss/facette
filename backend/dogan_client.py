@@ -193,6 +193,7 @@ class DoganClient:
                               customer_city: str = "",
                               customer_street: str = "",
                               customer_country: str = "Türkiye",
+                              customer_postal_zone: str = "",
                               customer_phone: str = "",
                               customer_email: str = "",
                               customer_tax_office: str = "",
@@ -207,6 +208,10 @@ class DoganClient:
                               carrier_vkn: str = "6080712084",
                               carrier_name: str = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.",
                               carrier_city: str = "İstanbul",
+                              cargo_tracking: str = "",
+                              order_ext_id: str = "",
+                              store_name: str = "",
+                              payment_amount: float = 0.0,
                               ) -> str:
         """UBL-TR 1.2 e-Arşiv Fatura XML üretici (Doğan e-Dönüşüm CANLI uyumlu).
 
@@ -246,6 +251,10 @@ class DoganClient:
         customer_city = _s(customer_city) or "İstanbul"
         customer_name = _s(customer_name) or "Bireysel Müşteri"
         customer_tax_office = _s(customer_tax_office)
+        customer_postal_zone = _s(customer_postal_zone)
+        # #5: açık adres (StreetName) ve posta kodu (PostalZone) — örnek faturada var, eksikti
+        customer_street_xml = f"<cbc:StreetName>{escape(customer_street)}</cbc:StreetName>" if customer_street else ""
+        customer_zone_xml = f"<cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>" if customer_postal_zone else ""
         note = _s(note)
         order_number = _s(order_number)
         payment_method = _s(payment_method) or "DIGER"
@@ -401,13 +410,40 @@ class DoganClient:
             customer_contact_xml = "<cac:Contact/>"
 
         # ─── Notlar (sample birden fazla Note kullanıyor) ────────────────
+        def _tr_money_words(n):
+            n = int(round(float(n or 0)))
+            birler = ["", "Bir", "İki", "Üç", "Dört", "Beş", "Altı", "Yedi", "Sekiz", "Dokuz"]
+            onlar = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
+            def _uc(x):
+                s = ""; y = x // 100; k = (x % 100) // 10; b = x % 10
+                if y: s += ("" if y == 1 else birler[y]) + "Yüz"
+                if k: s += onlar[k]
+                if b: s += birler[b]
+                return s
+            if n == 0: return "Sıfır"
+            out = ""; mr = n // 10**9; mn = (n % 10**9) // 10**6; bn = (n % 10**6) // 1000; kl = n % 1000
+            if mr: out += _uc(mr) + "Milyar"
+            if mn: out += _uc(mn) + "Milyon"
+            if bn: out += (("" if bn == 1 else _uc(bn)) + "Bin")
+            if kl: out += _uc(kl)
+            return out
+
         notes_xml = []
         if order_number:
             notes_xml.append(f"<cbc:Note>{escape(order_number)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Sipariş No: {escape(order_number)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Siparis No: {escape(order_number)} :Kargo Takip No: {escape(cargo_tracking)} :Sipariş ID: {escape(order_ext_id)}</cbc:Note>")
+        _satici_adr = (supplier_street or "").strip()
+        if _satici_adr:
+            notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
         if customer_street:
             notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(customer_street)}</cbc:Note>")
             notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+        notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
+        if store_name:
+            notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
+        if payment_method:
+            _pa = f" {payment_amount:.0f}TL" if payment_amount else ""
+            notes_xml.append(f"<cbc:Note>Ödeme :{escape(payment_method)}{_pa}</cbc:Note>")
         if note:
             notes_xml.append(f"<cbc:Note>{escape(note)}</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış Internet Üzerinden Yapılmıştır.</cbc:Note>")
@@ -515,8 +551,10 @@ class DoganClient:
       </cac:PartyIdentification>
       {customer_legal_block}
       <cac:PostalAddress>
+        {customer_street_xml}
         <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(customer_city)}</cbc:CityName>
+        {customer_zone_xml}
         <cac:Country>
           <cbc:Name>{escape(customer_country)}</cbc:Name>
         </cac:Country>

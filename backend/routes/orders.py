@@ -1036,6 +1036,7 @@ async def create_invoice_for_order(
             customer_district=ship_addr.get("district") or "",
             customer_city=ship_addr.get("city") or "",
             customer_street=ship_addr.get("address") or "",
+            customer_postal_zone=ship_addr.get("postal_code") or ship_addr.get("zip") or ship_addr.get("postal_zone") or "",
             customer_phone=ship_addr.get("phone") or "",
             customer_email=ship_addr.get("email") or order.get("user_email") or "",
             customer_tax_office=bill.get("tax_office") or "",
@@ -1046,6 +1047,10 @@ async def create_invoice_for_order(
             discount=float(order.get("discount") or 0),
             order_number=order.get("order_number") or order_id,
             payment_method=order.get("payment_method") or "DIGER",
+            cargo_tracking=order.get("cargo_tracking") or order.get("tracking_number") or "",
+            order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
+            store_name=order.get("store_name") or order.get("marketplace") or "",
+            payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
             note="",
         )
 
