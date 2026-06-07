@@ -48,7 +48,7 @@ from routes.ai_assistant import router as ai_assistant_router
 from routes.locations import router as locations_router
 from routes.attribution import router as attribution_router
 from routes.members import router as members_router
-from routes.coupons import admin_router as coupons_admin_router, public_router as coupons_public_router
+from routes.coupons import admin_router as coupons_admin_router, public_router as coupons_public_router, campaigns_router as campaigns_router
 from routes.reports import router as reports_router
 from routes.extras import (
     cart_router,
@@ -456,6 +456,7 @@ api_router.include_router(attribution_router)
 api_router.include_router(members_router)
 api_router.include_router(coupons_admin_router)
 api_router.include_router(coupons_public_router)
+api_router.include_router(campaigns_router)
 api_router.include_router(reports_router)
 api_router.include_router(cart_router)
 api_router.include_router(admin_cart_router)

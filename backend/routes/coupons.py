@@ -281,3 +281,100 @@ async def redeem_coupon(payload: dict):
         "redeemed_at": _utcnow(),
     })
     return {"recorded": True}
+
+
+# ==================== KAMPANYALAR (Campaigns) ====================
+# Admin "Kampanyalar" sayfası /api/campaigns çağırır. Kampanya = kupon olduğundan
+# bu uçlar db.coupons üzerine eşlenir (tip: percentage<->percent, free_shipping bayrağı).
+campaigns_router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+
+
+def _coupon_to_campaign(c: dict) -> dict:
+    t = c.get("type", "percent")
+    if c.get("free_shipping"):
+        ctype = "free_shipping"
+    elif t == "percent":
+        ctype = "percentage"
+    else:
+        ctype = t
+    return {
+        "id": c.get("id"),
+        "name": c.get("title") or c.get("code") or "",
+        "code": c.get("code", ""),
+        "type": ctype,
+        "value": c.get("value", 0),
+        "min_order_amount": c.get("min_cart_total", 0),
+        "usage_limit": c.get("usage_limit") or 0,
+        "is_active": c.get("is_active", True),
+        "start_date": c.get("start_at"),
+        "end_date": c.get("end_at"),
+        "redeemed_count": c.get("redeemed_count", 0),
+    }
+
+
+def _campaign_to_coupon_fields(payload: dict) -> dict:
+    ctype = payload.get("type") or "percentage"
+    return {
+        "title": payload.get("name") or payload.get("title") or "",
+        "type": "fixed" if ctype == "fixed" else "percent",
+        "value": float(payload.get("value", 0) or 0),
+        "min_cart_total": float(payload.get("min_order_amount", payload.get("min_cart_total", 0)) or 0),
+        "usage_limit": int(payload.get("usage_limit", 0) or 0) or None,
+        "start_at": payload.get("start_date") or payload.get("start_at"),
+        "end_at": payload.get("end_date") or payload.get("end_at"),
+        "is_active": bool(payload.get("is_active", True)),
+        "free_shipping": ctype == "free_shipping",
+    }
+
+
+@campaigns_router.get("")
+async def list_campaigns(current_user: dict = Depends(require_admin)):
+    """Kampanya listesi — frontend düz dizi bekler (res.data)."""
+    items = await db.coupons.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    out = []
+    for c in items:
+        c["redeemed_count"] = await db.coupon_redemptions.count_documents({"coupon_id": c.get("id")})
+        out.append(_coupon_to_campaign(c))
+    return out
+
+
+@campaigns_router.post("")
+async def create_campaign(payload: dict, current_user: dict = Depends(require_admin)):
+    code = (payload.get("code") or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Kampanya kodu gerekli")
+    if await db.coupons.find_one({"code": code}):
+        raise HTTPException(status_code=409, detail="Bu kod zaten kullanılıyor")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "code": code,
+        "categories": [],
+        "products": [],
+        "max_discount": None,
+        "usage_limit_per_user": None,
+        "first_order_only": False,
+        "created_at": _utcnow(),
+        "created_by": current_user.get("email", ""),
+    }
+    doc.update(_campaign_to_coupon_fields(payload))
+    await db.coupons.insert_one(doc)
+    doc.pop("_id", None)
+    return {"success": True, "campaign": _coupon_to_campaign(doc)}
+
+
+@campaigns_router.put("/{cid}")
+async def update_campaign(cid: str, payload: dict, current_user: dict = Depends(require_admin)):
+    update = _campaign_to_coupon_fields(payload)
+    update["updated_at"] = _utcnow()
+    res = await db.coupons.update_one({"id": cid}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    return {"success": True}
+
+
+@campaigns_router.delete("/{cid}")
+async def delete_campaign(cid: str, current_user: dict = Depends(require_admin)):
+    res = await db.coupons.delete_one({"id": cid})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    return {"success": True}
