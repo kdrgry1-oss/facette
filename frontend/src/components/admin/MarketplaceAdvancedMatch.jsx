@@ -217,11 +217,15 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
   const [saving, setSaving] = useState(false);
   const [hint, setHint] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const autosaveTimer = useRef(null);
+  const didLoad = useRef(false);
+  const [autoSavedAt, setAutoSavedAt] = useState(null);
 
   const color = MP_COLORS[marketplace] || "orange";
 
   useEffect(() => {
     if (!open || !category) return;
+    didLoad.current = false;
     setLoading(true);
     Promise.all([
       axios
@@ -242,7 +246,11 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
       setMappings(savedMap);
       setDefaults(mpRes.data?.default_mappings || {});
       setHint(mpRes.data?.hint || "");
-    }).finally(() => setLoading(false));
+    }).finally(() => {
+      setLoading(false);
+      // Yukleme bitti; bundan sonraki degisiklikler otomatik kaydedilebilir.
+      didLoad.current = true;
+    });
   }, [open, marketplace, category]);
 
   const handleAutoMatch = () => {
@@ -302,17 +310,35 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
     }
   };
 
+  const persistMappings = useCallback(async ({ silent } = {}) => {
+    if (!category) return false;
+    const payload = Object.entries(mappings)
+      .filter(([, v]) => v !== "" && v != null)
+      .map(([id, v]) => ({ local_attr: v, mp_attr_id: isNaN(Number(id)) ? id : Number(id) }));
+    await axios.post(
+      `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
+      { attribute_mappings: payload, default_mappings: defaults },
+      { headers: auth() }
+    );
+    if (silent) setAutoSavedAt(Date.now());
+    return true;
+  }, [mappings, defaults, marketplace, category]);
+
+  // Otomatik kaydetme: yukleme sonrasi mappings/defaults degisince debounce ile sessizce kaydet.
+  // Boylece sekmeler/section'lar arasinda gezerken onceki secimler kaybolmaz.
+  useEffect(() => {
+    if (!open || !category || !didLoad.current) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      persistMappings({ silent: true }).catch(() => {});
+    }, 800);
+    return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
+  }, [mappings, defaults, open, category, persistMappings]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = Object.entries(mappings)
-        .filter(([, v]) => v !== "" && v != null)
-        .map(([id, v]) => ({ local_attr: v, mp_attr_id: isNaN(Number(id)) ? id : Number(id) }));
-      await axios.post(
-        `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
-        { attribute_mappings: payload, default_mappings: defaults },
-        { headers: auth() }
-      );
+      await persistMappings({ silent: false });
       toast.success("Eşleştirmeler kaydedildi");
       onClose(true);
     } catch {
@@ -590,7 +616,10 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
           </>
         )}
 
-        <div className="flex justify-end gap-2 pt-3 border-t">
+        <div className="flex justify-end items-center gap-2 pt-3 border-t">
+          {autoSavedAt && (
+            <span className="text-xs text-green-600 mr-auto">✓ Değişiklikler otomatik kaydedildi</span>
+          )}
           <button onClick={() => onClose(false)}
             className="px-4 py-2 border rounded text-sm hover:bg-gray-50">İptal</button>
           <button onClick={handleSave} disabled={saving}
