@@ -605,6 +605,447 @@ class DoganClient:
 </Invoice>"""
         return xml
 
+    @staticmethod
+    def build_earsiv_export_ubl_xml(*,
+                              invoice_uuid: str,
+                              invoice_number: str,
+                              issue_date: str,            # YYYY-MM-DD
+                              issue_time: str,            # HH:MM:SS
+                              supplier_vkn: str,
+                              supplier_name: str,
+                              supplier_district: str = "",
+                              supplier_city: str = "",
+                              supplier_street: str = "",
+                              supplier_country: str = "Türkiye",
+                              supplier_tax_office: str = "",
+                              supplier_phone: str = "",
+                              supplier_email: str = "",
+                              supplier_website: str = "",
+                              customer_vkn_or_tckn: str,  # 11 haneli TCKN veya 10 haneli VKN
+                              customer_name: str,
+                              customer_district: str = "",
+                              customer_city: str = "",
+                              customer_street: str = "",
+                              customer_country: str = "Türkiye",
+                              customer_postal_zone: str = "",
+                              customer_phone: str = "",
+                              customer_email: str = "",
+                              customer_tax_office: str = "",
+                              currency: str = "TRY",
+                              kdv_rate: float = 20.0,
+                              line_items: list = None,    # [{name, qty, unit_price, kdv_rate, sku, note, barcode}]
+                              shipping_cost: float = 0.0,
+                              discount: float = 0.0,
+                              note: str = "",
+                              order_number: str = "",
+                              payment_method: str = "",
+                              carrier_vkn: str = "6080712084",
+                              carrier_name: str = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.",
+                              carrier_city: str = "İstanbul",
+                              cargo_tracking: str = "",
+                              order_ext_id: str = "",
+                              store_name: str = "",
+                              payment_amount: float = 0.0,
+                              ) -> str:
+        """UBL-TR 1.2 e-Arşiv MİKRO İHRACAT (İSTİSNA) Fatura XML üretici. KDV %0 / istisna 301.
+
+        Bireysel müşteri (TCKN 11 hane) ve kurumsal (VKN 10 hane) destekler.
+        FCT2026000011227.xml örnek dosyasına birebir şema uyumudur:
+          • Tam namespace seti (ubltr, ds, xades, qdt, ccts, udt)
+          • cac:Signature bloğu (UBL-TR'de zorunlu)
+          • cac:AdditionalDocumentReference > SendingType=ELEKTRONIK
+          • InvoicedQuantity unitCode="C62" (UBL-TR adet kodu)
+          • cac:PaymentMeans, cac:Delivery (opsiyonel ama Doğan örneğinde mevcut)
+          • SellersItemIdentification her satırda
+        Tüm tutarlar KDV hariç. Satır toplamı + KDV + kargo - indirim = genel toplam.
+        """
+        from html import escape
+
+        line_items = line_items or []
+        is_individual = len(customer_vkn_or_tckn) == 11
+        party_id_scheme = "TCKN" if is_individual else "VKN"
+
+        # null/None safety — UBL'de "None" string'i şema hatası verir
+        def _s(v):
+            if v is None or str(v).lower() == "none":
+                return ""
+            return str(v).strip()
+
+        supplier_phone = _s(supplier_phone)
+        supplier_email = _s(supplier_email)
+        supplier_website = _s(supplier_website)
+        supplier_street = _s(supplier_street)
+        supplier_district = _s(supplier_district)
+        supplier_city = _s(supplier_city) or "İstanbul"
+        supplier_tax_office = _s(supplier_tax_office) or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI"
+        customer_phone = _s(customer_phone)
+        customer_email = _s(customer_email)
+        customer_street = _s(customer_street)
+        customer_district = _s(customer_district)
+        customer_city = _s(customer_city) or "İstanbul"
+        customer_name = _s(customer_name) or "Bireysel Müşteri"
+        customer_tax_office = _s(customer_tax_office)
+        customer_postal_zone = _s(customer_postal_zone)
+        # #5: açık adres (StreetName) ve posta kodu (PostalZone) — örnek faturada var, eksikti
+        customer_street_xml = f"<cbc:StreetName>{escape(customer_street)}</cbc:StreetName>" if customer_street else ""
+        customer_zone_xml = f"<cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>" if customer_postal_zone else ""
+        note = _s(note)
+        order_number = _s(order_number)
+        payment_method = _s(payment_method) or "DIGER"
+
+        # ─── InvoiceLine'lar — UBL-TR unitCode "C62" (Adet) ──────────────
+        invoice_lines_xml = []
+        line_subtotal = 0.0
+        kdv_total = 0.0
+        # KDV oranı bazlı gruplandırma (TaxTotal'da multi-subtotal için)
+        kdv_groups = {}  # rate → {"taxable": x, "tax": y}
+
+        for idx, it in enumerate(line_items, start=1):
+            qty = float(it.get("qty") or 1)
+            unit_price = float(it.get("unit_price") or 0)
+            line_amount = round(qty * unit_price, 2)
+            li_kdv_rate = 0.0  # ihracat istisnasi: KDV %0
+            line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            line_subtotal += line_amount
+            kdv_total += line_kdv
+            grp = kdv_groups.setdefault(li_kdv_rate, {"taxable": 0.0, "tax": 0.0})
+            grp["taxable"] += line_amount
+            grp["tax"] += line_kdv
+
+            name = escape((it.get("name") or "Ürün"))[:255]
+            sku = escape(_s(it.get("sku") or it.get("product_code") or f"URN{idx:04d}"))
+            li_note = escape(_s(it.get("note") or it.get("barcode") or ""))
+            note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
+
+            invoice_lines_xml.append(f"""<cac:InvoiceLine>
+    <cbc:ID>{idx}</cbc:ID>
+    {note_xml}
+    <cbc:InvoicedQuantity unitCode="C62">{qty:g}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">{line_amount:.2f}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">{line_amount:.2f}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">{line_kdv:.2f}</cbc:TaxAmount>
+        <cbc:Percent>{li_kdv_rate:g}</cbc:Percent>
+        <cac:TaxCategory>
+          <cbc:TaxExemptionReasonCode>301</cbc:TaxExemptionReasonCode>
+          <cbc:TaxExemptionReason>11/1 - a Mal ihracatı</cbc:TaxExemptionReason>
+          <cac:TaxScheme>
+            <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+            <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>{name}</cbc:Name>
+      <cac:SellersItemIdentification>
+        <cbc:ID>{sku}</cbc:ID>
+      </cac:SellersItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{unit_price:.4f}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>""")
+
+        # Kargo bedeli — ayrı InvoiceLine olarak eklenir (sample böyle yapıyor)
+        if shipping_cost > 0:
+            sh_kdv_rate = 0.0  # ihracat istisnasi
+            sh_kdv = round(shipping_cost * sh_kdv_rate / 100.0, 2)
+            sh_taxable = round(shipping_cost - sh_kdv, 2)
+            kdv_total += sh_kdv
+            line_subtotal += sh_taxable
+            grp = kdv_groups.setdefault(sh_kdv_rate, {"taxable": 0.0, "tax": 0.0})
+            grp["taxable"] += sh_taxable
+            grp["tax"] += sh_kdv
+            next_idx = len(line_items) + 1
+            invoice_lines_xml.append(f"""<cac:InvoiceLine>
+    <cbc:ID>{next_idx}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">{sh_taxable:.2f}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">{sh_kdv:.2f}</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">{sh_taxable:.2f}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">{sh_kdv:.2f}</cbc:TaxAmount>
+        <cbc:Percent>{sh_kdv_rate:g}</cbc:Percent>
+        <cac:TaxCategory>
+          <cbc:TaxExemptionReasonCode>301</cbc:TaxExemptionReasonCode>
+          <cbc:TaxExemptionReason>11/1 - a Mal ihracatı</cbc:TaxExemptionReason>
+          <cac:TaxScheme>
+            <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+            <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Name>KARGO</cbc:Name>
+      <cac:SellersItemIdentification><cbc:ID>KARGO</cbc:ID></cac:SellersItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{sh_taxable:.4f}</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>""")
+
+        # İndirim — AllowanceCharge bloğu (root seviyesinde, TaxTotal öncesinde)
+        allowance_charges_xml = []
+        if discount > 0:
+            line_subtotal -= discount
+            allowance_charges_xml.append(f"""<cac:AllowanceCharge>
+    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+    <cbc:AllowanceChargeReason>İndirim</cbc:AllowanceChargeReason>
+    <cbc:Amount currencyID="{currency}">{discount:.2f}</cbc:Amount>
+  </cac:AllowanceCharge>""")
+
+        tax_inclusive_total = round(line_subtotal + kdv_total, 2)
+        payable_amount = tax_inclusive_total
+
+        # KDV TaxSubtotal blokları (multi-rate destekler)
+        tax_subtotals_xml = []
+        for rate, grp in sorted(kdv_groups.items()):
+            tax_subtotals_xml.append(f"""<cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="{currency}">{grp['taxable']:.2f}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="{currency}">{grp['tax']:.2f}</cbc:TaxAmount>
+      <cbc:Percent>{rate:g}</cbc:Percent>
+      <cac:TaxCategory>
+        <cbc:TaxExemptionReasonCode>301</cbc:TaxExemptionReasonCode>
+        <cbc:TaxExemptionReason>11/1 - a Mal ihracatı</cbc:TaxExemptionReason>
+        <cac:TaxScheme>
+          <cbc:Name>GERÇEK USULDE KATMA DEĞER VERGİSİ</cbc:Name>
+          <cbc:TaxTypeCode>0015</cbc:TaxTypeCode>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>""")
+
+        # ─── AccountingCustomerParty ─────────────────────────────────────
+        if is_individual:
+            parts = (customer_name or "").strip().split(" ", 1)
+            first_name = escape(parts[0])
+            last_name = escape(parts[1] if len(parts) > 1 else parts[0])
+            customer_name_block = f"""<cac:Person>
+        <cbc:FirstName>{first_name}</cbc:FirstName>
+        <cbc:FamilyName>{last_name}</cbc:FamilyName>
+      </cac:Person>"""
+            customer_legal_block = ""
+            customer_tax_scheme_block = ""
+        else:
+            customer_name_block = ""
+            customer_legal_block = f"""<cac:PartyName>
+        <cbc:Name>{escape(customer_name)}</cbc:Name>
+      </cac:PartyName>"""
+            customer_tax_scheme_block = f"""<cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:Name>{escape(customer_tax_office or '-')}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>"""
+
+        customer_contact_xml = ""
+        if customer_phone or customer_email:
+            tel_xml = f"<cbc:Telephone>{escape(customer_phone)}</cbc:Telephone>" if customer_phone else ""
+            mail_xml = f"<cbc:ElectronicMail>{escape(customer_email)}</cbc:ElectronicMail>" if customer_email else ""
+            customer_contact_xml = f"<cac:Contact>{tel_xml}{mail_xml}</cac:Contact>"
+        else:
+            customer_contact_xml = "<cac:Contact/>"
+
+        # ─── Notlar (sample birden fazla Note kullanıyor) ────────────────
+        def _tr_money_words(n):
+            n = int(round(float(n or 0)))
+            birler = ["", "Bir", "İki", "Üç", "Dört", "Beş", "Altı", "Yedi", "Sekiz", "Dokuz"]
+            onlar = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
+            def _uc(x):
+                s = ""; y = x // 100; k = (x % 100) // 10; b = x % 10
+                if y: s += ("" if y == 1 else birler[y]) + "Yüz"
+                if k: s += onlar[k]
+                if b: s += birler[b]
+                return s
+            if n == 0: return "Sıfır"
+            out = ""; mr = n // 10**9; mn = (n % 10**9) // 10**6; bn = (n % 10**6) // 1000; kl = n % 1000
+            if mr: out += _uc(mr) + "Milyar"
+            if mn: out += _uc(mn) + "Milyon"
+            if bn: out += (("" if bn == 1 else _uc(bn)) + "Bin")
+            if kl: out += _uc(kl)
+            return out
+
+        notes_xml = []
+        if order_number:
+            notes_xml.append(f"<cbc:Note>{escape(order_number)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Siparis No: {escape(order_number)} :Kargo Takip No: {escape(cargo_tracking)} :Sipariş ID: {escape(order_ext_id)}</cbc:Note>")
+        _satici_adr = (supplier_street or "").strip()
+        if _satici_adr:
+            notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
+        if customer_street:
+            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(customer_street)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+        notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
+        if store_name:
+            notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
+        if payment_method:
+            _pa = f" {payment_amount:.0f}TL" if payment_amount else ""
+            notes_xml.append(f"<cbc:Note>Ödeme :{escape(payment_method)}{_pa}</cbc:Note>")
+        if note:
+            notes_xml.append(f"<cbc:Note>{escape(note)}</cbc:Note>")
+        notes_xml.append("<cbc:Note>Bu Satış Internet Üzerinden Yapılmıştır.</cbc:Note>")
+
+        # ─── XML İskeleti ────────────────────────────────────────────────
+        supplier_website_xml = (f"<cbc:WebsiteURI>{escape(supplier_website)}</cbc:WebsiteURI>"
+                                if supplier_website else "")
+        supplier_contact_xml = "<cac:Contact/>"
+        if supplier_phone or supplier_email:
+            tel_xml = f"<cbc:Telephone>{escape(supplier_phone)}</cbc:Telephone>" if supplier_phone else ""
+            mail_xml = f"<cbc:ElectronicMail>{escape(supplier_email)}</cbc:ElectronicMail>" if supplier_email else ""
+            supplier_contact_xml = f"<cac:Contact>{tel_xml}{mail_xml}</cac:Contact>"
+
+        import uuid as _uuid
+        xslt_ref_id = str(_uuid.uuid4())
+        sending_ref_id = str(_uuid.uuid4())
+
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:qdt="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDatatypes-2" xmlns:ccts="urn:un:unece:uncefact:documentation:2" xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" xmlns:ubltr="urn:oasis:names:specification:ubl:schema:xsd:TurkishCustomizationExtensionComponents" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:udt="urn:un:unece:uncefact:data:specification:UnqualifiedDataTypesSchemaModule:2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2 UBL-Invoice-2.1.xsd">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>TR1.2</cbc:CustomizationID>
+  <cbc:ProfileID>EARSIVFATURA</cbc:ProfileID>
+  <cbc:ID>{escape(invoice_number)}</cbc:ID>
+  <cbc:CopyIndicator>false</cbc:CopyIndicator>
+  <cbc:UUID>{escape(invoice_uuid)}</cbc:UUID>
+  <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+  <cbc:IssueTime>{issue_time}</cbc:IssueTime>
+  <cbc:InvoiceTypeCode>ISTISNA</cbc:InvoiceTypeCode>
+  {''.join(notes_xml)}
+  <cbc:DocumentCurrencyCode>{currency}</cbc:DocumentCurrencyCode>
+  <cbc:LineCountNumeric>{len(invoice_lines_xml)}</cbc:LineCountNumeric>
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>{xslt_ref_id}</cbc:ID>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:DocumentType>XSLT</cbc:DocumentType>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject characterSetCode="UTF-8" encodingCode="Base64" filename="{escape(invoice_number)}.xslt" mimeCode="application/CSTAdata+xml">{DOGAN_XSLT_B64}</cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>{sending_ref_id}</cbc:ID>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:DocumentTypeCode>SendingType</cbc:DocumentTypeCode>
+    <cbc:DocumentType>ELEKTRONIK</cbc:DocumentType>
+  </cac:AdditionalDocumentReference>
+  <cac:Signature>
+    <cbc:ID schemeID="VKN_TCKN">{escape(supplier_vkn)}</cbc:ID>
+    <cac:SignatoryParty>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(supplier_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
+        <cac:Country>
+          <cbc:Name>{escape(supplier_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:Name>{escape(supplier_tax_office)}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      <cac:Contact/>
+    </cac:SignatoryParty>
+    <cac:DigitalSignatureAttachment>
+      <cac:ExternalReference>
+        <cbc:URI>#Signature_{escape(invoice_number)}</cbc:URI>
+      </cac:ExternalReference>
+    </cac:DigitalSignatureAttachment>
+  </cac:Signature>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      {supplier_website_xml}
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(supplier_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
+        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
+        <cac:Country>
+          <cbc:Name>{escape(supplier_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      <cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:Name>{escape(supplier_tax_office)}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      {supplier_contact_xml}
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="{party_id_scheme}">{escape(customer_vkn_or_tckn)}</cbc:ID>
+      </cac:PartyIdentification>
+      {customer_legal_block}
+      <cac:PostalAddress>
+        {customer_street_xml}
+        <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
+        <cbc:CityName>{escape(customer_city)}</cbc:CityName>
+        {customer_zone_xml}
+        <cac:Country>
+          <cbc:Name>{escape(customer_country)}</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+      {customer_tax_scheme_block}
+      {customer_contact_xml}
+      {customer_name_block}
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:Delivery>
+    <cac:CarrierParty>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="VKN">{escape(carrier_vkn)}</cbc:ID>
+      </cac:PartyIdentification>
+      <cac:PartyName>
+        <cbc:Name>{escape(carrier_name)}</cbc:Name>
+      </cac:PartyName>
+      <cac:PostalAddress>
+        <cbc:CitySubdivisionName/>
+        <cbc:CityName>{escape(carrier_city)}</cbc:CityName>
+        <cac:Country>
+          <cbc:Name>Türkiye</cbc:Name>
+        </cac:Country>
+      </cac:PostalAddress>
+    </cac:CarrierParty>
+    <cac:Despatch>
+      <cbc:ActualDespatchDate>{issue_date}</cbc:ActualDespatchDate>
+      <cbc:ActualDespatchTime>{issue_time}</cbc:ActualDespatchTime>
+    </cac:Despatch>
+  </cac:Delivery>
+  <cac:PaymentMeans>
+    <cbc:PaymentMeansCode>1</cbc:PaymentMeansCode>
+    <cbc:PaymentDueDate>{issue_date}</cbc:PaymentDueDate>
+    <cbc:InstructionNote>Odeme Tipi : {escape(payment_method)} - Web Adresi : {escape(supplier_website or 'facette.com.tr')}</cbc:InstructionNote>
+  </cac:PaymentMeans>
+  {''.join(allowance_charges_xml)}
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="{currency}">{kdv_total:.2f}</cbc:TaxAmount>
+    {''.join(tax_subtotals_xml)}
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="{currency}">{line_subtotal:.2f}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="{currency}">{line_subtotal:.2f}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="{currency}">{tax_inclusive_total:.2f}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="{currency}">{payable_amount:.2f}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  {''.join(invoice_lines_xml)}
+</Invoice>"""
+        return xml
+
+
     # ═════════════════ UBL-TR e-Fatura (TEMELFATURA) Üretimi ════════════
     @staticmethod
     def build_efatura_ubl_xml(*,
