@@ -120,17 +120,26 @@ _hb_sync_lock = asyncio.Lock()
 
 
 async def _get_hb_client():
-    """db.settings'ten Hepsiburada kimligini okuyup istemci kurar."""
-    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0})
-    if not s:
-        return None, "Hepsiburada ayarları kaydedilmemiş"
-    mid = (s.get("merchant_id") or "").strip()
-    sk = (s.get("secret_key") or s.get("password") or "").strip()
-    du = (s.get("dev_username") or "").strip()
+    """Hepsiburada kimligini once Pazaryerleri Yonetimi (marketplace_accounts),
+    yoksa eski db.settings'ten okur. Ortam: env/mode 'prod/production/canli' degilse sandbox."""
+    # 1) Birincil: marketplace_accounts.credentials (Pazaryerleri Yonetimi ekrani)
+    acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0})
+    cr = (acc or {}).get("credentials") or {}
+    mid = (cr.get("merchant_id") or "").strip()
+    sk = (cr.get("secret_key") or cr.get("password") or "").strip()
+    du = (cr.get("dev_username") or "").strip()
+    env = (cr.get("env") or cr.get("mode") or "").strip().lower()
+    # 2) Yedek: eski db.settings (Entegrasyonlar modali)
     if not (mid and sk and du):
-        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username)"
+        s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+        mid = mid or (s.get("merchant_id") or "").strip()
+        sk = sk or (s.get("secret_key") or s.get("password") or "").strip()
+        du = du or (s.get("dev_username") or "").strip()
+        env = env or (s.get("mode") or "").strip().lower()
+    if not (mid and sk and du):
+        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Pazaryerleri Yönetimi → Hepsiburada altından kaydedin."
+    test = env not in ("prod", "production", "live", "canli", "canlı")
     from hepsiburada_client import HepsiburadaClient
-    test = (s.get("mode", "sandbox") != "production")
     return HepsiburadaClient(mid, sk, du, test=test), None
 
 
