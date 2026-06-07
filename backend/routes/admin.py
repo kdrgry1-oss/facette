@@ -170,3 +170,106 @@ async def generate_barcode(
             detail="Barkod üretilemedi. Lütfen Ayarlar sayfasında barkod aralığınızı kontrol edin ve ürünlerinizde çakışma olmadığından emin olun."
         )
     return {"barcode": barcode}
+
+@router.get("/cleanup/dry-run")
+async def cleanup_dry_run(current_user: dict = Depends(require_admin)):
+    """Salt-okunur veri temizlik raporu (#1 combine + #3 mükerrer varyant).
+    HİÇBİR ŞEY DEĞİŞTİRMEZ; sadece rapor döner."""
+    from collections import defaultdict
+
+    def _norm(s):
+        return str(s or "").strip().lower()
+
+    def _has_image(p):
+        imgs = p.get("images") or []
+        return bool((imgs and str(imgs[0]).strip()) or str(p.get("image") or "").strip())
+
+    SAMPLE = 50
+
+    # Hafif ürün indeksi (id -> minimal)
+    prod = {}
+    async for p in db.products.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "is_active": 1, "images": 1, "image": 1}
+    ):
+        if p.get("id") is not None:
+            prod[str(p["id"])] = p
+    total_products = len(prod)
+
+    # ---- #1  BOZUK combine_products ----
+    c1 = {"missing": 0, "inactive": 0, "no_image": 0}
+    n_with_combine = 0
+    affected = 0
+    would_empty = 0
+    s1 = []
+    async for p in db.products.find(
+        {"combine_products": {"$exists": True, "$ne": []}},
+        {"_id": 0, "id": 1, "name": 1, "combine_products": 1},
+    ):
+        ids = p.get("combine_products") or []
+        if not ids:
+            continue
+        n_with_combine += 1
+        bad = []
+        good = 0
+        for cid in ids:
+            cid = str(cid)
+            ref = prod.get(cid)
+            if ref is None:
+                c1["missing"] += 1; bad.append([cid, "missing"])
+            elif ref.get("is_active") is False:
+                c1["inactive"] += 1; bad.append([cid, "inactive"])
+            elif not _has_image(ref):
+                c1["no_image"] += 1; bad.append([cid, "no_image"])
+            else:
+                good += 1
+        if bad:
+            affected += 1
+            if good == 0:
+                would_empty += 1
+            if len(s1) < SAMPLE:
+                s1.append({"id": p.get("id"), "name": (p.get("name") or "")[:60],
+                           "bad": len(bad), "total": len(ids), "detay": bad[:8]})
+
+    # ---- #3  AYNI BARKOD + AYNI BEDEN mükerrer varyant ----
+    dup_products = 0
+    dup_groups = 0
+    dup_extra = 0
+    s3 = []
+    async for p in db.products.find(
+        {"variants.0": {"$exists": True}},
+        {"_id": 0, "id": 1, "name": 1, "variants": 1},
+    ):
+        variants = p.get("variants") or []
+        groups = defaultdict(list)
+        for i, v in enumerate(variants):
+            bc = _norm(v.get("barcode"))
+            if not bc:
+                continue
+            groups[(bc, _norm(v.get("size")))].append(i)
+        dups = {k: idxs for k, idxs in groups.items() if len(idxs) > 1}
+        if dups:
+            dup_products += 1
+            for (bc, sz), idxs in dups.items():
+                dup_groups += 1
+                dup_extra += len(idxs) - 1
+                if len(s3) < SAMPLE:
+                    s3.append({"id": p.get("id"), "name": (p.get("name") or "")[:50],
+                               "barcode": bc, "size": sz, "count": len(idxs)})
+
+    return {
+        "total_products": total_products,
+        "combine_broken": {
+            "products_with_combine": n_with_combine,
+            "affected_products": affected,
+            "would_empty_after_clean": would_empty,
+            "counts": c1,
+            "samples": s1,
+        },
+        "duplicate_variants": {
+            "affected_products": dup_products,
+            "duplicate_groups": dup_groups,
+            "removable_extra_variants": dup_extra,
+            "samples": s3,
+        },
+        "note": "DRY-RUN — hicbir veri degistirilmedi.",
+    }
