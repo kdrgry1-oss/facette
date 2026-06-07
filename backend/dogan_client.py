@@ -269,9 +269,11 @@ class DoganClient:
         for idx, it in enumerate(line_items, start=1):
             qty = float(it.get("qty") or 1)
             unit_price = float(it.get("unit_price") or 0)
-            line_amount = round(qty * unit_price, 2)
             li_kdv_rate = float(it.get("kdv_rate") if it.get("kdv_rate") is not None else kdv_rate)
+            gross_line = round(qty * unit_price, 2)
+            line_amount = round(gross_line / (1.0 + li_kdv_rate / 100.0), 2)
             line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            net_unit_price = round(line_amount / qty, 4) if qty else line_amount
             line_subtotal += line_amount
             kdv_total += line_kdv
             grp = kdv_groups.setdefault(li_kdv_rate, {"taxable": 0.0, "tax": 0.0})
@@ -309,15 +311,15 @@ class DoganClient:
       </cac:SellersItemIdentification>
     </cac:Item>
     <cac:Price>
-      <cbc:PriceAmount currencyID="{currency}">{unit_price:.4f}</cbc:PriceAmount>
+      <cbc:PriceAmount currencyID="{currency}">{net_unit_price:.4f}</cbc:PriceAmount>
     </cac:Price>
   </cac:InvoiceLine>""")
 
         # Kargo bedeli — ayrı InvoiceLine olarak eklenir (sample böyle yapıyor)
         if shipping_cost > 0:
             sh_kdv_rate = 20.0
-            sh_kdv = round(shipping_cost * sh_kdv_rate / 100.0, 2)
-            sh_taxable = round(shipping_cost - sh_kdv, 2)
+            sh_taxable = round(shipping_cost / (1.0 + sh_kdv_rate / 100.0), 2)
+            sh_kdv = round(sh_taxable * sh_kdv_rate / 100.0, 2)
             kdv_total += sh_kdv
             line_subtotal += sh_taxable
             grp = kdv_groups.setdefault(sh_kdv_rate, {"taxable": 0.0, "tax": 0.0})
@@ -677,9 +679,11 @@ class DoganClient:
         for idx, it in enumerate(line_items, start=1):
             qty = float(it.get("qty") or 1)
             unit_price = float(it.get("unit_price") or 0)
-            line_amount = round(qty * unit_price, 2)
             li_kdv_rate = float(it.get("kdv_rate") if it.get("kdv_rate") is not None else kdv_rate)
+            gross_line = round(qty * unit_price, 2)
+            line_amount = round(gross_line / (1.0 + li_kdv_rate / 100.0), 2)
             line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            net_unit_price = round(line_amount / qty, 4) if qty else line_amount
             line_subtotal += line_amount
             kdv_total += line_kdv
             grp = kdv_groups.setdefault(li_kdv_rate, {"taxable": 0.0, "tax": 0.0})
@@ -721,15 +725,15 @@ class DoganClient:
       </cac:SellersItemIdentification>
     </cac:Item>
     <cac:Price>
-      <cbc:PriceAmount currencyID="{currency}">{unit_price:.4f}</cbc:PriceAmount>
+      <cbc:PriceAmount currencyID="{currency}">{net_unit_price:.4f}</cbc:PriceAmount>
     </cac:Price>
   </cac:InvoiceLine>""")
 
         # Kargo ayrı satır olarak (e-Fatura'da da)
         if shipping_cost > 0:
             sh_kdv_rate = 20.0
-            sh_kdv = round(shipping_cost * sh_kdv_rate / 100.0, 2)
-            sh_taxable = round(shipping_cost - sh_kdv, 2)
+            sh_taxable = round(shipping_cost / (1.0 + sh_kdv_rate / 100.0), 2)
+            sh_kdv = round(sh_taxable * sh_kdv_rate / 100.0, 2)
             kdv_total += sh_kdv
             line_subtotal += sh_taxable
             grp = kdv_groups.setdefault(sh_kdv_rate, {"taxable": 0.0, "tax": 0.0})
