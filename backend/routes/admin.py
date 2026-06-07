@@ -231,6 +231,7 @@ async def cleanup_dry_run(current_user: dict = Depends(require_admin)):
                            "bad": len(bad), "total": len(ids), "detay": bad[:8]})
 
     # ---- #3  AYNI BARKOD + AYNI BEDEN mükerrer varyant ----
+    # ---- #3  Ürün İÇİNDE aynı BEDEN birden fazla (2x S, 2x L ...) ----
     dup_products = 0
     dup_groups = 0
     dup_extra = 0
@@ -242,19 +243,35 @@ async def cleanup_dry_run(current_user: dict = Depends(require_admin)):
         variants = p.get("variants") or []
         groups = defaultdict(list)
         for i, v in enumerate(variants):
-            bc = _norm(v.get("barcode"))
-            if not bc:
-                continue
-            groups[(bc, _norm(v.get("size")))].append(i)
-        dups = {k: idxs for k, idxs in groups.items() if len(idxs) > 1}
+            groups[_norm(v.get("size"))].append(i)   # bedene göre grupla (barkod bağımsız)
+        dups = {sz: idxs for sz, idxs in groups.items() if len(idxs) > 1}
         if dups:
             dup_products += 1
-            for (bc, sz), idxs in dups.items():
+            for sz, idxs in dups.items():
                 dup_groups += 1
                 dup_extra += len(idxs) - 1
                 if len(s3) < SAMPLE:
+                    detay = [{"barcode": (variants[i].get("barcode") or ""),
+                              "stock": variants[i].get("stock")} for i in idxs[:6]]
                     s3.append({"id": p.get("id"), "name": (p.get("name") or "")[:50],
-                               "barcode": bc, "size": sz, "count": len(idxs)})
+                               "size": sz or "(boş)", "count": len(idxs), "detay": detay})
+
+    # ---- #3b  GLOBAL: farklı ürünlerde AYNI BARKOD (top-level + varyant) ----
+    barcode_products = defaultdict(set)
+    async for p in db.products.find(
+        {}, {"_id": 0, "id": 1, "barcode": 1, "variants": 1}
+    ):
+        pid = str(p.get("id"))
+        bc = _norm(p.get("barcode"))
+        if bc:
+            barcode_products[bc].add(pid)
+        for v in (p.get("variants") or []):
+            vb = _norm(v.get("barcode"))
+            if vb:
+                barcode_products[vb].add(pid)
+    cross = {bc: sorted(pids) for bc, pids in barcode_products.items() if len(pids) > 1}
+    cross_samples = [{"barcode": bc, "product_ids": pids[:8], "product_count": len(pids)}
+                     for bc, pids in list(cross.items())[:SAMPLE]]
 
     return {
         "total_products": total_products,
@@ -270,6 +287,10 @@ async def cleanup_dry_run(current_user: dict = Depends(require_admin)):
             "duplicate_groups": dup_groups,
             "removable_extra_variants": dup_extra,
             "samples": s3,
+        },
+        "duplicate_barcodes_cross_product": {
+            "barcodes_used_by_multiple_products": len(cross),
+            "samples": cross_samples,
         },
         "note": "DRY-RUN — hicbir veri degistirilmedi.",
     }
