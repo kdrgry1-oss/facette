@@ -24,6 +24,8 @@ KULLANAN FRONTEND:
 """
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
+import asyncio
+import re as _re
 
 from .deps import db, require_admin
 
@@ -114,6 +116,71 @@ def _tr_lower(s: str) -> str:
     )
 
 
+_hb_sync_lock = asyncio.Lock()
+
+
+async def _get_hb_client():
+    """db.settings'ten Hepsiburada kimligini okuyup istemci kurar."""
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0})
+    if not s:
+        return None, "Hepsiburada ayarları kaydedilmemiş"
+    mid = (s.get("merchant_id") or "").strip()
+    sk = (s.get("secret_key") or s.get("password") or "").strip()
+    du = (s.get("dev_username") or "").strip()
+    if not (mid and sk and du):
+        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username)"
+    from hepsiburada_client import HepsiburadaClient
+    test = (s.get("mode", "sandbox") != "production")
+    return HepsiburadaClient(mid, sk, du, test=test), None
+
+
+async def _sync_hb_categories(force=False):
+    """leaf+active+available HB kategorilerini db.hepsiburada_categories'e cache'ler.
+    Eszamanli cagrilarda kilit ile tek seferde calisir."""
+    async with _hb_sync_lock:
+        if not force:
+            existing = await db.hepsiburada_categories.count_documents({})
+            if existing > 0:
+                return existing, None
+        client, err = await _get_hb_client()
+        if err:
+            return 0, err
+        try:
+            cats = await asyncio.to_thread(client.iter_all_categories, True, True, True)
+        except Exception as e:
+            return 0, f"HB kategori çekme hatası: {e}"
+        docs = []
+        for c in cats:
+            if not (c.get("leaf") and c.get("available")):
+                continue
+            paths = c.get("paths") or []
+            full_path = " > ".join(paths) if paths else (c.get("displayName") or c.get("name") or "")
+            docs.append({
+                "category_id": c.get("categoryId"),
+                "name": c.get("name") or c.get("displayName"),
+                "full_path": full_path,
+                "parent_id": c.get("parentCategoryId"),
+                "leaf": True,
+                "_path_lower": _tr_lower(full_path),
+            })
+        await db.hepsiburada_categories.delete_many({})
+        if docs:
+            for i in range(0, len(docs), 1000):
+                await db.hepsiburada_categories.insert_many(docs[i:i + 1000])
+        return len(docs), None
+
+
+@router.post("/{marketplace}/sync-categories")
+async def sync_marketplace_categories(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Pazaryeri kategori cache'ini canli API'den yeniler (su an: hepsiburada)."""
+    if marketplace != "hepsiburada":
+        raise HTTPException(status_code=400, detail="Şimdilik sadece Hepsiburada senkronizasyonu destekleniyor")
+    n, err = await _sync_hb_categories(force=True)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"success": True, "count": n, "message": f"{n} Hepsiburada kategorisi senkronize edildi"}
+
+
 @router.get("/{marketplace}/options")
 async def search_marketplace_categories(
     marketplace: str,
@@ -130,6 +197,32 @@ async def search_marketplace_categories(
     """
     if marketplace not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+
+    if marketplace == "hepsiburada":
+        if (mode or "flat").lower() == "tree":
+            return {"tree": [], "hint": "Hepsiburada için liste (arama) görünümünü kullanın."}
+        # Cache bosse canli API'den senkronize et (ilk aramada bir kez)
+        if await db.hepsiburada_categories.count_documents({}) == 0:
+            _, err = await _sync_hb_categories()
+            if err:
+                return {"items": [], "hint": f"Hepsiburada kategorileri çekilemedi: {err}"}
+        tokens = [t for t in _tr_lower((q or "").strip()).split() if t]
+        query = {}
+        if tokens:
+            query = {"$and": [{"_path_lower": {"$regex": _re.escape(t)}} for t in tokens]}
+        rows = []
+        lim = max(1, min(2000, int(limit)))
+        async for c in db.hepsiburada_categories.find(query, {"_id": 0, "_path_lower": 0}).limit(lim):
+            rows.append({
+                "id": c.get("category_id"),
+                "name": c.get("name"),
+                "full_path": c.get("full_path"),
+                "parent_id": c.get("parent_id"),
+                "leaf": True,
+            })
+        rows.sort(key=lambda c: len(c["full_path"] or ""))
+        return {"items": rows, "count": len(rows)}
+
     if marketplace != "trendyol":
         return {"items": [], "tree": [], "hint": f"{marketplace} için kategori cache yok, manuel ID girin"}
 
