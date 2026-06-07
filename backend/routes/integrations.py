@@ -2764,6 +2764,117 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
         await log_integration_event("trendyol", "auto_import_job", "system", "-", "error", f"Toplu aktarım hatası: {str(e)}")
         raise HTTPException(status_code=500, detail="Sipariş aktarımı sırasında bir hata oluştu.")
 
+
+async def _backfill_trendyol_orders_job(days: int):
+    """Gecmis Trendyol siparislerini 14'er gunluk dilimlerle geriye giderek ceker.
+    Trendyol siparis ucu tek istekte ~2 haftadan genis araliga izin vermedigi icin
+    pencere pencere ilerler; her pencerede TUM sayfalar dolasilir. Arka planda calisir,
+    ilerleme integration_logs'a 'backfill' action ile yazilir."""
+    import sys, os, asyncio
+    from datetime import datetime, timezone, timedelta
+    try:
+        config = await get_trendyol_config()
+        if not config.get("is_active"):
+            return
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from trendyol_client import TrendyolClient
+        from .deps import generate_id
+
+        client = TrendyolClient(
+            supplier_id=config["supplier_id"],
+            api_key=config["api_key"],
+            api_secret=config["api_secret"],
+            mode=config["mode"],
+        )
+
+        CHUNK_DAYS = 14
+        MAX_PAGES = 50
+        now = datetime.now()
+        total_imported = 0
+        total_updated = 0
+        windows = 0
+        offset = 0
+        while offset < days:
+            win_end = now - timedelta(days=offset)
+            win_start = now - timedelta(days=min(offset + CHUNK_DAYS, days))
+            start_ms = int(win_start.timestamp() * 1000)
+            end_ms = int(win_end.timestamp() * 1000)
+            win_imported = 0
+            win_updated = 0
+            page = 0
+            while page < MAX_PAGES:
+                try:
+                    resp = await client.get_orders(
+                        start_date_ms=start_ms, end_date_ms=end_ms, size=200, page=page
+                    )
+                except Exception as _ex:
+                    logger.error(f"[backfill] get_orders hata (pencere {win_start.date()}..{win_end.date()} sayfa {page}): {_ex}")
+                    break
+                chunk = resp.get("content", []) or []
+                for t_order in chunk:
+                    try:
+                        number = str(t_order.get("orderNumber"))
+                        existing = await db.orders.find_one({"order_number": number, "platform": "trendyol"})
+                        data = map_trendyol_order(t_order)
+                        if existing:
+                            await db.orders.update_one({"_id": existing["_id"]}, {"$set": data})
+                            win_updated += 1
+                        else:
+                            data["id"] = generate_id()
+                            data["created_at"] = datetime.now(timezone.utc).isoformat()
+                            await db.orders.insert_one(data)
+                            win_imported += 1
+                    except Exception as _ex:
+                        logger.error(f"[backfill] order map/save hata: {_ex}")
+                total_pages = resp.get("totalPages") or 0
+                page += 1
+                if not chunk or page >= total_pages:
+                    break
+                await asyncio.sleep(0.3)
+            total_imported += win_imported
+            total_updated += win_updated
+            windows += 1
+            await log_integration_event(
+                "trendyol", "backfill", "order", "", "success",
+                f"[backfill] {win_start.strftime('%d.%m.%Y')}-{win_end.strftime('%d.%m.%Y')}: +{win_imported} yeni / {win_updated} guncellendi"
+            )
+            offset += CHUNK_DAYS
+            await asyncio.sleep(0.5)
+        await log_integration_event(
+            "trendyol", "backfill", "order", "", "success",
+            f"[backfill] TAMAMLANDI ({days} gun, {windows} pencere): toplam +{total_imported} yeni / {total_updated} guncellendi"
+        )
+    except Exception as e:
+        try:
+            await log_integration_event("trendyol", "backfill", "system", "-", "error", f"[backfill] hata: {e}")
+        except Exception:
+            pass
+
+
+@router.post("/trendyol/orders/backfill")
+async def backfill_trendyol_orders(payload: dict = Body(default={}), current_user: dict = Depends(require_admin)):
+    """Gecmis Trendyol siparislerini 14'er gunluk dilimlerle geriye giderek ceker.
+    Uzun surebilecegi icin arka planda calisir; ilerleme entegrasyon loglarinda
+    ('backfill' action) gorulur. body: {"days": 90} (varsayilan 90, 14..365)."""
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    import math, asyncio
+    try:
+        days = int((payload or {}).get("days") or 90)
+    except Exception:
+        days = 90
+    days = max(14, min(days, 365))
+    asyncio.create_task(_backfill_trendyol_orders_job(days))
+    windows = math.ceil(days / 14)
+    return {
+        "success": True,
+        "message": f"Trendyol siparis backfill baslatildi: son {days} gun (~{windows} pencere). Ilerleme entegrasyon loglarinda ('backfill').",
+        "days": days,
+        "windows": windows,
+    }
+
+
 class CategoryMappingReq(BaseModel):
     local_category_id: str
     local_name: str
