@@ -144,7 +144,7 @@ async def _run_trendyol_auto_orders_pull():
                     updated += 1
                 else:
                     data["id"] = generate_id()
-                    data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    data.setdefault("created_at", datetime.now(timezone.utc).isoformat())
                     await _db.orders.insert_one(data)
                     imported += 1
             except Exception as _ex:

@@ -2525,6 +2525,15 @@ async def log_integration_event(platform: str, action: str, entity_type: str, en
 def map_trendyol_order(t_order: dict) -> dict:
     from datetime import datetime, timezone
     order_number = t_order.get("orderNumber")
+    # Siparisin GERCEK Trendyol tarihi (epoch ms). Panel created_at'e gore
+    # siraladigi icin created_at'i bu tarihe esitliyoruz; boylece sonradan
+    # cekilen eski siparisler en uste degil kendi tarihine yerlesir.
+    _od_ms = t_order.get("orderDate") or t_order.get("orderDateMs")
+    try:
+        _order_dt = datetime.fromtimestamp(int(_od_ms) / 1000, tz=timezone.utc) if _od_ms else datetime.now(timezone.utc)
+    except Exception:
+        _order_dt = datetime.now(timezone.utc)
+    _order_iso = _order_dt.isoformat()
     
     items = []
     total_price = t_order.get("totalPrice", 0)
@@ -2623,6 +2632,9 @@ def map_trendyol_order(t_order: dict) -> dict:
         "is_micro_export": is_micro_export,
         "shipment_country": shipment_address.get("country", ""),
         "delivery_type": t_order.get("deliveryType", ""),
+        "order_date": _order_iso,
+        "order_date_ms": (int(_od_ms) if _od_ms else None),
+        "created_at": _order_iso,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -2672,7 +2684,7 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
                     updated_count += 1
                 else:
                     order_data["id"] = generate_id()
-                    order_data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    order_data.setdefault("created_at", datetime.now(timezone.utc).isoformat())
                     await db.orders.insert_one(order_data)
                     imported_count += 1
                 await log_integration_event("trendyol", "import_order", "order", order_number, "success", "Sipariş başarıyla aktarıldı.")
@@ -2768,8 +2780,14 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
 async def _backfill_trendyol_orders_job(days: int):
     """Gecmis Trendyol siparislerini 14'er gunluk dilimlerle geriye giderek ceker.
     Trendyol siparis ucu tek istekte ~2 haftadan genis araliga izin vermedigi icin
+<<<<<<< ours
     pencere pencere ilerler; her pencerede TUM sayfalar dolasilir. Arka planda calisir,
     ilerleme integration_logs'a 'backfill' action ile yazilir."""
+=======
+    pencere pencere ilerler; her pencerede TUM sayfalar dolasilir. Siparisler kendi
+    tarihine (created_at = orderDate) gore eklenir. Arka planda calisir; ilerleme
+    integration_logs'a 'backfill' action ile yazilir."""
+>>>>>>> theirs
     import sys, os, asyncio
     from datetime import datetime, timezone, timedelta
     try:
@@ -2821,7 +2839,11 @@ async def _backfill_trendyol_orders_job(days: int):
                             win_updated += 1
                         else:
                             data["id"] = generate_id()
+<<<<<<< ours
                             data["created_at"] = datetime.now(timezone.utc).isoformat()
+=======
+                            data.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+>>>>>>> theirs
                             await db.orders.insert_one(data)
                             win_imported += 1
                     except Exception as _ex:
