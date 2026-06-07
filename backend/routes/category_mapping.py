@@ -158,8 +158,15 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         return [], f"HB özellik çekme hatası: {e}"
     cat_attrs = (data or {}).get("attributes", []) or []
     out = []
+    media_attrs = []
     for a in cat_attrs:
         atype = (a.get("type") or "").lower()
+        # media (gorsel) tipli alanlar urun gonderiminde urun gorsellerinden doldurulur;
+        # metin/yerel-ozellik eslestirmesi yapilmaz -> mapping listesine alinmaz, ayri saklanir.
+        if atype == "media":
+            media_attrs.append({"id": a.get("id"), "name": a.get("name"),
+                                "required": bool(a.get("mandatory")), "type": a.get("type")})
+            continue
         norm = {
             "id": a.get("id"),
             "name": a.get("name"),
@@ -181,7 +188,8 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out,
+            {"$set": {"category_id": key, "attributes": out, "_v": 2,
+                      "media_attributes": media_attrs,
                       "base_attributes": (data or {}).get("baseAttributes", []),
                       "updated_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True,
@@ -1462,7 +1470,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs:
+        if not attrs or (cached or {}).get("_v") != 2:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {
