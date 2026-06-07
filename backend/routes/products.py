@@ -58,6 +58,22 @@ def _slug_to_diacritic_regex(slug: str) -> str:
             parts.append(re.escape(ch))
     return ''.join(parts)
 
+
+def _search_tr_regex(s: str) -> str:
+    """Serbest metin arama için Türkçe duyarsız regex.
+    MongoDB $options:'i' Türkçe İ↔i / ı↔I eşlemesini yapmadığından her Türkçe
+    harf ailesini kapsayan bir karakter sınıfına çeviririz → 'büstiyer',
+    'Büstiyer' ve 'BÜSTİYER' hepsi aynı sonucu verir."""
+    cls = {
+        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
+        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
+        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
+        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
+        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
+        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
+    }
+    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
+
 @router.get("")
 async def get_products(
     request: Request,
@@ -118,7 +134,20 @@ async def get_products(
     and_clauses: list = []
     # Çöp kutusundaki (soft-deleted) ürünler normal listelerde/storefront'ta görünmez
     query["is_deleted"] = {"$ne": True}
-    
+
+    # Admin (token'lı istek): status verilmemişse pasif ürünler de görünsün ki
+    # arama/listede hiçbir ürün "kaybolmasın". Storefront token göndermez →
+    # aktif default korunur, vitrin etkilenmez.
+    if status is None:
+        _auth = request.headers.get("authorization") or ""
+        if _auth.lower().startswith("bearer "):
+            try:
+                from .deps import _decode_jwt_strict
+                if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
+                    status = "all"
+            except Exception:
+                pass
+
     # Status default to active for storefront compatibility unless specified differently
     if status == "all":
         pass
@@ -207,7 +236,7 @@ async def get_products(
     
     if search:
         import re as _re
-        esc = _re.escape(search.strip())
+        esc = _search_tr_regex(search)  # Türkçe duyarsız (İ/ı/ş/ç/ğ/ö/ü dahil)
         query["$or"] = [
             {"name": {"$regex": esc, "$options": "i"}},
             {"description": {"$regex": esc, "$options": "i"}},
