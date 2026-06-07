@@ -1036,6 +1036,23 @@ async def create_invoice_for_order(
                          else ""),
             })
 
+        # Taşıyan (kargo firması) — siparişin Trendyol'da beyan edilen kargosundan DİNAMİK.
+        # Bilinen firmalar için ad+VKN; bilinmeyende Trendyol'un beyan adı, VKN boş (UBL'de atlanır).
+        _cpn = (order.get("cargo_provider_name") or "")
+        _cpl = _cpn.lower()
+        if "trendyol" in _cpl:
+            _carrier_name, _carrier_vkn, _carrier_city = "Trendyol Lojistik A.Ş.", "8590921777", "İstanbul"
+        elif "mng" in _cpl:
+            _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
+        elif ("yurtiçi" in _cpl) or ("yurtici" in _cpl):
+            _carrier_name, _carrier_vkn, _carrier_city = "YURTİÇİ KARGO SERVİSİ A.Ş.", "9860008925", "İstanbul"
+        elif "aras" in _cpl:
+            _carrier_name, _carrier_vkn, _carrier_city = "ARAS KARGO YURT İÇİ YURT DIŞI TAŞIMACILIK A.Ş.", "0720039666", "İstanbul"
+        elif _cpn.strip():
+            _carrier_name, _carrier_vkn, _carrier_city = _cpn.replace("Marketplace", "").strip(" -"), "", "İstanbul"
+        else:
+            _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
+
         ubl_xml = DoganClient.build_earsiv_ubl_xml(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
@@ -1070,6 +1087,9 @@ async def create_invoice_for_order(
             order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
             store_name=order.get("store_name") or order.get("marketplace") or "",
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
+            carrier_name=_carrier_name,
+            carrier_vkn=_carrier_vkn,
+            carrier_city=_carrier_city,
             note="",
         )
 
