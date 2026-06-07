@@ -1068,6 +1068,7 @@ async def create_invoice_for_order(
         )
 
         if not dogan_result.get("success"):
+            logger.error(f"DOGAN_RET earsiv: {dogan_result}")
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
             raise HTTPException(
                 status_code=502,
@@ -1164,6 +1165,7 @@ async def create_invoice_for_order(
         )
 
         if not dogan_result.get("success"):
+            logger.error(f"DOGAN_RET efatura: {dogan_result}")
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
