@@ -2549,6 +2549,7 @@ def map_trendyol_order(t_order: dict) -> dict:
             "price": net_price, # Net ödenen birim fiyat (Faturalandırılan)
             "size": line.get("productSize", ""),
             "color": line.get("productColor", ""),
+            "barcode": line.get("barcode", ""),
             "currency": line.get("currencyCode", "TRY")
         })
 

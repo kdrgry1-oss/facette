@@ -1066,7 +1066,7 @@ async def create_invoice_for_order(
             discount=0.0,
             order_number=order.get("order_number") or order_id,
             payment_method=order.get("payment_method") or "DIGER",
-            cargo_tracking=order.get("cargo_tracking") or order.get("tracking_number") or "",
+            cargo_tracking=str(order.get("cargo_tracking_number") or order.get("cargo_tracking") or order.get("tracking_number") or ""),
             order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
             store_name=order.get("store_name") or order.get("marketplace") or "",
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
