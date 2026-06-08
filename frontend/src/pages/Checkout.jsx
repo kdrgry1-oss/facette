@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
+import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -248,7 +248,7 @@ export default function Checkout() {
       }
     }
     if (addressModal === "shipping") {
-      setShippingAddress({ ...addressForm, email: user?.email || addressForm.email || "" });
+      setShippingAddress({ ...addressForm, email: user?.email || addressForm.email || shippingAddress.email || "" });
       if (billingSameAsShipping) setBillingAddress({ ...addressForm });
     } else {
       setBillingAddress({ ...addressForm });
@@ -259,7 +259,7 @@ export default function Checkout() {
 
   const pickSavedAddress = (a) => {
     if (addressModal === "shipping") {
-      setShippingAddress({ ...a, email: user?.email || "" });
+      setShippingAddress({ ...a, email: user?.email || a.email || shippingAddress.email || "" });
       if (billingSameAsShipping) setBillingAddress({ ...a });
     } else {
       setBillingAddress({ ...a });
@@ -278,6 +278,8 @@ export default function Checkout() {
       const tn = (corporateData.tax_number || "").replace(/\D/g, "");
       if (tn.length !== 10 && tn.length !== 11) { toast.error("VKN (10 hane) veya TCKN (11 hane) hatalı"); return false; }
     }
+    const _email = (shippingAddress.email || user?.email || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(_email)) { toast.error("Lütfen geçerli bir e-posta adresi girin"); return false; }
     return true;
   };
 
@@ -507,6 +509,39 @@ export default function Checkout() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* 1.5) İletişim — e-posta (üyeliksiz alışveriş için zorunlu) */}
+              <div className="bg-white border border-black/10" data-testid="contact-block">
+                <div className="px-5 py-4 border-b flex items-center gap-3">
+                  <Mail size={18} className="text-black" />
+                  <span className="font-medium">İletişim Bilgileri</span>
+                </div>
+                <div className="p-5">
+                  <label className="block text-xs text-gray-700 mb-1">E-posta *</label>
+                  <input
+                    type="email"
+                    value={shippingAddress.email || ""}
+                    onChange={(e) => setShippingAddress((p) => ({ ...p, email: e.target.value }))}
+                    placeholder="ornek@eposta.com"
+                    autoComplete="email"
+                    data-testid="contact-email"
+                    className="w-full border rounded px-3 py-2 text-sm"
+                    required
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1.5">
+                    Sipariş onayı ve faturanız bu adrese gönderilir. Üyelik gerekmez.
+                  </p>
+                  {!user && (
+                    <p className="text-[11px] text-gray-600 mt-2">
+                      Hesabın var mı?{" "}
+                      <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Giriş yap</a>
+                      {" · "}
+                      <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Üye ol</a>
+                      {" — ya da üyeliksiz devam et."}
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* 2) Adres */}

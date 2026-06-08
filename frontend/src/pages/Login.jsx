@@ -12,6 +12,7 @@ const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || "49503095707-
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
+  const _redirectTo = new URLSearchParams(location.search).get("redirect") || "/hesabim";
   const { login, register, user, loginWithToken } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,7 +40,7 @@ export default function Login() {
       if (res.data?.success) {
         loginWithToken(res.data.token, res.data.user);
         toast.success("Google ile giriş başarılı!");
-        navigate("/hesabim");
+        navigate(_redirectTo);
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Google ile giriş başarısız");
@@ -84,7 +85,7 @@ export default function Login() {
   }, []);
 
   if (user) {
-    navigate("/hesabim");
+    navigate(_redirectTo);
     return null;
   }
 
@@ -100,7 +101,7 @@ export default function Login() {
         await login(formData.email, formData.password);
         toast.success("Giriş başarılı!");
       }
-      navigate("/hesabim");
+      navigate(_redirectTo);
     } catch (err) {
       toast.error(err.response?.data?.detail || "İşlem başarısız");
     } finally {

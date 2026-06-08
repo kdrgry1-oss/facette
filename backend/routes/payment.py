@@ -21,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets as _secrets
 from datetime import datetime, timezone
 
@@ -85,7 +86,8 @@ def _build_initialize_payload(order: dict, callback_url: str) -> dict:
     first = (ship.get("first_name") or "").strip() or "Müşteri"
     last = (ship.get("last_name") or "").strip() or "Facette"
     contact = f"{first} {last}".strip()
-    email = ship.get("email") or order.get("email") or "[email protected]"
+    _raw_email = (ship.get("email") or order.get("email") or "").strip()
+    email = _raw_email if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", _raw_email) else "siparis@facette.com.tr"
     address = (ship.get("address") or "Adres").strip()
     city = (ship.get("city") or "İstanbul").strip()
     zipcode = str(ship.get("postal_code") or ship.get("zip_code") or "34000")
