@@ -2609,6 +2609,7 @@ def map_trendyol_order(t_order: dict) -> dict:
             "city": invoice_address.get("city", ""),
             "district": invoice_address.get("district", ""),
             "country": invoice_address.get("country", ""),
+            "company_name": invoice_address.get("company") or invoice_address.get("companyName") or "",
             "tax_number": invoice_address.get("taxNumber", ""),
             "tax_office": invoice_address.get("taxOffice", "")
         },

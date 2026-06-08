@@ -932,7 +932,10 @@ async def create_invoice_for_order(
     # mükellef sorgula → mükellef ise e-Fatura, değilse e-Arşiv. Boşsa e-Arşiv.
     bill = order.get("billing_address") or {}
     ship_addr = order.get("shipping_address") or {}
-    customer_vkn_raw = (bill.get("tax_no") or "").strip().replace(" ", "")
+    customer_vkn_raw = (bill.get("tax_number") or bill.get("tax_no") or bill.get("vkn") or "").strip().replace(" ", "")
+    if not customer_vkn_raw:
+        # Bireysel müşteri: Trendyol TCKN'i identityNumber alanında gelir
+        customer_vkn_raw = (str(order.get("trendyol_identity_number") or "")).strip().replace(" ", "")
     receiver_alias = ""
 
     if invoice_type == "auto" and dogan_active:
@@ -1030,7 +1033,7 @@ async def create_invoice_for_order(
 
         # Müşteri VKN/TCKN — order'dan al, yoksa default 11111111111 (TCKN bilinmiyor)
         customer_vkn = customer_vkn_raw
-        customer_name = (bill.get("name") or
+        customer_name = (bill.get("company_name") or bill.get("name") or
                          f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
                          "Bireysel Müşteri")
         if not customer_vkn:
@@ -1181,16 +1184,20 @@ async def create_invoice_for_order(
                 detail="e-Fatura için 10 (VKN) veya 11 (TCKN) haneli kimlik gerekli, müşteride yok."
             )
         _ef_scheme = "TCKN" if len(customer_vkn) == 11 else "VKN"
-        customer_name = (bill.get("name") or
+        customer_name = (bill.get("company_name") or bill.get("name") or
                          f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
                          "Müşteri")
-        # Birey (TCKN) için Ad/Soyad — Person bloğu builder'da bundan kurulur
-        _ef_first = (ship_addr.get("first_name") or "").strip()
-        _ef_family = (ship_addr.get("last_name") or "").strip()
-        if _ef_scheme == "TCKN" and not (_ef_first or _ef_family):
-            _np = (customer_name or "").split()
-            _ef_first = " ".join(_np[:-1]) if len(_np) > 1 else (customer_name or "")
-            _ef_family = _np[-1] if len(_np) > 1 else ""
+        # Birey (TCKN) için Ad/Soyad — Person bloğu builder'da bundan kurulur.
+        # Tüzel (VKN) için Person YOK; PartyName = firma unvanı kullanılır.
+        _ef_first = ""
+        _ef_family = ""
+        if _ef_scheme == "TCKN":
+            _ef_first = (ship_addr.get("first_name") or "").strip()
+            _ef_family = (ship_addr.get("last_name") or "").strip()
+            if not (_ef_first or _ef_family):
+                _np = (customer_name or "").split()
+                _ef_first = " ".join(_np[:-1]) if len(_np) > 1 else (customer_name or "")
+                _ef_family = _np[-1] if len(_np) > 1 else ""
 
         # receiver_alias auto-mode'da çekildi; explicit invoice_type=e-fatura
         # çağrısında alias yoksa CheckUser ile tamamla
