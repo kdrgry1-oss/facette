@@ -280,7 +280,7 @@ export default function AdminProducts() {
 
   const [formData, setFormData] = useState({
     name: "", slug: "", description: "", short_description: "",
-    price: 0, sale_price: null, category_name: "", brand: "FACETTE",
+    price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
     images: [], is_active: true, is_featured: false, is_new: false,
     stock: 0, stock_code: "", barcode: "", sku: "",
     urun_karti_id: "", urun_id: "",
@@ -1101,6 +1101,10 @@ export default function AdminProducts() {
       price: product.price || 0,
       sale_price: product.sale_price || null,
       category_name: product.category_name || "",
+      categories: (Array.isArray(product.categories) && product.categories.length)
+        ? product.categories
+        : (product.category_id ? [product.category_id]
+           : (categories.find(c => c.name === product.category_name)?.id ? [categories.find(c => c.name === product.category_name).id] : [])),
       brand: product.brand || "FACETTE",
       images: product.images || [],
       is_active: product.is_active ?? true,
@@ -1178,7 +1182,7 @@ export default function AdminProducts() {
     setShowAllAttributes(false);
     setFormData({
       name: "", slug: "", description: "", short_description: "",
-      price: 0, sale_price: null, category_name: "", brand: "FACETTE",
+      price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
       images: [], is_active: true, is_featured: false, is_new: false,
       stock: 0, stock_code: "", barcode: "", sku: "",
       urun_karti_id: "", urun_id: "",
@@ -1767,24 +1771,39 @@ export default function AdminProducts() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kategori</label>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kategoriler (birden fazla seçilebilir)</label>
                           <div className="relative">
-                            <div 
+                            <div
                               className="w-full border-gray-200 border px-3 py-2.5 rounded-lg focus-within:border-black bg-white flex items-center justify-between cursor-pointer transition-all"
                               onClick={() => setCategorySearchOpen(!categorySearchOpen)}
                             >
-                              <span className={formData.category_name ? "text-black text-sm" : "text-gray-400 text-sm"}>
-                                {formData.category_name ? (categories.find(c => c.name === formData.category_name)?.full_name || formData.category_name) : "Seçiniz"}
+                              <span className={(formData.categories?.length) ? "text-black text-sm" : "text-gray-400 text-sm"}>
+                                {(formData.categories?.length) ? `${formData.categories.length} kategori seçili` : "Seçiniz"}
                               </span>
                               <ChevronDown size={16} className="text-gray-400" />
                             </div>
-                            
+
+                            {(formData.categories?.length > 0) && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {formData.categories.map((cid) => {
+                                  const cc = categories.find(x => x.id === cid);
+                                  return (
+                                    <span key={cid} className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded px-2 py-0.5 text-xs">
+                                      {cc ? (cc.full_name || cc.name) : cid}
+                                      <button type="button" className="text-gray-400 hover:text-red-600"
+                                        onClick={(e) => { e.stopPropagation(); const next = formData.categories.filter(id => id !== cid); setFormData({ ...formData, categories: next, category_name: next[0] ? (categories.find(x => x.id === next[0])?.name || formData.category_name) : "" }); }}>×</button>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+
                             {categorySearchOpen && (
-                              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-72 overflow-y-auto">
                                 <div className="p-2 sticky top-0 bg-white border-b">
-                                  <input 
-                                    type="text" 
-                                    placeholder="Kategori ara..." 
+                                  <input
+                                    type="text"
+                                    placeholder="Kategori ara..."
                                     className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm outline-none focus:border-black bg-gray-50 focus:bg-white transition-colors"
                                     value={categorySearchTerm}
                                     onChange={(e) => setCategorySearchTerm(e.target.value)}
@@ -1793,22 +1812,32 @@ export default function AdminProducts() {
                                   />
                                 </div>
                                 <div className="p-1">
-                                  <div 
-                                    className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer rounded text-gray-500"
-                                    onClick={() => { setFormData({...formData, category_name: ""}); setCategorySearchOpen(false); }}
-                                  >
-                                    Seçiniz
-                                  </div>
-                                  {categories.filter(c => (c.full_name || c.name).toLowerCase().includes(categorySearchTerm.toLowerCase())).map(c => (
-                                    <div 
-                                      key={c.id}
-                                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer rounded truncate"
-                                      title={c.full_name || c.name}
-                                      onClick={() => { setFormData({...formData, category_name: c.name}); setCategorySearchOpen(false); setCategorySearchTerm(""); }}
-                                    >
-                                      {c.full_name || c.name}
-                                    </div>
-                                  ))}
+                                  {categories.filter(c => (c.full_name || c.name).toLowerCase().includes(categorySearchTerm.toLowerCase())).map(c => {
+                                    const checked = (formData.categories || []).includes(c.id);
+                                    return (
+                                      <label
+                                        key={c.id}
+                                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer rounded"
+                                        title={c.full_name || c.name}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="accent-black shrink-0"
+                                          checked={checked}
+                                          onChange={(e) => {
+                                            const cur = formData.categories || [];
+                                            const next = e.target.checked ? [...cur, c.id] : cur.filter(id => id !== c.id);
+                                            setFormData({ ...formData, categories: next, category_name: next[0] ? (categories.find(x => x.id === next[0])?.name || c.name) : "" });
+                                          }}
+                                        />
+                                        <span className="truncate">{c.full_name || c.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                <div className="p-2 border-t sticky bottom-0 bg-white flex justify-end">
+                                  <button type="button" className="text-xs px-3 py-1 bg-black text-white rounded hover:bg-gray-800" onClick={() => { setCategorySearchOpen(false); setCategorySearchTerm(""); }}>Tamam</button>
                                 </div>
                               </div>
                             )}

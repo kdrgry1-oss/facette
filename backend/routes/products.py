@@ -546,6 +546,22 @@ async def get_color_siblings(product_id: str):
         })
     return {"siblings": siblings}
 
+async def _expand_category_ids(selected_ids):
+    """Seçilen kategori id'lerini atalarıyla birlikte düzleştirir (vitrin category_ids için)."""
+    sel = [str(c) for c in (selected_ids or []) if c]
+    if not sel:
+        return []
+    cats = await db.categories.find({}, {"_id": 0, "id": 1, "parent_id": 1}).to_list(5000)
+    parent = {c.get("id"): c.get("parent_id") for c in cats if c.get("id")}
+    result, seen = [], set()
+    for cid in sel:
+        cur, guard = cid, 0
+        while cur and cur not in seen and guard < 50:
+            seen.add(cur); result.append(cur)
+            cur = parent.get(cur); guard += 1
+    return result
+
+
 @router.post("")
 async def create_product(
     product_data: dict,
@@ -576,6 +592,12 @@ async def create_product(
 
     _pid = await generate_short_id("products")
     _card = product_data.get("csv_card_id") or product_data.get("urun_karti_id") or _pid
+    _sel_cats = product_data.get("categories")
+    if not _sel_cats and product_data.get("category_id"):
+        _sel_cats = [product_data.get("category_id")]
+    _sel_cats = [str(x) for x in (_sel_cats or []) if x]
+    _cat_ids_all = await _expand_category_ids(_sel_cats)
+    _primary_cat = _sel_cats[0] if _sel_cats else ""
     product = {
         "id": _pid,
         "name": product_data.get("name", ""),
@@ -585,6 +607,9 @@ async def create_product(
         "price": float(product_data.get("price", 0)),
         "sale_price": product_data.get("sale_price"),
         "category_name": product_data.get("category_name", ""),
+        "category_id": _primary_cat,
+        "category_ids": _cat_ids_all,
+        "categories": _sel_cats,
         "brand": product_data.get("brand", "FACETTE"),
         "images": product_data.get("images", []),
         "variants": product_data.get("variants", []),
@@ -658,6 +683,19 @@ async def update_product(
             if barcode:
                 v["barcode"] = barcode
     
+    if ("categories" in product_data) or ("category_id" in product_data):
+        _sel = product_data.get("categories")
+        if _sel is None and product_data.get("category_id"):
+            _sel = [product_data.get("category_id")]
+        _sel = [str(x) for x in (_sel or []) if x]
+        product_data["categories"] = _sel
+        product_data["category_ids"] = await _expand_category_ids(_sel)
+        if _sel:
+            product_data["category_id"] = _sel[0]
+            _pc = await db.categories.find_one({"id": _sel[0]}, {"_id": 0, "name": 1})
+            if _pc and _pc.get("name"):
+                product_data["category_name"] = _pc["name"]
+
     product_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.products.update_one({"id": product_id}, {"$set": product_data})
