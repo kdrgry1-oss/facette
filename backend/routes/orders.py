@@ -43,7 +43,7 @@ async def next_order_number() -> str:
 @router.get("")
 async def get_orders(
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=1000),
     status: Optional[str] = None,
     search: Optional[str] = None,
     phone: Optional[str] = None,
@@ -54,6 +54,13 @@ async def get_orders(
     end_date: Optional[str] = None,
     payment_method: Optional[str] = None,
     platform: Optional[str] = None,
+    invoice_number: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    channel: Optional[str] = None,
+    source: Optional[str] = None,
+    coupon_code: Optional[str] = None,
+    influencer: Optional[str] = None,
+    is_corporate: Optional[str] = None,
     current_user: dict = Depends(require_admin)
 ):
     """Get orders with pagination (admin only)"""
@@ -74,6 +81,20 @@ async def get_orders(
         query["payment_method"] = payment_method
     if platform:
         query["platform"] = platform
+    if invoice_number:
+        query["invoice_number"] = {"$regex": invoice_number, "$options": "i"}
+    if payment_status:
+        query["payment_status"] = payment_status
+    if channel:
+        query["attribution.channel"] = {"$regex": channel, "$options": "i"}
+    if source:
+        query["attribution.source"] = {"$regex": source, "$options": "i"}
+    if coupon_code:
+        query["coupon_code"] = {"$regex": coupon_code, "$options": "i"}
+    if influencer and str(influencer).lower() not in ("0", "false", ""):
+        query["influencer_id"] = {"$exists": True, "$ne": None}
+    if is_corporate and str(is_corporate).lower() not in ("0", "false", ""):
+        query["billing_info.is_corporate"] = True
         
     date_query = {}
     if start_date:
@@ -86,6 +107,8 @@ async def get_orders(
     if search:
         query["$or"] = [
             {"order_number": {"$regex": search, "$options": "i"}},
+            {"invoice_number": {"$regex": search, "$options": "i"}},
+            {"cargo_tracking": {"$regex": search, "$options": "i"}},
             {"shipping_address.first_name": {"$regex": search, "$options": "i"}},
             {"shipping_address.last_name": {"$regex": search, "$options": "i"}},
             {"shipping_address.phone": {"$regex": search, "$options": "i"}},
