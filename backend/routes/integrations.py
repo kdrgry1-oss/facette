@@ -2557,18 +2557,21 @@ def map_trendyol_order(t_order: dict) -> dict:
     invoice_address = t_order.get("invoiceAddress", {})
 
     # --- Mikro İhracat Tespiti ---
-    # Trendyol uluslararası/mikro ihracat siparişlerinde country != "Türkiye"
-    # veya `deliveryType` / `originShipmentDate` ile birlikte "InternationalMicroExport"
-    # bayrağı görülür. Bu tür siparişler Türkiye içi e-arşiv yerine gümrük
-    # beyannamesi / ETGB ile faturalandırılır.
-    country = (shipment_address.get("country") or "").lower()
-    is_intl = bool(country) and country not in ("turkey", "türkiye", "tr", "")
+    # KESİN gösterge: Trendyol paketindeki `micro` bayrağı (ve ETGB no/tarihi).
+    # Adres ülkesine güvenilmez: mikro ihracatta kargo Türkiye içi aktarım
+    # noktasına teslim edildiği için shipmentAddress.country = "Türkiye" görünür;
+    # yabancı ülke invoiceAddress (alıcı) tarafındadır. Bu yüzden yedek ülke
+    # kontrolü invoiceAddress üzerinden yapılır.
     delivery_type = (t_order.get("deliveryType") or "").lower()
-    is_micro_export = (
-        is_intl
+    _buyer_country = (invoice_address.get("country") or "").strip().lower()
+    _is_intl_buyer = bool(_buyer_country) and _buyer_country not in ("turkey", "türkiye", "tr")
+    is_micro_export = bool(
+        t_order.get("micro")                 # birincil/kesin bayrak
+        or t_order.get("etgbNo")             # ETGB numarası => mikro ihracat
+        or t_order.get("etgbDate")
         or "micro" in delivery_type
         or "international" in delivery_type
-        or bool(t_order.get("micro"))
+        or _is_intl_buyer                    # yedek: ALICI ülkesi TR dışı
     )
     
     status_map = {
@@ -2595,7 +2598,8 @@ def map_trendyol_order(t_order: dict) -> dict:
             "email": t_order.get("customerEmail", ""),
             "address": shipment_address.get("fullAddress", ""),
             "city": shipment_address.get("city", ""),
-            "district": shipment_address.get("district", "")
+            "district": shipment_address.get("district", ""),
+            "country": shipment_address.get("country", "")
         },
         "billing_address": {
             "first_name": invoice_address.get("firstName", "Trendyol"),
@@ -2604,6 +2608,7 @@ def map_trendyol_order(t_order: dict) -> dict:
             "address": invoice_address.get("fullAddress", ""),
             "city": invoice_address.get("city", ""),
             "district": invoice_address.get("district", ""),
+            "country": invoice_address.get("country", ""),
             "tax_number": invoice_address.get("taxNumber", ""),
             "tax_office": invoice_address.get("taxOffice", "")
         },

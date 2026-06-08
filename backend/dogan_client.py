@@ -179,6 +179,7 @@ class DoganClient:
                               issue_time: str,            # HH:MM:SS
                               supplier_vkn: str,
                               supplier_name: str,
+                              platform_label: str = "",
                               supplier_district: str = "",
                               supplier_city: str = "",
                               supplier_street: str = "",
@@ -241,6 +242,7 @@ class DoganClient:
         supplier_email = _s(supplier_email)
         supplier_website = _s(supplier_website)
         supplier_street = _s(supplier_street)
+        _sup_street_line = f"<cbc:StreetName>{escape(supplier_street)}</cbc:StreetName>" if supplier_street else ""
         supplier_district = _s(supplier_district)
         supplier_city = _s(supplier_city) or "İstanbul"
         supplier_tax_office = _s(supplier_tax_office) or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI"
@@ -438,14 +440,22 @@ class DoganClient:
         if _satici_adr:
             notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
         if customer_street:
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(customer_street)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+            import re as _re
+            _cs = _re.sub(r"\s+", " ", str(customer_street)).strip()
+            _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
+            if _cd and _cc:
+                _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
+            _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
+            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Delivery; {escape(_cs_full)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
-        if payment_method:
-            _pa = f" {payment_amount:.0f}TL" if payment_amount else ""
-            notes_xml.append(f"<cbc:Note>Ödeme :{escape(payment_method)}{_pa}</cbc:Note>")
+        if payment_method or platform_label:
+            _lbl = (platform_label or payment_method).strip()
+            _amt = payment_amount if payment_amount else payable_amount
+            _amt_str = f"{_amt:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            notes_xml.append(f"<cbc:Note>Ödeme : {escape(_lbl)} {_amt_str} TL</cbc:Note>")
         if note:
             notes_xml.append(f"<cbc:Note>{escape(note)}</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış Internet Üzerinden Yapılmıştır.</cbc:Note>")
@@ -502,7 +512,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>
@@ -532,7 +542,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>
@@ -613,6 +623,7 @@ class DoganClient:
                               issue_time: str,            # HH:MM:SS
                               supplier_vkn: str,
                               supplier_name: str,
+                              platform_label: str = "",
                               supplier_district: str = "",
                               supplier_city: str = "",
                               supplier_street: str = "",
@@ -675,6 +686,7 @@ class DoganClient:
         supplier_email = _s(supplier_email)
         supplier_website = _s(supplier_website)
         supplier_street = _s(supplier_street)
+        _sup_street_line = f"<cbc:StreetName>{escape(supplier_street)}</cbc:StreetName>" if supplier_street else ""
         supplier_district = _s(supplier_district)
         supplier_city = _s(supplier_city) or "İstanbul"
         supplier_tax_office = _s(supplier_tax_office) or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI"
@@ -743,6 +755,9 @@ class DoganClient:
       <cac:SellersItemIdentification>
         <cbc:ID>{sku}</cbc:ID>
       </cac:SellersItemIdentification>
+      <cac:OriginCountry>
+        <cbc:Name>Türkiye</cbc:Name>
+      </cac:OriginCountry>
     </cac:Item>
     <cac:Price>
       <cbc:PriceAmount currencyID="{currency}">{unit_price:.4f}</cbc:PriceAmount>
@@ -876,14 +891,22 @@ class DoganClient:
         if _satici_adr:
             notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
         if customer_street:
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(customer_street)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+            import re as _re
+            _cs = _re.sub(r"\s+", " ", str(customer_street)).strip()
+            _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
+            if _cd and _cc:
+                _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
+            _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
+            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Delivery; {escape(_cs_full)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
-        if payment_method:
-            _pa = f" {payment_amount:.0f}TL" if payment_amount else ""
-            notes_xml.append(f"<cbc:Note>Ödeme :{escape(payment_method)}{_pa}</cbc:Note>")
+        if payment_method or platform_label:
+            _lbl = (platform_label or payment_method).strip()
+            _amt = payment_amount if payment_amount else payable_amount
+            _amt_str = f"{_amt:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            notes_xml.append(f"<cbc:Note>Ödeme : {escape(_lbl)} {_amt_str} TL</cbc:Note>")
         if note:
             notes_xml.append(f"<cbc:Note>{escape(note)}</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış Internet Üzerinden Yapılmıştır.</cbc:Note>")
@@ -940,7 +963,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>
@@ -970,7 +993,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district or 'Küçükçekmece')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>
@@ -1055,8 +1078,10 @@ class DoganClient:
                                 issue_time: str,
                                 supplier_vkn: str,
                                 supplier_name: str,
+                                platform_label: str = "",
                                 supplier_district: str = "KÜÇÜKÇEKMECE",
                                 supplier_city: str = "İstanbul",
+                                supplier_street: str = "",
                                 supplier_country: str = "Türkiye",
                                 supplier_tax_office: str = "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
                                 supplier_website: str = "facette.com.tr",
@@ -1128,6 +1153,7 @@ class DoganClient:
 
         supplier_website = _s(supplier_website)
         customer_street = _s(customer_street)
+        _sup_street_line = f"<cbc:StreetName>{escape(_s(supplier_street))}</cbc:StreetName>" if _s(supplier_street) else ""
         customer_district = _s(customer_district)
         customer_city = _s(customer_city) or "İstanbul"
         customer_postal_zone = _s(customer_postal_zone) or "34000"
@@ -1277,10 +1303,11 @@ class DoganClient:
             notes_xml.append(f"<cbc:Note>Fatura Ref:{escape(_clean(invoice_ref))}</cbc:Note>")
         if _clean(store_name):
             notes_xml.append(f"<cbc:Note>Mağaza Adı : {escape(_clean(store_name))}</cbc:Note>")
-        if _clean(payment_method):
-            _pm = _re.sub(r"\bHalave\b", "Havale", _clean(payment_method), flags=_re.IGNORECASE)
+        if _clean(payment_method) or _clean(platform_label):
+            _lbl = (_clean(platform_label) or _clean(payment_method)).strip()
             _pay_amt = payment_amount if (payment_amount and payment_amount > 0) else tax_inclusive_total
-            notes_xml.append(f"<cbc:Note>Ödeme : {escape(_pm)} {_pay_amt:.2f} TL</cbc:Note>")
+            _amt_str = f"{_pay_amt:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            notes_xml.append(f"<cbc:Note>Ödeme : {escape(_lbl)} {_amt_str} TL</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış İnternet Üzerinden Yapılmıştır</cbc:Note>")
         notes_xml.append("<cbc:Note>Ödeme Şekli: Elektronik</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Web Adresi: {escape(supplier_website)}</cbc:Note>")
@@ -1292,6 +1319,9 @@ class DoganClient:
                 notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kimlik No: {escape(_clean(carrier_vkn))}</cbc:Note>")
             notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kişi Adı: {escape(_clean(carrier_name))}</cbc:Note>")
         if _cust_street_clean:
+            notes_xml.append(
+                f"<cbc:Note>Taraf : Alıcı; {escape(_cust_street_clean)} "
+                f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
             notes_xml.append(
                 f"<cbc:Note>Delivery; {escape(_cust_street_clean)} "
                 f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
@@ -1344,7 +1374,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>
@@ -1373,7 +1403,7 @@ class DoganClient:
       </cac:PartyName>
       <cac:PostalAddress>
         <cbc:ID schemeID="VKN">{escape(supplier_vkn)}</cbc:ID>
-        <cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
+        {_sup_street_line}<cbc:CitySubdivisionName>{escape(supplier_district)}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(supplier_city)}</cbc:CityName>
         <cac:Country>
           <cbc:Name>{escape(supplier_country)}</cbc:Name>

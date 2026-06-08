@@ -106,6 +106,7 @@ export default function AdminOrders() {
   const [invoiceLinkInput, setInvoiceLinkInput] = useState("");
   const [invoiceNumberInput, setInvoiceNumberInput] = useState("");
   const [uploadingInvoice, setUploadingInvoice] = useState(false);
+  const [invoicingId, setInvoicingId] = useState(null); // fatura kesimi uçuşta olan sipariş (çift tıklama koruması)
 
   // FAZ 1 B3 - Order Note Modal
   const [noteModalOpen, setNoteModalOpen] = useState(false);
@@ -213,6 +214,8 @@ export default function AdminOrders() {
    *   oluşturulmuş siparişler tabloda opaklık azaltılarak pasifleştirilir.
    */
   const handleGenerateInvoice = async (orderId) => {
+    if (invoicingId) return;            // başka bir fatura işlemi sürüyor → çift tıklamayı yut
+    setInvoicingId(orderId);
     try {
       const token = localStorage.getItem('token');
       const res = await axios.post(`${API}/orders/${orderId}/create-invoice?invoice_type=e-arsiv`, {}, {
@@ -226,6 +229,8 @@ export default function AdminOrders() {
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Fatura oluşturulamadı");
+    } finally {
+      setInvoicingId(null);
     }
   };
 
@@ -1164,8 +1169,9 @@ export default function AdminOrders() {
                         {/* 4. E-Arşiv Fatura Oluştur - yeşil */}
                         <button
                           onClick={() => handleGenerateInvoice(order.id)}
+                          disabled={invoicingId === order.id || !!order.invoice?.invoice_number}
                           title={order.invoice?.invoice_number ? `Fatura: ${order.invoice.invoice_number}` : "E-Arşiv Fatura Oluştur"}
-                          className={`tci-btn ${order.invoice?.invoice_number ? 'tci-btn-green-active' : 'tci-btn-green'}`}
+                          className={`tci-btn ${order.invoice?.invoice_number ? 'tci-btn-green-active' : 'tci-btn-green'} ${invoicingId === order.id ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <FileText size={15} />
                         </button>
@@ -1254,10 +1260,11 @@ export default function AdminOrders() {
                 {!selectedOrder.invoice?.invoice_number && (
                   <button 
                     onClick={() => handleGenerateInvoice(selectedOrder.id)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                    disabled={invoicingId === selectedOrder.id}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <FileText size={16} />
-                    Fatura Kes
+                    {invoicingId === selectedOrder.id ? "Kesiliyor..." : "Fatura Kes"}
                   </button>
                 )}
                 {(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number) && (

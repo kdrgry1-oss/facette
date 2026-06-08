@@ -13,6 +13,12 @@ from pymongo import ReturnDocument
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
+def _platform_display(order) -> str:
+    p = (str(order.get("platform") or order.get("marketplace") or "")).strip().lower()
+    return {"trendyol": "Trendyol", "hepsiburada": "Hepsiburada"}.get(
+        p, "Site" if p in ("", "facette", "site") else p.title())
+
+
 def generate_order_number() -> str:
     import secrets
     return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
@@ -964,6 +970,27 @@ async def create_invoice_for_order(
         if not prefix:
             prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
 
+    # ─── ATOMİK KİLİT (çift tıklama / eşzamanlı istek koruması) ──────────
+    # Sayaç artırma + Doğan'a gönderim geri döndürülemez. Aynı sipariş için
+    # ikinci eşzamanlı isteği atomik olarak engelle. 2 dk'dan eski kilit
+    # "stale" sayılır (önceki deneme çökmüşse otomatik yeniden denenebilir).
+    _lock_now = datetime.now(timezone.utc)
+    _stale_iso = (_lock_now - timedelta(minutes=2)).isoformat()
+    _claim = await db.orders.find_one_and_update(
+        {"id": order_id, "invoice_issued": {"$ne": True},
+         "$or": [{"invoice_in_progress": {"$ne": True}},
+                 {"invoice_in_progress_at": {"$lt": _stale_iso}}]},
+        {"$set": {"invoice_in_progress": True,
+                  "invoice_in_progress_at": _lock_now.isoformat()}},
+    )
+    if _claim is None:
+        _fresh = await db.orders.find_one({"id": order_id}, {"_id": 0}) or {}
+        if _fresh.get("invoice_issued"):
+            return {"success": True, "message": "Fatura zaten kesilmiş",
+                    "invoice_number": _fresh.get("invoice_number", "")}
+        raise HTTPException(status_code=409,
+            detail="Bu sipariş için fatura işlemi şu anda sürüyor. Lütfen birkaç saniye bekleyip tekrar deneyin.")
+
     # Sıra numarası: atomik sayaç (db.counters) — başarısız denemede bile ilerler,
     # aynı numara BİR DAHA üretilmez (Doğan 10009 "duplicate" önlenir).
     # Taban: panelde en son kesilen no'nun DEVAMI — dogan_edonusum.earchive_start_number
@@ -1052,10 +1079,10 @@ async def create_invoice_for_order(
             issue_date=issue_date,
             issue_time=issue_time,
             supplier_vkn=dogan_settings.get("vkn") or "7810816779",
-            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ. TİC.A.Ş",
+            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC. A.Ş.",
             supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
             supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
-            supplier_street=dogan_settings.get("supplier_street") or "",
+            supplier_street=dogan_settings.get("supplier_street") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
             supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
             supplier_phone=dogan_settings.get("supplier_phone") or "",
             supplier_email=dogan_settings.get("supplier_email") or "",
@@ -1079,6 +1106,7 @@ async def create_invoice_for_order(
             cargo_tracking=str(order.get("cargo_tracking_number") or order.get("cargo_tracking") or order.get("tracking_number") or ""),
             order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
             store_name=order.get("store_name") or order.get("marketplace") or "",
+            platform_label=_platform_display(order),
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
             carrier_name=_carrier_name,
             carrier_vkn=_carrier_vkn,
@@ -1095,6 +1123,8 @@ async def create_invoice_for_order(
             _earsiv_kwargs["customer_street"] = bill.get("address") or ""
             _earsiv_kwargs["customer_postal_zone"] = bill.get("postal_code") or bill.get("zip") or bill.get("postal_zone") or ""
             _earsiv_kwargs["customer_phone"] = bill.get("phone") or ""
+            if bill.get("country"):
+                _earsiv_kwargs["customer_country"] = bill.get("country")
         _earsiv_builder = (DoganClient.build_earsiv_export_ubl_xml
                            if order.get("is_micro_export")
                            else DoganClient.build_earsiv_ubl_xml)
@@ -1133,6 +1163,7 @@ async def create_invoice_for_order(
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET earsiv: {dogan_result}")
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
+            await db.orders.update_one({"id": order_id}, {"$set": {"invoice_in_progress": False}})
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
@@ -1217,9 +1248,10 @@ async def create_invoice_for_order(
             issue_date=issue_date,
             issue_time=issue_time,
             supplier_vkn=dogan_settings.get("vkn") or "7810816779",
-            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ. TİC.A.Ş",
+            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC. A.Ş.",
             supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
             supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
+            supplier_street=dogan_settings.get("supplier_street") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
             supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
             supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
             customer_vkn=customer_vkn,
@@ -1245,6 +1277,7 @@ async def create_invoice_for_order(
             carrier_vkn=_carrier_vkn,
             carrier_type="Tüzel",
             store_name=order.get("store_name") or order.get("marketplace") or "",
+            platform_label=_platform_display(order),
             payment_method=order.get("payment_method") or "",
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
             dispatch_date=str(order.get("shipped_at") or order.get("dispatch_date") or issue_date)[:10],
@@ -1283,6 +1316,7 @@ async def create_invoice_for_order(
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET efatura: {dogan_result}")
+            await db.orders.update_one({"id": order_id}, {"$set": {"invoice_in_progress": False}})
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
@@ -1292,6 +1326,7 @@ async def create_invoice_for_order(
         {"id": order_id},
         {"$set": {
             "invoice_issued": True,
+            "invoice_in_progress": False,
             "invoice_number": invoice_number,
             "invoice_uuid": invoice_uuid,
             "invoice_type": invoice_type,
