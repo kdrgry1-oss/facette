@@ -53,10 +53,12 @@ function sayiToWords(num) {
   return joined.charAt(0) + joined.slice(1).toLocaleLowerCase("tr-TR");
 }
 
-// 4 pusula/sayfa: A4 dikey (297mm) / 4 = 74.25mm bant
-const GP_PER_PAGE = 4;
-const GP_SLIP_H_MM = 74.25;
-const GP_SLIP_W_MM = 210;
+// A4 yatay: sayfada aynı pusula 4 kopya (4 sütun), her sütun 74.25mm
+const GP_COPIES = 4;            // bir A4 yatay sayfada aynı pusula 4 kopya (4 sütun)
+const GP_SLIP_W_MM = 74.25;     // sütun genişliği (297mm / 4)
+const GP_SLIP_H_MM = 210;       // sütun yüksekliği (A4 yatay)
+const GP_PAGE_W_MM = 297;       // A4 yatay genişlik
+const GP_PAGE_H_MM = 210;       // A4 yatay yükseklik
 
 function ActionBadge({ action }) {
   if (action === "approved") return <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">Onaylandı</span>;
@@ -81,7 +83,7 @@ export default function Returns() {
   const [bulkPrintData, setBulkPrintData] = useState(null);
   // Gider pusulası: takip no (085490'dan), matbu bindirme modu ve hizalama (mm)
   const [gpStart, setGpStart] = useState(() => localStorage.getItem("gp_next_no") || "085490");
-  const [gpOverlay, setGpOverlay] = useState(() => localStorage.getItem("gp_overlay") === "1");
+  const [gpOverlay, setGpOverlay] = useState(() => localStorage.getItem("gp_overlay") !== "0");
   const [gpOffX, setGpOffX] = useState(() => parseFloat(localStorage.getItem("gp_off_x")) || 0);
   const [gpOffY, setGpOffY] = useState(() => parseFloat(localStorage.getItem("gp_off_y")) || 0);
   const [gpGuides, setGpGuides] = useState(false);
@@ -394,7 +396,7 @@ export default function Returns() {
             </>
           )}
           <p className="text-[11px] text-purple-600 ml-auto max-w-xs pb-1">
-            Numara kağıda basılmaz (matbuda zaten var); takip için satırda ve önizlemede görünür. Her çıktı 1 ilerler.
+            A4 yatay, aynı pusula 4 kopya. Numara kağıda basılmaz (matbuda var); takip için satırda/önizlemede görünür. Her iade çıktısı no'yu 1 ilerletir.
           </p>
         </div>
 
@@ -805,163 +807,124 @@ function fmt2(v) {
   return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
 }
 
-const gpTh = { border: "0.2mm solid #555", padding: "0.4mm 1mm", textAlign: "left", fontWeight: 700, background: "#f0f0f0" };
-const gpTd = { border: "0.2mm solid #555", padding: "0.4mm 1mm" };
-
-// Tek pusula: matbu forma bindirme (yalnız veri) veya tam form (boş kağıt / önizleme)
+// Tek matbu form (sütun): 74.25mm x 210mm. overlay=true -> yalnız işaretli alan verisi basılır
+// (matbu için). overlay=false -> gri referans form + siyah veri (boş kağıt / hizalama testi).
 function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }) {
   if (!data) return null;
-  const co = data.company || {};
   const c = data.customer || {};
-  const t = data.totals || {};
+  const tot = data.totals || {};
   const items = data.items || [];
   const dt = data.date ? new Date(data.date) : null;
   const dateStr = dt ? dt.toLocaleDateString("tr-TR") : "";
   const timeStr = dt ? dt.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
-  const neg = (v) => (v ? -Math.abs(v) : 0);
-  const tutar = t.net || 0;
-  const matrah = t.net_without_vat || 0;
-  const kdv = t.vat_amount || 0;
-  const words = sayiToWords(Math.round(tutar));
-  const coName = co.company_name || "FACETTE DIŞ TİC. A.Ş.";
-  const coAddr = [co.address, co.city].filter(Boolean).join(" ");
-  const coVd = co.tax_office || "Halkalı";
-  const coVkn = co.tax_number || "7810816779";
+  const neg = (v) => -Math.abs(v || 0);
+  const net = tot.net || 0;
+  const matrah = tot.net_without_vat || 0;
+  const kdv = tot.vat_amount || 0;
+  const indirim = tot.discount || 0;
+  const words = sayiToWords(Math.round(net));
+  const cityLine = [c.district, c.city, c.country || "Türkiye"].filter(Boolean).join("/");
 
-  const slipStyle = {
-    width: GP_SLIP_W_MM + "mm",
-    height: GP_SLIP_H_MM + "mm",
-    boxSizing: "border-box",
-    position: "relative",
-    overflow: "hidden",
-    fontFamily: "Arial, sans-serif",
-    fontSize: "2.4mm",
-    lineHeight: 1.15,
-    color: "#000",
-    background: "#fff",
-    padding: "3mm 5mm",
-    border: guides ? "0.3mm dashed #c084fc" : "none",
+  const wrap = {
+    position: "relative", width: GP_SLIP_W_MM + "mm", height: GP_SLIP_H_MM + "mm",
+    boxSizing: "border-box", overflow: "hidden", fontFamily: "Arial, sans-serif",
+    color: "#000", background: "#fff", borderRight: guides ? "0.3mm dashed #c084fc" : "none",
   };
-  const inner = { transform: `translate(${offX}mm, ${offY}mm)`, height: "100%", position: "relative" };
 
-  // ---- Matbu bindirme: yalnız değişken veri, mutlak konum (hizalama mm offset ile) ----
-  if (overlay) {
-    const F = ({ x, y, w, a = "left", b = false, children }) => (
-      <div style={{ position: "absolute", left: x + "mm", top: y + "mm", width: w ? w + "mm" : undefined, textAlign: a, fontWeight: b ? 700 : 400, whiteSpace: "nowrap", overflow: "hidden" }}>{children}</div>
-    );
-    return (
-      <div style={slipStyle}>
-        <div style={inner}>
-          <F x={26} y={9} b>{c.name || ""}</F>
-          <F x={26} y={13}>{c.address || ""}</F>
-          <F x={26} y={19}>{[c.district, c.city, "Türkiye"].filter(Boolean).join("/")}</F>
-          <F x={30} y={32}>{data.order_number || ""}</F>
-          <F x={30} y={35}>{dateStr}</F>
-          <F x={68} y={35}>{timeStr}</F>
-          {items.slice(0, 4).map((it, i) => (
-            <F key={i} x={30} y={50 + i * 3.2} w={90}>{(it.name || "").slice(0, 40)}</F>
-          ))}
-          {items.slice(0, 4).map((it, i) => (
-            <F key={"a" + i} x={150} y={50 + i * 3.2} w={24} a="right">{fmt2(neg(it.net_price))}</F>
-          ))}
-          <F x={118} y={50} w={28} a="right" b>{fmt2(tutar)}</F>
-          <F x={118} y={61} w={28} a="right">{fmt2(matrah)}</F>
-          <F x={118} y={64} w={28} a="right">{fmt2(kdv)}</F>
-          <F x={118} y={67} w={28} a="right" b>{fmt2(tutar)}</F>
-          <F x={26} y={67} w={80}>{words}</F>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Tam form (boş kağıt / önizleme) ----
-  return (
-    <div style={slipStyle}>
-      <div style={inner}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <div style={{ fontWeight: 700 }}>{coName}</div>
-            <div>{coAddr}</div>
-            <div>V.D.: {coVd} &nbsp; VKN: {coVkn}</div>
-            <div>iletisim@facette.com.tr</div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div>İL KODU: 34</div>
-            <div style={{ fontWeight: 700 }}>SERİ A</div>
-            <div style={{ fontWeight: 700 }}>GİDER PUSULASI</div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.5mm" }}>
-          <div style={{ maxWidth: "120mm" }}>
-            <div style={{ fontWeight: 700 }}>{c.name || "-"}</div>
-            <div>{c.address || ""}</div>
-            <div>{[c.district, c.city, "Türkiye"].filter(Boolean).join("/")}</div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div>Sipariş: {data.order_number || "-"}</div>
-            <div>{dateStr} {timeStr}</div>
-            <div>{data.claim_type === "RETURN" ? "İade" : "İptal"}</div>
-          </div>
-        </div>
-
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "1.5mm" }}>
-          <thead>
-            <tr>
-              <th style={gpTh}>Açıklama</th>
-              <th style={{ ...gpTh, textAlign: "center", width: "12mm" }}>Adet</th>
-              <th style={{ ...gpTh, textAlign: "right", width: "28mm" }}>Tutar</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                <td style={gpTd}>{it.name}</td>
-                <td style={{ ...gpTd, textAlign: "center" }}>{it.quantity}</td>
-                <td style={{ ...gpTd, textAlign: "right" }}>{fmt2(neg(it.net_price))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.5mm" }}>
-          <div style={{ maxWidth: "115mm" }}>
-            <div>Yalnız: <span style={{ fontWeight: 700 }}>{words} TL</span></div>
-            <div style={{ marginTop: "2.5mm" }}>Adı Soyadı: {c.name || ""}</div>
-            <div style={{ marginTop: "2.5mm" }}>İmza:</div>
-          </div>
-          <div style={{ textAlign: "right", minWidth: "48mm" }}>
-            <div>Tutar: <b>{fmt2(tutar)}</b></div>
-            <div>Vergi Matrahı: {fmt2(matrah)}</div>
-            <div>KDV: {fmt2(kdv)}</div>
-            <div style={{ fontWeight: 700 }}>Net Tutar: {fmt2(tutar)}</div>
-          </div>
-        </div>
-      </div>
+  // --- GRİ REFERANS (yalnız overlay kapalıyken / önizlemede; KAĞIDA BASILMAZ) ---
+  const G = "#9aa0a6";
+  const Gt = (x, y, s, txt, extra = {}) => (
+    <div style={{ position: "absolute", left: x + "mm", top: y + "mm", fontSize: s + "mm", color: G, whiteSpace: "nowrap", ...extra }}>{txt}</div>
+  );
+  const reference = !overlay && (
+    <div style={{ position: "absolute", inset: 0 }}>
+      {Gt(5, 4, 1.7, "No: 3  34307 Küçükçekmece/İST.")}
+      {Gt(5, 7.5, 1.7, "Halkalı V.D.: 781 081 6779")}
+      {Gt(5, 11, 1.7, "Ticaret Sicil No: 203113-5")}
+      {Gt(5, 14.5, 1.7, "iletisim@facette.com.tr")}
+      <div style={{ position: "absolute", left: "52mm", top: "4mm", width: "13mm", height: "13mm", border: "0.3mm solid " + G, borderRadius: "50%", textAlign: "center", fontSize: "1.4mm", color: G, lineHeight: "13mm" }}>T.C.</div>
+      {Gt(48, 27, 1.9, "İL KODU: 34", { fontWeight: 700 })}
+      {Gt(52, 34, 2.0, "SERİ A", { fontWeight: 700 })}
+      {Gt(5, 188, 1.6, "Yalnız _______________________")}
+      {Gt(5, 193, 1.5, "____ den yukarıda belirtilen Mal/İş")}
+      {Gt(5, 196.5, 1.5, "bedelini aldım.")}
+      {Gt(5, 202, 1.6, "Adı Soyadı ________________")}
+      {Gt(5, 206, 1.6, "Adresi ___________   İMZA")}
+      <div style={{ position: "absolute", left: "2.4mm", top: "150mm", transform: "rotate(-90deg)", transformOrigin: "left top", fontSize: "1.7mm", color: "#cc2222" }}>SIRA NO   No {data.assigned_no || ""}</div>
     </div>
   );
+
+  // --- SİYAH VERİ: sıkışık akışkan blok (KAĞIDA BASILAN TEK ALAN) ---
+  const row = (label, val, bold) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: "2mm", fontWeight: bold ? 700 : 400 }}>
+      <span>{label}</span><span>{val}</span>
+    </div>
+  );
+  const black = (
+    <div style={{ position: "absolute", left: "6mm", top: "41mm", width: "63mm", transform: `translate(${offX}mm, ${offY}mm)`, fontSize: "2.0mm", lineHeight: 1.12, color: "#000" }}>
+      <div style={{ fontWeight: 700 }}>{c.name || ""}</div>
+      {c.address ? <div>{c.address}</div> : null}
+      <div>{cityLine}</div>
+      <div style={{ height: "1.2mm" }} />
+      <div>Sipariş: {data.order_number || ""}</div>
+      <div>{dateStr}{timeStr ? "  " + timeStr : ""}</div>
+      <div style={{ height: "0.8mm" }} />
+      <div>Satış Fatura No: {data.sales_invoice_no || "-"}</div>
+      <div>Kargo Firma: {data.cargo_company || "-"}</div>
+      <div>Satış Sorumlusu: {data.sales_rep || "-"}</div>
+      <div style={{ height: "1mm" }} />
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "1.9mm" }}>
+        <thead>
+          <tr style={{ borderBottom: "0.2mm solid #999" }}>
+            <th style={{ textAlign: "left", fontWeight: 700, padding: "0.2mm 0" }}>Açıklama</th>
+            <th style={{ textAlign: "right", fontWeight: 700, width: "8mm" }}>Ad.</th>
+            <th style={{ textAlign: "right", fontWeight: 700, width: "17mm" }}>Tutar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i}>
+              <td style={{ padding: "0.3mm 0" }}>{(it.name || "").slice(0, 26)}</td>
+              <td style={{ textAlign: "right" }}>{it.quantity}</td>
+              <td style={{ textAlign: "right" }}>{fmt2(neg(it.net_price))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ height: "1.2mm" }} />
+      {row("Tutar (V.D.)", fmt2(net), true)}
+      {row("Toplam Satır İsk (VD)", fmt2(indirim))}
+      {row("Toplam Dip İsk (/D)", fmt2(0))}
+      {row("Vergi Matrahı", fmt2(matrah))}
+      {row("Kdv", fmt2(kdv))}
+      {row("Net Tutar", fmt2(net), true)}
+      <div style={{ height: "0.8mm" }} />
+      <div>Yalnız: {words} TL</div>
+    </div>
+  );
+
+  return <div style={wrap}>{reference}{black}</div>;
 }
 
-// A4 dikey: sayfa başına 4 pusula. Ekranda gizli, sadece yazdırmada görünür.
+// A4 YATAY: her iade = 1 sayfa, aynı pusula 4 kopya (4 sütun). Ekranda gizli, yazdırmada görünür.
 function GpPrintLayer({ slips, overlay, offX, offY, guides }) {
-  const pages = [];
-  for (let i = 0; i < (slips || []).length; i += GP_PER_PAGE) pages.push(slips.slice(i, i + GP_PER_PAGE));
   return (
     <div className="gp-print">
       <style>{`
         .gp-print { display: none; }
         @media print {
+          @page { size: A4 landscape; margin: 0; }
           body { margin: 0 !important; }
           .gp-print { display: block !important; }
-          .gp-page { width: ${GP_SLIP_W_MM}mm; height: 297mm; page-break-after: always; }
+          .gp-page { width: ${GP_PAGE_W_MM}mm; height: ${GP_PAGE_H_MM}mm; display: flex; flex-direction: row; page-break-after: always; overflow: hidden; }
           .gp-page:last-child { page-break-after: auto; }
-          .gp-slip-wrap { width: ${GP_SLIP_W_MM}mm; height: ${GP_SLIP_H_MM}mm; }
+          .gp-col { width: ${GP_SLIP_W_MM}mm; height: ${GP_SLIP_H_MM}mm; }
         }
       `}</style>
-      {pages.map((pg, pi) => (
+      {(slips || []).map((gp, pi) => (
         <div className="gp-page" key={pi}>
-          {pg.map((gp, si) => (
-            <div className="gp-slip-wrap" key={si}>
+          {Array.from({ length: GP_COPIES }).map((_, ci) => (
+            <div className="gp-col" key={ci}>
               <GiderPusulasiSlip data={gp} overlay={overlay} offX={offX} offY={offY} guides={guides} />
             </div>
           ))}

@@ -5568,6 +5568,55 @@ async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(
     return claim
 
 
+async def restock_claim_once(claim_id: str, source: str, by_email: str = "") -> list:
+    """İade kalemlerini ürün stoğuna BİR KEZ geri ekler (idempotent: claim.stock_restored).
+    Eşleşme: variant.barcode -> variant.stock; yoksa product.barcode -> product.stock."""
+    claim = await db.trendyol_claims.find_one(
+        {"claim_id": claim_id}, {"_id": 0, "items": 1, "order_number": 1, "stock_restored": 1}
+    )
+    if not claim or claim.get("stock_restored"):
+        return []
+    restocked = []
+    for item in (claim.get("items") or []):
+        barcode = str(item.get("barcode", "") or "").strip()
+        qty = int(item.get("quantity", 1) or 1)
+        if not barcode or qty <= 0:
+            continue
+        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "variants": 1, "stock": 1})
+        if prod:
+            for v in (prod.get("variants") or []):
+                if v.get("barcode") == barcode:
+                    v["stock"] = int(v.get("stock", 0) or 0) + qty
+                    break
+            new_total = sum(int(v.get("stock", 0) or 0) for v in prod.get("variants", []))
+            await db.products.update_one(
+                {"id": prod["id"]},
+                {"$set": {"variants": prod["variants"], "stock": new_total, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            restocked.append({"barcode": barcode, "qty": qty, "product_id": prod["id"]})
+        else:
+            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1, "stock": 1})
+            if p2:
+                await db.products.update_one(
+                    {"id": p2["id"]},
+                    {"$inc": {"stock": qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                restocked.append({"barcode": barcode, "qty": qty, "product_id": p2["id"]})
+    # Tekrarı önlemek için her durumda işaretle
+    await db.trendyol_claims.update_one(
+        {"claim_id": claim_id},
+        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(), "stock_restored_source": source}}
+    )
+    if restocked:
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()), "type": "return_restock", "source": source,
+            "claim_id": claim_id, "order_number": claim.get("order_number", ""),
+            "items": restocked, "created_by": by_email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    return restocked
+
+
 @router.post("/trendyol/claims/{claim_id}/gider-pusulasi")
 async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(default=None), current_user: dict = Depends(require_admin)):
     """Generate expense receipt (gider pusulası) data for a return claim"""
@@ -5575,8 +5624,19 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     if not claim:
         raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")
 
+    # İade onayımız = gider pusulası oluşturmak. Stoğu BİR KEZ geri ekle (idempotent).
+    await restock_claim_once(claim_id, "gider_pusulasi", current_user.get("email", ""))
+
     settings = await db.settings.find_one({"id": "main"}, {"_id": 0})
     company = settings.get("company_info", {}) if settings else {}
+    # Alıcı adresi claim'de tutulmuyor; sipariş kaydından çek
+    order = await db.orders.find_one({"order_number": claim.get("order_number", "")}, {"_id": 0}) or {}
+    _ship = order.get("shipping_address", {}) or {}
+    _cust_name = claim.get("customer_name", "") or (f"{_ship.get('first_name','')} {_ship.get('last_name','')}".strip())
+    _cust_addr = _ship.get("address", "") or (claim.get("shipping_address", "") if isinstance(claim.get("shipping_address"), str) else "")
+    _cust_district = _ship.get("district", "")
+    _cust_city = _ship.get("city", "") or claim.get("shipping_city", "")
+    _cust_country = _ship.get("country", "") or "Türkiye"
 
     items = claim.get("items", [])
     total_net = sum(item.get("price", 0) * item.get("quantity", 1) for item in items)
@@ -5600,10 +5660,15 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
         "date": datetime.now(timezone.utc).isoformat(),
         "company": company,
         "customer": {
-            "name": claim.get("customer_name", ""),
-            "address": claim.get("shipping_address", ""),
-            "city": claim.get("shipping_city", ""),
+            "name": _cust_name,
+            "address": _cust_addr,
+            "district": _cust_district,
+            "city": _cust_city,
+            "country": _cust_country,
         },
+        "sales_invoice_no": claim.get("invoice_number", ""),
+        "cargo_company": claim.get("cargo_provider_name", ""),
+        "sales_rep": "",
         "items": [{
             "name": item.get("productName", ""),
             "barcode": item.get("barcode", ""),
@@ -5941,9 +6006,9 @@ async def approve_trendyol_claim(
 
             # A7: İade onaylanınca stok otomatik geri iade
             try:
-                claim_doc = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0, "items": 1, "order_number": 1})
+                claim_doc = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0, "items": 1, "order_number": 1, "stock_restored": 1})
                 restocked_items = []
-                for item in (claim_doc.get("items") or []):
+                for item in ([] if (claim_doc or {}).get("stock_restored") else ((claim_doc or {}).get("items") or [])):
                     if str(item.get("claim_item_id", "")) not in [str(x) for x in claim_item_ids]:
                         continue
                     barcode = item.get("barcode", "")
@@ -5984,6 +6049,10 @@ async def approve_trendyol_claim(
                         "created_by": current_user["email"],
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     })
+                    await db.trendyol_claims.update_one(
+                        {"claim_id": claim_id},
+                        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(), "stock_restored_source": "approve"}}
+                    )
             except Exception as restock_err:
                 logger.error(f"Restock after claim approve failed: {restock_err}")
                 # non-fatal
