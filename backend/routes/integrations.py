@@ -5569,7 +5569,7 @@ async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(
 
 
 @router.post("/trendyol/claims/{claim_id}/gider-pusulasi")
-async def generate_gider_pusulasi(claim_id: str, current_user: dict = Depends(require_admin)):
+async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(default=None), current_user: dict = Depends(require_admin)):
     """Generate expense receipt (gider pusulası) data for a return claim"""
     claim = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0})
     if not claim:
@@ -5588,10 +5588,13 @@ async def generate_gider_pusulasi(claim_id: str, current_user: dict = Depends(re
 
     last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
     gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+    # Frontend'den gelen takip numarası (matbu form sıra no ile eşleşir). Verilirse display olarak kullan.
+    tracking_no = str((payload or {}).get("tracking_no") or "").strip()
+    display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
 
     gider_pusulasi = {
         "number": gp_number,
-        "display_number": f"GP-{gp_number:06d}",
+        "display_number": display_number,
         "claim_id": claim_id,
         "order_number": claim.get("order_number", ""),
         "date": datetime.now(timezone.utc).isoformat(),
@@ -5644,15 +5647,25 @@ async def bulk_generate_gider_pusulasi(payload: dict, current_user: dict = Depen
     if not claim_ids:
         raise HTTPException(status_code=400, detail="Claim ID listesi boş")
 
+    start_no = str(payload.get("start_no") or "").strip()
+    try:
+        base = int(start_no) if start_no else None
+    except ValueError:
+        base = None
+
     results = []
+    n = 0
     for cid in claim_ids:
         try:
-            result = await generate_gider_pusulasi(cid, current_user)
+            tno = f"{base + n:06d}" if base is not None else None
+            result = await generate_gider_pusulasi(cid, {"tracking_no": tno} if tno else None, current_user)
             results.append(result.get("gider_pusulasi"))
+            n += 1
         except Exception:
             pass
 
-    return {"success": True, "gider_pusulalari": results, "count": len(results)}
+    next_no = f"{base + n:06d}" if base is not None else ""
+    return {"success": True, "gider_pusulalari": results, "count": len(results), "next_no": next_no}
 
 
 
