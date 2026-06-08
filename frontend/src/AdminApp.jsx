@@ -85,8 +85,8 @@ export default function AdminApp() {
         <Route index element={<AdminDashboard />} />
         <Route path="urunler" element={<AdminProducts />} />
         <Route path="urunler/:productId" element={<AdminProducts />} />
-        <Route path="siparisler" element={<AdminOrders />} />
-        <Route path="odeme-bekleyen-siparisler" element={<AdminOrders unpaidView />} />
+        <Route path="siparisler" element={<AdminOrders key="orders-all" />} />
+        <Route path="odeme-bekleyen-siparisler" element={<AdminOrders key="orders-unpaid" unpaidView />} />
         <Route path="kategoriler" element={<AdminCategories />} />
         <Route path="varyantlar" element={<AdminVariants />} />
         <Route path="ozellik-import" element={<AttributeImport />} />

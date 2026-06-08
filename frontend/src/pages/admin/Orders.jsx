@@ -147,7 +147,7 @@ export default function AdminOrders({ unpaidView = false }) {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, pageSize, statusFilter, searchTick]);
+  }, [page, pageSize, statusFilter, searchTick, unpaidView]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.

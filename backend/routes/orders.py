@@ -118,8 +118,15 @@ async def get_orders(
     
     # Ödeme kaydı bulunmayan (web kart denemesi, hiç ödenmemiş) ayrımı
     _web_cond = {"$or": [{"platform": "facette"}, {"platform": {"$in": [None, ""]}}, {"platform": {"$exists": False}}]}
-    _card_cond = {"$or": [{"payment_method": "credit_card"}, {"payment_method": {"$in": [None, ""]}}, {"payment_method": {"$exists": False}}]}
-    _junk_cond = {"$and": [_web_cond, _card_cond, {"payment_status": {"$ne": "paid"}}]}
+    _settled_pay = ["paid", "completed", "success", "succeeded", "captured"]
+    _offline_pm = ["bank_transfer", "cash_on_delivery"]
+    _fulfilled_status = ["confirmed", "processing", "preparing", "shipped", "delivered", "completed", "undelivered", "cancelled"]
+    _junk_cond = {"$and": [
+        _web_cond,
+        {"payment_status": {"$nin": _settled_pay}},
+        {"payment_method": {"$nin": _offline_pm}},
+        {"status": {"$nin": _fulfilled_status}},
+    ]}
     if payment_view == "unpaid":
         query.setdefault("$and", []).append(_junk_cond)
     elif payment_view == "valid":
