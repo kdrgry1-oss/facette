@@ -2622,6 +2622,8 @@ def map_trendyol_order(t_order: dict) -> dict:
         "is_micro_export": is_micro_export,
         "shipment_country": shipment_address.get("country", ""),
         "delivery_type": t_order.get("deliveryType", ""),
+        "trendyol_customer_id": str(t_order.get("customerId") or ""),
+        "trendyol_identity_number": str(t_order.get("identityNumber") or ""),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     

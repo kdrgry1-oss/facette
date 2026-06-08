@@ -1009,6 +1009,11 @@ async def create_invoice_for_order(
         if not customer_vkn:
             # TCKN yoksa Doğan kabul etmez — bireysel için varsayılan TCKN dön (test'te)
             customer_vkn = "11111111111"
+        if order.get("is_micro_export"):
+            # Mikro ihracat (İSTİSNA): yabancı alıcının TR VKN'i yok →
+            # Trendyol gerçek VKN verdiyse (10/11 hane) onu, yoksa 2222222222.
+            _mx_vkn = (bill.get("tax_number") or bill.get("tax_no") or "").strip().replace(" ", "")
+            customer_vkn = _mx_vkn if len(_mx_vkn) in (10, 11) else "2222222222"
 
         line_items = []
         for it in (order.get("items") or []):
@@ -1084,6 +1089,13 @@ async def create_invoice_for_order(
                            if order.get("is_micro_export")
                            else DoganClient.build_earsiv_ubl_xml)
         ubl_xml = _earsiv_builder(**_earsiv_kwargs)
+        # Mikro ihracat İSTİSNA: alıcıya MÜŞTERİ NO (Trendyol customerId) ikinci kimliğini ekle.
+        if order.get("is_micro_export"):
+            _mno = str(order.get("trendyol_customer_id") or "").strip()
+            if _mno:
+                _vkn_tag = f'<cbc:ID schemeID="VKN">{customer_vkn}</cbc:ID>\n      </cac:PartyIdentification>'
+                if _vkn_tag in ubl_xml:
+                    ubl_xml = ubl_xml.replace(_vkn_tag, _vkn_tag + f'\n      <cac:PartyIdentification>\n        <cbc:ID schemeID="MUSTERINO">{_mno}</cbc:ID>\n      </cac:PartyIdentification>', 1)
 
         dogan_client = DoganClient(
             username=dogan_settings["username"],
