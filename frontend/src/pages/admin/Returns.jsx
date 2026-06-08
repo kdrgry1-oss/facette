@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
@@ -908,15 +909,18 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
 
 // A4 YATAY: her iade = 1 sayfa, aynı pusula 4 kopya (4 sütun). Ekranda gizli, yazdırmada görünür.
 function GpPrintLayer({ slips, overlay, offX, offY, guides }) {
-  return (
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="gp-print">
       <style>{`
         .gp-print { display: none; }
         @media print {
           @page { size: A4 landscape; margin: 0; }
-          body { margin: 0 !important; }
-          .gp-print { display: block !important; }
-          .gp-page { width: ${GP_PAGE_W_MM}mm; height: ${GP_PAGE_H_MM}mm; display: flex; flex-direction: row; page-break-after: always; overflow: hidden; }
+          html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+          /* Yazdırmada SADECE gider pusulası katmanı; admin arayüzü/başlık/kenar çubuğu/modal gizlenir */
+          body > *:not(.gp-print) { display: none !important; }
+          .gp-print { display: block !important; background: #fff; }
+          .gp-page { width: ${GP_PAGE_W_MM}mm; height: ${GP_PAGE_H_MM}mm; display: flex; flex-direction: row; page-break-after: always; overflow: hidden; background: #fff; }
           .gp-page:last-child { page-break-after: auto; }
           .gp-col { width: ${GP_SLIP_W_MM}mm; height: ${GP_SLIP_H_MM}mm; }
         }
@@ -930,6 +934,7 @@ function GpPrintLayer({ slips, overlay, offX, offY, guides }) {
           ))}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
