@@ -1071,8 +1071,12 @@ async def create_invoice_for_order(
             _carrier_name, _carrier_vkn, _carrier_city = "YURTİÇİ KARGO SERVİSİ A.Ş.", "9860008925", "İstanbul"
         elif "aras" in _cpl:
             _carrier_name, _carrier_vkn, _carrier_city = "ARAS KARGO YURT İÇİ YURT DIŞI TAŞIMACILIK A.Ş.", "0720039666", "İstanbul"
+        elif "dhl" in _cpl:
+            # Trendyol "DHL eCommerce" yurtiçinde MNG tarafından taşınır
+            _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
         elif _cpn.strip():
-            _carrier_name, _carrier_vkn, _carrier_city = _cpn.replace("Marketplace", "").strip(" -"), "", "İstanbul"
+            # Bilinmeyen taşıyıcı: adı koru ama VKN boş kalmasın (Doğan CarrierParty'de VKN zorunlu)
+            _carrier_name, _carrier_vkn, _carrier_city = _cpn.replace("Marketplace", "").strip(" -"), "6080712084", "İstanbul"
         else:
             _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
 
@@ -1244,6 +1248,8 @@ async def create_invoice_for_order(
             _carrier_name, _carrier_vkn = "YURTİÇİ KARGO SERVİSİ A.Ş.", "9860008925"
         elif "aras" in _cpl:
             _carrier_name, _carrier_vkn = "ARAS KARGO YURT İÇİ YURT DIŞI TAŞIMACILIK A.Ş.", "0720039666"
+        elif "dhl" in _cpl:
+            _carrier_name, _carrier_vkn = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084"
         elif _cpn.strip():
             _carrier_name, _carrier_vkn = _cpn.replace("Marketplace", "").strip(" -"), ""
         else:

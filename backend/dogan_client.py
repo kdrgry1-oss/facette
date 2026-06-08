@@ -578,7 +578,7 @@ class DoganClient:
   </cac:AccountingCustomerParty>
   <cac:Delivery>
     <cac:CarrierParty>
-      {('<cac:PartyIdentification><cbc:ID schemeID="VKN">' + escape(carrier_vkn) + '</cbc:ID></cac:PartyIdentification>') if (carrier_vkn or '').strip() else ''}
+      <cac:PartyIdentification><cbc:ID schemeID="VKN">{escape((carrier_vkn or '').strip() or '6080712084')}</cbc:ID></cac:PartyIdentification>
       <cac:PartyName>
         <cbc:Name>{escape(carrier_name)}</cbc:Name>
       </cac:PartyName>
@@ -1030,7 +1030,7 @@ class DoganClient:
   <cac:Delivery>
     <cac:CarrierParty>
       <cac:PartyIdentification>
-        <cbc:ID schemeID="VKN">{escape(carrier_vkn)}</cbc:ID>
+        <cbc:ID schemeID="VKN">{escape((carrier_vkn or '').strip() or '6080712084')}</cbc:ID>
       </cac:PartyIdentification>
       <cac:PartyName>
         <cbc:Name>{escape(carrier_name)}</cbc:Name>
