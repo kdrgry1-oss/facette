@@ -28,7 +28,7 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info, Trash2 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -226,6 +226,25 @@ export default function AdminOrders() {
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Fatura oluşturulamadı");
+    }
+  };
+
+  const handleResetInvoice = async (orderId) => {
+    if (!window.confirm("Bu siparişin fatura kaydı panelden silinecek ve yeniden kesilebilir hale gelecek.\n(Doğan'daki gerçek fatura iptal edilmez.)\n\nDevam edilsin mi?")) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/${orderId}/reset-invoice`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data.success) {
+        toast.success(res.data.message || "Fatura kaydı sıfırlandı");
+        setSelectedOrder(null);
+        fetchOrders();
+      } else {
+        toast.error(res.data.message || "Sıfırlanamadı");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Sıfırlanamadı");
     }
   };
 
@@ -1239,6 +1258,15 @@ export default function AdminOrders() {
                   >
                     <FileText size={16} />
                     Fatura Kes
+                  </button>
+                )}
+                {(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number) && (
+                  <button
+                    onClick={() => handleResetInvoice(selectedOrder.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                  >
+                    <Trash2 size={16} />
+                    Faturayı Sıfırla
                   </button>
                 )}
                 {!selectedOrder.cargo?.tracking_number && !selectedOrder.cargo_tracking_number ? (

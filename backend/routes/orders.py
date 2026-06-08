@@ -853,6 +853,27 @@ async def mark_order_invoiced(
 #
 # FRONTEND: Orders.jsx handleGenerateInvoice + handleBulkGenerateInvoice.
 # ---------------------------------------------------------------------------
+@router.post("/{order_id}/reset-invoice")
+async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(require_admin)):
+    """Sipariş fatura kaydını panelde sıfırlar (yeniden kesilebilsin diye).
+    Doğan'daki gerçek faturayı İPTAL ETMEZ; yalnız paneldeki fatura işaretini/numarasını temizler."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    prev = order.get("invoice_number") or ""
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"invoice_issued": False},
+         "$unset": {
+             "invoice_number": "", "invoice_uuid": "", "invoice_type": "",
+             "invoice_provider": "", "invoice_provider_response": "",
+             "invoice_intl_txn_id": "", "invoice_dogan_id": "", "invoice_pdf_url": "",
+             "invoice_issued_at": "", "invoice_issued_by": "",
+         }},
+    )
+    return {"success": True, "message": f"Fatura kaydı sıfırlandı ({prev or 'kayıt'} silindi), yeniden kesebilirsiniz"}
+
+
 @router.post("/{order_id}/create-invoice")
 async def create_invoice_for_order(
     order_id: str,
