@@ -1144,14 +1144,22 @@ async def create_invoice_for_order(
         from fastapi.concurrency import run_in_threadpool
 
         customer_vkn = customer_vkn_raw
-        if not customer_vkn or len(customer_vkn) != 10:
+        if not customer_vkn or len(customer_vkn) not in (10, 11):
             raise HTTPException(
                 status_code=400,
-                detail="e-Fatura için 10 haneli VKN gerekli, müşteride yok."
+                detail="e-Fatura için 10 (VKN) veya 11 (TCKN) haneli kimlik gerekli, müşteride yok."
             )
+        _ef_scheme = "TCKN" if len(customer_vkn) == 11 else "VKN"
         customer_name = (bill.get("name") or
                          f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip() or
                          "Müşteri")
+        # Birey (TCKN) için Ad/Soyad — Person bloğu builder'da bundan kurulur
+        _ef_first = (ship_addr.get("first_name") or "").strip()
+        _ef_family = (ship_addr.get("last_name") or "").strip()
+        if _ef_scheme == "TCKN" and not (_ef_first or _ef_family):
+            _np = (customer_name or "").split()
+            _ef_first = " ".join(_np[:-1]) if len(_np) > 1 else (customer_name or "")
+            _ef_family = _np[-1] if len(_np) > 1 else ""
 
         # receiver_alias auto-mode'da çekildi; explicit invoice_type=e-fatura
         # çağrısında alias yoksa CheckUser ile tamamla
@@ -1187,6 +1195,22 @@ async def create_invoice_for_order(
                          else ""),
             })
 
+        # Taşıyan (kargo firması) — Trendyol'da beyan edilen kargodan DİNAMİK (e-Arşiv ile aynı eşleme)
+        _cpn = (order.get("cargo_provider_name") or "")
+        _cpl = _cpn.lower()
+        if "trendyol" in _cpl:
+            _carrier_name, _carrier_vkn = "Trendyol Lojistik A.Ş.", "8590921777"
+        elif "mng" in _cpl:
+            _carrier_name, _carrier_vkn = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084"
+        elif ("yurtiçi" in _cpl) or ("yurtici" in _cpl):
+            _carrier_name, _carrier_vkn = "YURTİÇİ KARGO SERVİSİ A.Ş.", "9860008925"
+        elif "aras" in _cpl:
+            _carrier_name, _carrier_vkn = "ARAS KARGO YURT İÇİ YURT DIŞI TAŞIMACILIK A.Ş.", "0720039666"
+        elif _cpn.strip():
+            _carrier_name, _carrier_vkn = _cpn.replace("Marketplace", "").strip(" -"), ""
+        else:
+            _carrier_name, _carrier_vkn = "", ""
+
         _efatura_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
@@ -1199,6 +1223,9 @@ async def create_invoice_for_order(
             supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
             supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
             customer_vkn=customer_vkn,
+            customer_id_scheme=_ef_scheme,
+            customer_first_name=(_ef_first if _ef_scheme == "TCKN" else ""),
+            customer_family_name=(_ef_family if _ef_scheme == "TCKN" else ""),
             customer_name=customer_name,
             customer_street=ship_addr.get("address") or "",
             customer_district=ship_addr.get("district") or "",
@@ -1212,6 +1239,15 @@ async def create_invoice_for_order(
             discount=0.0,
             order_number=order.get("order_number") or order_id,
             order_date=(order.get("created_at") or now.isoformat())[:10],
+            order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
+            cargo_tracking=str(order.get("cargo_tracking_number") or order.get("cargo_tracking") or order.get("tracking_number") or ""),
+            carrier_name=_carrier_name,
+            carrier_vkn=_carrier_vkn,
+            carrier_type="Tüzel",
+            store_name=order.get("store_name") or order.get("marketplace") or "",
+            payment_method=order.get("payment_method") or "",
+            payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
+            dispatch_date=str(order.get("shipped_at") or order.get("dispatch_date") or issue_date)[:10],
         )
         ubl_xml = DoganClient.build_efatura_ubl_xml(**_efatura_kwargs)
 

@@ -1076,6 +1076,19 @@ class DoganClient:
                                 order_number: str = "",
                                 order_date: str = "",
                                 profile_id: str = "TEMELFATURA",
+                                customer_id_scheme: str = "",
+                                customer_first_name: str = "",
+                                customer_family_name: str = "",
+                                payment_method: str = "",
+                                payment_amount: float = 0.0,
+                                cargo_tracking: str = "",
+                                carrier_name: str = "",
+                                carrier_vkn: str = "",
+                                carrier_type: str = "Tüzel",
+                                store_name: str = "",
+                                order_ext_id: str = "",
+                                dispatch_date: str = "",
+                                invoice_ref: str = "",
                                 ) -> str:
         """UBL-TR 1.2 e-Fatura (TEMELFATURA) — kurumsal alıcılar için.
 
@@ -1091,14 +1104,27 @@ class DoganClient:
         from html import escape
         import uuid as _uuid
 
+        import re as _re
         line_items = line_items or []
-        if len(customer_vkn) != 10:
-            raise ValueError(f"e-Fatura için 10 haneli VKN gerekli, alındı: {customer_vkn} ({len(customer_vkn)} hane)")
+        _cid = str(customer_vkn or "").strip().replace(" ", "")
+        if len(_cid) not in (10, 11):
+            raise ValueError(f"e-Fatura için 10 (VKN) veya 11 (TCKN) haneli kimlik gerekli, alındı: {customer_vkn} ({len(_cid)} hane)")
+        customer_vkn = _cid
+        cust_id_scheme = (customer_id_scheme or ("TCKN" if len(_cid) == 11 else "VKN")).upper()
 
         def _s(v):
             if v is None or str(v).lower() == "none":
                 return ""
             return str(v).strip()
+
+        def _clean(v):
+            return _re.sub(r"\s+", " ", _s(v)).strip()
+
+        def _clean_addr(street, district, city):
+            s = _clean(street); d = _clean(district); c = _clean(city)
+            if d and c:
+                s = _re.sub(r"(?:\s*" + _re.escape(d) + r"\s+" + _re.escape(c) + r")+\s*$", "", s, flags=_re.IGNORECASE).strip()
+            return _clean(s)
 
         supplier_website = _s(supplier_website)
         customer_street = _s(customer_street)
@@ -1109,6 +1135,8 @@ class DoganClient:
         customer_name = _s(customer_name) or "Müşteri"
         order_number = _s(order_number)
         order_date = _s(order_date) or issue_date
+        _cust_street_clean = _clean_addr(customer_street, customer_district, customer_city)
+        _has_person = bool(_s(customer_first_name) or _s(customer_family_name))
 
         # InvoiceLine'lar — C62 unitCode
         invoice_lines_xml = []
@@ -1121,7 +1149,7 @@ class DoganClient:
             li_kdv_rate = float(it.get("kdv_rate") if it.get("kdv_rate") is not None else kdv_rate)
             gross_line = round(qty * unit_price, 2)
             line_amount = round(gross_line / (1.0 + li_kdv_rate / 100.0), 2)
-            line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            line_kdv = round(gross_line - line_amount, 2)  # KDV = brüt - net → ödenen tutara birebir
             net_unit_price = round(line_amount / qty, 4) if qty else line_amount
             line_subtotal += line_amount
             kdv_total += line_kdv
@@ -1129,11 +1157,17 @@ class DoganClient:
             grp["taxable"] += line_amount
             grp["tax"] += line_kdv
 
-            name = escape((it.get("name") or "Ürün"))[:255]
-            sku = escape(_s(it.get("sku") or it.get("product_code") or f"URN{idx:04d}"))
-            buyer_sku = escape(_s(it.get("buyer_sku") or it.get("sku") or sku))
-            li_note = escape(_s(it.get("note") or it.get("barcode") or ""))
+            name = escape(_clean(it.get("name") or "Ürün"))[:255]
+            _sku_raw = _clean(it.get("sku") or it.get("product_code") or f"URN{idx:04d}")
+            sku = escape(_sku_raw)
+            buyer_sku = escape(_clean(it.get("buyer_sku") or it.get("sku") or _sku_raw))
+            _barcode = _clean(it.get("barcode"))
+            li_note = escape(_clean(it.get("note")))   # barkod ARTIK not'a değil, kendi hanesine
             note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
+            std_item_xml = (f"""
+      <cac:StandardItemIdentification>
+        <cbc:ID schemeID="GTIN">{escape(_barcode)}</cbc:ID>
+      </cac:StandardItemIdentification>""" if _barcode else "")
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
     <cbc:ID>{idx}</cbc:ID>
@@ -1161,7 +1195,7 @@ class DoganClient:
       </cac:BuyersItemIdentification>
       <cac:SellersItemIdentification>
         <cbc:ID>{sku}</cbc:ID>
-      </cac:SellersItemIdentification>
+      </cac:SellersItemIdentification>{std_item_xml}
     </cac:Item>
     <cac:Price>
       <cbc:PriceAmount currencyID="{currency}">{net_unit_price:.4f}</cbc:PriceAmount>
@@ -1172,7 +1206,7 @@ class DoganClient:
         if shipping_cost > 0:
             sh_kdv_rate = 20.0
             sh_taxable = round(shipping_cost / (1.0 + sh_kdv_rate / 100.0), 2)
-            sh_kdv = round(sh_taxable * sh_kdv_rate / 100.0, 2)
+            sh_kdv = round(shipping_cost - sh_taxable, 2)  # KDV = brüt - net (kargo)
             kdv_total += sh_kdv
             line_subtotal += sh_taxable
             grp = kdv_groups.setdefault(sh_kdv_rate, {"taxable": 0.0, "tax": 0.0})
@@ -1231,15 +1265,47 @@ class DoganClient:
     </cac:TaxSubtotal>""")
 
         notes_xml = []
-        if order_number:
-            notes_xml.append(f"<cbc:Note>{escape(order_number)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Sipariş Numarası: {escape(order_number)}</cbc:Note>")
+        _ext = _clean(order_ext_id) or _clean(order_number)
+        _cargo = _clean(cargo_tracking)
+        if _ext:
+            notes_xml.append(f"<cbc:Note>{escape(_ext)}</cbc:Note>")
+            _l2 = f"Sipariş Numarası :{escape(_ext)}"
+            if _cargo:
+                _l2 += f" Kargo Takip No:{escape(_cargo)}"
+            notes_xml.append(f"<cbc:Note>{_l2}</cbc:Note>")
+        if _clean(invoice_ref):
+            notes_xml.append(f"<cbc:Note>Fatura Ref:{escape(_clean(invoice_ref))}</cbc:Note>")
+        if _clean(store_name):
+            notes_xml.append(f"<cbc:Note>Mağaza Adı : {escape(_clean(store_name))}</cbc:Note>")
+        if _clean(payment_method):
+            _pm = _re.sub(r"\bHalave\b", "Havale", _clean(payment_method), flags=_re.IGNORECASE)
+            _pay_amt = payment_amount if (payment_amount and payment_amount > 0) else tax_inclusive_total
+            notes_xml.append(f"<cbc:Note>Ödeme : {escape(_pm)} {_pay_amt:.2f} TL</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış İnternet Üzerinden Yapılmıştır</cbc:Note>")
+        notes_xml.append("<cbc:Note>Ödeme Şekli: Elektronik</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Web Adresi: {escape(supplier_website)}</cbc:Note>")
-        if customer_street:
-            notes_xml.append(f"<cbc:Note>Delivery; {escape(customer_street)}</cbc:Note>")
+        if _clean(dispatch_date):
+            notes_xml.append(f"<cbc:Note>Gönderim Tarihi: {escape(_clean(dispatch_date)[:10])}</cbc:Note>")
+        if _clean(carrier_name):
+            notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kişi Türü: {escape(_clean(carrier_type) or 'Tüzel')}</cbc:Note>")
+            if _clean(carrier_vkn):
+                notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kimlik No: {escape(_clean(carrier_vkn))}</cbc:Note>")
+            notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kişi Adı: {escape(_clean(carrier_name))}</cbc:Note>")
+        if _cust_street_clean:
+            notes_xml.append(
+                f"<cbc:Note>Delivery; {escape(_cust_street_clean)} "
+                f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
 
         xslt_ref_id = str(_uuid.uuid4())
+
+        _contact_xml = (f"\n      <cac:Contact><cbc:ElectronicMail>{escape(customer_email)}</cbc:ElectronicMail></cac:Contact>"
+                        if customer_email else "")
+        _partyname_xml = ("" if _has_person else
+                          f"\n      <cac:PartyName>\n        <cbc:Name>{escape(customer_name)}</cbc:Name>\n      </cac:PartyName>")
+        _person_xml = ((f"\n      <cac:Person>\n        <cbc:FirstName>{escape(_clean(customer_first_name))}</cbc:FirstName>"
+                        f"\n        <cbc:FamilyName>{escape(_clean(customer_family_name))}</cbc:FamilyName>\n      </cac:Person>")
+                       if _has_person else "")
+        _cust_street_xml = escape(_cust_street_clean or '-')
 
         xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:qdt="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDatatypes-2" xmlns:ccts="urn:un:unece:uncefact:documentation:2" xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" xmlns:ubltr="urn:oasis:names:specification:ubl:schema:xsd:TurkishCustomizationExtensionComponents" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:udt="urn:un:unece:uncefact:data:specification:UnqualifiedDataTypesSchemaModule:2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2 UBL-Invoice-2.1.xsd">
@@ -1324,42 +1390,34 @@ class DoganClient:
   <cac:AccountingCustomerParty>
     <cac:Party>
       <cac:PartyIdentification>
-        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
-      </cac:PartyIdentification>
-      <cac:PartyName>
-        <cbc:Name>{escape(customer_name)}</cbc:Name>
-      </cac:PartyName>
+        <cbc:ID schemeID="{cust_id_scheme}">{escape(customer_vkn)}</cbc:ID>
+      </cac:PartyIdentification>{_partyname_xml}
       <cac:PostalAddress>
-        <cbc:StreetName>{escape(customer_street or '-')}</cbc:StreetName>
+        <cbc:StreetName>{_cust_street_xml}</cbc:StreetName>
         <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(customer_city)}</cbc:CityName>
         <cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>
         <cac:Country>
           <cbc:Name>{escape(customer_country)}</cbc:Name>
         </cac:Country>
-      </cac:PostalAddress>
-      {('<cac:Contact><cbc:ElectronicMail>' + escape(customer_email) + '</cbc:ElectronicMail></cac:Contact>') if customer_email else ''}
+      </cac:PostalAddress>{_contact_xml}{_person_xml}
     </cac:Party>
   </cac:AccountingCustomerParty>
   <cac:BuyerCustomerParty>
     <cac:Party>
       <cac:PartyIdentification>
-        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
-      </cac:PartyIdentification>
-      <cac:PartyName>
-        <cbc:Name>{escape(customer_name)}</cbc:Name>
-      </cac:PartyName>
+        <cbc:ID schemeID="{cust_id_scheme}">{escape(customer_vkn)}</cbc:ID>
+      </cac:PartyIdentification>{_partyname_xml}
       <cac:PostalAddress>
-        <cbc:ID schemeID="VKN">{escape(customer_vkn)}</cbc:ID>
-        <cbc:StreetName>{escape(customer_street or '-')}</cbc:StreetName>
+        <cbc:ID schemeID="{cust_id_scheme}">{escape(customer_vkn)}</cbc:ID>
+        <cbc:StreetName>{_cust_street_xml}</cbc:StreetName>
         <cbc:CitySubdivisionName>{escape(customer_district or '-')}</cbc:CitySubdivisionName>
         <cbc:CityName>{escape(customer_city)}</cbc:CityName>
         <cbc:PostalZone>{escape(customer_postal_zone)}</cbc:PostalZone>
         <cac:Country>
           <cbc:Name>{escape(customer_country)}</cbc:Name>
         </cac:Country>
-      </cac:PostalAddress>
-      {('<cac:Contact><cbc:ElectronicMail>' + escape(customer_email) + '</cbc:ElectronicMail></cac:Contact>') if customer_email else ''}
+      </cac:PostalAddress>{_contact_xml}{_person_xml}
     </cac:Party>
   </cac:BuyerCustomerParty>
   <cac:Delivery>
