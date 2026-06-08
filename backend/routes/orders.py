@@ -938,7 +938,10 @@ async def create_invoice_for_order(
         customer_vkn_raw = (str(order.get("trendyol_identity_number") or "")).strip().replace(" ", "")
     receiver_alias = ""
 
-    if invoice_type == "auto" and dogan_active:
+    # Alıcı e-fatura mükellefi ise e-arşiv DÜZENLENEMEZ (Doğan 10013). Bu nedenle
+    # mikro ihracat DIŞINDAKİ e-arşiv taleplerini de mükellef sorgusundan geçir:
+    # mükellef → e-fatura'ya yükselt; değilse / VKN yoksa e-arşiv kalır.
+    if invoice_type in ("auto", "e-arsiv") and not order.get("is_micro_export") and dogan_active:
         if customer_vkn_raw and len(customer_vkn_raw) in (10, 11):
             # Doğan'a sor
             try:
