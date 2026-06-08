@@ -100,21 +100,55 @@ def normalize_phone_tr(phone: str) -> str:
 # =============================================================================
 
 async def _sms_netgsm(cfg: Dict, to: str, message: str) -> Dict:
-    """Netgsm HTTP GET API."""
+    """Netgsm HTTP GET API — https://api.netgsm.com.tr/sms/send/get
+
+    Gerekli cfg alanları:
+      - username : Netgsm abone numarası VEYA tanımlı API alt kullanıcı adı
+      - password : API (alt) kullanıcı şifresi
+      - header   : Netgsm panelinde ONAYLI gönderici adı (Originator)
+    Opsiyonel cfg:
+      - dil       : "TR" → Türkçe karakter destekli gönderim (varsayılan "TR")
+      - appkey    : API alt kullanıcıya tanımlı uygulama anahtarı (varsa)
+      - iysfilter : İYS filtresi (ticari ileti için; işlemsel SMS'te boş bırakılır)
+    """
+    gsmno = normalize_phone_tr(to)  # 905XXXXXXXXX
     url = "https://api.netgsm.com.tr/sms/send/get"
     params = {
         "usercode": cfg.get("username", ""),
         "password": cfg.get("password", ""),
-        "gsmno": to,
+        "gsmno": gsmno,
         "message": message,
         "msgheader": cfg.get("header", ""),
+        "dil": (cfg.get("dil") or "TR"),  # Türkçe karakter desteği (ç,ş,ğ,ı,ö,ü)
+    }
+    if cfg.get("appkey"):
+        params["appkey"] = cfg.get("appkey")
+    if cfg.get("iysfilter"):
+        params["iysfilter"] = cfg.get("iysfilter")
+
+    err_map = {
+        "20": "Mesaj metni hatalı ya da karakter sınırı aşıldı.",
+        "30": "Geçersiz kullanıcı adı/şifre, API erişim izni yok veya IP kısıtlaması var.",
+        "40": "Gönderici adı (başlık) sistemde tanımlı/onaylı değil.",
+        "50": "Hesap İYS kontrollü; alıcının izni bulunmuyor.",
+        "51": "Gönderici adı İYS marka eşleşmesi yapılmamış.",
+        "70": "Hatalı veya eksik parametre.",
+        "80": "Gönderim sınırı aşıldı.",
+        "85": "Aynı numaraya 1 dakika içinde mükerrer gönderim sınırı.",
     }
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url, params=params)
-        text = r.text.strip()
-        # 00 ile başlıyorsa başarılı (kod formatı: "00 JOBID")
-        ok = text.startswith("00 ") or text.startswith("01 ") or text == "00"
-        return {"success": ok, "response": text}
+        text = (r.text or "").strip()
+    # Netgsm GET yanıtı: başarı = "00 JOBID" (tek başarı kodu 00'dır)
+    parts = text.split()
+    code = parts[0] if parts else ""
+    ok = code == "00"
+    result = {"success": ok, "response": text}
+    if ok:
+        result["job_id"] = parts[1] if len(parts) > 1 else ""
+    else:
+        result["error"] = err_map.get(code, f"Beklenmeyen Netgsm yanıtı: {text or '(boş)'}")
+    return result
 
 
 async def _sms_iletimerkezi(cfg: Dict, to: str, message: str) -> Dict:
