@@ -61,6 +61,7 @@ async def get_orders(
     coupon_code: Optional[str] = None,
     influencer: Optional[str] = None,
     is_corporate: Optional[str] = None,
+    payment_view: Optional[str] = "all",
     current_user: dict = Depends(require_admin)
 ):
     """Get orders with pagination (admin only)"""
@@ -115,6 +116,15 @@ async def get_orders(
             {"shipping_address.email": {"$regex": search, "$options": "i"}}
         ]
     
+    # Ödeme kaydı bulunmayan (web kart denemesi, hiç ödenmemiş) ayrımı
+    _web_cond = {"$or": [{"platform": "facette"}, {"platform": {"$in": [None, ""]}}, {"platform": {"$exists": False}}]}
+    _card_cond = {"$or": [{"payment_method": "credit_card"}, {"payment_method": {"$in": [None, ""]}}, {"payment_method": {"$exists": False}}]}
+    _junk_cond = {"$and": [_web_cond, _card_cond, {"payment_status": {"$ne": "paid"}}]}
+    if payment_view == "unpaid":
+        query.setdefault("$and", []).append(_junk_cond)
+    elif payment_view == "valid":
+        query.setdefault("$and", []).append({"$nor": [_junk_cond]})
+
     orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.orders.count_documents(query)
     

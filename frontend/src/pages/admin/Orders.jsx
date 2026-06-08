@@ -66,7 +66,7 @@ const cargoCompanies = [
   { value: "PTT", label: "PTT Kargo" },
 ];
 
-export default function AdminOrders() {
+export default function AdminOrders({ unpaidView = false }) {
   const [orders, setOrders] = useState([]);
   const [riskMap, setRiskMap] = useState({});  // FAZ 6 — müşteri risk skorları
   const [loading, setLoading] = useState(true);
@@ -162,7 +162,7 @@ export default function AdminOrders() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `${API}/orders?page=${page}&limit=${pageSize}`;
+      let url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}`;
       if (statusFilter) url += `&status=${statusFilter}`;
       Object.keys(filters).forEach(key => {
         if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`;
@@ -688,7 +688,7 @@ export default function AdminOrders() {
   return (
     <div data-testid="admin-orders">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Siparişler</h1>
+        <h1 className="text-2xl font-bold">{unpaidView ? "Ödeme Kaydı Bulunmayan Siparişler" : "Siparişler"}</h1>
         <div className="flex items-center gap-4">
           <button 
             onClick={() => setTrendyolModalOpen(true)}

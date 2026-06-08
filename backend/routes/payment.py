@@ -257,6 +257,7 @@ async def _retrieve_and_finalize(token: str) -> dict:
         update["payment_id"] = data.get("paymentId")
         update["iyzico_payment_id"] = data.get("paymentId")
         update["paid_at"] = datetime.now(timezone.utc).isoformat()
+        update["status"] = "confirmed"
     else:
         update["payment_status"] = "failed"
 

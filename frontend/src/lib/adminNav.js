@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
   Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
-  Truck, CreditCard, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain,
+  Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain,
 } from "lucide-react";
 
 // Default sıralama (kullanıcı tercihi yoksa kullanılır):
@@ -23,6 +23,7 @@ export const navigationGroups = [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
       { label: "İadeler & İptaller", path: "/admin/iadeler", icon: RotateCcw },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },
+      { label: "Ödeme Kaydı Bulunmayan", path: "/admin/odeme-bekleyen-siparisler", icon: AlertTriangle },
     ],
   },
   {
