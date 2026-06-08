@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { useShipping } from "../lib/shipping";
 import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { trackRemoveFromCart } from "../lib/dataLayer";
@@ -9,8 +10,9 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function CartDrawer() {
   const { items, isOpen, setIsOpen, removeItem, updateQuantity, addItem, total, itemCount } = useCart();
-  const freeShippingLimit = 500;
-  const remaining = Math.max(0, freeShippingLimit - total);
+  const { shippingFee, freeShippingThreshold } = useShipping();
+  const freeShippingLimit = freeShippingThreshold || 0;
+  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
 
   const [suggestions, setSuggestions] = useState([]);
   const [bestsellers, setBestsellers] = useState([]);
@@ -231,7 +233,7 @@ export default function CartDrawer() {
               <span className="text-xs tracking-[0.2em] uppercase text-black/60">Ara Toplam</span>
               <span className="text-base font-medium tabular-nums">{total.toFixed(2)} TL</span>
             </div>
-            {remaining <= 0 && (
+            {freeShippingThreshold != null && remaining <= 0 && (
               <p className="text-[11px] text-emerald-700 text-center">
                 Ücretsiz kargo kazandınız
               </p>

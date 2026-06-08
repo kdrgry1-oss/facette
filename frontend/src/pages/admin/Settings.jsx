@@ -45,11 +45,25 @@ function MaintenanceSubscribers() {
   );
 }
 
+const CARGO_COMPANIES = [
+  { key: "aras", label: "Aras Kargo" },
+  { key: "mng", label: "MNG Kargo" },
+  { key: "yurtici", label: "Yurtiçi Kargo" },
+  { key: "surat", label: "Sürat Kargo" },
+  { key: "ptt", label: "PTT Kargo" },
+  { key: "ups", label: "UPS" },
+  { key: "sendeo", label: "Sendeo" },
+  { key: "hepsijet", label: "HepsiJET" },
+  { key: "trendyol_express", label: "Trendyol Express" },
+];
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState({
     site_name: "FACETTE",
     logo_url: "",
-    free_shipping_limit: 500,
+    shipping_fee: 0,
+    cargo_fees: {},
+    default_cargo_company: "",
     rotating_texts: [],
     contact_email: "",
     contact_phone: "",
@@ -187,14 +201,54 @@ export default function AdminSettings() {
                 className="w-full border px-3 py-2 rounded text-sm"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Ücretsiz Kargo Limiti (TL)</label>
-              <input
-                type="number"
-                value={settings.free_shipping_limit}
-                onChange={(e) => setSettings({ ...settings, free_shipping_limit: parseFloat(e.target.value) })}
-                className="w-full border px-3 py-2 rounded text-sm"
-              />
+            <div className="md:col-span-2 border rounded-lg p-3 bg-gray-50">
+              <label className="block text-sm font-semibold mb-2">Kargo Ücretleri (firma bazında)</label>
+              <p className="text-xs text-gray-500 mb-2">Müşteriye yansıyan kargo ücreti, aşağıda seçtiğiniz <b>Varsayılan Kargo Firması</b>'nın ücretidir. Ücretsiz kargo eşiği artık burada değil; <b>Kampanyalar</b> sayfasından "Otomatik uygula" işaretli bir <b>Ücretsiz Kargo</b> kampanyası ile yönetilir (örn. Min. Sipariş Tutarı: 3000).</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {CARGO_COMPANIES.map((cc) => (
+                  <div key={cc.key}>
+                    <label className="block text-xs text-gray-600 mb-1">{cc.label} (TL)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={(settings.cargo_fees || {})[cc.key] ?? ""}
+                      onChange={(e) => setSettings({ ...settings, cargo_fees: { ...(settings.cargo_fees || {}), [cc.key]: e.target.value === "" ? "" : parseFloat(e.target.value) } })}
+                      className="w-full border px-2 py-1.5 rounded text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3">
+                <label className="block text-xs text-gray-600 mb-1">Varsayılan Kargo Firması (müşteriye yansıyan ücret)</label>
+                <select
+                  value={settings.default_cargo_company || ""}
+                  onChange={(e) => setSettings({ ...settings, default_cargo_company: e.target.value })}
+                  className="w-full border px-2 py-1.5 rounded text-sm"
+                >
+                  <option value="">Seçiniz</option>
+                  {CARGO_COMPANIES.map((cc) => (<option key={cc.key} value={cc.key}>{cc.label}</option>))}
+                </select>
+              </div>
+            </div>
+            <div className="md:col-span-2 border rounded-lg p-3 bg-gray-50">
+              <label className="block text-sm font-semibold mb-2">Google Merchant XML Feed</label>
+              <div className="mb-2">
+                <label className="block text-xs text-gray-600 mb-1">Mağaza Adresi (feed linklerinde kullanılır)</label>
+                <input
+                  type="text"
+                  placeholder="https://facette.com.tr"
+                  value={settings.site_url || ""}
+                  onChange={(e) => setSettings({ ...settings, site_url: e.target.value })}
+                  className="w-full border px-2 py-1.5 rounded text-sm"
+                />
+              </div>
+              <label className="block text-xs text-gray-600 mb-1">Feed Adresi (Google Merchant'a bu linki ekleyin)</label>
+              <div className="flex gap-2">
+                <input readOnly value={`${API}/products/google-merchant-feed.xml`} className="flex-1 border px-2 py-1.5 rounded text-sm bg-white" />
+                <button type="button" onClick={() => { try { navigator.clipboard.writeText(`${API}/products/google-merchant-feed.xml`); } catch (e) {} }} className="px-3 py-1.5 bg-black text-white rounded text-sm whitespace-nowrap">Kopyala</button>
+                <a href={`${API}/products/google-merchant-feed.xml`} target="_blank" rel="noreferrer" className="px-3 py-1.5 border rounded text-sm whitespace-nowrap">Aç</a>
+              </div>
+              <p className="text-xs text-gray-500 mt-1.5">Tüm aktif ürünleri içerir. Google Merchant Center → Ürünler → Feed'ler → "Planlanmış getirme" ile bu adresi periyodik çektirebilirsiniz.</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Varsayılan KDV Oranı (%)</label>

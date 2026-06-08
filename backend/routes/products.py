@@ -14,6 +14,109 @@ import io
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
+
+@router.get("/google-merchant-feed.xml")
+async def google_merchant_feed():
+    """Tüm aktif ürünler için Google Merchant uyumlu RSS 2.0 (g:) XML feed (public)."""
+    import html
+    main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    site = (main.get("site_url") or "https://facette.com.tr").rstrip("/")
+    shop = main.get("site_name") or "FACETTE"
+    prods = await db.products.find({"is_active": True, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(50000)
+
+    def esc(x):
+        return html.escape(str(x if x is not None else ""), quote=True)
+
+    def first_image(pr):
+        for im in (pr.get("images") or []):
+            if isinstance(im, str) and im:
+                return im
+            if isinstance(im, dict):
+                u = im.get("url") or im.get("src") or im.get("image")
+                if u:
+                    return u
+        return pr.get("image") or ""
+
+    def abs_url(u):
+        if not u:
+            return ""
+        if str(u).startswith("http"):
+            return u
+        return site + ("" if str(u).startswith("/") else "/") + str(u)
+
+    items = []
+    for pr in prods:
+        pid = pr.get("id") or pr.get("slug")
+        if not pid:
+            continue
+        slug = pr.get("slug") or pid
+        link = f"{site}/urun/{slug}"
+        img = abs_url(first_image(pr))
+        try:
+            price = float(pr.get("price") or 0)
+        except Exception:
+            price = 0.0
+        sale = pr.get("sale_price")
+        try:
+            sale = float(sale) if sale not in (None, "", 0) else None
+        except Exception:
+            sale = None
+        stock = pr.get("stock") or 0
+        if pr.get("variants"):
+            try:
+                vsum = sum(int(v.get("stock") or 0) for v in pr["variants"])
+                if vsum:
+                    stock = vsum
+            except Exception:
+                pass
+        avail = "in stock" if (stock and stock > 0) else "out of stock"
+        desc = re.sub(r"<[^>]+>", " ", str(pr.get("description") or pr.get("short_description") or pr.get("name") or ""))
+        desc = re.sub(r"\s+", " ", desc).strip()[:4500]
+        brand = pr.get("brand") or shop
+        gtin = (pr.get("barcode") or "").strip()
+        mpn = (pr.get("stock_code") or pr.get("sku") or "").strip()
+        cat = pr.get("category_name") or ""
+        rows = [
+            f"<g:id>{esc(pid)}</g:id>",
+            f"<g:title>{esc((pr.get('name') or '')[:150])}</g:title>",
+            f"<g:description>{esc(desc or pr.get('name'))}</g:description>",
+            f"<g:link>{esc(link)}</g:link>",
+        ]
+        if img:
+            rows.append(f"<g:image_link>{esc(img)}</g:image_link>")
+        rows.append(f"<g:availability>{avail}</g:availability>")
+        rows.append("<g:condition>new</g:condition>")
+        if sale and sale > 0 and price and sale < price:
+            rows.append(f"<g:price>{price:.2f} TRY</g:price>")
+            rows.append(f"<g:sale_price>{sale:.2f} TRY</g:sale_price>")
+        else:
+            eff = sale if (sale and sale > 0) else price
+            rows.append(f"<g:price>{eff:.2f} TRY</g:price>")
+        if brand:
+            rows.append(f"<g:brand>{esc(brand)}</g:brand>")
+        has_id = False
+        if gtin and gtin.isdigit() and len(gtin) in (8, 12, 13, 14):
+            rows.append(f"<g:gtin>{esc(gtin)}</g:gtin>")
+            has_id = True
+        if mpn:
+            rows.append(f"<g:mpn>{esc(mpn)}</g:mpn>")
+            has_id = True
+        if not has_id:
+            rows.append("<g:identifier_exists>no</g:identifier_exists>")
+        if cat:
+            rows.append(f"<g:product_type>{esc(cat)}</g:product_type>")
+        items.append("<item>" + "".join(rows) + "</item>")
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel>'
+        f"<title>{esc(shop)}</title><link>{esc(site)}</link>"
+        f"<description>{esc(shop)} urun feed</description>"
+        + "".join(items) +
+        "</channel></rss>"
+    )
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
 def generate_slug(name: str) -> str:
     """Generate URL-friendly slug from name"""
     slug = name.lower()

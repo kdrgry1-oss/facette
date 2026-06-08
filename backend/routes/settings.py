@@ -77,6 +77,36 @@ async def get_settings():
             }
         }
         await db.settings.insert_one(settings.copy())
+
+    # Storefront kargo bilgisi (sabit kod yerine ayardan)
+    cargo_fees = settings.get("cargo_fees") or {}
+    default_company = settings.get("default_cargo_company") or ""
+    fee = None
+    if default_company and isinstance(cargo_fees, dict) and cargo_fees.get(default_company) not in (None, ""):
+        try:
+            fee = float(cargo_fees.get(default_company))
+        except Exception:
+            fee = None
+    if fee is None:
+        try:
+            fee = float(settings.get("shipping_fee"))
+        except Exception:
+            fee = 0.0
+    settings["shipping_fee"] = fee or 0.0
+    # Ucretsiz kargo esigi -- aktif "otomatik" free_shipping kampanyalarindan (en dusuk min tutar)
+    threshold = None
+    try:
+        async for _c in db.coupons.find({"is_active": True, "free_shipping": True, "auto_apply": True}, {"_id": 0, "min_cart_total": 1}):
+            mc = _c.get("min_cart_total")
+            if mc in (None, ""):
+                continue
+            mc = float(mc)
+            if threshold is None or mc < threshold:
+                threshold = mc
+    except Exception:
+        threshold = None
+    settings["free_shipping_threshold"] = threshold
+
     return settings
 
 @router.post("")

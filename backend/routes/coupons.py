@@ -73,6 +73,7 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "is_active": bool(payload.get("is_active", True)),
         "first_order_only": bool(payload.get("first_order_only", False)),
         "free_shipping": bool(payload.get("free_shipping", False)),
+        "auto_apply": bool(payload.get("auto_apply", False)),
         "created_at": _utcnow(),
         "created_by": current_user.get("email", ""),
     }
@@ -86,7 +87,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
     allowed = (
         "title", "type", "value", "min_cart_total", "max_discount",
         "categories", "products", "usage_limit", "usage_limit_per_user",
-        "start_at", "end_at", "is_active", "first_order_only", "free_shipping",
+        "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _utcnow()
@@ -309,6 +310,7 @@ def _coupon_to_campaign(c: dict) -> dict:
         "start_date": c.get("start_at"),
         "end_date": c.get("end_at"),
         "redeemed_count": c.get("redeemed_count", 0),
+        "auto_apply": c.get("auto_apply", False),
     }
 
 
@@ -324,6 +326,7 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "end_at": payload.get("end_date") or payload.get("end_at"),
         "is_active": bool(payload.get("is_active", True)),
         "free_shipping": ctype == "free_shipping",
+        "auto_apply": bool(payload.get("auto_apply", False)),
     }
 
 
@@ -341,6 +344,8 @@ async def list_campaigns(current_user: dict = Depends(require_admin)):
 @campaigns_router.post("")
 async def create_campaign(payload: dict, current_user: dict = Depends(require_admin)):
     code = (payload.get("code") or "").strip().upper()
+    if not code and payload.get("auto_apply"):
+        code = "AUTO-" + uuid.uuid4().hex[:6].upper()
     if not code:
         raise HTTPException(status_code=400, detail="Kampanya kodu gerekli")
     if await db.coupons.find_one({"code": code}):

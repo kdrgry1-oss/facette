@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
+import { useShipping } from "../lib/shipping";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -75,8 +76,9 @@ export default function Checkout() {
   });
 
   // Sipariş tutarları (türetilmiş) — useEffect'lerden ÖNCE tanımlanmalı (TDZ hatası önlenir)
-  const freeShippingLimit = 500;
-  const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
+  const { shippingFee, freeShippingThreshold } = useShipping();
+  const freeShippingLimit = freeShippingThreshold || 0;
+  const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;

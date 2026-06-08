@@ -108,6 +108,7 @@ export default function AdminCampaigns() {
     start_date: new Date().toISOString().split('T')[0],
     end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     is_active: true,
+    auto_apply: false,
     usage_limit: 0,
   });
 
@@ -150,7 +151,7 @@ export default function AdminCampaigns() {
       name: "", type: "percentage", value: 0, min_order_amount: 0, code: "",
       start_date: new Date().toISOString().split('T')[0],
       end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      is_active: true, usage_limit: 0
+      is_active: true, auto_apply: false, usage_limit: 0
     });
   };
 
@@ -173,6 +174,7 @@ export default function AdminCampaigns() {
       start_date: new Date().toISOString().split('T')[0],
       end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       is_active: true,
+      auto_apply: tmpl.payload.auto_apply || tmpl.payload.type === "free_shipping",
       usage_limit: tmpl.payload.usage_limit || 0,
     });
     setModalOpen(true);
@@ -336,6 +338,12 @@ export default function AdminCampaigns() {
                   className="w-full border px-3 py-2 rounded text-sm"
                 />
               </div>
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="accent-black" checked={!!formData.auto_apply} onChange={(e) => setFormData({ ...formData, auto_apply: e.target.checked })} />
+                <span>Otomatik uygula (kod gerekmez) — "Ücretsiz Kargo" kampanyasında sepet, Min. Sipariş Tutarı'na ulaşınca kargo otomatik bedava olur.</span>
+              </label>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>

@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Trash2, Plus, Minus } from "lucide-react";
 import axios from "axios";
+import { useShipping } from "../lib/shipping";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
@@ -12,9 +13,10 @@ const PLACEHOLDER = "/placeholder.jpg";
 
 export default function Cart() {
   const { items, removeItem, updateQuantity, total, itemCount } = useCart();
-  const freeShippingLimit = 500;
-  const remaining = Math.max(0, freeShippingLimit - total);
-  const shippingCost = total >= freeShippingLimit ? 0 : 29.90;
+  const { shippingFee, freeShippingThreshold } = useShipping();
+  const freeShippingLimit = freeShippingThreshold || 0;
+  const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
+  const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
   const grandTotal = total + shippingCost;
 
   // Kombin / sale öneriler
