@@ -544,6 +544,9 @@ api_router.include_router(compliance_router)
 # TOTP MFA (çok faktörlü doğrulama) — Amazon DPP uyumu
 from routes.mfa import router as mfa_router
 api_router.include_router(mfa_router)
+# Cloudflare Email Routing — gelen mail webhook'u
+from routes.inbound_mail import router as inbound_mail_router
+api_router.include_router(inbound_mail_router)
 
 # Root endpoint
 @api_router.get("/")
