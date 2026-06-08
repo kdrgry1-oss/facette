@@ -5652,6 +5652,29 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     tracking_no = str((payload or {}).get("tracking_no") or "").strip()
     display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
 
+    # Kalemleri ürün kataloğundaki beden ile zenginleştir (barkod -> variant.size)
+    gp_items = []
+    for _it in items:
+        _bc = str(_it.get("barcode", "") or "").strip()
+        _size = ""
+        if _bc:
+            _pv = await db.products.find_one({"variants.barcode": _bc}, {"_id": 0, "variants": 1})
+            if _pv:
+                for _v in (_pv.get("variants") or []):
+                    if str(_v.get("barcode")) == _bc:
+                        _size = _v.get("size") or _v.get("beden") or ""
+                        break
+        gp_items.append({
+            "name": _it.get("productName", ""),
+            "barcode": _bc,
+            "size": _size,
+            "quantity": _it.get("quantity", 1),
+            "unit_price": _it.get("unit_price", 0),
+            "discount": _it.get("discount_amount", 0),
+            "net_price": _it.get("price", 0),
+            "reason": _it.get("reason", ""),
+        })
+
     gider_pusulasi = {
         "number": gp_number,
         "display_number": display_number,
@@ -5669,15 +5692,7 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
         "sales_invoice_no": claim.get("invoice_number", ""),
         "cargo_company": claim.get("cargo_provider_name", ""),
         "sales_rep": "",
-        "items": [{
-            "name": item.get("productName", ""),
-            "barcode": item.get("barcode", ""),
-            "quantity": item.get("quantity", 1),
-            "unit_price": item.get("unit_price", 0),
-            "discount": item.get("discount_amount", 0),
-            "net_price": item.get("price", 0),
-            "reason": item.get("reason", "")
-        } for item in items],
+        "items": gp_items,
         "totals": {
             "gross": total_gross,
             "discount": total_discount,

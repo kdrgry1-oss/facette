@@ -864,6 +864,7 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
   const black = (
     <div style={{ position: "absolute", left: "6mm", top: "41mm", width: "63mm", transform: `translate(${offX}mm, ${offY}mm)`, fontSize: "2.0mm", lineHeight: 1.12, color: "#000" }}>
       <div style={{ fontWeight: 700 }}>{c.name || ""}</div>
+      <div style={{ height: "2.4mm" }} />
       {c.address ? <div>{c.address}</div> : null}
       <div>{cityLine}</div>
       <div style={{ height: "1.2mm" }} />
@@ -885,7 +886,7 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
         <tbody>
           {items.map((it, i) => (
             <tr key={i}>
-              <td style={{ padding: "0.3mm 0" }}>{(it.name || "").slice(0, 26)}</td>
+              <td style={{ padding: "0.3mm 0", wordBreak: "break-word" }}>{it.name || ""}{it.size ? ` — Beden: ${it.size}` : ""}</td>
               <td style={{ textAlign: "right" }}>{it.quantity}</td>
               <td style={{ textAlign: "right" }}>{fmt2(neg(it.net_price))}</td>
             </tr>
