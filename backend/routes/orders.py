@@ -875,44 +875,11 @@ async def create_invoice_for_order(
         return {"success": True, "message": "Fatura zaten kesilmiş",
                 "invoice_number": order.get("invoice_number", "")}
 
-    # Mikro ihracat siparişleri ayrı ETGB beyannamesi ile faturalanır;
-    # normal e-arşiv/e-fatura yerine ETGB-placeholder bir belge numarası oluştur.
+    # Mikro ihracat: gerçek e-Arşiv İSTİSNA faturası (InvoiceTypeCode=ISTISNA, KDV %0,
+    # istisna 301 "11/1-a Mal ihracatı"). ETGB placeholder yerine normal e-Arşiv akışı;
+    # build aşamasında export builder seçilir.
     if order.get("is_micro_export"):
-        count = await db.orders.count_documents({"invoice_type": "etgb"})
-        invoice_number = f"ETGB{(count + 1):08d}"
-        now = datetime.now(timezone.utc).isoformat()
-        await db.orders.update_one(
-            {"id": order_id},
-            {"$set": {
-                "invoice_issued": True,
-                "invoice_number": invoice_number,
-                "invoice_type": "etgb",
-                "invoice_provider": "etgb-micro-export",
-                "invoice_issued_at": now,
-                "invoice_issued_by": current_user.get("email", ""),
-                "updated_at": now,
-            }}
-        )
-        try:
-            from .marketplace_hub import log_integration_event
-            await log_integration_event(
-                marketplace="einvoice:etgb",
-                action="invoice_create",
-                status="success",
-                direction="outbound",
-                ref_id=order_id,
-                message=f"Mikro İhracat ETGB beyannamesi oluşturuldu: {invoice_number}",
-            )
-        except Exception:
-            pass
-        return {
-            "success": True,
-            "message": "Mikro ihracat ETGB beyannamesi oluşturuldu",
-            "invoice_number": invoice_number,
-            "invoice_type": "etgb",
-            "provider": "etgb-micro-export",
-        }
-
+        invoice_type = "e-arsiv"
     cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0})
     active = (cfg or {}).get("active_provider")
     providers = (cfg or {}).get("providers") or {}
@@ -1053,7 +1020,7 @@ async def create_invoice_for_order(
         else:
             _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
 
-        ubl_xml = DoganClient.build_earsiv_ubl_xml(
+        _earsiv_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
             issue_date=issue_date,
@@ -1092,6 +1059,10 @@ async def create_invoice_for_order(
             carrier_city=_carrier_city,
             note="",
         )
+        _earsiv_builder = (DoganClient.build_earsiv_export_ubl_xml
+                           if order.get("is_micro_export")
+                           else DoganClient.build_earsiv_ubl_xml)
+        ubl_xml = _earsiv_builder(**_earsiv_kwargs)
 
         dogan_client = DoganClient(
             username=dogan_settings["username"],
@@ -1105,6 +1076,23 @@ async def create_invoice_for_order(
             dogan_client.send_earsiv_invoice,
             ubl_xml, invoice_uuid, cust_email, archive_note,
         )
+        # Cift-numara korumasi: Dogan "zaten kayitli/mukerrer/10009" -> siradaki no
+        _ex_tries = 0
+        while (not dogan_result.get("success")) and _ex_tries < 5 and any(_t in str(dogan_result.get("message","")).lower() for _t in ("zaten","mükerrer","mukerrer","duplicate","already","10009","kayıtlı","kayitli","mevcut")):
+            _ex_tries += 1
+            await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
+            _sd = await db.counters.find_one({"_id": seq_key}) or {}
+            seq = int(_sd.get("seq", 1))
+            invoice_number = f"{prefix}{year_str}{seq:09d}"
+            invoice_uuid = generate_id()
+            _earsiv_kwargs["invoice_number"] = invoice_number
+            _earsiv_kwargs["invoice_uuid"] = invoice_uuid
+            logger.warning(f"e-Arsiv numara cakismasi -> siradaki: {invoice_number} (deneme {_ex_tries})")
+            ubl_xml = _earsiv_builder(**_earsiv_kwargs)
+            dogan_result = await run_in_threadpool(
+                dogan_client.send_earsiv_invoice,
+                ubl_xml, invoice_uuid, cust_email, archive_note,
+            )
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET earsiv: {dogan_result}")
@@ -1163,7 +1151,7 @@ async def create_invoice_for_order(
                          else ""),
             })
 
-        ubl_xml = DoganClient.build_efatura_ubl_xml(
+        _efatura_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
             issue_date=issue_date,
@@ -1189,6 +1177,7 @@ async def create_invoice_for_order(
             order_number=order.get("order_number") or order_id,
             order_date=(order.get("created_at") or now.isoformat())[:10],
         )
+        ubl_xml = DoganClient.build_efatura_ubl_xml(**_efatura_kwargs)
 
         dogan_client = DoganClient(
             username=dogan_settings["username"],
@@ -1202,6 +1191,23 @@ async def create_invoice_for_order(
             ubl_xml, invoice_uuid, invoice_number,
             customer_vkn, receiver_alias, sender_alias, cust_email,
         )
+        _ef_tries = 0
+        while (not dogan_result.get("success")) and _ef_tries < 5 and any(_t in str(dogan_result.get("message","")).lower() for _t in ("zaten","mükerrer","mukerrer","duplicate","already","10009","kayıtlı","kayitli","mevcut")):
+            _ef_tries += 1
+            await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
+            _sd = await db.counters.find_one({"_id": seq_key}) or {}
+            seq = int(_sd.get("seq", 1))
+            invoice_number = f"{prefix}{year_str}{seq:09d}"
+            invoice_uuid = generate_id()
+            _efatura_kwargs["invoice_number"] = invoice_number
+            _efatura_kwargs["invoice_uuid"] = invoice_uuid
+            logger.warning(f"e-Fatura numara cakismasi -> siradaki: {invoice_number} (deneme {_ef_tries})")
+            ubl_xml = DoganClient.build_efatura_ubl_xml(**_efatura_kwargs)
+            dogan_result = await run_in_threadpool(
+                dogan_client.send_efatura_invoice,
+                ubl_xml, invoice_uuid, invoice_number,
+                customer_vkn, receiver_alias, sender_alias, cust_email,
+            )
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET efatura: {dogan_result}")
