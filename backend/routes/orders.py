@@ -1272,6 +1272,7 @@ async def create_invoice_for_order(
             supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
             customer_vkn=customer_vkn,
             customer_id_scheme=_ef_scheme,
+            customer_tax_office=bill.get("tax_office") or "",
             customer_first_name=(_ef_first if _ef_scheme == "TCKN" else ""),
             customer_family_name=(_ef_family if _ef_scheme == "TCKN" else ""),
             customer_name=customer_name,
@@ -1307,6 +1308,16 @@ async def create_invoice_for_order(
         )
         cust_email = (ship_addr.get("email") or order.get("user_email") or "").strip()
         sender_alias = dogan_settings.get("sender_alias") or ""
+        if not sender_alias:
+            # Gönderici (Facette) GİB PK alias'ı ayarda yoksa, kendi VKN'mizi CheckUser ile
+            # sorgulayıp INVOICE alias'ını kullan. Boş bırakılırsa Doğan "account not found" döner.
+            try:
+                _own_vkn = dogan_settings.get("vkn") or "7810816779"
+                _own_chk = await run_in_threadpool(dogan_client.check_user, _own_vkn)
+                sender_alias = _own_chk.get("invoice_alias") or ""
+            except Exception as _se:
+                logger.warning(f"sender_alias CheckUser fallback: {_se}")
+        logger.info(f"e-Fatura gönderim: receiver_alias={'dolu' if receiver_alias else 'BOŞ'}, sender_alias={'dolu' if sender_alias else 'BOŞ'}")
         dogan_result = await run_in_threadpool(
             dogan_client.send_efatura_invoice,
             ubl_xml, invoice_uuid, invoice_number,

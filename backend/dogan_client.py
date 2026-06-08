@@ -1102,6 +1102,7 @@ class DoganClient:
                                 order_date: str = "",
                                 profile_id: str = "TEMELFATURA",
                                 customer_id_scheme: str = "",
+                                customer_tax_office: str = "",
                                 customer_first_name: str = "",
                                 customer_family_name: str = "",
                                 payment_method: str = "",
@@ -1136,6 +1137,9 @@ class DoganClient:
             raise ValueError(f"e-Fatura için 10 (VKN) veya 11 (TCKN) haneli kimlik gerekli, alındı: {customer_vkn} ({len(_cid)} hane)")
         customer_vkn = _cid
         cust_id_scheme = (customer_id_scheme or ("TCKN" if len(_cid) == 11 else "VKN")).upper()
+        _ctax = (customer_tax_office or "").strip()
+        _cust_tax_xml = (f"<cac:PartyTaxScheme><cac:TaxScheme><cbc:Name>{escape(_ctax)}</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>"
+                         if (cust_id_scheme == "VKN" and _ctax) else "")
 
         def _s(v):
             if v is None or str(v).lower() == "none":
@@ -1430,7 +1434,7 @@ class DoganClient:
         <cac:Country>
           <cbc:Name>{escape(customer_country)}</cbc:Name>
         </cac:Country>
-      </cac:PostalAddress>{_contact_xml}{_person_xml}
+      </cac:PostalAddress>{_cust_tax_xml}{_contact_xml}{_person_xml}
     </cac:Party>
   </cac:AccountingCustomerParty>
   <cac:BuyerCustomerParty>
@@ -1447,7 +1451,7 @@ class DoganClient:
         <cac:Country>
           <cbc:Name>{escape(customer_country)}</cbc:Name>
         </cac:Country>
-      </cac:PostalAddress>{_contact_xml}{_person_xml}
+      </cac:PostalAddress>{_cust_tax_xml}{_contact_xml}{_person_xml}
     </cac:Party>
   </cac:BuyerCustomerParty>
   <cac:Delivery>
