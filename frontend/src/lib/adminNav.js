@@ -6,7 +6,7 @@
  */
 import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
-  Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge,
+  Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
   Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain,
 } from "lucide-react";
@@ -21,7 +21,8 @@ export const navigationGroups = [
     icon: ShoppingCart,
     children: [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
-      { label: "İadeler & İptaller", path: "/admin/iadeler", icon: RotateCcw },
+      { label: "İadeler", path: "/admin/iadeler", icon: RotateCcw },
+      { label: "İptaller", path: "/admin/iptaller", icon: XCircle },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },
       { label: "Ödeme Kaydı Bulunmayan", path: "/admin/odeme-bekleyen-siparisler", icon: AlertTriangle },
     ],

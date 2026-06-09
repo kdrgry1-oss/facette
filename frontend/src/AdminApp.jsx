@@ -17,6 +17,7 @@ import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
+import AdminCancellations from "./pages/admin/Cancellations";
 import AttributeImport from "./pages/admin/AttributeImport";
 import AdminQuestions from "./pages/admin/Questions";
 import TrendyolLogs from "./pages/admin/TrendyolLogs";
@@ -98,6 +99,7 @@ export default function AdminApp() {
         <Route path="kampanyalar" element={<AdminCampaigns />} />
         <Route path="entegrasyonlar" element={<AdminIntegrations />} />
         <Route path="iadeler" element={<AdminReturns />} />
+        <Route path="iptaller" element={<AdminCancellations />} />
         <Route path="sayfalar" element={<AdminPages />} />
         <Route path="ayarlar" element={<AdminSettings />} />
         <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />

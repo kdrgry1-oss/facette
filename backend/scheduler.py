@@ -140,7 +140,7 @@ async def _run_trendyol_auto_orders_pull():
                 existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
                 data = map_trendyol_order(t_order)
                 if existing:
-                    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": data})
+                    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": {k: v for k, v in data.items() if k != "status"}})
                     updated += 1
                 else:
                     data["id"] = generate_id()

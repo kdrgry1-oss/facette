@@ -2612,15 +2612,13 @@ def map_trendyol_order(t_order: dict) -> dict:
         or _is_intl_buyer                    # yedek: ALICI ülkesi TR dışı
     )
     
+    # Pazaryeri siparisi panele DAIMA "confirmed" (Onaylandi) duser; Trendyol'un is
+    # akisi durumu (Picking/Invoiced/Shipped/Delivered) bizim operasyonel durumumuzu
+    # EZMEZ. Yalnizca iptal/iade/teslim-edilemedi terminal durumlari yansir.
     status_map = {
-        "Created": "confirmed",
-        "Picking": "processing",
-        "Invoiced": "processing",
-        "Shipped": "shipped",
         "Cancelled": "cancelled",
-        "Delivered": "delivered",
+        "Returned": "returned",
         "UnDelivered": "returned",
-        "Returned": "returned"
     }
     
     order_doc = {
@@ -2713,7 +2711,7 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
                 order_data = map_trendyol_order(t_order)
                 existing = await db.orders.find_one({"order_number": order_number, "platform": "trendyol"})
                 if existing:
-                    await db.orders.update_one({"_id": existing["_id"]}, {"$set": order_data})
+                    await db.orders.update_one({"_id": existing["_id"]}, {"$set": {k: v for k, v in order_data.items() if k != "status"}})
                     updated_count += 1
                 else:
                     order_data["id"] = generate_id()
@@ -2786,7 +2784,7 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
                 if existing_order:
                     await db.orders.update_one(
                         {"_id": existing_order["_id"]},
-                        {"$set": order_data}
+                        {"$set": {k: v for k, v in order_data.items() if k != "status"}}
                     )
                     updated_count += 1
                 else:
@@ -5531,27 +5529,63 @@ async def get_trendyol_claims(
     limit: int = 20,
     claim_type: str = "",
     search: str = "",
+    status: str = "",
     current_user: dict = Depends(require_admin)
 ):
-    """Yerel veritabanındaki iade/iptal kayıtlarını listele."""
-    query = {}
+    """Yerel veritabanındaki iade kayıtlarını listele.
+
+    Tüm claim'ler İADE'dir (İptal ayrı menüde, sipariş durumu üzerinden).
+    `status` = durum sekmesi anahtarı: all / talep_olusturulan / kargoya_verilen /
+    aksiyon_bekleyen / onaylanan / reddedilen.
+    """
+    # Trendyol claim_status -> sekme kovasi eslemesi (buyuk kovalar net: Accepted/Rejected).
+    STATUS_BUCKETS = {
+        "talep_olusturulan": ["Created", "WaitingInAction"],
+        "kargoya_verilen": ["InAnalysis", "Unresolved", "Returned"],
+        "aksiyon_bekleyen": ["WaitingInAction", "InAnalysis"],
+        "onaylanan": ["Accepted"],
+        "reddedilen": ["Rejected", "Cancelled"],
+    }
+
+    base_query = {}
     if claim_type:
-        query["claim_type"] = claim_type
+        base_query["claim_type"] = claim_type
     if search:
-        query["$or"] = [
+        base_query["$or"] = [
             {"order_number": {"$regex": search, "$options": "i"}},
             {"customer_name": {"$regex": search, "$options": "i"}},
-            {"claim_id": {"$regex": search, "$options": "i"}}
+            {"claim_id": {"$regex": search, "$options": "i"}},
+            {"invoice_number": {"$regex": search, "$options": "i"}},
+            {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
         ]
+
+    query = dict(base_query)
+    if status and status != "all" and status in STATUS_BUCKETS:
+        query["claim_status"] = {"$in": STATUS_BUCKETS[status]}
 
     total = await db.trendyol_claims.count_documents(query)
     skip = (page - 1) * limit
     claims = await db.trendyol_claims.find(query, {"_id": 0, "raw_data": 0}).skip(skip).limit(limit).sort("created_date", -1).to_list(limit)
 
+    # Sekme adetleri — mevcut arama/tip filtresini koruyarak her kova icin say.
+    async def _bucket_count(keys):
+        q = dict(base_query)
+        q["claim_status"] = {"$in": keys}
+        return await db.trendyol_claims.count_documents(q)
+
+    tab_counts = {
+        "all": await db.trendyol_claims.count_documents(base_query),
+        "talep_olusturulan": await _bucket_count(STATUS_BUCKETS["talep_olusturulan"]),
+        "kargoya_verilen": await _bucket_count(STATUS_BUCKETS["kargoya_verilen"]),
+        "aksiyon_bekleyen": await _bucket_count(STATUS_BUCKETS["aksiyon_bekleyen"]),
+        "onaylanan": await _bucket_count(STATUS_BUCKETS["onaylanan"]),
+        "reddedilen": await _bucket_count(STATUS_BUCKETS["reddedilen"]),
+    }
+
     # İstatistikler
     total_returns = await db.trendyol_claims.count_documents({"claim_type": "RETURN"})
     total_cancels = await db.trendyol_claims.count_documents({"claim_type": "CANCEL"})
-    
+
     pipeline = [{"$group": {"_id": None, "total": {"$sum": "$refund_amount"}}}]
     refund_result = await db.trendyol_claims.aggregate(pipeline).to_list(1)
     total_refund = refund_result[0]["total"] if refund_result else 0
@@ -5561,6 +5595,7 @@ async def get_trendyol_claims(
         "total": total,
         "page": page,
         "limit": limit,
+        "tab_counts": tab_counts,
         "stats": {
             "total_returns": total_returns,
             "total_cancels": total_cancels,
