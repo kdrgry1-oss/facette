@@ -18,6 +18,7 @@ import AdminIntegrations from "./pages/admin/Integrations";
 import Payments from "./pages/admin/Payments";
 import OrderStatusSettings from "./pages/admin/OrderStatusSettings";
 import SiteReturns from "./pages/admin/SiteReturns";
+import SenderAddress from "./pages/admin/SenderAddress";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
 import AdminCancellations from "./pages/admin/Cancellations";
@@ -109,6 +110,7 @@ export default function AdminApp() {
         <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />
         <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
         <Route path="ayarlar/kargo" element={<CargoSettings />} />
+        <Route path="ayarlar/gonderici-adresi" element={<SenderAddress />} />
         <Route path="ayarlar/bildirim" element={<NotificationSettings />} />
         <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
         <Route path="bloklu-musteriler" element={<BlockedCustomers />} />

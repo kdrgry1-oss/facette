@@ -281,3 +281,35 @@ async def public_default_bank():
     banks = pay.get("bank_accounts") or []
     bank = next((b for b in banks if b.get("is_default")), None) or (banks[0] if banks else None)
     return {"bank": bank}
+
+
+# =============================================================================
+# Gönderici / Depo Adresi — kargo & iade etiketlerinde kullanılır (settings.store_info)
+# =============================================================================
+@router.get("/store-info")
+async def get_store_info(current_user: dict = Depends(require_admin)):
+    s = await db.settings.find_one({"id": "store_info"}, {"_id": 0}) or {}
+    return {
+        "sender_name": s.get("sender_name", ""),
+        "sender_phone": s.get("sender_phone", ""),
+        "sender_address": s.get("sender_address", ""),
+        "sender_city": s.get("sender_city", ""),
+        "sender_district": s.get("sender_district", ""),
+        "sender_tax_no": s.get("sender_tax_no", ""),
+    }
+
+
+@router.post("/store-info")
+async def save_store_info(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+    data = {
+        "id": "store_info",
+        "sender_name": str(payload.get("sender_name") or "").strip(),
+        "sender_phone": str(payload.get("sender_phone") or "").strip(),
+        "sender_address": str(payload.get("sender_address") or "").strip(),
+        "sender_city": str(payload.get("sender_city") or "").strip(),
+        "sender_district": str(payload.get("sender_district") or "").strip(),
+        "sender_tax_no": str(payload.get("sender_tax_no") or "").strip(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.settings.update_one({"id": "store_info"}, {"$set": data}, upsert=True)
+    return {"success": True}

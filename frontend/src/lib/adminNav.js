@@ -159,6 +159,7 @@ export const navigationGroups = [
       { label: "Menü Düzeni", path: "/admin/ayarlar/menu-duzeni", icon: LayoutDashboard },
       { label: "E-Arşiv / E-Fatura", path: "/admin/ayarlar/e-fatura", icon: FileText },
       { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },
+      { label: "Gönderici / Depo Adresi", path: "/admin/ayarlar/gonderici-adresi", icon: Building2 },
       { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       { label: "Sipariş Durumları", path: "/admin/ayarlar/siparis-durumlari", icon: ShoppingCart },
