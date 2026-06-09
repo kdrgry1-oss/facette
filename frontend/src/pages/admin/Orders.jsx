@@ -84,6 +84,7 @@ export default function AdminOrders({ unpaidView = false }) {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState("");
+  const [activeStatusKeys, setActiveStatusKeys] = useState([]); // Ayarlar > Siparis Durumlari "Gorunur"
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [filters, setFilters] = useState({
     search: "", phone: "", email: "", order_number: "",
@@ -719,6 +720,22 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const r = await axios.get(`${API}/settings/order-statuses`, { headers: { Authorization: `Bearer ${token}` } });
+        const act = (r.data?.statuses || []).filter(s => s.active).map(s => s.key);
+        if (act.length) setActiveStatusKeys(act);
+      } catch (e) { /* tum liste fallback */ }
+    })();
+  }, []);
+
+  // "Gorunur" secili durumlar (bos ise tum katalog) — durum DEGISTIRME acilir menulerinde kullanilir
+  const visibleStatusOptions = activeStatusKeys.length
+    ? statusOptions.filter(s => activeStatusKeys.includes(s.value))
+    : statusOptions;
+
   const getStatusInfo = (status) => {
     return statusOptions.find(s => s.value === status) || statusOptions[0];
   };
@@ -747,7 +764,7 @@ export default function AdminOrders({ unpaidView = false }) {
             className="border px-3 py-2 rounded text-sm"
           >
             <option value="">Tüm Durumlar</option>
-            {statusOptions.map((opt) => (
+            {visibleStatusOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
@@ -1210,7 +1227,7 @@ export default function AdminOrders({ unpaidView = false }) {
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          {statusOptions.map((opt) => (
+                          {visibleStatusOptions.map((opt) => (
                             <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1485,7 +1502,7 @@ export default function AdminOrders({ unpaidView = false }) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {statusOptions.map((opt) => (
+                    {visibleStatusOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                     ))}
                   </SelectContent>

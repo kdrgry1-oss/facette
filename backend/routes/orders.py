@@ -2729,3 +2729,91 @@ async def return_barcode_png(return_id: str):
     import base64 as _b64
     raw = _b64.b64decode(rec["barcode_png_b64"])
     return Response(content=raw, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+
+# --- Admin: site iade taleplerini listele / durum güncelle ---
+_RETURN_STATUS_MAP = {
+    "created":     (None,                None),
+    "in_transit":  ("return_in_transit", "order_return_in_transit"),
+    "received":    ("returned",          "order_returned"),
+    "returned":    ("returned",          "order_returned"),
+    "refunded":    ("refunded",          "order_refunded"),
+    "rejected":    ("delivered",         None),
+    "cancelled":   ("delivered",         None),
+}
+
+
+@router.get("/returns/admin/list")
+async def list_returns_admin(
+    status: str = Query(""),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(require_admin),
+):
+    q = {}
+    if status:
+        q["status"] = status
+    rows = await db.customer_returns.find(q, {"_id": 0, "barcode_png_b64": 0}).sort("created_at", -1).to_list(length=limit)
+    out = []
+    for r in rows:
+        o = await db.orders.find_one({"id": r.get("order_id")}, {"_id": 0, "shipping_address": 1, "status": 1}) or {}
+        addr = o.get("shipping_address") or {}
+        out.append({
+            **r,
+            "customer_name": addr.get("full_name") or f"{addr.get('first_name','')} {addr.get('last_name','')}".strip(),
+            "customer_email": addr.get("email", ""),
+            "customer_phone": addr.get("phone", ""),
+            "order_status": o.get("status", ""),
+            "barcode_url": f"/api/orders/returns/{r.get('id')}/barcode.png",
+        })
+    return {"returns": out}
+
+
+@router.post("/returns/{return_id}/status")
+async def update_return_status(return_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    new = (payload.get("status") or "").strip()
+    if new not in _RETURN_STATUS_MAP:
+        raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli: {list(_RETURN_STATUS_MAP)}")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {"status": new, "updated_at": now_iso}})
+    order_status, event = _RETURN_STATUS_MAP[new]
+    if order_status:
+        await db.orders.update_one({"id": rec["order_id"]},
+            {"$set": {"status": order_status, "return_request.status": new, "updated_at": now_iso}})
+    else:
+        await db.orders.update_one({"id": rec["order_id"]},
+            {"$set": {"return_request.status": new, "updated_at": now_iso}})
+
+    if event and order_status:
+        import asyncio as _aio
+        async def _n():
+            try:
+                import sys, os
+                sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+                from notification_service import send_notification
+                from order_statuses import get_status_config, customer_label_for
+                cfg = await get_status_config(db)
+                nz = (cfg.get("notify") or {}).get(order_status) or {}
+                ch = [c for c in ("sms", "email") if nz.get(c)]
+                if not ch:
+                    return
+                o = await db.orders.find_one({"id": rec["order_id"]}, {"_id": 0})
+                addr = (o or {}).get("shipping_address") or {}
+                await send_notification(
+                    db, event,
+                    to_phone=addr.get("phone") or (o or {}).get("phone"),
+                    to_email=addr.get("email") or (o or {}).get("email"),
+                    variables={
+                        "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                        "order_number": rec.get("order_number", ""),
+                        "return_code": rec.get("return_code", ""),
+                        "status_label": customer_label_for(order_status),
+                    },
+                    channels=ch,
+                )
+            except Exception as e:
+                logger.warning(f"return status notif failed: {e}")
+        _aio.create_task(_n())
+    return {"success": True, "status": new}
