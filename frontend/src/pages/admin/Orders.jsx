@@ -496,7 +496,7 @@ export default function AdminOrders({ unpaidView = false }) {
     try {
       const token = localStorage.getItem('token');
       const res = await axios.post(
-        `${API}/orders/bulk/create-invoice?invoice_type=auto`,
+        `${API}/orders/bulk-create-invoice?invoice_type=auto`,
         selectedOrders,
         { headers: { Authorization: `Bearer ${token}` } }
       );

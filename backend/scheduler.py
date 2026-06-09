@@ -105,7 +105,7 @@ async def _run_trendyol_auto_orders_pull():
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
         from trendyol_client import TrendyolClient
         from routes.deps import db as _db, generate_id
-        from routes.integrations import map_trendyol_order
+        from routes.integrations import map_trendyol_order, _sync_trendyol_status_passes
 
         client = TrendyolClient(
             supplier_id=cfg["supplier_id"],
@@ -114,7 +114,7 @@ async def _run_trendyol_auto_orders_pull():
             mode=cfg["mode"],
         )
         now_ = _dt.now()
-        start = now_ - _td(days=7)
+        start = now_ - _td(days=14)
         start_ms = int(start.timestamp() * 1000)
         end_ms = int(now_.timestamp() * 1000)
         # Trendyol tek sayfada en fazla 200 paket dondurur; TUM sayfalari dolas.
@@ -149,6 +149,10 @@ async def _run_trendyol_auto_orders_pull():
                     imported += 1
             except Exception as _ex:
                 logger.error(f"[cron] Trendyol order import hata: {_ex}")
+        try:
+            await _sync_trendyol_status_passes(client, start_ms, end_ms)
+        except Exception as _ex2:
+            logger.error(f"[cron] Trendyol status pass hata: {_ex2}")
         await log_integration_event(
             marketplace="trendyol", action="order_pull", status="success",
             direction="inbound",

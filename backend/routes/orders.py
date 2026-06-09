@@ -1880,7 +1880,7 @@ async def bulk_create_cargo_barcode(
     }
 
 
-@router.post("/bulk/create-invoice")
+@router.post("/bulk-create-invoice")
 async def bulk_create_invoice(
     order_ids: List[str],
     invoice_type: str = Query("auto"),

@@ -2520,6 +2520,44 @@ async def log_integration_event(platform: str, action: str, entity_type: str, en
     except Exception as e:
         logger.error(f"Failed to log integration event: {str(e)}")
 
+async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
+    """İptal/iade/teslim edilemedi gibi durum değişikliklerini ayrı status
+    sorgularıyla yakalar; yalnızca MEVCUT siparişlerin status alanını günceller
+    (kaydı baştan ezmez). Trendyol orders ucu ~2 haftalık pencereyle sınırlıdır;
+    daha eski iadeler İadeler (claims) modülünden takip edilir."""
+    from datetime import datetime, timezone
+    updated = 0
+    for st in ("Cancelled", "Returned", "UnDelivered"):
+        try:
+            page = 0
+            while page < 25:
+                resp = await client.get_orders(
+                    start_date_ms=start_date_ms, end_date_ms=end_date_ms,
+                    status=st, size=200, page=page,
+                )
+                chunk = resp.get("content", []) or []
+                for t_order in chunk:
+                    onum = str(t_order.get("orderNumber"))
+                    mapped = map_trendyol_order(t_order)
+                    res = await db.orders.update_one(
+                        {"order_number": onum, "platform": "trendyol"},
+                        {"$set": {
+                            "status": mapped.get("status"),
+                            "trendyol_status_raw": t_order.get("status"),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }},
+                    )
+                    if res.modified_count:
+                        updated += 1
+                total_pages = resp.get("totalPages") or 0
+                page += 1
+                if not chunk or page >= total_pages:
+                    break
+        except Exception as e:
+            logger.error(f"[trendyol status pass {st}] {e}")
+    return updated
+
+
 def map_trendyol_order(t_order: dict) -> dict:
     from datetime import datetime, timezone
     order_number = t_order.get("orderNumber")
@@ -2575,7 +2613,7 @@ def map_trendyol_order(t_order: dict) -> dict:
     )
     
     status_map = {
-        "Created": "pending",
+        "Created": "confirmed",
         "Picking": "processing",
         "Invoiced": "processing",
         "Shipped": "shipped",
@@ -2619,7 +2657,7 @@ def map_trendyol_order(t_order: dict) -> dict:
         "total": total_price,
         "payment_method": "marketplace",
         "payment_status": "paid",
-        "status": status_map.get(t_order.get("status"), "pending"),
+        "status": status_map.get(t_order.get("status"), "confirmed"),
         "cargo_tracking_number": t_order.get("cargoTrackingNumber", ""),
         "cargo_tracking_link": t_order.get("cargoTrackingLink", ""),
         "cargo_provider_name": t_order.get("cargoProviderName", ""),
@@ -2760,6 +2798,11 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
                 logger.error(f"Error mapping/saving order {order_number}: {e}")
                 await log_integration_event("trendyol", "auto_import", "order", str(order_number), "error", f"Otomatik aktarım hatası: {str(e)}", {"raw": t_order})
         
+        try:
+            await _sync_trendyol_status_passes(client, start_date_ms, end_date_ms)
+        except Exception as _e:
+            logger.error(f"[trendyol status passes] {_e}")
+
         return {
             "success": True, 
             "message": f"Trendyol'dan {imported_count} yeni sipariş aktarıldı, {updated_count} sipariş güncellendi.",
