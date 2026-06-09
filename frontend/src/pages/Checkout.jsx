@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
@@ -35,9 +35,7 @@ export default function Checkout() {
   const [cartCollapsed, setCartCollapsed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [paymentStep, setPaymentStep] = useState("form"); // form | processing | iframe | success | error
-  const [paymentUrl, setPaymentUrl] = useState("");
   const [orderId, setOrderId] = useState(null);
-  const iframeRef = useRef(null);
 
   // Addresses
   const [savedAddresses, setSavedAddresses] = useState([]);
@@ -56,6 +54,7 @@ export default function Checkout() {
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
   const [use3DSecure, setUse3DSecure] = useState(true);
+  const [card, setCard] = useState({ holder: "", number: "", expiry: "", cvc: "" });
   const [usePoints, setUsePoints] = useState(false);
   const [userPoints] = useState(0); // future: fetch from /api/users/me
 
@@ -290,6 +289,14 @@ export default function Checkout() {
     if (!validateAddresses()) return;
     if (!acceptTerms) { toast.error("Lütfen sözleşmeleri onaylayın"); return; }
     if (items.length === 0) { toast.error("Sepetiniz boş"); return; }
+    if (paymentMethod === "credit_card") {
+      const _n = card.number.replace(/\s/g, "");
+      const _e = card.expiry.split("/");
+      if (!card.holder.trim() || _n.length < 15 || (_e[0] || "").length !== 2 || (_e[1] || "").length !== 2 || card.cvc.length < 3) {
+        toast.error("Lütfen kart bilgilerini eksiksiz girin");
+        return;
+      }
+    }
     setLoading(true);
     try {
       const orderData = {
@@ -325,19 +332,47 @@ export default function Checkout() {
       setOrderId(newOrderId);
 
       if (paymentMethod === "credit_card") {
-        const callbackUrl = `${API}/payment/callback`;
-        const returnUrl = `${window.location.origin}/odeme`;
-        const paymentRes = await axios.post(
-          `${API}/payment/initialize?order_id=${newOrderId}&callback_url=${encodeURIComponent(callbackUrl)}&return_url=${encodeURIComponent(returnUrl)}`
-        );
-        if (paymentRes.data.success && paymentRes.data.paymentPageUrl) {
-          window.location.href = paymentRes.data.paymentPageUrl;
-        } else if (paymentRes.data.success && paymentRes.data.checkoutFormContent) {
-          setPaymentUrl(paymentRes.data.checkoutFormContent);
-          setPaymentStep("iframe");
-        } else {
+        const _num = card.number.replace(/\s/g, "");
+        const _exp = card.expiry.split("/");
+        const cardPayload = {
+          cardHolderName: card.holder.trim(),
+          cardNumber: _num,
+          expireMonth: (_exp[0] || "").trim(),
+          expireYear: (_exp[1] || "").trim(),
+          cvc: card.cvc.trim(),
+        };
+        if (use3DSecure) {
+          const res = await axios.post(`${API}/payment/3ds/initialize`, {
+            order_id: newOrderId,
+            callback_url: `${API}/payment/3ds/callback`,
+            return_url: `${window.location.origin}/odeme`,
+            card: cardPayload,
+            installment: 1,
+          });
+          if (res.data.success && res.data.threeDSHtmlContent) {
+            const html = window.atob(res.data.threeDSHtmlContent);
+            document.open();
+            document.write(html);
+            document.close();
+            return;
+          }
           setLoading(false);
-          toast.error(paymentRes.data.error || "Ödeme başlatılamadı");
+          toast.error(res.data.error || "Ödeme başlatılamadı");
+          return;
+        } else {
+          const res = await axios.post(`${API}/payment/card/pay`, {
+            order_id: newOrderId,
+            card: cardPayload,
+            installment: 1,
+          });
+          if (res.data.success) {
+            setPaymentStep("success");
+            handlePaymentSuccess(res.data.order_number);
+          } else {
+            setLoading(false);
+            toast.error(res.data.error || "Ödeme başarısız");
+          }
+          return;
         }
       } else {
         const _userInfo = {
@@ -707,27 +742,46 @@ export default function Checkout() {
                   </div>
 
                   {paymentMethod === "credit_card" && (
-                    <div className="grid md:grid-cols-2 gap-4 mt-3 pt-3 border-t">
-                      <div>
-                        <div className="text-xs font-medium text-gray-700 mb-2">Kart Bilgileri</div>
-                        <div className="rounded border p-3 bg-stone-50 text-xs text-gray-500 leading-relaxed">
-                          <Lock size={12} className="inline mr-1 text-green-600" />
-                          Kart bilgileri <b>iyzico</b> güvenli ödeme sayfasında güvenle alınacaktır. Bu sayfaya yönlendirileceksiniz.
+                    <div className="mt-3 pt-3 border-t space-y-3">
+                      <div className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
+                        <Lock size={12} className="text-green-600" /> Kart Bilgileri
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] text-gray-500 mb-1">Kart Üzerindeki İsim</label>
+                          <input value={card.holder} autoComplete="cc-name" placeholder="AD SOYAD"
+                            onChange={(e) => setCard({ ...card, holder: e.target.value.toUpperCase() })}
+                            className="w-full border rounded px-3 py-2 text-sm tracking-wide focus:border-stone-900 outline-none" />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-[11px] text-gray-500 mb-1">Kart Numarası</label>
+                          <input value={card.number} inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000"
+                            onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 16); setCard({ ...card, number: d.replace(/(.{4})/g, "$1 ").trim() }); }}
+                            className="w-full border rounded px-3 py-2 text-sm tracking-widest font-mono focus:border-stone-900 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1">Son Kullanma (AA/YY)</label>
+                          <input value={card.expiry} inputMode="numeric" autoComplete="cc-exp" placeholder="AA/YY"
+                            onChange={(e) => { let d = e.target.value.replace(/\D/g, "").slice(0, 4); if (d.length >= 3) d = d.slice(0, 2) + "/" + d.slice(2); setCard({ ...card, expiry: d }); }}
+                            className="w-full border rounded px-3 py-2 text-sm font-mono focus:border-stone-900 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1">CVC</label>
+                          <input value={card.cvc} inputMode="numeric" autoComplete="cc-csc" placeholder="000"
+                            onChange={(e) => setCard({ ...card, cvc: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                            className="w-full border rounded px-3 py-2 text-sm font-mono focus:border-stone-900 outline-none" />
                         </div>
                       </div>
-                      <div>
-                        <div className="text-xs font-medium text-gray-700 mb-2">Taksit Seçenekleri</div>
-                        <div className="rounded border p-3 bg-stone-50 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span>Tek Çekim</span><span className="font-semibold">{grandTotal.toFixed(2)} TL</span>
-                          </div>
-                          <div className="text-[11px] text-gray-500 mt-1">Banka kartınıza özel taksit seçenekleri ödeme sayfasında listelenecektir.</div>
-                        </div>
+                      <div className="rounded border p-3 bg-stone-50 text-xs flex items-center justify-between">
+                        <span>Tek Çekim</span><span className="font-semibold">{grandTotal.toFixed(2)} TL</span>
                       </div>
                       <label className="inline-flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-black" />
-                        <ShieldCheck size={14} className="text-green-600" /> 3D Secure ile ödemek istiyorum
+                        <ShieldCheck size={14} className="text-green-600" /> 3D Secure ile öde (önerilir)
                       </label>
+                      <div className="text-[11px] text-gray-400 flex items-center gap-1">
+                        <Lock size={11} /> Kart bilgileriniz şifreli olarak iyzico altyapısıyla işlenir, sitemizde saklanmaz.
+                      </div>
                       {userPoints > 0 && (
                         <label className="inline-flex items-center gap-2 text-sm">
                           <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-black" />

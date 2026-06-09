@@ -35,6 +35,10 @@ router = APIRouter(prefix="/payment", tags=["Payment"])
 
 INIT_PATH = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 RETRIEVE_PATH = "/payment/iyzipos/checkoutform/auth/ecom/detail"
+# Doğrudan kart (kendi formumuz) — iyzico klasik Payment API yolları
+THREEDS_INIT_PATH = "/payment/3dsecure/initialize"
+THREEDS_AUTH_PATH = "/payment/3dsecure/auth"
+NON3DS_PATH = "/payment/auth"
 DEFAULT_TCKN = "11111111111"
 
 
@@ -290,3 +294,179 @@ async def payment_callback(request: Request, token: str = Form(default=None)):
     redirect = f"{return_base}{sep}status={status}&order={order.get('order_number')}"
     # 303: tarayıcı POST'u GET'e çevirip storefront'a gider
     return RedirectResponse(url=redirect, status_code=303)
+
+
+
+# =============================================================================
+# DOĞRUDAN KART İLE ÖDEME (kendi formumuz) — iyzico Payment API
+# iyzico hosted Checkout Form yerine: müşteri kartı sitemizdeki formda girer.
+#   POST /payment/3ds/initialize → 3DS başlat, threeDSHtmlContent döner (banka OTP)
+#   POST /payment/3ds/callback   → banka/iyzico geri döner, auth ile finalize
+#   POST /payment/card/pay       → 3DS'siz doğrudan tahsilat (use3DSecure kapalıysa)
+# NOT: Kart verisi YALNIZCA istek gövdesinde taşınır, asla loglanmaz/saklanmaz.
+# =============================================================================
+def _build_card_payment_payload(order: dict, card: dict, installment: int,
+                                callback_url: str, is_3ds: bool) -> dict:
+    """Checkout-form payload'ını doğrudan-kart isteğine uyarlar (paymentCard ekler)."""
+    base = _build_initialize_payload(order, callback_url)
+    base.pop("enabledInstallments", None)
+    if not is_3ds:
+        base.pop("callbackUrl", None)
+    num = "".join(ch for ch in str(card.get("cardNumber") or "") if ch.isdigit())
+    exp_m = str(card.get("expireMonth") or "").strip().zfill(2)
+    ey = "".join(ch for ch in str(card.get("expireYear") or "") if ch.isdigit())
+    exp_y = ("20" + ey) if len(ey) == 2 else ey
+    base["paymentChannel"] = "WEB"
+    base["installment"] = int(installment or 1)
+    base["paymentCard"] = {
+        "cardHolderName": (card.get("cardHolderName") or "").strip(),
+        "cardNumber": num,
+        "expireMonth": exp_m,
+        "expireYear": exp_y,
+        "cvc": str(card.get("cvc") or "").strip(),
+        "registerCard": 0,
+    }
+    return base
+
+
+async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
+    """iyzico ödeme/3ds-auth yanıtına göre siparişi günceller. Döner: paid(bool)."""
+    paid = (data.get("status") == "success") and (data.get("paymentStatus") == "SUCCESS")
+    update = {
+        "iyzico_retrieve_response": {
+            "status": data.get("status"),
+            "paymentStatus": data.get("paymentStatus"),
+            "errorMessage": data.get("errorMessage"),
+            "paymentId": data.get("paymentId"),
+            "paidPrice": data.get("paidPrice"),
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if paid:
+        update["payment_status"] = "paid"
+        update["payment_id"] = data.get("paymentId")
+        update["iyzico_payment_id"] = data.get("paymentId")
+        update["paid_at"] = datetime.now(timezone.utc).isoformat()
+        update["status"] = "confirmed"
+    else:
+        update["payment_status"] = "failed"
+    await db.orders.update_one({"id": order_id}, {"$set": update})
+    logger.info(f"iyzico kart odeme {'PAID' if paid else 'FAILED'} order_id={order_id} pid={data.get('paymentId')}")
+    return paid
+
+
+@router.post("/3ds/initialize")
+async def initialize_3ds_payment(payload: dict):
+    """Kendi kart formumuzdan 3D Secure başlatır; threeDSHtmlContent döner."""
+    order_id = (payload.get("order_id") or "").strip()
+    callback_url = (payload.get("callback_url") or "").strip()
+    return_url = (payload.get("return_url") or "").strip()
+    card = payload.get("card") or {}
+    installment = int(payload.get("installment") or 1)
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id gerekli")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    settings = await _get_iyzico_settings()
+    body = _build_card_payment_payload(order, card, installment, callback_url, is_3ds=True)
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    headers = _v2_headers(settings["api_key"], settings["api_secret"], THREEDS_INIT_PATH, body_str)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(f"{settings['base_url']}{THREEDS_INIT_PATH}", content=body_str.encode("utf-8"), headers=headers)
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure", "errorMessage": resp.text[:300]}
+    except Exception as e:
+        logger.error(f"iyzico 3ds init error: {e}")
+        raise HTTPException(status_code=502, detail=f"iyzico bağlantı hatası: {e}")
+
+    if data.get("status") != "success":
+        logger.warning(f"iyzico 3ds init failed order={order_id}: {data.get('errorCode')} {data.get('errorMessage')}")
+        return {"success": False, "error": data.get("errorMessage") or "Ödeme başlatılamadı", "errorCode": data.get("errorCode")}
+
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "iyzico_conversation_id": data.get("conversationId") or order_id,
+            "iyzico_return_url": return_url,
+            "payment_provider": "iyzico",
+            "payment_flow": "3ds",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return {"success": True, "threeDSHtmlContent": data.get("threeDSHtmlContent")}
+
+
+@router.api_route("/3ds/callback", methods=["POST", "GET"])
+async def callback_3ds(request: Request):
+    """Banka 3DS sonrası iyzico buraya POST eder; auth ile finalize edip storefront'a döner."""
+    try:
+        form = dict(await request.form())
+    except Exception:
+        form = {}
+    status = form.get("status") or request.query_params.get("status")
+    md = str(form.get("mdStatus") or "")
+    payment_id = form.get("paymentId") or request.query_params.get("paymentId")
+    conv_data = form.get("conversationData") or ""
+    conv_id = form.get("conversationId") or request.query_params.get("conversationId") or ""
+
+    order = await db.orders.find_one({"id": conv_id}, {"_id": 0}) if conv_id else None
+    return_base = (order or {}).get("iyzico_return_url") or f"{str(request.base_url).rstrip('/')}/odeme"
+
+    ok = False
+    if status == "success" and md == "1" and payment_id:
+        settings = await _get_iyzico_settings()
+        body = {"locale": "tr", "conversationId": str(conv_id), "paymentId": str(payment_id)}
+        if conv_data:
+            body["conversationData"] = conv_data
+        body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        headers = _v2_headers(settings["api_key"], settings["api_secret"], THREEDS_AUTH_PATH, body_str)
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                resp = await c.post(f"{settings['base_url']}{THREEDS_AUTH_PATH}", content=body_str.encode("utf-8"), headers=headers)
+            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure"}
+        except Exception as e:
+            logger.error(f"iyzico 3ds auth error: {e}")
+            data = {"status": "failure", "errorMessage": str(e)}
+        if order:
+            ok = await _mark_order_from_payment(order.get("id"), data)
+    elif order:
+        await db.orders.update_one({"id": order.get("id")}, {"$set": {"payment_status": "failed", "updated_at": datetime.now(timezone.utc).isoformat()}})
+
+    onum = (order or {}).get("order_number") or ""
+    sep = "&" if "?" in return_base else "?"
+    redirect = f"{return_base}{sep}status={'success' if ok else 'fail'}&order={onum}"
+    return RedirectResponse(url=redirect, status_code=303)
+
+
+@router.post("/card/pay")
+async def card_pay_non3ds(payload: dict):
+    """3DS'siz doğrudan tahsilat (use3DSecure kapalıysa). Yönlendirme yok."""
+    order_id = (payload.get("order_id") or "").strip()
+    card = payload.get("card") or {}
+    installment = int(payload.get("installment") or 1)
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id gerekli")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    settings = await _get_iyzico_settings()
+    body = _build_card_payment_payload(order, card, installment, "", is_3ds=False)
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    headers = _v2_headers(settings["api_key"], settings["api_secret"], NON3DS_PATH, body_str)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(f"{settings['base_url']}{NON3DS_PATH}", content=body_str.encode("utf-8"), headers=headers)
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure", "errorMessage": resp.text[:300]}
+    except Exception as e:
+        logger.error(f"iyzico non-3ds error: {e}")
+        raise HTTPException(status_code=502, detail=f"iyzico bağlantı hatası: {e}")
+
+    paid = await _mark_order_from_payment(order_id, data)
+    if paid:
+        return {"success": True, "order_number": order.get("order_number")}
+    return {"success": False, "error": data.get("errorMessage") or "Ödeme başarısız", "errorCode": data.get("errorCode")}
