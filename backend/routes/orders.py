@@ -2484,3 +2484,248 @@ async def cargo_poll_now(current_user: dict = Depends(require_admin)):
         return {"success": True, "message": "DHL/MNG kargo taraması çalıştırıldı."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tarama hatası: {e}")
+
+
+# =============================================================================
+# Faz 4 — Müşteri iadesi (14 gün) + DHL/MNG iade barkodu (3 gün geçerli)
+# Veri: db.customer_returns + order.return_request (özet)
+# =============================================================================
+def _render_return_barcode_png_b64(code: str) -> str:
+    """İade kodunu Code128 PNG (base64) barkoda çevirir (e-posta + ekran için)."""
+    try:
+        import io as _io, base64 as _b64
+        import barcode as _bc
+        from barcode.writer import ImageWriter as _IW
+        c = (code or "").strip() or "IADE"
+        buf = _io.BytesIO()
+        _bc.get("code128", c, writer=_IW()).write(
+            buf, options={"module_height": 12.0, "module_width": 0.3,
+                          "font_size": 10, "text_distance": 3.5, "quiet_zone": 2.0}
+        )
+        return _b64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"return barcode render failed: {e}")
+        return ""
+
+
+def _public_return(rec: dict) -> dict:
+    png = rec.get("barcode_png_b64") or ""
+    return {
+        "id": rec.get("id"),
+        "order_number": rec.get("order_number"),
+        "return_code": rec.get("return_code"),
+        "status": rec.get("status"),
+        "valid_until": rec.get("valid_until"),
+        "cargo_provider_name": rec.get("cargo_provider_name"),
+        "mng_ok": rec.get("mng_ok", False),
+        "items": rec.get("items") or [],
+        "reason": rec.get("reason", ""),
+        "created_at": rec.get("created_at"),
+        "barcode_data_url": (f"data:image/png;base64,{png}" if png else ""),
+    }
+
+
+async def _ensure_return_email_template():
+    """İade e-posta şablonunun barkod görseli + kod + 3 gün geçerlilik içermesini garanti eder."""
+    body = (
+        "<p>Merhaba {customer_name},</p>"
+        "<p><b>{order_number}</b> numaralı siparişiniz için iade talebiniz oluşturuldu.</p>"
+        "<p>İade kargo kodunuz: <b>{return_code}</b></p>"
+        "<p>Bu kod <b>3 gün</b> geçerlidir (son geçerlilik: {valid_until}). Ürünü en yakın DHL / MNG şubesine "
+        "bu kodu veya aşağıdaki barkodu göstererek teslim edebilirsiniz.</p>"
+        "{return_barcode_img}"
+    )
+    try:
+        tpl = await db.notification_templates.find_one(
+            {"event": "order_return_requested", "channel": "email"}, {"_id": 0}
+        )
+        if not tpl or "{return_barcode_img}" not in (tpl.get("body") or ""):
+            await db.notification_templates.update_one(
+                {"event": "order_return_requested", "channel": "email"},
+                {"$set": {"event": "order_return_requested", "channel": "email", "enabled": True,
+                          "subject": "İade Talebiniz Oluşturuldu — {order_number}", "body": body,
+                          "updated_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True,
+            )
+    except Exception as e:
+        logger.warning(f"ensure return email tpl failed: {e}")
+
+
+async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: str):
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from notification_service import send_notification
+        from order_statuses import get_status_config
+        await _ensure_return_email_template()
+        cfg = await get_status_config(db)
+        nz = (cfg.get("notify") or {}).get("return_requested") or {}
+        ch = [c for c in ("sms", "email") if nz.get(c)]
+        if not ch:
+            return
+        addr = order.get("shipping_address") or {}
+        try:
+            vu = datetime.fromisoformat(valid_until).strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            vu = valid_until
+        await send_notification(
+            db, "order_return_requested",
+            to_phone=addr.get("phone") or order.get("phone"),
+            to_email=addr.get("email") or order.get("email"),
+            variables={
+                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                "order_number": order.get("order_number", ""),
+                "return_code": code,
+                "valid_until": vu,
+                "return_barcode_img": barcode_img,
+            },
+            channels=ch,
+        )
+    except Exception as e:
+        logger.warning(f"return notif failed: {e}")
+
+
+@router.post("/{order_id}/return-request")
+async def create_return_request(order_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
+    """Müşteri: teslimden itibaren 14 gün içinde iade talebi oluşturur (sipariş + ürün seçer).
+    3 gün geçerli DHL/MNG iade kargo kodu + barkod üretir, kaydeder ve bildirir."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("user_id") and current_user.get("id") and order["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+
+    # --- 14 gün penceresi (teslim anından itibaren, 1 sn bile geçse engelle) ---
+    delivered_at = order.get("delivered_at")
+    if not delivered_at:
+        raise HTTPException(status_code=400, detail="Sipariş henüz teslim edilmedi; iade başlatılamaz.")
+    try:
+        d = datetime.fromisoformat(str(delivered_at).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Teslim tarihi okunamadı.")
+    now = datetime.now(timezone.utc)
+    if now > (d + timedelta(days=14)):
+        raise HTTPException(status_code=400, detail="İade süresi (teslimden itibaren 14 gün) dolmuştur.")
+
+    # Zaten aktif iade var mı?
+    existing = await db.customer_returns.find_one(
+        {"order_id": order["id"], "status": {"$in": ["created", "in_transit"]}}, {"_id": 0}
+    )
+    if existing:
+        return {"success": True, "already": True, "return": _public_return(existing)}
+
+    # Seçilen kalemler (index listesi) — boşsa tüm sipariş
+    src_items = order.get("items") or []
+    sel = payload.get("items")
+    chosen = []
+    if isinstance(sel, list) and sel:
+        for idx in sel:
+            try:
+                it = src_items[int(idx)]
+            except Exception:
+                continue
+            chosen.append(it)
+    if not chosen:
+        chosen = src_items
+    items = [{
+        "name": it.get("name") or it.get("product_name") or "Ürün",
+        "size": it.get("size", ""), "color": it.get("color", ""),
+        "quantity": int(it.get("quantity", 1) or 1),
+        "price": float(it.get("price") or it.get("unit_price") or 0),
+        "product_id": it.get("product_id") or it.get("sku") or "",
+    } for it in chosen]
+    reason = (payload.get("reason") or "").strip()[:500]
+
+    rid = generate_id()
+    ref = f"IADE{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
+
+    # --- MNG iade gönderisi (alıcı = depo/mağaza) — best-effort ---
+    return_code = ref
+    mng_ok = False
+    cargo_name = "DHL E-Commerce"
+    try:
+        import sys, os, asyncio as _aio
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from mng_kargo_client import create_shipment as mng_create
+        s = await _get_mng_settings()
+        snd = await _get_sender_info()
+        if s.get("is_active") and snd.get("address") and snd.get("city"):
+            res = await _aio.to_thread(
+                mng_create,
+                username=s["username"], password=s["password"],
+                siparis_no=ref, kiymet=float(order.get("total") or 0),
+                icerik=("IADE - " + "; ".join(f"{i['quantity']}x {i['name']}" for i in items))[:200],
+                hizmet_sekli="NORMAL", teslim_sekli=1, al_sms=0, gn_sms=0,
+                parca_list="1:1:20:30:15:;",
+                alici_ad=snd["name"], odeme_sekli="GO", adres_farkli="0",
+                il=snd["city"], ilce=snd.get("district", ""), adres=snd["address"],
+                tel_cep=snd["phone"], email="", kapida_odeme=0,
+                platform_adi="", platform_kodu="",
+            )
+            if res.get("ok") and res.get("barkod"):
+                return_code = str(res["barkod"]).strip()
+                mng_ok = True
+    except Exception as e:
+        logger.warning(f"return MNG create failed: {e}")
+
+    png_b64 = _render_return_barcode_png_b64(return_code)
+    now_iso = now.isoformat()
+    valid_until = (now + timedelta(days=3)).isoformat()
+    rec = {
+        "id": rid, "order_id": order["id"], "order_number": order.get("order_number", ""),
+        "user_id": order.get("user_id"), "items": items, "reason": reason,
+        "return_code": return_code, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
+        "barcode_png_b64": png_b64, "status": "created",
+        "created_at": now_iso, "valid_until": valid_until,
+    }
+    await db.customer_returns.insert_one({**rec})
+    await db.orders.update_one({"id": order["id"]}, {"$set": {
+        "return_request": {
+            "return_id": rid, "return_code": return_code, "valid_until": valid_until,
+            "created_at": now_iso, "status": "created", "items_count": len(items),
+        },
+        "status": "return_requested", "updated_at": now_iso,
+    }})
+
+    import os as _os, asyncio as _aio2
+    base = _os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL") or ""
+    barcode_img = (
+        f'<div style="margin:14px 0"><img src="{base}/api/orders/returns/{rid}/barcode.png" '
+        f'alt="{return_code}" style="height:90px"/></div>' if base else ""
+    )
+    _aio2.create_task(_notify_return(order, return_code, valid_until, barcode_img))
+    return {"success": True, "return": _public_return(rec)}
+
+
+@router.get("/{order_id}/return")
+async def get_return_info(order_id: str, current_user: dict = Depends(get_current_user)):
+    """Müşteri: bir siparişin iade kaydını getir (ekranda barkod/kod göstermek için)."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    oid = order_id
+    o = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0, "id": 1, "user_id": 1})
+    if o:
+        oid = o.get("id", order_id)
+        if o.get("user_id") and current_user.get("id") and o["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    rec = await db.customer_returns.find_one({"order_id": oid}, {"_id": 0}, sort=[("created_at", -1)])
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")
+    return {"return": _public_return(rec)}
+
+
+@router.get("/returns/{return_id}/barcode.png")
+async def return_barcode_png(return_id: str):
+    """İade barkodu PNG (e-posta <img> ve ekran için; opak return_id yetki anahtarı)."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0, "barcode_png_b64": 1})
+    if not rec or not rec.get("barcode_png_b64"):
+        raise HTTPException(status_code=404, detail="Barkod bulunamadı")
+    import base64 as _b64
+    raw = _b64.b64decode(rec["barcode_png_b64"])
+    return Response(content=raw, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})

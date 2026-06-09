@@ -20,6 +20,7 @@ import Login from "./pages/Login";
 import TrackOrder from "./pages/TrackOrder";
 import OrderSuccess from "./pages/OrderSuccess";
 import PaymentNotification from "./pages/PaymentNotification";
+import ReturnRequest from "./pages/ReturnRequest";
 import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
 
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
@@ -67,6 +68,7 @@ function App() {
                 <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
                 <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
                 <Route path="/odeme-bildirimi/:orderNumber" element={<PaymentNotification />} />
+                <Route path="/iade/:orderNumber" element={<ReturnRequest />} />
 
                 {/* Tema önizleme */}
                 <Route path="/tema/:slug" element={<MiuMiuTheme />} />

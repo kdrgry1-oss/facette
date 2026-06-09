@@ -452,6 +452,8 @@ function OrdersPane({ loading, orders, expandedOrder, setExpandedOrder }) {
 
 function OrderCard({ order, expanded, onToggle }) {
   const status = ORDER_STATUS[order.status] || ORDER_STATUS.pending;
+  const _deliveredAt = order.delivered_at ? new Date(order.delivered_at) : null;
+  const canReturn = order.status === "delivered" && _deliveredAt && (Date.now() - _deliveredAt.getTime()) <= 14 * 24 * 3600 * 1000;
   const StatusIcon = status.icon;
   const items = order.items || [];
   const itemCount = items.reduce((s, i) => s + (i.quantity || 1), 0);
@@ -532,6 +534,17 @@ function OrderCard({ order, expanded, onToggle }) {
           {order.status === "payment_notified" && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">Ödeme bildiriminiz alındı, en kısa sürede kontrol edilecek.</div>
           )}
+          {order.return_request ? (
+            <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm text-rose-900">İade talebiniz oluşturuldu · Kod: <b className="font-mono">{order.return_request.return_code}</b></span>
+              <a href={`/iade/${order.order_number}`} className="inline-block bg-rose-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-rose-700 shrink-0">Barkodu Gör</a>
+            </div>
+          ) : canReturn ? (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm text-gray-700">Üründe sorun mu var? 14 gün içinde iade edebilirsiniz.</span>
+              <a href={`/iade/${order.order_number}`} className="inline-block bg-black text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-gray-800 shrink-0">İade Talebi</a>
+            </div>
+          ) : null}
           {/* Items */}
           <div className="space-y-3">
             {items.length === 0 && (
