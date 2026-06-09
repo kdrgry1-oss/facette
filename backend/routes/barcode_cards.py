@@ -70,29 +70,14 @@ def _barcode_png_base64(code: str) -> str:
         return ""
 
 
-def _price_block(product: dict) -> str:
-    """Fiyat HTML bloğu; indirimli fiyat varsa üstü çizili + indirimli gösterir."""
-    price = product.get("price") or 0
-    sale = product.get("sale_price")
-    if sale and sale > 0 and sale < price:
-        return (
-            f'<div class="price-row">'
-            f'<span class="price-old">{price:.2f} ₺</span>'
-            f'<span class="price-new">{sale:.2f} ₺</span>'
-            f'</div>'
-        )
-    return f'<div class="price-row"><span class="price-new">{price:.2f} ₺</span></div>'
-
-
 def _card_html_for_variant(product: dict, variant: dict) -> str:
-    """Tek bir varyant için tek kart HTML parçası."""
-    name = product.get("name", "")
-    brand = product.get("brand") or "FACETTE"
-    category = product.get("category_name") or ""
+    """Tek varyant icin tek barkod ETIKETI (5cm x 4cm, FIYATSIZ)."""
+    name = (product.get("name", "") or "").strip()
+    brand = (product.get("brand") or "FACETTE").strip()
     stock_code = variant.get("stock_code") or product.get("stock_code") or ""
     bar_code = variant.get("barcode") or product.get("barcode") or stock_code
-    size = variant.get("size") or ""
-    color = variant.get("color") or ""
+    size = (variant.get("size") or "").strip()
+    color = (variant.get("color") or "").strip()
 
     barcode_img = _barcode_png_base64(bar_code) if bar_code else ""
 
@@ -100,105 +85,82 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
     <div class="card">
       <div class="brand">{brand}</div>
       <div class="name">{name}</div>
-      <div class="meta">
-        {f'<span class="tag">{category}</span>' if category else ''}
-        {f'<span class="tag size-tag">{size}</span>' if size else ''}
-        {f'<span class="tag">{color}</span>' if color else ''}
-      </div>
-      {_price_block(product)}
-      <div class="codes">
-        <div class="code-row"><span class="label">Stok Kodu:</span> <span class="mono">{stock_code or '-'}</span></div>
-        <div class="code-row"><span class="label">GTIN:</span> <span class="mono">{bar_code or '-'}</span></div>
-      </div>
+      <div class="meta">{f'<span class="size">{size}</span>' if size else ''}{f'<span class="color">{color}</span>' if color else ''}</div>
       {f'<img class="barcode-img" src="{barcode_img}" alt="barcode"/>' if barcode_img else ''}
-      <div class="barcode-text mono">{bar_code or ''}</div>
+      <div class="barcode-text">{bar_code or ''}</div>
+      <div class="stock">{f'Stok: {stock_code}' if stock_code else ''}</div>
     </div>
     """
 
 
-def _build_html(cards_html: str, title: str = "Barkod Kartları") -> str:
-    """Tüm kartları tek HTML sayfasına yerleştirir. A4 2 sütunlu print grid."""
-    return f"""
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="utf-8"/>
-<title>{title}</title>
-<style>
-  @page {{ size: A4; margin: 10mm; }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    margin: 0; padding: 10px; color: #111; background: #fff;
-  }}
-  .grid {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }}
-  .card {{
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    padding: 12px 14px;
-    page-break-inside: avoid;
-    background: #fff;
-    display: flex; flex-direction: column; gap: 4px;
-    min-height: 200px;
-  }}
-  .brand {{
-    font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase;
-    color: #6b7280; font-weight: 700;
-  }}
-  .name {{
-    font-size: 14px; font-weight: 700; line-height: 1.2;
-    max-height: 2.8em; overflow: hidden;
-  }}
-  .meta {{ display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }}
-  .tag {{
-    font-size: 10px; padding: 2px 8px; border-radius: 999px;
-    background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb;
-  }}
-  .size-tag {{ background: #111; color: #fff; border-color: #111; font-weight: 700; }}
-  .price-row {{ display: flex; align-items: baseline; gap: 8px; margin: 2px 0; }}
-  .price-old {{ font-size: 11px; color: #9ca3af; text-decoration: line-through; }}
-  .price-new {{ font-size: 18px; font-weight: 800; color: #000; }}
-  .codes {{ margin-top: 4px; font-size: 11px; color: #4b5563; }}
-  .code-row {{ display: flex; gap: 6px; }}
-  .label {{ color: #9ca3af; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .mono {{ font-family: "SF Mono", Menlo, Consolas, monospace; }}
-  .barcode-img {{
-    width: 100%; height: 48px; margin-top: 6px; object-fit: contain;
-  }}
-  .barcode-text {{
-    text-align: center; font-size: 11px; letter-spacing: 0.1em; color: #111;
-    margin-top: 2px;
-  }}
-  @media print {{
-    body {{ padding: 0; }}
-    .no-print {{ display: none; }}
-  }}
-  .no-print {{
+def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
+    """
+    Etiket sayfasi: yan yana 2 barkod. Her etiket 5cm x 4cm.
+    Kesme payi (bos seritler): en sol + orta + en sag = 0.5cm.
+    Satir genisligi = 2*5 + 3*0.5 = 11.5cm. Kac varyant varsa alt alta dizilir.
+    Olculeri degistirmek icin asagidaki cm degerlerini guncellemek yeterli.
+    """
+    LABEL_W = "5cm"      # her barkodun yatay olcusu
+    LABEL_H = "4cm"      # her barkodun dikey olcusu
+    CUT     = "0.5cm"    # kesme payi (sol/orta/sag)
+    SHEET_W = "11.5cm"   # 2*5cm + 3*0.5cm
+
+    css = """
+  @page { size: auto; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #111;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  .no-print {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 10px; padding: 8px 12px; background: #fff7ed; border: 1px solid #fed7aa;
+    margin: 8px; padding: 8px 12px; background: #fff7ed; border: 1px solid #fed7aa;
     border-radius: 8px; font-size: 13px;
-  }}
-  .btn {{
-    padding: 6px 14px; border-radius: 6px; border: 1px solid #111; background: #111;
-    color: #fff; cursor: pointer; font-size: 13px; font-weight: 600;
-  }}
-</style>
-</head>
-<body>
-  <div class="no-print">
-    <span><strong>{title}</strong> · Yazdırmak için Ctrl/Cmd+P veya sağdaki butonu kullanın.</span>
-    <button class="btn" onclick="window.print()">Yazdır</button>
-  </div>
-  <div class="grid">
-    {cards_html}
-  </div>
-</body>
-</html>
+  }
+  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #111;
+    background: #111; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; }
+
+  .sheet { width: __SHEET_W__; margin: 0 auto; padding: __CUT__ __CUT__ 0 __CUT__; }
+  .grid {
+    display: grid;
+    grid-template-columns: __LABEL_W__ __LABEL_W__;
+    column-gap: __CUT__;
+    row-gap: 0;
+  }
+  .card {
+    width: __LABEL_W__; height: __LABEL_H__;
+    overflow: hidden; padding: 0.12cm 0.14cm;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    text-align: center; gap: 1px; page-break-inside: avoid;
+  }
+  .brand { font-size: 7px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: #6b7280; font-weight: 700; width: 100%; }
+  .name { font-size: 8.5px; font-weight: 700; line-height: 1.1; width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { font-size: 8px; line-height: 1.1; }
+  .meta .size { font-weight: 800; color: #111; }
+  .meta .color { color: #374151; margin-left: 5px; }
+  .barcode-img { width: 100%; height: 1.45cm; object-fit: contain; margin-top: 1px; }
+  .barcode-text { font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 9px; letter-spacing: 0.12em; }
+  .stock { font-size: 7px; color: #6b7280; }
+
+  @media print {
+    .no-print { display: none; }
+    .sheet { margin: 0; }
+  }
 """
+    css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)
+              .replace("__LABEL_H__", LABEL_H).replace("__CUT__", CUT))
+
+    return (
+        "<!DOCTYPE html><html lang='tr'><head><meta charset='utf-8'/>"
+        "<title>" + title + "</title><style>" + css + "</style></head><body>"
+        "<div class='no-print'><span><strong>" + title + "</strong> "
+        "&middot; Yazdirmak icin Ctrl/Cmd+P veya butonu kullanin. "
+        "Yazdirma penceresinde olcek %100 / 'Gercek boyut' secili olmali.</span>"
+        "<button class='btn' onclick='window.print()'>Yazdir</button></div>"
+        "<div class='sheet'><div class='grid'>" + cards_html + "</div></div>"
+        "</body></html>"
+    )
 
 
 def _product_cards_html(product: dict) -> str:
