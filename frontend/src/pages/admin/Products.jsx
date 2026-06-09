@@ -974,10 +974,8 @@ export default function AdminProducts() {
   const handlePrintBarcode = (productId) => {
     const token = localStorage.getItem('token');
     const url = `${API}/products/${productId}/barcode-card?token=${token}`;
-    const w = window.open(url, '_blank', 'width=800,height=1000');
-    if (w) {
-      w.onload = () => setTimeout(() => w.print(), 600);
-    }
+    const w = window.open(url, '_blank', 'width=820,height=1000');
+    if (w) { w.focus(); } // otomatik yazdirma yok: kopya adedini secip "Yazdir"a bas
   };
 
   /**
@@ -1001,7 +999,7 @@ export default function AdminProducts() {
       if (w) {
         w.document.write(res.data);
         w.document.close();
-        setTimeout(() => w.print(), 600);
+        w.focus(); // otomatik yazdirma yok: kopya adedini secip "Yazdir"a bas
       }
     } catch (err) {
       toast.error("Barkod kartları oluşturulamadı: " + (err.response?.data?.detail || err.message));

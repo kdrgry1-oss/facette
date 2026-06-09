@@ -33,12 +33,13 @@ from fastapi import APIRouter, HTTPException, Response, Depends, Query
 from typing import List
 import base64
 import io
+import re
 
 from .deps import db, get_current_user, require_admin
 
 # python-barcode zaten requirements.txt'te (0.16.1)
 import barcode
-from barcode.writer import ImageWriter
+from barcode.writer import ImageWriter, SVGWriter
 
 router = APIRouter(prefix="/products", tags=["Barcode Cards"])
 
@@ -70,6 +71,30 @@ def _barcode_png_base64(code: str) -> str:
         return ""
 
 
+def _barcode_svg_inline(code: str) -> str:
+    """EAN-13/Code128 barkodu VEKTOR (SVG) uretir; kaliteli yazicida net cikar.
+    SVG olculeri mm bazlidir -> %100 olcekte fiziksel olarak dogru basar."""
+    if not code:
+        return ""
+    try:
+        clean = "".join(ch for ch in str(code) if ch.isalnum())
+        opts = {"write_text": False, "module_height": 13.0, "module_width": 0.43, "quiet_zone": 2.0}
+        if len(clean) == 13 and clean.isdigit():
+            bc = barcode.get("ean13", clean[:12], writer=SVGWriter())
+        else:
+            bc = barcode.get("code128", clean or str(code), writer=SVGWriter())
+        buf = io.BytesIO()
+        bc.write(buf, options=opts)
+        svg = buf.getvalue().decode("utf-8")
+        svg = re.sub(r"<\?xml[^>]*\?>", "", svg)
+        svg = re.sub(r"<!DOCTYPE[^>]*>", "", svg, flags=re.S | re.I)
+        svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
+        svg = svg.replace("<svg ", '<svg class="barcode-svg" ', 1)
+        return svg.strip()
+    except Exception:
+        return ""
+
+
 def _card_html_for_variant(product: dict, variant: dict) -> str:
     """Tek varyant icin tek barkod ETIKETI (5cm x 4cm, FIYATSIZ)."""
     name = (product.get("name", "") or "").strip()
@@ -79,14 +104,14 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
     size = (variant.get("size") or "").strip()
     color = (variant.get("color") or "").strip()
 
-    barcode_img = _barcode_png_base64(bar_code) if bar_code else ""
+    barcode_svg = _barcode_svg_inline(bar_code)
 
     return f"""
     <div class="card">
       <div class="brand">{brand}</div>
       <div class="name">{name}</div>
       <div class="meta">{f'<span class="size">{size}</span>' if size else ''}{f'<span class="color">{color}</span>' if color else ''}</div>
-      {f'<img class="barcode-img" src="{barcode_img}" alt="barcode"/>' if barcode_img else ''}
+      {barcode_svg}
       <div class="barcode-text">{bar_code or ''}</div>
       <div class="stock">{f'Stok: {stock_code}' if stock_code else ''}</div>
     </div>
@@ -95,70 +120,78 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
 
 def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     """
-    Etiket sayfasi: yan yana 2 barkod. Her etiket 5cm x 4cm.
-    Kesme payi (bos seritler): en sol + orta + en sag = 0.5cm.
-    Satir genisligi = 2*5 + 3*0.5 = 11.5cm. Kac varyant varsa alt alta dizilir.
-    Olculeri degistirmek icin asagidaki cm degerlerini guncellemek yeterli.
+    Etiket sayfasi: yan yana 2 barkod, her etiket 5cm x 4cm.
+    Kesme payi (bos seritler): sol + orta + sag = 0.5cm -> satir genisligi 11.5cm.
+    Barkodlar VEKTOR (SVG) -> net baski. Toolbar'dan kopya adedi secilir.
     """
-    LABEL_W = "5cm"      # her barkodun yatay olcusu
-    LABEL_H = "4cm"      # her barkodun dikey olcusu
-    CUT     = "0.5cm"    # kesme payi (sol/orta/sag)
-    SHEET_W = "11.5cm"   # 2*5cm + 3*0.5cm
+    LABEL_W = "5cm"
+    LABEL_H = "4cm"
+    CUT     = "0.5cm"
+    SHEET_W = "11.5cm"
 
     css = """
   @page { size: auto; margin: 0; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #fff; color: #111;
-    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    -webkit-font-smoothing: none; text-rendering: geometricPrecision; }
   .no-print {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
     margin: 8px; padding: 8px 12px; background: #fff7ed; border: 1px solid #fed7aa;
-    border-radius: 8px; font-size: 13px;
+    border-radius: 8px; font-size: 13px; flex-wrap: wrap;
   }
-  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid #111;
-    background: #111; color: #fff; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .no-print input { width: 64px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 6px; }
+  .btn { padding: 6px 16px; border-radius: 6px; border: 1px solid #111;
+    background: #111; color: #fff; cursor: pointer; font-size: 13px; font-weight: 700; }
 
   .sheet { width: __SHEET_W__; margin: 0 auto; padding: __CUT__ __CUT__ 0 __CUT__; }
-  .grid {
-    display: grid;
-    grid-template-columns: __LABEL_W__ __LABEL_W__;
-    column-gap: __CUT__;
-    row-gap: 0;
-  }
+  .grid { display: grid; grid-template-columns: __LABEL_W__ __LABEL_W__; column-gap: __CUT__; row-gap: 0; }
   .card {
     width: __LABEL_W__; height: __LABEL_H__;
-    overflow: hidden; padding: 0.12cm 0.14cm;
-    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-    text-align: center; gap: 1px; page-break-inside: avoid;
+    overflow: hidden; padding: 0.1cm 0.12cm;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    text-align: center; page-break-inside: avoid;
   }
-  .brand { font-size: 7px; letter-spacing: 0.16em; text-transform: uppercase;
-    color: #6b7280; font-weight: 700; width: 100%; }
-  .name { font-size: 8.5px; font-weight: 700; line-height: 1.1; width: 100%;
+  .brand { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color:#000; font-weight: 700; width:100%; line-height:1; }
+  .name { font-size: 11px; font-weight: 700; line-height: 1.05; width: 100%;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .meta { font-size: 8px; line-height: 1.1; }
-  .meta .size { font-weight: 800; color: #111; }
-  .meta .color { color: #374151; margin-left: 5px; }
-  .barcode-img { width: 100%; height: 1.45cm; object-fit: contain; margin-top: 1px; }
-  .barcode-text { font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 9px; letter-spacing: 0.12em; }
-  .stock { font-size: 7px; color: #6b7280; }
-
-  @media print {
-    .no-print { display: none; }
-    .sheet { margin: 0; }
-  }
+  .meta { font-size: 10px; line-height: 1.05; font-weight: 600; }
+  .meta .size { font-weight: 800; }
+  .meta .color { margin-left: 6px; }
+  .barcode-svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .barcode-text { font-family: "Courier New", monospace; font-weight: 700;
+    font-size: 12px; letter-spacing: 0.14em; line-height: 1; }
+  .stock { font-size: 8px; color:#000; line-height: 1; }
+  @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)
               .replace("__LABEL_H__", LABEL_H).replace("__CUT__", CUT))
 
+    script = (
+        "<script>(function(){"
+        "var grid=document.querySelector('.grid');"
+        "var original=grid?grid.innerHTML:'';"
+        "window.doPrint=function(){"
+        "var n=parseInt((document.getElementById('copies')||{}).value,10)||1;if(n<1)n=1;"
+        "var tmp=document.createElement('div');tmp.innerHTML=original;"
+        "var cards=Array.prototype.slice.call(tmp.querySelectorAll('.card'));"
+        "grid.innerHTML='';"
+        "cards.forEach(function(c){for(var i=0;i<n;i++){grid.appendChild(c.cloneNode(true));}});"
+        "window.print();"
+        "};})();</script>"
+    )
+
     return (
         "<!DOCTYPE html><html lang='tr'><head><meta charset='utf-8'/>"
         "<title>" + title + "</title><style>" + css + "</style></head><body>"
-        "<div class='no-print'><span><strong>" + title + "</strong> "
-        "&middot; Yazdirmak icin Ctrl/Cmd+P veya butonu kullanin. "
-        "Yazdirma penceresinde olcek %100 / 'Gercek boyut' secili olmali.</span>"
-        "<button class='btn' onclick='window.print()'>Yazdir</button></div>"
+        "<div class='no-print'>"
+        "<span><strong>" + title + "</strong> &middot; %100 olcek / 'Gercek boyut' ile yazdirin.</span>"
+        "<span style='display:flex;align-items:center;gap:8px'>"
+        "<label>Her barkoddan adet: <input id='copies' type='number' min='1' value='1'/></label>"
+        "<button class='btn' onclick='doPrint()'>Yazdir</button>"
+        "</span></div>"
         "<div class='sheet'><div class='grid'>" + cards_html + "</div></div>"
+        + script +
         "</body></html>"
     )
 
