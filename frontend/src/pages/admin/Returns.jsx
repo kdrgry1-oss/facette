@@ -7,6 +7,32 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+const PLATFORMS = [
+  { key: "facette", label: "Web Sitesi", badge: "W", color: "bg-gray-800" },
+  { key: "trendyol", label: "Trendyol", badge: "T", color: "bg-orange-500" },
+  { key: "hepsiburada", label: "Hepsiburada", badge: "H", color: "bg-orange-600" },
+  { key: "temu", label: "Temu", badge: "T", color: "bg-orange-500" },
+  { key: "n11", label: "N11", badge: "N", color: "bg-rose-600" },
+  { key: "amazon_tr", label: "Amazon TR", badge: "A", color: "bg-yellow-500" },
+  { key: "amazon_de", label: "Amazon DE", badge: "A", color: "bg-yellow-500" },
+  { key: "aliexpress", label: "AliExpress", badge: "A", color: "bg-red-600" },
+  { key: "etsy", label: "Etsy", badge: "E", color: "bg-orange-500" },
+  { key: "hepsiglobal", label: "Hepsi Global", badge: "H", color: "bg-orange-600" },
+  { key: "fruugo", label: "Fruugo", badge: "F", color: "bg-purple-600" },
+  { key: "emag", label: "eMAG", badge: "E", color: "bg-red-600" },
+  { key: "trendyol_export", label: "Trendyol İhracat", badge: "T", color: "bg-orange-500" },
+  { key: "ciceksepeti", label: "Çiçek Sepeti", badge: "Ç", color: "bg-pink-600" },
+];
+
+const STATUS_TABS = [
+  { key: "all", label: "Tüm İadeler" },
+  { key: "talep_olusturulan", label: "Talep Oluşturulan" },
+  { key: "kargoya_verilen", label: "Kargoya Verilen" },
+  { key: "aksiyon_bekleyen", label: "Aksiyon Bekleyen" },
+  { key: "onaylanan", label: "Onaylanan" },
+  { key: "reddedilen", label: "Reddedilen" },
+];
+
 function formatCurrency(val) {
   return new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(val || 0);
 }
@@ -76,6 +102,17 @@ export default function Returns() {
   const [stats, setStats] = useState({});
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [platform, setPlatform] = useState("trendyol");
+  const [statusTab, setStatusTab] = useState("all");
+  const [tabCounts, setTabCounts] = useState({});
+  const [itemSel, setItemSel] = useState({}); // {claim_id: Set(claim_item_id)} - manuel adet onayı
+  const toggleItem = (claimId, itemId, allIds) => {
+    setItemSel(prev => {
+      const cur = new Set(prev[claimId] || allIds);
+      if (cur.has(itemId)) cur.delete(itemId); else cur.add(itemId);
+      return { ...prev, [claimId]: cur };
+    });
+  };
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [expandedId, setExpandedId] = useState(null);
   const [gpModalOpen, setGpModalOpen] = useState(false);
@@ -108,21 +145,28 @@ export default function Returns() {
 
   const fetchClaims = useCallback(async () => {
     try {
+      setLoading(true);
+      // Şu an yalnızca Trendyol'da iade kaydı var; diğer platformlar için boş göster.
+      if (platform !== "trendyol") {
+        setClaims([]); setTotal(0); setTabCounts({}); setStats({});
+        return;
+      }
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({ page, limit, search });
-      if (typeFilter) params.append("claim_type", typeFilter);
+      if (statusTab && statusTab !== "all") params.append("status", statusTab);
       const res = await axios.get(`${API}/integrations/trendyol/claims?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setClaims(res.data.claims || []);
       setTotal(res.data.total || 0);
       setStats(res.data.stats || {});
+      setTabCounts(res.data.tab_counts || {});
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [page, search, typeFilter]);
+  }, [page, search, statusTab, platform]);
 
   useEffect(() => { fetchClaims(); }, [fetchClaims]);
 
@@ -157,12 +201,14 @@ export default function Returns() {
     }
   };
 
-  const handleApprove = async (claim) => {
-    if (!await window.appConfirm("Bu iadeyi onaylamak istediğinize emin misiniz?")) return;
+  const handleApprove = async (claim, explicitIds) => {
+    const claimItemIds = (explicitIds && explicitIds.length)
+      ? explicitIds
+      : (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
+    if (!claimItemIds.length) { toast.error("Onaylanacak ürün seçilmedi"); return; }
+    if (!await window.appConfirm(`Seçili ${claimItemIds.length} ürünün iadesini onaylamak istediğinize emin misiniz?`)) return;
     try {
       const token = localStorage.getItem("token");
-      const claimItemIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
-      if (!claimItemIds.length) { toast.error("Onaylanacak kalem bulunamadı"); return; }
       await axios.post(`${API}/integrations/trendyol/claims/${claim.claim_id}/approve`,
         { claim_item_ids: claimItemIds },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -339,7 +385,7 @@ export default function Returns() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">İadeler & İptaller</h1>
+            <h1 className="text-2xl font-bold text-gray-900">İadeler</h1>
             <p className="text-xs text-gray-500 mt-1">Her 5 dakikada otomatik güncellenir</p>
           </div>
           <div className="flex items-center gap-3">
@@ -358,6 +404,30 @@ export default function Returns() {
               {syncing ? "Güncelleniyor..." : "Güncelle"}
             </button>
           </div>
+        </div>
+
+        {/* Platform barı — en başta Web Sitesi, sonra pazaryerleri */}
+        <div className="flex items-center gap-1 overflow-x-auto border-b mb-4 pb-px">
+          {PLATFORMS.map((pf) => (
+            <button key={pf.key}
+              onClick={() => { setPlatform(pf.key); setStatusTab("all"); setPage(1); setSelectedIds(new Set()); }}
+              className={`flex items-center gap-2 whitespace-nowrap px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${platform === pf.key ? "border-orange-500 text-orange-600 font-semibold" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${pf.color}`}>{pf.badge}</span>
+              {pf.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Durum sekmeleri */}
+        <div className="flex items-center gap-2 overflow-x-auto mb-4">
+          {STATUS_TABS.map((t) => (
+            <button key={t.key}
+              onClick={() => { setStatusTab(t.key); setPage(1); }}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-sm border transition-colors ${statusTab === t.key ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+              {t.label}
+              <span className={`ml-1.5 text-xs ${statusTab === t.key ? "text-gray-300" : "text-gray-400"}`}>{tabCounts[t.key] ?? 0}</span>
+            </button>
+          ))}
         </div>
 
         {/* Gider Pusulası Ayarları */}
@@ -402,14 +472,10 @@ export default function Returns() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white p-4 rounded-xl border shadow-sm">
             <p className="text-xs text-gray-500 font-bold uppercase">Toplam İade</p>
             <p className="text-2xl font-bold text-red-600 mt-1">{stats.total_returns || 0}</p>
-          </div>
-          <div className="bg-white p-4 rounded-xl border shadow-sm">
-            <p className="text-xs text-gray-500 font-bold uppercase">Toplam İptal</p>
-            <p className="text-2xl font-bold text-yellow-600 mt-1">{stats.total_cancels || 0}</p>
           </div>
           <div className="bg-white p-4 rounded-xl border shadow-sm">
             <p className="text-xs text-gray-500 font-bold uppercase">Toplam İade Tutarı</p>
@@ -425,12 +491,6 @@ export default function Returns() {
               value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="w-full pl-9 pr-4 py-2 bg-white border rounded-lg text-sm" />
           </div>
-          <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
-            className="border rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="">Tümü</option>
-            <option value="RETURN">İadeler</option>
-            <option value="CANCEL">İptaller</option>
-          </select>
         </div>
 
         {/* Table */}
@@ -444,7 +504,6 @@ export default function Returns() {
                 </th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş No</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Müşteri</th>
-                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tür</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sebep</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kargo</th>
@@ -458,9 +517,9 @@ export default function Returns() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={13} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
               ) : claims.length === 0 ? (
-                <tr><td colSpan={13} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-gray-400">{platform === "trendyol" ? "İade kaydı bulunamadı" : "Bu platform için iade entegrasyonu henüz yok"}</td></tr>
               ) : claims.map(claim => {
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
@@ -483,25 +542,42 @@ export default function Returns() {
                       </button>
                       {isExpanded && (
                         <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs space-y-1">
-                          <p><strong>Claim ID:</strong> {claim.claim_id}</p>
-                          {(claim.items || []).map((item, ii) => (
-                            <div key={ii} className="flex justify-between border-t pt-1 mt-1">
-                              <span>{item.productName}</span>
-                              <span className="font-mono">{formatCurrency(item.price)}</span>
-                            </div>
-                          ))}
-                          {claim.invoice_number && <p><strong>Fatura No:</strong> {claim.invoice_number}</p>}
+                          <p className="mb-1"><strong>Claim ID:</strong> {claim.claim_id}{claim.invoice_number ? ` · Fatura: ${claim.invoice_number}` : ""}</p>
+                          {(() => {
+                            const allIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
+                            const selIds = itemSel[claim.claim_id] || new Set(allIds);
+                            return (
+                              <>
+                                <div className="rounded-lg border bg-white divide-y">
+                                  {(claim.items || []).map((item, ii) => (
+                                    <label key={ii} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-50">
+                                      <input type="checkbox" className="rounded"
+                                        checked={selIds.has(item.claim_item_id)}
+                                        onChange={() => toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
+                                      <span className="flex-1">
+                                        <span className="font-medium">{item.productName || "-"}</span>
+                                        {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
+                                        {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}
+                                      </span>
+                                      <span className="font-mono">{formatCurrency(item.price)}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                                {!isActioned && (
+                                  <button onClick={() => handleApprove(claim, Array.from(selIds))}
+                                    data-testid={`approve-items-${claim.claim_id}`}
+                                    disabled={selIds.size === 0}
+                                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-50">
+                                    <Check size={13} /> Seçili {selIds.size} ürünü İade Onayla
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                     </td>
                     <td className="px-3 py-3 text-gray-700">{claim.customer_name || "-"}</td>
-                    <td className="px-3 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        claim.claim_type === "RETURN" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"
-                      }`}>
-                        {claim.claim_type === "RETURN" ? "İade" : "İptal"}
-                      </span>
-                    </td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[140px] truncate">{claim.claim_reason || "-"}</td>
                     <td className="px-3 py-3 text-xs">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -561,7 +637,7 @@ export default function Returns() {
                           }`} title="Gider Pusulası">
                           <FileText size={14} />
                         </button>
-                        {claim.claim_type === "RETURN" && (
+                        {(
                           <button onClick={() => openRefundModal(claim)}
                             data-testid={`refund-btn-${claim.claim_id}`}
                             className={`p-1.5 rounded-lg transition-colors ${
