@@ -694,10 +694,14 @@ async def create_product(
             product_data["barcode"] = barcode
 
     _pid = await generate_short_id("products")
-    # Urun Kart ID: manuel verilmediyse otomatik sirali uret (barkod/GTIN'den bagimsiz, etikette basilir)
-    urun_karti_id = str(product_data.get("urun_karti_id") or product_data.get("csv_card_id") or "").strip()
+    # Urun Kart ID: form "Kimlik & Kodlar > Urun Kart ID" (ticimax_fields.URUNKARTIID)
+    # veya ust-seviye urun_karti_id; ikisi de bossa SON kart id + 1 otomatik atanir.
+    _tf_in = product_data.get("ticimax_fields") or {}
+    urun_karti_id = str(_tf_in.get("URUNKARTIID") or product_data.get("urun_karti_id") or product_data.get("csv_card_id") or "").strip()
     if not urun_karti_id:
         urun_karti_id = await generate_urun_karti_id()
+    # liste/etiket (urun_karti_id) ile form (ticimax_fields.URUNKARTIID) senkron
+    product_data["ticimax_fields"] = {**_tf_in, "URUNKARTIID": urun_karti_id}
     _card = urun_karti_id
     _sel_cats = product_data.get("categories")
     if not _sel_cats and product_data.get("category_id"):
@@ -708,6 +712,7 @@ async def create_product(
     product = {
         "id": _pid,
         "urun_karti_id": urun_karti_id,
+        "ticimax_fields": product_data.get("ticimax_fields", {}),
         "name": product_data.get("name", ""),
         "slug": product_data.get("slug") or slug_with_card_id(product_data.get("name", ""), _card),
         "description": product_data.get("description", ""),
@@ -804,6 +809,11 @@ async def update_product(
             if _pc and _pc.get("name"):
                 product_data["category_name"] = _pc["name"]
 
+    # Form "Urun Kart ID" alani ticimax_fields.URUNKARTIID'e yazar -> ust-seviye ile senkronla
+    _tf_u = product_data.get("ticimax_fields") or {}
+    _kid = str(_tf_u.get("URUNKARTIID") or product_data.get("urun_karti_id") or "").strip()
+    if _kid:
+        product_data["urun_karti_id"] = _kid
     # Bos urun_karti_id gonderilirse mevcut degeri ezme (sadece dolu ise guncelle)
     if "urun_karti_id" in product_data and not str(product_data.get("urun_karti_id") or "").strip():
         product_data.pop("urun_karti_id", None)

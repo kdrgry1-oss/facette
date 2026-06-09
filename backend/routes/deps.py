@@ -423,32 +423,30 @@ async def generate_barcode_from_range(used_barcodes_set=None) -> str:
 
 
 async def generate_urun_karti_id() -> str:
-    """Her yeni urun icin BENZERSIZ, sirali 'Urun Kart ID' uretir (etikette basilir).
-    Barkod/GTIN ve urun id'sinden BAGIMSIZ, insan-okur referanstir (or. '1071').
-    settings.urun_karti_start (varsayilan 1000) baslangic noktasidir.
-    Atomik sayac db.counters._id='urun_karti_id'; mevcut/manuel atanmis nolar atlanir.
-    Urun formundan manuel de duzeltilebilir.
+    """Yeni urun icin Urun Kart ID uretir: sistemdeki EN BUYUK sayisal
+    Urun Kart ID + 1. Hic yoksa settings.urun_karti_start (varsayilan 1000).
+    Manuel ayni no varsa bir sonraki bos numaraya ilerler.
     """
-    from pymongo import ReturnDocument
     settings = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
     try:
         start = int(settings.get("urun_karti_start") or 1000)
     except Exception:
         start = 1000
+    mx = 0
+    async for p in db.products.find({"urun_karti_id": {"$nin": [None, ""]}}, {"_id": 0, "urun_karti_id": 1}):
+        v = str(p.get("urun_karti_id") or "").strip()
+        if v.isdigit():
+            iv = int(v)
+            if iv > mx:
+                mx = iv
+    nxt = max(mx + 1, start)
     for _ in range(100000):
-        c = await db.counters.find_one_and_update(
-            {"_id": "urun_karti_id"},
-            {"$inc": {"seq": 1}},
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        seq = int((c or {}).get("seq", 1))
-        candidate = str(start + seq - 1)
-        exists = await db.products.find_one({"urun_karti_id": candidate}, {"_id": 1})
-        if exists:
-            continue
-        return candidate
-    return str(start)
+        cand = str(nxt)
+        ex = await db.products.find_one({"urun_karti_id": cand}, {"_id": 1})
+        if not ex:
+            return cand
+        nxt += 1
+    return str(nxt)
 
 
 # =============================================================================

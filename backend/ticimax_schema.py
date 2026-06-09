@@ -78,7 +78,7 @@ NUMBER_COLS = {
 }
 
 # Salt-okunur kimlik alanları (import kaynağı, elle değiştirilmez)
-READONLY_COLS = {"URUNKARTIID", "URUNID", "EKLEMETARIHI"}
+READONLY_COLS = {"URUNID", "EKLEMETARIHI"}  # URUNKARTIID artik elle duzenlenebilir
 
 LABELS: Dict[str, str] = {
     "URUNKARTIID": "Ürün Kart ID", "URUNID": "Varyant Ürün ID",
