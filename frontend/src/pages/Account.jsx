@@ -49,6 +49,17 @@ const ORDER_STATUS = {
   processing:  { label: "Hazırlanıyor",   cls: "bg-indigo-50  text-indigo-800  border-indigo-200",  icon: Package },
   shipped:     { label: "Kargoda",        cls: "bg-purple-50  text-purple-800  border-purple-200",  icon: Truck },
   delivered:   { label: "Teslim Edildi",  cls: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: CheckCircle },
+  awaiting_payment: { label: "Ödeme Bekleniyor", cls: "bg-amber-50 text-amber-800 border-amber-200", icon: Clock },
+  payment_notified: { label: "Ödeme Bildirimi Alındı", cls: "bg-amber-50 text-amber-800 border-amber-200", icon: Clock },
+  preparing:   { label: "Hazırlanıyor",   cls: "bg-indigo-50  text-indigo-800  border-indigo-200",  icon: Package },
+  ready_to_ship: { label: "Kargoya Hazır", cls: "bg-indigo-50 text-indigo-800 border-indigo-200", icon: Package },
+  in_transit:  { label: "Yolda",          cls: "bg-purple-50 text-purple-800 border-purple-200", icon: Truck },
+  out_for_delivery: { label: "Dağıtımda", cls: "bg-purple-50 text-purple-800 border-purple-200", icon: Truck },
+  undelivered: { label: "Teslim Edilemedi", cls: "bg-orange-50 text-orange-800 border-orange-200", icon: Truck },
+  return_requested: { label: "İade Talebi Alındı", cls: "bg-rose-50 text-rose-800 border-rose-200", icon: Package },
+  return_in_transit: { label: "İade Kargoda", cls: "bg-pink-50 text-pink-800 border-pink-200", icon: Truck },
+  returned:    { label: "İade Tamamlandı", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
+  refunded:    { label: "İade Bedeli Ödendi", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
   cancelled:   { label: "İptal Edildi",   cls: "bg-red-50     text-red-700     border-red-200",     icon: X },
 };
 
@@ -512,6 +523,15 @@ function OrderCard({ order, expanded, onToggle }) {
       {/* Expanded body */}
       {expanded && (
         <div className="border-t border-gray-100 px-4 md:px-6 py-5 space-y-5 bg-gray-50/40">
+          {order.status === "awaiting_payment" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm text-amber-900">Siparişiniz ödeme bekliyor. Havale/EFT sonrası dekontunuzu iletin.</span>
+              <a href={`/odeme-bildirimi/${order.order_number}`} className="inline-block bg-amber-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-amber-700 shrink-0">Ödeme Bildirimi Yap</a>
+            </div>
+          )}
+          {order.status === "payment_notified" && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">Ödeme bildiriminiz alındı, en kısa sürede kontrol edilecek.</div>
+          )}
           {/* Items */}
           <div className="space-y-3">
             {items.length === 0 && (

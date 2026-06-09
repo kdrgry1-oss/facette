@@ -49,12 +49,22 @@ import Pagination from "../../components/admin/Pagination";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const statusOptions = [
-  { value: "pending", label: "Bekliyor", class: "status-pending" },
+  { value: "pending", label: "Onay Bekliyor", class: "status-pending" },
+  { value: "awaiting_payment", label: "Ödeme Bekleniyor (Havale)", class: "status-pending" },
+  { value: "payment_notified", label: "Ödeme Bildirimi Alındı", class: "status-pending" },
   { value: "confirmed", label: "Onaylandı", class: "status-confirmed" },
-  { value: "processing", label: "Paketleniyor", class: "status-preparing" },
-  { value: "shipped", label: "Kargoda", class: "status-shipped" },
+  { value: "preparing", label: "Hazırlanıyor", class: "status-preparing" },
+  { value: "processing", label: "İşleme Alındı", class: "status-preparing" },
+  { value: "ready_to_ship", label: "Kargoya Hazır", class: "status-preparing" },
+  { value: "shipped", label: "Kargoya Verildi", class: "status-shipped" },
+  { value: "in_transit", label: "Taşınıyor", class: "status-shipped" },
+  { value: "out_for_delivery", label: "Dağıtımda", class: "status-shipped" },
   { value: "delivered", label: "Teslim Edildi", class: "status-delivered" },
   { value: "undelivered", label: "Teslim Edilemedi (Şubede)", class: "status-undelivered" },
+  { value: "return_requested", label: "İade Talebi Oluşturuldu", class: "status-undelivered" },
+  { value: "return_in_transit", label: "İade Kargoda", class: "status-shipped" },
+  { value: "returned", label: "İade Tamamlandı", class: "status-cancelled" },
+  { value: "refunded", label: "İade Bedeli Ödendi", class: "status-cancelled" },
   { value: "cancelled", label: "İptal Edildi", class: "status-cancelled" },
 ];
 
@@ -679,6 +689,34 @@ export default function AdminOrders({ unpaidView = false }) {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const viewReceipt = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API}/orders/${orderId}/payment-receipt`, {
+        headers: { Authorization: `Bearer ${token}` }, responseType: 'blob'
+      });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      toast.error('Dekont görüntülenemedi');
+    }
+  };
+
+  const approvePayment = async (orderId) => {
+    const ok = window.appConfirm ? await window.appConfirm('Ödemeyi onaylayıp siparişi "Onaylandı" durumuna almak istiyor musunuz?') : window.confirm('Ödemeyi onayla?');
+    if (!ok) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(`${API}/orders/${orderId}/mark-paid`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success('Ödeme onaylandı, sipariş "Onaylandı" durumuna alındı');
+      fetchOrders();
+      if (selectedOrder?.id === orderId) setSelectedOrder({ ...selectedOrder, payment_status: 'paid', status: 'confirmed' });
+    } catch (e) {
+      toast.error('Onaylanamadı');
+    }
   };
 
   const getStatusInfo = (status) => {
@@ -1453,6 +1491,35 @@ export default function AdminOrders({ unpaidView = false }) {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Havale: Dekont & Ödeme Onayı */}
+              {((selectedOrder.payment_method && ["bank_transfer","havale","eft","havale_eft","banka_havale"].includes(String(selectedOrder.payment_method).toLowerCase())) || selectedOrder.payment_receipt) && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="text-sm text-gray-600">Ödeme: Havale/EFT —
+                        <span className={`ml-1 font-semibold ${selectedOrder.payment_status==='paid'?'text-green-700':'text-amber-700'}`}>
+                          {selectedOrder.payment_status==='paid' ? 'Ödendi' : 'Ödeme bekleniyor'}
+                        </span>
+                      </p>
+                      {selectedOrder.payment_notified_at && (
+                        <p className="text-xs text-gray-500 mt-1">Dekont yüklendi: {new Date(selectedOrder.payment_notified_at).toLocaleString('tr-TR')}</p>
+                      )}
+                      {selectedOrder.payment_receipt?.note && (
+                        <p className="text-xs text-gray-500 mt-0.5">Not: {selectedOrder.payment_receipt.note}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {selectedOrder.payment_receipt && (
+                        <button onClick={() => viewReceipt(selectedOrder.id)} className="px-3 py-2 bg-white border rounded text-sm font-medium hover:bg-gray-50">Dekontu Görüntüle</button>
+                      )}
+                      {selectedOrder.payment_status !== 'paid' && (
+                        <button onClick={() => approvePayment(selectedOrder.id)} className="px-3 py-2 bg-green-600 text-white rounded text-sm font-semibold hover:bg-green-700">Ödemeyi Onayla</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Customer Info */}
               <div className="grid md:grid-cols-2 gap-4">

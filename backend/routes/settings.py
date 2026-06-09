@@ -271,3 +271,13 @@ async def save_order_statuses(payload: Dict[str, Any], current_user: dict = Depe
         upsert=True,
     )
     return {"success": True, "active_count": len(active)}
+
+
+
+@router.get("/public/bank-default")
+async def public_default_bank():
+    """Storefront (dekont sayfasi) icin varsayilan havale hesabi (public; IBAN zaten musteriyle paylasilir)."""
+    pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+    banks = pay.get("bank_accounts") or []
+    bank = next((b for b in banks if b.get("is_default")), None) or (banks[0] if banks else None)
+    return {"bank": bank}

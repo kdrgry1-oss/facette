@@ -1,7 +1,7 @@
 """
 Order routes - CRUD, checkout, tracking
 """
-from fastapi import APIRouter, HTTPException, Query, Depends, Response, Request
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, Request, UploadFile, File, Form
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import time
@@ -590,15 +590,49 @@ async def mark_order_paid(
                 "order_id": order_id, "already_paid": True}
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    await db.orders.update_one(
-        {"id": order_id},
-        {"$set": {
-            "payment_status": "paid",
-            "paid_at": now_iso,
-            "paid_by": current_user.get("email", ""),
-            "updated_at": now_iso,
-        }},
-    )
+    _set = {
+        "payment_status": "paid",
+        "paid_at": now_iso,
+        "paid_by": current_user.get("email", ""),
+        "updated_at": now_iso,
+    }
+    _flip_confirmed = order_doc.get("status") in ("awaiting_payment", "payment_notified", "pending")
+    if _flip_confirmed:
+        _set["status"] = "confirmed"
+    await db.orders.update_one({"id": order_id}, {"$set": _set})
+
+    # Havale onayinda "Onaylandi" bildirimi (Siparis Durumlari ayarina gore)
+    if _flip_confirmed:
+        import asyncio as _aio2
+        async def _notify_confirmed():
+            try:
+                import sys, os
+                sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+                from notification_service import send_notification
+                from order_statuses import get_status_config, customer_label_for
+                cfg = await get_status_config(db)
+                nz = (cfg.get("notify") or {}).get("confirmed") or {}
+                ch = [c for c in ("sms", "email") if nz.get(c)]
+                if not ch:
+                    return
+                addr = order_doc.get("shipping_address") or {}
+                _base = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
+                await send_notification(
+                    db, "order_confirmed",
+                    to_phone=addr.get("phone") or order_doc.get("phone"),
+                    to_email=addr.get("email") or order_doc.get("email"),
+                    variables={
+                        "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                        "order_number": order_doc.get("order_number", ""),
+                        "amount": f"{order_doc.get('total', 0):.2f} TL",
+                        "status_label": customer_label_for("confirmed"),
+                        "order_link": (f"{_base}/order-success/{order_doc.get('order_number','')}" if _base else "#"),
+                    },
+                    channels=ch,
+                )
+            except Exception as e:
+                logger.warning(f"confirmed notif failed: {e}")
+        _aio2.create_task(_notify_confirmed())
 
     # CAPI offline conversion (purchase event) — fire-and-forget
     import asyncio as _asyncio
@@ -2352,3 +2386,88 @@ async def test_mng_connection(current_user: dict = Depends(require_admin)):
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from mng_kargo_client import baglanti_test
     return baglanti_test()
+
+
+# =============================================================================
+# Faz 2 — Havale dekont bildirimi (storefront yukleme + admin goruntuleme)
+# =============================================================================
+@router.post("/by-number/{order_number}/payment-notification")
+async def submit_payment_notification(
+    order_number: str,
+    file: UploadFile = File(...),
+    note: str = Form(""),
+):
+    """Musteri: ilgili siparis icin dekont (PDF/gorsel) yukler.
+    Auth gerekmez; siparis numarasi yetkilendirme anahtaridir."""
+    order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Dosya 8MB'tan büyük olamaz")
+    ctype = file.content_type or "application/octet-stream"
+    if not (ctype.startswith("image/") or ctype == "application/pdf"):
+        raise HTTPException(status_code=400, detail="Sadece PDF veya görsel yükleyebilirsiniz")
+    import base64 as _b64
+    now_iso = datetime.now(timezone.utc).isoformat()
+    receipt = {
+        "filename": (file.filename or "dekont")[:120],
+        "content_type": ctype,
+        "size": len(data),
+        "data_b64": _b64.b64encode(data).decode("ascii"),
+        "note": (note or "")[:500],
+        "uploaded_at": now_iso,
+    }
+    upd = {
+        "payment_receipt": receipt,
+        "payment_notified": True,
+        "payment_notified_at": now_iso,
+        "updated_at": now_iso,
+    }
+    if order.get("status") in ("awaiting_payment", "pending"):
+        upd["status"] = "payment_notified"
+    await db.orders.update_one({"id": order["id"]}, {"$set": upd})
+
+    import asyncio as _aio
+    async def _notif():
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+            from order_statuses import get_status_config
+            cfg = await get_status_config(db)
+            nz = (cfg.get("notify") or {}).get("payment_notified") or {}
+            ch = [c for c in ("sms", "email") if nz.get(c)]
+            if not ch:
+                return
+            addr = order.get("shipping_address") or {}
+            await send_notification(
+                db, "order_payment_notified",
+                to_phone=addr.get("phone") or order.get("phone"),
+                to_email=addr.get("email") or order.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": order_number,
+                },
+                channels=ch,
+            )
+        except Exception as e:
+            logger.warning(f"payment_notified notif failed: {e}")
+    _aio.create_task(_notif())
+    return {"success": True, "message": "Ödeme bildiriminiz alındı, en kısa sürede kontrol edilecek."}
+
+
+@router.get("/{order_id}/payment-receipt")
+async def get_payment_receipt(order_id: str, current_user: dict = Depends(require_admin)):
+    """Admin: yuklenen dekontu goruntule/indir."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0, "payment_receipt": 1})
+    r = (order or {}).get("payment_receipt")
+    if not r:
+        raise HTTPException(status_code=404, detail="Dekont bulunamadı")
+    import base64 as _b64
+    raw = _b64.b64decode(r["data_b64"])
+    return Response(
+        content=raw,
+        media_type=r.get("content_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{r.get("filename","dekont")}"'},
+    )
