@@ -1422,6 +1422,37 @@ async def create_invoice_for_order(
     except Exception:
         pass
 
+    # ─── Trendyol: fatura kesilir kesilmez ANINDA Trendyol'a yükle ──────────
+    # Tüm fatura tipleri için (e-arşiv, e-fatura, mikro ihracat) — hiçbirini
+    # atlamaz. Hata olsa bile fatura kesimi başarılı sayılır (sadece loglanır),
+    # böylece toplu fatura akışı kesintisiz devam eder. Bu sayede manuel "linki
+    # yapıştır" adımına gerek kalmaz; geç/hiç gitmeme sorunu ortadan kalkar.
+    try:
+        if (order.get("platform") == "trendyol") and order.get("trendyol_package_id"):
+            _web = ((dogan_result or {}).get("web_key") or order.get("invoice_pdf_url") or "").strip()
+            _tmpl = (dogan_settings.get("earsiv_link_template") or "").strip()
+            if _web.startswith("http"):
+                _inv_link = _web
+            elif _tmpl and _web:
+                _inv_link = _tmpl.replace("{web_key}", _web)
+            else:
+                _inv_link = ""
+            if _inv_link:
+                from .integrations import upload_invoice_to_trendyol
+                await upload_invoice_to_trendyol(
+                    order.get("order_number"),
+                    {"invoice_link": _inv_link, "invoice_number": invoice_number},
+                    current_user,
+                )
+            else:
+                logger.warning(
+                    f"[trendyol invoice] Gecerli fatura linki uretilemedi "
+                    f"(web_key bos/URL degil ve sablon ayarli degil), Trendyol yuklemesi atlandi: "
+                    f"{order.get('order_number')}"
+                )
+    except Exception as _te:
+        logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_te}")
+
     return {
         "success": True,
         "message": "Fatura oluşturuldu",
