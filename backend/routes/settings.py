@@ -124,3 +124,109 @@ async def update_settings(
         await db.settings.update_one({"id": "main"}, {"$set": settings_data})
     
     return {"message": "Ayarlar güncellendi"}
+
+
+# =============================================================================
+# Ödeme Tipleri — Havale/EFT banka hesaplari + odeme entegrasyon ozeti
+# Veri: db.settings._id="payment" { bank_accounts: [ {id,bank_name,branch,iban,
+#       account_holder,is_default} ] }
+# =============================================================================
+import uuid as _uuid
+
+
+def _seed_default_banks():
+    return [{
+        "id": _uuid.uuid4().hex[:12],
+        "bank_name": "TÜRKİYE İŞ BANKASI",
+        "branch": "CUMHURİYET CADDESİ ESENYURT ŞUBESİ",
+        "iban": "TR86 0006 4000 0011 4540 1414 67",
+        "account_holder": "FACETTE DIŞ TİC. A.Ş",
+        "is_default": True,
+    }]
+
+
+def _ensure_single_default(banks):
+    if banks and not any(b.get("is_default") for b in banks):
+        banks[0]["is_default"] = True
+    return banks
+
+
+@router.get("/payment-overview")
+async def payment_overview(current_user: dict = Depends(require_admin)):
+    """Ödeme Tipleri sayfasi: aktif odeme entegrasyonlari + havale banka hesaplari."""
+    pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+    banks = pay.get("bank_accounts") or []
+    if not banks:
+        banks = _seed_default_banks()
+        await db.settings.update_one({"id": "payment"},
+                                     {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
+    iyz = await db.settings.find_one({"id": "iyzico"}, {"_id": 0}) or {}
+    integrations = [{
+        "key": "iyzico",
+        "name": "iyzico (Kredi / Banka Kartı)",
+        "configured": bool(iyz.get("api_key") and iyz.get("api_secret")),
+        "active": bool(iyz.get("is_active")),
+        "settings_path": "/admin/entegrasyonlar",
+    }, {
+        "key": "bank_transfer",
+        "name": "Havale / EFT",
+        "configured": bool(banks),
+        "active": bool(banks),
+        "settings_path": "/admin/odeme-tipleri",
+    }]
+    return {"integrations": integrations, "bank_accounts": banks}
+
+
+@router.post("/bank-accounts")
+async def upsert_bank_account(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+    pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {"id": "payment", "bank_accounts": []}
+    banks = pay.get("bank_accounts") or []
+    acc_id = str(payload.get("id") or "").strip() or _uuid.uuid4().hex[:12]
+    acc = {
+        "id": acc_id,
+        "bank_name": str(payload.get("bank_name") or "").strip(),
+        "branch": str(payload.get("branch") or "").strip(),
+        "iban": str(payload.get("iban") or "").strip().upper(),
+        "account_holder": str(payload.get("account_holder") or "").strip(),
+        "is_default": bool(payload.get("is_default")),
+    }
+    if not acc["bank_name"] or not acc["iban"]:
+        raise HTTPException(status_code=400, detail="Banka adı ve IBAN zorunlu")
+    found = False
+    for i, b in enumerate(banks):
+        if b.get("id") == acc_id:
+            banks[i] = acc
+            found = True
+            break
+    if not found:
+        banks.append(acc)
+    if acc["is_default"]:
+        for b in banks:
+            b["is_default"] = (b.get("id") == acc_id)
+    _ensure_single_default(banks)
+    await db.settings.update_one({"id": "payment"},
+                                 {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
+    return {"bank_accounts": banks}
+
+
+@router.delete("/bank-accounts/{acc_id}")
+async def delete_bank_account(acc_id: str, current_user: dict = Depends(require_admin)):
+    pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+    banks = [b for b in (pay.get("bank_accounts") or []) if b.get("id") != acc_id]
+    _ensure_single_default(banks)
+    await db.settings.update_one({"id": "payment"},
+                                 {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
+    return {"bank_accounts": banks}
+
+
+@router.post("/bank-accounts/{acc_id}/default")
+async def set_default_bank_account(acc_id: str, current_user: dict = Depends(require_admin)):
+    pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+    banks = pay.get("bank_accounts") or []
+    if not any(b.get("id") == acc_id for b in banks):
+        raise HTTPException(status_code=404, detail="Hesap bulunamadı")
+    for b in banks:
+        b["is_default"] = (b.get("id") == acc_id)
+    await db.settings.update_one({"id": "payment"},
+                                 {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
+    return {"bank_accounts": banks}

@@ -130,6 +130,7 @@ export const navigationGroups = [
     label: "Entegrasyonlar",
     icon: Cable,
     children: [
+      { label: "Ödeme Tipleri", path: "/admin/odeme-tipleri", icon: CreditCard },
       { label: "Pazaryerleri Hub", path: "/admin/pazaryerleri", icon: Store },
       { label: "Amazon SP-API", path: "/admin/amazon", icon: Store },
       { label: "Amazon DPP Uyum", path: "/admin/dpp-uyum", icon: Store },

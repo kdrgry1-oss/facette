@@ -15,6 +15,7 @@ import AdminCampaigns from "./pages/admin/Campaigns";
 import AdminPages from "./pages/admin/Pages";
 import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
+import Payments from "./pages/admin/Payments";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
 import AdminCancellations from "./pages/admin/Cancellations";
@@ -98,6 +99,7 @@ export default function AdminApp() {
         <Route path="temalar" element={<Themes />} />
         <Route path="kampanyalar" element={<AdminCampaigns />} />
         <Route path="entegrasyonlar" element={<AdminIntegrations />} />
+        <Route path="odeme-tipleri" element={<Payments />} />
         <Route path="iadeler" element={<AdminReturns />} />
         <Route path="iptaller" element={<AdminCancellations />} />
         <Route path="sayfalar" element={<AdminPages />} />
