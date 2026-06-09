@@ -818,6 +818,22 @@ export default function AdminProducts() {
         })) || []
       };
 
+      // Yeni urun(ler): TEK Urun Kart ID. Renkler ayri urune bolunse bile hepsi AYNI id'yi alir
+      // (kart id kendi icinde artmaz). Bos ise sistemdeki en buyuk + 1 alinir.
+      if (!editingProduct) {
+        let cid = String((formData.ticimax_fields && formData.ticimax_fields.URUNKARTIID) || formData.urun_karti_id || "").trim();
+        if (!cid) {
+          try {
+            const r = await axios.get(`${API}/products/meta/next-card-id`, { headers });
+            cid = String(r.data?.card_id || "");
+          } catch (e) { /* backend yine de otomatik atar */ }
+        }
+        if (cid) {
+          payload.urun_karti_id = cid;
+          payload.ticimax_fields = { ...(payload.ticimax_fields || {}), URUNKARTIID: cid };
+        }
+      }
+
       // Get unique colors from variants
       const uniqueColors = [...new Set((payload.variants || []).map(v => v.color).filter(Boolean))];
       

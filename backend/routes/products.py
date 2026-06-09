@@ -506,6 +506,14 @@ async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
     from ticimax_schema import build_schema
     return {"groups": build_schema()}
 
+@router.get("/meta/next-card-id")
+async def get_next_card_id(current_user: dict = Depends(require_admin)):
+    """Yeni urun icin onerilen Urun Kart ID (sistemdeki en buyuk + 1).
+    Sayac TUKETMEZ; bir urun olusturmanin tum renk/varyantlarina ayni id verilebilsin
+    diye frontend bunu bir kez alip hepsine atar (boylece kart id 'kendi icinde' artmaz)."""
+    cid = await generate_urun_karti_id()
+    return {"card_id": cid}
+
 @router.get("/meta/filter-options")
 async def get_filter_options(current_user: dict = Depends(require_admin)):
     """Gelişmiş filtre panelinin dropdown'larını besleyen dinamik veri.

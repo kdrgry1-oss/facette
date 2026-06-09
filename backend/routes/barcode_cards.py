@@ -130,10 +130,11 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     SHEET_W = "11.5cm"
 
     css = """
+  @import url('https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap');
   @page { size: auto; margin: 0; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; color: #000;
-    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    font-family: "Mulish", Arial, "Helvetica Neue", Helvetica, sans-serif;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   .no-print {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
@@ -152,15 +153,15 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
     text-align: left; gap: 1px; page-break-inside: avoid;
   }
-  .name { font-size: 9px; font-weight: 500; line-height: 1.15; width: 100%;
+  .name { font-size: 10px; font-weight: 700; line-height: 1.15; width: 100%;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .cardno { font-size: 8.5px; font-weight: 400; color: #111; line-height: 1.25; }
+  .cardno { font-size: 9.5px; font-weight: 600; color: #000; line-height: 1.25; }
   .row { display: flex; justify-content: space-between; align-items: baseline; width: 100%;
-    font-size: 9px; font-weight: 400; margin: 1px 0; }
-  .row .size { font-weight: 600; }
+    font-size: 10px; font-weight: 600; margin: 1px 0; }
+  .row .size { font-weight: 800; }
   .barcode-svg { display: block; max-width: 100%; height: auto; margin: 2px 0 0 0; }
-  .barcode-text { font-family: "Courier New", monospace; font-weight: 400;
-    font-size: 10px; letter-spacing: 0.08em; line-height: 1; margin-top: 1px; }
+  .barcode-text { font-family: "Mulish", Arial, sans-serif; font-weight: 700;
+    font-size: 11px; letter-spacing: 0.1em; line-height: 1; margin-top: 1px; }
   @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)
