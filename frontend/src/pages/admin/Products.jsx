@@ -1865,6 +1865,17 @@ export default function AdminProducts() {
                     <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
                       <h3 className="font-semibold text-gray-900 border-b pb-2 mb-4">Envanter & Kimlik</h3>
                       <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Ürün Kart ID <span className="text-[10px] text-gray-400 normal-case">(etikette basılır · yeni üründe otomatik · elle değiştirilebilir)</span></label>
+                        <input
+                          type="text"
+                          value={formData.urun_karti_id || ""}
+                          onChange={(e) => setFormData({ ...formData, urun_karti_id: e.target.value })}
+                          placeholder="Boş bırakırsanız otomatik atanır"
+                          data-testid="input-urun-karti-id"
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg bg-white focus:border-black outline-none transition-all font-mono text-sm"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stok Kodu (Model Kodu)</label>
                         <div className="flex gap-2">
                           <input
@@ -1932,17 +1943,6 @@ export default function AdminProducts() {
                       <div className="pt-3 border-t">
                         <div className="text-xs font-bold text-gray-500 uppercase mb-2">Entegrasyon Kodları</div>
                         <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[10px] text-gray-400 mb-1">Ürün Kart ID (etikette basılır · yeni üründe otomatik)</label>
-                            <input
-                              type="text"
-                              value={formData.urun_karti_id || ""}
-                              onChange={(e) => setFormData({ ...formData, urun_karti_id: e.target.value })}
-                              placeholder="Boş bırakırsanız otomatik atanır"
-                              data-testid="input-urun-karti-id"
-                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
-                            />
-                          </div>
                           <div>
                             <label className="block text-[10px] text-gray-400 mb-1">Ürün ID (Ana)</label>
                             <input

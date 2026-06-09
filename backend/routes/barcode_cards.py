@@ -152,15 +152,15 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
     text-align: left; gap: 1px; page-break-inside: avoid;
   }
-  .name { font-size: 11px; font-weight: 700; line-height: 1.05; width: 100%;
+  .name { font-size: 9.5px; font-weight: 600; line-height: 1.1; width: 100%;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .cardno { font-size: 10px; font-weight: 600; color: #000; line-height: 1.15; }
+  .cardno { font-size: 9px; font-weight: 500; color: #000; line-height: 1.2; }
   .row { display: flex; justify-content: space-between; align-items: baseline; width: 100%;
-    font-size: 11px; font-weight: 700; margin: 1px 0; }
-  .row .size { font-weight: 800; }
+    font-size: 9.5px; font-weight: 600; margin: 1px 0; }
+  .row .size { font-weight: 700; }
   .barcode-svg { display: block; max-width: 100%; height: auto; margin: 2px 0 0 0; }
-  .barcode-text { font-family: "Courier New", monospace; font-weight: 700;
-    font-size: 13px; letter-spacing: 0.12em; line-height: 1; margin-top: 1px; }
+  .barcode-text { font-family: "Courier New", monospace; font-weight: 600;
+    font-size: 11px; letter-spacing: 0.1em; line-height: 1; margin-top: 1px; }
   @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)
