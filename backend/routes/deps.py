@@ -359,43 +359,66 @@ def serialize_doc(doc):
         doc['updated_at'] = doc['updated_at'].isoformat()
     return doc
 
+def _ean13_check_digit(twelve: str) -> str:
+    """12 haneli taban için EAN-13 (mod-10) kontrol hanesi."""
+    total = 0
+    for i, ch in enumerate(twelve):
+        d = ord(ch) - 48
+        total += d if (i % 2 == 0) else d * 3
+    return str((10 - (total % 10)) % 10)
+
+
+async def build_used_barcode_set() -> set:
+    """Tum urun ve varyant barkodlarini (legacy dahil) tek seferde toplar."""
+    used = set()
+    async for p in db.products.find({}, {"_id": 0, "barcode": 1, "variants": 1}):
+        for var in (p.get("variants") or []):
+            bc = str(var.get("barcode", "") or "")
+            if bc:
+                used.add(bc)
+        pbc = str(p.get("barcode", "") or "")
+        if pbc:
+            used.add(pbc)
+    return used
+
+
 async def generate_barcode_from_range(used_barcodes_set=None) -> str:
-    """Generate a unique 13-digit GTIN barcode within the configured range"""
-    settings = await db.settings.find_one({"id": "main"}, {"_id": 0})
-    if not settings:
+    """GS1 onekine gore BENZERSIZ, gecerli EAN-13 (GTIN-13) barkod uretir.
+
+    settings.gs1_prefix (varsayilan '8683851', 7 hane) + sirali urun referansi
+    (kalan haneler; 7 hane onek => 5 hane = 100.000 barkod) + EAN-13 kontrol hanesi.
+    Atomik sirali sayac (db.counters._id='gs1_item_ref') kullanir ve kullanilan/
+    legacy barkodlari atlar. Boylece hicbir barkod cakismaz; her cagri (her varyant)
+    farkli barkod alir.
+    """
+    from pymongo import ReturnDocument
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    prefix = str(settings.get("gs1_prefix") or "8683851").strip()
+    if not prefix.isdigit() or len(prefix) >= 12:
         return None
-    
-    range_start = settings.get("barcode_range_start", "")
-    range_end = settings.get("barcode_range_end", "")
-    
-    if not range_start or not range_end:
-        return None
-    
-    try:
-        start_num = int(range_start)
-        end_num = int(range_end)
-    except ValueError:
-        return None
-    
-    # If set not provided, fetch it once
+    ref_len = 12 - len(prefix)          # 7 hane onek => 5
+    max_ref = 10 ** ref_len             # 100000
+
     if used_barcodes_set is None:
-        used_barcodes_set = set()
-        async for p in db.products.find({}, {"_id": 0, "barcode": 1, "all_barcodes": 1, "variants": 1}):
-            # Check variants
-            for var in p.get("variants", []):
-                bc = var.get("barcode", "")
-                if bc: used_barcodes_set.add(str(bc))
-            # Check main
-            pbc = p.get("barcode", "")
-            if pbc: used_barcodes_set.add(str(pbc))
-    
-    for _ in range(5000):
-        num = random.randint(start_num, end_num)
-        barcode = str(num).zfill(13)
-        if barcode not in used_barcodes_set:
-            used_barcodes_set.add(barcode) # For sequential calls in same request
-            return barcode
-    
+        used_barcodes_set = await build_used_barcode_set()
+
+    for _ in range(max_ref + 1):
+        c = await db.counters.find_one_and_update(
+            {"_id": "gs1_item_ref"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        ref = int((c or {}).get("seq", 1)) - 1      # 0'dan basla (00000)
+        if ref >= max_ref:
+            logger.error("GS1 barkod kapasitesi (%s) doldu - yeni onek/blok gerekli." % max_ref)
+            return None
+        base = prefix + str(ref).zfill(ref_len)     # 12 hane
+        barcode = base + _ean13_check_digit(base)   # 13 hane GTIN-13
+        if barcode in used_barcodes_set:
+            continue                                # legacy/kullanilmis -> atla
+        used_barcodes_set.add(barcode)
+        return barcode
     return None
 
 

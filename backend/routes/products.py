@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set
 from ticimax_schema import BOOL_COLS as TICIMAX_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
@@ -678,7 +678,7 @@ async def create_product(
     default_vat = settings.get("default_vat_rate", 20) if settings else 20
 
     # Auto-generate barcodes efficiently
-    used_barcodes_set = None # Will be initialized on first call
+    used_barcodes_set = await build_used_barcode_set()
     
     # Auto-generate barcodes for variants if missing
     for v in variants:
@@ -779,7 +779,7 @@ async def update_product(
     
     # Auto-generate barcodes for variants if missing
     variants = product_data.get("variants", [])
-    used_barcodes_set = None
+    used_barcodes_set = await build_used_barcode_set()
     for v in variants:
         if not v.get("barcode") or v.get("barcode") == "":
             barcode = await generate_barcode_from_range(used_barcodes_set)
