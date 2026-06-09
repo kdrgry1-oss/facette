@@ -1,25 +1,16 @@
 """
-email_smtp.py — Tek noktadan SMTP (Zoho Mail) ile e-posta gönderimi.
+email_smtp.py — E-posta gonderimi Zoho ZeptoMail HTTPS API'si (port 443) uzerinden.
+Railway giden SMTP portlarini (25/465/587) engelledigi icin SMTP yerine HTTPS API kullanilir.
+Fonksiyon adlari korunmustur; cagiran tum moduller degismeden calisir.
 
-Eski Resend (HTTPS API) yerine kurumsal SMTP kullanılır. Kimlik bilgileri
-DB'de saklanır: settings.id="email_smtp"
-  {
-    "enabled": true,
-    "host": "smtp.zoho.com",        # bölgeye göre smtp.zoho.eu olabilir
-    "port": 465,                     # 465=SSL, 587=STARTTLS
-    "secure": "ssl",                 # "ssl" | "tls"
-    "username": "info@facette.com.tr",
-    "password": "********",          # Zoho hesap/uygulama şifresi (admin'den girilir)
-    "from_name": "FACETTE"
-  }
-
-ÖNEMLI: Şifre yalnızca DB'de tutulur; loglanmaz, API yanıtında maskelenir.
+settings.id="email_smtp" alanlari (mevcut ayar sayfasiyla uyumlu):
+  enabled   : bool  -> gonderim aktif mi
+  username  : str   -> GONDEREN e-posta adresi (or. info@facette.com.tr)
+  password  : str   -> ZeptoMail "Send Mail Token" (API anahtari)
+  from_name : str   -> gonderen adi (or. FACETTE)
+  host      : str   -> 'eu' iceriyorsa api.zeptomail.eu, aksi halde api.zeptomail.com
 """
-import asyncio
-import smtplib
-import ssl
-from email.message import EmailMessage
-from email.utils import formataddr
+import httpx
 
 
 async def get_smtp_config(db) -> dict:
@@ -30,47 +21,47 @@ def is_configured(cfg: dict) -> bool:
     return bool(cfg.get("enabled") and cfg.get("username") and cfg.get("password"))
 
 
-def _send_sync(cfg: dict, to: str, subject: str, html: str,
-               from_name=None, reply_to=None, text=None):
-    sender = cfg.get("username")
-    name = from_name or cfg.get("from_name") or "FACETTE"
-    msg = EmailMessage()
-    msg["From"] = formataddr((name, sender))
-    msg["To"] = to
-    msg["Subject"] = subject
-    if reply_to:
-        msg["Reply-To"] = reply_to
-    msg.set_content(text or "Bu e-posta HTML biçimindedir. Lütfen HTML destekli bir istemcide görüntüleyin.")
-    if html:
-        msg.add_alternative(html, subtype="html")
+def _endpoint(cfg: dict) -> str:
+    host = (cfg.get("host") or "").lower()
+    base = "https://api.zeptomail.eu" if "eu" in host else "https://api.zeptomail.com"
+    return base + "/v1.1/email"
 
-    host = cfg.get("host") or "smtp.zoho.com"
-    port = int(cfg.get("port") or 465)
-    secure = (cfg.get("secure") or ("ssl" if port == 465 else "tls")).lower()
-    ctx = ssl.create_default_context()
 
-    if secure == "ssl" or port == 465:
-        with smtplib.SMTP_SSL(host, port, timeout=25, context=ctx) as s:
-            s.login(sender, cfg.get("password") or "")
-            s.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port, timeout=25) as s:
-            s.ehlo()
-            s.starttls(context=ctx)
-            s.ehlo()
-            s.login(sender, cfg.get("password") or "")
-            s.send_message(msg)
+def _auth_header(token: str) -> str:
+    token = (token or "").strip()
+    if token.lower().startswith("zoho-enczapikey"):
+        return token
+    return "Zoho-enczapikey " + token
 
 
 async def send_smtp_email(db, to: str, subject: str, html: str,
                           from_name=None, reply_to=None, text=None) -> dict:
-    """Tek alıcıya SMTP ile mail. Döner: {success, response}."""
     cfg = await get_smtp_config(db)
     if not is_configured(cfg):
-        return {"success": False, "response": "smtp_not_configured"}
+        return {"success": False, "response": "email_not_configured"}
+
+    sender = cfg.get("username")
+    name = from_name or cfg.get("from_name") or "FACETTE"
+    payload = {
+        "from": {"address": sender, "name": name},
+        "to": [{"email_address": {"address": to}}],
+        "subject": subject or "",
+        "htmlbody": html or "",
+    }
+    if text:
+        payload["textbody"] = text
+    if reply_to:
+        payload["reply_to"] = [{"address": reply_to}]
+
+    headers = {
+        "Authorization": _auth_header(cfg.get("password")),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
     try:
-        await asyncio.to_thread(_send_sync, cfg, to, subject, html, from_name, reply_to, text)
-        return {"success": True, "response": "sent"}
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(_endpoint(cfg), headers=headers, json=payload)
+        ok = r.status_code in (200, 201, 202)
+        return {"success": ok, "response": (r.text or "")[:400]}
     except Exception as e:
-        # Şifre/gövde loglanmaz; yalnızca hata mesajı
         return {"success": False, "response": str(e)[:300]}
