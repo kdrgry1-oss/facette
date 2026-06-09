@@ -99,6 +99,8 @@ export default function AdminOrders({ unpaidView = false }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState([]);
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState(null);
   const [bulkAction, setBulkAction] = useState("");
   const [selectedCargo, setSelectedCargo] = useState("MNG");
   const [shipModalOpen, setShipModalOpen] = useState(false);
@@ -680,7 +682,68 @@ export default function AdminOrders({ unpaidView = false }) {
 
   const openDetail = (order) => {
     setSelectedOrder(order);
+    setEditMode(false);
     setDetailOpen(true);
+  };
+
+  // ---- Sipariş detayı düzenleme ----
+  const _itemsKeyOf = (o) => (o?.lines?.length > 0 ? "lines" : "items");
+  const _nameKeyOf = (it) =>
+    it.productName !== undefined ? "productName" : (it.product_name !== undefined ? "product_name" : "name");
+
+  const startEdit = () => {
+    const o = selectedOrder;
+    if (!o) return;
+    const itemsKey = _itemsKeyOf(o);
+    setEditData({
+      itemsKey,
+      shipping_address: { ...(o.shipping_address || {}) },
+      items: JSON.parse(JSON.stringify(o[itemsKey] || [])),
+      subtotal: o.subtotal ?? 0,
+      shipping_cost: o.shipping_cost ?? 0,
+      discount: o.discount ?? 0,
+      total: o.total ?? 0,
+    });
+    setEditMode(true);
+  };
+
+  const setSA = (k, v) => setEditData((d) => ({ ...d, shipping_address: { ...d.shipping_address, [k]: v } }));
+  const setField = (k, v) => setEditData((d) => ({ ...d, [k]: v }));
+  const setItem = (idx, k, v) => setEditData((d) => {
+    const items = [...d.items];
+    items[idx] = { ...items[idx], [k]: v };
+    return { ...d, items };
+  });
+
+  const saveEdit = async () => {
+    if (!editData || !selectedOrder) return;
+    const num = (x) => (x === "" || x === null || x === undefined ? undefined : Number(x));
+    try {
+      const items = editData.items.map((it) => {
+        const o = { ...it };
+        if (it.quantity !== undefined) o.quantity = Number(it.quantity) || 1;
+        ["unit_price", "discount_amount", "price", "amount"].forEach((f) => {
+          if (it[f] !== undefined) { const n = num(it[f]); if (n !== undefined) o[f] = n; }
+        });
+        return o;
+      });
+      const payload = {
+        shipping_address: editData.shipping_address,
+        [editData.itemsKey]: items,
+        subtotal: Number(editData.subtotal) || 0,
+        shipping_cost: Number(editData.shipping_cost) || 0,
+        discount: Number(editData.discount) || 0,
+        total: Number(editData.total) || 0,
+      };
+      const token = localStorage.getItem("token");
+      await axios.put(`${API}/orders/${selectedOrder.id}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Sipariş güncellendi");
+      setSelectedOrder({ ...selectedOrder, ...payload });
+      setEditMode(false);
+      fetchOrders();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Kaydedilemedi");
+    }
   };
 
   const formatDate = (dateStr) => {
@@ -1277,8 +1340,20 @@ export default function AdminOrders({ unpaidView = false }) {
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
+            <DialogTitle className="flex items-center justify-between gap-2">
               <span>Sipariş Detayı - {selectedOrder?.order_number}</span>
+              {selectedOrder && (
+                <span className="flex items-center gap-2 mr-6">
+                  {editMode ? (
+                    <>
+                      <button onClick={saveEdit} className="px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800">Kaydet</button>
+                      <button onClick={() => setEditMode(false)} className="px-3 py-1.5 border text-xs rounded hover:bg-gray-50">İptal</button>
+                    </>
+                  ) : (
+                    <button onClick={startEdit} className="px-3 py-1.5 border text-xs rounded hover:bg-gray-50">Düzenle</button>
+                  )}
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
           
@@ -1476,14 +1551,39 @@ export default function AdminOrders({ unpaidView = false }) {
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="p-4 border rounded">
                   <h3 className="font-medium mb-2">Müşteri Bilgileri</h3>
-                  <p>{selectedOrder.shipping_address?.first_name} {selectedOrder.shipping_address?.last_name}</p>
-                  <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.email}</p>
-                  <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.phone}</p>
+                  {editMode ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Ad" value={editData.shipping_address.first_name || ""} onChange={(e) => setSA("first_name", e.target.value)} />
+                        <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Soyad" value={editData.shipping_address.last_name || ""} onChange={(e) => setSA("last_name", e.target.value)} />
+                      </div>
+                      <input className="border rounded px-2 py-1 text-sm w-full" placeholder="E-posta" value={editData.shipping_address.email || ""} onChange={(e) => setSA("email", e.target.value)} />
+                      <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Telefon" value={editData.shipping_address.phone || ""} onChange={(e) => setSA("phone", e.target.value)} />
+                    </div>
+                  ) : (
+                    <>
+                      <p>{selectedOrder.shipping_address?.first_name} {selectedOrder.shipping_address?.last_name}</p>
+                      <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.email}</p>
+                      <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.phone}</p>
+                    </>
+                  )}
                 </div>
                 <div className="p-4 border rounded">
                   <h3 className="font-medium mb-2">Teslimat Adresi</h3>
-                  <p className="text-sm">{selectedOrder.shipping_address?.address}</p>
-                  <p className="text-sm">{selectedOrder.shipping_address?.district} / {selectedOrder.shipping_address?.city}</p>
+                  {editMode ? (
+                    <div className="space-y-2">
+                      <textarea rows={2} className="border rounded px-2 py-1 text-sm w-full resize-none" placeholder="Açık adres" value={editData.shipping_address.address || ""} onChange={(e) => setSA("address", e.target.value)} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input className="border rounded px-2 py-1 text-sm w-full" placeholder="İlçe" value={editData.shipping_address.district || ""} onChange={(e) => setSA("district", e.target.value)} />
+                        <input className="border rounded px-2 py-1 text-sm w-full" placeholder="İl" value={editData.shipping_address.city || ""} onChange={(e) => setSA("city", e.target.value)} />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm">{selectedOrder.shipping_address?.address}</p>
+                      <p className="text-sm">{selectedOrder.shipping_address?.district} / {selectedOrder.shipping_address?.city}</p>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1531,26 +1631,46 @@ export default function AdminOrders({ unpaidView = false }) {
               <div className="border rounded">
                 <h3 className="font-medium p-4 border-b">Sipariş Kalemleri</h3>
                 <div className="divide-y">
-                  {(selectedOrder.lines?.length > 0 ? selectedOrder.lines : selectedOrder.items)?.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-4">
-                        {item.image && <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100" />}
-                        <div>
-                          <p className="font-medium">{item.productName || item.name || "Ürün"}</p>
-                          {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
-                          <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
-                        </div>
+                  {(editMode ? editData.items : (selectedOrder.lines?.length > 0 ? selectedOrder.lines : selectedOrder.items))?.map((item, i) => (
+                    <div key={i} className="flex items-start justify-between p-4 gap-4">
+                      <div className="flex items-start gap-4 flex-1 min-w-0">
+                        {item.image && <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100 rounded shrink-0" />}
+                        {editMode ? (
+                          <div className="flex-1 space-y-1 min-w-0">
+                            <input className="border rounded px-2 py-1 text-sm w-full font-medium" placeholder="Ürün adı" value={item.productName ?? item.product_name ?? item.name ?? ""} onChange={(e) => setItem(i, _nameKeyOf(item), e.target.value)} />
+                            <div className="grid grid-cols-2 gap-1">
+                              <input className="border rounded px-2 py-1 text-xs w-full" placeholder="Beden" value={item.size ?? ""} onChange={(e) => setItem(i, "size", e.target.value)} />
+                              <input type="number" min="1" className="border rounded px-2 py-1 text-xs w-full" placeholder="Adet" value={item.quantity ?? 1} onChange={(e) => setItem(i, "quantity", e.target.value)} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="font-medium">{item.productName || item.product_name || item.name || "Ürün"}</p>
+                            {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
+                            <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right text-sm">
-                        {item.unit_price > 0 && typeof item.unit_price !== 'undefined' && (
-                          <p className="text-gray-400 line-through text-xs">{item.unit_price.toFixed(2)} TL</p>
+                      <div className="text-right text-sm min-w-[130px]">
+                        {editMode ? (
+                          <div className="space-y-1">
+                            <input type="number" step="0.01" className="border rounded px-2 py-1 text-xs w-full text-right" placeholder="Liste birim" value={item.unit_price ?? ""} onChange={(e) => setItem(i, "unit_price", e.target.value)} />
+                            <input type="number" step="0.01" className="border rounded px-2 py-1 text-xs w-full text-right" placeholder="İskonto" value={item.discount_amount ?? ""} onChange={(e) => setItem(i, "discount_amount", e.target.value)} />
+                            <input type="number" step="0.01" className="border rounded px-2 py-1 text-xs w-full text-right" placeholder="Fiyat" value={item.price ?? ""} onChange={(e) => setItem(i, "price", e.target.value)} />
+                          </div>
+                        ) : (
+                          <>
+                            {item.unit_price > 0 && typeof item.unit_price !== 'undefined' && (
+                              <p className="text-gray-400 line-through text-xs">{item.unit_price.toFixed(2)} TL</p>
+                            )}
+                            {item.discount_amount > 0 && (
+                              <p className="text-orange-500 text-xs">İndirim: -{item.discount_amount.toFixed(2)} TL</p>
+                            )}
+                            <p className="font-medium">
+                              {((item.price || item.amount) * (item.quantity === 1 ? 1 : (item.price ? item.quantity : 1))).toFixed(2)} TL
+                            </p>
+                          </>
                         )}
-                        {item.discount_amount > 0 && (
-                          <p className="text-orange-500 text-xs">İndirim: -{item.discount_amount.toFixed(2)} TL</p>
-                        )}
-                        <p className="font-medium">
-                          {((item.price || item.amount) * (item.quantity === 1 ? 1 : (item.price ? item.quantity : 1))).toFixed(2)} TL
-                        </p>
                       </div>
                     </div>
                   ))}
@@ -1559,24 +1679,35 @@ export default function AdminOrders({ unpaidView = false }) {
 
               {/* Totals */}
               <div className="p-4 bg-gray-50 rounded space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Ara Toplam</span>
-                  <span>{selectedOrder.subtotal?.toFixed(2)} TL</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Kargo</span>
-                  <span>{selectedOrder.shipping_cost?.toFixed(2)} TL</span>
-                </div>
-                {selectedOrder.discount > 0 && (
-                  <div className="flex justify-between text-sm text-green-600">
-                    <span>İndirim</span>
-                    <span>-{selectedOrder.discount?.toFixed(2)} TL</span>
-                  </div>
+                {editMode ? (
+                  <>
+                    <div className="flex justify-between items-center text-sm gap-2"><span>Ara Toplam</span><input type="number" step="0.01" className="border rounded px-2 py-1 text-sm w-32 text-right" value={editData.subtotal} onChange={(e) => setField("subtotal", e.target.value)} /></div>
+                    <div className="flex justify-between items-center text-sm gap-2"><span>Kargo</span><input type="number" step="0.01" className="border rounded px-2 py-1 text-sm w-32 text-right" value={editData.shipping_cost} onChange={(e) => setField("shipping_cost", e.target.value)} /></div>
+                    <div className="flex justify-between items-center text-sm gap-2"><span>İndirim</span><input type="number" step="0.01" className="border rounded px-2 py-1 text-sm w-32 text-right" value={editData.discount} onChange={(e) => setField("discount", e.target.value)} /></div>
+                    <div className="flex justify-between items-center font-medium text-lg pt-2 border-t gap-2"><span>Toplam</span><input type="number" step="0.01" className="border rounded px-2 py-1 text-base w-32 text-right font-medium" value={editData.total} onChange={(e) => setField("total", e.target.value)} /></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span>Ara Toplam</span>
+                      <span>{selectedOrder.subtotal?.toFixed(2)} TL</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Kargo</span>
+                      <span>{selectedOrder.shipping_cost?.toFixed(2)} TL</span>
+                    </div>
+                    {selectedOrder.discount > 0 && (
+                      <div className="flex justify-between text-sm text-green-600">
+                        <span>İndirim</span>
+                        <span>-{selectedOrder.discount?.toFixed(2)} TL</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-medium text-lg pt-2 border-t">
+                      <span>Toplam</span>
+                      <span>{selectedOrder.total?.toFixed(2)} TL</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex justify-between font-medium text-lg pt-2 border-t">
-                  <span>Toplam</span>
-                  <span>{selectedOrder.total?.toFixed(2)} TL</span>
-                </div>
               </div>
             </div>
           )}
