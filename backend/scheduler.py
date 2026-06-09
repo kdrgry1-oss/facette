@@ -461,6 +461,145 @@ async def _pii_retention_purge():
         logger.exception(f"[scheduler] pii_retention_purge failed: {e}")
 
 
+def _parse_tr_dt(s: str):
+    """MNG teslim tarihini ISO'ya cevirir; basarisizsa None."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    for f in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+              "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, f).replace(tzinfo=timezone.utc).isoformat()
+        except Exception:
+            continue
+    return None
+
+
+async def _dhl_cargo_poll_tick():
+    """Her 5 dk: site (facette) siparislerini MNG/DHL e-Commerce API'sinden sorgula.
+      - GONDERI_NO / takip linki olustuysa -> 'shipped' (Kargoya Verildi) + bildirim
+      - Teslim edildiyse -> 'delivered' (Teslim Edildi) + delivered_at + bildirim
+    Bildirimler Ayarlar > Siparis Durumlari (sms/email) secimine gore gonderilir.
+    SOAP cagrilari thread executor'da calisir (event loop bloklanmaz).
+    """
+    from routes.deps import db  # lazy
+    try:
+        from routes.orders import _get_mng_settings
+        from order_statuses import get_status_config, customer_label_for
+        from notification_service import send_notification
+        from mng_kargo_client import get_mng_shipment_status
+    except Exception as e:
+        logger.warning(f"[scheduler][dhl] import skip: {e}")
+        return
+
+    s = await _get_mng_settings()
+    if not s.get("is_active") or not s.get("username"):
+        return
+    user, pw = s["username"], s["password"]
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+    q = {
+        "platform": {"$in": ["facette", "site", None]},
+        "status": {"$in": ["confirmed", "processing", "preparing", "ready_to_ship",
+                            "shipped", "in_transit", "out_for_delivery"]},
+        "$or": [
+            {"cargo_tracking_number": {"$nin": [None, ""]}},
+            {"cargo_provider_name": {"$nin": [None, ""]}},
+            {"cargo_barcode_created": True},
+        ],
+        "created_at": {"$gt": cutoff},
+    }
+    try:
+        cfg = await get_status_config(db)
+    except Exception:
+        cfg = {"notify": {}}
+    notify = cfg.get("notify") or {}
+
+    processed = 0
+    try:
+        async for order in db.orders.find(q, {"_id": 0}).limit(120):
+            siparis_no = str(order.get("order_number") or order.get("id") or "").strip()
+            if not siparis_no:
+                continue
+            try:
+                info = await asyncio.to_thread(
+                    get_mng_shipment_status, username=user, password=pw, siparis_no=siparis_no
+                )
+            except Exception as e:
+                logger.warning(f"[scheduler][dhl] status err {siparis_no}: {e}")
+                await asyncio.sleep(0.2)
+                continue
+            if not info or not info.get("ok"):
+                await asyncio.sleep(0.2)
+                continue
+
+            gonderi = (info.get("gonderi_no") or "").strip()
+            url = (info.get("kargo_takip_url") or "").strip()
+            teslim = (info.get("teslim_tarihi") or "").strip()
+            statu = (info.get("kargo_statu") or "0").strip()
+            aciklama = (info.get("kargo_statu_aciklama") or "")
+            cur = order.get("status")
+
+            delivered = bool(teslim) or ("teslim" in aciklama.lower() and "edilemedi" not in aciklama.lower())
+            shipped = bool(gonderi) or bool(url) or (statu not in ("", "0"))
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            new_status = None
+            upd = {}
+            if delivered and cur != "delivered":
+                new_status = "delivered"
+                upd["delivered_at"] = _parse_tr_dt(teslim) or now_iso
+            elif shipped and cur in ("confirmed", "processing", "preparing", "ready_to_ship"):
+                new_status = "shipped"
+                upd["shipped_at"] = now_iso
+
+            if gonderi:
+                upd["cargo_gonderi_no"] = gonderi
+                upd["cargo_tracking_number"] = gonderi
+            if url:
+                upd["cargo_tracking_url"] = url
+                upd["cargo_tracking_link"] = url
+            if aciklama:
+                upd["cargo_status_text"] = aciklama
+            if new_status:
+                upd["status"] = new_status
+            if upd:
+                upd["updated_at"] = now_iso
+                await db.orders.update_one({"id": order["id"]}, {"$set": upd})
+
+            if new_status in ("shipped", "delivered"):
+                ev = "order_shipped" if new_status == "shipped" else "order_delivered"
+                nz = notify.get(new_status) or {}
+                ch = [c for c in ("sms", "email") if nz.get(c)]
+                if ch:
+                    addr = order.get("shipping_address") or {}
+                    try:
+                        await send_notification(
+                            db, ev,
+                            to_phone=addr.get("phone") or order.get("phone"),
+                            to_email=addr.get("email") or order.get("email"),
+                            variables={
+                                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                                "order_number": siparis_no,
+                                "amount": f"{order.get('total', 0):.2f} TL",
+                                "tracking_number": gonderi or order.get("cargo_tracking_number", ""),
+                                "tracking_url": url or order.get("cargo_tracking_url", ""),
+                                "status_label": customer_label_for(new_status),
+                            },
+                            channels=ch,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[scheduler][dhl] notif {siparis_no}: {e}")
+                logger.info(f"[scheduler][dhl] {siparis_no} -> {new_status}")
+
+            processed += 1
+            await asyncio.sleep(0.25)
+    except Exception as e:
+        logger.exception(f"[scheduler][dhl] poll tick failed: {e}")
+    if processed:
+        logger.info(f"[scheduler][dhl] polled {processed} site order(s)")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -543,6 +682,16 @@ def start_scheduler():
         id="pii_retention_purge",
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1, coalesce=True,
+    )
+    # DHL/MNG kargo durum taramasi — her 5 dk (takip linki -> Kargoya Verildi, teslim -> Teslim Edildi)
+    _scheduler.add_job(
+        _dhl_cargo_poll_tick,
+        "interval",
+        minutes=5,
+        id="dhl_cargo_poll",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        max_instances=1,
+        coalesce=True,
     )
     _scheduler.start()
     logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily + Ticimax orders every 6h)")

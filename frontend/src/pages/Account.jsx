@@ -456,7 +456,7 @@ function OrderCard({ order, expanded, onToggle }) {
   const items = order.items || [];
   const itemCount = items.reduce((s, i) => s + (i.quantity || 1), 0);
   const previewImages = items.slice(0, 4);
-  const trackingUrl = order.cargo?.tracking_url || order.cargo_tracking_link;
+  const trackingUrl = order.cargo?.tracking_url || order.cargo_tracking_link || order.cargo_tracking_url;
   const trackingNumber = order.cargo?.tracking_number || order.cargo_tracking_number;
 
   return (

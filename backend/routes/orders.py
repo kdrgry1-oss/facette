@@ -2471,3 +2471,16 @@ async def get_payment_receipt(order_id: str, current_user: dict = Depends(requir
         media_type=r.get("content_type", "application/octet-stream"),
         headers={"Content-Disposition": f'inline; filename="{r.get("filename","dekont")}"'},
     )
+
+
+@router.post("/cargo/poll-now")
+async def cargo_poll_now(current_user: dict = Depends(require_admin)):
+    """Admin: DHL/MNG kargo durum taramasini hemen calistir (5 dk'lik job'in manuel tetigi)."""
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from scheduler import _dhl_cargo_poll_tick
+        await _dhl_cargo_poll_tick()
+        return {"success": True, "message": "DHL/MNG kargo taraması çalıştırıldı."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tarama hatası: {e}")
