@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id
 from ticimax_schema import BOOL_COLS as TICIMAX_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
@@ -694,7 +694,11 @@ async def create_product(
             product_data["barcode"] = barcode
 
     _pid = await generate_short_id("products")
-    _card = product_data.get("csv_card_id") or product_data.get("urun_karti_id") or _pid
+    # Urun Kart ID: manuel verilmediyse otomatik sirali uret (barkod/GTIN'den bagimsiz, etikette basilir)
+    urun_karti_id = str(product_data.get("urun_karti_id") or product_data.get("csv_card_id") or "").strip()
+    if not urun_karti_id:
+        urun_karti_id = await generate_urun_karti_id()
+    _card = urun_karti_id
     _sel_cats = product_data.get("categories")
     if not _sel_cats and product_data.get("category_id"):
         _sel_cats = [product_data.get("category_id")]
@@ -703,6 +707,7 @@ async def create_product(
     _primary_cat = _sel_cats[0] if _sel_cats else ""
     product = {
         "id": _pid,
+        "urun_karti_id": urun_karti_id,
         "name": product_data.get("name", ""),
         "slug": product_data.get("slug") or slug_with_card_id(product_data.get("name", ""), _card),
         "description": product_data.get("description", ""),
@@ -798,6 +803,10 @@ async def update_product(
             _pc = await db.categories.find_one({"id": _sel[0]}, {"_id": 0, "name": 1})
             if _pc and _pc.get("name"):
                 product_data["category_name"] = _pc["name"]
+
+    # Bos urun_karti_id gonderilirse mevcut degeri ezme (sadece dolu ise guncelle)
+    if "urun_karti_id" in product_data and not str(product_data.get("urun_karti_id") or "").strip():
+        product_data.pop("urun_karti_id", None)
 
     product_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     

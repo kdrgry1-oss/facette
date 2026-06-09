@@ -1933,12 +1933,12 @@ export default function AdminProducts() {
                         <div className="text-xs font-bold text-gray-500 uppercase mb-2">Entegrasyon Kodları</div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="block text-[10px] text-gray-400 mb-1">Kart ID (ÜRÜNKARTIID)</label>
+                            <label className="block text-[10px] text-gray-400 mb-1">Ürün Kart ID (etikette basılır · yeni üründe otomatik)</label>
                             <input
                               type="text"
                               value={formData.urun_karti_id || ""}
                               onChange={(e) => setFormData({ ...formData, urun_karti_id: e.target.value })}
-                              placeholder="—"
+                              placeholder="Boş bırakırsanız otomatik atanır"
                               data-testid="input-urun-karti-id"
                               className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
                             />

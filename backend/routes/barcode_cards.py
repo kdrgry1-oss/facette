@@ -78,7 +78,7 @@ def _barcode_svg_inline(code: str) -> str:
         return ""
     try:
         clean = "".join(ch for ch in str(code) if ch.isalnum())
-        opts = {"write_text": False, "module_height": 13.0, "module_width": 0.43, "quiet_zone": 2.0}
+        opts = {"write_text": False, "module_height": 16.0, "module_width": 0.46, "quiet_zone": 1.0}
         if len(clean) == 13 and clean.isdigit():
             bc = barcode.get("ean13", clean[:12], writer=SVGWriter())
         else:
@@ -96,9 +96,10 @@ def _barcode_svg_inline(code: str) -> str:
 
 
 def _card_html_for_variant(product: dict, variant: dict) -> str:
-    """Tek varyant icin tek barkod ETIKETI (5cm x 4cm, FIYATSIZ)."""
+    """Tek varyant icin tek barkod ETIKETI (5cm x 4cm). Markasiz, sola yasli.
+    Tasarim: urun adi / urun kart no / renk(sol)+beden(sag) / barkod / numara."""
     name = (product.get("name", "") or "").strip()
-    brand = (product.get("brand") or "FACETTE").strip()
+    card_no = str(product.get("urun_karti_id") or product.get("csv_card_id") or "").strip()
     stock_code = variant.get("stock_code") or product.get("stock_code") or ""
     bar_code = variant.get("barcode") or product.get("barcode") or stock_code
     size = (variant.get("size") or "").strip()
@@ -108,12 +109,11 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
 
     return f"""
     <div class="card">
-      <div class="brand">{brand}</div>
       <div class="name">{name}</div>
-      <div class="meta">{f'<span class="size">{size}</span>' if size else ''}{f'<span class="color">{color}</span>' if color else ''}</div>
+      {f'<div class="cardno">{card_no}</div>' if card_no else ''}
+      <div class="row"><span class="color">{color}</span><span class="size">{size}</span></div>
       {barcode_svg}
       <div class="barcode-text">{bar_code or ''}</div>
-      <div class="stock">{f'Stok: {stock_code}' if stock_code else ''}</div>
     </div>
     """
 
@@ -148,20 +148,19 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
   .grid { display: grid; grid-template-columns: __LABEL_W__ __LABEL_W__; column-gap: __CUT__; row-gap: 0; }
   .card {
     width: __LABEL_W__; height: __LABEL_H__;
-    overflow: hidden; padding: 0.1cm 0.12cm;
-    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-    text-align: center; page-break-inside: avoid;
+    overflow: hidden; padding: 0.12cm 0.16cm;
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+    text-align: left; gap: 1px; page-break-inside: avoid;
   }
-  .brand { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color:#000; font-weight: 700; width:100%; line-height:1; }
   .name { font-size: 11px; font-weight: 700; line-height: 1.05; width: 100%;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .meta { font-size: 10px; line-height: 1.05; font-weight: 600; }
-  .meta .size { font-weight: 800; }
-  .meta .color { margin-left: 6px; }
-  .barcode-svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .cardno { font-size: 10px; font-weight: 600; color: #000; line-height: 1.15; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; width: 100%;
+    font-size: 11px; font-weight: 700; margin: 1px 0; }
+  .row .size { font-weight: 800; }
+  .barcode-svg { display: block; max-width: 100%; height: auto; margin: 2px 0 0 0; }
   .barcode-text { font-family: "Courier New", monospace; font-weight: 700;
-    font-size: 12px; letter-spacing: 0.14em; line-height: 1; }
-  .stock { font-size: 8px; color:#000; line-height: 1; }
+    font-size: 13px; letter-spacing: 0.12em; line-height: 1; margin-top: 1px; }
   @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)
