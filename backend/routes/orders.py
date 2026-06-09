@@ -140,7 +140,58 @@ async def get_orders(
 
     orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.orders.count_documents(query)
-    
+
+    # Pazaryeri (Trendyol vb.) kalemlerinde görsel yoksa barkodla yerel üründen eşle.
+    # Barkodlar Trendyol ile aynı olduğundan doğrudan eşleşir; mevcut siparişler için
+    # re-sync gerekmez (okuma anında zenginleştirilir).
+    try:
+        _need = set()
+        for _o in orders:
+            for _it in (_o.get("items") or []) + (_o.get("lines") or []):
+                if not _it.get("image"):
+                    _bc = str(_it.get("barcode") or "").strip()
+                    if _bc:
+                        _need.add(_bc)
+        if _need:
+            _need_list = list(_need)
+            _prods = await db.products.find(
+                {"$or": [{"barcode": {"$in": _need_list}}, {"variants.barcode": {"$in": _need_list}}]},
+                {"_id": 0, "barcode": 1, "image": 1, "images": 1, "thumbnail": 1, "variants": 1},
+            ).to_list(1000)
+
+            def _first_img(pr):
+                for im in (pr.get("images") or []):
+                    if isinstance(im, str) and im:
+                        return im
+                    if isinstance(im, dict):
+                        u = im.get("url") or im.get("src") or im.get("image")
+                        if u:
+                            return u
+                return pr.get("image") or pr.get("thumbnail") or ""
+
+            _img_by_bc = {}
+            for _pr in _prods:
+                _img = _first_img(_pr)
+                if not _img:
+                    continue
+                _pb = str(_pr.get("barcode") or "").strip()
+                if _pb:
+                    _img_by_bc.setdefault(_pb, _img)
+                for _v in (_pr.get("variants") or []):
+                    _vb = str(_v.get("barcode") or "").strip()
+                    if _vb:
+                        _img_by_bc.setdefault(_vb, _img)
+
+            if _img_by_bc:
+                for _o in orders:
+                    for _it in (_o.get("items") or []) + (_o.get("lines") or []):
+                        if not _it.get("image"):
+                            _bc = str(_it.get("barcode") or "").strip()
+                            if _bc and _img_by_bc.get(_bc):
+                                _it["image"] = _img_by_bc[_bc]
+    except Exception as _e:
+        logger.warning(f"order image enrich skipped: {_e}")
+
     return {
         "orders": orders,
         "total": total,

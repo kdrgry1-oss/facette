@@ -39,6 +39,7 @@ RETRIEVE_PATH = "/payment/iyzipos/checkoutform/auth/ecom/detail"
 THREEDS_INIT_PATH = "/payment/3dsecure/initialize"
 THREEDS_AUTH_PATH = "/payment/3dsecure/auth"
 NON3DS_PATH = "/payment/auth"
+INSTALLMENT_PATH = "/payment/iyzipos/installment"
 DEFAULT_TCKN = "11111111111"
 
 
@@ -470,3 +471,56 @@ async def card_pay_non3ds(payload: dict):
     if paid:
         return {"success": True, "order_number": order.get("order_number")}
     return {"success": False, "error": data.get("errorMessage") or "Ödeme başarısız", "errorCode": data.get("errorCode")}
+
+
+
+@router.post("/installments")
+async def get_installments(payload: dict):
+    """Kart BIN'ine göre taksit seçeneklerini iyzico'dan sorgular.
+    Kart verisi TAŞINMAZ; yalnızca ilk 6-8 hane (BIN) gönderilir."""
+    bin_number = "".join(ch for ch in str(payload.get("bin_number") or "") if ch.isdigit())[:8]
+    try:
+        price = round(float(payload.get("price") or 0), 2)
+    except Exception:
+        price = 0.0
+    _fallback = {"success": False, "options": [{"number": 1, "totalPrice": price, "installmentPrice": price}]}
+    if len(bin_number) < 6 or price <= 0:
+        return _fallback
+
+    settings = await _get_iyzico_settings()
+    body = {"locale": "tr", "conversationId": "installment", "binNumber": bin_number, "price": _fmt(price)}
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    headers = _v2_headers(settings["api_key"], settings["api_secret"], INSTALLMENT_PATH, body_str)
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            resp = await c.post(f"{settings['base_url']}{INSTALLMENT_PATH}", content=body_str.encode("utf-8"), headers=headers)
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure"}
+    except Exception as e:
+        logger.error(f"iyzico installment error: {e}")
+        return _fallback
+
+    details = data.get("installmentDetails") or []
+    if data.get("status") != "success" or not details:
+        return _fallback
+
+    det = details[0]
+    opts = []
+    for ip in det.get("installmentPrices", []):
+        try:
+            opts.append({
+                "number": int(ip.get("installmentNumber") or 1),
+                "totalPrice": round(float(ip.get("totalPrice") or price), 2),
+                "installmentPrice": round(float(ip.get("installmentPrice") or 0), 2),
+            })
+        except Exception:
+            pass
+    opts.sort(key=lambda x: x["number"])
+    if not opts:
+        return _fallback
+    return {
+        "success": True,
+        "options": opts,
+        "cardFamily": det.get("cardFamilyName") or "",
+        "bankName": det.get("bankName") or "",
+        "force3ds": bool(det.get("force3ds")),
+    }

@@ -55,6 +55,8 @@ export default function Checkout() {
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
   const [use3DSecure, setUse3DSecure] = useState(true);
   const [card, setCard] = useState({ holder: "", number: "", expiry: "", cvc: "" });
+  const [installments, setInstallments] = useState([{ number: 1 }]);
+  const [selectedInstallment, setSelectedInstallment] = useState(1);
   const [usePoints, setUsePoints] = useState(false);
   const [userPoints] = useState(0); // future: fetch from /api/users/me
 
@@ -139,6 +141,35 @@ export default function Checkout() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Kart BIN'i (ilk 6 hane) + tutar değişince taksit seçeneklerini iyzico'dan getir
+  useEffect(() => {
+    if (paymentMethod !== "credit_card") return;
+    const bin = card.number.replace(/\D/g, "").slice(0, 6);
+    if (bin.length < 6 || grandTotal <= 0) {
+      setInstallments([{ number: 1, totalPrice: grandTotal, installmentPrice: grandTotal }]);
+      setSelectedInstallment(1);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await axios.post(`${API}/payment/installments`, {
+          bin_number: bin, price: Number(grandTotal.toFixed(2)),
+        });
+        const opts = res.data?.options?.length
+          ? res.data.options
+          : [{ number: 1, totalPrice: grandTotal, installmentPrice: grandTotal }];
+        setInstallments(opts);
+        setSelectedInstallment((cur) => (opts.find((o) => o.number === cur) ? cur : 1));
+        if (res.data?.force3ds) setUse3DSecure(true);
+      } catch {
+        setInstallments([{ number: 1, totalPrice: grandTotal, installmentPrice: grandTotal }]);
+        setSelectedInstallment(1);
+      }
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.number, grandTotal, paymentMethod]);
 
   const handlePaymentSuccess = async (orderNumber) => {
     if (!orderNumber) return;
@@ -347,7 +378,7 @@ export default function Checkout() {
             callback_url: `${API}/payment/3ds/callback`,
             return_url: `${window.location.origin}/odeme`,
             card: cardPayload,
-            installment: 1,
+            installment: selectedInstallment,
           });
           if (res.data.success && res.data.threeDSHtmlContent) {
             const html = window.atob(res.data.threeDSHtmlContent);
@@ -363,7 +394,7 @@ export default function Checkout() {
           const res = await axios.post(`${API}/payment/card/pay`, {
             order_id: newOrderId,
             card: cardPayload,
-            installment: 1,
+            installment: selectedInstallment,
           });
           if (res.data.success) {
             setPaymentStep("success");
@@ -772,8 +803,21 @@ export default function Checkout() {
                             className="w-full border rounded px-3 py-2 text-sm font-mono focus:border-stone-900 outline-none" />
                         </div>
                       </div>
-                      <div className="rounded border p-3 bg-stone-50 text-xs flex items-center justify-between">
-                        <span>Tek Çekim</span><span className="font-semibold">{grandTotal.toFixed(2)} TL</span>
+                      <div>
+                        <div className="text-xs font-medium text-gray-700 mb-1">Taksit Seçenekleri</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {installments.map((opt) => (
+                            <button type="button" key={opt.number}
+                              onClick={() => setSelectedInstallment(opt.number)}
+                              className={`border rounded px-2 py-1.5 text-left transition-colors ${selectedInstallment === opt.number ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
+                              <div className="text-xs font-semibold">{opt.number === 1 ? "Tek Çekim" : `${opt.number} Taksit`}</div>
+                              <div className="text-[11px] text-gray-500">
+                                {(opt.totalPrice ?? grandTotal).toFixed(2)} TL
+                                {opt.number > 1 && opt.installmentPrice ? ` · ${opt.installmentPrice.toFixed(2)}×${opt.number}` : ""}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <label className="inline-flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-black" />
