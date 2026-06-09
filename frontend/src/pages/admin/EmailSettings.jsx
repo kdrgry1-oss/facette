@@ -1,21 +1,24 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Mail, Save, Send, Lock } from "lucide-react";
+import { Mail, Save, Send, KeyRound } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+/**
+ * E-posta (Zoho ZeptoMail) Ayarları
+ * ---------------------------------
+ * Railway giden SMTP portlarını engellediği için e-posta gönderimi
+ * ZeptoMail HTTPS API'si (443) üzerinden yapılır.
+ * Backend sözleşmesi: settings.id="email_smtp"
+ *   username = gönderen e-posta, password = ZeptoMail Send Mail Token,
+ *   host     = api.zeptomail.com | api.zeptomail.eu (bölge)
+ */
 export default function EmailSettings() {
-  const [cfg, setCfg] = useState({
-    enabled: true,
-    host: "smtp.zoho.com",
-    port: 465,
-    secure: "ssl",
-    username: "",
-    from_name: "FACETTE",
-  });
-  const [password, setPassword] = useState("");
-  const [passwordSet, setPasswordSet] = useState(false);
+  const [cfg, setCfg] = useState({ enabled: true, username: "", from_name: "FACETTE" });
+  const [region, setRegion] = useState("com"); // com | eu
+  const [token, setToken] = useState("");
+  const [tokenSet, setTokenSet] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testTo, setTestTo] = useState("");
@@ -29,13 +32,11 @@ export default function EmailSettings() {
         const d = res.data || {};
         setCfg({
           enabled: d.enabled !== false,
-          host: d.host || "smtp.zoho.com",
-          port: d.port || 465,
-          secure: d.secure || "ssl",
           username: d.username || "",
           from_name: d.from_name || "FACETTE",
         });
-        setPasswordSet(!!d.password_set);
+        setRegion(((d.host || "").toLowerCase().includes("eu")) ? "eu" : "com");
+        setTokenSet(!!d.password_set);
       } catch (e) {
         toast.error("Ayarlar yüklenemedi");
       } finally {
@@ -45,15 +46,20 @@ export default function EmailSettings() {
   }, []);
 
   const save = async () => {
-    if (!cfg.username.trim()) { toast.error("E-posta adresi gerekli"); return; }
-    if (!passwordSet && !password.trim()) { toast.error("Şifre gerekli (Zoho hesap/uygulama şifresi)"); return; }
+    if (!cfg.username.trim()) { toast.error("Gönderen e-posta adresi gerekli"); return; }
+    if (!tokenSet && !token.trim()) { toast.error("ZeptoMail Send Mail Token gerekli"); return; }
     try {
       setSaving(true);
-      const payload = { ...cfg, port: Number(cfg.port) || 465 };
-      if (password.trim()) payload.password = password.trim();
+      const payload = {
+        enabled: cfg.enabled,
+        username: cfg.username.trim(),
+        from_name: cfg.from_name,
+        host: region === "eu" ? "api.zeptomail.eu" : "api.zeptomail.com",
+      };
+      if (token.trim()) payload.password = token.trim();
       await axios.post(`${API}/settings/email-smtp`, payload, auth());
       toast.success("E-posta ayarları kaydedildi");
-      if (password.trim()) { setPasswordSet(true); setPassword(""); }
+      if (token.trim()) { setTokenSet(true); setToken(""); }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Kaydedilemedi");
     } finally {
@@ -68,7 +74,8 @@ export default function EmailSettings() {
       await axios.post(`${API}/settings/email-smtp/test`, { to: testTo.trim() }, auth());
       toast.success("Test e-postası gönderildi — gelen kutunu kontrol et");
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Test gönderilemedi");
+      // Backend, ZeptoMail'in döndürdüğü gerçek hatayı detail içinde iletir.
+      toast.error(e.response?.data?.detail || "Test gönderilemedi (sunucuya ulaşılamadı)");
     } finally {
       setTesting(false);
     }
@@ -83,8 +90,8 @@ export default function EmailSettings() {
         <div className="flex items-center gap-2">
           <Mail size={22} className="text-gray-600" />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">E-posta (SMTP / Zoho)</h1>
-            <p className="text-sm text-gray-500 mt-1">Tüm bildirim ve toplu e-postalar bu hesaptan gönderilir.</p>
+            <h1 className="text-2xl font-bold text-gray-900">E-posta (Zoho ZeptoMail)</h1>
+            <p className="text-sm text-gray-500 mt-1">Tüm bildirim ve toplu e-postalar ZeptoMail API ile bu adresten gönderilir.</p>
           </div>
         </div>
         <button onClick={save} disabled={saving}
@@ -104,35 +111,28 @@ export default function EmailSettings() {
             </label>
 
             <div>
-              <label className={lbl}>E-posta Adresi (kullanıcı adı)</label>
+              <label className={lbl}>Gönderen E-posta Adresi</label>
               <input className={field} placeholder="info@facette.com.tr" value={cfg.username}
                 onChange={(e) => setCfg({ ...cfg, username: e.target.value.trim() })} autoComplete="off" />
+              <p className="text-[11px] text-gray-400 mt-1">ZeptoMail'de doğrulanmış domain altında bir adres olmalı (facette.com.tr).</p>
             </div>
 
             <div>
-              <label className={lbl}>Şifre {passwordSet && <span className="text-green-600 normal-case font-normal">· kayıtlı (değiştirmek için yeni şifre gir)</span>}</label>
+              <label className={lbl}>ZeptoMail Send Mail Token {tokenSet && <span className="text-green-600 normal-case font-normal">· kayıtlı (değiştirmek için yenisini yapıştır)</span>}</label>
               <div className="relative">
-                <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="password" className={`${field} pl-9`} placeholder={passwordSet ? "••••••• (değiştirmek için yaz)" : "Zoho hesap / uygulama şifresi"}
-                  value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+                <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="password" className={`${field} pl-9`} placeholder={tokenSet ? "••••••• (değiştirmek için yapıştır)" : "Zoho-enczapikey ... veya ham token"}
+                  value={token} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
               </div>
-              <p className="text-[11px] text-gray-400 mt-1">Zoho'da 2 adımlı doğrulama açıksa normal şifre değil <b>uygulamaya özel şifre</b> gerekir.</p>
+              <p className="text-[11px] text-gray-400 mt-1">ZeptoMail → Mail Agent → <b>Setup Info / Send Mail Token</b> bölümünden alınır. Başında "Zoho-enczapikey" olsa da olmasa da çalışır.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={lbl}>SMTP Sunucu</label>
-                <input className={field} value={cfg.host} onChange={(e) => setCfg({ ...cfg, host: e.target.value.trim() })} placeholder="smtp.zoho.com" />
-              </div>
-              <div>
-                <label className={lbl}>Port</label>
-                <input type="number" className={field} value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: e.target.value })} placeholder="465" />
-              </div>
-              <div>
-                <label className={lbl}>Güvenlik</label>
-                <select className={field} value={cfg.secure} onChange={(e) => setCfg({ ...cfg, secure: e.target.value })}>
-                  <option value="ssl">SSL (port 465)</option>
-                  <option value="tls">STARTTLS (port 587)</option>
+                <label className={lbl}>Bölge</label>
+                <select className={field} value={region} onChange={(e) => setRegion(e.target.value)}>
+                  <option value="com">Global (api.zeptomail.com)</option>
+                  <option value="eu">Avrupa (api.zeptomail.eu)</option>
                 </select>
               </div>
               <div>
@@ -141,7 +141,7 @@ export default function EmailSettings() {
               </div>
             </div>
             <p className="text-[11px] text-gray-400">
-              Zoho bölgen Avrupa ise sunucu <code>smtp.zoho.eu</code> olabilir. Gönderen adresi, giriş yaptığın Zoho hesabıyla aynı olmalıdır.
+              ZeptoMail hesabını <code>zeptomail.zoho.eu</code> üzerinden açtıysan Avrupa'yı seç; aksi halde Global doğrudur.
             </p>
           </div>
 
@@ -154,7 +154,7 @@ export default function EmailSettings() {
                 <Send size={15} /> {testing ? "Gönderiliyor…" : "Test Gönder"}
               </button>
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">Önce kaydet, sonra test et (test kayıtlı ayarları kullanır).</p>
+            <p className="text-[11px] text-gray-400 mt-2">Önce kaydet, sonra test et. Hata olursa ZeptoMail'in tam yanıtı burada bildirim olarak görünür.</p>
           </div>
         </div>
       )}

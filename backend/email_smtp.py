@@ -3,7 +3,7 @@ email_smtp.py — E-posta gonderimi Zoho ZeptoMail HTTPS API'si (port 443) uzeri
 Railway giden SMTP portlarini (25/465/587) engelledigi icin SMTP yerine HTTPS API kullanilir.
 Fonksiyon adlari korunmustur; cagiran tum moduller degismeden calisir.
 
-settings.id="email_smtp" alanlari (mevcut ayar sayfasiyla uyumlu):
+settings.id="email_smtp" alanlari (ayar sayfasiyla uyumlu):
   enabled   : bool  -> gonderim aktif mi
   username  : str   -> GONDEREN e-posta adresi (or. info@facette.com.tr)
   password  : str   -> ZeptoMail "Send Mail Token" (API anahtari)
@@ -36,6 +36,7 @@ def _auth_header(token: str) -> str:
 
 async def send_smtp_email(db, to: str, subject: str, html: str,
                           from_name=None, reply_to=None, text=None) -> dict:
+    """Tek aliciya ZeptoMail API ile mail. Doner: {success, response}."""
     cfg = await get_smtp_config(db)
     if not is_configured(cfg):
         return {"success": False, "response": "email_not_configured"}

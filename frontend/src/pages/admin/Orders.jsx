@@ -28,7 +28,7 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Filter, Search, Eye, Store, Info, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -83,19 +83,7 @@ export default function AdminOrders({ unpaidView = false }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("");
   const [activeStatusKeys, setActiveStatusKeys] = useState([]); // Ayarlar > Siparis Durumlari "Gorunur"
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState({
-    search: "", phone: "", email: "", order_number: "",
-    cargo_tracking: "", invoice_number: "", coupon_code: "",
-    start_date: "", end_date: "",
-    payment_method: "", payment_status: "", platform: "", channel: "",
-    influencer: "", is_corporate: ""
-  });
-  const [searchTick, setSearchTick] = useState(0);
-  const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
-  const onFilterKey = (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } };
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState([]);
@@ -107,16 +95,6 @@ export default function AdminOrders({ unpaidView = false }) {
   const [exporting, setExporting] = useState(false);
   const [cargoTrackingNumbers, setCargoTrackingNumbers] = useState({});
 
-  // Trendyol Manual Import State
-  const [trendyolModalOpen, setTrendyolModalOpen] = useState(false);
-  const [trendyolQueryType, setTrendyolQueryType] = useState('order_number');
-  const [trendyolOrderNumber, setTrendyolOrderNumber] = useState("");
-  const [trendyolStartDate, setTrendyolStartDate] = useState("");
-  const [trendyolEndDate, setTrendyolEndDate] = useState("");
-  const [trendyolPreviewOrders, setTrendyolPreviewOrders] = useState([]);
-  const [trendyolSelectedOrders, setTrendyolSelectedOrders] = useState([]);
-  const [trendyolPreviewing, setTrendyolPreviewing] = useState(false);
-  const [trendyolImporting, setTrendyolImporting] = useState(false);
   const [shipOrderId, setShipOrderId] = useState(null);
   const [trackingNumber, setTrackingNumber] = useState("");
 
@@ -157,12 +135,12 @@ export default function AdminOrders({ unpaidView = false }) {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, pageSize, statusFilter, searchTick, unpaidView]);
+  }, [page, pageSize, unpaidView]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.
    *
-   * TETİKLEYİCİ: useEffect([page, statusFilter, filters]) ile otomatik.
+   * TETİKLEYİCİ: useEffect([page, pageSize, unpaidView]) ile otomatik.
    *              Üst ve alt Pagination componentleri `onChange={setPage}` ile
    *              bu state'i günceller.
    * BACKEND    : GET /api/orders?page=&limit=20&status=&...
@@ -172,12 +150,9 @@ export default function AdminOrders({ unpaidView = false }) {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      let url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}`;
-      if (statusFilter) url += `&status=${statusFilter}`;
-      else url += `&hide_closed=1`;
-      Object.keys(filters).forEach(key => {
-        if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`;
-      });
+      // Durum kartlari/filtreleri kaldirildi: liste her zaman acik (kapali statuler haric) gosterilir.
+      // Iptal/iade icin ayri sayfalar var (Iptaller, Iade Edilenler).
+      const url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}&hide_closed=1`;
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       const list = res.data?.orders || [];
       setOrders(list);
@@ -580,81 +555,7 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
-  /**
-   * handleTrendyolPreview — Trendyol'dan sipariş önizlemesi çeker.
-   *   Kullanıcı ya sipariş numarası ya da tarih aralığı girer, backend
-   *   Trendyol API'ına sorgu atar ve henüz sisteme çekilmemiş olanları
-   *   listeler. Ardından `handleTrendyolImportSelected` ile seçilenler
-   *   içe aktarılır. Bu, canlıya bağlı olan tek Trendyol akışıdır
-   *   (webhook kaçarsa manuel kurtarma için).
-   */
-  const handleTrendyolPreview = async () => {
-    setTrendyolPreviewing(true);
-    setTrendyolPreviewOrders([]);
-    setTrendyolSelectedOrders([]);
-    try {
-      const token = localStorage.getItem('token');
-      const payload = {};
-      if (trendyolQueryType === 'order_number') {
-        if (!trendyolOrderNumber) {
-          toast.error("Lütfen sipariş numarası giriniz.");
-          setTrendyolPreviewing(false);
-          return;
-        }
-        payload.order_number = trendyolOrderNumber;
-      } else {
-        if (!trendyolStartDate || !trendyolEndDate) {
-          toast.error("Lütfen tarih aralığı seçiniz.");
-          setTrendyolPreviewing(false);
-          return;
-        }
-        payload.start_date_ms = new Date(trendyolStartDate).getTime();
-        payload.end_date_ms = new Date(trendyolEndDate).getTime();
-      }
-      
-      const res = await axios.post(`${API}/integrations/trendyol/orders/preview`, payload, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.data.success) {
-        setTrendyolPreviewOrders(res.data.orders);
-        if (res.data.orders.length === 0) toast.info("Belirtilen kriterlerde sipariş bulunamadı.");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Trendyol siparişleri sorgulanamadı.");
-    } finally {
-      setTrendyolPreviewing(false);
-    }
-  };
-
-  const handleTrendyolImportSelected = async () => {
-    if (trendyolSelectedOrders.length === 0) {
-      toast.error("Lütfen aktarılacak siparişleri seçin.");
-      return;
-    }
-    setTrendyolImporting(true);
-    try {
-      const token = localStorage.getItem('token');
-      const ordersToImport = trendyolPreviewOrders.filter(o => trendyolSelectedOrders.includes(o.orderNumber));
-      const res = await axios.post(`${API}/integrations/trendyol/orders/import-selected`, { orders: ordersToImport }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (res.data.success) {
-        toast.success(`${res.data.imported} sipariş aktarıldı, ${res.data.updated} güncellendi.`);
-        if (res.data.errors && res.data.errors.length > 0) {
-           toast.error(`${res.data.errors.length} sipariş aktarılamadı. Hataları loglardan inceleyin.`);
-        }
-        setTrendyolModalOpen(false);
-        fetchOrders();
-      }
-    } catch (err) {
-      toast.error("Aktarım başarısız oldu.");
-    } finally {
-      setTrendyolImporting(false);
-    }
-  };
-
-  const toggleSelectOrder = (orderId) => {
+    const toggleSelectOrder = (orderId) => {
     setSelectedOrders(prev => 
       prev.includes(orderId) 
         ? prev.filter(id => id !== orderId)
@@ -798,113 +699,7 @@ export default function AdminOrders({ unpaidView = false }) {
     <div data-testid="admin-orders">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{unpaidView ? "Ödeme Kaydı Bulunmayan Siparişler" : "Siparişler"}</h1>
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setTrendyolModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-600 border border-orange-200 rounded hover:bg-orange-100 text-sm font-medium transition-colors"
-            title="Trendyol Sipariş Sorgula ve Aktar"
-          >
-            <Store size={16} /> <Info size={14} className="opacity-70" /> Trendyol Sipariş Çek
-          </button>
-          <button 
-            onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
-            className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
-          >
-            <Filter size={16} /> Gelişmiş Filtreler
-          </button>
-          <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="border px-3 py-2 rounded text-sm"
-          >
-            <option value="">Tüm Durumlar</option>
-            {visibleStatusOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
       </div>
-
-      {/* Advanced Filters Pane */}
-      {advancedFiltersOpen && (
-        <div className="bg-white border rounded-lg p-4 mb-6 shadow-sm">
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            <input type="text" placeholder="Genel Arama (ad, no, fatura, kargo...)" className="border px-3 py-1.5 rounded text-sm" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="Sipariş No" className="border px-3 py-1.5 rounded text-sm" value={filters.order_number} onChange={e => setFilters({...filters, order_number: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="Fatura No" className="border px-3 py-1.5 rounded text-sm" value={filters.invoice_number} onChange={e => setFilters({...filters, invoice_number: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="Kargo Takip No" className="border px-3 py-1.5 rounded text-sm" value={filters.cargo_tracking} onChange={e => setFilters({...filters, cargo_tracking: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="Telefon" className="border px-3 py-1.5 rounded text-sm" value={filters.phone} onChange={e => setFilters({...filters, phone: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="E-posta" className="border px-3 py-1.5 rounded text-sm" value={filters.email} onChange={e => setFilters({...filters, email: e.target.value})} onKeyDown={onFilterKey} />
-            <input type="text" placeholder="Kupon Kodu" className="border px-3 py-1.5 rounded text-sm" value={filters.coupon_code} onChange={e => setFilters({...filters, coupon_code: e.target.value})} onKeyDown={onFilterKey} />
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.platform} onChange={e => setFilters({...filters, platform: e.target.value})}>
-              <option value="">Tüm Platformlar</option>
-              <option value="facette">Web Sitesi (Facette)</option>
-              <option value="trendyol">Trendyol</option>
-              <option value="hepsiburada">Hepsiburada</option>
-              <option value="amazon">Amazon</option>
-              <option value="temu">Temu</option>
-              <option value="n11">N11</option>
-              <option value="ciceksepeti">Çiçeksepeti</option>
-              <option value="pttavm">PttAVM</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.channel} onChange={e => setFilters({...filters, channel: e.target.value})} title="Geliş kaynağı (reklam/organik/sosyal/influencer)">
-              <option value="">Tüm Kaynaklar</option>
-              <option value="organic">Organik</option>
-              <option value="ads|paid">Reklam (Tümü)</option>
-              <option value="instagram">Instagram</option>
-              <option value="google">Google</option>
-              <option value="tiktok">TikTok</option>
-              <option value="facebook">Facebook</option>
-              <option value="influencer">Influencer</option>
-              <option value="email">E-posta</option>
-              <option value="referral">Referans</option>
-              <option value="direct">Doğrudan</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_method} onChange={e => setFilters({...filters, payment_method: e.target.value})}>
-              <option value="">Tüm Ödeme Tipleri</option>
-              <option value="credit_card">Kredi Kartı</option>
-              <option value="bank_transfer">Havale/EFT</option>
-              <option value="cash_on_delivery">Kapıda Ödeme</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_status} onChange={e => setFilters({...filters, payment_status: e.target.value})}>
-              <option value="">Tüm Ödeme Durumları</option>
-              <option value="paid">Ödendi</option>
-              <option value="pending">Bekliyor</option>
-              <option value="failed">Başarısız</option>
-              <option value="refunded">İade Edildi</option>
-            </select>
-            <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
-              <input type="checkbox" className="accent-black" checked={filters.influencer === "1"} onChange={e => setFilters({...filters, influencer: e.target.checked ? "1" : ""})} />
-              Influencer ile gelen
-            </label>
-            <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
-              <input type="checkbox" className="accent-black" checked={filters.is_corporate === "1"} onChange={e => setFilters({...filters, is_corporate: e.target.checked ? "1" : ""})} />
-              Kurumsal fatura
-            </label>
-            <div className="flex gap-2 items-center text-sm text-gray-500 xl:col-span-2">
-              <span className="shrink-0">Tarih:</span>
-              <input type="date" title="Başlangıç Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.start_date} onChange={e => setFilters({...filters, start_date: e.target.value})} />
-              <span>-</span>
-              <input type="date" title="Bitiş Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.end_date} onChange={e => setFilters({...filters, end_date: e.target.value})} />
-            </div>
-            <div className="flex gap-2 xl:col-span-2">
-              <button onClick={applyFilters} type="button" className="w-1/2 bg-black text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 flex justify-center items-center gap-1">
-                <Search size={14} /> Ara
-              </button>
-              <button
-                onClick={() => {
-                  setFilters({ search: "", phone: "", email: "", order_number: "", cargo_tracking: "", invoice_number: "", coupon_code: "", start_date: "", end_date: "", payment_method: "", payment_status: "", platform: "", channel: "", influencer: "", is_corporate: "" });
-                  applyFilters();
-                }}
-                className="w-1/2 px-3 py-1.5 border hover:border-gray-400 rounded text-sm bg-gray-50 hover:bg-white transition-colors"
-                type="button"
-              >
-                Sıfırla
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Bulk Actions Bar */}
       {selectedOrders.length > 0 && (
@@ -973,41 +768,6 @@ export default function AdminOrders({ unpaidView = false }) {
           </div>
         </div>
       )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mb-6">
-        <div 
-          onClick={() => setStatusFilter("")}
-          className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${!statusFilter ? "ring-2 ring-black" : ""}`}
-        >
-          <p className="text-2xl font-bold">{total}</p>
-          <p className="text-sm text-gray-500">Toplam</p>
-        </div>
-        {statusOptions.filter(s => s.value !== 'cancelled').map((status) => (
-          <div 
-            key={status.value}
-            onClick={() => setStatusFilter(status.value)}
-            data-testid={`status-card-${status.value}`}
-            className={`bg-white p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${statusFilter === status.value ? "ring-2 ring-black" : ""}`}
-          >
-            <p className="text-2xl font-bold">
-              {orders.filter(o => o.status === status.value).length}
-            </p>
-            <p className="text-sm text-gray-500">{status.label}</p>
-          </div>
-        ))}
-        {/* İptal Edilen Siparişler – kullanıcı tarafından istendi (ayrı sekme) */}
-        <div
-          onClick={() => setStatusFilter('cancelled')}
-          data-testid="status-card-cancelled"
-          className={`bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md ${statusFilter === 'cancelled' ? "ring-2 ring-red-500" : ""}`}
-        >
-          <p className="text-2xl font-bold text-red-700">
-            {orders.filter(o => o.status === 'cancelled').length}
-          </p>
-          <p className="text-sm text-red-600 font-medium">İptal Edilen</p>
-        </div>
-      </div>
 
       {/* =================================================================
           SİPARİŞLER TABLOSU
@@ -1725,153 +1485,6 @@ export default function AdminOrders({ unpaidView = false }) {
               >
                 Kargoya Ver
               </button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Trendyol Import Modal */}
-      <Dialog open={trendyolModalOpen} onOpenChange={setTrendyolModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-orange-600">
-              <Store size={20} /> Trendyol Manuel Sipariş Aktarımı
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 overflow-hidden h-full mt-4">
-            <div className="flex flex-col sm:flex-row gap-4 p-4 border rounded-lg bg-orange-50/30">
-              <div className="flex flex-col gap-2 w-full sm:w-1/3">
-                <label className="text-sm font-medium">Sorgulama Tipi</label>
-                <select 
-                  className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none"
-                  value={trendyolQueryType}
-                  onChange={e => setTrendyolQueryType(e.target.value)}
-                >
-                  <option value="order_number">Sipariş Numarası İle</option>
-                  <option value="date_range">Tarih Aralığı İle</option>
-                </select>
-              </div>
-              
-              {trendyolQueryType === 'order_number' ? (
-                <div className="flex flex-col gap-2 w-full sm:w-1/2">
-                  <label className="text-sm font-medium">Trendyol Sipariş No</label>
-                  <input 
-                    type="text" 
-                    value={trendyolOrderNumber}
-                    onChange={e => setTrendyolOrderNumber(e.target.value)}
-                    className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none"
-                    placeholder="Örn: 921381293"
-                  />
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 w-full sm:w-2/3">
-                  <label className="text-sm font-medium">Tarih Aralığı</label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="date" 
-                      value={trendyolStartDate}
-                      onChange={e => setTrendyolStartDate(e.target.value)}
-                      className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none flex-1"
-                    />
-                    <span>-</span>
-                    <input 
-                      type="date" 
-                      value={trendyolEndDate}
-                      onChange={e => setTrendyolEndDate(e.target.value)}
-                      className="border rounded px-3 py-2 text-sm focus:ring-orange-300 outline-none flex-1"
-                    />
-                  </div>
-                </div>
-              )}
-              
-              <div className="flex items-end flex-1 sm:w-auto">
-                <button 
-                  onClick={handleTrendyolPreview}
-                  disabled={trendyolPreviewing}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {trendyolPreviewing ? "Sorgulanıyor..." : <><Search size={16} /> Sorgula</>}
-                </button>
-              </div>
-            </div>
-
-            {/* Preview Results */}
-            <div className="flex-1 overflow-auto border rounded-lg bg-white relative">
-              <table className="w-full text-sm text-left relative">
-                <thead className="bg-gray-50 text-gray-600 font-medium border-b sticky top-0 z-10 shadow-sm">
-                  <tr>
-                    <th className="py-3 px-4 w-12 text-center">
-                      <input 
-                        type="checkbox" 
-                        onChange={(e) => {
-                          if (e.target.checked) setTrendyolSelectedOrders(trendyolPreviewOrders.map(o => o.orderNumber));
-                          else setTrendyolSelectedOrders([]);
-                        }}
-                        checked={trendyolPreviewOrders.length > 0 && trendyolSelectedOrders.length === trendyolPreviewOrders.length}
-                        className="rounded text-orange-600 focus:ring-orange-500"
-                      />
-                    </th>
-                    <th className="py-3 px-4">Sipariş No</th>
-                    <th className="py-3 px-4">Tarih</th>
-                    <th className="py-3 px-4">Müşteri</th>
-                    <th className="py-3 px-4">Tutar</th>
-                    <th className="py-3 px-4">Durum</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trendyolPreviewOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="text-center py-12 text-gray-500">
-                        Henüz arama yapılmadı veya sonuç bulunamadı.
-                      </td>
-                    </tr>
-                  ) : (
-                    trendyolPreviewOrders.map((o) => (
-                      <tr key={o.orderNumber} className="border-b hover:bg-gray-50 transition-colors">
-                        <td className="py-2 px-4 text-center">
-                          <input 
-                            type="checkbox" 
-                            checked={trendyolSelectedOrders.includes(o.orderNumber)}
-                            onChange={(e) => {
-                              if (e.target.checked) setTrendyolSelectedOrders([...trendyolSelectedOrders, o.orderNumber]);
-                              else setTrendyolSelectedOrders(trendyolSelectedOrders.filter(id => id !== o.orderNumber));
-                            }}
-                            className="rounded text-orange-600 focus:ring-orange-500"
-                          />
-                        </td>
-                        <td className="py-2 px-4 font-medium">{o.orderNumber}</td>
-                        <td className="py-2 px-4 text-gray-500"> {new Date(o.orderDate).toLocaleString('tr-TR')} </td>
-                        <td className="py-2 px-4">{o.shipmentAddress?.firstName} {o.shipmentAddress?.lastName}</td>
-                        <td className="py-2 px-4 font-semibold">{o.totalPrice?.toFixed(2)} ₺</td>
-                        <td className="py-2 px-4">
-                           <span className="px-2 py-1 bg-gray-100 rounded text-xs">{o.status}</span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border">
-              <div className="text-sm font-medium text-gray-600">
-                Seçilen: {trendyolSelectedOrders.length} / {trendyolPreviewOrders.length}
-              </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => setTrendyolModalOpen(false)}
-                  className="px-4 py-2 border rounded hover:bg-gray-100 text-sm transition-colors"
-                >
-                  İptal
-                </button>
-                <button 
-                  onClick={handleTrendyolImportSelected}
-                  disabled={trendyolImporting || trendyolSelectedOrders.length === 0}
-                  className="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded text-sm transition-colors disabled:opacity-50"
-                >
-                  {trendyolImporting ? "Aktarılıyor..." : "Seçili Olanları Aktar"}
-                </button>
-              </div>
             </div>
           </div>
         </DialogContent>
