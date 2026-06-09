@@ -313,3 +313,61 @@ async def save_store_info(payload: Dict[str, Any], current_user: dict = Depends(
     }
     await db.settings.update_one({"id": "store_info"}, {"$set": data}, upsert=True)
     return {"success": True}
+
+
+# =============================================================================
+# E-posta (SMTP / Zoho Mail) Ayarları — settings.id="email_smtp"
+# Tüm bildirim & toplu e-postalar bu hesaptan gönderilir. Şifre DB'de tutulur,
+# API yanıtında ASLA dönülmez (yalnızca password_set bilgisi).
+# =============================================================================
+@router.get("/email-smtp")
+async def get_email_smtp(current_user: dict = Depends(require_admin)):
+    s = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    return {
+        "enabled": bool(s.get("enabled", False)),
+        "host": s.get("host", "smtp.zoho.com"),
+        "port": int(s.get("port", 465)),
+        "secure": s.get("secure", "ssl"),
+        "username": s.get("username", ""),
+        "from_name": s.get("from_name", "FACETTE"),
+        "password_set": bool(s.get("password")),
+    }
+
+
+@router.post("/email-smtp")
+async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+    existing = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    pwd = payload.get("password")
+    data = {
+        "id": "email_smtp",
+        "enabled": bool(payload.get("enabled", False)),
+        "host": (str(payload.get("host") or "smtp.zoho.com")).strip(),
+        "port": int(payload.get("port") or 465),
+        "secure": (str(payload.get("secure") or "ssl")).strip().lower(),
+        "username": (str(payload.get("username") or "")).strip(),
+        "from_name": (str(payload.get("from_name") or "FACETTE")).strip(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Şifre yalnızca yeni değer girildiyse güncellenir; boş bırakılırsa mevcut korunur.
+    if pwd:
+        data["password"] = str(pwd)
+    elif existing.get("password"):
+        data["password"] = existing["password"]
+    await db.settings.update_one({"id": "email_smtp"}, {"$set": data}, upsert=True)
+    return {"success": True}
+
+
+@router.post("/email-smtp/test")
+async def test_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+    to = (str(payload.get("to") or "")).strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="Test için alıcı e-posta gerekli")
+    from email_smtp import send_smtp_email
+    res = await send_smtp_email(
+        db, to,
+        "Facette SMTP Test",
+        "<p>Bu bir test e-postasıdır. Zoho SMTP ayarlarınız çalışıyor 🎉</p>",
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=502, detail=f"Gönderilemedi: {res.get('response')}")
+    return {"success": True, "message": "Test e-postası gönderildi"}

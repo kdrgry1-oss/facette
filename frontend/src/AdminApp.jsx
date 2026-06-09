@@ -49,6 +49,7 @@ import AdminTasks from "./pages/admin/AdminTasks";
 import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
 import NotificationSettings from "./pages/admin/NotificationSettings";
+import EmailSettings from "./pages/admin/EmailSettings";
 import NotificationTemplates from "./pages/admin/NotificationTemplates";
 import BlockedCustomers from "./pages/admin/BlockedCustomers";
 import ProductionPlan from "./pages/admin/ProductionPlan";
@@ -114,6 +115,7 @@ export default function AdminApp() {
         <Route path="ayarlar/kargo" element={<CargoSettings />} />
         <Route path="ayarlar/gonderici-adresi" element={<SenderAddress />} />
         <Route path="ayarlar/bildirim" element={<NotificationSettings />} />
+        <Route path="ayarlar/eposta" element={<EmailSettings />} />
         <Route path="ayarlar/bildirim/sablonlar" element={<NotificationTemplates />} />
         <Route path="bloklu-musteriler" element={<BlockedCustomers />} />
         <Route path="uretim-plani" element={<ProductionPlan />} />

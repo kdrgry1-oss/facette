@@ -1630,7 +1630,7 @@ async def print_invoice_html(order_id: str, token: str = None):
     total = order.get("total") or order.get("total_amount") or 0
 
     rows = "".join(
-        f"<tr><td>{i.get('product_name','')}</td>"
+        f"<tr><td>{i.get('product_name') or i.get('name') or ''}</td>"
         f"<td style='text-align:center'>{i.get('quantity',1)}</td>"
         f"<td style='text-align:right'>{(i.get('price') or 0):.2f} ₺</td>"
         f"<td style='text-align:right'>{((i.get('price') or 0)*(i.get('quantity') or 1)):.2f} ₺</td></tr>"

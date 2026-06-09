@@ -273,19 +273,10 @@ async def _whatsapp_send(cfg: Dict, to: str, message: str, template_name: Option
 # EMAIL (RESEND)
 # =============================================================================
 
-async def _email_send(to: str, subject: str, html: str) -> Dict:
-    """Resend üzerinden tek alıcıya mail."""
-    key = os.environ.get("RESEND_API_KEY", "")
-    sender = os.environ.get("RESEND_FROM", "onboarding@resend.dev")
-    if not key:
-        return {"success": False, "response": "resend_key_missing"}
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"from": sender, "to": [to], "subject": subject, "html": html},
-        )
-        return {"success": r.status_code in (200, 201, 202), "response": r.text[:500]}
+async def _email_send(db, to: str, subject: str, html: str) -> Dict:
+    """Kurumsal SMTP (Zoho) üzerinden tek alıcıya mail."""
+    from email_smtp import send_smtp_email
+    return await send_smtp_email(db, to, subject, html)
 
 
 # =============================================================================
@@ -393,7 +384,7 @@ async def send_notification(
             subj = render_template(tpl.get("subject", ""), variables) or f"Bildirim: {event}"
             html = render_template(tpl.get("body", ""), variables) or f"<p>{event}</p>"
             try:
-                res = await _email_send(to_email, subj, html)
+                res = await _email_send(db, to_email, subj, html)
                 results["email"] = res
                 await _log_event(db, event=event, channel="email", to=to_email,
                                  status="success" if res.get("success") else "failed",
@@ -420,5 +411,5 @@ async def test_provider(db, channel: str, provider_key: Optional[str], to: str, 
     if channel == "whatsapp":
         return await _whatsapp_send(providers.get("whatsapp_meta", {}), normalize_phone_tr(to), message)
     if channel == "email":
-        return await _email_send(to, "Test Bildirim", f"<p>{message}</p>")
+        return await _email_send(db, to, "Test Bildirim", f"<p>{message}</p>")
     return {"success": False, "response": "unknown_channel"}

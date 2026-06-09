@@ -251,9 +251,9 @@ async def _send_abandoned_cart_reminders():
     except Exception as e:
         logger.warning(f"[scheduler] abandoned cart mail skip (import): {e}")
         return
-    import os
-    if not os.environ.get("RESEND_API_KEY", "").strip():
-        return  # no key → skip silently
+    from email_smtp import get_smtp_config, is_configured
+    if not is_configured(await get_smtp_config(db)):
+        return  # E-posta (SMTP/Zoho) yapılandırılmamış → sessizce atla
     now = datetime.now(timezone.utc)
     # 2 saatten eski, 48 saatten yeni aktif sepetler
     start = (now - timedelta(hours=48)).isoformat()

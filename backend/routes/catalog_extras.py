@@ -478,33 +478,23 @@ email_admin_router = APIRouter(prefix="/admin/email", tags=["admin-email"])
 
 
 async def _send_email_via_resend(to_list, subject: str, html: str, from_addr: Optional[str] = None):
-    """Send email via Resend API. Returns (success_count, failed_count, errors[])."""
-    api_key = os.environ.get("RESEND_API_KEY", "").strip()
-    sender = from_addr or os.environ.get("RESEND_FROM", "onboarding@resend.dev")
-    if not api_key:
-        return 0, len(to_list), ["RESEND_API_KEY tanımlı değil"]
+    """E-postaları kurumsal SMTP (Zoho) ile gönderir. Returns (success, failed, errors[]).
+    (İsim geriye dönük uyumluluk için korunmuştur; artık Resend değil SMTP kullanır.)"""
+    from email_smtp import send_smtp_email, get_smtp_config, is_configured
+    cfg = await get_smtp_config(db)
+    if not is_configured(cfg):
+        return 0, len(to_list), ["E-posta (SMTP/Zoho) yapılandırılmamış"]
     success = 0
     failed = 0
     errors = []
-    async with httpx.AsyncClient(timeout=20) as c:
-        # Resend batches up to 100
-        for i in range(0, len(to_list), 100):
-            batch = to_list[i : i + 100]
-            emails = [{"from": sender, "to": [t], "subject": subject, "html": html} for t in batch]
-            try:
-                r = await c.post(
-                    "https://api.resend.com/emails/batch",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=emails,
-                )
-                if r.status_code in (200, 201):
-                    success += len(batch)
-                else:
-                    failed += len(batch)
-                    errors.append(f"HTTP {r.status_code}: {r.text[:200]}")
-            except Exception as e:
-                failed += len(batch)
-                errors.append(str(e)[:200])
+    for t in to_list:
+        r = await send_smtp_email(db, t, subject, html)
+        if r.get("success"):
+            success += 1
+        else:
+            failed += 1
+            if len(errors) < 5:
+                errors.append(r.get("response", "hata"))
     return success, failed, errors
 
 

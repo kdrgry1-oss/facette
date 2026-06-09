@@ -101,6 +101,7 @@ export default function Returns() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState({});
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [platform, setPlatform] = useState("trendyol");
   const [statusTab, setStatusTab] = useState("all");
@@ -143,6 +144,12 @@ export default function Returns() {
 
   const limit = 20;
 
+  // Aramayı 350ms geciktir (her tuşta istek atıp yarış/janklık yaşamamak için)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const fetchClaims = useCallback(async () => {
     try {
       setLoading(true);
@@ -152,7 +159,7 @@ export default function Returns() {
         return;
       }
       const token = localStorage.getItem("token");
-      const params = new URLSearchParams({ page, limit, search });
+      const params = new URLSearchParams({ page, limit, search: debouncedSearch });
       if (statusTab && statusTab !== "all") params.append("status", statusTab);
       const res = await axios.get(`${API}/integrations/trendyol/claims?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -166,7 +173,7 @@ export default function Returns() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusTab, platform]);
+  }, [page, debouncedSearch, statusTab, platform]);
 
   useEffect(() => { fetchClaims(); }, [fetchClaims]);
 

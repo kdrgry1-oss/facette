@@ -51,23 +51,11 @@ async def inbound_mail(request: Request, x_webhook_secret: str | None = Header(d
 async def send_email(to: str, subject: str, html: str,
                      text: str | None = None, reply_to: str | None = None):
     """Uygulamanın herhangi bir yerinden mail göndermek için bunu çağır."""
-    import httpx  # lazy import — eksik olsa bile uygulamanın açılışını bozmaz
-    if not RESEND_API_KEY:
-        raise HTTPException(status_code=500, detail="RESEND_API_KEY tanımlı değil")
-    payload = {"from": MAIL_FROM, "to": [to], "subject": subject, "html": html}
-    if text:
-        payload["text"] = text
-    if reply_to:
-        payload["reply_to"] = reply_to
-    async with httpx.AsyncClient(timeout=15) as http:
-        r = await http.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-            json=payload,
-        )
-    if r.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"Resend hata: {r.status_code} {r.text}")
-    return r.json()
+    from email_smtp import send_smtp_email
+    res = await send_smtp_email(db, to, subject, html, reply_to=reply_to, text=text)
+    if not res.get("success"):
+        raise HTTPException(status_code=502, detail=f"SMTP hata: {res.get('response')}")
+    return {"ok": True, "id": "smtp"}
 
 
 @router.post("/send-test")

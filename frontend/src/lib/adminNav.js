@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
   Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
-  Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain,
+  Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain, Mail,
 } from "lucide-react";
 
 // Default sıralama (kullanıcı tercihi yoksa kullanılır):
@@ -162,6 +162,7 @@ export const navigationGroups = [
       { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },
       { label: "Gönderici / Depo Adresi", path: "/admin/ayarlar/gonderici-adresi", icon: Building2 },
       { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
+      { label: "E-posta (SMTP)", path: "/admin/ayarlar/eposta", icon: Mail },
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       { label: "Sipariş Durumları", path: "/admin/ayarlar/siparis-durumlari", icon: ShoppingCart },
       { label: "Pazarlama Pixelleri", path: "/admin/ayarlar/pixel", icon: Code },

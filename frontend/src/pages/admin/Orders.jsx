@@ -121,9 +121,6 @@ export default function AdminOrders({ unpaidView = false }) {
   const [trackingNumber, setTrackingNumber] = useState("");
 
   // Trendyol Invoice Upload State
-  const [invoiceLinkInput, setInvoiceLinkInput] = useState("");
-  const [invoiceNumberInput, setInvoiceNumberInput] = useState("");
-  const [uploadingInvoice, setUploadingInvoice] = useState(false);
   const [invoicingId, setInvoicingId] = useState(null); // fatura kesimi uçuşta olan sipariş (çift tıklama koruması)
 
   // FAZ 1 B3 - Order Note Modal
@@ -296,36 +293,6 @@ export default function AdminOrders({ unpaidView = false }) {
     setShipModalOpen(true);
   };
 
-  const handleUploadTrendyolInvoice = async (orderNumber) => {
-    if (!invoiceLinkInput) {
-      toast.error("Lütfen fatura linkini girin");
-      return;
-    }
-    setUploadingInvoice(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/trendyol/invoices/${orderNumber}`, {
-        invoice_link: invoiceLinkInput,
-        invoice_number: invoiceNumberInput
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      toast.success(res.data.message || "Fatura Trendyol'a yüklendi");
-      setInvoiceLinkInput("");
-      setInvoiceNumberInput("");
-      fetchOrders();
-      // Update selected order view without closing modal
-      setSelectedOrder(prev => ({
-        ...prev,
-        invoice_link: invoiceLinkInput,
-        invoice_number: invoiceNumberInput
-      }));
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Fatura yüklenemedi");
-    } finally {
-      setUploadingInvoice(false);
-    }
-  };
 
 
   /**
@@ -529,10 +496,10 @@ export default function AdminOrders({ unpaidView = false }) {
 
   /**
    * handleBulkPrintInvoices — Seçili siparişlerin faturalarını TEK bir
-   *   yazdırılabilir HTML sayfasında birleştirir. Her fatura için
-   *   `/orders/{id}/invoice/print` endpoint'i çağrılıp iframe ile
-   *   birleştirilir. Pratik: kullanıcı Ctrl+P yaparak hepsini art arda
-   *   yazdırır; A4 başına bir fatura.
+   *   yazdırılabilir pencerede birleştirir. Her fatura HTML'i fetch ile
+   *   alınır; cross-origin iframe X-Frame-Options(DENY) ile engellendiği
+   *   için IFRAME KULLANILMAZ — body içerikleri tek sayfaya gömülür.
+   *   Pop-up engellenirse kullanıcı uyarılır.
    */
   const handleBulkPrintInvoices = async () => {
     if (selectedOrders.length === 0) {
@@ -540,28 +507,51 @@ export default function AdminOrders({ unpaidView = false }) {
       return;
     }
     const token = localStorage.getItem('token');
-    // Her biri ayrı bir iframe olarak eklenir; tarayıcı her iframe'in sayfalarını
-    // birbirinin ardına basar (@page break-after: always).
-    const iframes = selectedOrders
-      .map(id => `<iframe src="${API}/orders/${id}/invoice/print?token=${token}" class="f"></iframe>`)
-      .join("\n");
-    const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${selectedOrders.length} Fatura</title>
-      <style>
-        @page { margin: 10mm; }
-        body { margin: 0; font-family: system-ui; }
-        .toolbar { padding: 10px; background:#fff7ed; border-bottom:1px solid #fed7aa; display:flex; justify-content:space-between; align-items:center; }
-        .f { width: 100%; height: 95vh; border: 0; page-break-after: always; }
-        @media print { .toolbar { display: none; } .f { height: 100vh; } }
-        button { padding: 6px 14px; background:#111; color:#fff; border:0; border-radius:6px; cursor:pointer; font-weight:600; }
-      </style></head>
-      <body>
-        <div class="toolbar"><strong>${selectedOrders.length} Fatura</strong><button onclick="window.print()">Tümünü Yazdır</button></div>
-        ${iframes}
-      </body></html>`;
-    const w = window.open('', '_blank', 'width=900,height=1100');
-    if (w) {
-      w.document.write(html);
+    toast.loading("Faturalar hazırlanıyor...", { id: "bulkinv" });
+    try {
+      const htmls = await Promise.all(
+        selectedOrders.map(async (id) => {
+          try {
+            const r = await fetch(`${API}/orders/${id}/invoice/print?token=${token}`);
+            if (!r.ok) return "";
+            return await r.text();
+          } catch {
+            return "";
+          }
+        })
+      );
+      const sections = htmls
+        .filter(Boolean)
+        .map((html) => {
+          const m = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+          return `<div class="page">${m ? m[1] : html}</div>`;
+        });
+      toast.dismiss("bulkinv");
+      if (!sections.length) {
+        toast.error("Yazdırılacak fatura bulunamadı");
+        return;
+      }
+      const doc = `<!doctype html><html lang="tr"><head><meta charset="utf-8"/>` +
+        `<title>${sections.length} Fatura</title><style>` +
+        `@page{margin:12mm} body{font-family:system-ui,Arial,sans-serif;margin:0}` +
+        `.bar{position:sticky;top:0;background:#fff7ed;border-bottom:1px solid #fed7aa;padding:8px 14px;display:flex;justify-content:space-between;align-items:center}` +
+        `.bar button{padding:6px 14px;background:#111;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:600}` +
+        `.page{page-break-after:always;padding:4px}` +
+        `@media print{.bar{display:none}.page{padding:0}}` +
+        `</style></head><body>` +
+        `<div class="bar"><strong>${sections.length} Fatura</strong><button onclick="window.print()">Tümünü Yazdır</button></div>` +
+        sections.join("") +
+        `</body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) {
+        toast.error("Açılır pencere engellendi — tarayıcı pop-up iznini açın");
+        return;
+      }
+      w.document.write(doc);
       w.document.close();
+    } catch (e) {
+      toast.dismiss("bulkinv");
+      toast.error("Fatura yazdırma başarısız");
     }
   };
 
@@ -1361,7 +1351,7 @@ export default function AdminOrders({ unpaidView = false }) {
             <div className="space-y-6">
               {/* Action Buttons */}
               <div className="flex gap-2 flex-wrap">
-                {!selectedOrder.invoice?.invoice_number && (
+                {!(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number) && (
                   <button 
                     onClick={() => handleGenerateInvoice(selectedOrder.id)}
                     disabled={invoicingId === selectedOrder.id}
@@ -1443,59 +1433,38 @@ export default function AdminOrders({ unpaidView = false }) {
                 </button>
               </div>
 
-              {/* Invoice & Cargo Info */}
-              {(selectedOrder.invoice || selectedOrder.cargo || selectedOrder.invoice_link || selectedOrder.platform === 'trendyol') && (
-                <div className="grid md:grid-cols-2 gap-4">
-                  {(selectedOrder.invoice || selectedOrder.invoice_link) ? (
-                    <div className="p-4 bg-green-50 border border-green-200 rounded">
-                      <h3 className="font-medium text-green-800 mb-2">Fatura Bilgileri</h3>
-                      <p className="text-sm">Fatura No: <span className="font-medium">{selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number}</span></p>
-                      {selectedOrder.invoice?.invoice_date && <p className="text-sm text-gray-600">Tarih: {formatDate(selectedOrder.invoice.invoice_date)}</p>}
-                      {selectedOrder.invoice_link && (
-                        <a href={selectedOrder.invoice_link} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline mt-2 inline-block">Faturayı Görüntüle</a>
-                      )}
-                    </div>
-                  ) : (
-                    selectedOrder.platform === 'trendyol' && (
-                      <div className="p-4 border rounded">
-                        <h3 className="font-medium mb-2">Trendyol'a Fatura Yükle</h3>
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            placeholder="Fatura Numarası (Opsiyonel)"
-                            className="w-full text-sm border rounded px-2 py-1"
-                            value={invoiceNumberInput}
-                            onChange={e => setInvoiceNumberInput(e.target.value)}
-                          />
-                          <input
-                            type="url"
-                            placeholder="PDF Linki (Zorunlu)"
-                            className="w-full text-sm border rounded px-2 py-1"
-                            value={invoiceLinkInput}
-                            onChange={e => setInvoiceLinkInput(e.target.value)}
-                          />
-                          <button
-                            onClick={() => handleUploadTrendyolInvoice(selectedOrder.order_number)}
-                            disabled={uploadingInvoice || !invoiceLinkInput.trim()}
-                            className="w-full px-3 py-1.5 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:opacity-50"
-                          >
-                            {uploadingInvoice ? "Yükleniyor..." : "Faturayı İlet"}
-                          </button>
-                        </div>
+              {/* Fatura — kesilmişse PDF'i otomatik göster (Trendyol'a yükleme zaten otomatik yapılır) */}
+              {(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number || selectedOrder.invoice_pdf_url || selectedOrder.invoice_link) && (() => {
+                const invNo = selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number;
+                const rawUrl = selectedOrder.invoice_pdf_url || selectedOrder.invoice_link || "";
+                const tok = localStorage.getItem('token');
+                const pdfSrc = (typeof rawUrl === 'string' && rawUrl.startsWith('http'))
+                  ? rawUrl
+                  : `${API}/orders/${selectedOrder.id}/invoice/print?token=${tok}`;
+                return (
+                  <div className="border border-green-200 bg-green-50 rounded p-4">
+                    <div className="flex items-center justify-between mb-3 gap-3">
+                      <div>
+                        <h3 className="font-medium text-green-800">Fatura</h3>
+                        {invNo && <p className="text-sm text-gray-700">No: <span className="font-medium">{invNo}</span></p>}
                       </div>
-                    )
-                  )}
-                  {selectedOrder.cargo && (
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded">
-                      <h3 className="font-medium text-blue-800 mb-2">Kargo Bilgileri</h3>
-                      <p className="text-sm">Firma: <span className="font-medium">{selectedOrder.cargo.company}</span></p>
-                      <p className="text-sm">Takip No: <span className="font-medium">{selectedOrder.cargo.tracking_number}</span></p>
+                      <a href={pdfSrc} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline shrink-0">Yeni sekmede aç ↗</a>
                     </div>
-                  )}
+                    <iframe src={pdfSrc} title="Fatura" className="w-full rounded border bg-white" style={{ height: 520 }} />
+                  </div>
+                );
+              })()}
+
+              {/* Kargo Bilgileri */}
+              {selectedOrder.cargo && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded">
+                  <h3 className="font-medium text-blue-800 mb-2">Kargo Bilgileri</h3>
+                  <p className="text-sm">Firma: <span className="font-medium">{selectedOrder.cargo.company}</span></p>
+                  <p className="text-sm">Takip No: <span className="font-medium">{selectedOrder.cargo.tracking_number}</span></p>
                 </div>
               )}
 
-              {/* Status */}
+                            {/* Status */}
               <div className="flex items-center justify-between p-4 bg-gray-50 rounded">
                 <div>
                   <p className="text-sm text-gray-500">Durum</p>

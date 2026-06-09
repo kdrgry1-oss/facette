@@ -170,7 +170,7 @@ export default function NotificationSettings() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Mail size={18} className="text-purple-600" />
-            <h2 className="font-semibold">E-posta (Resend)</h2>
+            <h2 className="font-semibold">E-posta Bildirimleri</h2>
           </div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={cfg.email_active}
@@ -179,7 +179,7 @@ export default function NotificationSettings() {
             Aktif
           </label>
         </div>
-        <p className="text-xs text-gray-500 mt-2">E-posta API anahtarı sistem .env dosyasından yönetilir (RESEND_API_KEY, RESEND_FROM).</p>
+        <p className="text-xs text-gray-500 mt-2">E-posta gönderimi <b>Zoho SMTP</b> ile yapılır. Hesap ve şifre için: <a href="/admin/ayarlar/eposta" className="text-blue-600 hover:underline">Ayarlar → E-posta (SMTP)</a></p>
       </section>
 
       {/* Test */}
