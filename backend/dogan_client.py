@@ -6,6 +6,8 @@ import logging
 import os
 from zeep import Client, Settings as ZeepSettings
 from zeep.transports import Transport
+from zeep.cache import InMemoryCache
+import threading as _threading
 from requests import Session
 from datetime import datetime, timezone
 
@@ -21,6 +23,27 @@ try:
 except Exception as _e:  # noqa
     logger.warning(f"Doğan XSLT template not loaded: {_e}")
     DOGAN_XSLT_B64 = ""
+
+
+# --- Performans: zeep istemcileri + WSDL surec boyunca onbelleklenir ---
+# Her cagrida Client(wsdl) kurmak WSDL'i indirip parse ettigi icin cok yavasti
+# (tekli faturada birkac kez, toplu faturada N kez). Asagidaki onbellek WSDL'i
+# surec basina BIR kez parse eder; SESSION_ID her SOAP cagrisinda header ile
+# gectigi icin istemci paylasimi guvenlidir.
+_WSDL_CACHE = InMemoryCache()
+_CLIENT_CACHE = {}
+_CLIENT_LOCK = _threading.Lock()
+
+
+def _get_cached_client(wsdl_url, transport, settings):
+    c = _CLIENT_CACHE.get(wsdl_url)
+    if c is None:
+        with _CLIENT_LOCK:
+            c = _CLIENT_CACHE.get(wsdl_url)
+            if c is None:
+                c = Client(wsdl_url, transport=transport, settings=settings)
+                _CLIENT_CACHE[wsdl_url] = c
+    return c
 
 
 class DoganClient:
@@ -44,13 +67,13 @@ class DoganClient:
 
         session = Session()
         session.verify = True
-        self.transport = Transport(session=session, timeout=30)
+        self.transport = Transport(session=session, timeout=30, cache=_WSDL_CACHE)
         self.zeep_settings = ZeepSettings(strict=False, xml_huge_tree=True)
 
     def login(self) -> str:
         """Authenticate and get session ID. Raises on failure."""
         try:
-            client = Client(self.auth_wsdl, transport=self.transport, settings=self.zeep_settings)
+            client = _get_cached_client(self.auth_wsdl, self.transport, self.zeep_settings)
             header = {"SESSION_ID": "", "APPLICATION_NAME": "FACETTE"}
             result = client.service.Login(
                 REQUEST_HEADER=header,
@@ -88,7 +111,7 @@ class DoganClient:
         if not self.session_id:
             return
         try:
-            client = Client(self.auth_wsdl, transport=self.transport, settings=self.zeep_settings)
+            client = _get_cached_client(self.auth_wsdl, self.transport, self.zeep_settings)
             header = {"SESSION_ID": self.session_id, "APPLICATION_NAME": "FACETTE"}
             client.service.Logout(REQUEST_HEADER=header)
             self.session_id = None
@@ -98,12 +121,12 @@ class DoganClient:
     def _get_efatura_client(self):
         if not self.session_id:
             self.login()
-        return Client(self.efatura_wsdl, transport=self.transport, settings=self.zeep_settings)
+        return _get_cached_client(self.efatura_wsdl, self.transport, self.zeep_settings)
 
     def _get_earsiv_client(self):
         if not self.session_id:
             self.login()
-        return Client(self.earsiv_wsdl, transport=self.transport, settings=self.zeep_settings)
+        return _get_cached_client(self.earsiv_wsdl, self.transport, self.zeep_settings)
 
     def _make_header(self, compressed="N"):
         return {

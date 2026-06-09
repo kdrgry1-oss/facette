@@ -1501,6 +1501,7 @@ async def create_invoice_for_order(
     # atlamaz. Hata olsa bile fatura kesimi başarılı sayılır (sadece loglanır),
     # böylece toplu fatura akışı kesintisiz devam eder. Bu sayede manuel "linki
     # yapıştır" adımına gerek kalmaz; geç/hiç gitmeme sorunu ortadan kalkar.
+    trendyol_upload = None
     try:
         if (order.get("platform") == "trendyol") and order.get("trendyol_package_id"):
             _web = ((dogan_result or {}).get("web_key") or order.get("invoice_pdf_url") or "").strip()
@@ -1513,18 +1514,36 @@ async def create_invoice_for_order(
                 _inv_link = ""
             if _inv_link:
                 from .integrations import upload_invoice_to_trendyol
-                await upload_invoice_to_trendyol(
-                    order.get("order_number"),
-                    {"invoice_link": _inv_link, "invoice_number": invoice_number},
-                    current_user,
-                )
+                try:
+                    await upload_invoice_to_trendyol(
+                        order.get("order_number"),
+                        {"invoice_link": _inv_link, "invoice_number": invoice_number},
+                        current_user,
+                    )
+                    trendyol_upload = {"ok": True, "link": _inv_link}
+                    await db.orders.update_one(
+                        {"id": order_id},
+                        {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}},
+                    )
+                except HTTPException as _he:
+                    _err = str(_he.detail)
+                    trendyol_upload = {"ok": False, "error": _err}
+                    await db.orders.update_one(
+                        {"id": order_id},
+                        {"$set": {"trendyol_invoice_uploaded": False, "trendyol_invoice_error": _err[:1000]}},
+                    )
+                    logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_err}")
             else:
-                logger.warning(
-                    f"[trendyol invoice] Gecerli fatura linki uretilemedi "
-                    f"(web_key bos/URL degil ve sablon ayarli degil), Trendyol yuklemesi atlandi: "
-                    f"{order.get('order_number')}"
+                _err = ("Gecerli fatura linki uretilemedi: Dogan web_key bir URL degil ve "
+                        "earsiv_link_template ayarli degil (Ayarlar > E-Arsiv / E-Fatura).")
+                trendyol_upload = {"ok": False, "error": _err}
+                await db.orders.update_one(
+                    {"id": order_id},
+                    {"$set": {"trendyol_invoice_uploaded": False, "trendyol_invoice_error": _err}},
                 )
+                logger.warning(f"[trendyol invoice] {order.get('order_number')}: {_err}")
     except Exception as _te:
+        trendyol_upload = {"ok": False, "error": str(_te)}
         logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_te}")
 
     return {
@@ -1533,6 +1552,7 @@ async def create_invoice_for_order(
         "invoice_number": invoice_number,
         "invoice_type": invoice_type,
         "provider": active,
+        "trendyol_upload": trendyol_upload,
     }
 
 
@@ -2014,6 +2034,7 @@ async def bulk_create_invoice(
                 "invoice_number": r.get("invoice_number"),
                 "invoice_type": r.get("invoice_type"),
                 "invoice_pdf_url": r.get("invoice_pdf_url"),
+                "trendyol_upload": r.get("trendyol_upload"),
             })
         except HTTPException as he:
             errors.append({"order_id": oid, "error": str(he.detail)})
