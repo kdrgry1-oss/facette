@@ -275,6 +275,10 @@ async def create_order(
     except Exception as inf_err:
         logger.warning(f"Influencer link failed: {inf_err}")
 
+    # Havale/EFT siparisleri: "Siparisiniz Alindi · Odeme Bekleniyor" durumunda baslar
+    _pm0 = (order.get("payment_method") or "").lower()
+    if _pm0 in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
+        order["status"] = "awaiting_payment"
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 
@@ -317,6 +321,11 @@ async def create_order(
             base_url = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
             order_link = f"{base_url}/order-success/{order['order_number']}" if base_url else "#"
             order_date = order["created_at"][:10]
+            _hv_bank = {}
+            if order.get("status") == "awaiting_payment":
+                _pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+                _banks = _pay.get("bank_accounts") or []
+                _hv_bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
 
             variables = {
                 "customer_name": full_name,
@@ -335,13 +344,32 @@ async def create_order(
                 "shipping_district": ship.get("district", ""),
                 "shipping_phone": ship.get("phone", ""),
                 "order_link": order_link,
+                "bank_name": (_hv_bank or {}).get("bank_name", ""),
+                "bank_branch": (_hv_bank or {}).get("branch", ""),
+                "bank_iban": (_hv_bank or {}).get("iban", ""),
+                "bank_account_holder": (_hv_bank or {}).get("account_holder", ""),
+                "payment_url": (f"{base_url}/odeme-bildirimi/{order['order_number']}" if base_url else order_link),
             }
-            await send_notification(
-                db, "order_confirmed",
-                to_phone=ship.get("phone") or order.get("phone"),
-                to_email=ship.get("email") or order.get("email"),
-                variables=variables,
-            )
+            if order.get("status") == "awaiting_payment":
+                from order_statuses import get_status_config
+                _cfg = await get_status_config(db)
+                _nz = (_cfg.get("notify") or {}).get("awaiting_payment") or {}
+                _channels = [c for c in ("sms", "email") if _nz.get(c)]
+                if _channels:
+                    await send_notification(
+                        db, "order_awaiting_payment",
+                        to_phone=ship.get("phone") or order.get("phone"),
+                        to_email=ship.get("email") or order.get("email"),
+                        variables=variables,
+                        channels=_channels,
+                    )
+            else:
+                await send_notification(
+                    db, "order_confirmed",
+                    to_phone=ship.get("phone") or order.get("phone"),
+                    to_email=ship.get("email") or order.get("email"),
+                    variables=variables,
+                )
         except Exception as e:
             logger.warning(f"order_confirmed notification dispatch failed: {e}")
 
@@ -392,7 +420,8 @@ async def update_order_status(
     current_user: dict = Depends(require_admin)
 ):
     """Update order status"""
-    valid_statuses = ["pending", "confirmed", "processing", "shipped", "delivered", "undelivered", "cancelled"]
+    from order_statuses import all_status_keys
+    valid_statuses = all_status_keys()
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {valid_statuses}")
     
@@ -413,33 +442,44 @@ async def update_order_status(
             order_doc = await db.orders.find_one({"id": order_id}, {"_id": 0})
             if not order_doc:
                 return
-            status_to_event = {
-                "confirmed": "order_confirmed",
-                "processing": "order_packed",
-                "shipped": "order_shipped",
-                "delivered": "order_delivered",
-                "undelivered": "order_undelivered",
-                "cancelled": "order_cancelled",
-            }
-            ev = status_to_event.get(status)
-            if not ev:
-                return
             import sys, os
             sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
             from notification_service import send_notification
+            from order_statuses import event_for, get_status_config, customer_label_for
+            ev = event_for(status)
+            if not ev:
+                return
+            _cfg = await get_status_config(db)
+            _nz = (_cfg.get("notify") or {}).get(status) or {}
+            _channels = [c for c in ("sms", "email") if _nz.get(c)]
+            if not _channels:
+                return  # bu durum icin bildirim kapali (Ayarlar > Siparis Durumlari)
             addr = order_doc.get("shipping_address") or {}
+            _bank = {}
+            if status == "awaiting_payment":
+                _pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+                _banks = _pay.get("bank_accounts") or []
+                _bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
+            _base = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
             variables = {
                 "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
                 "order_number": order_doc.get("order_number", ""),
                 "amount": f"{order_doc.get('total', 0):.2f} TL",
                 "tracking_number": order_doc.get("cargo_tracking_number", ""),
-                "status_label": status,
+                "tracking_url": order_doc.get("cargo_tracking_url", "") or order_doc.get("tracking_url", ""),
+                "status_label": customer_label_for(status),
+                "bank_name": (_bank or {}).get("bank_name", ""),
+                "bank_branch": (_bank or {}).get("branch", ""),
+                "bank_iban": (_bank or {}).get("iban", ""),
+                "bank_account_holder": (_bank or {}).get("account_holder", ""),
+                "payment_url": (f"{_base}/odeme-bildirimi/{order_doc.get('order_number','')}" if _base else ""),
             }
             await send_notification(
                 db, ev,
                 to_phone=addr.get("phone") or order_doc.get("phone"),
                 to_email=addr.get("email") or order_doc.get("email"),
                 variables=variables,
+                channels=_channels,
             )
         except Exception as _notif_err:
             logger.warning(f"notification dispatch failed for order {order_id}: {_notif_err}")

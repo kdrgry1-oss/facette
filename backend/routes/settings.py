@@ -230,3 +230,44 @@ async def set_default_bank_account(acc_id: str, current_user: dict = Depends(req
     await db.settings.update_one({"id": "payment"},
                                  {"$set": {"id": "payment", "bank_accounts": banks}}, upsert=True)
     return {"bank_accounts": banks}
+
+
+
+# =============================================================================
+# Sipariş Durumları — sistemde görünür durumlar + durum başına SMS/Mail seçimi
+# Veri: db.settings._id="order_status_config" { active:[key], notify:{key:{sms,email}} }
+# =============================================================================
+@router.get("/order-statuses")
+async def get_order_statuses(current_user: dict = Depends(require_admin)):
+    from order_statuses import ORDER_STATUS_CATALOG, get_status_config
+    cfg = await get_status_config(db)
+    out = []
+    for s in ORDER_STATUS_CATALOG:
+        nz = (cfg.get("notify") or {}).get(s["key"], {})
+        out.append({
+            "key": s["key"], "label": s["label"], "customer_label": s["customer_label"],
+            "event": s["event"], "color": s["color"], "group": s["group"],
+            "active": s["key"] in cfg.get("active", []),
+            "sms": bool(nz.get("sms")), "email": bool(nz.get("email")),
+        })
+    return {"statuses": out}
+
+
+@router.post("/order-statuses")
+async def save_order_statuses(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
+    from order_statuses import all_status_keys, CONFIG_ID
+    valid = set(all_status_keys())
+    active = [k for k in (payload.get("active") or []) if k in valid]
+    notify_in = payload.get("notify") or {}
+    notify = {}
+    for k in valid:
+        v = notify_in.get(k) or {}
+        notify[k] = {"sms": bool(v.get("sms")), "email": bool(v.get("email"))}
+    await db.settings.update_one(
+        {"id": CONFIG_ID},
+        {"$set": {"id": CONFIG_ID, "active": active, "notify": notify,
+                  "templates_seeded": True,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"success": True, "active_count": len(active)}

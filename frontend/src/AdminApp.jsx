@@ -16,6 +16,7 @@ import AdminPages from "./pages/admin/Pages";
 import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
 import Payments from "./pages/admin/Payments";
+import OrderStatusSettings from "./pages/admin/OrderStatusSettings";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
 import AdminCancellations from "./pages/admin/Cancellations";
@@ -118,6 +119,7 @@ export default function AdminApp() {
         <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
         <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
         <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
+        <Route path="ayarlar/siparis-durumlari" element={<OrderStatusSettings />} />
         <Route path="pazaryerleri" element={<MarketplaceHub />} />
         <Route path="entegrasyon-loglari" element={<IntegrationLogs />} />
         <Route path="aktarilamayanlar" element={<FailedTransfers />} />
