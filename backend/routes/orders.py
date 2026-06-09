@@ -62,6 +62,7 @@ async def get_orders(
     influencer: Optional[str] = None,
     is_corporate: Optional[str] = None,
     payment_view: Optional[str] = "all",
+    hide_closed: Optional[str] = None,
     current_user: dict = Depends(require_admin)
 ):
     """Get orders with pagination (admin only)"""
@@ -69,7 +70,12 @@ async def get_orders(
     query = {}
     
     if status:
-        query["status"] = status
+        _st = [x.strip() for x in str(status).split(",") if x.strip()]
+        query["status"] = _st[0] if len(_st) == 1 else {"$in": _st}
+    elif hide_closed and str(hide_closed).lower() not in ("0", "false", ""):
+        # Ana "Tüm Siparişler" görünümü: iptal/iade/iade-ödemesi yapılanlar gizlenir
+        # (İptaller ve İade Edilenler sayfalarında ayrıca listelenir).
+        query["status"] = {"$nin": ["cancelled", "returned", "refunded"]}
     if phone:
         query["shipping_address.phone"] = {"$regex": phone, "$options": "i"}
     if email:

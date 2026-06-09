@@ -175,6 +175,7 @@ export default function AdminOrders({ unpaidView = false }) {
       const token = localStorage.getItem('token');
       let url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}`;
       if (statusFilter) url += `&status=${statusFilter}`;
+      else url += `&hide_closed=1`;
       Object.keys(filters).forEach(key => {
         if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`;
       });
@@ -1000,7 +1001,6 @@ export default function AdminOrders({ unpaidView = false }) {
               <th>Tutar</th>
               <th>Ödeme Tipi</th>
               <th>Platform</th>
-              <th>Kargo</th>
               <th>Durum</th>
               <th>Tarih</th>
               <th>İşlemler</th>
@@ -1009,11 +1009,11 @@ export default function AdminOrders({ unpaidView = false }) {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="text-center py-8">Yükleniyor...</td>
+                <td colSpan={9} className="text-center py-8">Yükleniyor...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
+                <td colSpan={9} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
               </tr>
             ) : (
               orders.map((order) => {
@@ -1082,13 +1082,25 @@ export default function AdminOrders({ unpaidView = false }) {
                     <td>
                       <div className="flex flex-col gap-0.5">
                         {/* Trendyol stores items in 'lines', web orders in 'items' */}
-                        {(order.lines?.length > 0 ? order.lines : order.items)?.slice(0, 2).map((item, i) => (
+                        {(order.lines?.length > 0 ? order.lines : order.items)?.slice(0, 2).map((item, i) => {
+                          const qty = item.quantity || 1;
+                          const img = item.image || item.product_image || item.imageUrl;
+                          return (
                           <div key={i} className="flex items-center gap-1 text-xs">
-                            {item.image && <img src={item.image} alt="" className="w-6 h-6 object-cover bg-gray-100 rounded shrink-0" />}
-                            <span className="truncate max-w-[120px]">{item.productName || item.name || 'Ürün'}</span>
-                            {item.quantity > 1 && <span className="text-gray-500">x{item.quantity}</span>}
+                            <div className="relative w-6 h-6 shrink-0">
+                              {img ? (
+                                <img src={img} alt="" className="w-6 h-6 object-cover bg-gray-100 rounded" />
+                              ) : (
+                                <div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center text-[8px] text-gray-400">—</div>
+                              )}
+                              {qty > 1 && (
+                                <span className="absolute -top-1 -left-1 min-w-[14px] h-[14px] px-0.5 bg-black text-white text-[9px] leading-[14px] text-center rounded-full font-bold">{qty}</span>
+                              )}
+                            </div>
+                            <span className="truncate max-w-[120px]">{item.productName || item.product_name || item.name || 'Ürün'}</span>
                           </div>
-                        ))}
+                          );
+                        })}
                         {((order.lines?.length > 0 ? order.lines : order.items)?.length || 0) > 2 && (
                           <span className="text-xs text-gray-500">+{(order.lines?.length || order.items?.length || 0) - 2} daha</span>
                         )}
@@ -1098,18 +1110,16 @@ export default function AdminOrders({ unpaidView = false }) {
                       </div>
                     </td>
                     <td>
-                      <div className="flex flex-col">
-                        <span className={`font-medium ${isUnpaidHavale ? 'text-red-600 font-bold' : ''}`} data-testid={`amount-${order.id}`}>
-                          {order.total?.toFixed(2)} TL
-                        </span>
-                        {order.platform === 'trendyol' && order.discount_amount > 0 && (
+                      <div className="flex flex-col gap-0.5 text-sm text-gray-900" data-testid={`amount-${order.id}`}>
+                        {(order.subtotal != null && ((order.discount_amount || order.discount || 0) > 0)) && (
                           <>
-                            <span className="text-xs text-gray-400">{order.subtotal?.toFixed(2)} TL (Liste)</span>
-                            <span className="text-xs text-red-500 font-medium">-{order.discount_amount?.toFixed(2)} TL (İskonto)</span>
+                            <span>Liste: {order.subtotal?.toFixed(2)} TL</span>
+                            <span>İskonto: -{(order.discount_amount || order.discount || 0).toFixed(2)} TL</span>
                           </>
                         )}
+                        <span>Fiyat: {order.total?.toFixed(2)} TL</span>
                         {isUnpaidHavale && (
-                          <span className="text-[10px] text-red-600 font-bold uppercase tracking-wider">Ödeme Bekliyor</span>
+                          <span className="text-xs text-gray-500">Ödeme bekliyor</span>
                         )}
                       </div>
                     </td>
@@ -1118,32 +1128,19 @@ export default function AdminOrders({ unpaidView = false }) {
                         const pm = (order.payment_method || '').toLowerCase();
                         const paid = order.payment_status === 'paid' ||
                           ['confirmed', 'processing', 'shipped', 'delivered', 'undelivered'].includes(order.status);
-                        if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') {
-                          return (
-                            <span className={`inline-flex flex-col items-start`}>
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${paid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                Havale/EFT
-                              </span>
-                              <span className={`text-[9px] mt-0.5 ${paid ? 'text-green-600' : 'text-red-600 font-bold'}`}>
-                                {paid ? 'Ödendi' : 'Beklemede'}
-                              </span>
-                            </span>
-                          );
-                        }
-                        if (pm === 'credit_card' || pm === 'card' || pm === 'iyzico' || pm === 'cc') {
-                          return (
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${paid ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              Kredi Kartı
-                            </span>
-                          );
-                        }
-                        if (pm === 'cod' || pm === 'kapida') {
-                          return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-purple-100 text-purple-700">Kapıda</span>;
-                        }
-                        if (order.platform === 'trendyol') {
-                          return <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-100 text-orange-700">Marketplace</span>;
-                        }
-                        return <span className="text-xs text-gray-400">—</span>;
+                        let label = '';
+                        if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') label = 'Havale/EFT';
+                        else if (pm === 'credit_card' || pm === 'card' || pm === 'iyzico' || pm === 'cc') label = 'Kredi Kartı';
+                        else if (pm === 'cod' || pm === 'kapida') label = 'Kapıda';
+                        else if (order.platform === 'trendyol') label = 'Marketplace';
+                        if (!label) return <span className="text-sm text-gray-400">—</span>;
+                        const isHavale = (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft');
+                        return (
+                          <div className="flex flex-col text-sm text-gray-900">
+                            <span>{label}</span>
+                            {isHavale && <span className="text-xs text-gray-500">{paid ? 'Ödendi' : 'Beklemede'}</span>}
+                          </div>
+                        );
                       })()}
                     </td>
                     <td>
@@ -1151,69 +1148,6 @@ export default function AdminOrders({ unpaidView = false }) {
                         <span className="inline-block px-2 py-0.5 bg-[#F27A1A] text-white text-[10px] uppercase font-bold tracking-wider rounded">Trendyol</span>
                       ) : (
                         <span className="inline-block px-2 py-0.5 bg-gray-800 text-white text-[10px] uppercase font-bold tracking-wider rounded">Web</span>
-                      )}
-                    </td>
-                    <td>
-                      {order.platform === 'trendyol' ? (
-                        order.cargo_tracking_number ? (
-                          <div className="text-xs">
-                            <p className="font-medium text-orange-600">{order.cargo_provider_name || 'Trendyol Kargo'}</p>
-                            <a 
-                              href={order.cargo_tracking_link || '#'} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {order.cargo_tracking_number}
-                            </a>
-                            <button 
-                              onClick={() => handleTrendyolPrintLabel(order.cargo_tracking_number)}
-                              className="ml-2 text-purple-600 hover:text-purple-800"
-                              title="Trendyol Etiketi Yazdır"
-                            >
-                              <Tag size={14} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-500">Kargo Bekleniyor</span>
-                        )
-                      ) : order.cargo?.tracking_number ? (
-                        <div className="text-xs">
-                          <p className="font-medium text-green-600">{order.cargo.company_name || order.cargo.company}</p>
-                          <a 
-                            href={order.cargo.tracking_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline"
-                          >
-                            {order.cargo.tracking_number}
-                          </a>
-                          <button 
-                            onClick={() => handlePrintLabel(order.id)}
-                            className="ml-2 text-purple-600 hover:text-purple-800"
-                            title="Etiket Yazdır"
-                          >
-                            <Tag size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => handleCreateMngShipment(order.id)}
-                            className="text-xs text-green-600 hover:underline flex items-center gap-1"
-                            title="DHL E-Commerce ile Gönder"
-                          >
-                            <Truck size={14} />
-                            DHL
-                          </button>
-                          <button 
-                            onClick={() => openShipModal(order.id)}
-                            className="text-xs text-blue-600 hover:underline"
-                            title="Manuel Giriş"
-                          >
-                            Manuel
-                          </button>
-                        </div>
                       )}
                     </td>
                     <td>
