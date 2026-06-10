@@ -7,21 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Yalnızca iade verisi/akışı olan AKTİF platformlar gösterilir.
+// Web Sitesi (site iadeleri) en başta, sonra Trendyol. Yeni bir pazaryeri
+// entegrasyonu aktifleştiğinde (örn. Hepsiburada claim çekimi) buraya eklenir.
 const PLATFORMS = [
   { key: "facette", label: "Web Sitesi", badge: "W", color: "bg-gray-800" },
   { key: "trendyol", label: "Trendyol", badge: "T", color: "bg-orange-500" },
-  { key: "hepsiburada", label: "Hepsiburada", badge: "H", color: "bg-orange-600" },
-  { key: "temu", label: "Temu", badge: "T", color: "bg-orange-500" },
-  { key: "n11", label: "N11", badge: "N", color: "bg-rose-600" },
-  { key: "amazon_tr", label: "Amazon TR", badge: "A", color: "bg-yellow-500" },
-  { key: "amazon_de", label: "Amazon DE", badge: "A", color: "bg-yellow-500" },
-  { key: "aliexpress", label: "AliExpress", badge: "A", color: "bg-red-600" },
-  { key: "etsy", label: "Etsy", badge: "E", color: "bg-orange-500" },
-  { key: "hepsiglobal", label: "Hepsi Global", badge: "H", color: "bg-orange-600" },
-  { key: "fruugo", label: "Fruugo", badge: "F", color: "bg-purple-600" },
-  { key: "emag", label: "eMAG", badge: "E", color: "bg-red-600" },
-  { key: "trendyol_export", label: "Trendyol İhracat", badge: "T", color: "bg-orange-500" },
-  { key: "ciceksepeti", label: "Çiçek Sepeti", badge: "Ç", color: "bg-pink-600" },
 ];
 
 const STATUS_TABS = [
@@ -153,13 +144,9 @@ export default function Returns() {
   const fetchClaims = useCallback(async () => {
     try {
       setLoading(true);
-      // Şu an yalnızca Trendyol'da iade kaydı var; diğer platformlar için boş göster.
-      if (platform !== "trendyol") {
-        setClaims([]); setTotal(0); setTabCounts({}); setStats({});
-        return;
-      }
       const token = localStorage.getItem("token");
-      const params = new URLSearchParams({ page, limit, search: debouncedSearch });
+      // platform = 'facette' (site iadeleri) veya 'trendyol' (pazaryeri). Backend ayrimi yapar.
+      const params = new URLSearchParams({ page, limit, search: debouncedSearch, platform });
       if (statusTab && statusTab !== "all") params.append("status", statusTab);
       const res = await axios.get(`${API}/integrations/trendyol/claims?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -526,7 +513,7 @@ export default function Returns() {
               {loading ? (
                 <tr><td colSpan={12} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
               ) : claims.length === 0 ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">{platform === "trendyol" ? "İade kaydı bulunamadı" : "Bu platform için iade entegrasyonu henüz yok"}</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
               ) : claims.map(claim => {
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
