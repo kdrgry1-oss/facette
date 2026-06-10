@@ -5523,6 +5523,35 @@ async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
     return {"success": True, "fixed": fixed, "message": f"{fixed} iadenin iskonto bilgisi güncellendi"}
 
 
+def _claim_is_site_order(claim: dict) -> bool:
+    """Bir iade kaydının SİTE (web) siparişi mi yoksa PAZARYERİ mi olduğunu belirler.
+
+    Kural (öncelik sırası — Kadir'in onayladığı kesin sinyal):
+      1. trendyol_package_id dolu  -> Trendyol (kargo DHL/MNG olsa bile)
+      2. cargo_provider_name içinde "marketplace" geçiyor -> pazaryeri
+      3. hepsiburada paket izi -> pazaryeri
+      4. platform alanı bilinen bir pazaryeri -> pazaryeri
+      5. Hiçbiri değil -> SİTE siparişi
+    Not: 'platform'/'source' alanı tek başına güvenilir değil (eski Ticimax-çekme
+    döneminde Trendyol siparişleri de 'ticimax' damgası almış olabilir), bu yüzden
+    önce sağlam paket-kimliği sinyallerine bakılır.
+    """
+    if claim.get("trendyol_package_id"):
+        return False
+    cpn = str(claim.get("cargo_provider_name") or "").lower()
+    if "marketplace" in cpn:
+        return False
+    if claim.get("hepsiburada_package_id") or claim.get("hb_package_id"):
+        return False
+    plt = str(claim.get("platform") or "").lower()
+    _MARKETPLACES = {"trendyol", "hepsiburada", "n11", "amazon_tr", "amazon_de",
+                     "temu", "aliexpress", "etsy", "ciceksepeti", "emag", "fruugo",
+                     "hepsiglobal", "trendyol_export"}
+    if plt in _MARKETPLACES:
+        return False
+    return True
+
+
 @router.get("/trendyol/claims")
 async def get_trendyol_claims(
     page: int = 1,
@@ -5530,6 +5559,7 @@ async def get_trendyol_claims(
     claim_type: str = "",
     search: str = "",
     status: str = "",
+    platform: str = "trendyol",
     current_user: dict = Depends(require_admin)
 ):
     """Yerel veritabanındaki iade kayıtlarını listele.
@@ -5537,6 +5567,8 @@ async def get_trendyol_claims(
     Tüm claim'ler İADE'dir (İptal ayrı menüde, sipariş durumu üzerinden).
     `status` = durum sekmesi anahtarı: all / talep_olusturulan / kargoya_verilen /
     aksiyon_bekleyen / onaylanan / reddedilen.
+    `platform` = 'facette' (web/site iadeleri) veya bir pazaryeri anahtarı
+    (trendyol, hepsiburada, ...). Ayrım `_claim_is_site_order` kuralıyla yapılır.
     """
     # Trendyol claim_status -> sekme kovasi eslemesi (buyuk kovalar net: Accepted/Rejected).
     STATUS_BUCKETS = {
@@ -5559,27 +5591,55 @@ async def get_trendyol_claims(
             {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
         ]
 
-    query = dict(base_query)
-    if status and status != "all" and status in STATUS_BUCKETS:
-        query["claim_status"] = {"$in": STATUS_BUCKETS[status]}
+    want_site = (str(platform or "").lower() in ("facette", "web", "site"))
+    status_keys = set(STATUS_BUCKETS[status]) if (status and status != "all" and status in STATUS_BUCKETS) else None
 
-    total = await db.trendyol_claims.count_documents(query)
+    # base_query (arama/tip filtreli, AMA status filtresiz) ile TÜM kayıtları çek.
+    # Status filtresi bellekte uygulanır ki tab_counts tüm kovaları doğru sayabilsin.
+    raw = await db.trendyol_claims.find(
+        base_query, {"_id": 0, "raw_data": 0}
+    ).sort("created_date", -1).to_list(None)
+
+    # (a) claim_id'ye göre tekilleştir — aynı claim birden fazla belge olarak yazılmışsa
+    # en güncel (created_date'e göre zaten sıralı) ilk görüleni tut.
+    seen = set()
+    deduped = []
+    for c in raw:
+        cid = c.get("claim_id") or c.get("order_number")
+        if cid in seen:
+            continue
+        seen.add(cid)
+        deduped.append(c)
+
+    # (b) site / pazaryeri ayrımı + her kayda is_site_order bayrağı ekle.
+    platform_scoped = []
+    for c in deduped:
+        c["is_site_order"] = _claim_is_site_order(c)
+        if c["is_site_order"] == want_site:
+            platform_scoped.append(c)
+
+    # (c) status sekmesi filtresi (bellekte)
+    if status_keys is not None:
+        filtered = [c for c in platform_scoped if c.get("claim_status") in status_keys]
+    else:
+        filtered = platform_scoped
+
+    total = len(filtered)
     skip = (page - 1) * limit
-    claims = await db.trendyol_claims.find(query, {"_id": 0, "raw_data": 0}).skip(skip).limit(limit).sort("created_date", -1).to_list(limit)
+    claims = filtered[skip: skip + limit]
 
-    # Sekme adetleri — mevcut arama/tip filtresini koruyarak her kova icin say.
-    async def _bucket_count(keys):
-        q = dict(base_query)
-        q["claim_status"] = {"$in": keys}
-        return await db.trendyol_claims.count_documents(q)
+    # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, her kova doğru sayılır.
+    def _bucket_count_mem(keys):
+        ks = set(keys)
+        return sum(1 for c in platform_scoped if c.get("claim_status") in ks)
 
     tab_counts = {
-        "all": await db.trendyol_claims.count_documents(base_query),
-        "talep_olusturulan": await _bucket_count(STATUS_BUCKETS["talep_olusturulan"]),
-        "kargoya_verilen": await _bucket_count(STATUS_BUCKETS["kargoya_verilen"]),
-        "aksiyon_bekleyen": await _bucket_count(STATUS_BUCKETS["aksiyon_bekleyen"]),
-        "onaylanan": await _bucket_count(STATUS_BUCKETS["onaylanan"]),
-        "reddedilen": await _bucket_count(STATUS_BUCKETS["reddedilen"]),
+        "all": len(platform_scoped),
+        "talep_olusturulan": _bucket_count_mem(STATUS_BUCKETS["talep_olusturulan"]),
+        "kargoya_verilen": _bucket_count_mem(STATUS_BUCKETS["kargoya_verilen"]),
+        "aksiyon_bekleyen": _bucket_count_mem(STATUS_BUCKETS["aksiyon_bekleyen"]),
+        "onaylanan": _bucket_count_mem(STATUS_BUCKETS["onaylanan"]),
+        "reddedilen": _bucket_count_mem(STATUS_BUCKETS["reddedilen"]),
     }
 
     # İstatistikler
