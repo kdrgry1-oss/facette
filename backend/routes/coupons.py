@@ -83,6 +83,7 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "priority": int(payload.get("priority", 0) or 0),
         "combinable": bool(payload.get("combinable", False)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
+        "combinable_with": payload.get("combinable_with") or [],
         "created_at": _utcnow(),
         "created_by": current_user.get("email", ""),
     }
@@ -98,7 +99,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "categories", "products", "usage_limit", "usage_limit_per_user",
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
         "min_quantity", "buy_quantity", "free_quantity", "get_discount",
-        "priority", "combinable", "stack_group",
+        "priority", "combinable", "stack_group", "combinable_with",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _utcnow()
@@ -355,6 +356,7 @@ def _coupon_to_campaign(c: dict) -> dict:
         "stack_group": c.get("stack_group") or "",
         "categories": c.get("categories") or [],
         "products": c.get("products") or [],
+        "combinable_with": c.get("combinable_with") or [],
     }
 
 
@@ -392,6 +394,7 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "priority": int(payload.get("priority", 0) or 0),
         "combinable": bool(payload.get("combinable", False)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
+        "combinable_with": payload.get("combinable_with") or [],
     }
 
 
@@ -491,6 +494,7 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
                 "priority": int(c.get("priority", 0) or 0),
                 "combinable": bool(c.get("combinable", False)),
                 "stack_group": c.get("stack_group") or "",
+                "combinable_with": c.get("combinable_with") or [],
                 "is_entered": cid == entered_id,
             })
         elif cid == entered_id:
@@ -499,13 +503,28 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
     # 3) Sirala: priority -> discount -> girilen kod (esitlikte one)
     valid.sort(key=lambda x: (x["priority"], x["discount"], x["is_entered"]), reverse=True)
 
-    # 4) Stack uygula (combinable kapisi + stack_group + kalan tabana ardisik)
+    # 4) Stack uygula (IKILI/pairwise combinable kapisi + stack_group + kalan tabana ardisik)
+    def _pair_ok(a, b):
+        # ikisi de combinable olmali; her birinin combinable_with listesi bossa "tumuyle biner",
+        # doluysa karsi tarafin id'sini icermeli (KARSILIKLI).
+        if not (a["combinable"] and b["combinable"]):
+            return False
+        aw = a.get("combinable_with") or []
+        bw = b.get("combinable_with") or []
+        if aw and b["c"]["id"] not in aw:
+            return False
+        if bw and a["c"]["id"] not in bw:
+            return False
+        return True
+
     applied = []
     running = cart_total
     used_groups = set()
     for cand in valid:
         if applied:
-            if not cand["combinable"] or not all(a["combinable"] for a in applied):
+            if not cand["combinable"]:
+                continue
+            if not all(_pair_ok(cand, a) for a in applied):
                 continue
             if cand["stack_group"] and cand["stack_group"] in used_groups:
                 continue
@@ -539,6 +558,7 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
             "title": a["c"].get("title", ""), "type": a["c"].get("type"),
             "discount": a["applied_discount"], "free_shipping": a["free_shipping"],
             "priority": a["priority"], "combinable": a["combinable"], "stack_group": a["stack_group"],
+            "combinable_with": a.get("combinable_with") or [],
         } for a in applied],
         "total_discount": total,
         "free_shipping": any(a["free_shipping"] for a in applied),

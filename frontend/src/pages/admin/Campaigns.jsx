@@ -72,7 +72,7 @@ const blankForm = () => ({
   is_active: true, auto_apply: false, usage_limit: 0,
   first_order_only: false, usage_limit_per_user: 0, min_quantity: 0,
   buy_quantity: 2, free_quantity: 1, get_discount: 50,
-  priority: 0, combinable: false, stack_group: "",
+  priority: 0, combinable: false, stack_group: "", combinable_with: [],
   categories: [], products: [],
 });
 
@@ -112,6 +112,10 @@ export default function AdminCampaigns() {
     setProdQuery(""); setProdResults([]);
   };
   const removeProduct = (id) => setFormData({ ...formData, products: (formData.products || []).filter((x) => x !== id) });
+  const toggleCombinableWith = (id) => {
+    const cur = formData.combinable_with || [];
+    setFormData({ ...formData, combinable_with: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -172,6 +176,7 @@ export default function AdminCampaigns() {
       priority: c.priority || 0,
       combinable: !!c.combinable,
       stack_group: c.stack_group || "",
+      combinable_with: c.combinable_with || [],
       categories: c.categories || [],
       products: c.products || [],
     });
@@ -450,6 +455,21 @@ export default function AdminCampaigns() {
               <input type="checkbox" className="accent-black" checked={!!formData.combinable} onChange={(e) => setFormData({ ...formData, combinable: e.target.checked })} />
               <span>Birleştirilebilir — diğer birleştirilebilir kampanyalarla üst üste uygulanır (kapalıysa tek başına/münhasır).</span>
             </label>
+
+            {formData.combinable && (
+              <div className="border rounded-lg p-3 bg-gray-50/50">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Hangi kampanyalarla birleşsin? <span className="font-normal normal-case text-gray-400">(boş = tüm birleştirilebilirlerle · seçim karşılıklı olmalı)</span></div>
+                <div className="max-h-32 overflow-y-auto space-y-1 border rounded bg-white p-2">
+                  {campaigns.filter((c) => c.id !== editingId).length === 0 && <div className="text-xs text-gray-400">Başka kampanya yok</div>}
+                  {campaigns.filter((c) => c.id !== editingId).map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input type="checkbox" className="accent-black" checked={(formData.combinable_with || []).includes(c.id)} onChange={() => toggleCombinableWith(c.id)} />
+                      <span>{c.name || c.code}{c.combinable ? "" : <span className="text-amber-600"> (bu kampanya birleştirilemez işaretli)</span>}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Madde 4 — Kapsam (kategori/ürün). Boş = tüm sepete uygulanır. */}
             <div className="border rounded-lg p-3 space-y-3 bg-gray-50/50">
