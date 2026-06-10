@@ -369,6 +369,32 @@ async def create_order(
     except Exception as _redeem_err:
         logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
 
+    # Madde 4 — Sunucu-otoriter fiyat (GÖZLEM/shadow). Motoru sipariş kalemleriyle yeniden
+    # çalıştırıp istemcinin gönderdiği discount ile karşılaştırır; FARK varsa LOGLAR.
+    # FİYATA DOKUNMAZ — gerçek zorlama ödeme adımından ÖNCE yapılmalı; bu yalnızca gözlem.
+    try:
+        from .coupons import evaluate_cart_promotions as _eval_promos
+        _eng_items = [{
+            "product_id": it.get("product_id"),
+            "category_id": it.get("category_id"),
+            "qty": it.get("quantity", it.get("qty", 1)),
+            "price": it.get("price", 0),
+        } for it in (order.get("items") or [])]
+        _ev = await _eval_promos(
+            cart_total=float(order.get("subtotal", 0) or 0),
+            items=_eng_items,
+            user_id=order.get("user_id"),
+            email=(order.get("shipping_address") or {}).get("email", ""),
+            entered_code=order.get("coupon_code", ""),
+        )
+        _srv = float(_ev.get("total_discount", 0) or 0)
+        _cli = float(order.get("discount", 0) or 0)
+        if abs(_srv - _cli) > 0.01:
+            logger.warning(f"[PROMO SHADOW] siparis={order['order_number']} istemci_indirim={_cli} "
+                           f"sunucu_indirim={_srv} fark={round(_cli - _srv, 2)} (fiyat degismedi)")
+    except Exception as _shadow_err:
+        logger.warning(f"Promo gölge yeniden hesap hatası (sipariş etkilenmedi): {_shadow_err}")
+
     # FAZ — Sipariş onayı bildirimi (SMS + Email + WhatsApp) — fire-and-forget
     import asyncio as _asyncio
     async def _notify_order_created():

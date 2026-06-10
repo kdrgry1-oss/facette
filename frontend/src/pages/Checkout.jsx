@@ -367,6 +367,7 @@ export default function Checkout() {
         user_id: user?.id || null,
         items: items.map((item) => ({
           product_id: item.productId, variant_id: item.variantId, quantity: item.quantity,
+          category_id: item.categoryId,
           price: item.price, name: item.name, image: item.image, size: item.size, color: item.color,
         })),
         shipping_address: { ...shippingAddress, email: shippingAddress.email || user?.email || "" },
