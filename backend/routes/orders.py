@@ -3321,3 +3321,74 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": display_number}})
 
     return {"success": True, "gider_pusulasi": gider_pusulasi}
+
+
+# ============================================================================
+# Madde 3 — İade Ödemesi (refunded) — SADECE returns.refund_pay yetkisi (P6)
+# ============================================================================
+
+@router.post("/returns/{return_id}/refund-pay")
+async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(default=None),
+                            current_user: dict = Depends(require_permission("returns.refund_pay"))):
+    """İade bedelinin ödendiğini işaretler. Sadece 'returns.refund_pay' yetkisi (örn. merve).
+    Durumu 'refunded' yapar, kim/ne zaman/yöntem loglanır, müşteriye bildirim gönderir."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    if rec.get("status") == "refunded":
+        return {"success": True, "status": "refunded", "already": True}
+    if rec.get("status") in ("cancelled", "rejected"):
+        raise HTTPException(status_code=400, detail="Bu iade kapanmış; ödeme yapılamaz.")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    method = (payload or {}).get("method") or ""  # havale | iyzico | nakit ...
+    amount = rec.get("refund_amount")
+    if (payload or {}).get("amount") not in (None, ""):
+        try:
+            amount = _round2((payload or {}).get("amount"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz tutar.")
+    payment = {
+        "by": current_user.get("email") or current_user.get("id"),
+        "at": now_iso, "method": method, "amount": amount,
+    }
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+        "status": "refunded", "refund_payment": payment,
+        "refund_amount": amount if amount is not None else rec.get("refund_amount"),
+        "updated_at": now_iso,
+    }})
+    await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
+        "status": "refunded", "return_request.status": "refunded", "updated_at": now_iso,
+    }})
+
+    import asyncio as _aio
+    async def _n():
+        try:
+            import sys, os as _os
+            sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+            from notification_service import send_notification
+            from order_statuses import get_status_config, customer_label_for
+            cfg = await get_status_config(db)
+            nz = (cfg.get("notify") or {}).get("refunded") or {}
+            ch = [c for c in ("sms", "email") if nz.get(c)]
+            if not ch:
+                return
+            addr = (order or {}).get("shipping_address") or {}
+            await send_notification(
+                db, "order_refunded",
+                to_phone=addr.get("phone") or order.get("phone"),
+                to_email=addr.get("email") or order.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": rec.get("order_number", ""),
+                    "return_code": rec.get("return_code", ""),
+                    "refund_amount": f"{(amount or 0):.2f}",
+                    "status_label": customer_label_for("refunded"),
+                },
+                channels=ch,
+            )
+        except Exception as e:
+            logger.warning(f"refund-pay notif failed: {e}")
+    _aio.create_task(_n())
+
+    return {"success": True, "status": "refunded", "amount": amount}
