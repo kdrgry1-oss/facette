@@ -28,7 +28,7 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -83,6 +83,18 @@ export default function AdminOrders({ unpaidView = false }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  // --- Gelişmiş Filtreler (kullanıcı talebiyle geri eklendi) ---
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    search: "", phone: "", email: "", order_number: "",
+    cargo_tracking: "", invoice_number: "", coupon_code: "",
+    start_date: "", end_date: "",
+    payment_method: "", payment_status: "", platform: "", channel: "",
+    influencer: "", is_corporate: ""
+  });
+  const [searchTick, setSearchTick] = useState(0);
+  const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
+  const onFilterKey = (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } };
   const [activeStatusKeys, setActiveStatusKeys] = useState([]); // Ayarlar > Siparis Durumlari "Gorunur"
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -135,7 +147,7 @@ export default function AdminOrders({ unpaidView = false }) {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, pageSize, unpaidView]);
+  }, [page, pageSize, unpaidView, searchTick]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.
@@ -150,9 +162,11 @@ export default function AdminOrders({ unpaidView = false }) {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      // Durum kartlari/filtreleri kaldirildi: liste her zaman acik (kapali statuler haric) gosterilir.
-      // Iptal/iade icin ayri sayfalar var (Iptaller, Iade Edilenler).
-      const url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}&hide_closed=1`;
+      // Liste varsayilan olarak kapali statuler haric; aktif gelismis filtre varsa tum siparislerde arar.
+      let url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}`;
+      const anyFilter = Object.values(filters).some((v) => v);
+      if (!anyFilter) url += `&hide_closed=1`;
+      Object.keys(filters).forEach((key) => { if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`; });
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       const list = res.data?.orders || [];
       setOrders(list);
@@ -699,7 +713,94 @@ export default function AdminOrders({ unpaidView = false }) {
     <div data-testid="admin-orders">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{unpaidView ? "Ödeme Kaydı Bulunmayan Siparişler" : "Siparişler"}</h1>
+        <button
+          onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
+          className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
+        >
+          <Filter size={16} /> Gelişmiş Filtreler
+        </button>
       </div>
+
+      {/* Gelişmiş Filtreler Paneli */}
+      {advancedFiltersOpen && (
+        <div className="bg-white border rounded-lg p-4 mb-6 shadow-sm">
+          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <input type="text" placeholder="Genel Arama (ad, no, fatura, kargo...)" className="border px-3 py-1.5 rounded text-sm" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="Sipariş No" className="border px-3 py-1.5 rounded text-sm" value={filters.order_number} onChange={e => setFilters({...filters, order_number: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="Fatura No" className="border px-3 py-1.5 rounded text-sm" value={filters.invoice_number} onChange={e => setFilters({...filters, invoice_number: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="Kargo Takip No" className="border px-3 py-1.5 rounded text-sm" value={filters.cargo_tracking} onChange={e => setFilters({...filters, cargo_tracking: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="Telefon" className="border px-3 py-1.5 rounded text-sm" value={filters.phone} onChange={e => setFilters({...filters, phone: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="E-posta" className="border px-3 py-1.5 rounded text-sm" value={filters.email} onChange={e => setFilters({...filters, email: e.target.value})} onKeyDown={onFilterKey} />
+            <input type="text" placeholder="Kupon Kodu" className="border px-3 py-1.5 rounded text-sm" value={filters.coupon_code} onChange={e => setFilters({...filters, coupon_code: e.target.value})} onKeyDown={onFilterKey} />
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.platform} onChange={e => setFilters({...filters, platform: e.target.value})}>
+              <option value="">Tüm Platformlar</option>
+              <option value="facette">Web Sitesi (Facette)</option>
+              <option value="trendyol">Trendyol</option>
+              <option value="hepsiburada">Hepsiburada</option>
+              <option value="amazon">Amazon</option>
+              <option value="temu">Temu</option>
+              <option value="n11">N11</option>
+              <option value="ciceksepeti">Çiçeksepeti</option>
+              <option value="pttavm">PttAVM</option>
+            </select>
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.channel} onChange={e => setFilters({...filters, channel: e.target.value})} title="Geliş kaynağı (reklam/organik/sosyal/influencer)">
+              <option value="">Tüm Kaynaklar</option>
+              <option value="organic">Organik</option>
+              <option value="ads|paid">Reklam (Tümü)</option>
+              <option value="instagram">Instagram</option>
+              <option value="google">Google</option>
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+              <option value="influencer">Influencer</option>
+              <option value="email">E-posta</option>
+              <option value="referral">Referans</option>
+              <option value="direct">Doğrudan</option>
+            </select>
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_method} onChange={e => setFilters({...filters, payment_method: e.target.value})}>
+              <option value="">Tüm Ödeme Tipleri</option>
+              <option value="credit_card">Kredi Kartı</option>
+              <option value="bank_transfer">Havale/EFT</option>
+              <option value="cash_on_delivery">Kapıda Ödeme</option>
+            </select>
+            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_status} onChange={e => setFilters({...filters, payment_status: e.target.value})}>
+              <option value="">Tüm Ödeme Durumları</option>
+              <option value="paid">Ödendi</option>
+              <option value="pending">Bekliyor</option>
+              <option value="failed">Başarısız</option>
+              <option value="refunded">İade Edildi</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
+              <input type="checkbox" className="accent-black" checked={filters.influencer === "1"} onChange={e => setFilters({...filters, influencer: e.target.checked ? "1" : ""})} />
+              Influencer ile gelen
+            </label>
+            <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
+              <input type="checkbox" className="accent-black" checked={filters.is_corporate === "1"} onChange={e => setFilters({...filters, is_corporate: e.target.checked ? "1" : ""})} />
+              Kurumsal fatura
+            </label>
+            <div className="flex gap-2 items-center text-sm text-gray-500 xl:col-span-2">
+              <span className="shrink-0">Tarih:</span>
+              <input type="date" title="Başlangıç Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.start_date} onChange={e => setFilters({...filters, start_date: e.target.value})} />
+              <span>-</span>
+              <input type="date" title="Bitiş Tarihi" className="border px-2 py-1.5 rounded flex-1" value={filters.end_date} onChange={e => setFilters({...filters, end_date: e.target.value})} />
+            </div>
+            <div className="flex gap-2 xl:col-span-2">
+              <button onClick={applyFilters} type="button" className="w-1/2 bg-black text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 flex justify-center items-center gap-1">
+                <Search size={14} /> Ara
+              </button>
+              <button
+                onClick={() => {
+                  setFilters({ search: "", phone: "", email: "", order_number: "", cargo_tracking: "", invoice_number: "", coupon_code: "", start_date: "", end_date: "", payment_method: "", payment_status: "", platform: "", channel: "", influencer: "", is_corporate: "" });
+                  applyFilters();
+                }}
+                className="w-1/2 px-3 py-1.5 border hover:border-gray-400 rounded text-sm bg-gray-50 hover:bg-white transition-colors"
+                type="button"
+              >
+                Sıfırla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Actions Bar */}
       {selectedOrders.length > 0 && (
