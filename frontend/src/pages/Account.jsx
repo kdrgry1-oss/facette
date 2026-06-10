@@ -57,9 +57,12 @@ const ORDER_STATUS = {
   out_for_delivery: { label: "Dağıtımda", cls: "bg-purple-50 text-purple-800 border-purple-200", icon: Truck },
   undelivered: { label: "Teslim Edilemedi", cls: "bg-orange-50 text-orange-800 border-orange-200", icon: Truck },
   return_requested: { label: "İade Talebi Alındı", cls: "bg-rose-50 text-rose-800 border-rose-200", icon: Package },
+  return_approved: { label: "İade Onaylandı", cls: "bg-rose-50 text-rose-800 border-rose-200", icon: CheckCircle },
+  return_rejected: { label: "İade Değerlendirildi", cls: "bg-gray-50 text-gray-700 border-gray-200", icon: X },
   return_in_transit: { label: "İade Kargoda", cls: "bg-pink-50 text-pink-800 border-pink-200", icon: Truck },
   returned:    { label: "İade Tamamlandı", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
   refunded:    { label: "İade Bedeli Ödendi", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
+  partial_refunded: { label: "Kısmi İade Yapıldı", cls: "bg-rose-50 text-rose-700 border-rose-200", icon: CheckCircle },
   cancelled:   { label: "İptal Edildi",   cls: "bg-red-50     text-red-700     border-red-200",     icon: X },
 };
 
