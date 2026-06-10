@@ -50,6 +50,7 @@ export default function Checkout() {
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [availableCoupons, setAvailableCoupons] = useState([]);
+  const [appliedPromotions, setAppliedPromotions] = useState([]); // Madde 4 motor sonucu
 
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
@@ -102,6 +103,28 @@ export default function Checkout() {
       .catch(() => {});
   }, [user]);
 
+  // Madde 4 — Kampanya motoru: otomatik kampanyalar + (varsa) girilen kodu BIRLIKTE hesaplar.
+  // Sunucudaki /coupons/evaluate ile ayni sonuc (onizleme = siparis).
+  const recalcPromotions = async (code = "") => {
+    try {
+      const res = await axios.post(`${API}/coupons/evaluate`, {
+        cart_total: total,
+        items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
+        user_id: user?.id || null,
+        email: user?.email || "",
+        code: code || "",
+      });
+      const d = res.data || {};
+      setAppliedPromotions(d.applied || []);
+      setDiscount(Number(d.total_discount || 0));
+      return d;
+    } catch {
+      setAppliedPromotions([]);
+      setDiscount(0);
+      return null;
+    }
+  };
+
   // Available coupons + InitiateCheckout pixel
   useEffect(() => {
     if (items.length === 0) { setAvailableCoupons([]); return; }
@@ -128,6 +151,13 @@ export default function Checkout() {
       .catch(() => setAvailableCoupons([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
+
+  // Madde 4 — sepet/kod degisince motoru calistir (discount DEP DEGIL -> dongu yok)
+  useEffect(() => {
+    if (items.length === 0) { setAppliedPromotions([]); setDiscount(0); return; }
+    recalcPromotions(appliedCoupon?.code || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, total, user?.id, appliedCoupon?.code]);
 
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {
@@ -216,29 +246,32 @@ export default function Checkout() {
     setTimeout(() => navigate(`/order-success/${orderNumber}`), 1200);
   };
 
-  const handleApplyCoupon = async () => {
-    if (!couponCode.trim()) return;
-    try {
-      const res = await axios.post(`${API}/campaigns/validate?code=${couponCode}&total=${total}`);
-      setDiscount(res.data.discount);
-      setAppliedCoupon({ code: couponCode.toUpperCase(), discount: res.data.discount });
-      toast.success(`Kupon uygulandı: ${res.data.discount.toFixed(2)} TL indirim`);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Kupon geçersiz");
+  const applyCode = async (rawCode) => {
+    const code = (rawCode || "").trim().toUpperCase();
+    if (!code) return;
+    const d = await recalcPromotions(code);
+    if (!d) { toast.error("Kampanya hesaplanamadı"); return; }
+    const hit = (d.applied || []).find((a) => (a.code || "").toUpperCase() === code);
+    if (hit) {
+      setAppliedCoupon({ code });
+      toast.success(`Kupon uygulandı: ${Number(hit.discount).toFixed(2)} TL indirim`);
+    } else {
+      const rej = (d.rejected || []).find((r) => (r.code || "").toUpperCase() === code);
+      toast.error(rej?.reason || "Kupon uygulanamadı (daha yüksek öncelikli kampanya olabilir)");
     }
   };
 
+  const handleApplyCoupon = () => applyCode(couponCode);
+
   const handlePickCoupon = (c) => {
     setCouponCode(c.code);
-    setDiscount(c.discount);
-    setAppliedCoupon({ code: c.code, discount: c.discount, title: c.title });
-    toast.success(`${c.code} uygulandı: ${c.discount.toFixed(2)} TL indirim`);
+    applyCode(c.code);
   };
 
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
     setCouponCode("");
-    setDiscount(0);
+    recalcPromotions(""); // girilen kod kalkar, otomatik kampanyalar uygulanmaya devam eder
   };
 
   // ----- Address Modal -----
@@ -349,6 +382,7 @@ export default function Checkout() {
         subtotal: total,
         shipping_cost: shippingCost,
         discount, coupon_code: appliedCoupon?.code || "",
+        applied_promotions: appliedPromotions,
         gift_note: giftNote || "", gift_wrap: giftWrap, gift_wrap_price: giftWrapTotal,
         use_points: usePoints, points_used: pointsDeduction,
         use_3d_secure: use3DSecure,
@@ -903,6 +937,21 @@ export default function Checkout() {
                       : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="apply-coupon-btn">Uygula</button>}
                   </div>
                 </div>
+
+                {/* Madde 4 — uygulanan kampanyalar kirilimi */}
+                {appliedPromotions.length > 0 && (
+                  <div className="px-5 pt-4" data-testid="applied-promotions">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Uygulanan Kampanyalar</div>
+                    <div className="space-y-1">
+                      {appliedPromotions.map((p, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs">
+                          <span className="text-gray-700 truncate">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
+                          <span className="text-green-600 font-semibold shrink-0 ml-2">-{Number(p.discount).toFixed(2)} ₺</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Totals */}
                 <div className="px-5 py-4 mt-3 border-t space-y-2 text-sm">
