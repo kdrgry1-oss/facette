@@ -80,6 +80,7 @@ from routes.footer_template import public_router as footer_public_router, admin_
 from routes.ticimax_stock_sync import router as ticimax_stock_sync_router
 from routes.ticimax_category_sync import router as ticimax_category_sync_router
 from routes.ticimax_member_sync import router as ticimax_member_sync_router
+from routes.ticimax_product_pull import router as ticimax_product_pull_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
@@ -505,6 +506,8 @@ api_router.include_router(ticimax_stock_sync_router)
 api_router.include_router(ticimax_category_sync_router)
 # Ticimax üye içe aktarma — e-posta eşleştirme + geçmiş sipariş bağlama (admin)
 api_router.include_router(ticimax_member_sync_router)
+# Ticimax belirli kart ID ürün çekme — kaynak→hedef kart ID ile yeni ürün (admin)
+api_router.include_router(ticimax_product_pull_router)
 # Toplu fiyat/stok Excel ops + stok uyarı + yeniden sipariş önerisi
 api_router.include_router(bulk_ops_router)
 # RFM müşteri segmentasyonu + marketplace karlılık + Google Merchant feed

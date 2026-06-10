@@ -251,11 +251,13 @@ def get_product_count(aktif: Optional[int] = None,
 def get_products(page: int = 1, page_size: int = 50,
                  aktif: Optional[int] = 1,
                  kategori_id: Optional[int] = None,
+                 urun_karti_id: Optional[int] = None,
                  wscode: str = TICIMAX_API_KEY) -> List[Dict]:
     """
     SelectUrun(UyeKodu, f:UrunFiltre, s:UrunSayfalama)
     aktif=1 → aktif ürünler (varsayılan), aktif=0 → pasif, None → hepsi
     kategori_id → belirli kategori filtresi
+    urun_karti_id → belirli ürün kartı filtresi (tek ürün çekmek için)
     UrunSayfalama: BaslangicIndex (0-based), KayitSayisi, KayitSayisinaGoreGetir
     """
     c = _urun_client()
@@ -267,6 +269,11 @@ def get_products(page: int = 1, page_size: int = 50,
         f_kwargs["Aktif"] = aktif
     if kategori_id is not None:
         f_kwargs["KategoriID"] = kategori_id
+    if urun_karti_id is not None:
+        # Ticimax UrunFiltre tek-ürün filtresi (alan adı sürüme göre değişebilir,
+        # ikisini de set ediyoruz; desteklenmeyen alan strict=False ile yok sayılır).
+        f_kwargs["UrunKartiID"] = urun_karti_id
+        f_kwargs["UrunID"] = urun_karti_id
     f = ff(**f_kwargs)
 
     start = (page - 1) * page_size
