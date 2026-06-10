@@ -1,7 +1,7 @@
 """
 Order routes - CRUD, checkout, tracking
 """
-from fastapi import APIRouter, HTTPException, Query, Depends, Response, Request, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, Depends, Response, Request, UploadFile, File, Form, Body
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import time
@@ -3238,3 +3238,86 @@ async def reject_return(return_id: str, payload: dict,
     _aio.create_task(_n())
 
     return {"success": True, "status": "rejected", "reason": reason, "reship_code": reship_code}
+
+
+# ============================================================================
+# Madde 3 — Gider Pusulası (site iadeleri) (P5)
+# ============================================================================
+
+@router.post("/returns/{return_id}/gider-pusulasi")
+async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = Body(default=None),
+                                     current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """Site iadesi için gider pusulası verisi üretir. Trendyol tarafıyla AYNI koleksiyonu
+    (db.gider_pusulasi) ve AYNI numara serisini kullanır (numaralar sürekli)."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    settings = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    company = settings.get("company_info", {}) if settings else {}
+
+    ship = order.get("shipping_address", {}) or {}
+    cust_name = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                 or ship.get("full_name", "") or "Müşteri")
+
+    items = rec.get("items", []) or []
+    total_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
+    total_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * int(it.get("quantity", 1) or 1) for it in items))
+    total_discount = _round2(max(0.0, total_gross - total_net))
+    vat_rate = settings.get("default_vat_rate", 10) if settings else 10
+    vat_amount = round(total_net * vat_rate / (100 + vat_rate), 2)
+    net_without_vat = round(total_net - vat_amount, 2)
+
+    # ORTAK numara serisi (Trendyol + site)
+    last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
+    gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+    tracking_no = str((payload or {}).get("tracking_no") or "").strip()
+    display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
+
+    gp_items = [{
+        "name": it.get("name", ""),
+        "barcode": it.get("product_id", "") or it.get("barcode", ""),
+        "size": it.get("size", ""),
+        "quantity": it.get("quantity", 1),
+        "unit_price": it.get("unit_price", it.get("price", 0)),
+        "discount": it.get("discount_amount", 0),
+        "net_price": it.get("price", 0),
+        "reason": rec.get("reason", ""),
+    } for it in items]
+
+    gider_pusulasi = {
+        "number": gp_number,
+        "display_number": display_number,
+        "return_id": return_id,
+        "source": "site",
+        "order_number": rec.get("order_number", ""),
+        "date": datetime.now(timezone.utc).isoformat(),
+        "company": company,
+        "customer": {
+            "name": cust_name,
+            "address": ship.get("address", ""),
+            "district": ship.get("district", ""),
+            "city": ship.get("city", ""),
+            "country": ship.get("country", "") or "Türkiye",
+        },
+        "sales_invoice_no": order.get("invoice_number", ""),
+        "cargo_company": rec.get("cargo_provider_name", ""),
+        "sales_rep": "",
+        "items": gp_items,
+        "totals": {
+            "gross": total_gross,
+            "discount": total_discount,
+            "net": total_net,
+            "vat_rate": vat_rate,
+            "vat_amount": vat_amount,
+            "net_without_vat": net_without_vat,
+        },
+        "claim_reason": rec.get("reason", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.gider_pusulasi.update_one({"return_id": return_id}, {"$set": gider_pusulasi}, upsert=True)
+    await db.customer_returns.update_one({"id": return_id},
+        {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": display_number}})
+
+    return {"success": True, "gider_pusulasi": gider_pusulasi}
