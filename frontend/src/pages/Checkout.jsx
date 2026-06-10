@@ -113,6 +113,7 @@ export default function Checkout() {
         user_id: user?.id || null,
         email: user?.email || "",
         code: code || "",
+        payment_method: paymentMethod,
       });
       const d = res.data || {};
       setAppliedPromotions(d.applied || []);
@@ -152,12 +153,12 @@ export default function Checkout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
 
-  // Madde 4 — sepet/kod degisince motoru calistir (discount DEP DEGIL -> dongu yok)
+  // Madde 4 — sepet/kod/ÖDEME YÖNTEMİ degisince motoru calistir (discount DEP DEGIL -> dongu yok)
   useEffect(() => {
     if (items.length === 0) { setAppliedPromotions([]); setDiscount(0); return; }
     recalcPromotions(appliedCoupon?.code || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, total, user?.id, appliedCoupon?.code]);
+  }, [items, total, user?.id, appliedCoupon?.code, paymentMethod]);
 
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {

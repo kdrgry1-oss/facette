@@ -73,7 +73,7 @@ const blankForm = () => ({
   first_order_only: false, usage_limit_per_user: 0, min_quantity: 0,
   buy_quantity: 2, free_quantity: 1, get_discount: 50,
   priority: 0, combinable: false, stack_group: "", combinable_with: [],
-  categories: [], products: [],
+  categories: [], products: [], payment_methods: [],
 });
 
 export default function AdminCampaigns() {
@@ -115,6 +115,10 @@ export default function AdminCampaigns() {
   const toggleCombinableWith = (id) => {
     const cur = formData.combinable_with || [];
     setFormData({ ...formData, combinable_with: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+  const togglePaymentMethod = (key) => {
+    const cur = formData.payment_methods || [];
+    setFormData({ ...formData, payment_methods: cur.includes(key) ? cur.filter((x) => x !== key) : [...cur, key] });
   };
 
   const fetchCampaigns = async () => {
@@ -179,6 +183,7 @@ export default function AdminCampaigns() {
       combinable_with: c.combinable_with || [],
       categories: c.categories || [],
       products: c.products || [],
+      payment_methods: c.payment_methods || [],
     });
     setModalOpen(true);
   };
@@ -470,6 +475,23 @@ export default function AdminCampaigns() {
                 </div>
               </div>
             )}
+
+            {/* Ödeme yöntemine özel kampanya — boş = tüm yöntemler */}
+            <div className="border rounded-lg p-3 bg-gray-50/50">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Ödeme yöntemi <span className="font-normal normal-case text-gray-400">(boş = tüm yöntemlerde geçerli · örn. sadece Havale/EFT seçersen indirim yalnızca havalede biner)</span></div>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {[
+                  { key: "bank_transfer", label: "Havale / EFT" },
+                  { key: "credit_card", label: "Banka & Kredi Kartı" },
+                  { key: "cash_on_delivery", label: "Kapıda Ödeme" },
+                ].map((pm) => (
+                  <label key={pm.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" className="accent-black" checked={(formData.payment_methods || []).includes(pm.key)} onChange={() => togglePaymentMethod(pm.key)} />
+                    <span>{pm.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
 
             {/* Madde 4 — Kapsam (kategori/ürün). Boş = tüm sepete uygulanır. */}
             <div className="border rounded-lg p-3 space-y-3 bg-gray-50/50">

@@ -337,6 +337,43 @@ async def create_order(
     _pm0 = (order.get("payment_method") or "").lower()
     if _pm0 in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
         order["status"] = "awaiting_payment"
+
+    # Madde 4 — SUNUCU-OTORITER GUVENLI KELEPCE (tek yonlu). Sunucu indirimi odeme yontemiyle
+    # birlikte yeniden hesaplar; istemcinin gonderdigi indirim sunucununkini ASAMAZ. Mesru
+    # siparis degismez (iki deger esit). Sismis/sahte indirim (orn. havale indirimini kapip
+    # kartla odeme) kirpilir; karta yansiyan tutar INSERT'ten ONCE duzeltilir (cunku
+    # /payment/card/pay siparisin kayitli total'ini ceker). Hata olsa bile siparis bozulmaz.
+    try:
+        from .coupons import evaluate_cart_promotions as _eval_promos
+        _eng_items = [{
+            "product_id": it.get("product_id"),
+            "category_id": it.get("category_id"),
+            "qty": it.get("quantity", it.get("qty", 1)),
+            "price": it.get("price", 0),
+        } for it in (order.get("items") or [])]
+        _ev = await _eval_promos(
+            cart_total=float(order.get("subtotal", 0) or 0),
+            items=_eng_items,
+            user_id=order.get("user_id"),
+            email=(order.get("shipping_address") or {}).get("email", ""),
+            entered_code=order.get("coupon_code", ""),
+            payment_method=order.get("payment_method", ""),
+        )
+        _srv = round(float(_ev.get("total_discount", 0) or 0), 2)
+        _cli = round(float(order.get("discount", 0) or 0), 2)
+        if _cli - _srv > 0.01:  # istemci fazla indirim iddia etmis -> sunucu degerine kirp
+            _delta = round(_cli - _srv, 2)
+            order["discount"] = _srv
+            order["total"] = round(float(order.get("total", 0) or 0) + _delta, 2)
+            order["applied_promotions"] = _ev.get("applied") or []
+            order["promo_clamped"] = {"client": _cli, "server": _srv, "delta": _delta,
+                                      "payment_method": order.get("payment_method")}
+            logger.warning(f"[PROMO KELEPCE] siparis={order['order_number']} istemci={_cli} "
+                           f"sunucu={_srv} -> indirim {_srv}'e kirpildi, total +{_delta} "
+                           f"(odeme={order.get('payment_method')})")
+    except Exception as _clamp_err:
+        logger.warning(f"Promo kelepce hatasi (siparis etkilenmedi): {_clamp_err}")
+
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 
@@ -369,31 +406,10 @@ async def create_order(
     except Exception as _redeem_err:
         logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
 
-    # Madde 4 — Sunucu-otoriter fiyat (GÖZLEM/shadow). Motoru sipariş kalemleriyle yeniden
-    # çalıştırıp istemcinin gönderdiği discount ile karşılaştırır; FARK varsa LOGLAR.
-    # FİYATA DOKUNMAZ — gerçek zorlama ödeme adımından ÖNCE yapılmalı; bu yalnızca gözlem.
-    try:
-        from .coupons import evaluate_cart_promotions as _eval_promos
-        _eng_items = [{
-            "product_id": it.get("product_id"),
-            "category_id": it.get("category_id"),
-            "qty": it.get("quantity", it.get("qty", 1)),
-            "price": it.get("price", 0),
-        } for it in (order.get("items") or [])]
-        _ev = await _eval_promos(
-            cart_total=float(order.get("subtotal", 0) or 0),
-            items=_eng_items,
-            user_id=order.get("user_id"),
-            email=(order.get("shipping_address") or {}).get("email", ""),
-            entered_code=order.get("coupon_code", ""),
-        )
-        _srv = float(_ev.get("total_discount", 0) or 0)
-        _cli = float(order.get("discount", 0) or 0)
-        if abs(_srv - _cli) > 0.01:
-            logger.warning(f"[PROMO SHADOW] siparis={order['order_number']} istemci_indirim={_cli} "
-                           f"sunucu_indirim={_srv} fark={round(_cli - _srv, 2)} (fiyat degismedi)")
-    except Exception as _shadow_err:
-        logger.warning(f"Promo gölge yeniden hesap hatası (sipariş etkilenmedi): {_shadow_err}")
+    # NOT: Sunucu-otoriter promosyon yeniden-hesabi artik INSERT'ten ONCE "guvenli kelepce"
+    # blogunda yapiliyor (yukari bkz). Bu yuzden eski post-insert [PROMO SHADOW] gozlem blogu
+    # kaldirildi — motor siparis basina yalnizca bir kez calisir.
+
 
     # FAZ — Sipariş onayı bildirimi (SMS + Email + WhatsApp) — fire-and-forget
     import asyncio as _asyncio

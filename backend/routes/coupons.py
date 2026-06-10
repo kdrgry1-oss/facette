@@ -84,6 +84,7 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "combinable": bool(payload.get("combinable", False)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
         "combinable_with": payload.get("combinable_with") or [],
+        "payment_methods": payload.get("payment_methods") or [],  # bos=tum yontemler; dolu=sadece secililer
         "created_at": _utcnow(),
         "created_by": current_user.get("email", ""),
     }
@@ -99,7 +100,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "categories", "products", "usage_limit", "usage_limit_per_user",
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
         "min_quantity", "buy_quantity", "free_quantity", "get_discount",
-        "priority", "combinable", "stack_group", "combinable_with",
+        "priority", "combinable", "stack_group", "combinable_with", "payment_methods",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _utcnow()
@@ -202,6 +203,21 @@ async def available_coupons(payload: dict):
     return {"items": out, "total": len(out)}
 
 
+def _norm_pm(pm) -> str:
+    """Odeme yontemi anahtarini kanonik 3 degerden birine indirger.
+    bank_transfer | credit_card | cash_on_delivery. Bos/bilinmeyen -> ''."""
+    s = (str(pm or "")).strip().lower()
+    if not s:
+        return ""
+    if s in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "wire"):
+        return "bank_transfer"
+    if s in ("cash_on_delivery", "kapida", "kapıda", "cod", "kapida_odeme"):
+        return "cash_on_delivery"
+    if s in ("credit_card", "card", "kredi_karti", "kredi_kart", "banka_kredi_karti", "iyzico"):
+        return "credit_card"
+    return s  # taninmayan ama dolu deger: oldugu gibi (esitlik yine de calisir)
+
+
 def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     """Saf indirim matematigi (dogrulama YOK). Kapsam(scope) + tip(nth/percent/fixed).
     items fiyatlari olceklenmis verilirse (stacking) sonuc kalan tabana gore otomatik cikar."""
@@ -243,10 +259,14 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
 
 
 async def _evaluate_single(c: dict, cart_total: float, items: list,
-                           user_id=None, email: str = "") -> dict:
+                           user_id=None, email: str = "", payment_method: str = "") -> dict:
     """Tek kuponu dogrular + indirimini hesaplar. apply_coupon VE motor ayni cekirdegi kullanir."""
     if not c.get("is_active"):
         return {"valid": False, "reason": "Kupon pasif", "discount": 0}
+    # Odeme yontemi filtresi: kampanyanin payment_methods listesi doluysa, secili yontem listede olmali.
+    _pms = c.get("payment_methods") or []
+    if _pms and _norm_pm(payment_method) not in [_norm_pm(x) for x in _pms]:
+        return {"valid": False, "reason": "Bu kampanya bu ödeme yönteminde geçerli değil", "discount": 0}
     now = datetime.now(timezone.utc)
     if c.get("start_at") and c["start_at"] > now.isoformat():
         return {"valid": False, "reason": "Kupon henüz başlamadı", "discount": 0}
@@ -297,7 +317,8 @@ async def apply_coupon(payload: dict):
     cart_total = float(payload.get("cart_total") or 0)
     items = payload.get("items") or []
     email = payload.get("email") or payload.get("customer_email") or ""
-    return await _evaluate_single(c, cart_total, items, payload.get("user_id"), email)
+    return await _evaluate_single(c, cart_total, items, payload.get("user_id"), email,
+                                  payload.get("payment_method") or "")
 
 
 @public_router.post("/redeem")
@@ -357,6 +378,7 @@ def _coupon_to_campaign(c: dict) -> dict:
         "categories": c.get("categories") or [],
         "products": c.get("products") or [],
         "combinable_with": c.get("combinable_with") or [],
+        "payment_methods": c.get("payment_methods") or [],
     }
 
 
@@ -395,6 +417,7 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "combinable": bool(payload.get("combinable", False)),
         "stack_group": (payload.get("stack_group") or "").strip() or None,
         "combinable_with": payload.get("combinable_with") or [],
+        "payment_methods": payload.get("payment_methods") or [],
     }
 
 
@@ -469,7 +492,8 @@ async def _promo_cap_pct() -> float:
 
 
 async def evaluate_cart_promotions(cart_total: float, items: list,
-                                   user_id=None, email: str = "", entered_code: str = "") -> dict:
+                                   user_id=None, email: str = "", entered_code: str = "",
+                                   payment_method: str = "") -> dict:
     """Otomatik kampanyalar + (varsa) girilen kodu birlikte degerlendirir. Saf orkestrasyon."""
     entered = (entered_code or "").strip().upper()
 
@@ -487,7 +511,7 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
     # 2) Tekil degerlendirme
     valid, rejected = [], []
     for cid, c in candidates.items():
-        ev = await _evaluate_single(c, cart_total, items, user_id, email)
+        ev = await _evaluate_single(c, cart_total, items, user_id, email, payment_method)
         if ev.get("valid") and (ev.get("discount", 0) > 0 or ev.get("free_shipping")):
             valid.append({
                 "c": c, "discount": ev["discount"], "free_shipping": ev.get("free_shipping", False),
@@ -577,4 +601,5 @@ async def evaluate_promotions_endpoint(payload: dict):
         user_id=payload.get("user_id"),
         email=payload.get("email") or payload.get("customer_email") or "",
         entered_code=payload.get("code") or "",
+        payment_method=payload.get("payment_method") or "",
     )
