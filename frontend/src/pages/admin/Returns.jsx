@@ -4,6 +4,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
+import SiteReturns from "./SiteReturns";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -142,10 +143,16 @@ export default function Returns() {
   }, [search]);
 
   const fetchClaims = useCallback(async () => {
+    // Web Sitesi sekmesi kendi verisini gömülü <SiteReturns/> ile customer_returns'ten
+    // ceker; bu yuzden Trendyol claims endpoint'ini cagirmaya gerek yok.
+    if (platform === "facette") {
+      setClaims([]); setTotal(0); setTabCounts({}); setStats({}); setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      // platform = 'facette' (site iadeleri) veya 'trendyol' (pazaryeri). Backend ayrimi yapar.
+      // platform = 'trendyol' (pazaryeri). Backend tum claim'leri dondurur (mikro ihracat dahil).
       const params = new URLSearchParams({ page, limit, search: debouncedSearch, platform });
       if (statusTab && statusTab !== "all") params.append("status", statusTab);
       const res = await axios.get(`${API}/integrations/trendyol/claims?${params}`, {
@@ -412,6 +419,11 @@ export default function Returns() {
           ))}
         </div>
 
+        {/* Web Sitesi sekmesi: gerçek site iadeleri (customer_returns) gömülü SiteReturns ile */}
+        {platform === "facette" && <SiteReturns embedded />}
+
+        {/* Trendyol (pazaryeri) sekmesi gövdesi */}
+        {platform !== "facette" && (<>
         {/* Durum sekmeleri */}
         <div className="flex items-center gap-2 overflow-x-auto mb-4">
           {STATUS_TABS.map((t) => (
@@ -501,9 +513,7 @@ export default function Returns() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sebep</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kargo</th>
-                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Brüt</th>
-                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">İskonto</th>
-                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Net (Fatura)</th>
+                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tarih</th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Durum</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">İşlemler</th>
@@ -511,9 +521,9 @@ export default function Returns() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
               ) : claims.length === 0 ? (
-                <tr><td colSpan={12} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
               ) : claims.map(claim => {
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
@@ -591,9 +601,15 @@ export default function Returns() {
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right font-mono text-gray-500 line-through text-xs">{totalDiscount > 0 ? formatCurrency(totalGross) : ""}</td>
-                    <td className="px-3 py-3 text-right font-mono text-orange-600 text-xs font-bold">{totalDiscount > 0 ? `-${formatCurrency(totalDiscount)}` : "-"}</td>
-                    <td className="px-3 py-3 text-right font-mono font-bold">{formatCurrency(totalNet)}</td>
+                    <td className="px-3 py-3 text-right font-mono whitespace-nowrap">
+                      {totalDiscount > 0 && (
+                        <div className="text-gray-500 line-through text-xs leading-tight">{formatCurrency(totalGross)}</div>
+                      )}
+                      {totalDiscount > 0 && (
+                        <div className="text-orange-600 text-xs font-bold leading-tight">-{formatCurrency(totalDiscount)}</div>
+                      )}
+                      <div className="font-bold text-gray-900 leading-tight">{formatCurrency(totalNet)}</div>
+                    </td>
                     <td className="px-3 py-3 text-xs text-gray-500">{formatDate(claim.created_date)}</td>
                     <td className="px-3 py-3 text-center"><ActionBadge action={claim.panel_action} /></td>
                     <td className="px-3 py-3">
@@ -664,6 +680,7 @@ export default function Returns() {
             </div>
           </div>
         )}
+        </>)}
       </div>
 
       {/* Gider Pusulası Modal */}

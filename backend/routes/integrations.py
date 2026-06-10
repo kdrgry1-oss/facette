@@ -5591,7 +5591,6 @@ async def get_trendyol_claims(
             {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
         ]
 
-    want_site = (str(platform or "").lower() in ("facette", "web", "site"))
     status_keys = set(STATUS_BUCKETS[status]) if (status and status != "all" and status in STATUS_BUCKETS) else None
 
     # base_query (arama/tip filtreli, AMA status filtresiz) ile TÜM kayıtları çek.
@@ -5611,12 +5610,12 @@ async def get_trendyol_claims(
         seen.add(cid)
         deduped.append(c)
 
-    # (b) site / pazaryeri ayrımı + her kayda is_site_order bayrağı ekle.
-    platform_scoped = []
-    for c in deduped:
-        c["is_site_order"] = _claim_is_site_order(c)
-        if c["is_site_order"] == want_site:
-            platform_scoped.append(c)
+    # (b) trendyol_claims koleksiyonu TAMAMEN pazaryeri (Trendyol) kayitlaridir.
+    # Site iadeleri ayri koleksiyonda (customer_returns) ve ayri sekmede (Web Sitesi)
+    # gosterilir. Bu yuzden burada site/pazaryeri ayrimi YAPILMAZ; mikro ihracat dahil
+    # TUM claim'ler dondurulur. (`platform` parametresi geriye-donuk uyumluluk icin
+    # kabul edilir ama bu endpoint'te artik filtreleme yapmaz.)
+    platform_scoped = deduped
 
     # (c) status sekmesi filtresi (bellekte)
     if status_keys is not None:

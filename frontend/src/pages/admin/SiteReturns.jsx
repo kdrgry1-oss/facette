@@ -24,7 +24,7 @@ const STATUS_CLS = {
   cancelled: "bg-gray-100 text-gray-500 border-gray-300",
 };
 
-export default function SiteReturns() {
+export default function SiteReturns({ embedded = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
@@ -61,10 +61,12 @@ export default function SiteReturns() {
   return (
     <div data-testid="admin-site-returns">
       <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <RotateCcw size={22} className="text-rose-600" />
-          <h1 className="text-2xl font-bold">İade Talepleri (Site)</h1>
-        </div>
+        {!embedded && (
+          <div className="flex items-center gap-2">
+            <RotateCcw size={22} className="text-rose-600" />
+            <h1 className="text-2xl font-bold">İade Talepleri (Site)</h1>
+          </div>
+        )}
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border px-3 py-2 rounded text-sm">
           <option value="">Tüm Durumlar</option>
           {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
