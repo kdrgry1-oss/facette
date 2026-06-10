@@ -42,6 +42,64 @@ export default function ProductDetail() {
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifySubmitting, setNotifySubmitting] = useState(false);
 
+  // SEO — JSON-LD yapısal veri (Product + BreadcrumbList). react-helmet yok,
+  // bu yüzden <head>'e script'i elle enjekte edip temizliyoruz. Google'ın
+  // "rich results" (fiyat, stok, marka) göstermesini sağlar.
+  useEffect(() => {
+    if (!product) return;
+    const origin = (typeof window !== "undefined" && window.location && window.location.origin) || "https://facette.com.tr";
+    const canonical = `${origin}/urun/${product.slug || product.id}`;
+    const price = product.sale_price || product.price;
+    const inStock = Array.isArray(product.variants) && product.variants.length > 0
+      ? product.variants.some((v) => (v.stock || 0) > 0)
+      : true;
+
+    const productLd = {
+      "@context": "https://schema.org/",
+      "@type": "Product",
+      name: product.name,
+      image: Array.isArray(product.images) && product.images.length ? product.images : undefined,
+      description: product.description || product.name,
+      sku: product.barcode || product.stock_code || product.id,
+      brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
+      offers: {
+        "@type": "Offer",
+        url: canonical,
+        priceCurrency: "TRY",
+        price: price != null ? String(price) : undefined,
+        availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      },
+    };
+
+    const crumbs = [{ name: "Ana Sayfa", item: origin }];
+    if (product.category_name) {
+      crumbs.push({ name: product.category_name, item: `${origin}/kategori/${product.category_slug || ""}` });
+    }
+    crumbs.push({ name: product.name, item: canonical });
+    const breadcrumbLd = {
+      "@context": "https://schema.org/",
+      "@type": "BreadcrumbList",
+      itemListElement: crumbs.map((c, i) => ({
+        "@type": "ListItem",
+        position: i + 1,
+        name: c.name,
+        item: c.item,
+      })),
+    };
+
+    const tag = document.createElement("script");
+    tag.type = "application/ld+json";
+    tag.setAttribute("data-seo", "product");
+    tag.text = JSON.stringify([productLd, breadcrumbLd]);
+    // Önceki kalmışsa temizle, sonra ekle
+    document.querySelectorAll('script[data-seo="product"]').forEach((el) => el.remove());
+    document.head.appendChild(tag);
+
+    return () => {
+      document.querySelectorAll('script[data-seo="product"]').forEach((el) => el.remove());
+    };
+  }, [product]);
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [slug]);

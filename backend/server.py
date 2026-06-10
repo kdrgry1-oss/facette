@@ -41,6 +41,7 @@ from routes import (
 )
 from routes.vendors import router as vendors_router
 from routes.admin_rbac import router as admin_rbac_router
+from routes.seo import router as seo_router
 from routes.size_tables import router as size_tables_router, public_router as size_tables_public_router
 from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
 from routes.ai_chatbot import router as ai_chatbot_router
@@ -573,6 +574,9 @@ async def health():
 
 # Include API router
 app.include_router(api_router)
+
+# SEO: /sitemap.xml ve /robots.txt — KÖK seviye (api_router'a DEĞİL, /api prefix'siz)
+app.include_router(seo_router)
 
 # Static files (if needed)
 static_path = os.path.join(os.path.dirname(__file__), "static")
