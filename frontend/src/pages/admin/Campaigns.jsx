@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, Percent, Gift, Truck, Tag, ShoppingBag, Users, Clock, Sparkles } from "lucide-react";
+import { Plus, Edit, Trash2, Power, Percent, Gift, Truck, Tag, ShoppingBag, Users, Clock, Sparkles, AlertTriangle } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -11,110 +11,77 @@ import {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Hazır kampanya şablonları - "kutucuklu modeller halinde"
+// Hazır kampanya şablonları
 const CAMPAIGN_TEMPLATES = [
   {
-    id: "percent-10",
-    name: "%10 İndirim",
-    icon: Percent,
-    color: "bg-rose-500",
+    id: "percent-10", name: "%10 İndirim", icon: Percent, color: "bg-rose-500",
     description: "Sepette %10 iskonto uygulayan klasik kampanya.",
     payload: { type: "percentage", value: 10, min_order_amount: 0, code: "INDIRIM10", usage_limit: 0 },
   },
   {
-    id: "percent-20-500",
-    name: "500₺+ Sepette %20",
-    icon: Percent,
-    color: "bg-orange-500",
+    id: "percent-20-500", name: "500₺+ Sepette %20", icon: Percent, color: "bg-orange-500",
     description: "500₺ üzeri alışverişlere %20 indirim.",
     payload: { type: "percentage", value: 20, min_order_amount: 500, code: "BUYUK20", usage_limit: 0 },
   },
   {
-    id: "free-shipping",
-    name: "Ücretsiz Kargo",
-    icon: Truck,
-    color: "bg-emerald-500",
+    id: "free-shipping", name: "Ücretsiz Kargo", icon: Truck, color: "bg-emerald-500",
     description: "Tüm siparişlerde ücretsiz kargo.",
-    payload: { type: "free_shipping", value: 0, min_order_amount: 0, code: "KARGO0", usage_limit: 0 },
+    payload: { type: "free_shipping", value: 0, min_order_amount: 0, code: "KARGO0", usage_limit: 0, auto_apply: true },
   },
   {
-    id: "free-shipping-300",
-    name: "300₺+ Ücretsiz Kargo",
-    icon: Truck,
-    color: "bg-teal-500",
+    id: "free-shipping-300", name: "300₺+ Ücretsiz Kargo", icon: Truck, color: "bg-teal-500",
     description: "Minimum 300₺ alışverişlerde ücretsiz teslimat.",
-    payload: { type: "free_shipping", value: 0, min_order_amount: 300, code: "UCRETSIZKARGO", usage_limit: 0 },
+    payload: { type: "free_shipping", value: 0, min_order_amount: 300, code: "KARGOBEDAVA", usage_limit: 0, auto_apply: true },
   },
   {
-    id: "fixed-50",
-    name: "50₺ İndirim Çeki",
-    icon: Tag,
-    color: "bg-sky-500",
-    description: "Her siparişte sabit 50₺ düşüm.",
+    id: "fixed-50", name: "50₺ İndirim Çeki", icon: Tag, color: "bg-sky-500",
+    description: "Her siparişte sabit 50₺ düşüm (min 150₺).",
     payload: { type: "fixed", value: 50, min_order_amount: 150, code: "CEK50", usage_limit: 0 },
   },
   {
-    id: "welcome-15",
-    name: "Hoşgeldin İndirimi",
-    icon: Gift,
-    color: "bg-pink-500",
-    description: "İlk alışverişe özel %15 indirim, tek kullanımlık.",
-    payload: { type: "percentage", value: 15, min_order_amount: 0, code: "HOSGELDIN15", usage_limit: 1 },
+    id: "welcome-15", name: "Hoşgeldin (İlk Sipariş)", icon: Gift, color: "bg-pink-500",
+    description: "Sadece ilk siparişe özel %15, kişi başı 1 kez.",
+    payload: { type: "percentage", value: 15, min_order_amount: 0, code: "HOSGELDIN15", usage_limit: 0, first_order_only: true, usage_limit_per_user: 1 },
   },
   {
-    id: "buy2-save-25",
-    name: "2 Al %25 İndirim",
-    icon: ShoppingBag,
-    color: "bg-amber-500",
-    description: "En az 2 ürün alana %25 toplu indirim.",
-    payload: { type: "percentage", value: 25, min_order_amount: 0, code: "IKI25", usage_limit: 0 },
+    id: "second-item-50", name: "2. Ürüne %50", icon: ShoppingBag, color: "bg-amber-500",
+    description: "2 ürün alana, EN UCUZ ürüne %50 indirim.",
+    payload: { type: "nth_discount", value: 0, min_order_amount: 0, code: "IKINCI50", usage_limit: 0, buy_quantity: 2, free_quantity: 1, get_discount: 50, min_quantity: 2 },
   },
   {
-    id: "vip-30",
-    name: "VIP Müşteri %30",
-    icon: Users,
-    color: "bg-violet-500",
-    description: "VIP segment için %30 özel kampanya.",
-    payload: { type: "percentage", value: 30, min_order_amount: 0, code: "VIP30", usage_limit: 100 },
+    id: "buy3-pay2", name: "3 Al 2 Öde", icon: ShoppingBag, color: "bg-amber-600",
+    description: "Her 3 üründe en ucuz olan bedava (100% indirim).",
+    payload: { type: "nth_discount", value: 0, min_order_amount: 0, code: "3AL2ODE", usage_limit: 0, buy_quantity: 3, free_quantity: 1, get_discount: 100, min_quantity: 3 },
   },
   {
-    id: "flash-sale",
-    name: "Flaş Satış %40",
-    icon: Clock,
-    color: "bg-red-600",
-    description: "24 saatlik kısa süreli büyük indirim.",
+    id: "vip-30", name: "VIP Müşteri %30", icon: Users, color: "bg-violet-500",
+    description: "VIP segment için %30 özel kampanya (kişi başı 1).",
+    payload: { type: "percentage", value: 30, min_order_amount: 0, code: "VIP30", usage_limit: 100, usage_limit_per_user: 1 },
+  },
+  {
+    id: "flash-sale", name: "Flaş Satış %40", icon: Clock, color: "bg-red-600",
+    description: "Kısa süreli büyük indirim. Süreyi mutlaka kısaltın!",
     payload: { type: "percentage", value: 40, min_order_amount: 0, code: "FLAS40", usage_limit: 500 },
   },
-  {
-    id: "cart-abandon-12",
-    name: "Sepet Hatırlatma %12",
-    icon: Sparkles,
-    color: "bg-fuchsia-500",
-    description: "Sepetini terk eden müşteriye özel %12.",
-    payload: { type: "percentage", value: 12, min_order_amount: 0, code: "GERI12", usage_limit: 1 },
-  },
 ];
+
+const blankForm = () => ({
+  name: "", type: "percentage", value: 0, min_order_amount: 0, code: "",
+  start_date: new Date().toISOString().split('T')[0],
+  end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+  is_active: true, auto_apply: false, usage_limit: 0,
+  first_order_only: false, usage_limit_per_user: 0, min_quantity: 0,
+  buy_quantity: 2, free_quantity: 1, get_discount: 50,
+});
 
 export default function AdminCampaigns() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    type: "percentage",
-    value: 0,
-    min_order_amount: 0,
-    code: "",
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    is_active: true,
-    auto_apply: false,
-    usage_limit: 0,
-  });
+  const [editingId, setEditingId] = useState(null);
+  const [formData, setFormData] = useState(blankForm());
 
-  useEffect(() => {
-    fetchCampaigns();
-  }, []);
+  useEffect(() => { fetchCampaigns(); }, []);
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -136,8 +103,13 @@ export default function AdminCampaigns() {
         start_date: new Date(formData.start_date).toISOString(),
         end_date: new Date(formData.end_date).toISOString(),
       };
-      await axios.post(`${API}/campaigns`, data);
-      toast.success("Kampanya oluşturuldu");
+      if (editingId) {
+        await axios.put(`${API}/campaigns/${editingId}`, data);
+        toast.success("Kampanya güncellendi");
+      } else {
+        await axios.post(`${API}/campaigns`, data);
+        toast.success("Kampanya oluşturuldu");
+      }
       setModalOpen(false);
       resetForm();
       fetchCampaigns();
@@ -146,40 +118,99 @@ export default function AdminCampaigns() {
     }
   };
 
-  const resetForm = () => {
+  const resetForm = () => { setFormData(blankForm()); setEditingId(null); };
+
+  const openEdit = (c) => {
+    setEditingId(c.id);
     setFormData({
-      name: "", type: "percentage", value: 0, min_order_amount: 0, code: "",
-      start_date: new Date().toISOString().split('T')[0],
-      end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      is_active: true, auto_apply: false, usage_limit: 0
+      name: c.name || "",
+      type: c.type || "percentage",
+      value: c.value || 0,
+      min_order_amount: c.min_order_amount || 0,
+      code: c.code || "",
+      start_date: c.start_date ? new Date(c.start_date).toISOString().split('T')[0] : blankForm().start_date,
+      end_date: c.end_date ? new Date(c.end_date).toISOString().split('T')[0] : blankForm().end_date,
+      is_active: c.is_active !== false,
+      auto_apply: !!c.auto_apply,
+      usage_limit: c.usage_limit || 0,
+      first_order_only: !!c.first_order_only,
+      usage_limit_per_user: c.usage_limit_per_user || 0,
+      min_quantity: c.min_quantity || 0,
+      buy_quantity: c.buy_quantity || 2,
+      free_quantity: c.free_quantity || 1,
+      get_discount: c.get_discount || 50,
     });
+    setModalOpen(true);
   };
 
-  const getTypeLabel = (type) => {
-    const types = {
-      percentage: "Yüzde İndirim",
-      fixed: "Sabit İndirim",
-      free_shipping: "Ücretsiz Kargo",
-    };
-    return types[type] || type;
+  const handleDelete = async (c) => {
+    if (!window.confirm(`"${c.name || c.code}" kampanyası silinsin mi?`)) return;
+    try {
+      await axios.delete(`${API}/campaigns/${c.id}`);
+      toast.success("Kampanya silindi");
+      fetchCampaigns();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Silinemedi");
+    }
   };
+
+  const handleToggle = async (c) => {
+    try {
+      await axios.put(`${API}/campaigns/${c.id}`, { ...c, is_active: !c.is_active });
+      toast.success(c.is_active ? "Pasife alındı" : "Aktifleştirildi");
+      fetchCampaigns();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Güncellenemedi");
+    }
+  };
+
+  const getTypeLabel = (type) => ({
+    percentage: "Yüzde İndirim",
+    fixed: "Sabit İndirim",
+    free_shipping: "Ücretsiz Kargo",
+    nth_discount: "X Al Y Öde",
+  }[type] || type);
+
+  const valueLabel = (c) => {
+    if (c.type === "percentage") return `%${c.value}`;
+    if (c.type === "fixed") return `${c.value} TL`;
+    if (c.type === "nth_discount") return `${c.buy_quantity || 2} al · en ucuz ${c.free_quantity || 1}'e %${c.get_discount || 0}`;
+    return "-";
+  };
+
+  // Riskli tanım uyarısı (form içi)
+  const riskWarning = (() => {
+    if (formData.type === "percentage" && Number(formData.value) >= 40) return "Yüksek indirim oranı (%40+) — marjı kontrol edin.";
+    if (formData.type === "nth_discount" && Number(formData.get_discount) >= 100 && (!formData.min_quantity && !formData.buy_quantity)) return "100% indirim + adet koşulu yok — ürün bedava gidebilir.";
+    if (!Number(formData.usage_limit) && !formData.first_order_only && formData.type !== "free_shipping") return "Toplam kullanım limiti yok — sınırsız kullanılabilir.";
+    return null;
+  })();
 
   const applyTemplate = (tmpl) => {
+    const p = tmpl.payload;
+    setEditingId(null);
     setFormData({
+      ...blankForm(),
       name: tmpl.name,
-      type: tmpl.payload.type,
-      value: tmpl.payload.value,
-      min_order_amount: tmpl.payload.min_order_amount,
-      code: tmpl.payload.code,
-      start_date: new Date().toISOString().split('T')[0],
-      end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      is_active: true,
-      auto_apply: tmpl.payload.auto_apply || tmpl.payload.type === "free_shipping",
-      usage_limit: tmpl.payload.usage_limit || 0,
+      type: p.type,
+      value: p.value || 0,
+      min_order_amount: p.min_order_amount || 0,
+      code: p.code || "",
+      auto_apply: p.auto_apply || p.type === "free_shipping",
+      usage_limit: p.usage_limit || 0,
+      first_order_only: !!p.first_order_only,
+      usage_limit_per_user: p.usage_limit_per_user || 0,
+      min_quantity: p.min_quantity || 0,
+      buy_quantity: p.buy_quantity || 2,
+      free_quantity: p.free_quantity || 1,
+      get_discount: p.get_discount || 50,
     });
     setModalOpen(true);
     toast.success(`"${tmpl.name}" şablonu yüklendi. Kontrol edip kaydedin.`);
   };
+
+  const inputCls = "w-full border px-3 py-2 rounded text-sm";
+  const lblCls = "block text-sm font-medium mb-1";
 
   return (
     <div data-testid="admin-campaigns">
@@ -190,12 +221,11 @@ export default function AdminCampaigns() {
           data-testid="new-campaign-btn"
           className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
         >
-          <Plus size={18} />
-          Yeni Kampanya
+          <Plus size={18} /> Yeni Kampanya
         </button>
       </div>
 
-      {/* Campaign Templates Gallery */}
+      {/* Şablon galerisi */}
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-3">
           <Sparkles size={18} className="text-amber-500" />
@@ -219,9 +249,7 @@ export default function AdminCampaigns() {
                 <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-3">{tmpl.description}</p>
                 <div className="mt-2 flex items-center gap-1 text-[10px] text-gray-400">
                   <code className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">{tmpl.payload.code}</code>
-                  {tmpl.payload.min_order_amount > 0 && (
-                    <span>· min {tmpl.payload.min_order_amount}₺</span>
-                  )}
+                  {tmpl.payload.min_order_amount > 0 && (<span>· min {tmpl.payload.min_order_amount}₺</span>)}
                 </div>
               </button>
             );
@@ -237,39 +265,46 @@ export default function AdminCampaigns() {
               <th>Tür</th>
               <th>Değer</th>
               <th>Kupon Kodu</th>
-              <th>Min. Tutar</th>
+              <th>Koşul</th>
+              <th>Kullanım</th>
               <th>Tarih Aralığı</th>
               <th>Durum</th>
+              <th>İşlem</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={7} className="text-center py-8">Yükleniyor...</td>
-              </tr>
+              <tr><td colSpan={9} className="text-center py-8">Yükleniyor...</td></tr>
             ) : campaigns.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-center py-8 text-gray-500">Kampanya bulunamadı</td>
-              </tr>
+              <tr><td colSpan={9} className="text-center py-8 text-gray-500">Kampanya bulunamadı</td></tr>
             ) : (
-              campaigns.map((campaign) => (
-                <tr key={campaign.id}>
-                  <td className="font-medium">{campaign.name}</td>
-                  <td>{getTypeLabel(campaign.type)}</td>
-                  <td>
-                    {campaign.type === "percentage" ? `%${campaign.value}` : 
-                     campaign.type === "fixed" ? `${campaign.value} TL` : "-"}
+              campaigns.map((c) => (
+                <tr key={c.id}>
+                  <td className="font-medium">{c.name}</td>
+                  <td>{getTypeLabel(c.type)}</td>
+                  <td>{valueLabel(c)}</td>
+                  <td><code className="bg-gray-100 px-2 py-1 text-sm">{c.code || "-"}</code></td>
+                  <td className="text-xs text-gray-600">
+                    {c.first_order_only && <span className="inline-block bg-pink-100 text-pink-700 px-1.5 py-0.5 rounded mr-1">İlk sipariş</span>}
+                    {c.min_quantity > 0 && <span className="inline-block bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded mr-1">min {c.min_quantity} ürün</span>}
+                    {c.min_order_amount > 0 && <span>min {c.min_order_amount}₺</span>}
+                    {!c.first_order_only && !c.min_quantity && !c.min_order_amount && <span className="text-gray-300">—</span>}
                   </td>
-                  <td><code className="bg-gray-100 px-2 py-1 text-sm">{campaign.code || "-"}</code></td>
-                  <td>{campaign.min_order_amount} TL</td>
+                  <td className="text-sm">{c.redeemed_count || 0}{c.usage_limit ? ` / ${c.usage_limit}` : ""}</td>
                   <td className="text-sm">
-                    {new Date(campaign.start_date).toLocaleDateString('tr-TR')} - 
-                    {new Date(campaign.end_date).toLocaleDateString('tr-TR')}
+                    {c.start_date ? new Date(c.start_date).toLocaleDateString('tr-TR') : "-"} – {c.end_date ? new Date(c.end_date).toLocaleDateString('tr-TR') : "-"}
                   </td>
                   <td>
-                    <span className={`px-2 py-1 text-xs rounded ${campaign.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                      {campaign.is_active ? "Aktif" : "Pasif"}
+                    <span className={`px-2 py-1 text-xs rounded ${c.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                      {c.is_active ? "Aktif" : "Pasif"}
                     </span>
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleToggle(c)} title={c.is_active ? "Pasife al" : "Aktifleştir"} className={`p-1.5 rounded hover:bg-gray-100 ${c.is_active ? "text-green-600" : "text-gray-400"}`}><Power size={16} /></button>
+                      <button onClick={() => openEdit(c)} title="Düzenle" className="p-1.5 rounded text-blue-600 hover:bg-blue-50"><Edit size={16} /></button>
+                      <button onClick={() => handleDelete(c)} title="Sil" className="p-1.5 rounded text-red-600 hover:bg-red-50"><Trash2 size={16} /></button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -279,107 +314,116 @@ export default function AdminCampaigns() {
       </div>
 
       {/* Modal */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent>
+      <Dialog open={modalOpen} onOpenChange={(o) => { setModalOpen(o); if (!o) resetForm(); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Yeni Kampanya</DialogTitle>
+            <DialogTitle>{editingId ? "Kampanyayı Düzenle" : "Yeni Kampanya"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Kampanya Adı *</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-                className="w-full border px-3 py-2 rounded text-sm"
-              />
+              <label className={lblCls}>Kampanya Adı *</label>
+              <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required className={inputCls} />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Tür</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm"
-                >
+                <label className={lblCls}>Tür</label>
+                <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} className={inputCls}>
                   <option value="percentage">Yüzde İndirim</option>
                   <option value="fixed">Sabit İndirim (TL)</option>
                   <option value="free_shipping">Ücretsiz Kargo</option>
+                  <option value="nth_discount">X Al Y Öde / N. Ürüne İndirim</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Değer</label>
-                <input
-                  type="number"
-                  value={formData.value}
-                  onChange={(e) => setFormData({ ...formData, value: parseFloat(e.target.value) })}
-                  className="w-full border px-3 py-2 rounded text-sm"
-                />
-              </div>
+              {formData.type !== "nth_discount" && formData.type !== "free_shipping" && (
+                <div>
+                  <label className={lblCls}>Değer {formData.type === "percentage" ? "(%)" : "(TL)"}</label>
+                  <input type="number" value={formData.value} onChange={(e) => setFormData({ ...formData, value: parseFloat(e.target.value) || 0 })} className={inputCls} />
+                </div>
+              )}
             </div>
+
+            {formData.type === "nth_discount" && (
+              <div className="grid grid-cols-3 gap-3 bg-amber-50 border border-amber-200 rounded p-3">
+                <div>
+                  <label className={lblCls}>Kaç ürün alınca</label>
+                  <input type="number" min="1" value={formData.buy_quantity} onChange={(e) => setFormData({ ...formData, buy_quantity: parseInt(e.target.value) || 1 })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={lblCls}>Kaç ürüne</label>
+                  <input type="number" min="1" value={formData.free_quantity} onChange={(e) => setFormData({ ...formData, free_quantity: parseInt(e.target.value) || 1 })} className={inputCls} />
+                </div>
+                <div>
+                  <label className={lblCls}>İndirim (%)</label>
+                  <input type="number" min="1" max="100" value={formData.get_discount} onChange={(e) => setFormData({ ...formData, get_discount: parseFloat(e.target.value) || 0 })} className={inputCls} />
+                </div>
+                <p className="col-span-3 text-[11px] text-amber-700">
+                  Örn: 2 al / 1 ürüne / %50 = ikinci üründe %50. İndirim her zaman <b>en ucuz ürün(ler)e</b> uygulanır. 3 al / 1 / %100 = "3 al 2 öde".
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Kupon Kodu</label>
-                <input
-                  type="text"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                  placeholder="INDIRIM10"
-                  className="w-full border px-3 py-2 rounded text-sm uppercase"
-                />
+                <label className={lblCls}>Kupon Kodu</label>
+                <input type="text" value={formData.code} onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })} placeholder="INDIRIM10" className={`${inputCls} uppercase`} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Min. Sipariş Tutarı</label>
-                <input
-                  type="number"
-                  value={formData.min_order_amount}
-                  onChange={(e) => setFormData({ ...formData, min_order_amount: parseFloat(e.target.value) })}
-                  className="w-full border px-3 py-2 rounded text-sm"
-                />
+                <label className={lblCls}>Min. Sipariş Tutarı (₺)</label>
+                <input type="number" value={formData.min_order_amount} onChange={(e) => setFormData({ ...formData, min_order_amount: parseFloat(e.target.value) || 0 })} className={inputCls} />
               </div>
             </div>
-            <div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" className="accent-black" checked={!!formData.auto_apply} onChange={(e) => setFormData({ ...formData, auto_apply: e.target.checked })} />
-                <span>Otomatik uygula (kod gerekmez) — "Ücretsiz Kargo" kampanyasında sepet, Min. Sipariş Tutarı'na ulaşınca kargo otomatik bedava olur.</span>
-              </label>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className={lblCls}>Min. Ürün Adedi</label>
+                <input type="number" min="0" value={formData.min_quantity} onChange={(e) => setFormData({ ...formData, min_quantity: parseInt(e.target.value) || 0 })} className={inputCls} />
+              </div>
+              <div>
+                <label className={lblCls}>Toplam Kullanım Limiti</label>
+                <input type="number" min="0" value={formData.usage_limit} onChange={(e) => setFormData({ ...formData, usage_limit: parseInt(e.target.value) || 0 })} placeholder="0 = sınırsız" className={inputCls} />
+              </div>
+              <div>
+                <label className={lblCls}>Kişi Başı Limit</label>
+                <input type="number" min="0" value={formData.usage_limit_per_user} onChange={(e) => setFormData({ ...formData, usage_limit_per_user: parseInt(e.target.value) || 0 })} placeholder="0 = sınırsız" className={inputCls} />
+              </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="accent-black" checked={!!formData.first_order_only} onChange={(e) => setFormData({ ...formData, first_order_only: e.target.checked })} />
+              <span><b>Sadece ilk siparişe özel</b> — müşterinin daha önce (iptal hariç) siparişi yoksa geçerli. Hoşgeldin kampanyaları için işaretleyin.</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="accent-black" checked={!!formData.auto_apply} onChange={(e) => setFormData({ ...formData, auto_apply: e.target.checked })} />
+              <span>Otomatik uygula (kod gerekmez) — özellikle "Ücretsiz Kargo" için.</span>
+            </label>
+
+            {riskWarning && (
+              <div className="flex items-start gap-2 text-xs bg-red-50 border border-red-200 text-red-700 rounded p-2">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" /> <span>{riskWarning}</span>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Başlangıç Tarihi</label>
-                <input
-                  type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm"
-                />
+                <label className={lblCls}>Başlangıç Tarihi</label>
+                <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className={inputCls} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Bitiş Tarihi</label>
-                <input
-                  type="date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm"
-                />
+                <label className={lblCls}>Bitiş Tarihi</label>
+                <input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className={inputCls} />
               </div>
             </div>
+
             <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={formData.is_active}
-                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              />
+              <input type="checkbox" checked={formData.is_active} onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })} />
               <span className="text-sm">Aktif</span>
             </label>
+
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <button type="button" onClick={() => setModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">
-                İptal
-              </button>
-              <button type="submit" className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800">
-                Oluştur
-              </button>
+              <button type="button" onClick={() => { setModalOpen(false); resetForm(); }} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
+              <button type="submit" className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800">{editingId ? "Güncelle" : "Oluştur"}</button>
             </div>
           </form>
         </DialogContent>

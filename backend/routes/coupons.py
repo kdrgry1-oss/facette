@@ -224,9 +224,17 @@ async def apply_coupon(payload: dict):
         if used_by_user >= c["usage_limit_per_user"]:
             return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
 
-    # First-order only guard
-    if user_id and c.get("first_order_only"):
-        prior = await db.orders.count_documents({"user_id": user_id, "status": {"$ne": "cancelled"}})
+    # First-order only guard — kullanici VEYA e-posta ile dogrulanir; dogrulanamiyorsa reddet
+    if c.get("first_order_only"):
+        email = (payload.get("email") or payload.get("customer_email") or "").strip().lower()
+        ors = []
+        if user_id:
+            ors.append({"user_id": user_id})
+        if email:
+            ors.append({"customer_email": email})
+        if not ors:
+            return {"valid": False, "reason": "İlk siparişe özel kupon için giriş yapın", "discount": 0}
+        prior = await db.orders.count_documents({"$or": ors, "status": {"$ne": "cancelled"}})
         if prior > 0:
             return {"valid": False, "reason": "Kupon sadece ilk siparişe özeldir", "discount": 0}
 
@@ -234,6 +242,12 @@ async def apply_coupon(payload: dict):
     allowed_cats = set(c.get("categories") or [])
     allowed_pids = set(c.get("products") or [])
     items = payload.get("items") or []
+
+    # Minimum urun adedi kosulu
+    if c.get("min_quantity"):
+        total_qty = sum(int(it.get("qty", 0) or 0) for it in items)
+        if total_qty < int(c["min_quantity"]):
+            return {"valid": False, "reason": f"En az {int(c['min_quantity'])} ürün gerekli", "discount": 0}
 
     if allowed_cats or allowed_pids:
         eligible_total = 0.0
@@ -247,7 +261,27 @@ async def apply_coupon(payload: dict):
         base = cart_total
 
     discount = 0.0
-    if c.get("type") == "percent":
+    ctype = c.get("type")
+    if ctype == "nth_discount":
+        # "X al Y ode" / "N. urune %Z": kapsamdaki urunler birim fiyata gore artan
+        # siralanir; her X'lik grupta EN UCUZ free_quantity adet birime get_discount% uygulanir.
+        bq = int(c.get("buy_quantity") or 2)
+        fq = int(c.get("free_quantity") or 1)
+        gd = float(c.get("get_discount") or 0)
+        units = []
+        for it in items:
+            pid = it.get("product_id")
+            cid_ = it.get("category_id")
+            inscope = (not allowed_cats and not allowed_pids) or (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats)
+            if inscope:
+                for _ in range(int(it.get("qty", 0) or 0)):
+                    units.append(float(it.get("price", 0) or 0))
+        units.sort()  # en ucuz basta
+        groups = (len(units) // bq) if bq else 0
+        n_disc = groups * fq
+        for i in range(min(n_disc, len(units))):
+            discount += units[i] * (gd / 100.0)
+    elif ctype == "percent":
         discount = base * (c.get("value", 0) / 100.0)
         if c.get("max_discount"):
             discount = min(discount, c["max_discount"])
@@ -311,17 +345,41 @@ def _coupon_to_campaign(c: dict) -> dict:
         "end_date": c.get("end_at"),
         "redeemed_count": c.get("redeemed_count", 0),
         "auto_apply": c.get("auto_apply", False),
+        "first_order_only": c.get("first_order_only", False),
+        "usage_limit_per_user": c.get("usage_limit_per_user") or 0,
+        "min_quantity": c.get("min_quantity") or 0,
+        "buy_quantity": c.get("buy_quantity") or 0,
+        "free_quantity": c.get("free_quantity") or 1,
+        "get_discount": c.get("get_discount") or 0,
+        "max_discount": c.get("max_discount") or 0,
     }
 
 
 def _campaign_to_coupon_fields(payload: dict) -> dict:
     ctype = payload.get("type") or "percentage"
+    if ctype == "fixed":
+        type_db = "fixed"
+    elif ctype == "nth_discount":
+        type_db = "nth_discount"
+    else:
+        type_db = "percent"  # "percentage" ve "free_shipping" yuzde tabanli calisir
     return {
         "title": payload.get("name") or payload.get("title") or "",
-        "type": "fixed" if ctype == "fixed" else "percent",
+        "type": type_db,
         "value": float(payload.get("value", 0) or 0),
         "min_cart_total": float(payload.get("min_order_amount", payload.get("min_cart_total", 0)) or 0),
         "usage_limit": int(payload.get("usage_limit", 0) or 0) or None,
+        # --- Kural alanlari (onceden tasinmiyordu; "ilk uyelik herkese" bug'inin koku) ---
+        "usage_limit_per_user": int(payload.get("usage_limit_per_user", 0) or 0) or None,
+        "first_order_only": bool(payload.get("first_order_only", False)),
+        "min_quantity": int(payload.get("min_quantity", 0) or 0) or None,
+        "categories": payload.get("categories") or [],
+        "products": payload.get("products") or [],
+        "max_discount": (float(payload["max_discount"]) if payload.get("max_discount") else None),
+        # --- "X al Y ode / N. urune %Z" icin ---
+        "buy_quantity": int(payload.get("buy_quantity", 0) or 0) or None,
+        "free_quantity": int(payload.get("free_quantity", 1) or 1),
+        "get_discount": float(payload.get("get_discount", 0) or 0),
         "start_at": payload.get("start_date") or payload.get("start_at"),
         "end_at": payload.get("end_date") or payload.get("end_at"),
         "is_active": bool(payload.get("is_active", True)),
