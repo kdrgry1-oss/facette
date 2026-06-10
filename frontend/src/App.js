@@ -6,22 +6,23 @@ import { AuthProvider } from "./context/AuthContext";
 import { FavoritesProvider } from "./context/FavoritesContext";
 import { bootstrapNative } from "./lib/native";
 
-// Storefront sayfaları — hafif ve ilk açılışta gerekli, bu yüzden eager (hemen) yüklenir.
+// Storefront — sadece ana sayfa (LCP) eager; gerisi route'a girilince yüklenir.
+// Bu, ilk açılışta indirilen JS'i ciddi şekilde küçültür (mobil TBT/LCP/FCP iyileşir).
 import Home from "./pages/Home";
-import GizlilikPolitikasi from "./pages/GizlilikPolitikasi";
-import Category from "./pages/Category";
-import ProductDetail from "./pages/ProductDetail";
-import Cart from "./pages/Cart";
-import Checkout from "./pages/Checkout";
-import Search from "./pages/Search";
-import StaticPage from "./pages/StaticPage";
-import Account from "./pages/Account";
-import Login from "./pages/Login";
-import TrackOrder from "./pages/TrackOrder";
-import OrderSuccess from "./pages/OrderSuccess";
-import PaymentNotification from "./pages/PaymentNotification";
-import ReturnRequest from "./pages/ReturnRequest";
-import MiuMiuTheme from "./pages/storefront/MiuMiuTheme";
+const GizlilikPolitikasi = lazy(() => import("./pages/GizlilikPolitikasi"));
+const Category = lazy(() => import("./pages/Category"));
+const ProductDetail = lazy(() => import("./pages/ProductDetail"));
+const Cart = lazy(() => import("./pages/Cart"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const Search = lazy(() => import("./pages/Search"));
+const StaticPage = lazy(() => import("./pages/StaticPage"));
+const Account = lazy(() => import("./pages/Account"));
+const Login = lazy(() => import("./pages/Login"));
+const TrackOrder = lazy(() => import("./pages/TrackOrder"));
+const OrderSuccess = lazy(() => import("./pages/OrderSuccess"));
+const PaymentNotification = lazy(() => import("./pages/PaymentNotification"));
+const ReturnRequest = lazy(() => import("./pages/ReturnRequest"));
+const MiuMiuTheme = lazy(() => import("./pages/storefront/MiuMiuTheme"));
 
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import MaintenanceGate from "./components/MaintenanceGate";
@@ -52,7 +53,8 @@ function App() {
             <Toaster position="top-center" richColors />
             <MarketingPixelsInjector />
             <MaintenanceGate>
-              <Routes>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
+                <Routes>
                 {/* Storefront */}
                 <Route path="/" element={<Home />} />
                 <Route path="/kategori/:slug" element={<Category />} />
@@ -78,18 +80,15 @@ function App() {
                     rotaları AdminApp içindeki kendi <Routes>'unda tanımlı. */}
                 <Route
                   path="/admin/*"
-                  element={
-                    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
-                      <AdminApp />
-                    </Suspense>
-                  }
+                  element={<AdminApp />}
                 />
 
                 {/* Ürün detay — SEO dostu kök URL. Statik rotalar dinamikten önce
                     eşleştiği için /sepet, /giris, /admin vb. her zaman önceliklidir. */}
                 <Route path="/urun/:slug" element={<ProductDetail />} />
                 <Route path="/:slug" element={<ProductDetail />} />
-              </Routes>
+                </Routes>
+              </Suspense>
             </MaintenanceGate>
           </BrowserRouter>
         </FavoritesProvider>

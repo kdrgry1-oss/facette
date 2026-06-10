@@ -230,7 +230,7 @@ function VideoBanner({ block }) {
         </div>
       ) : (
         <Link to={block.links?.[0] || "/"} className="block">
-          <img src={block.images[0]} alt={block.title || ""} className="w-full h-auto" />
+          <img src={optimizeImg(block.images[0], 1920)} alt={block.title || ""} className="w-full h-auto" loading="lazy" decoding="async" />
         </Link>
       )}
     </section>

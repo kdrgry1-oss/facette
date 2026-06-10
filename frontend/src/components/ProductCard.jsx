@@ -78,6 +78,8 @@ export default function ProductCard({ product }) {
             onClick={handleFavorite}
             className="absolute top-3 right-3 z-10"
             data-testid={`favorite-${product.id}`}
+            aria-label={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
+            title={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
           >
             <Heart 
               size={20} 
@@ -115,6 +117,7 @@ export default function ProductCard({ product }) {
               onClick={handleQuickAdd}
               className="flex-shrink-0 p-1 hover:opacity-60 transition-opacity"
               data-testid={`quick-add-${product.id}`}
+              aria-label="Sepete ekle"
               title="Sepete Ekle"
             >
               <ShoppingBag size={18} strokeWidth={1.5} />
