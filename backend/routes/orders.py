@@ -305,6 +305,7 @@ async def create_order(
         "gift_wrap": bool(order_data.get("gift_wrap", False)),
         "gift_wrap_price": float(order_data.get("gift_wrap_price", 0) or 0),
         "coupon_code": (order_data.get("coupon_code") or "").upper(),
+        "applied_promotions": order_data.get("applied_promotions") or [],
         # FAZ 6 — müşteri izleri
         "customer_ip": client_ip,
         "user_agent": request.headers.get("user-agent", "")[:300],
@@ -338,6 +339,35 @@ async def create_order(
         order["status"] = "awaiting_payment"
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
+
+    # Madde 4 — Promosyon kullanım kaydı (usage_limit / usage_limit_per_user'ın ÇALIŞMASI için).
+    # FIYATA DOKUNMAZ; sadece coupon_redemptions'a yazar. Hata olsa bile sipariş bozulmaz.
+    try:
+        _email = (order.get("shipping_address") or {}).get("email", "")
+        _redeem_ids = []
+        _applied = order.get("applied_promotions") or []
+        if _applied:
+            for _a in _applied:
+                _cid = _a.get("coupon_id")
+                if _cid:
+                    _redeem_ids.append((_cid, float(_a.get("discount", 0) or 0)))
+        elif order.get("coupon_code"):
+            _c = await db.coupons.find_one({"code": order["coupon_code"]}, {"_id": 0, "id": 1})
+            if _c:
+                _redeem_ids.append((_c["id"], float(order.get("discount", 0) or 0)))
+        for _cid, _disc in _redeem_ids:
+            _exists = await db.coupon_redemptions.find_one({"coupon_id": _cid, "order_id": order["id"]})
+            if not _exists:
+                await db.coupon_redemptions.insert_one({
+                    "coupon_id": _cid,
+                    "order_id": order["id"],
+                    "user_id": order.get("user_id"),
+                    "customer_email": _email,
+                    "discount": _disc,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+    except Exception as _redeem_err:
+        logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
 
     # FAZ — Sipariş onayı bildirimi (SMS + Email + WhatsApp) — fire-and-forget
     import asyncio as _asyncio

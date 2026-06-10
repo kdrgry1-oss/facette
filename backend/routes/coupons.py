@@ -201,88 +201,28 @@ async def available_coupons(payload: dict):
     return {"items": out, "total": len(out)}
 
 
-@public_router.post("/apply")
-async def apply_coupon(payload: dict):
-    code = (payload.get("code") or "").strip().upper()
-    if not code:
-        return {"valid": False, "reason": "Kupon kodu boş", "discount": 0}
-
-    c = await db.coupons.find_one({"code": code}, {"_id": 0})
-    if not c:
-        return {"valid": False, "reason": "Kupon bulunamadı", "discount": 0}
-    if not c.get("is_active"):
-        return {"valid": False, "reason": "Kupon pasif", "discount": 0}
-
-    now = datetime.now(timezone.utc)
-    if c.get("start_at") and c["start_at"] > now.isoformat():
-        return {"valid": False, "reason": "Kupon henüz başlamadı", "discount": 0}
-    if c.get("end_at") and c["end_at"] < now.isoformat():
-        return {"valid": False, "reason": "Kupon süresi dolmuş", "discount": 0}
-
-    cart_total = float(payload.get("cart_total") or 0)
-    if c.get("min_cart_total", 0) and cart_total < c["min_cart_total"]:
-        return {"valid": False, "reason": f"Minimum sepet tutarı ₺{c['min_cart_total']:.2f}", "discount": 0}
-
-    # Usage limits
-    if c.get("usage_limit"):
-        used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
-        if used >= c["usage_limit"]:
-            return {"valid": False, "reason": "Kupon kullanım limiti dolmuş", "discount": 0}
-
-    user_id = payload.get("user_id")
-    if user_id and c.get("usage_limit_per_user"):
-        used_by_user = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "user_id": user_id})
-        if used_by_user >= c["usage_limit_per_user"]:
-            return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
-
-    # First-order only guard — kullanici VEYA e-posta ile dogrulanir; dogrulanamiyorsa reddet
-    if c.get("first_order_only"):
-        email = (payload.get("email") or payload.get("customer_email") or "").strip().lower()
-        ors = []
-        if user_id:
-            ors.append({"user_id": user_id})
-        if email:
-            ors.append({"customer_email": email})
-        if not ors:
-            return {"valid": False, "reason": "İlk siparişe özel kupon için giriş yapın", "discount": 0}
-        prior = await db.orders.count_documents({"$or": ors, "status": {"$ne": "cancelled"}})
-        if prior > 0:
-            return {"valid": False, "reason": "Kupon sadece ilk siparişe özeldir", "discount": 0}
-
-    # Category/product filter — applies discount only on matching items
+def _compute_discount(c: dict, cart_total: float, items: list) -> float:
+    """Saf indirim matematigi (dogrulama YOK). Kapsam(scope) + tip(nth/percent/fixed).
+    items fiyatlari olceklenmis verilirse (stacking) sonuc kalan tabana gore otomatik cikar."""
     allowed_cats = set(c.get("categories") or [])
     allowed_pids = set(c.get("products") or [])
-    items = payload.get("items") or []
-
-    # Minimum urun adedi kosulu
-    if c.get("min_quantity"):
-        total_qty = sum(int(it.get("qty", 0) or 0) for it in items)
-        if total_qty < int(c["min_quantity"]):
-            return {"valid": False, "reason": f"En az {int(c['min_quantity'])} ürün gerekli", "discount": 0}
-
     if allowed_cats or allowed_pids:
-        eligible_total = 0.0
+        base = 0.0
         for it in items:
-            pid = it.get("product_id")
-            cid_ = it.get("category_id")
+            pid = it.get("product_id"); cid_ = it.get("category_id")
             if (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats):
-                eligible_total += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
-        base = eligible_total
+                base += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
     else:
         base = cart_total
-
-    discount = 0.0
     ctype = c.get("type")
+    discount = 0.0
     if ctype == "nth_discount":
-        # "X al Y ode" / "N. urune %Z": kapsamdaki urunler birim fiyata gore artan
-        # siralanir; her X'lik grupta EN UCUZ free_quantity adet birime get_discount% uygulanir.
         bq = int(c.get("buy_quantity") or 2)
         fq = int(c.get("free_quantity") or 1)
         gd = float(c.get("get_discount") or 0)
         units = []
         for it in items:
-            pid = it.get("product_id")
-            cid_ = it.get("category_id")
+            pid = it.get("product_id"); cid_ = it.get("category_id")
             inscope = (not allowed_cats and not allowed_pids) or (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats)
             if inscope:
                 for _ in range(int(it.get("qty", 0) or 0)):
@@ -290,26 +230,73 @@ async def apply_coupon(payload: dict):
         units.sort()  # en ucuz basta
         groups = (len(units) // bq) if bq else 0
         n_disc = groups * fq
-        for i in range(min(n_disc, len(units))):
-            discount += units[i] * (gd / 100.0)
+        for k in range(min(n_disc, len(units))):
+            discount += units[k] * (gd / 100.0)
     elif ctype == "percent":
         discount = base * (c.get("value", 0) / 100.0)
         if c.get("max_discount"):
             discount = min(discount, c["max_discount"])
     else:  # fixed
         discount = min(c.get("value", 0), base)
+    return round(discount, 2)
 
-    discount = round(discount, 2)
+
+async def _evaluate_single(c: dict, cart_total: float, items: list,
+                           user_id=None, email: str = "") -> dict:
+    """Tek kuponu dogrular + indirimini hesaplar. apply_coupon VE motor ayni cekirdegi kullanir."""
+    if not c.get("is_active"):
+        return {"valid": False, "reason": "Kupon pasif", "discount": 0}
+    now = datetime.now(timezone.utc)
+    if c.get("start_at") and c["start_at"] > now.isoformat():
+        return {"valid": False, "reason": "Kupon henüz başlamadı", "discount": 0}
+    if c.get("end_at") and c["end_at"] < now.isoformat():
+        return {"valid": False, "reason": "Kupon süresi dolmuş", "discount": 0}
+    if c.get("min_cart_total", 0) and cart_total < c["min_cart_total"]:
+        return {"valid": False, "reason": f"Minimum sepet tutarı ₺{c['min_cart_total']:.2f}", "discount": 0}
+    if c.get("usage_limit"):
+        used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
+        if used >= c["usage_limit"]:
+            return {"valid": False, "reason": "Kupon kullanım limiti dolmuş", "discount": 0}
+    if user_id and c.get("usage_limit_per_user"):
+        used_by_user = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "user_id": user_id})
+        if used_by_user >= c["usage_limit_per_user"]:
+            return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
+    if c.get("first_order_only"):
+        em = (email or "").strip().lower()
+        ors = []
+        if user_id:
+            ors.append({"user_id": user_id})
+        if em:
+            ors.append({"customer_email": em})
+        if not ors:
+            return {"valid": False, "reason": "İlk siparişe özel kupon için giriş yapın", "discount": 0}
+        prior = await db.orders.count_documents({"$or": ors, "status": {"$ne": "cancelled"}})
+        if prior > 0:
+            return {"valid": False, "reason": "Kupon sadece ilk siparişe özeldir", "discount": 0}
+    if c.get("min_quantity"):
+        total_qty = sum(int(it.get("qty", 0) or 0) for it in items)
+        if total_qty < int(c["min_quantity"]):
+            return {"valid": False, "reason": f"En az {int(c['min_quantity'])} ürün gerekli", "discount": 0}
+    discount = _compute_discount(c, cart_total, items)
     return {
-        "valid": True,
-        "coupon_id": c["id"],
-        "code": c["code"],
-        "title": c.get("title", ""),
-        "type": c.get("type"),
-        "value": c.get("value"),
-        "discount": discount,
-        "free_shipping": bool(c.get("free_shipping")),
+        "valid": True, "coupon_id": c["id"], "code": c["code"],
+        "title": c.get("title", ""), "type": c.get("type"), "value": c.get("value"),
+        "discount": discount, "free_shipping": bool(c.get("free_shipping")),
     }
+
+
+@public_router.post("/apply")
+async def apply_coupon(payload: dict):
+    code = (payload.get("code") or "").strip().upper()
+    if not code:
+        return {"valid": False, "reason": "Kupon kodu boş", "discount": 0}
+    c = await db.coupons.find_one({"code": code}, {"_id": 0})
+    if not c:
+        return {"valid": False, "reason": "Kupon bulunamadı", "discount": 0}
+    cart_total = float(payload.get("cart_total") or 0)
+    items = payload.get("items") or []
+    email = payload.get("email") or payload.get("customer_email") or ""
+    return await _evaluate_single(c, cart_total, items, payload.get("user_id"), email)
 
 
 @public_router.post("/redeem")
@@ -459,3 +446,113 @@ async def delete_campaign(cid: str, current_user: dict = Depends(require_admin))
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
     return {"success": True}
+
+
+# ============================================================================
+# Madde 4 — Kampanya Motoru (P3)
+# Kilitli kurallar: priority sirali; combinable=False MUNHASIR; combinable=True
+# stack_group basina bir, KALAN tabana ARDISIK (once %20 sonra %10); GLOBAL TAVAN.
+# ============================================================================
+
+async def _promo_cap_pct() -> float:
+    s = await db.settings.find_one({"id": "main"}, {"_id": 0, "promo_max_discount_pct": 1}) or {}
+    try:
+        v = float(s.get("promo_max_discount_pct", 70) or 70)
+    except Exception:
+        v = 70.0
+    return v if v > 0 else 70.0
+
+
+async def evaluate_cart_promotions(cart_total: float, items: list,
+                                   user_id=None, email: str = "", entered_code: str = "") -> dict:
+    """Otomatik kampanyalar + (varsa) girilen kodu birlikte degerlendirir. Saf orkestrasyon."""
+    entered = (entered_code or "").strip().upper()
+
+    # 1) Adaylar: aktif auto_apply kampanyalar + girilen kod
+    candidates = {}
+    async for c in db.coupons.find({"is_active": True, "auto_apply": True}, {"_id": 0}):
+        candidates[c["id"]] = c
+    entered_id = None
+    if entered:
+        ec = await db.coupons.find_one({"code": entered}, {"_id": 0})
+        if ec:
+            candidates[ec["id"]] = ec
+            entered_id = ec["id"]
+
+    # 2) Tekil degerlendirme
+    valid, rejected = [], []
+    for cid, c in candidates.items():
+        ev = await _evaluate_single(c, cart_total, items, user_id, email)
+        if ev.get("valid") and (ev.get("discount", 0) > 0 or ev.get("free_shipping")):
+            valid.append({
+                "c": c, "discount": ev["discount"], "free_shipping": ev.get("free_shipping", False),
+                "priority": int(c.get("priority", 0) or 0),
+                "combinable": bool(c.get("combinable", False)),
+                "stack_group": c.get("stack_group") or "",
+                "is_entered": cid == entered_id,
+            })
+        elif cid == entered_id:
+            rejected.append({"code": entered, "reason": ev.get("reason", "Uygulanamadı")})
+
+    # 3) Sirala: priority -> discount -> girilen kod (esitlikte one)
+    valid.sort(key=lambda x: (x["priority"], x["discount"], x["is_entered"]), reverse=True)
+
+    # 4) Stack uygula (combinable kapisi + stack_group + kalan tabana ardisik)
+    applied = []
+    running = cart_total
+    used_groups = set()
+    for cand in valid:
+        if applied:
+            if not cand["combinable"] or not all(a["combinable"] for a in applied):
+                continue
+            if cand["stack_group"] and cand["stack_group"] in used_groups:
+                continue
+        scale = (running / cart_total) if cart_total > 0 else 0.0
+        scaled_items = [{**it, "price": float(it.get("price", 0)) * scale} for it in items]
+        d = _compute_discount(cand["c"], running, scaled_items)
+        fs = cand["free_shipping"]
+        if d <= 0 and not fs:
+            continue
+        applied.append({**cand, "applied_discount": round(d, 2)})
+        running = round(running - d, 2)
+        if cand["stack_group"]:
+            used_groups.add(cand["stack_group"])
+
+    total = round(sum(a["applied_discount"] for a in applied), 2)
+
+    # 5) Global tavan
+    cap_pct = await _promo_cap_pct()
+    cap_amount = round(cart_total * cap_pct / 100.0, 2)
+    capped = False
+    if total > cap_amount and total > 0:
+        factor = cap_amount / total
+        for a in applied:
+            a["applied_discount"] = round(a["applied_discount"] * factor, 2)
+        total = round(sum(a["applied_discount"] for a in applied), 2)
+        capped = True
+
+    return {
+        "applied": [{
+            "coupon_id": a["c"]["id"], "code": a["c"].get("code", ""),
+            "title": a["c"].get("title", ""), "type": a["c"].get("type"),
+            "discount": a["applied_discount"], "free_shipping": a["free_shipping"],
+            "priority": a["priority"], "combinable": a["combinable"], "stack_group": a["stack_group"],
+        } for a in applied],
+        "total_discount": total,
+        "free_shipping": any(a["free_shipping"] for a in applied),
+        "capped": capped,
+        "cap_pct": cap_pct,
+        "rejected": rejected,
+    }
+
+
+@public_router.post("/evaluate")
+async def evaluate_promotions_endpoint(payload: dict):
+    """Checkout/sepet motoru ucu. Onizleme ve siparis-kaydi AYNI motoru cagirir."""
+    return await evaluate_cart_promotions(
+        cart_total=float(payload.get("cart_total") or 0),
+        items=payload.get("items") or [],
+        user_id=payload.get("user_id"),
+        email=payload.get("email") or payload.get("customer_email") or "",
+        entered_code=payload.get("code") or "",
+    )
