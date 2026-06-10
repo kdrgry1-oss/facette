@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 import time
 import uuid
 
-from .deps import db, logger, get_current_user, require_admin, generate_id
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -2812,11 +2812,14 @@ async def return_barcode_png(return_id: str):
 # --- Admin: site iade taleplerini listele / durum güncelle ---
 _RETURN_STATUS_MAP = {
     "created":     (None,                None),
+    # approved/rejected bildirimleri ozel endpoint'lerde (sebep/tutar/barkod
+    # degiskenleriyle) gonderilir; generic durum-degistirici burada event ATMAZ.
+    "approved":    ("return_approved",   None),
     "in_transit":  ("return_in_transit", "order_return_in_transit"),
     "received":    ("returned",          "order_returned"),
     "returned":    ("returned",          "order_returned"),
     "refunded":    ("refunded",          "order_refunded"),
-    "rejected":    ("delivered",         None),
+    "rejected":    ("return_rejected",   None),
     "cancelled":   ("delivered",         None),
 }
 
@@ -2895,3 +2898,343 @@ async def update_return_status(return_id: str, payload: dict, current_user: dict
                 logger.warning(f"return status notif failed: {e}")
         _aio.create_task(_n())
     return {"success": True, "status": new}
+
+
+# ============================================================================
+# Madde 3 — İade tutarı hesabı + Onay endpoint'i (P3)
+# ============================================================================
+
+async def _resolve_shipping_cost(cart_total: float):
+    """db.shipping_rules'tan verilen sepet tutarına uygulanacak kargo bedelini döndürür.
+    free_shipping kuralı -> 0.0 ; eşleşen kural yoksa None (bilgi yok)."""
+    try:
+        rules = await db.shipping_rules.find({"is_active": True}, {"_id": 0}).sort("min_cart", -1).to_list(100)
+    except Exception:
+        return None
+    for r in rules:
+        mn = r.get("min_cart", 0) or 0
+        mx = r.get("max_cart") or None
+        if cart_total >= mn and (not mx or cart_total <= mx):
+            return 0.0 if r.get("free_shipping") else float(r.get("shipping_cost", 0) or 0)
+    return None
+
+
+def _round2(x):
+    try:
+        return round(float(x or 0) + 1e-9, 2)
+    except Exception:
+        return 0.0
+
+
+async def _compute_refund_breakdown(rec: dict, order: dict, fault: str, return_cargo_fee_override=None):
+    """İade tutarını otomatik hesaplar, şeffaf bir döküm döndürür (Karar #2 + #3).
+
+    fault: 'customer' (müşteri kusuru -> iade kargo bedeli müşteriden düşülür)
+           'store'    (mağaza kusuru  -> iade kargo bedeli mağazadan, düşülmez)
+    """
+    items = rec.get("items") or []
+    returned_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
+
+    orig_cart = _round2(order.get("subtotal") or order.get("total") or 0)
+    kept_cart = _round2(max(0.0, orig_cart - returned_net))
+    is_partial = kept_cart > 0.01  # tam iadede (kalan 0) kampanya mahsubu uygulanmaz
+
+    # --- Dinamik ücretsiz-kargo kampanyası mahsubu (Karar #2 = EVET) ---
+    campaign_deduction = 0.0
+    campaign_note = ""
+    orig_ship = await _resolve_shipping_cost(orig_cart)
+    kept_ship = await _resolve_shipping_cost(kept_cart) if is_partial else None
+    if is_partial and (orig_ship == 0) and (kept_ship is not None and kept_ship > 0):
+        campaign_deduction = _round2(kept_ship)
+        campaign_note = (
+            f"İade sonrası kalan tutar ({kept_cart:.2f} TL) ücretsiz kargo eşiğinin "
+            f"altına düştü; kargo bedeli ({campaign_deduction:.2f} TL) iadeden düşüldü."
+        )
+
+    # --- İade kargo bedeli (Karar #3 = kusur seçimine bağlı) ---
+    fault = (fault or "store").lower()
+    if return_cargo_fee_override is not None:
+        return_cargo_fee = _round2(return_cargo_fee_override)
+    elif fault == "customer":
+        sugg = order.get("shipping_cost")
+        if not sugg:
+            sugg = await _resolve_shipping_cost(orig_cart) or 0
+        return_cargo_fee = _round2(sugg)
+    else:
+        return_cargo_fee = 0.0
+
+    auto_refund = _round2(max(0.0, returned_net - campaign_deduction - return_cargo_fee))
+
+    return {
+        "returned_net": returned_net,
+        "orig_cart": orig_cart,
+        "kept_cart": kept_cart,
+        "is_partial": is_partial,
+        "fault": fault,
+        "campaign_deduction": campaign_deduction,
+        "campaign_note": campaign_note,
+        "return_cargo_fee": return_cargo_fee,
+        "auto_refund": auto_refund,
+    }
+
+
+@router.get("/returns/{return_id}/refund-preview")
+async def refund_preview(return_id: str, fault: str = "store",
+                         current_user: dict = Depends(require_permission("returns.approve"))):
+    """Onaydan ÖNCE iade tutarı dökümünü hesaplar (kaydetmez). Frontend bunu gösterir."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    bd = await _compute_refund_breakdown(rec, order, fault)
+    return {"breakdown": bd}
+
+
+@router.post("/returns/{return_id}/approve")
+async def approve_return(return_id: str, payload: dict,
+                         current_user: dict = Depends(require_permission("returns.approve"))):
+    """İadeyi onaylar: tutarı hesaplar (kusur seçimine göre), kaydeder, durumu 'approved'
+    yapar ve müşteriye bildirim gönderir. Tutar elle override edilebilir (loglanır)."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    if rec.get("status") in ("refunded", "cancelled"):
+        raise HTTPException(status_code=400, detail="Bu iade kapanmış; onaylanamaz.")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+
+    fault = (payload.get("fault") or "store").lower()
+    if fault not in ("customer", "store"):
+        raise HTTPException(status_code=400, detail="Geçersiz kusur (customer|store).")
+
+    cargo_override = payload.get("return_cargo_fee")
+    cargo_override = None if cargo_override in (None, "") else cargo_override
+    bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override)
+
+    # Elle tutar override (Karar #5: otomatik hesap + elle düzeltme, loglanır)
+    final_amount = bd["auto_refund"]
+    manual_override = False
+    if payload.get("refund_amount") not in (None, ""):
+        try:
+            final_amount = _round2(payload.get("refund_amount"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz iade tutarı.")
+        manual_override = abs(final_amount - bd["auto_refund"]) > 0.01
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    approval = {
+        "by": current_user.get("email") or current_user.get("id"),
+        "at": now_iso,
+        "fault": fault,
+        "auto_refund": bd["auto_refund"],
+        "final_refund": final_amount,
+        "manual_override": manual_override,
+        "note": (payload.get("note") or "")[:500],
+    }
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+        "status": "approved", "fault": fault,
+        "refund_breakdown": bd, "refund_amount": final_amount,
+        "approval": approval, "updated_at": now_iso,
+    }})
+    await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
+        "status": "return_approved", "return_request.status": "approved", "updated_at": now_iso,
+    }})
+
+    # Bildirim: "İade Onaylandı" + tutar (kanal ayarı panelden yönetilir)
+    import asyncio as _aio
+    async def _n():
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from notification_service import send_notification
+            from order_statuses import get_status_config, customer_label_for
+            cfg = await get_status_config(db)
+            nz = (cfg.get("notify") or {}).get("return_approved") or {}
+            ch = [c for c in ("sms", "email") if nz.get(c)]
+            if not ch:
+                return
+            addr = (order or {}).get("shipping_address") or {}
+            await send_notification(
+                db, "order_return_approved",
+                to_phone=addr.get("phone") or order.get("phone"),
+                to_email=addr.get("email") or order.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": rec.get("order_number", ""),
+                    "return_code": rec.get("return_code", ""),
+                    "refund_amount": f"{final_amount:.2f}",
+                    "status_label": customer_label_for("return_approved"),
+                },
+                channels=ch,
+            )
+        except Exception as e:
+            logger.warning(f"return approve notif failed: {e}")
+    _aio.create_task(_n())
+
+    return {"success": True, "status": "approved", "refund_amount": final_amount,
+            "manual_override": manual_override, "breakdown": bd}
+
+
+# ============================================================================
+# Madde 3 — Ret (sebep + bildirim) + Barkod yeniden üretimi (P4)
+# ============================================================================
+
+async def _create_return_shipment(ref: str, kiymet: float, icerik: str, recipient: dict):
+    """Parametrik MNG iade gönderisi (best-effort). recipient={name,phone,city,district,address}.
+    MNG kapalı/eksikse veya hata olursa ref'i kod olarak döndürür (mng_ok=False)."""
+    code = ref
+    mng_ok = False
+    try:
+        import sys, os, asyncio as _aio
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from mng_kargo_client import create_shipment as mng_create
+        s = await _get_mng_settings()
+        if s.get("is_active") and recipient.get("address") and recipient.get("city"):
+            res = await _aio.to_thread(
+                mng_create,
+                username=s["username"], password=s["password"],
+                siparis_no=ref, kiymet=float(kiymet or 0),
+                icerik=(icerik or "IADE")[:200],
+                hizmet_sekli="NORMAL", teslim_sekli=1, al_sms=0, gn_sms=0,
+                parca_list="1:1:20:30:15:;",
+                alici_ad=recipient.get("name", ""), odeme_sekli="GO", adres_farkli="0",
+                il=recipient["city"], ilce=recipient.get("district", ""), adres=recipient["address"],
+                tel_cep=recipient.get("phone", ""), email="", kapida_odeme=0,
+                platform_adi="", platform_kodu="",
+            )
+            if res.get("ok") and res.get("barkod"):
+                code = str(res["barkod"]).strip()
+                mng_ok = True
+    except Exception as e:
+        logger.warning(f"return shipment create failed: {e}")
+    return code, mng_ok
+
+
+async def _within_return_window(order: dict) -> bool:
+    """Sipariş teslim tarihinden itibaren 14 gün içinde mi? (barkod yeniden üretimi için)"""
+    delivered_at = order.get("delivered_at")
+    if not delivered_at:
+        return False
+    try:
+        d = datetime.fromisoformat(str(delivered_at).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+    return datetime.now(timezone.utc) <= (d + timedelta(days=14))
+
+
+@router.post("/returns/{return_id}/reissue-barcode")
+async def reissue_return_barcode(return_id: str,
+                                 current_user: dict = Depends(require_permission("returns.cargo_rebook"))):
+    """Karar #1: barkod 3 gün geçerli; 14 gün içinde YENİDEN üretilebilir.
+    Depoya iade gönderisi için yeni 3 günlük barkod üretir, kayda yazar, müşteriye bildirir."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    if rec.get("status") in ("refunded", "cancelled", "rejected"):
+        raise HTTPException(status_code=400, detail="Bu iade kapanmış; yeni barkod üretilemez.")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    if not await _within_return_window(order):
+        raise HTTPException(status_code=400, detail="İade süresi (teslimden 14 gün) dolmuş; barkod üretilemez.")
+
+    items = rec.get("items") or []
+    ref = f"IADE{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
+    icerik = "IADE - " + "; ".join(f"{i.get('quantity',1)}x {i.get('name','Ürün')}" for i in items)
+    warehouse = await _get_sender_info()
+    code, mng_ok = await _create_return_shipment(ref, order.get("total") or 0, icerik, warehouse)
+    png_b64 = _render_return_barcode_png_b64(code)
+    now = datetime.now(timezone.utc)
+    valid_until = (now + timedelta(days=3)).isoformat()
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+        "return_code": code, "mng_ok": mng_ok, "barcode_png_b64": png_b64,
+        "valid_until": valid_until, "updated_at": now.isoformat(),
+        "status": "created" if rec.get("status") in (None, "created", "in_transit") else rec.get("status"),
+    }})
+    await db.orders.update_one({"id": rec.get("order_id")},
+        {"$set": {"return_request.return_code": code, "return_request.valid_until": valid_until,
+                  "updated_at": now.isoformat()}})
+
+    # Bildirim: yeni barkod (oluşturma şablonu ile)
+    import os as _os, asyncio as _aio
+    _base = _os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL") or ""
+    barcode_img = (f'<div style="margin:14px 0"><img src="{_base}/api/orders/returns/{return_id}/barcode.png" '
+                   f'alt="{code}" style="height:90px"/></div>' if _base else "")
+    _aio.create_task(_notify_return(order, code, valid_until, barcode_img))
+
+    return {"success": True, "return_code": code, "mng_ok": mng_ok, "valid_until": valid_until}
+
+
+@router.post("/returns/{return_id}/reject")
+async def reject_return(return_id: str, payload: dict,
+                        current_user: dict = Depends(require_permission("returns.reject"))):
+    """İadeyi reddeder: sebep zorunlu, durum 'rejected', müşteriye SEBEP'le bildirim.
+    İsteğe bağlı (reship=true): ürünü müşteriye geri göndermek için yeni kargo barkodu üretir."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    if rec.get("status") in ("refunded", "cancelled"):
+        raise HTTPException(status_code=400, detail="Bu iade kapanmış; reddedilemez.")
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Ret sebebi zorunludur.")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    # İsteğe bağlı: ürünü müşteriye geri gönder (yeni barkod, alıcı = müşteri)
+    reship_code = ""
+    if payload.get("reship"):
+        addr = order.get("shipping_address") or {}
+        recipient = {
+            "name": addr.get("full_name") or f"{addr.get('first_name','')} {addr.get('last_name','')}".strip() or "Müşteri",
+            "phone": addr.get("phone", ""), "city": addr.get("city", ""),
+            "district": addr.get("district", ""), "address": addr.get("address", ""),
+        }
+        ref = f"RET{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
+        reship_code, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+
+    rejection = {
+        "by": current_user.get("email") or current_user.get("id"),
+        "at": now_iso, "reason": reason, "reship_code": reship_code,
+    }
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+        "status": "rejected", "reject_reason": reason, "rejection": rejection,
+        "reship_code": reship_code, "updated_at": now_iso,
+    }})
+    await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
+        "status": "return_rejected", "return_request.status": "rejected", "updated_at": now_iso,
+    }})
+
+    # Bildirim: reddedildi + SEBEP (+ varsa geri-gönderim takip kodu)
+    import asyncio as _aio
+    async def _n():
+        try:
+            import sys, os as _os
+            sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+            from notification_service import send_notification
+            from order_statuses import get_status_config, customer_label_for
+            cfg = await get_status_config(db)
+            nz = (cfg.get("notify") or {}).get("return_rejected") or {}
+            ch = [c for c in ("sms", "email") if nz.get(c)]
+            if not ch:
+                return
+            addr = (order or {}).get("shipping_address") or {}
+            await send_notification(
+                db, "order_return_rejected",
+                to_phone=addr.get("phone") or order.get("phone"),
+                to_email=addr.get("email") or order.get("email"),
+                variables={
+                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                    "order_number": rec.get("order_number", ""),
+                    "return_code": rec.get("return_code", ""),
+                    "reason": reason,
+                    "reship_code": reship_code,
+                    "status_label": customer_label_for("return_rejected"),
+                },
+                channels=ch,
+            )
+        except Exception as e:
+            logger.warning(f"return reject notif failed: {e}")
+    _aio.create_task(_n())
+
+    return {"success": True, "status": "rejected", "reason": reason, "reship_code": reship_code}

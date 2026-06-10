@@ -56,6 +56,7 @@ PERMISSION_TREE = [
             {"key": "returns.expense_note", "label": "Gider Pusulası Oluştur"},
             {"key": "returns.iyzico_refund", "label": "Iyzico Kart İadesi"},
             {"key": "returns.cargo_rebook", "label": "Yeni Kargo Barkodu"},
+            {"key": "returns.refund_pay", "label": "İade Ödemesi Yap (Bedeli Ödendi)"},
         ],
     },
     {

@@ -330,6 +330,36 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
     return user
 
+
+async def get_effective_permissions(user: dict) -> list:
+    """Kullanicinin etkin yetki listesini dondurur.
+
+    Kural (admin_rbac /me/permissions ile birebir ayni):
+      - email == 'admin@facette.com' VEYA role_id yok  -> ['*'] (super admin)
+      - aksi halde rol kaydindaki permissions listesi
+    """
+    role_id = (user or {}).get("role_id") or ""
+    if (user or {}).get("email") == "admin@facette.com" or not role_id:
+        return ["*"]
+    role = await db.roles.find_one({"id": role_id}, {"_id": 0})
+    if not role:
+        return []
+    return role.get("permissions", []) or []
+
+
+def require_permission(perm_key: str):
+    """Belirli bir RBAC yetkisini ZORUNLU kilan FastAPI dependency uretir.
+
+    super_admin ('*') her yetkiyi gecer. Yetkisi olmayan -> 403.
+    Kullanim:  current_user: dict = Depends(require_permission("returns.approve"))
+    """
+    async def _checker(current_user: dict = Depends(require_admin)) -> dict:
+        perms = await get_effective_permissions(current_user)
+        if "*" in perms or perm_key in perms:
+            return current_user
+        raise HTTPException(status_code=403, detail=f"Bu işlem için yetkiniz yok ({perm_key})")
+    return _checker
+
 def generate_id() -> str:
     """Generate unique UUID"""
     return str(uuid.uuid4())
