@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 echo "==> Calisma klasoru: $(pwd)"
 if [ ! -d backend ]; then echo "HATA: 'backend' yok. Bu dosyayi facette proje kokune koy. Once: unzip -o facette_update.zip -d ."; exit 1; fi
 if [ ! -d .git ]; then echo "HATA: '.git' yok. Repo koku degilsin."; exit 1; fi
-if [ ! -f backend/routes/ticimax_category_sync.py ]; then echo "HATA: Yeni dosyalar yerine konmamis. Once: unzip -o facette_update.zip -d ."; exit 1; fi
+if [ ! -f backend/routes/ticimax_member_sync.py ]; then echo "HATA: Yeni dosyalar yerine konmamis. Once: unzip -o facette_update.zip -d ."; exit 1; fi
 echo "==> Degisiklikler dogrulandi."
 echo "==> Git: add + commit + push ..."
 git add -A
