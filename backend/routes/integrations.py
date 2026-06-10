@@ -260,7 +260,7 @@ async def sync_trendyol_categories(current_user: dict = Depends(require_admin)):
 
 
 @router.get("/trendyol/categories/{category_id}/attributes")
-async def get_trendyol_category_attributes(category_id: int, current_user: dict = Depends(require_admin)):
+async def get_trendyol_category_attributes(category_id: int, refresh: bool = Query(False, description="True ise cache atlanır, Trendyol'dan taze ve eksiksiz çekilir"), current_user: dict = Depends(require_admin)):
     """Get attributes for a specific category (From DB or Trendyol API directly)"""
     config = await get_trendyol_config()
     import sys
@@ -268,10 +268,11 @@ async def get_trendyol_category_attributes(category_id: int, current_user: dict 
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from trendyol_client import TrendyolClient
     
-    # Check if already in local DB
-    existing = await db.trendyol_attributes.find_one({"category_id": category_id})
-    if existing:
-        return {"success": True, "attributes": existing.get("attributes", [])}
+    # Check if already in local DB (refresh=true ise cache atla — eksik/eski cache'i yenile)
+    if not refresh:
+        existing = await db.trendyol_attributes.find_one({"category_id": category_id})
+        if existing and existing.get("attributes"):
+            return {"success": True, "attributes": existing.get("attributes", []), "cached": True}
         
     try:
         client = TrendyolClient(

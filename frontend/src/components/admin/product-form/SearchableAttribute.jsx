@@ -52,16 +52,41 @@ const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
   // Kütüphanede değer yoksa düz input'a düş
   if (!attr.values || attr.values.length === 0) {
     return (
-      <div className="space-y-2">
-        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">
-          {attr.name}
-        </label>
+      <div
+        className={`space-y-2 ${
+          isRequired && !hasValue ? "p-3 bg-red-50 rounded-xl border-2 border-red-200" : ""
+        }`}
+      >
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1">
+            <label
+              className={`block text-[10px] font-black uppercase tracking-widest ${
+                isRequired ? "text-white bg-red-600 px-1 rounded" : "text-gray-400"
+              }`}
+            >
+              {attr.name}
+            </label>
+            {hasValue && <Check size={12} className="text-green-500 font-bold" strokeWidth={4} />}
+            {isRequired && !hasValue && <span className="text-red-600 font-bold animate-pulse">*</span>}
+          </div>
+          {isRequired && !hasValue && (
+            <span className="text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full uppercase animate-pulse shadow-lg shadow-red-200 ring-2 ring-red-300">
+              ZORUNLU (TRENDYOL)
+            </span>
+          )}
+        </div>
         <input
           type="text"
           value={value || ""}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Serbest değer yazın..."
-          className="w-full border-gray-100 border-2 px-4 py-3 rounded-lg bg-gray-50 focus:bg-white focus:border-orange-300 outline-none transition-all text-sm font-medium"
+          className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 focus:bg-white outline-none transition-all text-sm font-medium ${
+            hasValue
+              ? "border-green-500 focus:border-green-500"
+              : isRequired
+              ? "border-red-400 focus:border-red-500"
+              : "border-gray-100 focus:border-orange-300"
+          }`}
         />
       </div>
     );

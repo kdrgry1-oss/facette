@@ -34,7 +34,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -179,6 +179,8 @@ export default function AdminProducts() {
   // Shape: { kumas: {label, value}, kalip: {label, value}, ... } VEYA boş obj
   const [technicalDetails, setTechnicalDetails] = useState({});
   const [uploading, setUploading] = useState(false);
+  const [draggedImgIdx, setDraggedImgIdx] = useState(null);
+  const [dragOverImgIdx, setDragOverImgIdx] = useState(null);
   const [variantsModalOpen, setVariantsModalOpen] = useState(false);
   const [selectedProductForVariants, setSelectedProductForVariants] = useState(null);
   const [globalTrendyolMarkup, setGlobalTrendyolMarkup] = useState(0);
@@ -331,7 +333,7 @@ export default function AdminProducts() {
       if (targetTrendyolCatId) {
         setFetchingAttributes(true);
         const token = localStorage.getItem('token');
-        axios.get(`${API}/integrations/trendyol/categories/${targetTrendyolCatId}/attributes`, {
+        axios.get(`${API}/integrations/trendyol/categories/${targetTrendyolCatId}/attributes?refresh=true`, {
           headers: { Authorization: `Bearer ${token}` }
         })
           .then(res => setTrendyolAttributesList(res.data.attributes || []))
@@ -766,6 +768,20 @@ export default function AdminProducts() {
     const newImages = [...formData.images];
     newImages.splice(index, 1);
     setFormData({ ...formData, images: newImages });
+  };
+  // Görsel sıralama — sürükle-bırak ile diziyi yeniden düzenler. İlk görsel = KAPAK.
+  const reorderImages = (from, to) => {
+    if (from === null || to === null || from === to) return;
+    const newImages = [...formData.images];
+    const [moved] = newImages.splice(from, 1);
+    newImages.splice(to, 0, moved);
+    setFormData({ ...formData, images: newImages });
+  };
+  // Mobil/dokunmatik için ok ile taşıma (sürükleme zor olabilir)
+  const moveImage = (index, dir) => {
+    const to = index + dir;
+    if (to < 0 || to >= formData.images.length) return;
+    reorderImages(index, to);
   };
   // Görsel string ya da {url, is_size_table:true} dict olabilir. Ölçü/pazaryeri görseli
   // işaretlenince müşteriye gizlenir (storefront eler) ama admin galeride durmaya devam eder.
@@ -2233,8 +2249,44 @@ export default function AdminProducts() {
                       values: (a.attributeValues || []).map(v => v.name),
                       required: !!a.required,
                     }));
+
+                    // TRENDYOL: kendi kategori özelliklerinin TÜM izin verilen değerlerini
+                    // (attributeValues) global kütüphaneyle BİRLEŞTİR ve global'de olmayan
+                    // Trendyol özelliklerini de ekle → forma eksiksiz Trendyol listesi gelir.
+                    const tyByName = {};
+                    (trendyolAttributesList || []).forEach(a => {
+                      const nm = (a.attribute?.name || a.name || "").trim();
+                      if (!nm) return;
+                      tyByName[nm.toLowerCase()] = {
+                        id: a.attribute?.id || a.id,
+                        name: nm,
+                        values: (a.attributeValues || [])
+                          .map(v => (typeof v === "string" ? v : (v?.name || "")))
+                          .filter(Boolean),
+                      };
+                    });
+                    const tyMerged = (() => {
+                      const out = baseList.map(attr => {
+                        const ty = tyByName[(attr.name || "").toLowerCase()];
+                        if (ty && ty.values.length) {
+                          const merged = Array.from(new Set([...(attr.values || []), ...ty.values]));
+                          return { ...attr, values: merged };
+                        }
+                        return attr;
+                      });
+                      const globalNames = new Set(baseList.map(a => (a.name || "").toLowerCase()));
+                      Object.values(tyByName).forEach(ty => {
+                        if (!globalNames.has(ty.name.toLowerCase())) {
+                          out.push({ id: `ty-${ty.id}`, name: ty.name, values: ty.values });
+                        }
+                      });
+                      return out.filter(a => (a.name || "").toLowerCase().includes(attributeSearchTerm.toLowerCase()));
+                    })();
+
                     const sourceList = marketplace === 'hepsiburada'
                       ? hbSource.filter(a => (a.name || '').toLowerCase().includes(attributeSearchTerm.toLowerCase()))
+                      : marketplace === 'trendyol'
+                      ? tyMerged
                       : baseList;
 
                     const processed = sourceList.map(attr => {
@@ -2813,23 +2865,51 @@ export default function AdminProducts() {
 
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {formData.images.map((img, idx) => (
-                      <div key={idx} className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all ${isSizeTableImg(img) ? "border-amber-400" : "border-white"}`}>
-                        <img src={imgUrl(img)} className="w-full h-full object-cover" alt="" />
+                      <div
+                        key={idx}
+                        draggable
+                        onDragStart={() => setDraggedImgIdx(idx)}
+                        onDragOver={(e) => { e.preventDefault(); if (dragOverImgIdx !== idx) setDragOverImgIdx(idx); }}
+                        onDragLeave={() => setDragOverImgIdx((cur) => (cur === idx ? null : cur))}
+                        onDrop={(e) => { e.preventDefault(); reorderImages(draggedImgIdx, idx); setDraggedImgIdx(null); setDragOverImgIdx(null); }}
+                        onDragEnd={() => { setDraggedImgIdx(null); setDragOverImgIdx(null); }}
+                        className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all cursor-move ${isSizeTableImg(img) ? "border-amber-400" : "border-white"} ${draggedImgIdx === idx ? "opacity-40" : ""} ${dragOverImgIdx === idx && draggedImgIdx !== idx ? "ring-4 ring-orange-400 scale-[1.03]" : ""}`}
+                      >
+                        <img src={imgUrl(img)} draggable={false} className="w-full h-full object-cover pointer-events-none" alt="" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => moveImage(idx, -1)}
+                            disabled={idx === 0}
+                            title="Sola al"
+                            className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => toggleSizeTableImg(idx)}
                             title={isSizeTableImg(img) ? "Müşteriye tekrar göster" : "Ölçü tablosu / pazaryeri görseli — müşteriden gizle"}
-                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isSizeTableImg(img) ? "bg-amber-500 text-white hover:bg-amber-600" : "bg-white text-black hover:bg-gray-100"}`}
+                            className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${isSizeTableImg(img) ? "bg-amber-500 text-white hover:bg-amber-600" : "bg-white text-black hover:bg-gray-100"}`}
                           >
-                            <EyeOff size={18} />
+                            <EyeOff size={16} />
                           </button>
-                          <button 
+                          <button
                             type="button"
-                            onClick={() => removeImage(idx)} 
-                            className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+                            onClick={() => removeImage(idx)}
+                            title="Sil"
+                            className="w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
                           >
-                            <Trash2 size={20} />
+                            <Trash2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveImage(idx, 1)}
+                            disabled={idx === formData.images.length - 1}
+                            title="Sağa al"
+                            className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ChevronRight size={18} />
                           </button>
                         </div>
                         {isSizeTableImg(img) ? (
