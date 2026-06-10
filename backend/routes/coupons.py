@@ -74,6 +74,15 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "first_order_only": bool(payload.get("first_order_only", False)),
         "free_shipping": bool(payload.get("free_shipping", False)),
         "auto_apply": bool(payload.get("auto_apply", False)),
+        # --- nth_discount ("X al Y öde") alanları (önceden create'te kaydedilmiyordu) ---
+        "min_quantity": int(payload.get("min_quantity", 0) or 0) or None,
+        "buy_quantity": int(payload.get("buy_quantity", 0) or 0) or None,
+        "free_quantity": int(payload.get("free_quantity", 1) or 1),
+        "get_discount": float(payload.get("get_discount", 0) or 0),
+        # --- Madde 4 motor alanları ---
+        "priority": int(payload.get("priority", 0) or 0),
+        "combinable": bool(payload.get("combinable", False)),
+        "stack_group": (payload.get("stack_group") or "").strip() or None,
         "created_at": _utcnow(),
         "created_by": current_user.get("email", ""),
     }
@@ -88,6 +97,8 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "title", "type", "value", "min_cart_total", "max_discount",
         "categories", "products", "usage_limit", "usage_limit_per_user",
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
+        "min_quantity", "buy_quantity", "free_quantity", "get_discount",
+        "priority", "combinable", "stack_group",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _utcnow()
@@ -352,6 +363,9 @@ def _coupon_to_campaign(c: dict) -> dict:
         "free_quantity": c.get("free_quantity") or 1,
         "get_discount": c.get("get_discount") or 0,
         "max_discount": c.get("max_discount") or 0,
+        "priority": c.get("priority", 0),
+        "combinable": bool(c.get("combinable", False)),
+        "stack_group": c.get("stack_group") or "",
     }
 
 
@@ -385,6 +399,10 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "is_active": bool(payload.get("is_active", True)),
         "free_shipping": ctype == "free_shipping",
         "auto_apply": bool(payload.get("auto_apply", False)),
+        # --- Madde 4 motor alanları ---
+        "priority": int(payload.get("priority", 0) or 0),
+        "combinable": bool(payload.get("combinable", False)),
+        "stack_group": (payload.get("stack_group") or "").strip() or None,
     }
 
 
