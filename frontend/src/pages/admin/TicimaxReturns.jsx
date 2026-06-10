@@ -94,11 +94,16 @@ export default function TicimaxReturns({ embedded = false }) {
     toast.info("Ticimax'tan siparişler çekiliyor — bu işlem birkaç dakika sürebilir…");
     try {
       const res = await axios.post(
-        `${API}/integrations/ticimax/orders/import?days=365&pages=20&limit=200`,
+        `${API}/integrations/ticimax/orders/import?days=365&pages=20&limit=100`,
         {},
         auth()
       );
-      toast.success(res.data.message || "Ticimax siparişleri çekildi");
+      if (res.data?.success === false) {
+        // Backend gerçek WS hatasını message + error_detail ile döndürür
+        toast.error(res.data.message || "Ticimax'tan sipariş çekilemedi.");
+      } else {
+        toast.success(res.data.message || "Ticimax siparişleri çekildi");
+      }
       await load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Ticimax'tan çekme başarısız. WS yetki kodu / Sipariş Servisi iznini kontrol edin.");

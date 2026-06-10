@@ -3998,11 +3998,15 @@ async def import_ticimax_orders(
 
     # Sayfa sayfa çek — RAW (filtersız), post-filter route'da yapılıyor
     orders_raw = []
+    first_error = None
+    # Ticimax KayitSayisi büyük değerlerde (>100) boş/hatalı dönebiliyor — cron 100 ile
+    # sorunsuz çalışıyor. Güvenli tarafta kalmak için sayfa boyutunu 100 ile sınırla.
+    safe_page_size = min(int(limit), 100)
     for page_no in range(1, pages + 1):
         try:
             page_orders = tc_get_orders(
                 page=page_no,
-                page_size=limit,
+                page_size=safe_page_size,
                 start_date=start_date_str,
                 end_date=end_date_str,
                 exclude_marketplace=False,   # Raw çek — son sayfa tespitini bozmaması için
@@ -4010,6 +4014,8 @@ async def import_ticimax_orders(
                 wscode=api_key,
             )
         except Exception as e:
+            if first_error is None:
+                first_error = str(e)
             logger.warning(f"Page {page_no} çekim başarısız: {e}")
             await log_integration_event("ticimax", "import_orders", "order", str(page_no), "error", f"Sayfa çekilemedi: {e}")
             break
@@ -4234,14 +4240,20 @@ async def import_ticimax_orders(
 
     msg = f"{imported} yeni sipariş eklendi, {updated} sipariş güncellendi. {skipped_marketplace} pazaryeri siparişi atlandı, {skipped_no_phone} telefonsuz sipariş atlandı."
     if not orders_raw:
-        msg = "Ticimax'tan sipariş gelmedi. WS yetki kodunuzun 'Sipariş Servisi' iznine sahip olduğundan emin olun."
+        if first_error:
+            # Gerçek Ticimax/WS hatasını yüzeye çıkar (auth, WSDL, filtre, vb.)
+            msg = f"Ticimax'tan sipariş çekilemedi — WS hatası: {first_error}"
+        else:
+            msg = (f"Ticimax'tan bu aralıkta ({days} gün) sipariş gelmedi. "
+                   f"Aralığı genişletmeyi deneyin veya WS yetki kodunuzun 'Sipariş Servisi' iznini kontrol edin.")
     return {
-        "success": True,
+        "success": bool(orders_raw) or first_error is None,
         "imported": imported,
         "updated": updated,
         "total": imported + updated,
         "skipped_marketplace": skipped_marketplace,
         "skipped_no_phone": skipped_no_phone,
+        "error_detail": first_error,
         "message": msg
     }
 
