@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 ORDER_STATUS_CATALOG = [
     {"key": "pending", "label": "Onay Bekliyor", "customer_label": "Siparişiniz Alındı", "event": "order_pending", "color": "#9CA3AF", "group": "Başlangıç", "default_active": True, "default_sms": False, "default_email": False},
     {"key": "awaiting_payment", "label": "Ödeme Bekleniyor (Havale/EFT)", "customer_label": "Siparişiniz Alındı · Ödeme Bekleniyor", "event": "order_awaiting_payment", "color": "#F59E0B", "group": "Başlangıç", "default_active": True, "default_sms": True, "default_email": True},
-    {"key": "payment_notified", "label": "Ödeme Bildirimi Alındı", "customer_label": "Ödeme Bildiriminiz Alındı", "event": "order_payment_notified", "color": "#FBBF24", "group": "Başlangıç", "default_active": True, "default_sms": False, "default_email": False},
+    {"key": "payment_notified", "label": "Ödeme Bildirimi Alındı", "customer_label": "Ödeme Bildiriminiz Alındı", "event": "order_payment_notified", "color": "#FBBF24", "group": "Başlangıç", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "confirmed", "label": "Onaylandı", "customer_label": "Siparişiniz Onaylandı", "event": "order_confirmed", "color": "#10B981", "group": "Hazırlık", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "preparing", "label": "Hazırlanıyor", "customer_label": "Siparişiniz Hazırlanıyor", "event": "order_preparing", "color": "#3B82F6", "group": "Hazırlık", "default_active": False, "default_sms": False, "default_email": False},
     {"key": "processing", "label": "İşleme Alındı", "customer_label": "Siparişiniz İşleme Alındı", "event": "order_packed", "color": "#6366F1", "group": "Hazırlık", "default_active": False, "default_sms": False, "default_email": False},
@@ -38,6 +38,9 @@ ORDER_STATUS_CATALOG = [
 
 _BY_KEY = {s["key"]: s for s in ORDER_STATUS_CATALOG}
 CONFIG_ID = "order_status_config"
+# Şablon tohumlama versiyonu — DEFAULT_STATUS_TEMPLATES'e yeni event/email şablonu
+# eklendikçe artır; get_status_config bu sürümü görünce eksikleri yeniden tohumlar.
+SEED_VERSION = 2
 
 
 def all_status_keys():
@@ -106,12 +109,36 @@ DEFAULT_STATUS_TEMPLATES = {
         "email_subject": "İade Talebiniz Oluşturuldu — {order_number}",
         "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz için iade talebiniz oluşturuldu.</p><p>İade kargo kodunuz: <b>{return_code}</b> (3 gün geçerli).</p>",
     },
-    "order_preparing": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz hazirlaniyor."},
-    "order_ready_to_ship": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz kargoya hazirlaniyor."},
-    "order_in_transit": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz yolda. Takip: {tracking_url}"},
-    "order_out_for_delivery": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz dagitimda."},
-    "order_return_in_transit": {"sms": "Sayin {customer_name}, {order_number} numarali iadeniz kargoda."},
-    "order_returned": {"sms": "Sayin {customer_name}, {order_number} numarali iadeniz tamamlandi."},
+    "order_preparing": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz hazirlaniyor.",
+        "email_subject": "Siparişiniz Hazırlanıyor — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz hazırlanıyor. Kargoya verildiğinde ayrıca bilgilendirileceksiniz.</p>",
+    },
+    "order_ready_to_ship": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz kargoya hazirlaniyor.",
+        "email_subject": "Siparişiniz Kargoya Hazırlanıyor — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz kargoya teslim için hazırlanıyor.</p>",
+    },
+    "order_in_transit": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz yolda. Takip: {tracking_url}",
+        "email_subject": "Siparişiniz Yolda — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz yola çıktı.</p><p>Takip linki: <a href='{tracking_url}'>{tracking_url}</a></p>",
+    },
+    "order_out_for_delivery": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz dagitimda.",
+        "email_subject": "Siparişiniz Dağıtımda — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz bugün dağıtıma çıktı, kısa süre içinde teslim edilecektir.</p>",
+    },
+    "order_return_in_transit": {
+        "sms": "Sayin {customer_name}, {order_number} numarali iadeniz kargoda.",
+        "email_subject": "İadeniz Kargoda — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişinize ait iadeniz kargoya verildi, tarafımıza ulaştığında bilgilendirileceksiniz.</p>",
+    },
+    "order_returned": {
+        "sms": "Sayin {customer_name}, {order_number} numarali iadeniz tamamlandi.",
+        "email_subject": "İadeniz Tamamlandı — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişinize ait iade işleminiz tamamlandı. Varsa iade bedeliniz ayrıca işleme alınacaktır.</p>",
+    },
     "order_refunded": {
         "sms": "Sayin {customer_name}, {order_number} numarali siparisinizin iade bedeli odendi.",
         "email_subject": "İade Bedeliniz Ödendi — {order_number}",
@@ -162,7 +189,11 @@ DEFAULT_STATUS_TEMPLATES = {
         "email_subject": "Siparişiniz İptal Edildi — {order_number}",
         "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz iptal edildi. Ödeme alınmışsa iade süreci başlatılacaktır.</p>",
     },
-    "order_pending": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz alindi."},
+    "order_pending": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz alindi.",
+        "email_subject": "Siparişiniz Alındı — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz alındı. İşleme alındığında bilgilendirileceksiniz.</p>",
+    },
 }
 
 
@@ -193,9 +224,16 @@ async def ensure_status_templates(db):
 async def get_status_config(db):
     saved = await db.settings.find_one({"id": CONFIG_ID}, {"_id": 0})
     cfg = merge_config(saved)
-    if not (saved and saved.get("templates_seeded")):
+    # Şablon tohumlama VERSİYON bazlı: yeni event/email şablonu eklediğimizde
+    # SEED_VERSION'ı artırırız; mevcut (canlı) DB'lerde de eksik şablonlar
+    # idempotent olarak tamamlanır. ensure_status_templates var olanı bozmaz,
+    # sadece eksik (event,channel) kombinasyonlarını ekler.
+    if not saved or saved.get("templates_seed_version") != SEED_VERSION:
         await ensure_status_templates(db)
         await db.settings.update_one(
-            {"id": CONFIG_ID}, {"$set": {"id": CONFIG_ID, "templates_seeded": True}}, upsert=True
+            {"id": CONFIG_ID},
+            {"$set": {"id": CONFIG_ID, "templates_seeded": True,
+                      "templates_seed_version": SEED_VERSION}},
+            upsert=True,
         )
     return cfg
