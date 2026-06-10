@@ -11,7 +11,7 @@ const R2_CDN = "cdn.facette.com.tr";
 // Eski r2.dev (transform desteklemez) — kalan referanslar için boyut-eşleme fallback.
 const R2_SIZES = [400, 800, 1280, 1920];
 
-export function optimizeImg(url, width = 800, quality = 90) {
+export function optimizeImg(url, width = 800, quality = 75) {
   // Boş/geçersiz değerlerde src="" uyarısını ve gereksiz isteği önlemek için undefined döndür
   if (!url || typeof url !== "string") return undefined;
 

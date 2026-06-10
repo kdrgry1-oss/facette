@@ -55,7 +55,7 @@ function HeroSlider({ block }) {
             className={`absolute inset-0 block transition-opacity duration-700 ${index === currentSlide ? "opacity-100 z-10" : "opacity-0"}`}
           >
             <img
-              src={optimizeImg(img, 1920, 82)}
+              src={optimizeImg(img, 1920, 78)}
               alt={block?.title || ""}
               className="w-full h-full object-cover block"
               fetchPriority={index === 0 ? "high" : "auto"}
