@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import SiteReturns from "./SiteReturns";
+import TicimaxReturns from "./TicimaxReturns";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -13,6 +14,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // entegrasyonu aktifleştiğinde (örn. Hepsiburada claim çekimi) buraya eklenir.
 const PLATFORMS = [
   { key: "facette", label: "Web Sitesi", badge: "W", color: "bg-gray-800" },
+  { key: "ticimax", label: "Ticimax", badge: "S", color: "bg-blue-600" },
   { key: "trendyol", label: "Trendyol", badge: "T", color: "bg-orange-500" },
 ];
 
@@ -145,7 +147,7 @@ export default function Returns() {
   const fetchClaims = useCallback(async () => {
     // Web Sitesi sekmesi kendi verisini gömülü <SiteReturns/> ile customer_returns'ten
     // ceker; bu yuzden Trendyol claims endpoint'ini cagirmaya gerek yok.
-    if (platform === "facette") {
+    if (platform === "facette" || platform === "ticimax") {
       setClaims([]); setTotal(0); setTabCounts({}); setStats({}); setLoading(false);
       return;
     }
@@ -174,6 +176,7 @@ export default function Returns() {
   // Auto-refresh every 5 minutes
   useEffect(() => {
     const syncAndRefresh = async () => {
+      if (platform !== "trendyol") return;
       try {
         const token = localStorage.getItem("token");
         await axios.get(`${API}/integrations/trendyol/claims/sync`, {
@@ -422,8 +425,11 @@ export default function Returns() {
         {/* Web Sitesi sekmesi: gerçek site iadeleri (customer_returns) gömülü SiteReturns ile */}
         {platform === "facette" && <SiteReturns embedded />}
 
+        {/* Ticimax sekmesi: orders'tan iade/kısmi iade durumundaki siparişler */}
+        {platform === "ticimax" && <TicimaxReturns embedded />}
+
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
-        {platform !== "facette" && (<>
+        {platform === "trendyol" && (<>
         {/* Durum sekmeleri */}
         <div className="flex items-center gap-2 overflow-x-auto mb-4">
           {STATUS_TABS.map((t) => (
