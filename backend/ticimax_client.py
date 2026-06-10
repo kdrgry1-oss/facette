@@ -36,6 +36,25 @@ _siparis_client_cache = None
 _uye_client_cache = None
 
 
+def set_domain(domain: str):
+    """Runtime'da Ticimax domain'ini değiştir (db.settings'ten gelen değer için).
+    WSDL URL'lerini yeniden kurar ve client cache'lerini sıfırlar ki bir sonraki
+    çağrı yeni domain'e gitsin. Sync fonksiyonları çağırmadan önce bunu kullanır."""
+    global TICIMAX_DOMAIN, URUN_WSDL, SIPARIS_WSDL, UYE_WSDL
+    global _urun_client_cache, _siparis_client_cache, _uye_client_cache
+    domain = (domain or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    if not domain or domain == TICIMAX_DOMAIN:
+        return
+    TICIMAX_DOMAIN = domain
+    URUN_WSDL    = f"https://{domain}/Servis/UrunServis.svc?wsdl"
+    SIPARIS_WSDL = f"https://{domain}/Servis/SiparisServis.svc?wsdl"
+    UYE_WSDL     = f"https://{domain}/Servis/UyeServis.svc?wsdl"
+    _urun_client_cache = None
+    _siparis_client_cache = None
+    _uye_client_cache = None
+    logger.info(f"Ticimax domain set → {domain}")
+
+
 def _urun_client():
     global _urun_client_cache
     if _urun_client_cache is None:

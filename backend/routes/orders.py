@@ -484,14 +484,20 @@ async def create_order(
                 _cfg = await get_status_config(db)
                 _nz = (_cfg.get("notify") or {}).get("awaiting_payment") or {}
                 _channels = [c for c in ("sms", "email") if _nz.get(c)]
-                if _channels:
-                    await send_notification(
-                        db, "order_awaiting_payment",
-                        to_phone=ship.get("phone") or order.get("phone"),
-                        to_email=ship.get("email") or order.get("email"),
-                        variables=variables,
-                        channels=_channels,
-                    )
+                # Havale/EFT siparişinde "Siparişiniz Alındı · Ödeme Bekleniyor"
+                # bildirimi HER ZAMAN gitmeli — config boş bırakılmış olsa bile
+                # müşteri en azından e-posta (varsa SMS) ile bilgilendirilir.
+                if not _channels:
+                    _channels = ["email"]
+                    if (ship.get("phone") or order.get("phone")):
+                        _channels.append("sms")
+                await send_notification(
+                    db, "order_awaiting_payment",
+                    to_phone=ship.get("phone") or order.get("phone"),
+                    to_email=ship.get("email") or order.get("email"),
+                    variables=variables,
+                    channels=_channels,
+                )
             else:
                 await send_notification(
                     db, "order_confirmed",
@@ -1300,8 +1306,14 @@ async def create_invoice_for_order(
                 "kdv_rate": float(it.get("kdv_rate") or 10.0),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": it.get("barcode") or "",
-                # Ürün/Hizmet kolonunda ad altinda sadece Renk; stok(barkod) ve beden YAZILMAZ.
-                "note": (f"Renk: {it.get('color')}" if it.get('color') else ""),
+                # Doğan şablonu Barkod/Renk/Beden sütunlarını satır notundan parse eder:
+                # Renk='Renk:'..';' arası, Beden='Beden:'..':' arası, Barkod=substring-after('Barcode:').
+                # Açıklamaya (Item/Name) stok/beden YAZILMAZ; sütunlar bu nottan dolar.
+                "note": ((
+                    f"Renk:{(it.get('color') or '').strip()};"
+                    f"Beden:{(it.get('size') or '').strip()}:"
+                    f"Barcode:{(it.get('barcode') or '').strip()}"
+                ) if (it.get('color') or it.get('size') or it.get('barcode')) else ""),
             })
 
         # Taşıyan (kargo firması) — siparişin Trendyol'da beyan edilen kargosundan DİNAMİK.
@@ -1477,8 +1489,12 @@ async def create_invoice_for_order(
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "buyer_sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": it.get("barcode") or "",
-                # Ad altinda sadece Renk; urun adi tekrari + beden YAZILMAZ.
-                "note": (f"Renk: {it.get('color')}" if it.get('color') else ""),
+                # Doğan şablonu Barkod/Renk/Beden sütunlarını satır notundan parse eder.
+                "note": ((
+                    f"Renk:{(it.get('color') or '').strip()};"
+                    f"Beden:{(it.get('size') or '').strip()}:"
+                    f"Barcode:{(it.get('barcode') or '').strip()}"
+                ) if (it.get('color') or it.get('size') or it.get('barcode')) else ""),
             })
 
         # Taşıyan (kargo firması) — Trendyol'da beyan edilen kargodan DİNAMİK (e-Arşiv ile aynı eşleme)

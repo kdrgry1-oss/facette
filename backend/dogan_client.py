@@ -468,8 +468,9 @@ class DoganClient:
             _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
             if _cd and _cc:
                 _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
-            _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
+            # İl/ilçe NOTA EKLENMEZ: şablon PostalAddress'ten zaten "ilçe / il" basıyor;
+            # nota da eklenince faturada iki kez görünüyordu.
+            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -918,8 +919,9 @@ class DoganClient:
             _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
             if _cd and _cc:
                 _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
-            _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
+            # İl/ilçe NOTA EKLENMEZ: şablon PostalAddress'ten zaten "ilçe / il" basıyor;
+            # nota da eklenince faturada iki kez görünüyordu.
+            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -1344,9 +1346,9 @@ class DoganClient:
                 notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kimlik No: {escape(_clean(carrier_vkn))}</cbc:Note>")
             notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kişi Adı: {escape(_clean(carrier_name))}</cbc:Note>")
         if _cust_street_clean:
+            # İl/ilçe nota eklenmez (PostalAddress zaten basıyor → çift görünüm engellenir)
             notes_xml.append(
-                f"<cbc:Note>Taraf : Alıcı; {escape(_cust_street_clean)} "
-                f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
+                f"<cbc:Note>Taraf : Alıcı; {escape(_cust_street_clean)}</cbc:Note>")
 
         xslt_ref_id = str(_uuid.uuid4())
 

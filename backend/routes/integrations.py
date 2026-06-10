@@ -3980,6 +3980,13 @@ async def import_ticimax_orders(
     # WS kodu DB'den al
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
     api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    _dom = settings.get("domain")
+    if _dom:
+        try:
+            from ticimax_client import set_domain as _set_dom  # type: ignore
+            _set_dom(_dom)
+        except Exception as _e:
+            logger.warning(f"[ticimax] set_domain failed: {_e}")
 
     # Tarih aralığı
     end_dt   = datetime.now(timezone.utc)
@@ -4055,11 +4062,38 @@ async def import_ticimax_orders(
         status_map   = {
             "Yeni": "pending", "Onaylandı": "confirmed", "Hazırlanıyor": "processing",
             "Kargoya Verildi": "shipped", "Teslim Edildi": "delivered",
-            "İptal": "cancelled", "İade": "returned"
+            "İptal": "cancelled", "İptal Edildi": "cancelled",
+            "İade": "returned", "İade Edildi": "returned", "İade Tamamlandı": "returned",
+            "İade Talebi": "return_requested", "İade Onaylandı": "return_approved",
+            "İade Bedeli Ödendi": "refunded", "Para İadesi Yapıldı": "refunded",
+            "Kısmi İade": "partial_refunded", "Kısmi İade Yapıldı": "partial_refunded",
         }
         status       = status_map.get(status_raw, "pending")
+        # Ham Ticimax durumunda "kısmi iade" / "iade bedeli" geçen varyantları yakala
+        _sr_low = status_raw.lower()
+        if "kısmi" in _sr_low or "kismi" in _sr_low:
+            status = "partial_refunded"
+        elif ("iade bedeli" in _sr_low or "para iadesi" in _sr_low or
+              ("iade" in _sr_low and ("ödendi" in _sr_low or "odendi" in _sr_low))):
+            status = "refunded"
         created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
                            datetime.now(timezone.utc).isoformat())
+        # Gerçek ödeme yöntemini yakala (havale / kredi kartı / kapıda ödeme vb.)
+        _odeme_raw = str(raw.get("OdemeTipi") or raw.get("OdemeSekli") or
+                         raw.get("OdemeYontemi") or raw.get("OdemeAdi") or "").strip()
+        _odeme_low = _odeme_raw.lower()
+        if "havale" in _odeme_low or "eft" in _odeme_low or "banka" in _odeme_low:
+            payment_method = "bank_transfer"
+        elif "kapıda" in _odeme_low or "kapida" in _odeme_low:
+            payment_method = "cash_on_delivery"
+        elif "kredi" in _odeme_low or "kart" in _odeme_low or "kredikart" in _odeme_low:
+            payment_method = "credit_card"
+        elif "kapıda kredi" in _odeme_low:
+            payment_method = "cod_card"
+        elif _odeme_raw:
+            payment_method = "ticimax"  # bilinmeyen ama dolu — ham değer aşağıda saklanır
+        else:
+            payment_method = "ticimax"
         ip_address   = str(raw.get("IPAdresi") or "")
         kaynak       = str(raw.get("Kaynak") or "")
         kargo_takip  = str(raw.get("KargoTakipNo") or "")
@@ -4161,7 +4195,8 @@ async def import_ticimax_orders(
             "tax": kdv_tutari,
             "total": total,
             "paid_amount": odenen,
-            "payment_method": "ticimax",
+            "payment_method": payment_method,
+            "payment_method_raw": _odeme_raw,  # Ticimax'tan gelen ham ödeme tipi metni
             "payment_status": "paid" if odenen >= total else "pending",
             "status": status,
             "platform": "ticimax",
@@ -4233,6 +4268,13 @@ async def backfill_broken_ticimax_orders(
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
     api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    _dom = settings.get("domain")
+    if _dom:
+        try:
+            from ticimax_client import set_domain as _set_dom  # type: ignore
+            _set_dom(_dom)
+        except Exception as _e:
+            logger.warning(f"[ticimax] set_domain failed: {_e}")
 
     # 1) DB'deki bozuk siparişleri bul
     broken_query = {
@@ -4405,6 +4447,13 @@ async def import_ticimax_members(
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
     api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    _dom = settings.get("domain")
+    if _dom:
+        try:
+            from ticimax_client import set_domain as _set_dom  # type: ignore
+            _set_dom(_dom)
+        except Exception as _e:
+            logger.warning(f"[ticimax] set_domain failed: {_e}")
 
     imported = 0
     updated = 0
@@ -4573,6 +4622,65 @@ async def import_ticimax_members(
         "linked_users": linked_users,
         "pages_fetched": page - 1,
         "message": f"{imported} yeni üye, {updated} güncellendi. {linked_users} mevcut hesap Ticimax üyesiyle eşleşti."
+    }
+
+
+@router.post("/ticimax/link-orders-to-users")
+async def link_ticimax_orders_to_users(
+    current_user: dict = Depends(require_admin),
+):
+    """Email ile eşleştirme: user_id'si boş Ticimax siparişlerini, aynı e-postaya
+    sahip kullanıcı hesabına bağlar. Üye ve sipariş import'tan SONRA çalıştırın.
+
+    - Parolalara dokunmaz (kullanıcı şifresini sıfırlama akışıyla belirler).
+    - Yalnızca source=ticimax ve user_id boş siparişleri hedefler.
+    """
+    started = datetime.now(timezone.utc)
+    linked = 0
+    no_email = 0
+    no_user = 0
+    scanned = 0
+
+    # E-posta → user_id haritası (tek seferde)
+    email_to_uid: Dict[str, str] = {}
+    async for u in db.users.find({"email": {"$ne": None}}, {"_id": 0, "id": 1, "email": 1}):
+        em = str(u.get("email") or "").strip().lower()
+        if em and u.get("id"):
+            email_to_uid[em] = u["id"]
+
+    cursor = db.orders.find(
+        {"source": "ticimax", "$or": [{"user_id": None}, {"user_id": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "shipping_address": 1, "email": 1},
+    )
+    async for o in cursor:
+        scanned += 1
+        em = str((o.get("shipping_address") or {}).get("email") or o.get("email") or "").strip().lower()
+        if not em:
+            no_email += 1
+            continue
+        uid = email_to_uid.get(em)
+        if not uid:
+            no_user += 1
+            continue
+        await db.orders.update_one(
+            {"id": o["id"]},
+            {"$set": {"user_id": uid, "linked_by_email_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        linked += 1
+
+    duration = (datetime.now(timezone.utc) - started).total_seconds()
+    await log_integration_event(
+        "ticimax", "link_orders", "order", "-", "success",
+        f"{linked} sipariş e-posta ile hesaba bağlandı ({scanned} tarandı)")
+    return {
+        "success": True,
+        "scanned": scanned,
+        "linked": linked,
+        "skipped_no_email": no_email,
+        "skipped_no_matching_user": no_user,
+        "duration_sec": round(duration, 2),
+        "message": (f"{linked} Ticimax siparişi e-posta eşleşmesiyle kullanıcı hesaplarına bağlandı. "
+                    f"{no_user} sipariş için eşleşen hesap yok (üye henüz kayıt/parola oluşturmamış olabilir)."),
     }
 
 

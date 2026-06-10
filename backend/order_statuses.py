@@ -31,7 +31,8 @@ ORDER_STATUS_CATALOG = [
     {"key": "return_rejected", "label": "İade Reddedildi", "customer_label": "İade Talebiniz Değerlendirildi", "event": "order_return_rejected", "color": "#9CA3AF", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "return_in_transit", "label": "İade Kargoda", "customer_label": "İadeniz Kargoda", "event": "order_return_in_transit", "color": "#EC4899", "group": "İade", "default_active": False, "default_sms": False, "default_email": False},
     {"key": "returned", "label": "İade Tamamlandı", "customer_label": "İadeniz Tamamlandı", "event": "order_returned", "color": "#BE123C", "group": "İade", "default_active": True, "default_sms": False, "default_email": False},
-    {"key": "refunded", "label": "İade Bedeli Ödendi", "customer_label": "İade Bedeliniz Ödendi", "event": "order_refunded", "color": "#9F1239", "group": "İade", "default_active": True, "default_sms": False, "default_email": False},
+    {"key": "refunded", "label": "İade Bedeli Ödendi", "customer_label": "İade Bedeliniz Ödendi", "event": "order_refunded", "color": "#9F1239", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
+    {"key": "partial_refunded", "label": "Kısmi İade Yapıldı", "customer_label": "Kısmi İadeniz Yapıldı", "event": "order_partial_refunded", "color": "#DB2777", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "cancelled", "label": "İptal Edildi", "customer_label": "Siparişiniz İptal Edildi", "event": "order_cancelled", "color": "#6B7280", "group": "Son", "default_active": True, "default_sms": False, "default_email": False},
 ]
 
@@ -111,7 +112,56 @@ DEFAULT_STATUS_TEMPLATES = {
     "order_out_for_delivery": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz dagitimda."},
     "order_return_in_transit": {"sms": "Sayin {customer_name}, {order_number} numarali iadeniz kargoda."},
     "order_returned": {"sms": "Sayin {customer_name}, {order_number} numarali iadeniz tamamlandi."},
-    "order_refunded": {"sms": "Sayin {customer_name}, {order_number} numarali siparisinizin iade bedeli odendi."},
+    "order_refunded": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisinizin iade bedeli odendi.",
+        "email_subject": "İade Bedeliniz Ödendi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişinizin iade bedeli hesabınıza/kartınıza iade edilmiştir.</p><p>İade tutarının hesabınıza yansıması bankanıza bağlı olarak 1-7 iş günü sürebilir.</p><p>FACETTE'i tercih ettiğiniz için teşekkür ederiz.</p>",
+    },
+    "order_partial_refunded": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz icin kismi iade yapildi.",
+        "email_subject": "Kısmi İadeniz Yapıldı — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz için kısmi iade işlemi gerçekleştirilmiştir.</p><p>İade edilen tutarın hesabınıza/kartınıza yansıması bankanıza bağlı olarak 1-7 iş günü sürebilir.</p><p>Detaylar için hesabım > siparişlerim sayfasını ziyaret edebilirsiniz.</p>",
+    },
+    "order_confirmed": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz onaylandi ve hazirlaniyor.",
+        "email_subject": "Siparişiniz Onaylandı — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz onaylandı ve hazırlanmaya başlandı.</p><p>Kargoya verildiğinde ayrıca bilgilendirileceksiniz.</p>",
+    },
+    "order_packed": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz paketlendi.",
+        "email_subject": "Siparişiniz Paketlendi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz paketlendi, kargoya teslim için hazır.</p>",
+    },
+    "order_shipped": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz kargoya verildi. Takip: {tracking_url}",
+        "email_subject": "Siparişiniz Kargoya Verildi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz kargoya verildi.</p><p>Takip linki: <a href='{tracking_url}'>{tracking_url}</a></p>",
+    },
+    "order_delivered": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz teslim edildi. Bizi tercih ettiginiz icin tesekkurler.",
+        "email_subject": "Siparişiniz Teslim Edildi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz teslim edildi. FACETTE'i tercih ettiğiniz için teşekkür ederiz.</p>",
+    },
+    "order_undelivered": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz teslim edilemedi. En kisa surede sizinle iletisime gececegiz.",
+        "email_subject": "Siparişiniz Teslim Edilemedi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz teslim edilemedi. Ekibimiz en kısa sürede sizinle iletişime geçecektir.</p>",
+    },
+    "order_return_approved": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz icin iade talebiniz onaylandi.",
+        "email_subject": "İade Talebiniz Onaylandı — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz için iade talebiniz onaylandı.</p>",
+    },
+    "order_return_rejected": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz icin iade talebiniz degerlendirildi. Detay icin hesabinizi kontrol edin.",
+        "email_subject": "İade Talebiniz Değerlendirildi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz için iade talebiniz değerlendirildi. Detaylar için hesabım > siparişlerim sayfasını ziyaret edebilirsiniz.</p>",
+    },
+    "order_cancelled": {
+        "sms": "Sayin {customer_name}, {order_number} numarali siparisiniz iptal edildi.",
+        "email_subject": "Siparişiniz İptal Edildi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişiniz iptal edildi. Ödeme alınmışsa iade süreci başlatılacaktır.</p>",
+    },
     "order_pending": {"sms": "Sayin {customer_name}, {order_number} numarali siparisiniz alindi."},
 }
 
