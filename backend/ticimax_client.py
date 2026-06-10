@@ -39,11 +39,29 @@ _uye_client_cache = None
 def set_domain(domain: str):
     """Runtime'da Ticimax domain'ini değiştir (db.settings'ten gelen değer için).
     WSDL URL'lerini yeniden kurar ve client cache'lerini sıfırlar ki bir sonraki
-    çağrı yeni domain'e gitsin. Sync fonksiyonları çağırmadan önce bunu kullanır."""
+    çağrı yeni domain'e gitsin. Sync fonksiyonları çağırmadan önce bunu kullanır.
+
+    ÖNEMLİ: Ticimax WEB SERVİS'i (SOAP/WSDL) MAĞAZA domaininde yayınlanır
+    (ör. https://www.facette.com.tr/Servis/SiparisServis.svc?wsdl) — resmi
+    dökümantasyon: "Servis Adresi: https://www.alanadiniz.com/Servis/...".
+    Ticimax YÖNETİM PANELİ adresleri (*.ticimaxeticaret.com) WSDL servis ETMEZ;
+    böyle bir adres verilirse zeep WSDL'i çözemez ve
+    "'NoneType' object has no attribute 'getroottree'" hatası fırlatır.
+    Bu yüzden panel adresleri yok sayılır ve çalışan mağaza domaini korunur.
+    """
     global TICIMAX_DOMAIN, URUN_WSDL, SIPARIS_WSDL, UYE_WSDL
     global _urun_client_cache, _siparis_client_cache, _uye_client_cache
     domain = (domain or "").strip().replace("https://", "").replace("http://", "").strip("/")
+    # Yol / sorgu parçalarını at — yalnızca host kalsın
+    domain = domain.split("/")[0].split("?")[0].strip()
     if not domain or domain == TICIMAX_DOMAIN:
+        return
+    if "ticimaxeticaret.com" in domain.lower():
+        logger.warning(
+            f"Ticimax WS için panel adresi kullanılamaz ({domain}); "
+            f"mağaza domaini korunuyor: {TICIMAX_DOMAIN}. "
+            f"WS endpoint mağaza alan adınızdadır (ör. www.facette.com.tr/Servis/...)."
+        )
         return
     TICIMAX_DOMAIN = domain
     URUN_WSDL    = f"https://{domain}/Servis/UrunServis.svc?wsdl"
