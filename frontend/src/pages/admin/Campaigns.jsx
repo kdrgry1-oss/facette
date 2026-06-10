@@ -72,6 +72,8 @@ const blankForm = () => ({
   is_active: true, auto_apply: false, usage_limit: 0,
   first_order_only: false, usage_limit_per_user: 0, min_quantity: 0,
   buy_quantity: 2, free_quantity: 1, get_discount: 50,
+  priority: 0, combinable: false, stack_group: "",
+  categories: [], products: [],
 });
 
 export default function AdminCampaigns() {
@@ -80,8 +82,36 @@ export default function AdminCampaigns() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState(blankForm());
+  // Madde 4 — kapsam (kategori/ürün) seçici
+  const [allCategories, setAllCategories] = useState([]);
+  const [prodQuery, setProdQuery] = useState("");
+  const [prodResults, setProdResults] = useState([]);
+  const [prodNames, setProdNames] = useState({}); // id -> ad (chip gösterimi)
 
   useEffect(() => { fetchCampaigns(); }, []);
+  useEffect(() => {
+    axios.get(`${API}/categories`).then((r) => setAllCategories(r.data || [])).catch(() => setAllCategories([]));
+  }, []);
+
+  const toggleCategory = (id) => {
+    const cur = formData.categories || [];
+    setFormData({ ...formData, categories: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+  const searchProducts = async (q) => {
+    setProdQuery(q);
+    if (!q || q.trim().length < 2) { setProdResults([]); return; }
+    try {
+      const r = await axios.get(`${API}/products?search=${encodeURIComponent(q.trim())}&limit=8`);
+      setProdResults(r.data?.products || []);
+    } catch { setProdResults([]); }
+  };
+  const addProduct = (p) => {
+    const cur = formData.products || [];
+    if (!cur.includes(p.id)) setFormData({ ...formData, products: [...cur, p.id] });
+    setProdNames((prev) => ({ ...prev, [p.id]: p.name }));
+    setProdQuery(""); setProdResults([]);
+  };
+  const removeProduct = (id) => setFormData({ ...formData, products: (formData.products || []).filter((x) => x !== id) });
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -139,6 +169,11 @@ export default function AdminCampaigns() {
       buy_quantity: c.buy_quantity || 2,
       free_quantity: c.free_quantity || 1,
       get_discount: c.get_discount || 50,
+      priority: c.priority || 0,
+      combinable: !!c.combinable,
+      stack_group: c.stack_group || "",
+      categories: c.categories || [],
+      products: c.products || [],
     });
     setModalOpen(true);
   };
@@ -398,6 +433,63 @@ export default function AdminCampaigns() {
               <input type="checkbox" className="accent-black" checked={!!formData.auto_apply} onChange={(e) => setFormData({ ...formData, auto_apply: e.target.checked })} />
               <span>Otomatik uygula (kod gerekmez) — özellikle "Ücretsiz Kargo" için.</span>
             </label>
+
+            {/* Madde 4 — kampanya motoru alanları */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={lblCls}>Öncelik (büyük = önce uygulanır)</label>
+                <input type="number" value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) || 0 })} className={inputCls} />
+              </div>
+              <div>
+                <label className={lblCls}>Stack Grubu (opsiyonel)</label>
+                <input type="text" value={formData.stack_group} onChange={(e) => setFormData({ ...formData, stack_group: e.target.value })} placeholder="örn. kargo" className={inputCls} />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="accent-black" checked={!!formData.combinable} onChange={(e) => setFormData({ ...formData, combinable: e.target.checked })} />
+              <span>Birleştirilebilir — diğer birleştirilebilir kampanyalarla üst üste uygulanır (kapalıysa tek başına/münhasır).</span>
+            </label>
+
+            {/* Madde 4 — Kapsam (kategori/ürün). Boş = tüm sepete uygulanır. */}
+            <div className="border rounded-lg p-3 space-y-3 bg-gray-50/50">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">Kapsam (opsiyonel — boşsa tüm sepete uygulanır)</div>
+              <div>
+                <label className={lblCls}>Kategoriler</label>
+                <div className="max-h-32 overflow-y-auto border rounded bg-white p-2 space-y-1">
+                  {allCategories.length === 0 && <div className="text-xs text-gray-400">Kategori bulunamadı</div>}
+                  {allCategories.map((cat) => (
+                    <label key={cat.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input type="checkbox" className="accent-black" checked={(formData.categories || []).includes(cat.id)} onChange={() => toggleCategory(cat.id)} />
+                      <span>{cat.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className={lblCls}>Ürünler</label>
+                {(formData.products || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-1.5">
+                    {(formData.products || []).map((pid) => (
+                      <span key={pid} className="inline-flex items-center gap-1 bg-stone-900 text-white text-[11px] rounded px-2 py-0.5">
+                        {prodNames[pid] || pid}
+                        <button type="button" onClick={() => removeProduct(pid)} className="text-white/70 hover:text-white">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <input type="text" value={prodQuery} onChange={(e) => searchProducts(e.target.value)} placeholder="Ürün ara (en az 2 harf)…" className={inputCls} />
+                {prodResults.length > 0 && (
+                  <div className="border rounded bg-white mt-1 max-h-40 overflow-y-auto">
+                    {prodResults.map((p) => (
+                      <button type="button" key={p.id} onClick={() => addProduct(p)} className="w-full text-left px-2 py-1.5 text-xs hover:bg-gray-50 border-b last:border-0">
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
             {riskWarning && (
               <div className="flex items-start gap-2 text-xs bg-red-50 border border-red-200 text-red-700 rounded p-2">

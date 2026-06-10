@@ -353,6 +353,8 @@ def _coupon_to_campaign(c: dict) -> dict:
         "priority": c.get("priority", 0),
         "combinable": bool(c.get("combinable", False)),
         "stack_group": c.get("stack_group") or "",
+        "categories": c.get("categories") or [],
+        "products": c.get("products") or [],
     }
 
 
