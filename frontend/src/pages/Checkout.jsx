@@ -51,6 +51,8 @@ export default function Checkout() {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedPromotions, setAppliedPromotions] = useState([]); // Madde 4 motor sonucu
+  const [eligiblePromotions, setEligiblePromotions] = useState([]); // tum uygulanabilirler (musteri secsin)
+  const [excludedIds, setExcludedIds] = useState([]); // musterinin X ile kaldirdigi kampanyalar
 
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
@@ -114,13 +116,16 @@ export default function Checkout() {
         email: user?.email || "",
         code: code || "",
         payment_method: paymentMethod,
+        excluded_ids: excludedIds,
       });
       const d = res.data || {};
       setAppliedPromotions(d.applied || []);
+      setEligiblePromotions(d.eligible || []);
       setDiscount(Number(d.total_discount || 0));
       return d;
     } catch {
       setAppliedPromotions([]);
+      setEligiblePromotions([]);
       setDiscount(0);
       return null;
     }
@@ -147,18 +152,19 @@ export default function Checkout() {
     axios.post(`${API}/coupons/available`, {
       cart_total: total,
       user_id: user?.id || null,
+      email: user?.email || "",
       items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
     }).then((r) => setAvailableCoupons(r.data?.items || []))
       .catch(() => setAvailableCoupons([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
 
-  // Madde 4 — sepet/kod/ÖDEME YÖNTEMİ degisince motoru calistir (discount DEP DEGIL -> dongu yok)
+  // Madde 4 — sepet/kod/ÖDEME YÖNTEMİ/kaldırılanlar degisince motoru calistir (discount DEP DEGIL)
   useEffect(() => {
-    if (items.length === 0) { setAppliedPromotions([]); setDiscount(0); return; }
+    if (items.length === 0) { setAppliedPromotions([]); setEligiblePromotions([]); setDiscount(0); return; }
     recalcPromotions(appliedCoupon?.code || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, total, user?.id, appliedCoupon?.code, paymentMethod]);
+  }, [items, total, user?.id, appliedCoupon?.code, paymentMethod, excludedIds]);
 
   // Payment callback — iyzico → backend → storefront'a ?status=success|fail&order=.. ile döner
   useEffect(() => {
@@ -274,6 +280,38 @@ export default function Checkout() {
     setCouponCode("");
     recalcPromotions(""); // girilen kod kalkar, otomatik kampanyalar uygulanmaya devam eder
   };
+
+  // Madde 4 — Müşteri kontrolü: kampanya seçimi/kaldırma
+  // İki kampanya birleşebilir mi? (backend _pair_ok aynası)
+  const canCombine = (a, b) => {
+    if (!a?.combinable || !b?.combinable) return false;
+    const aw = a.combinable_with || [];
+    const bw = b.combinable_with || [];
+    if (aw.length && !aw.includes(b.coupon_id)) return false;
+    if (bw.length && !bw.includes(a.coupon_id)) return false;
+    return true;
+  };
+  // Uygulanan bir kampanyayı X ile kaldır
+  const removePromotion = (p) => {
+    // Girilen kod kampanyasıysa: kodu temizlemek doğal kaldırmadır
+    if (appliedCoupon && p.code && appliedCoupon.code === p.code) { handleRemoveCoupon(); return; }
+    const id = p.coupon_id;
+    if (!id) return;
+    setExcludedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+  // Alternatif bir kampanyayı seç: çakışan (birleşemeyen) uygulanmışları hariç tut, kendisini geri al
+  const pickAlternative = (alt) => {
+    const altId = alt.coupon_id;
+    const conflicts = appliedPromotions
+      .filter((p) => p.coupon_id && p.coupon_id !== altId && !canCombine(p, alt))
+      .map((p) => p.coupon_id);
+    setExcludedIds((prev) => {
+      const next = new Set(prev.filter((x) => x !== altId));
+      conflicts.forEach((c) => next.add(c));
+      return Array.from(next);
+    });
+  };
+  const resetExcluded = () => setExcludedIds([]);
 
   // ----- Address Modal -----
   const openAddressModal = (which) => {
@@ -940,20 +978,48 @@ export default function Checkout() {
                   </div>
                 </div>
 
-                {/* Madde 4 — uygulanan kampanyalar kirilimi */}
-                {appliedPromotions.length > 0 && (
-                  <div className="px-5 pt-4" data-testid="applied-promotions">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Uygulanan Kampanyalar</div>
-                    <div className="space-y-1">
-                      {appliedPromotions.map((p, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs">
-                          <span className="text-gray-700 truncate">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
-                          <span className="text-green-600 font-semibold shrink-0 ml-2">-{Number(p.discount).toFixed(2)} ₺</span>
+                {/* Madde 4 — uygulanan kampanyalar + müşteri seçimi (X ile kaldır / alternatifi uygula) */}
+                {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (() => {
+                  const appliedIds = appliedPromotions.map((p) => p.coupon_id).filter(Boolean);
+                  const alternatives = eligiblePromotions.filter((e) => !appliedIds.includes(e.coupon_id));
+                  return (
+                    <div className="px-5 pt-4" data-testid="applied-promotions">
+                      {appliedPromotions.length > 0 && (
+                        <>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Uygulanan Kampanyalar</div>
+                          <div className="space-y-1">
+                            {appliedPromotions.map((p, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs gap-2">
+                                <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
+                                <span className="text-green-600 font-semibold shrink-0">-{Number(p.discount).toFixed(2)} ₺</span>
+                                <button type="button" onClick={() => removePromotion(p)} title="Kampanyayı kaldır" aria-label="Kaldır"
+                                  className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">×</button>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {alternatives.length > 0 && (
+                        <div className="mt-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Şunları da uygulayabilirsiniz</div>
+                          <div className="space-y-1">
+                            {alternatives.map((a, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs gap-2">
+                                <span className="text-gray-500 truncate flex-1">{a.title || a.code}{a.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
+                                <span className="text-gray-400 shrink-0">-{Number(a.discount).toFixed(2)} ₺</span>
+                                <button type="button" onClick={() => pickAlternative(a)}
+                                  className="shrink-0 text-[11px] px-2 py-0.5 border rounded hover:border-stone-900 hover:bg-stone-50 transition-colors">Uygula</button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      ))}
+                      )}
+                      {excludedIds.length > 0 && (
+                        <button type="button" onClick={resetExcluded} className="mt-2 text-[11px] text-gray-500 underline hover:text-stone-900">Kaldırılan kampanyaları geri al</button>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Totals */}
                 <div className="px-5 py-4 mt-3 border-t space-y-2 text-sm">

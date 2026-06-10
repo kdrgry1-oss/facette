@@ -79,7 +79,7 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
           <img
             src={optimizeImg((p.images && p.images[0]) || p.image || "", 400)}
             alt={p.name}
-            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+            className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-500"
             loading="lazy"
             decoding="async"
           />
@@ -403,7 +403,7 @@ export default function Header({ hideMenu = false }) {
                           <img
                             src={(p.images && p.images[0]) || p.image || ""}
                             alt={p.name}
-                            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+                            className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-500"
                           />
                         </div>
                         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>

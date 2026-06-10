@@ -767,6 +767,16 @@ export default function AdminProducts() {
     newImages.splice(index, 1);
     setFormData({ ...formData, images: newImages });
   };
+  // Görsel string ya da {url, is_size_table:true} dict olabilir. Ölçü/pazaryeri görseli
+  // işaretlenince müşteriye gizlenir (storefront eler) ama admin galeride durmaya devam eder.
+  const imgUrl = (img) => (typeof img === 'object' && img !== null ? (img.url || img.src || img.image || '') : img);
+  const isSizeTableImg = (img) => (typeof img === 'object' && img !== null && !!img.is_size_table);
+  const toggleSizeTableImg = (index) => {
+    const newImages = [...formData.images];
+    const cur = newImages[index];
+    newImages[index] = isSizeTableImg(cur) ? imgUrl(cur) : { url: imgUrl(cur), is_size_table: true };
+    setFormData({ ...formData, images: newImages });
+  };
 
   /**
    * handleSubmit — Ürün kaydetme / güncelleme işlemi.
@@ -2803,9 +2813,17 @@ export default function AdminProducts() {
 
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {formData.images.map((img, idx) => (
-                      <div key={idx} className="relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 border-white shadow-md hover:shadow-xl transition-all">
-                        <img src={img} className="w-full h-full object-cover" alt="" />
+                      <div key={idx} className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all ${isSizeTableImg(img) ? "border-amber-400" : "border-white"}`}>
+                        <img src={imgUrl(img)} className="w-full h-full object-cover" alt="" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleSizeTableImg(idx)}
+                            title={isSizeTableImg(img) ? "Müşteriye tekrar göster" : "Ölçü tablosu / pazaryeri görseli — müşteriden gizle"}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isSizeTableImg(img) ? "bg-amber-500 text-white hover:bg-amber-600" : "bg-white text-black hover:bg-gray-100"}`}
+                          >
+                            <EyeOff size={18} />
+                          </button>
                           <button 
                             type="button"
                             onClick={() => removeImage(idx)} 
@@ -2814,9 +2832,11 @@ export default function AdminProducts() {
                             <Trash2 size={20} />
                           </button>
                         </div>
-                        {idx === 0 && (
+                        {isSizeTableImg(img) ? (
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white text-[10px] font-black uppercase tracking-tighter rounded-full">Ölçü · Gizli</div>
+                        ) : idx === 0 ? (
                           <div className="absolute top-2 left-2 px-3 py-1 bg-black text-white text-[10px] font-black uppercase tracking-tighter rounded-full">Kapak</div>
-                        )}
+                        ) : null}
                         <div className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-white/90 text-black flex items-center justify-center text-[10px] font-black">{idx + 1}</div>
                       </div>
                     ))}

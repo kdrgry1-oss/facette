@@ -230,11 +230,12 @@ export default function ProductDetail() {
   // Remove duplicate images and hide size-table images from customer view
   const allImages = product.images || [];
   const uniqueImages = allImages.length > 1 && allImages[0] === allImages[1] ? allImages.slice(1) : allImages;
-  // Size table images are dict objects with is_size_table flag – strip them out for customer
-  const displayImages = uniqueImages.filter(img => {
-    if (typeof img === 'object' && img !== null) return !img.is_size_table;
-    return true;
-  });
+  // Ölçü tablosu görselleri {url, is_size_table:true} dict'i olarak işaretli — müşteriden gizle.
+  // Kalanları URL string'e normalize et (dict gelse bile <img src> kırılmasın).
+  const displayImages = uniqueImages
+    .filter((img) => !(typeof img === 'object' && img !== null && img.is_size_table))
+    .map((img) => (typeof img === 'object' && img !== null ? (img.url || img.src || img.image || '') : img))
+    .filter(Boolean);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({

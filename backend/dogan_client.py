@@ -307,7 +307,7 @@ class DoganClient:
 
             name = escape((it.get("name") or "Ürün"))[:255]
             sku = escape(_s(it.get("sku") or it.get("product_code") or f"URN{idx:04d}"))
-            li_note = escape(_s(it.get("note") or it.get("barcode") or ""))
+            li_note = escape(_s(it.get("note") or ""))  # barkod ARTIK not'a yazilmaz (stok ad altinda gorunmesin)
             note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
@@ -470,7 +470,6 @@ class DoganClient:
                 _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
             _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
             notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Delivery; {escape(_cs_full)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -749,7 +748,7 @@ class DoganClient:
 
             name = escape((it.get("name") or "Ürün"))[:255]
             sku = escape(_s(it.get("sku") or it.get("product_code") or f"URN{idx:04d}"))
-            li_note = escape(_s(it.get("note") or it.get("barcode") or ""))
+            li_note = escape(_s(it.get("note") or ""))  # barkod ARTIK not'a yazilmaz (stok ad altinda gorunmesin)
             note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
@@ -921,7 +920,6 @@ class DoganClient:
                 _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
             _cs_full = (_cs + (" " + _cd if _cd else "") + (" " + _cc if _cc else "")).strip()
             notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs_full)}</cbc:Note>")
-            notes_xml.append(f"<cbc:Note>Delivery; {escape(_cs_full)}</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -1348,9 +1346,6 @@ class DoganClient:
         if _cust_street_clean:
             notes_xml.append(
                 f"<cbc:Note>Taraf : Alıcı; {escape(_cust_street_clean)} "
-                f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
-            notes_xml.append(
-                f"<cbc:Note>Delivery; {escape(_cust_street_clean)} "
                 f"{escape(_clean(customer_district))} {escape(_clean(customer_city))}</cbc:Note>")
 
         xslt_ref_id = str(_uuid.uuid4())

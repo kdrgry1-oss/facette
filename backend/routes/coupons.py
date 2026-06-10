@@ -151,18 +151,26 @@ async def available_coupons(payload: dict):
         min_total = float(c.get("min_cart_total") or 0)
         if min_total and cart_total < min_total:
             continue
-        # İlk siparişte limit
-        if user_id and c.get("first_order_only"):
-            prior = await db.orders.count_documents({"user_id": user_id, "status": {"$ne": "cancelled"}})
+        # Kullanici eslesmesi: user_id VEYA email (misafir->uye gecisinde de yakalansin)
+        em = (payload.get("email") or payload.get("customer_email") or "").strip().lower()
+        _ors = []
+        if user_id:
+            _ors.append({"user_id": user_id})
+        if em:
+            _ors.append({"customer_email": em})
+        # İlk siparişe özel (hoşgeldin): user_id VEYA email ile onceki siparis varsa GIZLE
+        if c.get("first_order_only") and _ors:
+            prior = await db.orders.count_documents({"$or": _ors, "status": {"$ne": "cancelled"}})
             if prior > 0:
                 continue
-        # Kullanım limiti
+        # Kullanım limiti (toplam)
         if c.get("usage_limit"):
             used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
             if used >= c["usage_limit"]:
                 continue
-        if user_id and c.get("usage_limit_per_user"):
-            used_by = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "user_id": user_id})
+        # Kullanıcı başına limit: user_id VEYA email ile kullanim sayilir (hoşgeldin 1 kez -> GIZLE)
+        if c.get("usage_limit_per_user") and _ors:
+            used_by = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "$or": _ors})
             if used_by >= c["usage_limit_per_user"]:
                 continue
         # Kategori/ürün filtresi varsa eligible_total hesapla
@@ -278,10 +286,17 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
         used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
         if used >= c["usage_limit"]:
             return {"valid": False, "reason": "Kupon kullanım limiti dolmuş", "discount": 0}
-    if user_id and c.get("usage_limit_per_user"):
-        used_by_user = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "user_id": user_id})
-        if used_by_user >= c["usage_limit_per_user"]:
-            return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
+    if c.get("usage_limit_per_user"):
+        _em = (email or "").strip().lower()
+        _ors = []
+        if user_id:
+            _ors.append({"user_id": user_id})
+        if _em:
+            _ors.append({"customer_email": _em})
+        if _ors:
+            used_by_user = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "$or": _ors})
+            if used_by_user >= c["usage_limit_per_user"]:
+                return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
     if c.get("first_order_only"):
         em = (email or "").strip().lower()
         ors = []
@@ -493,8 +508,10 @@ async def _promo_cap_pct() -> float:
 
 async def evaluate_cart_promotions(cart_total: float, items: list,
                                    user_id=None, email: str = "", entered_code: str = "",
-                                   payment_method: str = "") -> dict:
-    """Otomatik kampanyalar + (varsa) girilen kodu birlikte degerlendirir. Saf orkestrasyon."""
+                                   payment_method: str = "", excluded_ids=None) -> dict:
+    """Otomatik kampanyalar + (varsa) girilen kodu birlikte degerlendirir. Saf orkestrasyon.
+    excluded_ids: musterinin X ile kaldirdigi kampanya id'leri -> uygulanmaz (ama eligible'da
+    yine gorunur ki geri eklenebilsin). Boylece motor 'en yuksegi zorla' DEGIL, musteri secer."""
     entered = (entered_code or "").strip().upper()
 
     # 1) Adaylar: aktif auto_apply kampanyalar + girilen kod
@@ -544,7 +561,10 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
     applied = []
     running = cart_total
     used_groups = set()
+    _excluded = set(excluded_ids or [])
     for cand in valid:
+        if cand["c"]["id"] in _excluded:
+            continue  # musteri bu kampanyayi X ile kaldirdi
         if applied:
             if not cand["combinable"]:
                 continue
@@ -589,6 +609,14 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
         "capped": capped,
         "cap_pct": cap_pct,
         "rejected": rejected,
+        # eligible: bu sepette GECERLI tum kampanyalar (uygulanmis olsun olmasin) — musteri
+        # X ile kaldirip baskasini secebilsin diye. discount = tek basina (standalone) deger.
+        "eligible": [{
+            "coupon_id": v["c"]["id"], "code": v["c"].get("code", ""),
+            "title": v["c"].get("title", ""), "type": v["c"].get("type"),
+            "discount": round(v["discount"], 2), "free_shipping": v["free_shipping"],
+            "combinable": v["combinable"], "combinable_with": v.get("combinable_with") or [],
+        } for v in valid],
     }
 
 
@@ -602,4 +630,5 @@ async def evaluate_promotions_endpoint(payload: dict):
         email=payload.get("email") or payload.get("customer_email") or "",
         entered_code=payload.get("code") or "",
         payment_method=payload.get("payment_method") or "",
+        excluded_ids=payload.get("excluded_ids") or [],
     )

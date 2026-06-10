@@ -1294,15 +1294,14 @@ async def create_invoice_for_order(
         line_items = []
         for it in (order.get("items") or []):
             line_items.append({
-                "name": it.get("product_name") or "Ürün",
+                "name": it.get("product_name") or it.get("name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
                 "kdv_rate": float(it.get("kdv_rate") or 10.0),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": it.get("barcode") or "",
-                "note": (f"Renk:{it.get('color') or ''}; Beden:{it.get('size') or ''}: Barcode:{it.get('barcode') or ''}"
-                         if (it.get('color') or it.get('size') or it.get('barcode'))
-                         else ""),
+                # Ürün/Hizmet kolonunda ad altinda sadece Renk; stok(barkod) ve beden YAZILMAZ.
+                "note": (f"Renk: {it.get('color')}" if it.get('color') else ""),
             })
 
         # Taşıyan (kargo firması) — siparişin Trendyol'da beyan edilen kargosundan DİNAMİK.
@@ -1471,16 +1470,15 @@ async def create_invoice_for_order(
         line_items = []
         for it in (order.get("items") or []):
             line_items.append({
-                "name": it.get("product_name") or "Ürün",
+                "name": it.get("product_name") or it.get("name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
                 "kdv_rate": float(it.get("kdv_rate") or 10.0),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "buyer_sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": it.get("barcode") or "",
-                "note": (f"{it.get('product_name', '')}, Renk:{it.get('color') or ''}, Beden:{it.get('size') or ''}"
-                         if (it.get('color') or it.get('size'))
-                         else ""),
+                # Ad altinda sadece Renk; urun adi tekrari + beden YAZILMAZ.
+                "note": (f"Renk: {it.get('color')}" if it.get('color') else ""),
             })
 
         # Taşıyan (kargo firması) — Trendyol'da beyan edilen kargodan DİNAMİK (e-Arşiv ile aynı eşleme)
