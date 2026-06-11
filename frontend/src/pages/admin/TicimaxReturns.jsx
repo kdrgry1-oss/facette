@@ -241,6 +241,9 @@ export default function TicimaxReturns({ embedded = false }) {
                       <td colSpan={7} className="px-4 py-3">
                         <div className="text-xs text-gray-500 mb-2 flex flex-wrap gap-x-6 gap-y-1">
                           {r.email && <span>E-posta: <b className="text-gray-700">{r.email}</b></span>}
+                          {(r.address || r.city || r.district) && (
+                            <span>Adres: <b className="text-gray-700">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
+                          )}
                           {r.payment_method_raw && <span>Ham ödeme: <b className="text-gray-700">{r.payment_method_raw}</b></span>}
                           {r.invoice_number && <span>Fatura: <b className="text-gray-700">{r.invoice_number}</b></span>}
                           {r.paid_amount > 0 && <span>Ödenen: <b className="text-gray-700">{fmtTL(r.paid_amount)}</b></span>}

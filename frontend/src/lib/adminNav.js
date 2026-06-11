@@ -23,7 +23,6 @@ export const navigationGroups = [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
       { label: "İadeler", path: "/admin/iadeler", icon: RotateCcw },
       { label: "İptaller", path: "/admin/iptaller", icon: XCircle },
-      { label: "İade Edilenler", path: "/admin/iade-edilenler", icon: RotateCcw },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },
       { label: "Ödeme Kaydı Bulunmayan", path: "/admin/odeme-bekleyen-siparisler", icon: AlertTriangle },
     ],
