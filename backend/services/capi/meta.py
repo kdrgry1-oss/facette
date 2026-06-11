@@ -81,7 +81,7 @@ def _build_custom_data(event: dict) -> dict:
         contents = []
         ids = []
         for it in items:
-            cid = str(it.get("item_id") or it.get("id") or "")
+            cid = str(it.get("content_id") or it.get("item_id") or it.get("id") or "")
             ids.append(cid)
             content = {
                 "id": cid,

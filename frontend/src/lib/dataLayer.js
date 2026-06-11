@@ -117,7 +117,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
         window.fbq("track", fbEv, {
           currency: eventData.currency || "TRY",
           value: eventData.value || 0,
-          content_ids: (eventData.items || []).map((i) => String(i.item_id || i.id || "")),
+          content_ids: (eventData.items || []).map((i) => String(i.content_id || i.item_id || i.id || "")),
           content_type: "product",
           num_items: (eventData.items || []).reduce((s, i) => s + (i.quantity || 1), 0),
         }, { eventID: event_id });
@@ -250,6 +250,14 @@ function productToItem(p, variant = null, opts = {}) {
 
   const item = {
     item_id: String(p.id || p.product_id || p.sku || p.stock_code || ""),
+    // Meta katalog eşleşmesi: katalog beden başına Ticimax varyant ID'siyle beslendiği
+    // için Meta content_ids = SEÇİLİ varyantın id'si olmalı. Varyant id yoksa ana ürün
+    // id'sine düşer. (GA4/Google ana id'de kalır; bunu yalnızca Meta kullanır.)
+    content_id: String(
+      (variant && variant.id != null && variant.id !== "") ? variant.id
+      : (p.catalog_id != null && p.catalog_id !== "") ? p.catalog_id
+      : (p.id || p.product_id || p.sku || p.stock_code || "")
+    ),
     item_name: p.name || "",
     item_brand: p.brand || p.vendor || "FACETTE",
     item_category: crumbs[0] || p.category_name || "",

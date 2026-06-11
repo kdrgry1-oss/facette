@@ -133,20 +133,24 @@ export default function ProductDetail() {
           navigate(`/${res.data.slug}`, { replace: true });
         }
 
+        // Varsayılan/ilk uygun bedeni önce belirle — ViewContent'in Meta content_id'si
+        // seçili bedenin Ticimax varyant id'si olsun (katalog eşleşmesi için).
+        const defaultVariant =
+          (res.data?.variants || []).find((v) => (v.stock || 0) > 0) ||
+          (res.data?.variants || [])[0] || null;
+
         // FAZ 9+ — Pixel ViewContent event
         trackViewContent({
           product_id: res.data.id,
           name: res.data.name,
           category: res.data.category_name,
           price: res.data.sale_price || res.data.price,
+          variant_id: defaultVariant?.id,
         });
 
-        if (res.data?.variants?.length > 0) {
-          const firstAvailable = res.data.variants.find(v => v.stock > 0);
-          if (firstAvailable) {
-            setSelectedVariant(firstAvailable);
-            setSelectedSize(firstAvailable.size);
-          }
+        if (defaultVariant && (defaultVariant.stock || 0) > 0) {
+          setSelectedVariant(defaultVariant);
+          setSelectedSize(defaultVariant.size);
         }
 
         // Benzer ürünler — kategori bazlı. (Eski /similar endpoint'i backend'de
@@ -206,8 +210,11 @@ export default function ProductDetail() {
       product_id: product.id,
       name: product.name,
       category: product.category_name,
-      price: product.sale_price || product.price,
+      price: selectedVariant?.price || product.sale_price || product.price,
       quantity,
+      size: selectedVariant?.size,
+      color: selectedVariant?.color,
+      variant_id: selectedVariant?.id,
     });
     toast.success(selectedVariant 
       ? `${product.name} - ${selectedVariant.size} sepete eklendi` 
@@ -220,6 +227,17 @@ export default function ProductDetail() {
     setSelectedSize(variant.size);
     // Beden değişince açık bildirim formunu kapat (stoklu bedene geçilirse gizlenir)
     if (variant.stock > 0) setNotifyOpen(false);
+    // Beden değişince ViewContent'i seçili bedenin Meta katalog id'siyle yeniden gönder
+    // (Meta content_id = o bedenin Ticimax varyant id'si — her beden için doğru eşleşme).
+    if (product) {
+      trackViewContent({
+        product_id: product.id,
+        name: product.name,
+        category: product.category_name,
+        price: variant.price || product.sale_price || product.price,
+        variant_id: variant.id,
+      });
+    }
   };
 
   const handleStockNotify = async () => {

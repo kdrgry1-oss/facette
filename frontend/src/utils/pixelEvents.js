@@ -21,25 +21,29 @@ import {
   trackSearch as _trackSearch,
 } from "../lib/dataLayer";
 
-/** Ürün detay görüntüleme — eski imza */
-export function trackViewContent({ product_id, name, category, price, brand, color }) {
+/** Ürün detay görüntüleme — eski imza (+ Meta katalog varyant id'si) */
+export function trackViewContent({ product_id, name, category, price, brand, color, variant_id }) {
   return trackViewItem({
     product: {
       id: product_id, name, category_name: category,
       brand: brand || "FACETTE", color: color || "",
       sale_price: Number(price) || 0, price: Number(price) || 0,
+      // Meta content_ids için: seçili bedenin Ticimax varyant id'si (varsa)
+      catalog_id: (variant_id != null && variant_id !== "") ? variant_id : undefined,
     },
   });
 }
 
-/** Sepete ekleme — eski imza */
-export function trackAddToCart({ product_id, name, category, price, quantity = 1, size, color }) {
+/** Sepete ekleme — eski imza (+ Meta katalog varyant id'si) */
+export function trackAddToCart({ product_id, name, category, price, quantity = 1, size, color, variant_id }) {
   return _trackAddToCart({
     product: {
       id: product_id, name, category_name: category,
       sale_price: Number(price) || 0, price: Number(price) || 0,
     },
-    variant: size || color ? { size, color, price: Number(price) || 0 } : null,
+    variant: (variant_id || size || color)
+      ? { id: variant_id, size, color, price: Number(price) || 0 }
+      : null,
     quantity,
   });
 }
