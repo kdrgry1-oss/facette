@@ -60,7 +60,7 @@ async def get_settings():
             "contact_email": "",
             "contact_phone": "",
             "address": "",
-            "payment_methods": {"credit_card": True, "bank_transfer": True, "cash_on_delivery": True},
+            "payment_methods": {"credit_card": True, "bank_transfer": True, "cash_on_delivery": False},
             "barcode_range_start": "",
             "barcode_range_end": "",
             "default_vat_rate": 10,

@@ -5,8 +5,20 @@ import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck,
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// İade grubu durumları — order_statuses.py "İade" grubuyla birebir
+// TÜM sipariş durumları — order_statuses.py kataloğuyla birebir (iade sayfasında da hepsi seçilebilir)
 const STATUS_OPTS = [
+  { value: "pending", label: "Onay Bekliyor" },
+  { value: "awaiting_payment", label: "Ödeme Bekleniyor (Havale/EFT)" },
+  { value: "payment_notified", label: "Ödeme Bildirimi Alındı" },
+  { value: "confirmed", label: "Onaylandı" },
+  { value: "preparing", label: "Hazırlanıyor" },
+  { value: "processing", label: "İşleme Alındı" },
+  { value: "ready_to_ship", label: "Kargoya Hazır" },
+  { value: "shipped", label: "Kargoya Verildi" },
+  { value: "in_transit", label: "Taşınıyor" },
+  { value: "out_for_delivery", label: "Dağıtımda" },
+  { value: "delivered", label: "Teslim Edildi" },
+  { value: "undelivered", label: "Teslim Edilemedi" },
   { value: "return_requested", label: "İade Talebi Alındı" },
   { value: "return_approved", label: "İade Onaylandı" },
   { value: "return_rejected", label: "İade Reddedildi" },
@@ -14,9 +26,22 @@ const STATUS_OPTS = [
   { value: "returned", label: "İade Tamamlandı" },
   { value: "partial_refunded", label: "Kısmi İade Yapıldı" },
   { value: "refunded", label: "İade Bedeli Ödendi" },
+  { value: "cancelled", label: "İptal Edildi" },
 ];
 const STATUS_LABEL = Object.fromEntries(STATUS_OPTS.map((s) => [s.value, s.label]));
 const STATUS_CLS = {
+  pending: "bg-gray-100 text-gray-600 border-gray-300",
+  awaiting_payment: "bg-amber-50 text-amber-700 border-amber-200",
+  payment_notified: "bg-amber-50 text-amber-700 border-amber-200",
+  confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  preparing: "bg-blue-50 text-blue-700 border-blue-200",
+  processing: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  ready_to_ship: "bg-sky-50 text-sky-700 border-sky-200",
+  shipped: "bg-violet-50 text-violet-700 border-violet-200",
+  in_transit: "bg-violet-50 text-violet-700 border-violet-200",
+  out_for_delivery: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
+  delivered: "bg-green-100 text-green-800 border-green-300",
+  undelivered: "bg-orange-50 text-orange-700 border-orange-200",
   return_requested: "bg-rose-50 text-rose-700 border-rose-200",
   return_approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   return_rejected: "bg-gray-100 text-gray-600 border-gray-300",
@@ -24,6 +49,7 @@ const STATUS_CLS = {
   returned: "bg-red-50 text-red-700 border-red-200",
   partial_refunded: "bg-rose-50 text-rose-700 border-rose-200",
   refunded: "bg-green-100 text-green-800 border-green-300",
+  cancelled: "bg-gray-100 text-gray-500 border-gray-300",
 };
 
 const PAYMENT_OPTS = [
@@ -134,7 +160,7 @@ export default function TicimaxReturns({ embedded = false }) {
       {/* Üst bar: çek butonu + özet */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-gray-600">
-          Ticimax'ten iade / kısmi iade durumundaki siparişler.
+          İade / kısmi iade durumundaki siparişler.
           {totalReturns > 0 && <span className="ml-1 font-medium text-gray-800">Toplam {totalReturns} iade siparişi.</span>}
         </div>
         <button
@@ -143,7 +169,7 @@ export default function TicimaxReturns({ embedded = false }) {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-60"
         >
           <RefreshCw size={15} className={pulling ? "animate-spin" : ""} />
-          {pulling ? "Çekiliyor…" : "Ticimax'tan Çek"}
+          {pulling ? "Çekiliyor…" : "Siparişleri Çek"}
         </button>
       </div>
 
@@ -239,16 +265,26 @@ export default function TicimaxReturns({ embedded = false }) {
                   {expandedId === r.id && (
                     <tr className="bg-gray-50/60">
                       <td colSpan={7} className="px-4 py-3">
-                        <div className="text-xs text-gray-500 mb-2 flex flex-wrap gap-x-6 gap-y-1">
-                          {r.email && <span>E-posta: <b className="text-gray-700">{r.email}</b></span>}
+                        {/* Müşteri + sipariş özeti */}
+                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600 mb-3">
+                          <span>Müşteri: <b className="text-gray-800">{r.customer_name}</b></span>
+                          {r.phone && <span>Telefon: <b className="text-gray-800">{r.phone}</b></span>}
+                          {r.email && <span>E-posta: <b className="text-gray-800">{r.email}</b></span>}
                           {(r.address || r.city || r.district) && (
-                            <span>Adres: <b className="text-gray-700">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
+                            <span className="lg:col-span-3">Adres: <b className="text-gray-800">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
                           )}
-                          {r.payment_method_raw && <span>Ham ödeme: <b className="text-gray-700">{r.payment_method_raw}</b></span>}
-                          {r.invoice_number && <span>Fatura: <b className="text-gray-700">{r.invoice_number}</b></span>}
-                          {r.paid_amount > 0 && <span>Ödenen: <b className="text-gray-700">{fmtTL(r.paid_amount)}</b></span>}
-                          {r.ticimax_order_id && <span>Ticimax ID: <b className="text-gray-700">{r.ticimax_order_id}</b></span>}
+                          <span>Durum: <b className="text-gray-800">{STATUS_LABEL[r.status] || r.status}</b></span>
+                          <span>Ödeme: <b className="text-gray-800">{r.payment_label}</b></span>
+                          {r.payment_method_raw && <span>Ham ödeme: <b className="text-gray-800">{r.payment_method_raw}</b></span>}
+                          <span>Sipariş tutarı: <b className="text-gray-800">{fmtTL(r.total)}</b></span>
+                          {r.paid_amount > 0 && <span>Ödenen: <b className="text-gray-800">{fmtTL(r.paid_amount)}</b></span>}
+                          {r.invoice_number && <span>Fatura: <b className="text-gray-800">{r.invoice_number}</b></span>}
+                          {r.ticimax_order_id && <span>Kaynak No: <b className="text-gray-800">{r.ticimax_order_id}</b></span>}
+                          {r.coupon_code && <span>Kupon: <b className="text-gray-800">{r.coupon_code}</b></span>}
                         </div>
+
+                        {/* Ürün kalemleri: ne almış / kaç adet / birim ve satır tutarı */}
+                        <div className="text-[11px] font-semibold text-gray-500 mb-1">Ürünler ({r.item_count} adet)</div>
                         {(r.items || []).length > 0 ? (
                           <div className="space-y-1">
                             {r.items.map((it, i) => (
@@ -257,14 +293,34 @@ export default function TicimaxReturns({ embedded = false }) {
                                 {it.size && <span className="text-gray-500">Beden: {it.size}</span>}
                                 {it.color && <span className="text-gray-500">Renk: {it.color}</span>}
                                 {it.barcode && <span className="text-gray-400">#{it.barcode}</span>}
-                                <span className="text-gray-500">{it.qty} ad.</span>
-                                <span className="font-medium">{fmtTL(it.price)}</span>
+                                <span className="text-gray-500 whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
+                                <span className="font-medium whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
                               </div>
                             ))}
                           </div>
                         ) : (
                           <div className="text-xs text-gray-400">Ürün kalemi yok.</div>
                         )}
+
+                        {/* Tutar dökümü */}
+                        {(r.subtotal > 0 || r.shipping_cost > 0 || r.discount > 0) && (
+                          <div className="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-6 gap-y-1 justify-end">
+                            {r.subtotal > 0 && <span>Ara toplam: <b className="text-gray-800">{fmtTL(r.subtotal)}</b></span>}
+                            {r.shipping_cost > 0 && <span>Kargo: <b className="text-gray-800">{fmtTL(r.shipping_cost)}</b></span>}
+                            {r.discount > 0 && <span>İndirim: <b className="text-gray-800">−{fmtTL(r.discount)}</b></span>}
+                            <span>Genel toplam: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
+                          </div>
+                        )}
+
+                        {/* İade/iptal durumu açıklaması */}
+                        {(r.status === "partial_refunded" || r.status === "returned" || r.status === "refunded" || r.status === "cancelled") && (
+                          <div className="mt-2 text-[11px] text-gray-500 bg-white border rounded-md px-2.5 py-1.5">
+                            {r.status === "cancelled" ? "Sipariş iptal edildi."
+                              : r.status === "partial_refunded" ? "Kısmi iade yapıldı. (Kaynak sistem kalem bazında ayrım vermiyor; iade edilen tutar yukarıdaki ödenen/tutar bilgisine yansır.)"
+                              : "Sipariş iade sürecinde / iade tamamlandı."}
+                          </div>
+                        )}
+                        {r.notes && <div className="mt-2 text-[11px] text-gray-500">Not: {r.notes}</div>}
                       </td>
                     </tr>
                   )}

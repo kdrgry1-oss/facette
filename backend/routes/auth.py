@@ -29,7 +29,8 @@ async def register(
     email: str = Query(...),
     password: str = Query(...),
     first_name: str = Query(None),
-    last_name: str = Query(None)
+    last_name: str = Query(None),
+    phone: str = Query(None)
 ):
     """Register new user"""
     email = safe_str(email, 256).lower().strip()
@@ -43,13 +44,22 @@ async def register(
     if existing:
         raise HTTPException(status_code=400, detail="Bu e-posta zaten kayıtlı")
 
+    # Telefon: normalize + mukerrer kontrol (ayni cep no ile ikinci hesap acilamaz)
+    from notification_service import normalize_phone_tr
+    phone_norm = normalize_phone_tr(safe_str(phone, 32) or "") if phone else ""
+    _last10 = phone_norm[-10:]
+    if len(_last10) == 10 and _last10.isdigit():
+        dup_phone = await db.users.find_one({"phone": {"$regex": _last10}}, {"_id": 0, "id": 1})
+        if dup_phone:
+            raise HTTPException(status_code=400, detail="Bu telefon numarası zaten kayıtlı")
+
     user = {
         "id": generate_id(),
         "email": email,
         "password": hash_password(password),
         "first_name": safe_str(first_name, 100) or "",
         "last_name": safe_str(last_name, 100) or "",
-        "phone": "",
+        "phone": phone_norm,
         "is_admin": False,
         "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -183,11 +193,46 @@ async def convert_guest_order(payload: dict):
     if not email:
         raise HTTPException(status_code=400, detail="Sipariş e-postası bulunamadı")
 
+    from notification_service import normalize_phone_tr
+    phone_norm = normalize_phone_tr(phone) if phone else ""
+    _last10 = phone_norm[-10:]
+
+    async def _save_guest_address(uid, _order):
+        try:
+            a = _order.get("shipping_address") or {}
+            if not (a.get("address") and a.get("city")):
+                return
+            dup = await db.addresses.find_one(
+                {"user_id": uid, "address": a.get("address", ""),
+                 "city": a.get("city", ""), "district": a.get("district", "")},
+                {"_id": 0, "id": 1})
+            if dup:
+                return
+            has_any = await db.addresses.find_one({"user_id": uid}, {"_id": 0, "id": 1})
+            await db.addresses.insert_one({
+                "id": generate_id(), "user_id": uid,
+                "title": a.get("title") or "Teslimat Adresi",
+                "first_name": a.get("first_name", ""), "last_name": a.get("last_name", ""),
+                "phone": a.get("phone", ""), "address": a.get("address", ""),
+                "city": a.get("city", ""), "district": a.get("district", ""),
+                "postal_code": a.get("postal_code", ""),
+                "is_default": not bool(has_any),
+                "is_corporate": False, "company_name": "", "tax_no": "", "tax_office": "",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as _e:
+            logger.warning(f"convert-guest adres kaydi atlandi: {_e}")
+
     existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+    if not existing and len(_last10) == 10 and _last10.isdigit():
+        # Ayni cep no baska bir hesaba aitse mukerrer uyelik acma — o hesaba bagla
+        existing = await db.users.find_one({"phone": {"$regex": _last10}}, {"_id": 0, "id": 1})
+
     if existing:
-        # Var olan hesaba bağla
+        # Var olan hesaba bagla (mukerrer hesap olusturma)
         user_id = existing["id"]
         await db.orders.update_one({"id": order["id"]}, {"$set": {"user_id": user_id}})
+        await _save_guest_address(user_id, order)
         from .deps import create_token as _ct
         token = _ct(user_id, is_admin=False)
         return {"token": token, "existing_account": True, "message": "Sipariş mevcut hesabınıza bağlandı"}
@@ -199,7 +244,7 @@ async def convert_guest_order(payload: dict):
         "password": hash_password(password),
         "first_name": first_name,
         "last_name": last_name,
-        "phone": phone,
+        "phone": phone_norm or phone,
         "role": "customer",
         "is_active": True,
         "source": "checkout_guest_convert",
@@ -207,6 +252,7 @@ async def convert_guest_order(payload: dict):
     }
     await db.users.insert_one(user)
     await db.orders.update_one({"id": order["id"]}, {"$set": {"user_id": user["id"]}})
+    await _save_guest_address(user["id"], order)
 
     from .deps import create_token as _ct
     token = _ct(user["id"], is_admin=False)

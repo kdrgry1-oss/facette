@@ -71,7 +71,7 @@ export default function AdminSettings() {
     payment_methods: {
       credit_card: true,
       bank_transfer: true,
-      cash_on_delivery: true,
+      cash_on_delivery: false,
     },
     barcode_range_start: "",
     barcode_range_end: "",

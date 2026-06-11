@@ -60,7 +60,14 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (data) => {
-    const res = await axios.post(`${API}/auth/register`, data);
+    const qs = new URLSearchParams({
+      email: data.email || "",
+      password: data.password || "",
+      first_name: data.first_name || "",
+      last_name: data.last_name || "",
+      phone: data.phone || "",
+    }).toString();
+    const res = await axios.post(`${API}/auth/register?${qs}`);
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;

@@ -208,6 +208,48 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"CAPI retry loop start warning: {e}")
 
+    # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
+    # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
+    # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve
+    # admin sonradan tekrar acarsa bir daha kapatmaz.
+    try:
+        _cfg = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+        if not _cfg.get("_cod_default_off_v1"):
+            _pm = dict(_cfg.get("payment_methods") or {})
+            _pm.setdefault("credit_card", True)
+            _pm.setdefault("bank_transfer", True)
+            _pm["cash_on_delivery"] = False
+            await db.settings.update_one(
+                {"id": "main"},
+                {"$set": {"payment_methods": _pm, "_cod_default_off_v1": True},
+                 "$setOnInsert": {"id": "main"}},
+                upsert=True,
+            )
+            logger.info("[migrate] cash_on_delivery varsayilan KAPALI uygulandi (_cod_default_off_v1)")
+    except Exception as e:
+        logger.warning(f"[migrate] cod_default_off atlandi: {e}")
+
+    # Tek seferlik: "Google Merchant" XML feed kaydini olustur (XML Feed'ler sayfasinda gorunur).
+    # Cikti /api/products/feed/google-merchant.xml — google-merchant-feed.xml ile birebir ayni format.
+    try:
+        _cfgf = await db.settings.find_one({"id": "main"}, {"_id": 0, "_google_feed_seeded_v1": 1}) or {}
+        if not _cfgf.get("_google_feed_seeded_v1"):
+            from routes.deps import generate_id as _gid
+            from datetime import datetime as _dt, timezone as _tz
+            if not await db.xml_feeds.find_one({"slug": "google-merchant"}):
+                await db.xml_feeds.insert_one({
+                    "id": _gid(), "name": "Google Merchant", "slug": "google-merchant",
+                    "target": "google", "enabled": True, "in_stock_only": False,
+                    "created_at": _dt.now(_tz.utc).isoformat(),
+                })
+                logger.info("[migrate] Google Merchant XML feed seed edildi (/feed/google-merchant.xml)")
+            await db.settings.update_one(
+                {"id": "main"},
+                {"$set": {"_google_feed_seeded_v1": True}, "$setOnInsert": {"id": "main"}},
+                upsert=True)
+    except Exception as e:
+        logger.warning(f"[migrate] google feed seed atlandi: {e}")
+
     yield
     
     # Shutdown

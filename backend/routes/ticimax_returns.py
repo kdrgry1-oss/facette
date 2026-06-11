@@ -67,7 +67,8 @@ async def list_ticimax_return_orders(
     }
 
     # Durum filtresi: tek durum verilmişse onu, yoksa tüm iade grubunu kullan
-    if status and status in RETURN_STATUSES:
+    if status:
+        # Artık herhangi bir sipariş durumuyla filtrelenebilir (yalnız iade grubuyla sınırlı değil)
         base_filter["status"] = status
     else:
         base_filter["status"] = {"$in": RETURN_STATUSES}
@@ -94,7 +95,9 @@ async def list_ticimax_return_orders(
     proj = {
         "_id": 0, "id": 1, "order_number": 1, "order_code": 1, "ticimax_order_id": 1,
         "status": 1, "payment_method": 1, "payment_method_raw": 1, "payment_status": 1,
-        "total": 1, "paid_amount": 1, "shipping_address": 1, "items": 1,
+        "total": 1, "paid_amount": 1, "subtotal": 1, "shipping_cost": 1, "discount": 1,
+        "coupon_code": 1, "notes": 1, "shipping_address": 1, "billing_address": 1,
+        "customer_name": 1, "full_name": 1, "items": 1,
         "created_at": 1, "updated_at": 1, "channel_source": 1, "invoice_number": 1,
     }
 
@@ -108,7 +111,12 @@ async def list_ticimax_return_orders(
     rows = []
     async for o in cursor:
         addr = o.get("shipping_address") or {}
-        name = " ".join([addr.get("first_name") or "", addr.get("last_name") or ""]).strip() or "—"
+        bill = o.get("billing_address") or {}
+        name = (" ".join([addr.get("first_name") or "", addr.get("last_name") or ""]).strip()
+                or addr.get("full_name") or addr.get("name")
+                or o.get("customer_name") or o.get("full_name")
+                or " ".join([bill.get("first_name") or "", bill.get("last_name") or ""]).strip()
+                or bill.get("name") or "—")
         items = o.get("items") or []
         rows.append({
             "id": o.get("id"),
@@ -127,6 +135,11 @@ async def list_ticimax_return_orders(
             "payment_status": o.get("payment_status") or "",
             "total": o.get("total") or 0,
             "paid_amount": o.get("paid_amount") or 0,
+            "subtotal": o.get("subtotal") or 0,
+            "shipping_cost": o.get("shipping_cost") or 0,
+            "discount": o.get("discount") or 0,
+            "coupon_code": o.get("coupon_code") or "",
+            "notes": o.get("notes") or "",
             "item_count": sum(int(i.get("quantity") or 1) for i in items),
             "items": [
                 {

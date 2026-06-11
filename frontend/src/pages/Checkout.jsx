@@ -25,6 +25,14 @@ const emptyAddress = {
   postal_code: "",
 };
 
+// Telefon alanı: yalnızca rakam (ve baştaki tek +) kabul edilir — harf/sembol engellenir
+const sanitizePhone = (v) => {
+  const raw = (v || "").replace(/[^\d+]/g, "");
+  const plus = raw.startsWith("+") ? "+" : "";
+  const digits = raw.replace(/\+/g, "").slice(0, 15);
+  return plus + digits;
+};
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -62,6 +70,9 @@ export default function Checkout() {
   const [selectedInstallment, setSelectedInstallment] = useState(1);
   const [usePoints, setUsePoints] = useState(false);
   const [userPoints] = useState(0); // future: fetch from /api/users/me
+  // Aktif ödeme yöntemleri — admin "Ödeme Yöntemleri" ayarından gelir (public /settings).
+  // Varsayılan: kart & havale AÇIK, kapıda ödeme KAPALI.
+  const [enabledPM, setEnabledPM] = useState({ credit_card: true, bank_transfer: true, cash_on_delivery: false });
 
   // Gift options + terms + quick signup
   const GIFT_WRAP_PRICE = 130;
@@ -87,6 +98,32 @@ export default function Checkout() {
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
   const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+
+  // Storefront: hangi ödeme yöntemleri aktif? (admin panelinden yönetilir)
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/settings`)
+      .then((r) => {
+        if (!alive) return;
+        const pm = r.data?.payment_methods || {};
+        setEnabledPM({
+          credit_card: pm.credit_card !== false,          // varsayılan AÇIK
+          bank_transfer: pm.bank_transfer !== false,      // varsayılan AÇIK
+          cash_on_delivery: pm.cash_on_delivery === true, // varsayılan KAPALI
+        });
+      })
+      .catch(() => { /* sessiz: varsayılan değerlerde kal */ });
+    return () => { alive = false; };
+  }, []);
+
+  // Seçili ödeme yöntemi kapatılmışsa ilk aktif yönteme düş
+  useEffect(() => {
+    const order = ["credit_card", "bank_transfer", "cash_on_delivery"];
+    if (!enabledPM[paymentMethod]) {
+      const first = order.find((k) => enabledPM[k]);
+      if (first) setPaymentMethod(first);
+    }
+  }, [enabledPM, paymentMethod]);
 
   // Load saved addresses for logged-in users
   useEffect(() => {
@@ -328,6 +365,8 @@ export default function Checkout() {
     for (const k of required) {
       if (!addressForm[k]) { toast.error("Tüm zorunlu alanları doldurun"); return; }
     }
+    const _digits = (addressForm.phone || "").replace(/\D/g, "");
+    if (_digits.length < 10) { toast.error("Geçerli bir telefon numarası girin (en az 10 hane)"); return; }
     // Persist for logged in users (async, page does not reload)
     if (user) {
       const token = localStorage.getItem("token");
@@ -806,7 +845,7 @@ export default function Checkout() {
                       { key: "credit_card", label: "Banka & Kredi Kartı ile Öde", icon: CreditCard },
                       { key: "bank_transfer", label: "Havale / EFT", icon: Building },
                       { key: "cash_on_delivery", label: "Kapıda Ödeme (+10₺)", icon: Truck },
-                    ].map(({ key, label, icon: Icon }) => (
+                    ].filter(({ key }) => enabledPM[key]).map(({ key, label, icon: Icon }) => (
                       <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                         <input type="radio" name="payment" value={key}
                           checked={paymentMethod === key}
@@ -1112,7 +1151,8 @@ export default function Checkout() {
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-700 mb-1">Telefon *</label>
-                <input value={addressForm.phone} onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+                <input value={addressForm.phone} onChange={(e) => setAddressForm({ ...addressForm, phone: sanitizePhone(e.target.value) })}
+                  type="tel" inputMode="numeric" autoComplete="tel" placeholder="05XX XXX XX XX"
                   className="w-full border rounded px-3 py-2 text-sm" required />
               </div>
               <div className="md:col-span-2">

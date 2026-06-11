@@ -14,7 +14,6 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // entegrasyonu aktifleştiğinde (örn. Hepsiburada claim çekimi) buraya eklenir.
 const PLATFORMS = [
   { key: "facette", label: "Web Sitesi", badge: "W", color: "bg-gray-800" },
-  { key: "ticimax", label: "Ticimax", badge: "S", color: "bg-blue-600" },
   { key: "trendyol", label: "Trendyol", badge: "T", color: "bg-orange-500" },
 ];
 
@@ -97,7 +96,8 @@ export default function Returns() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
-  const [platform, setPlatform] = useState("trendyol");
+  const [platform, setPlatform] = useState("facette");
+  const [siteView, setSiteView] = useState("orders"); // Web Sitesi alt görünümü: orders | requests
   const [statusTab, setStatusTab] = useState("all");
   const [tabCounts, setTabCounts] = useState({});
   const [itemSel, setItemSel] = useState({}); // {claim_id: Set(claim_item_id)} - manuel adet onayı
@@ -147,7 +147,7 @@ export default function Returns() {
   const fetchClaims = useCallback(async () => {
     // Web Sitesi sekmesi kendi verisini gömülü <SiteReturns/> ile customer_returns'ten
     // ceker; bu yuzden Trendyol claims endpoint'ini cagirmaya gerek yok.
-    if (platform === "facette" || platform === "ticimax") {
+    if (platform === "facette") {
       setClaims([]); setTotal(0); setTabCounts({}); setStats({}); setLoading(false);
       return;
     }
@@ -422,11 +422,22 @@ export default function Returns() {
           ))}
         </div>
 
-        {/* Web Sitesi sekmesi: gerçek site iadeleri (customer_returns) gömülü SiteReturns ile */}
-        {platform === "facette" && <SiteReturns embedded />}
-
-        {/* Ticimax sekmesi: orders'tan iade/kısmi iade durumundaki siparişler */}
-        {platform === "ticimax" && <TicimaxReturns embedded />}
+        {/* Web Sitesi sekmesi: sipariş bazlı iadeler + site iade talepleri (tek sekme) */}
+        {platform === "facette" && (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <button type="button" onClick={() => setSiteView("orders")}
+                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${siteView === "orders" ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                Sipariş İadeleri
+              </button>
+              <button type="button" onClick={() => setSiteView("requests")}
+                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${siteView === "requests" ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+                Site İade Talepleri
+              </button>
+            </div>
+            {siteView === "orders" ? <TicimaxReturns embedded /> : <SiteReturns embedded />}
+          </div>
+        )}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
         {platform === "trendyol" && (<>

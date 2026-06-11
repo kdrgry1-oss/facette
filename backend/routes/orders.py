@@ -338,6 +338,14 @@ async def create_order(
     if _pm0 in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
         order["status"] = "awaiting_payment"
 
+    # Guvenlik: kapida odeme admin tarafindan KAPALIYSA, eski istemci veya dogrudan
+    # API cagrisi ile gelen kapida odeme siparislerini sunucu tarafinda da reddet.
+    if _pm0 in ("cash_on_delivery", "kapida"):
+        _scfg = await db.settings.find_one({"id": "main"}, {"_id": 0, "payment_methods": 1}) or {}
+        _cod_on = ((_scfg.get("payment_methods") or {}).get("cash_on_delivery")) is True
+        if not _cod_on:
+            raise HTTPException(status_code=400, detail="Kapıda ödeme şu anda kullanılamıyor. Lütfen başka bir ödeme yöntemi seçin.")
+
     # Madde 4 — SUNUCU-OTORITER GUVENLI KELEPCE (tek yonlu). Sunucu indirimi odeme yontemiyle
     # birlikte yeniden hesaplar; istemcinin gonderdigi indirim sunucununkini ASAMAZ. Mesru
     # siparis degismez (iki deger esit). Sismis/sahte indirim (orn. havale indirimini kapip

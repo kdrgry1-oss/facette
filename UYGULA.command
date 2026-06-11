@@ -1,46 +1,51 @@
 #!/bin/bash
 # ============================================================
-# FACETTE DEPLOY
-#  - TICIMAX WS DOGRU ADRES + KEY: domain=facette.ticimaxeticaret.com,
-#    WS yetki kodu=AKG0M8DTRSEBAIA898JA6HW22EDIU3 (default + tum fallback'ler).
-#    Yanlis "panel adresini reddet" mantigi kaldirildi. Cron dahil her sey
-#    artik dogru adrese gider -> getroottree hatasi cozulur.
-#  - Performans: gorsel kalite 75, Google Fonts async
-#  - Mobil: storefront lazy code-split, lang=tr, ProductCard aria-label
-#  - Urun: gorsel siralama + Trendyol eksiksiz ozellik + zorunlu kirmizi
-#  - Ticimax iade sekmesi + SEO uclusu
-# Kullanim: once  unzip -o facette_update.zip -d .   sonra  bash UYGULA.command
+# FACETTE DEPLOY (KUMULATIF) — TUM bekleyen isler tek pakette
+#  A) Kapida odeme: storefronttan kaldirildi (admin panelden acilabilir) + koruma + migration.
+#  B) Checkout adres kaydi + mukerrer uyelik engeli (email/telefon) + telefon alani dogrulamasi.
+#  C) Iadeler sayfasi:
+#     - "Ticimax" sekmesi KALDIRILDI; icerigi "Web Sitesi" altina tasindi
+#       (Web Sitesi'nde: "Siparis Iadeleri" + "Site Iade Talepleri" ic gecisi).
+#     - Durum listesine TUM siparis durumlari eklendi (filtre + satir dropdown).
+#     - Her siparis detayinda: musteri, urunler (adet x birim = satir tutari),
+#       tutar dokumu, iade/iptal durumu.
+#  D) "Google Merchant" XML feed kaydi otomatik olusturulur (XML Feed'ler sayfasinda gorunur);
+#     /api/products/feed/google-merchant.xml -> google-merchant-feed.xml ile birebir format.
+# Kullanim: repo kokunde (.git olan klasor):  unzip -o facette_update.zip -d .  sonra  bash UYGULA.command
 # ============================================================
 set -e
 cd "$(dirname "$0")"
 echo "==> Calisma klasoru: $(pwd)"
 if [ ! -d backend ]; then echo "HATA: 'backend' yok. Once: unzip -o facette_update.zip -d ."; exit 1; fi
-if [ ! -d .git ]; then echo "HATA: '.git' yok."; exit 1; fi
-# --- Ticimax dogru adres + key (kritik) ---
-grep -q 'facette.ticimaxeticaret.com' backend/ticimax_client.py || { echo "HATA: dogru WS domaini default degil."; exit 1; }
-grep -q 'AKG0M8DTRSEBAIA898JA6HW22EDIU3' backend/ticimax_client.py || { echo "HATA: yeni WS key yok."; exit 1; }
-if grep -rq 'SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V' backend/ --include=*.py; then echo "HATA: eski WS key hala var."; exit 1; fi
-# --- Onceki isler ---
-grep -q "first_error" backend/routes/integrations.py || { echo "HATA: first_error yok."; exit 1; }
-grep -q "quality = 75" frontend/src/lib/img.js || { echo "HATA: gorsel kalite 75 degil."; exit 1; }
-grep -q 'html lang="tr"' frontend/public/index.html || { echo "HATA: lang=tr yok."; exit 1; }
-grep -q "tyMerged" frontend/src/pages/admin/Products.jsx || { echo "HATA: Trendyol eksiksiz ozellik yok."; exit 1; }
-echo "==> Tum dosyalar dogrulandi."
+if [ ! -d .git ]; then echo "HATA: '.git' yok. Repo kokunde calistir (unzip'i .git olan klasore yap)."; exit 1; fi
+
+# A
+grep -q "_cod_default_off_v1" backend/server.py || { echo "HATA: kapida migration yok."; exit 1; }
+grep -q "enabledPM\[key\]" frontend/src/pages/Checkout.jsx || { echo "HATA: checkout odeme filtreleme yok."; exit 1; }
+# B
+grep -q "_save_guest_address" backend/routes/auth.py || { echo "HATA: misafir adres kaydedici yok."; exit 1; }
+grep -q "URLSearchParams" frontend/src/context/AuthContext.jsx || { echo "HATA: register telefon gonderimi yok."; exit 1; }
+# C
+grep -q "siteView" frontend/src/pages/admin/Returns.jsx || { echo "HATA: Iadeler birlestirme yok."; exit 1; }
+grep -q "out_for_delivery" frontend/src/pages/admin/TicimaxReturns.jsx || { echo "HATA: tum durumlar eklenmemis."; exit 1; }
+grep -q "Kaynak No" frontend/src/pages/admin/TicimaxReturns.jsx || { echo "HATA: zengin detay yok."; exit 1; }
+grep -q "billing_address" backend/routes/ticimax_returns.py || { echo "HATA: backend detay zenginlestirme yok."; exit 1; }
+# D
+grep -q "_google_feed_seeded_v1" backend/server.py || { echo "HATA: google feed seed yok."; exit 1; }
+echo "==> Tum dosyalar dogrulandi (A+B+C+D)."
+
 echo "==> Git: add + commit + push ..."
 git add -A
-git commit -m "Ticimax WS: dogru adres facette.ticimaxeticaret.com + yeni yetki kodu (eski key/yanlis domain mantigi temizlendi); getroottree cozumu (+onceki isler)" || echo "   (commit edilecek yeni degisiklik yok)"
+git commit -m "feat: iadeler ticimax->web sitesi birlesimi + tum durumlar + zengin siparis detayi + google xml feed seed (kapida/checkout/uyelik isleriyle kumulatif)" || echo "   (commit edilecek yeni degisiklik yok)"
 git push
 echo ""
 echo "============================================"
-echo "  GONDERILDI. Railway backend'i yeniden baslatacak. ~1-2 dk."
-echo ""
-echo "  ONEMLI — db'deki ayar:"
-echo "   Entegrasyonlar > Ticimax ayarinda 'domain' = facette.ticimaxeticaret.com"
-echo "   ve 'api_key' = AKG0M8DTRSEBAIA898JA6HW22EDIU3 oldugundan emin ol."
-echo "   (Kod default'u zaten bu; ama db'de eski www.facette.com.tr varsa onu"
-echo "    duzelt ya da domain alanini bos birak.)"
+echo "  GONDERILDI. Railway + Cloudflare Pages ~1-3 dk icinde yeniden kurar."
 echo ""
 echo "  KONTROL:"
-echo "   1. Iadeler > Ticimax > 'Ticimax'tan Cek' -> artik calismali."
-echo "   2. Hala hata olursa KIRMIZI toast gercek sebebi gosterir; bana ilet."
+echo "   * Iadeler: 'Ticimax' sekmesi yok; Web Sitesi altinda Siparis Iadeleri / Site Iade Talepleri."
+echo "   * Durum dropdown'unda tum siparis durumlari secilebilir."
+echo "   * Bir siparisi acinca musteri + urunler + tutar dokumu gorunur."
+echo "   * SEO/Pazarlama > XML Feed'ler'de 'Google Merchant' feed'i hazir:"
+echo "     /api/products/feed/google-merchant.xml"
 echo "============================================"
