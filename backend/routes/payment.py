@@ -70,6 +70,25 @@ def _fmt(v: float) -> str:
     return f"{round(float(v or 0), 2):.2f}"
 
 
+def _is_paid(data: dict) -> bool:
+    """iyzico ödeme/3ds-auth yanıtından gerçek başarı tespiti.
+
+    Not: iyzico'nun 3DS auth (ThreedsPayment) yanıtı çoğu zaman `paymentStatus`
+    DÖNDÜRMEZ (null) — sadece status=success + paymentId verir. Bu yüzden
+    paymentStatus=="SUCCESS" şartı koşmak başarılı ödemeyi "failed" işaretliyordu.
+    Doğru başarı sinyali: API çağrısı başarılı + paymentId var + fraud reddi değil
+    + paymentStatus açıkça FAILURE değil.
+    """
+    if data.get("status") != "success":
+        return False
+    if not data.get("paymentId"):
+        return False
+    if str(data.get("fraudStatus", 1)) == "-1":
+        return False
+    ps = data.get("paymentStatus")
+    return ps in (None, "", "SUCCESS")
+
+
 def _format_gsm(phone: str) -> str:
     digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
     if not digits:
@@ -246,7 +265,7 @@ async def _retrieve_and_finalize(token: str) -> dict:
         resp = await c.post(f"{settings['base_url']}{RETRIEVE_PATH}", content=body_str.encode("utf-8"), headers=headers)
     data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure"}
 
-    paid = (data.get("status") == "success") and (data.get("paymentStatus") == "SUCCESS")
+    paid = _is_paid(data)
     update = {
         "iyzico_retrieve_response": {
             "status": data.get("status"),
@@ -332,7 +351,7 @@ def _build_card_payment_payload(order: dict, card: dict, installment: int,
 
 async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
     """iyzico ödeme/3ds-auth yanıtına göre siparişi günceller. Döner: paid(bool)."""
-    paid = (data.get("status") == "success") and (data.get("paymentStatus") == "SUCCESS")
+    paid = _is_paid(data)
     update = {
         "iyzico_retrieve_response": {
             "status": data.get("status"),
