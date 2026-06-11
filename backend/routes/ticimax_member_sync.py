@@ -79,7 +79,7 @@ async def _run_member_import(
     from ticimax_client import get_members, get_member_addresses  # type: ignore
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _domain = settings.get("domain") or settings.get("api_url") or os.environ.get("TICIMAX_DOMAIN")
     if _domain:
         try:

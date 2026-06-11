@@ -3137,8 +3137,8 @@ def _generate_slug(name: str) -> str:
 async def get_ticimax_status():
     """Check Ticimax connection status"""
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    domain = settings.get("domain", "www.facette.com.tr")
-    api_key = settings.get("api_key", "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V")
+    domain = settings.get("domain", "facette.ticimaxeticaret.com")
+    api_key = settings.get("api_key", "AKG0M8DTRSEBAIA898JA6HW22EDIU3")
     return {
         "configured": True,
         "domain": domain,
@@ -3158,8 +3158,8 @@ async def save_ticimax_settings(
     await db.settings.update_one(
         {"id": "ticimax"},
         {"$set": {
-            "domain": settings.get("domain", "www.facette.com.tr"),
-            "api_key": settings.get("api_key", "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"),
+            "domain": settings.get("domain", "facette.ticimaxeticaret.com"),
+            "api_key": settings.get("api_key", "AKG0M8DTRSEBAIA898JA6HW22EDIU3"),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }},
         upsert=True
@@ -3980,7 +3980,7 @@ async def import_ticimax_orders(
 
     # WS kodu DB'den al
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:
@@ -4280,7 +4280,7 @@ async def backfill_broken_ticimax_orders(
     from ticimax_order_parser import parse_ticimax_order
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:
@@ -4459,7 +4459,7 @@ async def import_ticimax_members(
     from ticimax_client import get_members, get_member_addresses
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:

@@ -320,7 +320,7 @@ async def _ticimax_sync_orders():
         from routes.deps import db  # lazy import
         from routes.marketplace_hub import log_integration_event  # lazy import
         s = await db.settings.find_one({"id": "ticimax"}) or {}
-        api_key = s.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+        api_key = s.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
         end_dt = datetime.now(timezone.utc)
         start_dt = end_dt - timedelta(days=30)
         start_str = start_dt.strftime("%d.%m.%Y")

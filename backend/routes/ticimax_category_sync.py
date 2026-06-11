@@ -236,7 +236,7 @@ async def _run_category_sync(
     from ticimax_client import get_all_categories, get_products  # type: ignore
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     # Domain'i de DB'den (yoksa env'den) uygula — yeni Ticimax sitesi için
     _domain = settings.get("domain") or settings.get("api_url") or os.environ.get("TICIMAX_DOMAIN")
     if _domain:
@@ -607,7 +607,7 @@ async def set_ticimax_settings(
 async def check_ticimax_access(current_user: dict = Depends(require_admin)):
     """UrunServis erişimini ve örnek kategori listesini test eder (yetki kodu doğru mu?)."""
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     domain = settings.get("domain") or settings.get("api_url") or os.environ.get("TICIMAX_DOMAIN")
     import ticimax_client as _tc  # type: ignore
     if domain:

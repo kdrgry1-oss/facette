@@ -78,7 +78,7 @@ async def sync_ticimax_stock(
     from ticimax_client import get_products, get_product_count  # type: ignore
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:
@@ -412,7 +412,7 @@ async def ticimax_category_probe(
     yapısını (kategori alanının adı, yeni-ürün bayrağı) görmek içindir."""
     from ticimax_client import get_products, get_all_categories  # type: ignore
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:
@@ -537,7 +537,7 @@ async def sync_ticimax_categories(
     from ticimax_client import get_products, get_product_count  # type: ignore
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _dom = settings.get("domain")
     if _dom:
         try:

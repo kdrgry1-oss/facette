@@ -1,6 +1,6 @@
 """
 Ticimax SOAP Web Service Client  –  facette.com.tr
-Default WS Key (UyeKodu): SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V (override via DB settings)
+Default WS Key (UyeKodu): AKG0M8DTRSEBAIA898JA6HW22EDIU3 (override via DB settings)
 
 Gerçek WSDL imzaları (doğrulanmış):
   SelectKategori  : UyeKodu, kategoriID=0, dil='tr', parentID
@@ -23,8 +23,8 @@ from typing import List, Dict, Optional, Any
 warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 
-TICIMAX_DOMAIN  = os.environ.get("TICIMAX_DOMAIN") or "www.facette.com.tr"
-TICIMAX_API_KEY = os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+TICIMAX_DOMAIN  = os.environ.get("TICIMAX_DOMAIN") or "facette.ticimaxeticaret.com"
+TICIMAX_API_KEY = os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
 RATE_LIMIT_SLEEP = 13   # Ticimax rate limit: 12 sn, biz 13 sn bekliyoruz
 
 URUN_WSDL    = f"https://{TICIMAX_DOMAIN}/Servis/UrunServis.svc?wsdl"
@@ -37,17 +37,11 @@ _uye_client_cache = None
 
 
 def set_domain(domain: str):
-    """Runtime'da Ticimax domain'ini değiştir (db.settings'ten gelen değer için).
-    WSDL URL'lerini yeniden kurar ve client cache'lerini sıfırlar ki bir sonraki
-    çağrı yeni domain'e gitsin. Sync fonksiyonları çağırmadan önce bunu kullanır.
+    """Runtime'da Ticimax domain'ini değiştir. WSDL URL'lerini yeniden kurar ve
+    client cache'lerini sıfırlar ki bir sonraki çağrı yeni domain'e gitsin.
 
-    ÖNEMLİ: Ticimax WEB SERVİS'i (SOAP/WSDL) MAĞAZA domaininde yayınlanır
-    (ör. https://www.facette.com.tr/Servis/SiparisServis.svc?wsdl) — resmi
-    dökümantasyon: "Servis Adresi: https://www.alanadiniz.com/Servis/...".
-    Ticimax YÖNETİM PANELİ adresleri (*.ticimaxeticaret.com) WSDL servis ETMEZ;
-    böyle bir adres verilirse zeep WSDL'i çözemez ve
-    "'NoneType' object has no attribute 'getroottree'" hatası fırlatır.
-    Bu yüzden panel adresleri yok sayılır ve çalışan mağaza domaini korunur.
+    NOT: Doğru WS domaini artık resolve_ws_domain() ile CANLI olarak yoklanıp
+    bulunur (aşağı bak). Bu fonksiyon sadece verilen host'u temizleyip ayarlar.
     """
     global TICIMAX_DOMAIN, URUN_WSDL, SIPARIS_WSDL, UYE_WSDL
     global _urun_client_cache, _siparis_client_cache, _uye_client_cache
@@ -56,13 +50,6 @@ def set_domain(domain: str):
     domain = domain.split("/")[0].split("?")[0].strip()
     if not domain or domain == TICIMAX_DOMAIN:
         return
-    if "ticimaxeticaret.com" in domain.lower():
-        logger.warning(
-            f"Ticimax WS için panel adresi kullanılamaz ({domain}); "
-            f"mağaza domaini korunuyor: {TICIMAX_DOMAIN}. "
-            f"WS endpoint mağaza alan adınızdadır (ör. www.facette.com.tr/Servis/...)."
-        )
-        return
     TICIMAX_DOMAIN = domain
     URUN_WSDL    = f"https://{domain}/Servis/UrunServis.svc?wsdl"
     SIPARIS_WSDL = f"https://{domain}/Servis/SiparisServis.svc?wsdl"
@@ -70,6 +57,7 @@ def set_domain(domain: str):
     _urun_client_cache = None
     _siparis_client_cache = None
     _uye_client_cache = None
+    logger.info(f"Ticimax domain set → {domain}")
     logger.info(f"Ticimax domain set → {domain}")
 
 

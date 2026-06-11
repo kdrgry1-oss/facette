@@ -207,7 +207,7 @@ async def _run_pull(mappings: List[Tuple[int, int]], apply: bool) -> Dict:
     import ticimax_client as _tc  # type: ignore
 
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
-    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "SSIQWRIYHQWROZGJAEIC2CRRZ5RV5V"
+    api_key = settings.get("api_key") or os.environ.get("TICIMAX_API_KEY") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
     _domain = settings.get("domain") or settings.get("api_url") or os.environ.get("TICIMAX_DOMAIN")
     if _domain:
         try:
