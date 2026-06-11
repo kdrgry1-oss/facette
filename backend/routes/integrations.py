@@ -3977,6 +3977,7 @@ async def import_ticimax_orders(
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from ticimax_client import get_orders as tc_get_orders, get_order_items
+    from ticimax_order_parser import map_status as _map_status, extract_payment as _extract_payment, extract_items as _extract_items
 
     # WS kodu DB'den al
     settings = await db.settings.find_one({"id": "ticimax"}) or {}
@@ -4061,46 +4062,20 @@ async def import_ticimax_orders(
         order_number = str(raw.get("SiparisNo") or raw.get("SiparisKodu") or raw.get("SiparisID") or ticimax_order_id)
         order_code   = str(raw.get("SiparisKodu") or "")
         odenen       = float(raw.get("OdenenTutar") or 0)
+        # NOT: _odenen_paid (Odemeler toplamı) aşağıda _extract_payment'tan gelir;
+        # OdenenTutar boşsa (iade siparişlerinde sık) ona düşeriz.
         kargo_tutari = float(raw.get("KargoTutari") or 0)
         indirim      = float(raw.get("IndirimTutari") or 0)
         kdv_tutari   = float(raw.get("KdvTutari") or 0)
-        total        = float(raw.get("ToplamTutar") or raw.get("GenelToplam") or odenen or 0)
-        status_raw   = str(raw.get("Durum") or raw.get("SiparisDurumu") or "Yeni")
-        status_map   = {
-            "Yeni": "pending", "Onaylandı": "confirmed", "Hazırlanıyor": "processing",
-            "Kargoya Verildi": "shipped", "Teslim Edildi": "delivered",
-            "İptal": "cancelled", "İptal Edildi": "cancelled",
-            "İade": "returned", "İade Edildi": "returned", "İade Tamamlandı": "returned",
-            "İade Talebi": "return_requested", "İade Onaylandı": "return_approved",
-            "İade Bedeli Ödendi": "refunded", "Para İadesi Yapıldı": "refunded",
-            "Kısmi İade": "partial_refunded", "Kısmi İade Yapıldı": "partial_refunded",
-        }
-        status       = status_map.get(status_raw, "pending")
-        # Ham Ticimax durumunda "kısmi iade" / "iade bedeli" geçen varyantları yakala
-        _sr_low = status_raw.lower()
-        if "kısmi" in _sr_low or "kismi" in _sr_low:
-            status = "partial_refunded"
-        elif ("iade bedeli" in _sr_low or "para iadesi" in _sr_low or
-              ("iade" in _sr_low and ("ödendi" in _sr_low or "odendi" in _sr_low))):
-            status = "refunded"
+        total        = float(raw.get("SiparisToplamTutari") or raw.get("ToplamTutar") or raw.get("GenelToplam") or odenen or 0)
+        # Durum: top-level Durum int kodundan (9,13,17...) iç status'e — string fallback'li.
+        # (Eski kod Durum=int'i string map'e veriyordu → tüm iadeler "pending"e düşüyordu.)
+        status       = _map_status(raw)
         created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
                            datetime.now(timezone.utc).isoformat())
-        # Gerçek ödeme yöntemini yakala (havale / kredi kartı / kapıda ödeme vb.)
-        _odeme_raw = str(raw.get("OdemeTipi") or raw.get("OdemeSekli") or
-                         raw.get("OdemeYontemi") or raw.get("OdemeAdi") or "").strip()
-        _odeme_low = _odeme_raw.lower()
-        if "havale" in _odeme_low or "eft" in _odeme_low or "banka" in _odeme_low:
-            payment_method = "bank_transfer"
-        elif "kapıda" in _odeme_low or "kapida" in _odeme_low:
-            payment_method = "cash_on_delivery"
-        elif "kredi" in _odeme_low or "kart" in _odeme_low or "kredikart" in _odeme_low:
-            payment_method = "credit_card"
-        elif "kapıda kredi" in _odeme_low:
-            payment_method = "cod_card"
-        elif _odeme_raw:
-            payment_method = "ticimax"  # bilinmeyen ama dolu — ham değer aşağıda saklanır
-        else:
-            payment_method = "ticimax"
+        # Ödeme: Odemeler.WebSiparisOdeme[].OdemeTipi int kodundan — string fallback'li.
+        # (Eski kod top-level OdemeTipi string okuyordu → hep None → "ticimax".)
+        payment_method, _odeme_raw, _odenen_paid = _extract_payment(raw)
         ip_address   = str(raw.get("IPAdresi") or "")
         kaynak       = str(raw.get("Kaynak") or "")
         kargo_takip  = str(raw.get("KargoTakipNo") or "")
@@ -4140,36 +4115,11 @@ async def import_ticimax_orders(
             from il_mapping import IL_CODE_TO_NAME  # type: ignore  # noqa
             city = IL_CODE_TO_NAME.get(posta_kodu[:2], "")
 
-        # Fetch line items (UrunGetir=True ile zaten gelmesi lazım, ama yine de fallback)
-        items = []
-        urunler_raw = raw.get("UrunListesi") or raw.get("Urunler") or []
-        if hasattr(urunler_raw, "__values__"):
-            urunler_raw = list(urunler_raw.__values__.values())[0] if urunler_raw.__values__ else []
-        if not urunler_raw:
-            try:
-                urunler_raw = get_order_items(ticimax_order_id, wscode=api_key)
-            except Exception:
-                urunler_raw = []
-        if not isinstance(urunler_raw, list):
-            urunler_raw = [urunler_raw] if urunler_raw else []
-
-        for item in urunler_raw:
-            if not item:
-                continue
-            if hasattr(item, "__values__"):
-                item = dict(item.__values__)
-            if not isinstance(item, dict):
-                continue
-            items.append({
-                "product_name": str(item.get("UrunAdi") or item.get("Adi") or ""),
-                "stock_code":   str(item.get("StokKodu") or ""),
-                "barcode":      str(item.get("Barkod") or ""),
-                "quantity":     int(item.get("Adet") or item.get("Miktar") or 1),
-                "price":        float(item.get("BirimFiyat") or item.get("Fiyat") or 0),
-                "size":         str(item.get("Beden") or ""),
-                "color":        str(item.get("Renk") or ""),
-                "ticimax_urun_id": item.get("UrunID") or item.get("UrunKartiID"),
-            })
+        # Sipariş kalemleri — Urunler {"WebSiparisUrun":[...]} dict'i doğru açılır,
+        # beden/renk EkSecenekList'ten, fiyat SatisAniIndirimliFiyat/Tutar'dan gelir.
+        # (Eski kod dict'i tek-eleman liste sanıp ürünleri boş bırakıyordu; ayrıca
+        # olmayan Beden/Renk/BirimFiyat alanlarını okuyordu.) Inline gelmezse SOAP fallback.
+        items = _extract_items(raw, ticimax_order_id, api_key=api_key)
 
         doc = {
             "ticimax_order_id": ticimax_order_id,
@@ -4201,10 +4151,10 @@ async def import_ticimax_orders(
             "discount": indirim,
             "tax": kdv_tutari,
             "total": total,
-            "paid_amount": odenen,
+            "paid_amount": odenen or _odenen_paid,
             "payment_method": payment_method,
             "payment_method_raw": _odeme_raw,  # Ticimax'tan gelen ham ödeme tipi metni
-            "payment_status": "paid" if odenen >= total else "pending",
+            "payment_status": "paid" if (odenen or _odenen_paid) >= total > 0 else "pending",
             "status": status,
             "platform": "ticimax",
             "source": "ticimax",

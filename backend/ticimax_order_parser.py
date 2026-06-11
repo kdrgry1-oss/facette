@@ -1,21 +1,56 @@
 """
 Ticimax sipariş parser - ortak helper.
-Hem cron (scheduler.py) hem manuel/backfill (routes/integrations.py) kullanımları
-için tek noktadan tutarlı eşleştirme sağlar.
+Hem cron (scheduler.py) hem manuel/backfill (routes/integrations.py) hem de
+/import (routes/integrations.py import_ticimax_orders) tek noktadan tutarlı eşleştirme
+kullanır.
 
-Kaynak: routes/integrations.py içinden çıkarıldı (satır 1800-1930 dolaylarında olan
-mantık). Cron daha önce minimal/yanlış map yapıyordu (AliciAdi top-level), bu helper
-KargoAdresi/FaturaAdresi nested dict + UrunListesi item parse mantığını kullanır.
+DÜZELTME (2026-06-11): Gerçek Ticimax SelectSiparis yanıt yapısına göre düzeltildi.
+  - Urunler: {"WebSiparisUrun": [...]} dict → liste olarak açılır (eskiden tek eleman sarılıyordu)
+  - Beden/Renk: EkSecenekList.WebSiparisUrunEkSecenekOzellik (TipID=1 renk, TipID=2 beden)
+    (eskiden olmayan Beden/Renk alanları okunuyordu → hep boş)
+  - Fiyat: SatisAniIndirimliFiyat / Tutar (eskiden olmayan BirimFiyat → hep 0)
+  - Ödeme: Odemeler.WebSiparisOdeme[].OdemeTipi int kodu (eskiden top-level OdemeTipi → hep None)
+  - Durum: top-level Durum int kodu (9,13,17...) → iç status; string label fallback
+    (eskiden Durum=int, _STATUS_MAP string bekliyordu → iade siparişleri "pending"e düşüyordu)
 """
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 
-_STATUS_MAP = {
-    "Yeni": "pending", "Onaylandı": "confirmed", "Hazırlanıyor": "processing",
-    "Kargoya Verildi": "shipped", "Teslim Edildi": "delivered",
-    "İptal": "cancelled", "İade": "returned",
+# ── Ticimax durum INT kodu → iç status (SelectSiparisDurumlari ile birebir) ──
+_STATUS_CODE_MAP = {
+    0: "pending", 1: "pending", 2: "confirmed", 3: "pending",
+    4: "processing", 5: "processing", 6: "shipped", 7: "delivered",
+    8: "cancelled", 9: "returned", 10: "cancelled",
+    11: "return_requested", 12: "returned", 13: "refunded",
+    14: "cancelled", 15: "cancelled", 16: "return_requested",
+    17: "partial_refunded", 18: "delivered", 19: "processing",
+    20: "processing", 21: "processing", 22: "refunded",
 }
+# String label → iç status (Durum int yoksa fallback)
+_STATUS_STR_MAP = {
+    "siparişiniz alındı": "pending", "onay bekliyor": "pending",
+    "onaylandı": "confirmed", "ödeme bekliyor": "pending",
+    "paketleniyor": "processing", "tedarik ediliyor": "processing",
+    "kargoya verildi": "shipped", "teslim edildi": "delivered",
+    "iptal edildi": "cancelled", "iptal": "cancelled",
+    "iade edildi": "returned", "iade talebi alındı": "return_requested",
+    "iade ulaştı ödeme yapılacak": "returned", "iade ödemesi yapıldı": "refunded",
+    "kısmi iade talebi": "return_requested", "kısmi iade yapıldı": "partial_refunded",
+    "cüzdana iade yapıldı": "refunded", "teslim edilemedi": "delivered",
+    "yeni": "pending", "iade": "returned",
+}
+# Ödeme INT kodu → (method, okunabilir etiket)
+_PAYMENT_CODE_MAP = {
+    1:  ("bank_transfer",    "Havale/EFT"),
+    2:  ("cash_on_delivery", "Kapıda Ödeme (Nakit)"),
+    3:  ("cod_card",         "Kapıda Ödeme (Kredi Kartı)"),
+    10: ("credit_card",      "Kredi Kartı"),
+    17: ("credit_card",      "Kredi Kartı"),
+    31: ("credit_card",      "Kredi Kartı"),
+}
+
+_STATUS_MAP = _STATUS_STR_MAP  # geriye dönük uyum (eski isim)
 
 
 def _to_dict(maybe_obj):
@@ -30,50 +65,125 @@ def _to_dict(maybe_obj):
     return maybe_obj if isinstance(maybe_obj, dict) else {}
 
 
-def _parse_items(raw, ticimax_order_id: int, api_key: Optional[str] = None) -> List[Dict]:
-    """UrunListesi/Urunler veya fallback ile item parse."""
-    urunler_raw = raw.get("UrunListesi") or raw.get("Urunler") or []
-    if hasattr(urunler_raw, "__values__"):
+def _inner_list(container):
+    """{"WebSiparisUrun":[...]} / {"WebSiparisOdeme":[...]} gibi tek-anahtarlı
+    sarmalı, ya da zaten liste olanı düz listeye çevirir."""
+    c = container
+    if hasattr(c, "__values__"):
         try:
-            vals = list(urunler_raw.__values__.values())
-            urunler_raw = vals[0] if vals else []
+            c = dict(c.__values__)
         except Exception:
-            urunler_raw = []
-    if not urunler_raw and api_key:
-        # Fallback: SOAP ile tek tek çek
+            c = {}
+    if isinstance(c, list):
+        return c
+    if isinstance(c, dict):
+        for v in c.values():
+            if isinstance(v, list):
+                return v
+    return []
+
+
+def _item_variant(d: Dict):
+    """EkSecenekList → (beden, renk). TipID=1 renk, TipID=2 beden."""
+    color = size = ""
+    for opt in _inner_list(d.get("EkSecenekList")):
+        od = _to_dict(opt)
+        tip = od.get("TipID")
+        tanim = od.get("Tanim") or ""
+        if tip == 1 and not color:
+            color = tanim
+        elif tip == 2 and not size:
+            size = tanim
+    return size, color
+
+
+def extract_items(raw: Dict, ticimax_order_id: int, api_key: Optional[str] = None) -> List[Dict]:
+    """Sipariş kalemlerini doğru alanlardan çıkar. Inline gelmezse SOAP fallback."""
+    urunler = _inner_list(raw.get("UrunListesi") or raw.get("Urunler"))
+    if not urunler and api_key:
         try:
             from ticimax_client import get_order_items  # local import
-            urunler_raw = get_order_items(ticimax_order_id, wscode=api_key) or []
+            urunler = get_order_items(ticimax_order_id, wscode=api_key) or []
         except Exception:
-            urunler_raw = []
-    if not isinstance(urunler_raw, list):
-        urunler_raw = [urunler_raw] if urunler_raw else []
+            urunler = []
 
-    items = []
-    for item in urunler_raw:
-        if not item:
-            continue
-        d = _to_dict(item)
+    items: List[Dict] = []
+    for it in urunler:
+        d = _to_dict(it)
         if not d:
             continue
+        size, color = _item_variant(d)
+        price = (d.get("SatisAniIndirimliFiyat") or d.get("Tutar") or
+                 d.get("SatisAniSatisFiyat") or d.get("BirimFiyat") or d.get("Fiyat") or 0)
         items.append({
             "product_name": str(d.get("UrunAdi") or d.get("Adi") or ""),
             "name":         str(d.get("UrunAdi") or d.get("Adi") or ""),
             "stock_code":   str(d.get("StokKodu") or ""),
             "barcode":      str(d.get("Barkod") or ""),
             "quantity":     int(d.get("Adet") or d.get("Miktar") or 1),
-            "price":        float(d.get("BirimFiyat") or d.get("Fiyat") or 0),
-            "size":         str(d.get("Beden") or ""),
-            "color":        str(d.get("Renk") or ""),
-            "image":        str(d.get("Resim") or d.get("ResimUrl") or ""),
+            "price":        round(float(price or 0), 2),
+            "size":         size or str(d.get("Beden") or ""),
+            "color":        color or str(d.get("Renk") or ""),
+            "image":        str(d.get("ResimYolu") or d.get("Resim") or d.get("ResimUrl") or ""),
             "ticimax_urun_id": d.get("UrunID") or d.get("UrunKartiID"),
         })
     return items
 
 
+def extract_payment(raw: Dict):
+    """Odemeler.WebSiparisOdeme[].OdemeTipi int kodundan ödeme yöntemi.
+    Dönüş: (payment_method, payment_method_raw_label, paid_amount)."""
+    ods = _inner_list(raw.get("Odemeler"))
+    paid = 0.0
+    code = None
+    for p in ods:
+        pd = _to_dict(p)
+        if code is None:
+            code = pd.get("OdemeTipi")
+        paid += float(pd.get("Tutar") or 0)
+
+    if isinstance(code, int) and code in _PAYMENT_CODE_MAP:
+        method, label = _PAYMENT_CODE_MAP[code]
+        return method, label, round(paid, 2)
+
+    # String fallback (bazı eski yanıtlarda top-level metin gelebilir)
+    raw_txt = str(raw.get("OdemeTipi") or raw.get("OdemeSekli") or
+                  raw.get("OdemeYontemi") or raw.get("OdemeAdi") or "").strip()
+    low = raw_txt.lower()
+    if "havale" in low or "eft" in low or "banka" in low:
+        return "bank_transfer", raw_txt or "Havale/EFT", round(paid, 2)
+    if "kapıda" in low or "kapida" in low:
+        return "cash_on_delivery", raw_txt or "Kapıda Ödeme", round(paid, 2)
+    if "kart" in low or "kredi" in low:
+        return "credit_card", raw_txt or "Kredi Kartı", round(paid, 2)
+    return "ticimax", raw_txt or (f"Kod {code}" if code is not None else ""), round(paid, 2)
+
+
+def map_status(raw: Dict) -> str:
+    """Top-level Durum int kodundan iç status; yoksa string label fallback."""
+    code = raw.get("Durum")
+    if isinstance(code, bool):
+        code = None
+    else:
+        try:
+            code = int(code) if code is not None and str(code).strip() != "" else None
+        except Exception:
+            code = None
+    if code is not None and code in _STATUS_CODE_MAP:
+        return _STATUS_CODE_MAP[code]
+    label = str(raw.get("SiparisDurumu") or raw.get("StrSiparisDurumu") or
+                raw.get("SiparisDurumuStr") or "").strip().lower()
+    return _STATUS_STR_MAP.get(label, "pending")
+
+
+def _parse_items(raw, ticimax_order_id: int, api_key: Optional[str] = None) -> List[Dict]:
+    """Geriye dönük uyum — extract_items'a yönlendirir."""
+    return extract_items(raw, ticimax_order_id, api_key=api_key)
+
+
 def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Dict]:
     """Tek bir Ticimax SelectSiparis kaydını standart `orders` dokümanına çevirir.
-    
+
     Returns None if `raw` boş ya da ticimax_order_id yok.
     """
     if not raw:
@@ -88,22 +198,22 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
 
     order_number = str(raw.get("SiparisNo") or raw.get("SiparisKodu") or ticimax_order_id).strip().upper()
     order_code   = str(raw.get("SiparisKodu") or "")
-    odenen       = float(raw.get("OdenenTutar") or 0)
     kargo_tutari = float(raw.get("KargoTutari") or 0)
     indirim      = float(raw.get("IndirimTutari") or raw.get("KuponIndirimi") or 0)
-    kdv_tutari   = float(raw.get("KdvTutari") or 0)
-    total        = float(raw.get("ToplamTutar") or raw.get("GenelToplam") or
-                         raw.get("ToplamSiparisTutari") or odenen or 0)
-    status_raw   = str(raw.get("Durum") or raw.get("SiparisDurumu") or
-                       raw.get("SiparisDurumuStr") or "Yeni")
-    status       = _STATUS_MAP.get(status_raw, "pending")
+    kdv_tutari   = float(raw.get("KdvTutari") or raw.get("ToplamKdv") or 0)
+    total        = float(raw.get("SiparisToplamTutari") or raw.get("ToplamTutar") or
+                         raw.get("GenelToplam") or raw.get("ToplamSiparisTutari") or 0)
+    status       = map_status(raw)
+    payment_method, payment_raw, odenen = extract_payment(raw)
+    if total <= 0:
+        total = odenen
     created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
                        datetime.now(timezone.utc).isoformat())
     ip_address   = str(raw.get("IPAdresi") or "")
-    kaynak       = str(raw.get("Kaynak") or "")
+    kaynak       = str(raw.get("Kaynak") or raw.get("SiparisKaynagi") or "")
     kargo_takip  = str(raw.get("KargoTakipNo") or "")
     kargo_link   = str(raw.get("KargoTakipLink") or "")
-    kargo_firma  = str(raw.get("KargoFirmaTanim") or "")
+    kargo_firma  = str(raw.get("KargoFirmaTanim") or raw.get("KargoFirmaAdi") or "")
     fatura_no    = str(raw.get("FaturaNo") or "")
     adi_soyadi   = str(raw.get("AdiSoyadi") or "")
     email        = str(raw.get("Mail") or raw.get("AliciEmail") or "").strip().lower()
@@ -112,8 +222,12 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
     kargo_adresi = _to_dict(raw.get("KargoAdresi"))
     fatura_adresi = _to_dict(raw.get("FaturaAdresi"))
 
-    # AliciAdi adres içinde "Ad Soyad" tek string olarak gelir → ilk kelime first_name
-    full_name = str(kargo_adresi.get("AliciAdi") or fatura_adresi.get("AliciAdi") or adi_soyadi or "").strip()
+    # İsim: AliciAdi / FirmaAdi adres içinde, yoksa top-level AdiSoyadi
+    full_name = str(
+        kargo_adresi.get("AliciAdi") or kargo_adresi.get("FirmaAdi") or
+        fatura_adresi.get("AliciAdi") or fatura_adresi.get("FirmaAdi") or
+        adi_soyadi or ""
+    ).strip()
     parts = [p for p in full_name.split(" ") if p]
     first_name = parts[0] if parts else ""
     last_name  = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -136,7 +250,6 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
     )
     posta_kodu = str(kargo_adresi.get("PostaKodu") or fatura_adresi.get("PostaKodu") or "")
 
-    # Posta kodu varsa ama il boşsa, ilk 2 hane → il
     if not city and posta_kodu and len(posta_kodu) >= 2:
         try:
             from il_mapping import IL_CODE_TO_NAME  # type: ignore
@@ -144,11 +257,7 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
         except Exception:
             pass
 
-    items = _parse_items(raw, ticimax_order_id, api_key=api_key)
-    if not items and not city and address_text == "":
-        # Hiç anlamlı veri yoksa subtotal hesabını yine de yapalım
-        pass
-
+    items = extract_items(raw, ticimax_order_id, api_key=api_key)
     subtotal = max(0.0, total - kargo_tutari + indirim) if total else 0.0
 
     doc = {
@@ -168,7 +277,7 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
             "postal_code": posta_kodu,
         },
         "billing_address": {
-            "name": fatura_adresi.get("AliciAdi") or adi_soyadi,
+            "name": fatura_adresi.get("AliciAdi") or fatura_adresi.get("FirmaAdi") or adi_soyadi,
             "phone": fatura_adresi.get("AliciTelefon") or phone,
             "address": fatura_adresi.get("Adres") or "",
             "city": fatura_adresi.get("Sehir") or fatura_adresi.get("Il") or "",
@@ -182,8 +291,9 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
         "tax": kdv_tutari,
         "total": total,
         "paid_amount": odenen,
-        "payment_method": str(raw.get("OdemeTipi") or "ticimax"),
-        "payment_status": "paid" if (raw.get("OdemeTamamlandi") or odenen >= total > 0) else "pending",
+        "payment_method": payment_method,
+        "payment_method_raw": payment_raw,
+        "payment_status": "paid" if (raw.get("OdemeTamamlandi") or (odenen >= total > 0)) else "pending",
         "status": status,
         "platform": "facette",
         "source": "ticimax",
@@ -206,7 +316,7 @@ def is_marketplace_order(raw: Dict) -> bool:
     if not raw:
         return False
     siparis_no = str(raw.get("SiparisNo") or "").upper()
-    kaynak = str(raw.get("Kaynak") or "").lower()
+    kaynak = str(raw.get("Kaynak") or raw.get("SiparisKaynagi") or "").lower()
     mp_keywords = ("trendyol", "hepsiburada", "n11", "aliexpress", "amazon",
                    "ciceksepeti", "pttavm", "temu", "pazarama", "gittigidiyor", "epttavm")
     mp_prefixes = ("TY-", "HB-", "N11-", "AMZ-", "AE-")
