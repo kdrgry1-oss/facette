@@ -250,6 +250,64 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[migrate] google feed seed atlandi: {e}")
 
+    # Tek seferlik: LEGACY iade siparisi temizligi.
+    #   (A) Import-gunu (2026-06-11) telefonsuz MUKERRER kopyalari sil — yalnizca ayni
+    #       siparis numarasindan gercek ikizi (telefonlu/gercek tarihli) olanlari.
+    #   (B) id'siz kalan tum siparislere id ata — satir bazli durum degistirme
+    #       (/api/orders/{id}/status id alanina gore eslesir) bu kayitlarda calissin.
+    # Guard: _orders_iade_cleanup_v1 → sadece BIR KEZ calisir.
+    try:
+        _omf = await db.settings.find_one({"id": "main"}, {"_id": 0, "_orders_iade_cleanup_v1": 1}) or {}
+        if not _omf.get("_orders_iade_cleanup_v1"):
+            from routes.deps import generate_id as _gidc
+            removed = 0
+            async for _d in db.orders.find(
+                {"created_at": {"$regex": "^2026-06-11"}},
+                {"_id": 1, "order_number": 1, "phone": 1, "shipping_address": 1},
+            ):
+                _ph = ((_d.get("shipping_address") or {}).get("phone") or _d.get("phone") or "").strip()
+                if _ph:
+                    continue  # telefonu olan kopyayi ASLA silme
+                _onum = _d.get("order_number")
+                if not _onum:
+                    continue
+                _twin = await db.orders.find_one(
+                    {"order_number": _onum, "_id": {"$ne": _d["_id"]}}, {"_id": 1})
+                if _twin:  # gercek ikizi var → bu import-gunu kopyayi sil
+                    await db.orders.delete_one({"_id": _d["_id"]})
+                    removed += 1
+            fixed = 0
+            async for _d in db.orders.find(
+                {"$or": [{"id": {"$exists": False}}, {"id": None}, {"id": ""}]}, {"_id": 1}):
+                await db.orders.update_one({"_id": _d["_id"]}, {"$set": {"id": _gidc()}})
+                fixed += 1
+            await db.settings.update_one(
+                {"id": "main"},
+                {"$set": {"_orders_iade_cleanup_v1": True}, "$setOnInsert": {"id": "main"}},
+                upsert=True)
+            logger.info(f"[migrate] iade cleanup: {removed} mukerrer silindi, {fixed} id atandi (_orders_iade_cleanup_v1)")
+    except Exception as e:
+        logger.warning(f"[migrate] iade cleanup atlandi: {e}")
+
+    # Tek seferlik: iade-akisi durumlarinda SMS+mail bildirimini AC (refund-pay dahil).
+    # Canli notify config'inde 'refunded' vb. kapali oldugu icin "Iade Bedeli Odendi"de
+    # bildirim gitmiyordu. Guard: _return_notify_all_v1 → bir kez acar, sonra admin degistirebilir.
+    try:
+        _osc = await db.settings.find_one(
+            {"id": "order_status_config"}, {"_id": 0, "_return_notify_all_v1": 1}) or {}
+        if not _osc.get("_return_notify_all_v1"):
+            _ret_keys = ["return_requested", "return_approved", "return_rejected",
+                         "return_in_transit", "returned", "partial_refunded", "refunded"]
+            _setn = {f"notify.{k}": {"sms": True, "email": True} for k in _ret_keys}
+            _setn["_return_notify_all_v1"] = True
+            await db.settings.update_one(
+                {"id": "order_status_config"},
+                {"$set": _setn, "$setOnInsert": {"id": "order_status_config"}},
+                upsert=True)
+            logger.info("[migrate] iade durumlari SMS+mail acildi (_return_notify_all_v1)")
+    except Exception as e:
+        logger.warning(f"[migrate] return notify enable atlandi: {e}")
+
     yield
     
     # Shutdown
