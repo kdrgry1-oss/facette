@@ -58,6 +58,7 @@ import AmazonSpApi from "./pages/admin/AmazonSpApi";
 import Compliance from "./pages/admin/Compliance";
 import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
+import XmlFeeds from "./pages/admin/XmlFeeds";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
 import IntegrationLogs from "./pages/admin/IntegrationLogs";
@@ -95,7 +96,7 @@ export default function AdminApp() {
         <Route path="odeme-bekleyen-siparisler" element={<AdminOrders key="orders-unpaid" unpaidView />} />
         <Route path="kategoriler" element={<AdminCategories />} />
         <Route path="varyantlar" element={<AdminVariants />} />
-        <Route path="ozellik-import" element={<AttributeImport />} />
+        <Route path="xml-feedler" element={<XmlFeeds />} />
         <Route path="ticimax-excel" element={<TicimaxExcelUpload />} />
         <Route path="sorular" element={<AdminQuestions />} />
         <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />

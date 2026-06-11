@@ -15,17 +15,22 @@ import io
 router = APIRouter(prefix="/products", tags=["Products"])
 
 
-@router.get("/google-merchant-feed.xml")
-async def google_merchant_feed():
-    """Tüm aktif ürünler için Google Merchant uyumlu RSS 2.0 (g:) XML feed (public)."""
-    import html
-    main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
-    site = (main.get("site_url") or "https://facette.com.tr").rstrip("/")
-    shop = main.get("site_name") or "FACETTE"
-    prods = await db.products.find({"is_active": True, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(50000)
+# ---------------------------------------------------------------------------
+# XML ürün feed'leri (Google Merchant / Facebook Katalog / Genel)
+# Çoklu feed: her feed bir "target" ile public URL üretir → /products/feed/<slug>.xml
+# google/generic = ürün-seviyesi (g:id = ürün id)
+# facebook        = varyant-seviyesi (g:id = varyant id, item_group_id = ürün id,
+#                    g:size/g:color) → Meta pixel content_id'leriyle birebir eşleşir.
+# ---------------------------------------------------------------------------
+import html as _html
+
+
+def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False):
+    """Ürün listesinden Google/Facebook uyumlu RSS 2.0 (g:) XML üretir."""
+    target = (target or "google").lower()
 
     def esc(x):
-        return html.escape(str(x if x is not None else ""), quote=True)
+        return _html.escape(str(x if x is not None else ""), quote=True)
 
     def first_image(pr):
         for im in (pr.get("images") or []):
@@ -44,6 +49,12 @@ async def google_merchant_feed():
             return u
         return site + ("" if str(u).startswith("/") else "/") + str(u)
 
+    def fnum(x):
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
     items = []
     for pr in prods:
         pid = pr.get("id") or pr.get("slug")
@@ -52,62 +63,103 @@ async def google_merchant_feed():
         slug = pr.get("slug") or pid
         link = f"{site}/urun/{slug}"
         img = abs_url(first_image(pr))
-        try:
-            price = float(pr.get("price") or 0)
-        except Exception:
-            price = 0.0
+        price = fnum(pr.get("price"))
         sale = pr.get("sale_price")
-        try:
-            sale = float(sale) if sale not in (None, "", 0) else None
-        except Exception:
-            sale = None
+        sale = fnum(sale) if sale not in (None, "", 0) else None
+        name = (pr.get("name") or "")[:150]
+        desc = re.sub(r"<[^>]+>", " ", str(pr.get("description") or pr.get("short_description") or pr.get("name") or ""))
+        desc = re.sub(r"\s+", " ", desc).strip()[:4500] or name
+        brand = pr.get("brand") or shop
+        cat = pr.get("category_name") or ""
+        pcolor = pr.get("color") or ""
+        variants = pr.get("variants") or []
+
+        def price_rows(p_price, p_sale):
+            r = []
+            if p_sale and p_sale > 0 and p_price and p_sale < p_price:
+                r.append(f"<g:price>{p_price:.2f} TRY</g:price>")
+                r.append(f"<g:sale_price>{p_sale:.2f} TRY</g:sale_price>")
+            else:
+                eff = p_sale if (p_sale and p_sale > 0) else p_price
+                r.append(f"<g:price>{eff:.2f} TRY</g:price>")
+            return r
+
+        def common_rows(item_id, avail, gtin, mpn, extra=None):
+            r = [
+                f"<g:id>{esc(item_id)}</g:id>",
+                f"<g:title>{esc(name)}</g:title>",
+                f"<g:description>{esc(desc)}</g:description>",
+                f"<g:link>{esc(link)}</g:link>",
+            ]
+            if img:
+                r.append(f"<g:image_link>{esc(img)}</g:image_link>")
+            r.append(f"<g:availability>{avail}</g:availability>")
+            r.append("<g:condition>new</g:condition>")
+            if brand:
+                r.append(f"<g:brand>{esc(brand)}</g:brand>")
+            has_id = False
+            if gtin and str(gtin).isdigit() and len(str(gtin)) in (8, 12, 13, 14):
+                r.append(f"<g:gtin>{esc(gtin)}</g:gtin>")
+                has_id = True
+            if mpn:
+                r.append(f"<g:mpn>{esc(mpn)}</g:mpn>")
+                has_id = True
+            if not has_id:
+                r.append("<g:identifier_exists>no</g:identifier_exists>")
+            if cat:
+                r.append(f"<g:product_type>{esc(cat)}</g:product_type>")
+            if extra:
+                r.extend(extra)
+            return r
+
+        # ---- Facebook: varyant (beden) bazlı satırlar ----
+        if target == "facebook" and variants:
+            for v in variants:
+                vid = v.get("id")
+                vstock = 0
+                try:
+                    vstock = int(v.get("stock") or 0)
+                except Exception:
+                    vstock = 0
+                if in_stock_only and vstock <= 0:
+                    continue
+                vsize = v.get("size") or ""
+                vcolor = v.get("color") or pcolor
+                vbarcode = (v.get("barcode") or "").strip()
+                item_id = str(vid) if (vid is not None and str(vid) != "") else f"{pid}-{esc(vsize)}"
+                vprice = fnum(v.get("price")) or price
+                vsale = v.get("sale_price")
+                vsale = fnum(vsale) if vsale not in (None, "", 0) else sale
+                avail = "in stock" if vstock > 0 else "out of stock"
+                extra = [f"<g:item_group_id>{esc(pid)}</g:item_group_id>"]
+                if vsize:
+                    extra.append(f"<g:size>{esc(vsize)}</g:size>")
+                if vcolor:
+                    extra.append(f"<g:color>{esc(vcolor)}</g:color>")
+                rows = common_rows(item_id, avail, vbarcode, (pr.get("stock_code") or pr.get("sku") or "").strip(), extra)
+                rows.extend(price_rows(vprice, vsale))
+                items.append("<item>" + "".join(rows) + "</item>")
+            continue
+
+        # ---- Google / Generic: ürün-seviyesi tek satır ----
         stock = pr.get("stock") or 0
-        if pr.get("variants"):
+        if variants:
             try:
-                vsum = sum(int(v.get("stock") or 0) for v in pr["variants"])
+                vsum = sum(int(v.get("stock") or 0) for v in variants)
                 if vsum:
                     stock = vsum
             except Exception:
                 pass
+        if in_stock_only and not (stock and stock > 0):
+            continue
         avail = "in stock" if (stock and stock > 0) else "out of stock"
-        desc = re.sub(r"<[^>]+>", " ", str(pr.get("description") or pr.get("short_description") or pr.get("name") or ""))
-        desc = re.sub(r"\s+", " ", desc).strip()[:4500]
-        brand = pr.get("brand") or shop
         gtin = (pr.get("barcode") or "").strip()
         mpn = (pr.get("stock_code") or pr.get("sku") or "").strip()
-        cat = pr.get("category_name") or ""
-        rows = [
-            f"<g:id>{esc(pid)}</g:id>",
-            f"<g:title>{esc((pr.get('name') or '')[:150])}</g:title>",
-            f"<g:description>{esc(desc or pr.get('name'))}</g:description>",
-            f"<g:link>{esc(link)}</g:link>",
-        ]
-        if img:
-            rows.append(f"<g:image_link>{esc(img)}</g:image_link>")
-        rows.append(f"<g:availability>{avail}</g:availability>")
-        rows.append("<g:condition>new</g:condition>")
-        if sale and sale > 0 and price and sale < price:
-            rows.append(f"<g:price>{price:.2f} TRY</g:price>")
-            rows.append(f"<g:sale_price>{sale:.2f} TRY</g:sale_price>")
-        else:
-            eff = sale if (sale and sale > 0) else price
-            rows.append(f"<g:price>{eff:.2f} TRY</g:price>")
-        if brand:
-            rows.append(f"<g:brand>{esc(brand)}</g:brand>")
-        has_id = False
-        if gtin and gtin.isdigit() and len(gtin) in (8, 12, 13, 14):
-            rows.append(f"<g:gtin>{esc(gtin)}</g:gtin>")
-            has_id = True
-        if mpn:
-            rows.append(f"<g:mpn>{esc(mpn)}</g:mpn>")
-            has_id = True
-        if not has_id:
-            rows.append("<g:identifier_exists>no</g:identifier_exists>")
-        if cat:
-            rows.append(f"<g:product_type>{esc(cat)}</g:product_type>")
+        rows = common_rows(pid, avail, gtin, mpn)
+        rows.extend(price_rows(price, sale))
         items.append("<item>" + "".join(rows) + "</item>")
 
-    xml = (
+    return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0"><channel>'
         f"<title>{esc(shop)}</title><link>{esc(site)}</link>"
@@ -115,7 +167,83 @@ async def google_merchant_feed():
         + "".join(items) +
         "</channel></rss>"
     )
+
+
+async def _feed_site_shop_prods():
+    main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    site = (main.get("site_url") or "https://facette.com.tr").rstrip("/")
+    shop = main.get("site_name") or "FACETTE"
+    prods = await db.products.find({"is_active": True, "is_deleted": {"$ne": True}}, {"_id": 0}).to_list(50000)
+    return site, shop, prods
+
+
+@router.get("/google-merchant-feed.xml")
+async def google_merchant_feed():
+    """Geriye-uyumlu varsayilan feed (tum aktif urunler, urun-seviyesi)."""
+    site, shop, prods = await _feed_site_shop_prods()
+    xml = _build_merchant_xml(prods, site, shop, "google", False)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@router.get("/feed/{slug}.xml")
+async def dynamic_feed(slug: str):
+    """Yapilandirilmis XML feed (slug ile). target'a gore urun/varyant seviyesi."""
+    feed = await db.xml_feeds.find_one({"slug": slug}, {"_id": 0})
+    if not feed or not feed.get("enabled", True):
+        return Response(content='<?xml version="1.0"?><error>feed not found</error>',
+                        media_type="application/xml", status_code=404)
+    site, shop, prods = await _feed_site_shop_prods()
+    xml = _build_merchant_xml(prods, site, shop, feed.get("target", "google"), bool(feed.get("in_stock_only")))
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@router.get("/feeds", dependencies=[Depends(require_admin)])
+async def list_feeds():
+    return await db.xml_feeds.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+
+@router.post("/feeds", dependencies=[Depends(require_admin)])
+async def create_feed(payload: dict):
+    name = (payload.get("name") or "").strip() or "Yeni Feed"
+    target = (payload.get("target") or "google").strip().lower()
+    if target not in ("google", "facebook", "generic"):
+        target = "google"
+    base = generate_slug(name) or "feed"
+    s = base
+    i = 2
+    while await db.xml_feeds.find_one({"slug": s}):
+        s = f"{base}-{i}"
+        i += 1
+    doc = {
+        "id": generate_id(), "name": name, "slug": s, "target": target,
+        "enabled": bool(payload.get("enabled", True)),
+        "in_stock_only": bool(payload.get("in_stock_only", False)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.xml_feeds.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/feeds/{fid}", dependencies=[Depends(require_admin)])
+async def update_feed(fid: str, payload: dict):
+    upd = {}
+    for k in ("name", "target", "enabled", "in_stock_only"):
+        if k in payload:
+            upd[k] = payload[k]
+    if upd.get("target") and upd["target"] not in ("google", "facebook", "generic"):
+        upd["target"] = "google"
+    if upd:
+        await db.xml_feeds.update_one({"id": fid}, {"$set": upd})
+    f = await db.xml_feeds.find_one({"id": fid}, {"_id": 0})
+    return f or {"ok": True}
+
+
+@router.delete("/feeds/{fid}", dependencies=[Depends(require_admin)])
+async def delete_feed(fid: str):
+    await db.xml_feeds.delete_one({"id": fid})
+    return {"ok": True}
+
 
 def generate_slug(name: str) -> str:
     """Generate URL-friendly slug from name"""

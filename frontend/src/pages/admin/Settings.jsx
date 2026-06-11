@@ -231,7 +231,7 @@ export default function AdminSettings() {
               </div>
             </div>
             <div className="md:col-span-2 border rounded-lg p-3 bg-gray-50">
-              <label className="block text-sm font-semibold mb-2">Google Merchant XML Feed</label>
+              <label className="block text-sm font-semibold mb-2">XML Feed'ler (Google / Facebook)</label>
               <div className="mb-2">
                 <label className="block text-xs text-gray-600 mb-1">Mağaza Adresi (feed linklerinde kullanılır)</label>
                 <input
@@ -242,13 +242,8 @@ export default function AdminSettings() {
                   className="w-full border px-2 py-1.5 rounded text-sm"
                 />
               </div>
-              <label className="block text-xs text-gray-600 mb-1">Feed Adresi (Google Merchant'a bu linki ekleyin)</label>
-              <div className="flex gap-2">
-                <input readOnly value={`${API}/products/google-merchant-feed.xml`} className="flex-1 border px-2 py-1.5 rounded text-sm bg-white" />
-                <button type="button" onClick={() => { try { navigator.clipboard.writeText(`${API}/products/google-merchant-feed.xml`); } catch (e) {} }} className="px-3 py-1.5 bg-black text-white rounded text-sm whitespace-nowrap">Kopyala</button>
-                <a href={`${API}/products/google-merchant-feed.xml`} target="_blank" rel="noreferrer" className="px-3 py-1.5 border rounded text-sm whitespace-nowrap">Aç</a>
-              </div>
-              <p className="text-xs text-gray-500 mt-1.5">Tüm aktif ürünleri içerir. Google Merchant Center → Ürünler → Feed'ler → "Planlanmış getirme" ile bu adresi periyodik çektirebilirsiniz.</p>
+              <a href="/admin/xml-feedler" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded text-sm">XML Feed'leri Yönet →</a>
+              <p className="text-xs text-gray-500 mt-1.5">Çoklu feed oluşturup her birine amaç (Google Merchant / Facebook Kataloğu) atayabilir, kendi linkini alıp ilgili panelde "planlı çekme" olarak tanımlayabilirsiniz.</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Varsayılan KDV Oranı (%)</label>
