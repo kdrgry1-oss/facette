@@ -74,6 +74,7 @@ export default function TicimaxReturns({ embedded = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
+  const [redating, setRedating] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -138,6 +139,40 @@ export default function TicimaxReturns({ embedded = false }) {
     }
   };
 
+  // Tüm siparişlerin TARİHİ'ni Ticimax'taki gerçek SiparisTarihi'ne çek.
+  // Zaman aşımına takılmamak için backend'i parça parça (5 sayfa) döngüyle çağırır.
+  const refreshDates = async () => {
+    if (redating || pulling) return;
+    setRedating(true);
+    let page = 1, totalFixed = 0;
+    try {
+      for (let guard = 0; guard < 60; guard++) {
+        const res = await axios.post(
+          `${API}/admin/ticimax/orders/refresh-dates?page=${page}&per_pages=5`,
+          {},
+          auth()
+        );
+        const d = res.data || {};
+        if (d.success === false) {
+          toast.error(d.message || "Tarih güncelleme başarısız.", { id: "redate" });
+          break;
+        }
+        totalFixed += d.fixed || 0;
+        toast.info(`Tarihler güncelleniyor… ${totalFixed} sipariş düzeltildi`, { id: "redate" });
+        if (!d.has_more) {
+          toast.success(`Tamamlandı — ${totalFixed} siparişin tarihi gerçek tarihine çekildi.`, { id: "redate" });
+          break;
+        }
+        page = d.next_page || page + 5;
+      }
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.response?.data?.message || "Tarih güncelleme başarısız.", { id: "redate" });
+    } finally {
+      setRedating(false);
+    }
+  };
+
   // Sipariş durumunu değiştir (mevcut endpoint — bildirim de buradan gider)
   const changeStatus = async (row, newStatus) => {
     if (newStatus === row.status) return;
@@ -170,6 +205,15 @@ export default function TicimaxReturns({ embedded = false }) {
         >
           <RefreshCw size={15} className={pulling ? "animate-spin" : ""} />
           {pulling ? "Çekiliyor…" : "Siparişleri Çek"}
+        </button>
+        <button
+          onClick={refreshDates}
+          disabled={redating || pulling}
+          title="Tüm siparişlerin tarihini Ticimax'taki gerçek sipariş tarihine günceller"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+        >
+          <RefreshCw size={15} className={redating ? "animate-spin" : ""} />
+          {redating ? "Tarihler düzeltiliyor…" : "Tarihleri Düzelt"}
         </button>
       </div>
 

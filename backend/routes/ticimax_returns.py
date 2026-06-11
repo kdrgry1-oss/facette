@@ -187,3 +187,69 @@ async def list_ticimax_return_orders(
         "payment_counts": payment_counts,
         "total_returns": sum(status_counts.values()),
     }
+
+
+@router.post("/orders/refresh-dates")
+async def refresh_order_dates(
+    page: int = Query(1, ge=1),
+    per_pages: int = Query(5, ge=1, le=15),
+    current_user: dict = Depends(require_admin),
+):
+    """Siparişlerin created_at'ini Ticimax'taki gerçek SiparisTarihi'ne çeker.
+
+    Zaman aşımına takılmamak için her çağrıda `per_pages` sayfa (100'er kayıt)
+    işler. Frontend, has_more=False dönene kadar page'i artırarak döngüyle çağırır.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    try:
+        from ticimax_client import get_orders as tc_get_orders
+    except Exception as e:
+        return {"success": False, "message": f"Ticimax client yüklenemedi: {e}"}
+
+    fixed = 0
+    scanned = 0
+    reached_end = False
+    for i in range(per_pages):
+        pno = page + i
+        try:
+            batch = tc_get_orders(page=pno, page_size=100,
+                                  exclude_marketplace=False, only_with_phone=False)
+        except Exception as e:
+            logger.warning(f"[refresh-dates] sayfa {pno} çekilemedi: {e}")
+            batch = []
+        if not batch:
+            reached_end = True
+            break
+        for o in batch:
+            if not o:
+                continue
+            scanned += 1
+            tid = o.get("SiparisID") or o.get("ID")
+            d = o.get("SiparisTarihi") or o.get("SiparisTarih") or o.get("Tarih")
+            if not tid or not d:
+                continue
+            try:
+                iso = d.isoformat() if hasattr(d, "isoformat") else str(d)
+                tid_int = int(tid)
+            except Exception:
+                continue
+            try:
+                r = await db.orders.update_one(
+                    {"ticimax_order_id": tid_int},
+                    {"$set": {"created_at": iso,
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+                if r.modified_count:
+                    fixed += 1
+            except Exception as ie:
+                logger.warning(f"[refresh-dates] update hata {tid_int}: {ie}")
+        await asyncio.sleep(0.4)
+
+    return {
+        "success": True,
+        "fixed": fixed,
+        "scanned": scanned,
+        "next_page": page + per_pages,
+        "has_more": (not reached_end),
+    }

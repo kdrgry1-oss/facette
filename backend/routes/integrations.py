@@ -4071,8 +4071,9 @@ async def import_ticimax_orders(
         # Durum: top-level Durum int kodundan (9,13,17...) iç status'e — string fallback'li.
         # (Eski kod Durum=int'i string map'e veriyordu → tüm iadeler "pending"e düşüyordu.)
         status       = _map_status(raw)
-        created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
-                           datetime.now(timezone.utc).isoformat())
+        _real_sip_dt = raw.get("SiparisTarihi") or raw.get("SiparisTarih") or raw.get("Tarih")
+        created_at   = (_real_sip_dt.isoformat() if hasattr(_real_sip_dt, "isoformat")
+                        else str(_real_sip_dt)) if _real_sip_dt else datetime.now(timezone.utc).isoformat()
         # Ödeme: Odemeler.WebSiparisOdeme[].OdemeTipi int kodundan — string fallback'li.
         # (Eski kod top-level OdemeTipi string okuyordu → hep None → "ticimax".)
         payment_method, _odeme_raw, _odenen_paid = _extract_payment(raw)
@@ -4170,7 +4171,10 @@ async def import_ticimax_orders(
 
         existing = await db.orders.find_one({"ticimax_order_id": ticimax_order_id})
         if existing:
-            await db.orders.update_one({"ticimax_order_id": ticimax_order_id}, {"$set": doc})
+            _upd = dict(doc)
+            if _real_sip_dt:  # Ticimax'tan gerçek sipariş tarihi geldiyse created_at'i de düzelt
+                _upd["created_at"] = created_at
+            await db.orders.update_one({"ticimax_order_id": ticimax_order_id}, {"$set": _upd})
             updated += 1
         else:
             doc["id"] = generate_id()

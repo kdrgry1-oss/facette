@@ -207,8 +207,9 @@ def parse_ticimax_order(raw: Dict, api_key: Optional[str] = None) -> Optional[Di
     payment_method, payment_raw, odenen = extract_payment(raw)
     if total <= 0:
         total = odenen
-    created_at   = str(raw.get("SiparisTarihi") or raw.get("Tarih") or
-                       datetime.now(timezone.utc).isoformat())
+    _sip_dt = raw.get("SiparisTarihi") or raw.get("SiparisTarih") or raw.get("Tarih")
+    created_at   = (_sip_dt.isoformat() if hasattr(_sip_dt, "isoformat")
+                    else str(_sip_dt)) if _sip_dt else datetime.now(timezone.utc).isoformat()
     ip_address   = str(raw.get("IPAdresi") or "")
     kaynak       = str(raw.get("Kaynak") or raw.get("SiparisKaynagi") or "")
     kargo_takip  = str(raw.get("KargoTakipNo") or "")
