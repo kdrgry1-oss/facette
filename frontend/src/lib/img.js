@@ -15,17 +15,14 @@ export function optimizeImg(url, width = 800, quality = 75) {
   // Boş/geçersiz değerlerde src="" uyarısını ve gereksiz isteği önlemek için undefined döndür
   if (!url || typeof url !== "string") return undefined;
 
-  // Cloudflare R2 özel domain → cdn-cgi/image ile dinamik resize + format=auto (AVIF/WebP)
+  // Cloudflare R2 özel domain.
+  // NOT: Image Transformations ücretsiz kotası (ayda 5.000 benzersiz dönüşüm) dolunca
+  // cdn-cgi/image ile gelen TÜM görseller "ERROR 9422" verip boş kalıyordu. Origin
+  // nesneleri zaten boyutlandırılmış WebP (-1280 ürün / -1920 pagedesign) olduğundan
+  // dönüşümü bypass edip origin URL'yi doğrudan döndürüyoruz → kota harcanmaz, ücret yok.
   if (url.includes(R2_CDN)) {
-    let path = url;
     const m = url.match(/cdn\.facette\.com\.tr\/cdn-cgi\/image\/[^/]+\/(.*)$/i);
-    if (m) {
-      path = `https://${R2_CDN}/${m[1]}`;
-    }
-    return path.replace(
-      `https://${R2_CDN}/`,
-      `https://${R2_CDN}/cdn-cgi/image/width=${width},quality=${quality},format=auto/`
-    );
+    return m ? `https://${R2_CDN}/${m[1]}` : url;
   }
 
   // Eski r2.dev URL'leri (transform yok) → en yakın üretilmiş boyutu seç
