@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, CreditCard } from "lucide-react";
@@ -6,45 +6,58 @@ import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, Credit
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 
-// Tüm durumların etiket + rengi (rozet için)
+// customer_returns durum etiket + renkleri
 const STATUS_LABELS = {
-  created: "Oluşturuldu", approved: "Onaylandı", in_transit: "İade Kargoda",
-  received: "Teslim Alındı", returned: "Teslim Alındı", refunded: "Bedeli Ödendi",
-  rejected: "Reddedildi", cancelled: "İptal",
+  created: "Talep Oluşturuldu", in_transit: "Kargoya Verildi",
+  received: "Teslim Alındı", returned: "Teslim Alındı",
+  approved: "Onaylandı", rejected: "Reddedildi",
+  refunded: "Bedeli Ödendi", cancelled: "İptal",
 };
 const STATUS_CLS = {
   created: "bg-rose-50 text-rose-700 border-rose-200",
-  approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   in_transit: "bg-pink-50 text-pink-700 border-pink-200",
-  received: "bg-red-50 text-red-700 border-red-200",
-  returned: "bg-red-50 text-red-700 border-red-200",
-  refunded: "bg-green-100 text-green-800 border-green-300",
+  received: "bg-amber-50 text-amber-700 border-amber-200",
+  returned: "bg-amber-50 text-amber-700 border-amber-200",
+  approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   rejected: "bg-gray-100 text-gray-600 border-gray-300",
+  refunded: "bg-green-100 text-green-800 border-green-300",
   cancelled: "bg-gray-100 text-gray-500 border-gray-300",
 };
-// Manuel lojistik durum dropdown'u (onay/ret/ödeme AYRI butonlarla, RBAC'lı)
-const LOGISTIC_OPTS = [
-  { value: "created", label: "Oluşturuldu" },
-  { value: "in_transit", label: "İade Kargoda" },
+
+// Durum sütunu — TÜM durumlar elle değiştirilebilsin (_RETURN_STATUS_MAP ile birebir)
+const ALL_STATUS_OPTS = [
+  { value: "created", label: "Talep Oluşturuldu" },
+  { value: "in_transit", label: "Kargoya Verildi" },
+  { value: "received", label: "Teslim Alındı (bize ulaştı)" },
   { value: "returned", label: "Teslim Alındı" },
+  { value: "approved", label: "Onaylandı" },
+  { value: "rejected", label: "Reddedildi" },
+  { value: "refunded", label: "Bedeli Ödendi" },
   { value: "cancelled", label: "İptal" },
 ];
-const FILTER_OPTS = [
-  { value: "", label: "Tüm Durumlar" },
-  ...Object.entries(STATUS_LABELS).filter(([k]) => k !== "received").map(([value, label]) => ({ value, label })),
+
+// Üst sekmeler — ekran görüntüsündeki akışla aynı
+const TABS = [
+  { key: "all",        label: "Tüm İadeler",       match: () => true },
+  { key: "created",    label: "Talep Oluşturulan",  match: (s) => s === "created" },
+  { key: "in_transit", label: "Kargoya Verilen",    match: (s) => s === "in_transit" },
+  { key: "action",     label: "Aksiyon Bekleyen",   match: (s) => s === "received" || s === "returned" },
+  { key: "approved",   label: "Onaylanan",          match: (s) => s === "approved" },
+  { key: "rejected",   label: "Reddedilen",         match: (s) => s === "rejected" },
+  { key: "refunded",   label: "Bedeli Ödendi",      match: (s) => s === "refunded" },
 ];
 
 const fmtTL = (v) => Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
 
 export default function SiteReturns({ embedded = false }) {
-  const [rows, setRows] = useState([]);
+  const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
+  const [tab, setTab] = useState("all");
   const [perms, setPerms] = useState([]);
   const [busyId, setBusyId] = useState("");
 
-  const [approveM, setApproveM] = useState(null); // {row, fault, preview, finalAmount, note, edited, loading}
-  const [rejectM, setRejectM] = useState(null);    // {row, reason, reship, loading}
+  const [approveM, setApproveM] = useState(null);
+  const [rejectM, setRejectM] = useState(null);
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
   const can = (key) => perms.includes("*") || perms.includes(key);
@@ -52,15 +65,19 @@ export default function SiteReturns({ embedded = false }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const url = `${API}/orders/returns/admin/list${filter ? `?status=${filter}` : ""}`;
-      const res = await axios.get(url, auth());
-      setRows(res.data?.returns || []);
+      // Tüm listeyi tek seferde çek; sekme sayıları + filtreleme client'ta
+      const res = await axios.get(`${API}/orders/returns/admin/list?limit=500`, auth());
+      const list = res.data?.returns || [];
+      // Mükerrer kayıt koruması — id'ye göre tekilleştir
+      const seen = new Set();
+      const uniq = list.filter((r) => (r.id && !seen.has(r.id) ? (seen.add(r.id), true) : false));
+      setAllRows(uniq);
     } catch (e) {
       toast.error("İade talepleri yüklenemedi");
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
   const loadPerms = useCallback(async () => {
     try {
@@ -74,13 +91,25 @@ export default function SiteReturns({ embedded = false }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadPerms(); }, [loadPerms]);
 
+  const counts = useMemo(() => {
+    const c = {};
+    for (const t of TABS) c[t.key] = allRows.filter((r) => t.match(r.status)).length;
+    return c;
+  }, [allRows]);
+
+  const rows = useMemo(() => {
+    const t = TABS.find((x) => x.key === tab) || TABS[0];
+    return allRows.filter((r) => t.match(r.status));
+  }, [allRows, tab]);
+
   const fmt = (d) => (d ? new Date(d).toLocaleString("tr-TR") : "");
+  const patchRow = (id, patch) => setAllRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   const changeStatus = async (id, status) => {
     try {
       await axios.post(`${API}/orders/returns/${id}/status`, { status }, auth());
-      setRows((rs) => rs.map((r) => (r.id === id ? { ...r, status } : r)));
-      toast.success("İade durumu güncellendi");
+      patchRow(id, { status });
+      toast.success(`Durum güncellendi: ${STATUS_LABELS[status] || status}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Güncellenemedi");
     }
@@ -94,8 +123,9 @@ export default function SiteReturns({ embedded = false }) {
   const openApprove = async (row) => {
     try {
       setBusyId(row.id);
-      const pv = await fetchPreview(row.id, "store");
-      setApproveM({ row, fault: "store", preview: pv, finalAmount: pv?.auto_refund ?? 0, note: "", edited: false, loading: false });
+      // Varsayılan: müşteri kusuru (iade kargosu müşteriden) — iş kuralı
+      const pv = await fetchPreview(row.id, "customer");
+      setApproveM({ row, fault: "customer", preview: pv, finalAmount: pv?.auto_refund ?? 0, note: "", edited: false, loading: false });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Önizleme alınamadı");
     } finally {
@@ -120,7 +150,7 @@ export default function SiteReturns({ embedded = false }) {
       const body = { fault: approveM.fault, note: approveM.note };
       if (approveM.edited) body.refund_amount = Number(approveM.finalAmount);
       const res = await axios.post(`${API}/orders/returns/${approveM.row.id}/approve`, body, auth());
-      setRows((rs) => rs.map((r) => (r.id === approveM.row.id ? { ...r, status: "approved", refund_amount: res.data?.refund_amount } : r)));
+      patchRow(approveM.row.id, { status: "approved", refund_amount: res.data?.refund_amount });
       toast.success(`İade onaylandı · İade tutarı: ${fmtTL(res.data?.refund_amount)}`);
       setApproveM(null);
     } catch (e) {
@@ -137,7 +167,7 @@ export default function SiteReturns({ embedded = false }) {
       setRejectM((m) => ({ ...m, loading: true }));
       const res = await axios.post(`${API}/orders/returns/${rejectM.row.id}/reject`,
         { reason: rejectM.reason.trim(), reship: !!rejectM.reship }, auth());
-      setRows((rs) => rs.map((r) => (r.id === rejectM.row.id ? { ...r, status: "rejected" } : r)));
+      patchRow(rejectM.row.id, { status: "rejected" });
       toast.success(res.data?.reship_code ? `Reddedildi · Geri gönderim: ${res.data.reship_code}` : "İade reddedildi");
       setRejectM(null);
     } catch (e) {
@@ -163,7 +193,7 @@ export default function SiteReturns({ embedded = false }) {
       setBusyId(row.id);
       const res = await axios.post(`${API}/orders/returns/${row.id}/gider-pusulasi`, {}, auth());
       toast.success(`Gider pusulası: ${res.data?.gider_pusulasi?.display_number}`);
-      setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, has_gider_pusulasi: true } : r)));
+      patchRow(row.id, { has_gider_pusulasi: true });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı");
     } finally { setBusyId(""); }
@@ -174,7 +204,7 @@ export default function SiteReturns({ embedded = false }) {
     try {
       setBusyId(row.id);
       await axios.post(`${API}/orders/returns/${row.id}/refund-pay`, {}, auth());
-      setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: "refunded" } : r)));
+      patchRow(row.id, { status: "refunded" });
       toast.success("İade bedeli ödendi olarak işaretlendi");
     } catch (e) {
       toast.error(e.response?.data?.detail || "İşaretlenemedi");
@@ -185,28 +215,41 @@ export default function SiteReturns({ embedded = false }) {
 
   return (
     <div data-testid="admin-site-returns">
-      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-        {!embedded && (
-          <div className="flex items-center gap-2">
-            <RotateCcw size={22} className="text-rose-600" />
-            <h1 className="text-2xl font-bold">İade Talepleri (Site)</h1>
-          </div>
-        )}
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border px-3 py-2 rounded text-sm">
-          {FILTER_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+      {!embedded && (
+        <div className="flex items-center gap-2 mb-4">
+          <RotateCcw size={22} className="text-rose-600" />
+          <h1 className="text-2xl font-bold">İade Talepleri (Site)</h1>
+        </div>
+      )}
+
+      {/* ---- Sekmeler (sayımlı) ---- */}
+      <div className="flex flex-wrap gap-1 mb-5 border-b border-gray-200">
+        {TABS.map((t) => {
+          const active = tab === t.key;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`relative px-4 py-2.5 text-sm font-semibold transition-colors -mb-px border-b-2 ${
+                active ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
+              {t.label}
+              <span className={`ml-2 text-xs font-bold px-1.5 py-0.5 rounded-full ${active ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-500"}`}>
+                {counts[t.key] ?? 0}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {loading ? (
         <div className="p-10 text-center text-gray-400">Yükleniyor…</div>
       ) : rows.length === 0 ? (
         <div className="p-10 text-center text-gray-400 border rounded-xl bg-white">
-          <Package className="mx-auto mb-2 opacity-40" size={28} /> Henüz iade talebi yok.
+          <Package className="mx-auto mb-2 opacity-40" size={28} /> Bu sekmede iade talebi yok.
         </div>
       ) : (
         <div className="space-y-3">
           {rows.map((r) => {
-            const closed = ["refunded", "rejected", "cancelled"].includes(r.status);
+            const closed = ["refunded", "cancelled"].includes(r.status);
+            const canAct = ["created", "in_transit", "received", "returned"].includes(r.status);
             const isBusy = busyId === r.id;
             return (
               <div key={r.id} className="bg-white border rounded-xl p-4 shadow-sm">
@@ -225,7 +268,6 @@ export default function SiteReturns({ embedded = false }) {
                       {r.has_gider_pusulasi && (
                         <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">GP ✓</span>
                       )}
-                      {!r.mng_ok && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Etiket bekliyor</span>}
                     </div>
                     <p className="text-sm text-gray-600 mt-1">{r.customer_name} · {r.customer_phone} · {r.customer_email}</p>
                     <p className="text-xs text-gray-500 mt-0.5">
@@ -243,30 +285,34 @@ export default function SiteReturns({ embedded = false }) {
                     {r.reject_reason && <p className="text-xs text-rose-600 mt-1">Ret sebebi: {r.reject_reason}</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    <img src={`${BACKEND}${r.barcode_url}`} alt={r.return_code} className="h-14 border border-gray-100 rounded bg-white" />
-                    <a href={`${BACKEND}${r.barcode_url}`} target="_blank" rel="noopener noreferrer"
-                      className="text-[11px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
-                      Barkodu aç <ExternalLink size={11} />
-                    </a>
-                    <select value={["approved","refunded","rejected"].includes(r.status) ? "" : r.status}
-                      onChange={(e) => e.target.value && changeStatus(r.id, e.target.value)}
-                      className="border px-2 py-1.5 rounded text-xs" title="Lojistik durum">
-                      <option value="">Durum…</option>
-                      {LOGISTIC_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {r.barcode_url && (
+                      <>
+                        <img src={`${BACKEND}${r.barcode_url}`} alt={r.return_code} className="h-14 border border-gray-100 rounded bg-white" />
+                        <a href={`${BACKEND}${r.barcode_url}`} target="_blank" rel="noopener noreferrer"
+                          className="text-[11px] text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                          Barkodu aç <ExternalLink size={11} />
+                        </a>
+                      </>
+                    )}
+                    {/* Durum sütunu — TÜM durumlar elle değiştirilebilir */}
+                    <select value={r.status}
+                      onChange={(e) => e.target.value !== r.status && changeStatus(r.id, e.target.value)}
+                      className="border px-2 py-1.5 rounded text-xs" title="Durum (elle değiştir)">
+                      {ALL_STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {/* Aksiyon çubuğu — RBAC'a göre gösterilir */}
+                {/* Aksiyon çubuğu — RBAC'a göre gösterilir (sadece SİTE iadeleri) */}
                 {!closed && (
                   <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-                    {r.status === "created" && can("returns.approve") && (
+                    {canAct && can("returns.approve") && (
                       <button disabled={isBusy} onClick={() => openApprove(r)}
                         className={`${btn} border-emerald-300 text-emerald-700 hover:bg-emerald-50`}>
                         <Check size={13} /> Onayla
                       </button>
                     )}
-                    {r.status === "created" && can("returns.reject") && (
+                    {canAct && can("returns.reject") && (
                       <button disabled={isBusy} onClick={() => setRejectM({ row: r, reason: "", reship: false, loading: false })}
                         className={`${btn} border-rose-300 text-rose-700 hover:bg-rose-50`}>
                         <X size={13} /> Reddet
@@ -278,13 +324,13 @@ export default function SiteReturns({ embedded = false }) {
                         <RefreshCw size={13} /> Yeni Barkod
                       </button>
                     )}
-                    {can("returns.expense_note") && (
+                    {r.status === "approved" && can("returns.expense_note") && (
                       <button disabled={isBusy} onClick={() => doGiderPusulasi(r)}
                         className={`${btn} border-purple-300 text-purple-700 hover:bg-purple-50`}>
                         <FileText size={13} /> Gider Pusulası
                       </button>
                     )}
-                    {["approved", "in_transit", "received", "returned"].includes(r.status) && can("returns.refund_pay") && (
+                    {["approved", "in_transit", "received", "returned"].includes(r.status) && r.has_gider_pusulasi && can("returns.refund_pay") && (
                       <button disabled={isBusy} onClick={() => doRefundPay(r)}
                         className={`${btn} border-green-400 bg-green-600 text-white hover:bg-green-700`}>
                         <CreditCard size={13} /> İade Ödemesi Yap
@@ -308,7 +354,7 @@ export default function SiteReturns({ embedded = false }) {
             <div className="mb-3">
               <p className="text-xs font-bold text-gray-500 uppercase mb-1">Kusur</p>
               <div className="flex gap-2">
-                {[["store", "Mağaza kusuru (kargo bizden)"], ["customer", "Müşteri kusuru (kargo müşteriden)"]].map(([v, l]) => (
+                {[["customer", "Müşteri kusuru (kargo müşteriden)"], ["store", "Mağaza kusuru (kargo bizden)"]].map(([v, l]) => (
                   <button key={v} onClick={() => changeFault(v)} disabled={approveM.loading}
                     className={`flex-1 px-3 py-2 rounded-lg text-xs border transition-colors ${approveM.fault === v ? "border-emerald-500 bg-emerald-50 text-emerald-700 font-semibold" : "border-gray-200 text-gray-600"}`}>
                     {l}
