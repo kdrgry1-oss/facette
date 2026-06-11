@@ -1297,24 +1297,81 @@ async def create_invoice_for_order(
             _mx_vkn = (bill.get("tax_number") or bill.get("tax_no") or "").strip().replace(" ", "")
             customer_vkn = _mx_vkn if len(_mx_vkn) in (10, 11) else "2222222222"
 
+        # Site sipariş kalemlerinde barkod boş olabilir → ürün varyantından tamamla
+        # (fatura "Barkod" sütunu için). Marketplace kalemlerinde barkod zaten dolu gelir.
+        _bc_pids = list({it.get("product_id") for it in (order.get("items") or [])
+                         if it.get("product_id") and not it.get("barcode")})
+        _bc_pmap = {}
+        if _bc_pids:
+            async for _p in db.products.find({"id": {"$in": _bc_pids}},
+                                             {"_id": 0, "id": 1, "variants": 1, "barcode": 1}):
+                _bc_pmap[_p["id"]] = _p
+
+        def _item_barcode(it):
+            if it.get("barcode"):
+                return it["barcode"]
+            _p = _bc_pmap.get(it.get("product_id")) or {}
+            _sz = (it.get("size") or "").strip().lower()
+            _cl = (it.get("color") or "").strip().lower()
+            for _v in (_p.get("variants") or []):
+                if (str(_v.get("size") or "").strip().lower() == _sz
+                        and (not _cl or str(_v.get("color") or "").strip().lower() == _cl)
+                        and _v.get("barcode")):
+                    return _v["barcode"]
+            return _p.get("barcode") or ""
+
         line_items = []
         for it in (order.get("items") or []):
+            _bc = _item_barcode(it)
             line_items.append({
                 "name": it.get("product_name") or it.get("name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
                 "kdv_rate": float(it.get("kdv_rate") or 10.0),
                 "sku": it.get("sku") or it.get("product_code") or "",
-                "barcode": it.get("barcode") or "",
+                "barcode": _bc,
                 # Doğan şablonu Barkod/Renk/Beden sütunlarını satır notundan parse eder:
                 # Renk='Renk:'..';' arası, Beden='Beden:'..':' arası, Barkod=substring-after('Barcode:').
                 # Açıklamaya (Item/Name) stok/beden YAZILMAZ; sütunlar bu nottan dolar.
                 "note": ((
                     f"Renk:{(it.get('color') or '').strip()};"
                     f"Beden:{(it.get('size') or '').strip()}:"
-                    f"Barcode:{(it.get('barcode') or '').strip()}"
-                ) if (it.get('color') or it.get('size') or it.get('barcode')) else ""),
+                    f"Barcode:{_bc}"
+                ) if (it.get('color') or it.get('size') or _bc) else ""),
             })
+
+        # Kupon/indirim faturaya yansısın: fatura brütü (kalemler + kargo) ile müşterinin
+        # ödediği tutar (order.total) farkı = indirim. order.discount yedek olarak kullanılır.
+        # Marketplace siparişinde fiyatlar zaten net geldiği için fark ~0 → indirim uygulanmaz.
+        _items_gross = sum(float(i.get("price") or 0) * int(i.get("quantity") or 1)
+                           for i in (order.get("items") or []))
+        _inv_gross = _items_gross + float(order.get("shipping_cost") or 0)
+        _paid_total = float(order.get("total") or _inv_gross)
+        _inv_discount = round(_inv_gross - _paid_total, 2)
+        if _inv_discount < 0.01:
+            _inv_discount = round(float(order.get("discount") or 0), 2)
+        if _inv_discount < 0:
+            _inv_discount = 0.0
+
+        # İndirimi ÜRÜN satırlarının birim fiyatına orantılı dağıt (kargo hariç).
+        # Böylece her satırın KDV matrahı indirimli tutardan hesaplanır; satır toplamları
+        # ve KDV tutarlı kalır → GİB/Doğan geçerli. (Builder'ın belge-seviyesi indirimi
+        # LineExtension/matrah uyuşmazlığı yarattığı için kullanılmıyor.) Son satır kalanı alır.
+        if _inv_discount > 0 and line_items:
+            _prod_gross = sum((li["unit_price"] or 0) * (li["qty"] or 1) for li in line_items)
+            if _prod_gross > 0:
+                _disc = min(_inv_discount, round(_prod_gross, 2))
+                _alloc = 0.0
+                for _k, li in enumerate(line_items):
+                    _g = (li["unit_price"] or 0) * (li["qty"] or 1)
+                    if _k < len(line_items) - 1:
+                        _d = round(_disc * _g / _prod_gross, 2)
+                    else:
+                        _d = round(_disc - _alloc, 2)  # yuvarlama kalanı son satıra
+                    _alloc += _d
+                    _new_gross = _g - _d
+                    _q = li["qty"] or 1
+                    li["unit_price"] = round(_new_gross / _q, 4) if _q else _new_gross
 
         # Taşıyan (kargo firması) — siparişin Trendyol'da beyan edilen kargosundan DİNAMİK.
         # Bilinen firmalar için ad+VKN; bilinmeyende Trendyol'un beyan adı, VKN boş (UBL'de atlanır).

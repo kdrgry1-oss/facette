@@ -462,15 +462,10 @@ class DoganClient:
         _satici_adr = (supplier_street or "").strip()
         if _satici_adr:
             notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
-        if customer_street:
-            import re as _re
-            _cs = _re.sub(r"\s+", " ", str(customer_street)).strip()
-            _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
-            if _cd and _cc:
-                _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
-            # İl/ilçe NOTA EKLENMEZ: şablon PostalAddress'ten zaten "ilçe / il" basıyor;
-            # nota da eklenince faturada iki kez görünüyordu.
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs)}</cbc:Note>")
+        # Alıcı açık adresi NOT olarak EKLENMEZ: adres zaten cac:PostalAddress'ten
+        # (StreetName + "ilçe / il") basılıyor. "Taraf : Alıcı; <adres>" notu eklenince
+        # adres faturada İKİ KEZ görünüyordu (site siparişinde tam adres dolu → belirgin;
+        # marketplace'te adres maskeli geldiği için orada fark edilmiyordu).
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -913,15 +908,10 @@ class DoganClient:
         _satici_adr = (supplier_street or "").strip()
         if _satici_adr:
             notes_xml.append(f"<cbc:Note>Taraf : Satıcı; {escape(_satici_adr)}</cbc:Note>")
-        if customer_street:
-            import re as _re
-            _cs = _re.sub(r"\s+", " ", str(customer_street)).strip()
-            _cd = str(customer_district or "").strip(); _cc = str(customer_city or "").strip()
-            if _cd and _cc:
-                _cs = _re.sub(r"(?:\s*" + _re.escape(_cd) + r"\s+" + _re.escape(_cc) + r")+\s*$", "", _cs, flags=_re.IGNORECASE).strip()
-            # İl/ilçe NOTA EKLENMEZ: şablon PostalAddress'ten zaten "ilçe / il" basıyor;
-            # nota da eklenince faturada iki kez görünüyordu.
-            notes_xml.append(f"<cbc:Note>Taraf : Alıcı; {escape(_cs)}</cbc:Note>")
+        # Alıcı açık adresi NOT olarak EKLENMEZ: adres zaten cac:PostalAddress'ten
+        # (StreetName + "ilçe / il") basılıyor. "Taraf : Alıcı; <adres>" notu eklenince
+        # adres faturada İKİ KEZ görünüyordu (site siparişinde tam adres dolu → belirgin;
+        # marketplace'te adres maskeli geldiği için orada fark edilmiyordu).
         notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(payable_amount)} Lira</cbc:Note>")
         if store_name:
             notes_xml.append(f"<cbc:Note>Mağaza Adı :{escape(store_name)}</cbc:Note>")
@@ -1345,10 +1335,8 @@ class DoganClient:
             if _clean(carrier_vkn):
                 notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kimlik No: {escape(_clean(carrier_vkn))}</cbc:Note>")
             notes_xml.append(f"<cbc:Note>Gönderi Taşıyan Kişi Adı: {escape(_clean(carrier_name))}</cbc:Note>")
-        if _cust_street_clean:
-            # İl/ilçe nota eklenmez (PostalAddress zaten basıyor → çift görünüm engellenir)
-            notes_xml.append(
-                f"<cbc:Note>Taraf : Alıcı; {escape(_cust_street_clean)}</cbc:Note>")
+        # Alıcı açık adresi NOT olarak EKLENMEZ (adres cac:PostalAddress'ten basılıyor;
+        # not da eklenince faturada iki kez görünüyordu).
 
         xslt_ref_id = str(_uuid.uuid4())
 
