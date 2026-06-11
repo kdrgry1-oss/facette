@@ -52,6 +52,19 @@ const STATUS_CLS = {
   cancelled: "bg-gray-100 text-gray-500 border-gray-300",
 };
 
+// İade akışı sekmeleri (Trendyol benzeri) — her sekme tek bir order status'üne map'lenir.
+// "" = tüm iadeler. Sayaçlar status_counts'tan (filtreden bağımsız) gelir.
+const RETURN_TABS = [
+  { key: "", label: "Tüm İadeler" },
+  { key: "return_requested", label: "Talep Oluşturulan" },
+  { key: "return_approved", label: "Onaylanan" },
+  { key: "return_in_transit", label: "İade Kargoda" },
+  { key: "returned", label: "Teslim Alındı" },
+  { key: "partial_refunded", label: "Kısmi İade" },
+  { key: "refunded", label: "Bedeli Ödendi" },
+  { key: "return_rejected", label: "Reddedilen" },
+];
+
 const PAYMENT_OPTS = [
   { value: "", label: "Tüm Ödeme Tipleri" },
   { value: "bank_transfer", label: "Havale / EFT" },
@@ -217,16 +230,29 @@ export default function TicimaxReturns({ embedded = false }) {
         </button>
       </div>
 
-      {/* Durum rozetleri */}
-      {Object.keys(statusCounts).length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          {STATUS_OPTS.filter((s) => statusCounts[s.value]).map((s) => (
-            <span key={s.value} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${STATUS_CLS[s.value]}`}>
-              {s.label}: <b>{statusCounts[s.value]}</b>
-            </span>
-          ))}
-        </div>
-      )}
+      {/* İade durum sekmeleri (Trendyol benzeri) — tıklanınca o duruma filtreler */}
+      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-gray-200 pb-2">
+        {RETURN_TABS.map((t) => {
+          const n = t.key === "" ? totalReturns : (statusCounts[t.key] || 0);
+          const active = statusFilter === t.key;
+          return (
+            <button
+              key={t.key || "all"}
+              onClick={() => setStatusFilter(t.key)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                active
+                  ? "bg-orange-500 text-white border-orange-500 shadow-sm"
+                  : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              {t.label}
+              <span className={`inline-flex items-center justify-center min-w-[1.25rem] px-1 rounded-full text-[11px] ${
+                active ? "bg-white/25 text-white" : "bg-gray-100 text-gray-500"
+              }`}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Filtreler */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -239,10 +265,6 @@ export default function TicimaxReturns({ embedded = false }) {
             className="pl-8 pr-3 py-2 text-sm border rounded-lg w-64 focus:outline-none focus:ring-1 focus:ring-orange-400"
           />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="py-2 px-3 text-sm border rounded-lg">
-          <option value="">Tüm İade Durumları</option>
-          {STATUS_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
         <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="py-2 px-3 text-sm border rounded-lg">
           {PAYMENT_OPTS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
         </select>
