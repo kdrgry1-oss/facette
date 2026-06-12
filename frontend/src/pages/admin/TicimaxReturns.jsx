@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package } from "lucide-react";
+import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -29,28 +29,7 @@ const STATUS_OPTS = [
   { value: "cancelled", label: "İptal Edildi" },
 ];
 const STATUS_LABEL = Object.fromEntries(STATUS_OPTS.map((s) => [s.value, s.label]));
-const STATUS_CLS = {
-  pending: "bg-gray-100 text-gray-600 border-gray-300",
-  awaiting_payment: "bg-amber-50 text-amber-700 border-amber-200",
-  payment_notified: "bg-amber-50 text-amber-700 border-amber-200",
-  confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  preparing: "bg-blue-50 text-blue-700 border-blue-200",
-  processing: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  ready_to_ship: "bg-sky-50 text-sky-700 border-sky-200",
-  shipped: "bg-violet-50 text-violet-700 border-violet-200",
-  in_transit: "bg-violet-50 text-violet-700 border-violet-200",
-  out_for_delivery: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
-  delivered: "bg-green-100 text-green-800 border-green-300",
-  undelivered: "bg-orange-50 text-orange-700 border-orange-200",
-  return_requested: "bg-rose-50 text-rose-700 border-rose-200",
-  return_approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  return_rejected: "bg-gray-100 text-gray-600 border-gray-300",
-  return_in_transit: "bg-pink-50 text-pink-700 border-pink-200",
-  returned: "bg-red-50 text-red-700 border-red-200",
-  partial_refunded: "bg-rose-50 text-rose-700 border-rose-200",
-  refunded: "bg-green-100 text-green-800 border-green-300",
-  cancelled: "bg-gray-100 text-gray-500 border-gray-300",
-};
+const STATUS_CLS = {}; // durum renkleri kaldırıldı — tüm durumlar nötr görünür
 
 // İade akışı sekmeleri (Trendyol benzeri) — her sekme tek bir order status'üne map'lenir.
 // "" = tüm iadeler. Sayaçlar status_counts'tan (filtreden bağımsız) gelir.
@@ -96,6 +75,7 @@ export default function TicimaxReturns({ embedded = false }) {
   const [paymentCounts, setPaymentCounts] = useState({});
   const [totalReturns, setTotalReturns] = useState(0);
   const [busyId, setBusyId] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [perms, setPerms] = useState([]);
   const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
@@ -185,6 +165,35 @@ export default function TicimaxReturns({ embedded = false }) {
       toast.error(e.response?.data?.detail || e.response?.data?.message || "Tarih güncelleme başarısız.", { id: "redate" });
     } finally {
       setRedating(false);
+    }
+  };
+
+  // İade siparişlerini Excel'e aktar (görseldeki kolon düzeni — backend openpyxl üretir)
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.append("status", statusFilter);
+      if (paymentFilter) params.append("payment", paymentFilter);
+      if (debounced) params.append("search", debounced);
+      const res = await fetch(`${API}/admin/ticimax/return-orders/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+      if (!res.ok) throw new Error("export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "iade-siparisleri.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Excel indirildi");
+    } catch (e) {
+      toast.error("Excel aktarımı başarısız");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -313,6 +322,15 @@ export default function TicimaxReturns({ embedded = false }) {
           <RefreshCw size={15} className={redating ? "animate-spin" : ""} />
           {redating ? "Tarihler düzeltiliyor…" : "Tarihleri Düzelt"}
         </button>
+        <button
+          onClick={exportExcel}
+          disabled={exporting}
+          title="İade siparişlerini (mevcut filtreyle) Excel olarak indir"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+        >
+          <Download size={15} />
+          {exporting ? "Hazırlanıyor…" : "Excel'e Aktar"}
+        </button>
       </div>
 
       {/* İade durum sekmeleri (Trendyol benzeri) — tıklanınca o duruma filtreler */}
@@ -384,7 +402,16 @@ export default function TicimaxReturns({ embedded = false }) {
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
                       <div className="font-medium text-gray-900">{r.order_number}</div>
-                      {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
+                      {(r.items || []).length > 0 ? (
+                        <div
+                          className="text-xs text-gray-500 max-w-[280px] truncate"
+                          title={(r.items || []).map((it) => it.name).filter(Boolean).join(", ")}
+                        >
+                          {(r.items || []).map((it) => it.name).filter(Boolean).join(", ") || `${r.item_count} ürün`}
+                        </div>
+                      ) : (
+                        r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="text-gray-800">{r.customer_name}</div>
@@ -434,8 +461,8 @@ export default function TicimaxReturns({ embedded = false }) {
                           {r.coupon_code && <span>Kupon: <b className="text-gray-800">{r.coupon_code}</b></span>}
                         </div>
 
-                        {/* Ürün kalemleri: ne almış / kaç adet / birim ve satır tutarı */}
-                        <div className="text-[11px] font-semibold text-gray-500 mb-1">Ürünler ({r.item_count} adet)</div>
+                        {/* İade talep edilen ürünler: ne almış / kaç adet / birim ve satır tutarı */}
+                        <div className="text-[11px] font-semibold text-gray-500 mb-1">İade talep edilen ürünler ({r.item_count} adet)</div>
                         {(r.items || []).length > 0 ? (
                           <div className="space-y-1">
                             {r.items.map((it, i) => (

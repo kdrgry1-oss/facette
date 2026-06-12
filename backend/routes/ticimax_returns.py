@@ -143,7 +143,7 @@ async def list_ticimax_return_orders(
             "item_count": sum(int(i.get("quantity") or 1) for i in items),
             "items": [
                 {
-                    "name": i.get("product_name") or "",
+                    "name": i.get("product_name") or i.get("name") or "",
                     "qty": i.get("quantity") or 1,
                     "size": i.get("size") or "",
                     "color": i.get("color") or "",
@@ -253,6 +253,107 @@ async def refresh_order_dates(
         "next_page": page + per_pages,
         "has_more": (not reached_end),
     }
+
+
+# ============================================================================
+# EXPORT — İade siparişlerini Excel (.xlsx) indir (görseldeki kolon düzeni)
+# ============================================================================
+@router.get("/return-orders/export")
+async def export_ticimax_return_orders(
+    status: Optional[str] = Query(None),
+    payment: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """İade siparişlerini listelemeyle AYNI filtrelerle Excel'e aktarır.
+    Kolonlar: Ürün Adı | Tutar | Sipariş Tarihi | Sipariş ID | Sipariş No |
+    Ad Soyad | Durum | Kaynak | Ödeme Tipi."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from fastapi.responses import StreamingResponse
+    try:
+        from order_statuses import ORDER_STATUS_CATALOG
+        status_label = {s["key"]: (s.get("label") or s["key"]) for s in ORDER_STATUS_CATALOG}
+    except Exception:
+        status_label = {}
+
+    base_filter = {"$or": [{"platform": "ticimax"}, {"source": "ticimax"}]}
+    if status:
+        base_filter["status"] = status
+    else:
+        base_filter["status"] = {"$in": RETURN_STATUSES}
+    if payment:
+        base_filter["payment_method"] = payment
+    if search:
+        s = re.escape(search.strip())
+        rx = {"$regex": s, "$options": "i"}
+        base_filter["$and"] = [{
+            "$or": [
+                {"order_number": rx}, {"order_code": rx},
+                {"shipping_address.first_name": rx}, {"shipping_address.last_name": rx},
+                {"shipping_address.phone": rx}, {"shipping_address.email": rx},
+            ]
+        }]
+
+    proj = {
+        "_id": 0, "id": 1, "order_number": 1, "ticimax_order_id": 1, "status": 1,
+        "payment_method": 1, "payment_method_raw": 1, "total": 1,
+        "shipping_address": 1, "billing_address": 1, "customer_name": 1, "full_name": 1,
+        "items": 1, "created_at": 1, "channel_source": 1,
+    }
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "İade Siparişleri"
+    headers = ["Ürün Adı", "Tutar", "Sipariş Tarihi", "Sipariş ID", "Sipariş No",
+               "Ad Soyad", "Durum", "Kaynak", "Ödeme Tipi"]
+    ws.append(headers)
+    hfill = PatternFill("solid", fgColor="FCE4B6")
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = hfill
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    cursor = db.orders.find(base_filter, proj).sort("created_at", -1)
+    async for o in cursor:
+        addr = o.get("shipping_address") or {}
+        bill = o.get("billing_address") or {}
+        name = (" ".join([addr.get("first_name") or "", addr.get("last_name") or ""]).strip()
+                or addr.get("full_name") or addr.get("name")
+                or o.get("customer_name") or o.get("full_name")
+                or " ".join([bill.get("first_name") or "", bill.get("last_name") or ""]).strip()
+                or bill.get("name") or "")
+        items = o.get("items") or []
+        urun = ", ".join([
+            (i.get("product_name") or i.get("name") or "").strip()
+            for i in items if (i.get("product_name") or i.get("name"))
+        ])
+        st = o.get("status") or ""
+        ws.append([
+            urun,
+            float(o.get("total") or 0),
+            str(o.get("created_at") or "")[:10],
+            o.get("id") or "",
+            o.get("order_number") or "",
+            name,
+            status_label.get(st, st),
+            o.get("channel_source") or "Ticimax",
+            _payment_label(o.get("payment_method") or "", o.get("payment_method_raw") or ""),
+        ])
+
+    widths = [42, 12, 14, 16, 14, 24, 18, 12, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=iade-siparisleri.xlsx"},
+    )
 
 
 # ============================================================================
