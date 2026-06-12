@@ -14,11 +14,11 @@ Endpoint'ler (full path):
   GET  /api/admin/ticimax/return-orders     → iade siparişleri listesi + istatistik
 =============================================================================
 """
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Optional
 import re
 
-from .deps import db, logger, require_admin
+from .deps import db, logger, require_admin, generate_id
 
 router = APIRouter(prefix="/admin/ticimax", tags=["ticimax-returns"])
 
@@ -253,3 +253,62 @@ async def refresh_order_dates(
         "next_page": page + per_pages,
         "has_more": (not reached_end),
     }
+
+
+# ============================================================================
+# BRIDGE — Ticimax iade siparişini zengin iade akışına (customer_returns) bağlar
+# ============================================================================
+@router.post("/returns/{order_id}/open")
+async def open_ticimax_return(order_id: str, current_user: dict = Depends(require_admin)):
+    """Ticimax iade siparişinden, zengin iade akışı (onayla/reddet/gider/öde) için bir
+    `customer_returns` köprü kaydı üretir. İDEMPOTENT: zaten varsa mevcut return_id'yi döndürür.
+    PARA/İŞLEM YAPMAZ — sadece köprü kaydını oluşturur. Sonraki adımlar mevcut
+    /api/orders/returns/{return_id}/{refund-preview,approve,reject,gider-pusulasi,refund-pay}
+    endpoint'leriyle yürür (RBAC + bildirim oralarda)."""
+    from datetime import datetime, timezone
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    # İdempotent: bu siparişe ait köprü kaydı zaten varsa onu döndür
+    existing = await db.customer_returns.find_one(
+        {"order_id": order_id}, {"_id": 0, "id": 1, "status": 1})
+    if existing:
+        return {"success": True, "return_id": existing.get("id"),
+                "status": existing.get("status"), "created": False}
+
+    # Sipariş kalemlerini customer_returns şemasına eşle
+    src = order.get("items") or []
+    items = [{
+        "name": it.get("product_name") or it.get("name") or "Ürün",
+        "size": it.get("size", "") or "",
+        "color": it.get("color", "") or "",
+        "quantity": int(it.get("quantity", 1) or 1),
+        "price": float(it.get("price") or it.get("unit_price") or 0),
+        "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+        "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+    } for it in src]
+
+    # Sipariş durumu → customer_returns durumu
+    _map = {
+        "return_requested": "created", "return_approved": "approved",
+        "return_in_transit": "in_transit", "returned": "received",
+        "refunded": "refunded", "partial_refunded": "refunded",
+        "return_rejected": "rejected",
+    }
+    cr_status = _map.get(order.get("status"), "created")
+
+    rid = generate_id()
+    rr = order.get("return_request") or {}
+    rec = {
+        "id": rid, "order_id": order_id, "order_number": order.get("order_number", ""),
+        "user_id": order.get("user_id"), "items": items, "reason": "",
+        "return_code": rr.get("return_code", "") or "", "mng_ok": False,
+        "cargo_provider_name": order.get("cargo_provider_name", "") or "",
+        "status": cr_status, "source": "ticimax_bridge",
+        "created_at": order.get("created_at") or datetime.now(timezone.utc).isoformat(),
+    }
+    await db.customer_returns.insert_one({**rec})
+    await db.orders.update_one({"id": order_id},
+                               {"$set": {"return_request.return_id": rid}})
+    return {"success": True, "return_id": rid, "status": cr_status, "created": True}

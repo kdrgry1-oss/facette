@@ -97,6 +97,8 @@ export default function TicimaxReturns({ embedded = false }) {
   const [totalReturns, setTotalReturns] = useState(0);
   const [busyId, setBusyId] = useState("");
   const [expandedId, setExpandedId] = useState(null);
+  const [perms, setPerms] = useState([]);
+  const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 
@@ -202,6 +204,89 @@ export default function TicimaxReturns({ embedded = false }) {
       setBusyId("");
     }
   };
+
+  // Yetkiler (RBAC) — butonları yetkiye göre göster
+  useEffect(() => {
+    axios.get(`${API}/admin/me/permissions`, auth())
+      .then((r) => setPerms(r.data?.permissions || []))
+      .catch(() => {});
+  }, []);
+  const can = (k) => perms.includes("*") || perms.includes(k);
+
+  // İade işlem akışı: Ticimax siparişini köprüle (customer_returns üret) → tutar önizleme → modal
+  const openWorkflow = async (row) => {
+    try {
+      setBusyId(row.id);
+      const br = await axios.post(`${API}/admin/ticimax/returns/${row.id}/open`, {}, auth());
+      const returnId = br.data?.return_id;
+      if (!returnId) throw new Error("bridge");
+      let preview = null;
+      try {
+        const pv = await axios.get(`${API}/orders/returns/${returnId}/refund-preview?fault=customer`, auth());
+        preview = pv.data?.breakdown || null;
+      } catch { /* önizleme alınamazsa modal yine açılır */ }
+      setWf({
+        row, returnId, status: br.data?.status || "created", fault: "customer",
+        preview, finalAmount: preview?.auto_refund ?? 0, note: "", edited: false,
+        loading: false, rejectReason: "", reship: false, showReject: false, hasGider: false,
+      });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "İade işlem akışı açılamadı");
+    } finally { setBusyId(""); }
+  };
+  const wfFault = async (fault) => {
+    if (!wf) return;
+    setWf((m) => ({ ...m, loading: true }));
+    try {
+      const pv = await axios.get(`${API}/orders/returns/${wf.returnId}/refund-preview?fault=${fault}`, auth());
+      const bd = pv.data?.breakdown || null;
+      setWf((m) => ({ ...m, fault, preview: bd, loading: false, finalAmount: m.edited ? m.finalAmount : (bd?.auto_refund ?? 0) }));
+    } catch { toast.error("Önizleme alınamadı"); setWf((m) => ({ ...m, loading: false })); }
+  };
+  const wfApprove = async () => {
+    if (!wf) return;
+    setWf((m) => ({ ...m, loading: true }));
+    try {
+      const body = { fault: wf.fault, note: wf.note };
+      if (wf.edited) body.refund_amount = Number(wf.finalAmount);
+      const res = await axios.post(`${API}/orders/returns/${wf.returnId}/approve`, body, auth());
+      toast.success(`İade onaylandı · ${fmtTL(res.data?.refund_amount)}`);
+      setWf((m) => ({ ...m, status: "approved", loading: false }));
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Onaylanamadı"); setWf((m) => ({ ...m, loading: false })); }
+  };
+  const wfReject = async () => {
+    if (!wf) return;
+    if (!wf.rejectReason.trim()) { toast.error("Ret sebebi zorunludur"); return; }
+    setWf((m) => ({ ...m, loading: true }));
+    try {
+      const res = await axios.post(`${API}/orders/returns/${wf.returnId}/reject`,
+        { reason: wf.rejectReason.trim(), reship: !!wf.reship }, auth());
+      toast.success(res.data?.reship_code ? `Reddedildi · Geri gönderim: ${res.data.reship_code}` : "İade reddedildi");
+      setWf(null); load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Reddedilemedi"); setWf((m) => ({ ...m, loading: false })); }
+  };
+  const wfGider = async () => {
+    if (!wf) return;
+    setWf((m) => ({ ...m, loading: true }));
+    try {
+      const res = await axios.post(`${API}/orders/returns/${wf.returnId}/gider-pusulasi`, {}, auth());
+      toast.success(`Gider pusulası: ${res.data?.gider_pusulasi?.display_number || "oluşturuldu"}`);
+      setWf((m) => ({ ...m, hasGider: true, loading: false }));
+    } catch (e) { toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı"); setWf((m) => ({ ...m, loading: false })); }
+  };
+  const wfPay = async () => {
+    if (!wf) return;
+    if (!window.confirm(`İade bedeli ödendi olarak işaretlensin mi?${wf.finalAmount ? ` (${fmtTL(wf.finalAmount)})` : ""}`)) return;
+    setWf((m) => ({ ...m, loading: true }));
+    try {
+      await axios.post(`${API}/orders/returns/${wf.returnId}/refund-pay`, {}, auth());
+      toast.success("İade bedeli ödendi olarak işaretlendi");
+      setWf(null); load();
+    } catch (e) { toast.error(e.response?.data?.detail || "İşaretlenemedi"); setWf((m) => ({ ...m, loading: false })); }
+  };
+
+  const wfCanAct = can("returns.approve") || can("returns.reject") || can("returns.expense_note") || can("returns.refund_pay");
 
   return (
     <div className={embedded ? "" : "p-4"}>
@@ -386,6 +471,20 @@ export default function TicimaxReturns({ embedded = false }) {
                               : "Sipariş iade sürecinde / iade tamamlandı."}
                           </div>
                         )}
+                        {wfCanAct && (
+                          <div className="mt-3">
+                            <button
+                              onClick={() => openWorkflow(r)}
+                              disabled={busyId === r.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 disabled:opacity-60"
+                            >
+                              <Package size={14} /> İade İşlemleri (Onayla / Reddet / Öde)
+                            </button>
+                            <div className="text-[11px] text-gray-400 mt-1">
+                              Onay/ret tutar hesabı + gider pusulası + iade ödemesi; müşteriye SMS/mail gider.
+                            </div>
+                          </div>
+                        )}
                         {r.notes && <div className="mt-2 text-[11px] text-gray-500">Not: {r.notes}</div>}
                       </td>
                     </tr>
@@ -394,6 +493,87 @@ export default function TicimaxReturns({ embedded = false }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* İade işlem akışı modal'ı (köprülenmiş customer_returns üzerinden) */}
+      {wf && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !wf.loading && setWf(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <div>
+                <div className="font-semibold text-gray-900">İade İşlemleri</div>
+                <div className="text-xs text-gray-500">Sipariş {wf.row.order_number} · {wf.row.customer_name}</div>
+              </div>
+              <button onClick={() => setWf(null)} disabled={wf.loading} className="text-gray-400 hover:text-gray-700 text-sm">Kapat ✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="text-xs text-gray-500">
+                Mevcut iade durumu: <b className="text-gray-800">{STATUS_LABEL[wf.row.status] || wf.row.status}</b>
+              </div>
+
+              {wf.preview ? (
+                <div className="border rounded-xl p-3 text-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs text-gray-500">Kusur:</span>
+                    {[["customer", "Müşteri (kargo müşteriden)"], ["store", "Mağaza (kargo bizden)"]].map(([v, l]) => (
+                      <button key={v} onClick={() => wfFault(v)} disabled={wf.loading}
+                        className={`text-xs px-2 py-1 rounded-md border ${wf.fault === v ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-600 border-gray-200"}`}>{l}</button>
+                    ))}
+                  </div>
+                  <div className="space-y-1 text-xs text-gray-600">
+                    <div className="flex justify-between"><span>İade edilen ürün tutarı</span><b>{fmtTL(wf.preview.returned_net)}</b></div>
+                    {wf.preview.campaign_deduction > 0 && <div className="flex justify-between text-amber-700"><span>Kargo kampanya mahsubu</span><b>− {fmtTL(wf.preview.campaign_deduction)}</b></div>}
+                    {wf.preview.return_cargo_fee > 0 && <div className="flex justify-between text-amber-700"><span>İade kargo bedeli</span><b>− {fmtTL(wf.preview.return_cargo_fee)}</b></div>}
+                    <div className="flex justify-between pt-1 border-t mt-1 text-gray-900"><span>Otomatik iade tutarı</span><b>{fmtTL(wf.preview.auto_refund)}</b></div>
+                  </div>
+                  {wf.preview.campaign_note && <div className="text-[11px] text-amber-600 mt-1">{wf.preview.campaign_note}</div>}
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs text-gray-500">İade tutarı:</span>
+                    <input type="number" value={wf.finalAmount}
+                      onChange={(e) => setWf((m) => ({ ...m, finalAmount: e.target.value, edited: true }))}
+                      className="w-32 text-sm border rounded-md px-2 py-1" />
+                    <span className="text-xs text-gray-400">TL {wf.edited && "(elle)"}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400">Tutar önizlemesi alınamadı. Onayda tutarı elle girebilirsin.</div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {can("returns.approve") && (
+                  <button onClick={wfApprove} disabled={wf.loading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">Onayla</button>
+                )}
+                {can("returns.reject") && (
+                  <button onClick={() => setWf((m) => ({ ...m, showReject: !m.showReject }))} disabled={wf.loading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50">Reddet</button>
+                )}
+                {can("returns.expense_note") && (
+                  <button onClick={wfGider} disabled={wf.loading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-50">Gider Pusulası</button>
+                )}
+                {can("returns.refund_pay") && (
+                  <button onClick={wfPay} disabled={wf.loading}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-700 text-white text-xs font-semibold hover:bg-green-800 disabled:opacity-50">İade Bedeli Öde</button>
+                )}
+              </div>
+
+              {wf.showReject && (
+                <div className="border rounded-xl p-3 bg-rose-50/40">
+                  <label className="text-xs text-gray-600">Ret sebebi (müşteriye SMS/mail ile gider)</label>
+                  <textarea value={wf.rejectReason} onChange={(e) => setWf((m) => ({ ...m, rejectReason: e.target.value }))}
+                    rows={2} className="w-full mt-1 text-sm border rounded-md px-2 py-1" placeholder="Örn. ürün kullanılmış / etiketi yok…" />
+                  <label className="flex items-center gap-2 mt-2 text-xs text-gray-600">
+                    <input type="checkbox" checked={wf.reship} onChange={(e) => setWf((m) => ({ ...m, reship: e.target.checked }))} />
+                    Ürünü müşteriye geri gönder (yeni kargo barkodu üret)
+                  </label>
+                  <button onClick={wfReject} disabled={wf.loading}
+                    className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50">Reddi Onayla</button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
