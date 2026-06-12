@@ -541,7 +541,15 @@ async def _dhl_cargo_poll_tick():
             cur = order.get("status")
 
             delivered = bool(teslim) or ("teslim" in aciklama.lower() and "edilemedi" not in aciklama.lower())
-            shipped = bool(gonderi) or bool(url) or (statu not in ("", "0"))
+            # İLK OKUTMA tespiti — sadece kargocu/şube siparişi fiilen okuttuğunda "Kargoya Verildi".
+            # Barkod oluşturulurken gönderi_no/takip url'i dolabildiği için onlar TEK BAŞINA tetik DEĞİL;
+            # yalnızca MNG/DHL bir HAREKET statüsü (kargo_statu ≠ 0) ya da kabul/şube/okutma açıklaması
+            # döndürdüğünde durumu çeviriyoruz. (kargo_statu: 0=İşlem Yok, 1+/100+=şubeye girdi/işleniyor)
+            _alow = aciklama.lower()
+            _acc_kw = ("kabul", "şube", "sube", "okut", "teslim alın", "teslim alin",
+                       "işleme", "isleme", "çıkış", "cikis", "girdi", "transfer",
+                       "dağıt", "dagit", "yola")
+            shipped = (statu not in ("", "0")) or any(k in _alow for k in _acc_kw)
             now_iso = datetime.now(timezone.utc).isoformat()
 
             new_status = None
