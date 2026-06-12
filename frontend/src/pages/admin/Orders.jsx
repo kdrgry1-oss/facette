@@ -950,9 +950,7 @@ export default function AdminOrders({ unpaidView = false }) {
                 const isUnpaidHavale = isHavale && !paymentConfirmed && order.status !== 'cancelled';
                 const isUnpaidPending = !paymentConfirmed && !isHavale && order.status === 'pending';
                 const isInvoiceIssued = !!order.invoice_issued;
-                const rowClass = isInvoiceIssued
-                  ? 'opacity-60 bg-gray-50'
-                  : isUnpaidHavale
+                const rowClass = isUnpaidHavale
                   ? 'bg-red-50 border-l-4 border-red-400'
                   : isUnpaidPending
                   ? 'bg-yellow-50'
@@ -1080,7 +1078,7 @@ export default function AdminOrders({ unpaidView = false }) {
                       >
                         <SelectTrigger className="w-32 h-8 text-xs">
                           <SelectValue>
-                            <span className={statusInfo.class}>{statusInfo.label}</span>
+                            <span className="text-gray-700 font-medium">{statusInfo.label}</span>
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
@@ -1118,15 +1116,24 @@ export default function AdminOrders({ unpaidView = false }) {
                         >
                           <Printer size={15} />
                         </button>
-                        {/* 4. E-Arşiv Fatura Oluştur - yeşil */}
-                        <button
-                          onClick={() => handleGenerateInvoice(order.id)}
-                          disabled={invoicingId === order.id || !!order.invoice?.invoice_number}
-                          title={order.invoice?.invoice_number ? `Fatura: ${order.invoice.invoice_number}` : "E-Arşiv Fatura Oluştur"}
-                          className={`tci-btn ${order.invoice?.invoice_number ? 'tci-btn-green-active' : 'tci-btn-green'} ${invoicingId === order.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <FileText size={15} />
-                        </button>
+                        {/* 4. E-Arşiv Fatura Oluştur - kesilince saydam+pasif (Fatura Sıfırla'ya kadar) */}
+                        {(() => {
+                          const invoiced = isInvoiceIssued || !!order.invoice_number || !!order.invoice?.invoice_number;
+                          const busy = invoicingId === order.id;
+                          const invNo = order.invoice_number || order.invoice?.invoice_number || "";
+                          return (
+                            <button
+                              onClick={() => handleGenerateInvoice(order.id)}
+                              disabled={busy || invoiced}
+                              title={invoiced
+                                ? `Fatura kesildi${invNo ? `: ${invNo}` : ""} — yeniden basmak için Fatura Sıfırla`
+                                : "E-Arşiv Fatura Oluştur"}
+                              className={`tci-btn ${invoiced ? "tci-btn-green-active opacity-50 cursor-not-allowed" : "tci-btn-green"} ${busy ? "opacity-50 cursor-not-allowed" : ""}`}
+                            >
+                              <FileText size={15} />
+                            </button>
+                          );
+                        })()}
                         {/* 5. Kargo Etiketi - yeşil çift */}
                         {order.platform === 'trendyol' && order.cargo_tracking_number ? (
                           <button
@@ -1302,6 +1309,33 @@ export default function AdminOrders({ unpaidView = false }) {
                   Yazdır
                 </button>
               </div>
+
+              {/* Kargo takip — no + link (web sitesi siparişlerinde ilk okutmada poll'dan dolar) */}
+              {(selectedOrder.cargo_tracking_url || selectedOrder.cargo_tracking_link || selectedOrder.cargo_tracking_number || selectedOrder.cargo?.tracking_number || selectedOrder.cargo_gonderi_no) && (() => {
+                const trackNo = selectedOrder.cargo_tracking_number || selectedOrder.cargo?.tracking_number || selectedOrder.cargo_gonderi_no || "";
+                const trackUrl = selectedOrder.cargo_tracking_url || selectedOrder.cargo_tracking_link || "";
+                return (
+                  <div className="mt-3 p-3 border rounded-lg bg-gray-50 text-sm">
+                    <div className="font-medium text-gray-700 mb-1">Kargo Takip</div>
+                    {trackNo && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-gray-500">Takip No:</span>
+                        <span className="font-mono">{trackNo}</span>
+                        <button onClick={() => { navigator.clipboard?.writeText(trackNo); toast.success("Takip no kopyalandı"); }} className="text-xs text-blue-600 hover:underline">kopyala</button>
+                      </div>
+                    )}
+                    {trackUrl ? (
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-gray-500">Takip Linki:</span>
+                        <a href={trackUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{trackUrl}</a>
+                        <button onClick={() => { navigator.clipboard?.writeText(trackUrl); toast.success("Takip linki kopyalandı"); }} className="text-xs text-blue-600 hover:underline whitespace-nowrap">kopyala</button>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-400 mt-1">Takip linki, kargo ilk okutulduğunda otomatik oluşur.</div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Fatura — kesilmişse PDF'i otomatik göster (Trendyol'a yükleme zaten otomatik yapılır) */}
               {(selectedOrder.invoice_issued || selectedOrder.invoice_number || selectedOrder.invoice?.invoice_number || selectedOrder.invoice_pdf_url || selectedOrder.invoice_link) && (() => {

@@ -24,7 +24,7 @@ const CHANNEL_META = {
 };
 
 const VARIABLES = [
-  "{customer_name}", "{order_number}", "{amount}", "{tracking_number}",
+  "{customer_name}", "{order_number}", "{amount}", "{tracking_number}", "{tracking_url}",
   "{otp_code}", "{cart_url}", "{status_label}",
 ];
 
