@@ -1137,6 +1137,23 @@ async def reset_invoice_for_order(order_id: str, current_user: dict = Depends(re
     return {"success": True, "message": f"Fatura kaydı sıfırlandı ({prev or 'kayıt'} silindi), yeniden kesebilirsiniz"}
 
 
+# Havale/EFT siparişlerinde fatura, ödeme (havale) onaylanmadan KESİLMEZ.
+_HAVALE_PMS = ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "havale/eft")
+_SETTLED_PAY = ("paid", "completed", "success", "succeeded", "captured")
+
+
+def _havale_invoice_block(order: dict):
+    """Havale/EFT siparişi ödemesi onaylanmamışsa fatura engelinin sebebini döndürür;
+    onaylıysa (payment_status ödenmiş) None döner."""
+    pm = (order.get("payment_method") or "").lower()
+    pstat = (order.get("payment_status") or "").lower()
+    if pm in _HAVALE_PMS and pstat not in _SETTLED_PAY:
+        return ("Havale onaylanmadığı için bu siparişe fatura kesilemedi. "
+                "Önce siparişin ödemesini 'Ödendi' olarak işaretleyin (havale onayı), "
+                "sonra faturayı kesin.")
+    return None
+
+
 @router.post("/{order_id}/create-invoice")
 async def create_invoice_for_order(
     order_id: str,
@@ -1158,6 +1175,11 @@ async def create_invoice_for_order(
     if order.get("invoice_issued"):
         return {"success": True, "message": "Fatura zaten kesilmiş",
                 "invoice_number": order.get("invoice_number", "")}
+
+    # Havale/EFT siparişi onaylanmadan fatura KESİLMEZ — buton basılsa bile engelle.
+    _hblk = _havale_invoice_block(order)
+    if _hblk:
+        raise HTTPException(status_code=400, detail=_hblk)
 
     # Mikro ihracat: gerçek e-Arşiv İSTİSNA faturası (InvoiceTypeCode=ISTISNA, KDV %0,
     # istisna 301 "11/1-a Mal ihracatı"). ETGB placeholder yerine normal e-Arşiv akışı;

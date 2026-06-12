@@ -475,6 +475,15 @@ export default function AdminOrders({ unpaidView = false }) {
       toast.success(`${ok} fatura oluşturuldu${fail > 0 ? `, ${fail} başarısız` : ""}`);
       if (fail > 0 && res.data?.errors?.length) {
         console.warn("Bulk invoice errors:", res.data.errors);
+        const havaleBlocked = res.data.errors.filter(
+          (e) => (e.error || "").includes("Havale onaylanmadığı")
+        );
+        if (havaleBlocked.length) {
+          toast.error(
+            `${havaleBlocked.length} sipariş havale onaylanmadığı için faturalanamadı. Önce ödemelerini 'Ödendi' işaretleyin.`,
+            { duration: 6000 }
+          );
+        }
       }
       setSelectedOrders([]);
       fetchOrders();
