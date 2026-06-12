@@ -40,6 +40,13 @@ async def next_order_number() -> str:
         import secrets
         return f"W{int(time.time()) % 1000000}{secrets.token_hex(1).upper()}"
 
+# Sipariş listesi sayım (count) önbelleği — büyük koleksiyonda count_documents her
+# istekte koleksiyonu tarıyor (özellikle valid/hide_closed gibi $nor/$nin filtrelerinde
+# pahalı). Aynı filtre için kısa süre cache'leyip sayfalama/yenilemede tekrar taramayı
+# önleriz. Filtre imzası skip/limit içermez → tüm sayfalar aynı toplamı paylaşır.
+_ORDERS_COUNT_CACHE = {}   # sig -> (count, monotonic_ts)
+_ORDERS_COUNT_TTL = 60.0   # sn
+
 @router.get("")
 async def get_orders(
     page: int = Query(1, ge=1),
@@ -138,8 +145,28 @@ async def get_orders(
     elif payment_view == "valid":
         query.setdefault("$and", []).append({"$nor": [_junk_cond]})
 
-    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    total = await db.orders.count_documents(query)
+    # PERF: find ve count'u paralel çalıştır (ardışık değil) + count'u kısa süre
+    # önbellekle. Önceden find→count ardışıktı ve karmaşık filtrede toplam ~8 sn
+    # sürüyordu; soğuk önbellekte paralel + cache çok daha hızlı.
+    import asyncio as _aio
+    import json as _json
+    _sig = _json.dumps(query, sort_keys=True, default=str)
+    _now = time.monotonic()
+    _cached = _ORDERS_COUNT_CACHE.get(_sig)
+
+    async def _do_find():
+        return await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    if _cached and (_now - _cached[1] < _ORDERS_COUNT_TTL):
+        orders = await _do_find()
+        total = _cached[0]
+    else:
+        orders, total = await _aio.gather(_do_find(), db.orders.count_documents(query))
+        _ORDERS_COUNT_CACHE[_sig] = (total, _now)
+        # cache'i sınırla (sınırsız büyümesin)
+        if len(_ORDERS_COUNT_CACHE) > 200:
+            _oldest = min(_ORDERS_COUNT_CACHE.items(), key=lambda kv: kv[1][1])[0]
+            _ORDERS_COUNT_CACHE.pop(_oldest, None)
 
     # Pazaryeri (Trendyol vb.) kalemlerinde görsel yoksa barkodla yerel üründen eşle.
     # Barkodlar Trendyol ile aynı olduğundan doğrudan eşleşir; mevcut siparişler için

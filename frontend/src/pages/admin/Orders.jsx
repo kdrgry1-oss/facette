@@ -171,22 +171,19 @@ export default function AdminOrders({ unpaidView = false }) {
       const list = res.data?.orders || [];
       setOrders(list);
       setTotal(res.data?.total || 0);
+      setLoading(false);   // liste geldi → spinner'ı hemen kaldır; risk skorları arka planda yüklenir
 
-      // FAZ 6 — Yüksek iade oranlı müşterileri bulk'ta çek
+      // FAZ 6 — Yüksek iade oranlı müşterileri ARKA PLANDA çek (sayfa yüklemesini bloklamaz)
       const uids = [...new Set(list.map((o) => o.user_id).filter(Boolean))].slice(0, 100);
       const mails = [...new Set(list.map((o) => o.shipping_address?.email).filter(Boolean))].slice(0, 100);
       if (uids.length || mails.length) {
-        try {
-          const r = await axios.get(`${API}/customer-risk/bulk`, {
-            params: { user_ids: uids.join(","), emails: mails.join(",") },
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setRiskMap(r.data?.risks || {});
-        } catch { /* risk skoru opsiyonel */ }
+        axios.get(`${API}/customer-risk/bulk`, {
+          params: { user_ids: uids.join(","), emails: mails.join(",") },
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => setRiskMap(r.data?.risks || {})).catch(() => { /* risk skoru opsiyonel */ });
       }
     } catch (err) {
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };
