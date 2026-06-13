@@ -102,6 +102,35 @@ def _format_gsm(phone: str) -> str:
     return "+" + digits
 
 
+def _payment_snapshot(data: dict) -> dict:
+    """iyzico retrieve/auth yanıtından siparişe yazılacak ödeme görüntüsü.
+
+    KVKK: SADECE maskeli kart bilgisi saklanır — binNumber (ilk 6) + lastFourDigits
+    (son 4). Tam kart numarası ASLA tutulmaz. Banka/Iyzico komisyonu raporlama için
+    eklenir.
+    """
+    d = data or {}
+    return {
+        "status": d.get("status"),
+        "paymentStatus": d.get("paymentStatus"),
+        "errorMessage": d.get("errorMessage"),
+        "paymentId": d.get("paymentId"),
+        "paidPrice": d.get("paidPrice"),
+        "currency": d.get("currency"),
+        "installment": d.get("installment"),
+        "cardType": d.get("cardType"),
+        "cardAssociation": d.get("cardAssociation"),
+        "cardFamily": d.get("cardFamily"),
+        "binNumber": d.get("binNumber"),            # ilk 6 (maskeli)
+        "lastFourDigits": d.get("lastFourDigits"),  # son 4 (maskeli)
+        "authCode": d.get("authCode"),
+        "hostReference": d.get("hostReference"),
+        "merchantCommissionRate": d.get("merchantCommissionRate"),
+        "iyziCommissionRateAmount": d.get("iyziCommissionRateAmount"),
+        "iyziCommissionFee": d.get("iyziCommissionFee"),
+    }
+
+
 def _build_initialize_payload(order: dict, callback_url: str) -> dict:
     ship = order.get("shipping_address") or {}
     bill = order.get("billing_address") or ship
@@ -267,13 +296,7 @@ async def _retrieve_and_finalize(token: str) -> dict:
 
     paid = _is_paid(data)
     update = {
-        "iyzico_retrieve_response": {
-            "status": data.get("status"),
-            "paymentStatus": data.get("paymentStatus"),
-            "errorMessage": data.get("errorMessage"),
-            "paymentId": data.get("paymentId"),
-            "paidPrice": data.get("paidPrice"),
-        },
+        "iyzico_retrieve_response": _payment_snapshot(data),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if paid:
@@ -353,13 +376,7 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
     """iyzico ödeme/3ds-auth yanıtına göre siparişi günceller. Döner: paid(bool)."""
     paid = _is_paid(data)
     update = {
-        "iyzico_retrieve_response": {
-            "status": data.get("status"),
-            "paymentStatus": data.get("paymentStatus"),
-            "errorMessage": data.get("errorMessage"),
-            "paymentId": data.get("paymentId"),
-            "paidPrice": data.get("paidPrice"),
-        },
+        "iyzico_retrieve_response": _payment_snapshot(data),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if paid:

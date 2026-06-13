@@ -32,6 +32,7 @@ import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquar
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
 import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
+import OrderPaymentDetail from "../../components/admin/OrderPaymentDetail";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1565,6 +1566,7 @@ export default function AdminOrders({ unpaidView = false }) {
               </div>
 
               <OrderMarketplaceInfo order={selectedOrder} />
+              <OrderPaymentDetail order={selectedOrder} />
               <OrderEventsLog orderId={selectedOrder.id} />
             </div>
           )}
