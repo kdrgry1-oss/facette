@@ -74,6 +74,17 @@ async def sync_ticimax_stock(
         not_found, errors, duration_sec
       }
     """
+    # Facette stok master — Ticimax stok senkronu varsayılan KAPALI; stoğu EZMESİN.
+    # Yalnızca settings.ticimax.stock_sync_enabled=True ise çalışır.
+    _cfg = await db.settings.find_one({"id": "ticimax"}) or {}
+    if not _cfg.get("stock_sync_enabled"):
+        return {
+            "success": False,
+            "disabled": True,
+            "updated_variants": 0,
+            "matched_products": 0,
+            "message": "Ticimax stok senkronu kapalı (Facette stok master). Stok yalnızca sipariş/iptal/iade ile yönetilir.",
+        }
     started = datetime.now(timezone.utc)
     from ticimax_client import get_products, get_product_count  # type: ignore
 

@@ -655,16 +655,15 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Ticimax canlı stok senkronu — 2 saatte bir
-    _scheduler.add_job(
-        _ticimax_sync_stock,
-        "interval",
-        hours=2,
-        id="ticimax_stock_sync",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
-        max_instances=1,
-        coalesce=True,
-    )
+    # Ticimax canlı stok senkronu — KAPALI (Facette stok master'ı; Ticimax stoğu
+    # bu sistemi EZMESİN). Kullanıcı kararı: stok yalnızca sipariş/iptal/iade ile
+    # Facette içinde yönetilir. Gerekirse settings.ticimax_stock_sync_enabled=true
+    # yapıp elle tetiklenebilir, ama otomatik job artık çalışmaz.
+    # _scheduler.add_job(
+    #     _ticimax_sync_stock, "interval", hours=2, id="ticimax_stock_sync",
+    #     next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
+    #     max_instances=1, coalesce=True,
+    # )
     # Iter 43 — Günlük stok tükenme uyarısı (her gün sabah 9:00 UTC, ~12:00 TR)
     async def _daily_stockout_alert():
         try:

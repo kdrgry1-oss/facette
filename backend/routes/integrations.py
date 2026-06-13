@@ -2698,6 +2698,34 @@ async def preview_trendyol_orders(req: TrendyolOrderPreviewReq, current_user: di
         logger.error(f"Error previewing Trendyol orders: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def _decrement_stock_for_imported_order(order_data: dict, source: str):
+    """Facette stok master — yeni içe aktarılan pazaryeri/Ticimax siparişi için
+    idempotent stok DÜŞÜMÜ. Aynı sipariş tekrar senkronlanırsa stock_movements
+    guard'ı çift düşümü engeller. Kalemde barkod yoksa o kalem atlanır."""
+    try:
+        oid = order_data.get("id") or order_data.get("order_number")
+        if not oid:
+            return
+        already = await db.stock_movements.find_one(
+            {"order_id": oid, "type": "order_imported"}, {"_id": 1}
+        )
+        if already:
+            return
+        from .orders import _stock_delta_for_order  # local import — döngü önleme
+        moves = await _stock_delta_for_order(order_data, -1)
+        await db.stock_movements.insert_one({
+            "order_id": oid,
+            "order_number": order_data.get("order_number"),
+            "type": "order_imported",
+            "source": source,
+            "delta": -1,
+            "moves": moves,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as _e:
+        logger.error(f"[stock] import decrement failed ({source}): {_e}")
+
+
 @router.post("/trendyol/orders/import-selected")
 async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_user: dict = Depends(require_admin)):
     try:
@@ -2719,6 +2747,7 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
                     order_data["created_at"] = datetime.now(timezone.utc).isoformat()
                     await db.orders.insert_one(order_data)
                     imported_count += 1
+                    await _decrement_stock_for_imported_order(order_data, "trendyol")
                 await log_integration_event("trendyol", "import_order", "order", order_number, "success", "Sipariş başarıyla aktarıldı.")
             except Exception as e:
                 err_msg = str(e)
@@ -2793,6 +2822,7 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
                     order_data["created_at"] = datetime.now(timezone.utc).isoformat()
                     await db.orders.insert_one(order_data)
                     imported_count += 1
+                    await _decrement_stock_for_imported_order(order_data, "trendyol")
             except Exception as e:
                 logger.error(f"Error mapping/saving order {order_number}: {e}")
                 await log_integration_event("trendyol", "auto_import", "order", str(order_number), "error", f"Otomatik aktarım hatası: {str(e)}", {"raw": t_order})
@@ -4182,6 +4212,7 @@ async def import_ticimax_orders(
             doc["created_at"] = created_at
             await db.orders.insert_one(doc)
             imported += 1
+            await _decrement_stock_for_imported_order(doc, "ticimax")
 
     await db.settings.update_one(
         {"id": "ticimax"},
