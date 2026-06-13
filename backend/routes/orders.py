@@ -930,6 +930,65 @@ async def apply_stock_for_order(
     return {"success": True, "items_affected": len(moves)}
 
 
+@router.post("/reconcile-stock")
+async def reconcile_stock_backfill(
+    platform: str = Query("trendyol"),
+    start_date: str = Query(...),
+    action: str = Query("decrement"),
+    skip_status: str = Query("cancelled,returned,refunded"),
+    current_user: dict = Depends(require_admin)
+):
+    """İdempotent stok mutabakatı: platform + start_date sonrası siparişlerden HENÜZ
+    stok-düşümü yapılmamış olanlara delta uygular. Daha önce düşüm hareketi olan siparişi
+    atlar (manual_decrement / order_imported / backfill_decrement). Tekrar çalıştırılabilir.
+    Ticimax stok senkronu ile ALAKASI YOKTUR — sadece sipariş bazlı stok düşer/ekler."""
+    skips = set(s.strip() for s in (skip_status or "").split(",") if s.strip())
+    delta = -1 if action == "decrement" else 1
+    guard_types = ["manual_decrement", "order_imported", "backfill_decrement"]
+    q = {"platform": platform, "created_at": {"$gte": start_date}}
+    total = 0
+    applied = 0
+    skipped_status = 0
+    skipped_done = 0
+    zero_affected = []
+    cursor = db.orders.find(q, {"_id": 0, "id": 1, "order_number": 1, "status": 1, "items": 1})
+    async for o in cursor:
+        total += 1
+        if (o.get("status") or "") in skips:
+            skipped_status += 1
+            continue
+        oid = o.get("id")
+        already = await db.stock_movements.find_one(
+            {"order_id": oid, "type": {"$in": guard_types}}, {"_id": 1}
+        )
+        if already:
+            skipped_done += 1
+            continue
+        moves = await _stock_delta_for_order(o, delta)
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()),
+            "type": "backfill_decrement" if delta < 0 else "backfill_increment",
+            "order_id": oid,
+            "order_number": o.get("order_number", ""),
+            "items": moves,
+            "created_by": current_user.get("email", ""),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if moves:
+            applied += 1
+        else:
+            zero_affected.append(o.get("order_number", ""))
+    return {
+        "success": True,
+        "total_scanned": total,
+        "applied": applied,
+        "skipped_status": skipped_status,
+        "skipped_already_done": skipped_done,
+        "zero_affected_count": len(zero_affected),
+        "zero_affected": zero_affected[:50],
+    }
+
+
 @router.post("/auto-cancel-expired")
 async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
