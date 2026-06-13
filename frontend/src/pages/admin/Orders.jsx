@@ -266,6 +266,26 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+  const [deletingId, setDeletingId] = useState("");
+  const handleDeleteOrder = async (orderId) => {
+    const label = selectedOrder?.order_number ? `\n\nSipariş: ${selectedOrder.order_number}` : "";
+    if (!window.confirm(`Bu sipariş silinecek.${label}\n\nSilinen siparişler "Silinen Siparişler" sayfasına taşınır ve oradan geri alınabilir.\n\nDevam edilsin mi?`)) return;
+    setDeletingId(orderId);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.delete(`${API}/orders/${orderId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success("Sipariş silindi — Silinen Siparişler sayfasına taşındı");
+      setSelectedOrder(null);
+      fetchOrders();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Silinemedi");
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   const handlePrintInvoice = async (orderId) => {
     const token = localStorage.getItem('token');
     window.open(`${API}/orders/${orderId}/invoice/print?token=${token}`, '_blank');
@@ -1284,6 +1304,14 @@ export default function AdminOrders({ unpaidView = false }) {
                 >
                   <Printer size={16} />
                   Yazdır
+                </button>
+                <button
+                  onClick={() => handleDeleteOrder(selectedOrder.id)}
+                  disabled={deletingId === selectedOrder.id}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-700 text-white text-sm rounded hover:bg-red-800 disabled:opacity-50 ml-auto"
+                >
+                  <Trash2 size={16} />
+                  {deletingId === selectedOrder.id ? "Siliniyor..." : "Siparişi Sil"}
                 </button>
               </div>
 
