@@ -19,6 +19,33 @@ def _platform_display(order) -> str:
         p, "Site" if p in ("", "facette", "site") else p.title())
 
 
+async def _log_order_event(order_id: str, event_type: str, description: str,
+                           current_user: dict = None, meta: dict = None,
+                           order_number: str = None):
+    """Sipariş işlem geçmişi (audit log) kaydı → db.order_events.
+
+    Her sipariş aksiyonunda (durum, ödeme, kargo, not, fatura, iade) bir iz
+    bırakır. Tasarım gereği HİÇBİR ZAMAN isteği bozmaz; hata olursa sadece
+    uyarı loglar. `stock_movements` deseninin birebir kardeşidir.
+    """
+    try:
+        if order_number is None:
+            _o = await db.orders.find_one({"id": order_id}, {"_id": 0, "order_number": 1})
+            order_number = (_o or {}).get("order_number", "")
+        await db.order_events.insert_one({
+            "id": str(uuid.uuid4()),
+            "order_id": order_id,
+            "order_number": order_number or "",
+            "event_type": event_type,
+            "description": description,
+            "actor": (current_user or {}).get("email", "") if current_user else "",
+            "meta": meta or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as _e:  # pragma: no cover - log asla isteği bozmaz
+        logger.warning(f"order_event log failed for {order_id}: {_e}")
+
+
 def generate_order_number() -> str:
     import secrets
     return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
@@ -278,6 +305,19 @@ async def get_order(
             raise HTTPException(status_code=403, detail="Bu siparişi görüntüleme yetkiniz yok")
     
     return order
+
+
+@router.get("/{order_id}/events")
+async def get_order_events(
+    order_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Sipariş işlem geçmişi (Log) — en yeni en üstte."""
+    events = await db.order_events.find(
+        {"order_id": order_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return {"events": events, "count": len(events)}
+
 
 @router.post("")
 async def create_order(
@@ -603,6 +643,8 @@ async def update_order_status(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
+    await _log_order_event(order_id, "status", f"Durum güncellendi: {status}", current_user, {"status": status})
+
     # Bildirim tetikleme: status → event eşlemesi
     # NOT: Provider'lara gidiş yavaş olabilir — fire-and-forget task ile UI yanıtını
     # bloklamadan arka planda tetikliyoruz.
@@ -770,6 +812,10 @@ async def mark_order_paid(
     if _flip_confirmed:
         _set["status"] = "confirmed"
     await db.orders.update_one({"id": order_id}, {"$set": _set})
+
+    await _log_order_event(order_id, "payment", "Ödeme onaylandı (manuel/havale)", current_user,
+                           {"payment_status": "paid", "status_flipped": _flip_confirmed},
+                           order_number=order_doc.get("order_number", ""))
 
     # Havale onayinda "Onaylandi" bildirimi (Siparis Durumlari ayarina gore)
     if _flip_confirmed:
@@ -1049,6 +1095,7 @@ async def add_order_note(
         {"id": order_id},
         {"$set": {"admin_notes": notes_list, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
+    await _log_order_event(order_id, "note", "Sipariş notu eklendi", current_user, {"note": note[:200]})
     return {"success": True, "notes": notes_list}
 
 
@@ -1088,6 +1135,10 @@ async def ship_order(
             "updated_at": now_iso,
         }},
     )
+
+    await _log_order_event(order_id, "cargo", f"Kargoya verildi: {cargo_company} ({tracking_number.strip()})", current_user,
+                           {"cargo_company": cargo_company, "tracking_number": tracking_number.strip()},
+                           order_number=existing.get("order_number", ""))
 
     # Bildirim — fire-and-forget
     import asyncio as _asyncio

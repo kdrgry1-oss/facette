@@ -30,6 +30,7 @@
 import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
+import OrderEventsLog from "../../components/admin/OrderEventsLog";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1541,6 +1542,8 @@ export default function AdminOrders({ unpaidView = false }) {
                   </>
                 )}
               </div>
+
+              <OrderEventsLog orderId={selectedOrder.id} />
             </div>
           )}
         </DialogContent>
