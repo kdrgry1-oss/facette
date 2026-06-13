@@ -46,6 +46,47 @@ async def _log_order_event(order_id: str, event_type: str, description: str,
         logger.warning(f"order_event log failed for {order_id}: {_e}")
 
 
+async def _enrich_items_with_products(items):
+    """Sipariş kalemlerini barkodla products'tan zenginleştir: Marka + KDV oranı.
+
+    Stored veriyi DEĞİŞTİRMEZ; sadece okuma anında (detay) ekler. Tek bir $in
+    sorgusuyla hem ürün hem varyant barkodunu eşler. Hata olursa items'ı olduğu
+    gibi döndürür. (Desi/ağırlık ürün şemasında yok — eklenmez.)
+    """
+    try:
+        if not items:
+            return items
+        bset = list({str(it.get("barcode") or "").strip() for it in items if (it.get("barcode") or "").strip()})
+        if not bset:
+            return items
+        bmap = {}
+        cursor = db.products.find(
+            {"$or": [{"barcode": {"$in": bset}}, {"variants.barcode": {"$in": bset}}]},
+            {"_id": 0, "barcode": 1, "brand": 1, "vat_rate": 1, "variants.barcode": 1},
+        )
+        async for p in cursor:
+            meta = {"brand": p.get("brand") or "", "vat_rate": p.get("vat_rate")}
+            pb = str(p.get("barcode") or "").strip()
+            if pb:
+                bmap[pb] = meta
+            for v in (p.get("variants") or []):
+                vb = str(v.get("barcode") or "").strip()
+                if vb:
+                    bmap[vb] = meta
+        for it in items:
+            m = bmap.get(str(it.get("barcode") or "").strip())
+            if not m:
+                continue
+            if not it.get("brand") and m.get("brand"):
+                it["brand"] = m["brand"]
+            if it.get("vat_rate") in (None, "") and m.get("vat_rate") is not None:
+                it["vat_rate"] = m["vat_rate"]
+        return items
+    except Exception as _e:  # pragma: no cover
+        logger.warning(f"item enrich failed: {_e}")
+        return items
+
+
 def generate_order_number() -> str:
     import secrets
     return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
@@ -304,6 +345,7 @@ async def get_order(
         if order.get("user_id") != current_user.get("id"):
             raise HTTPException(status_code=403, detail="Bu siparişi görüntüleme yetkiniz yok")
     
+    order["items"] = await _enrich_items_with_products(order.get("items") or [])
     return order
 
 
@@ -1241,6 +1283,7 @@ async def mark_order_invoiced(
     if existing.get("status") == "pending":
         update["status"] = "confirmed"
     await db.orders.update_one({"id": order_id}, {"$set": update})
+    await _log_order_event(order_id, "invoice", f"Fatura işlendi: {invoice_number}".strip(), current_user, {"invoice_number": invoice_number})
     return {"success": True, "invoice_issued": True}
 
 
@@ -3073,6 +3116,9 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         "created_at": now_iso, "valid_until": valid_until,
     }
     await db.customer_returns.insert_one({**rec})
+    await _log_order_event(order["id"], "return", "İade talebi oluşturuldu", current_user,
+                           {"return_id": rid, "return_code": return_code},
+                           order_number=order.get("order_number", ""))
     await db.orders.update_one({"id": order["id"]}, {"$set": {
         "return_request": {
             "return_id": rid, "return_code": return_code, "valid_until": valid_until,
@@ -3380,6 +3426,9 @@ async def approve_return(return_id: str, payload: dict,
             logger.warning(f"return approve notif failed: {e}")
     _aio.create_task(_n())
 
+    await _log_order_event(rec.get("order_id"), "return", f"İade onaylandı (₺{final_amount})", current_user,
+                           {"return_id": return_id, "refund_amount": final_amount, "fault": fault},
+                           order_number=rec.get("order_number", ""))
     return {"success": True, "status": "approved", "refund_amount": final_amount,
             "manual_override": manual_override, "breakdown": bd}
 
@@ -3547,6 +3596,9 @@ async def reject_return(return_id: str, payload: dict,
             logger.warning(f"return reject notif failed: {e}")
     _aio.create_task(_n())
 
+    await _log_order_event(rec.get("order_id"), "return", f"İade reddedildi: {reason}", current_user,
+                           {"return_id": return_id, "reason": reason},
+                           order_number=rec.get("order_number", ""))
     return {"success": True, "status": "rejected", "reason": reason, "reship_code": reship_code}
 
 

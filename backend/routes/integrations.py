@@ -2550,6 +2550,23 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
                     )
                     if res.modified_count:
                         updated += 1
+                    # İptal senkronu → stoğu BİR KEZ geri ekle (idempotent; manuel iptalle aynı order_cancelled guard)
+                    if st == "Cancelled":
+                        try:
+                            _o = await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 0, "id": 1, "items": 1})
+                            if _o:
+                                _already = await db.stock_movements.find_one({"order_id": _o.get("id"), "type": "order_cancelled"}, {"_id": 1})
+                                if not _already:
+                                    from routes.orders import _stock_delta_for_order
+                                    _moves = await _stock_delta_for_order(_o, +1)
+                                    await db.stock_movements.insert_one({
+                                        "id": str(uuid.uuid4()), "type": "order_cancelled",
+                                        "order_id": _o.get("id"), "order_number": onum,
+                                        "items": _moves, "source": "trendyol_cancel_sync",
+                                        "created_at": datetime.now(timezone.utc).isoformat(),
+                                    })
+                        except Exception as _re:
+                            logger.error(f"[trendyol cancel restock {onum}] {_re}")
                 total_pages = resp.get("totalPages") or 0
                 page += 1
                 if not chunk or page >= total_pages:
@@ -2557,6 +2574,19 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
         except Exception as e:
             logger.error(f"[trendyol status pass {st}] {e}")
     return updated
+
+
+def _ms_to_iso(v):
+    """Trendyol ms-epoch (int) → ISO string; sayı değilse olduğu gibi/boş döner."""
+    if v is None or v == "":
+        return ""
+    try:
+        from datetime import datetime, timezone
+        if isinstance(v, (int, float)) or (isinstance(v, str) and str(v).isdigit()):
+            return datetime.fromtimestamp(int(v) / 1000, tz=timezone.utc).isoformat()
+    except Exception:
+        pass
+    return str(v)
 
 
 def map_trendyol_order(t_order: dict) -> dict:
@@ -2667,6 +2697,13 @@ def map_trendyol_order(t_order: dict) -> dict:
         "delivery_type": t_order.get("deliveryType", ""),
         "trendyol_customer_id": str(t_order.get("customerId") or ""),
         "trendyol_identity_number": str(t_order.get("identityNumber") or ""),
+        # --- FAZ 1b: Pazaryeri / SLA bilgileri (ham .get; alan yoksa boş) ---
+        "marketplace_status": t_order.get("status", ""),
+        "marketplace_agreed_delivery_date": _ms_to_iso(t_order.get("agreedDeliveryDate")),
+        "marketplace_estimated_delivery_start": _ms_to_iso(t_order.get("estimatedDeliveryStartDate")),
+        "marketplace_estimated_delivery_end": _ms_to_iso(t_order.get("estimatedDeliveryEndDate")),
+        "marketplace_last_modified": _ms_to_iso(t_order.get("lastModifiedDate")),
+        "cargo_sender_number": str(t_order.get("cargoSenderNumber") or ""),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -5866,6 +5903,13 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     claim = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0})
     if not claim:
         raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")
+
+    # Kurumsal/e-Fatura siparişinde gider pusulası DÜZENLENEMEZ — iade faturası gerekir.
+    _onum = claim.get("order_number", "")
+    if _onum:
+        _ord = await db.orders.find_one({"order_number": _onum}, {"_id": 0, "invoice_type": 1, "billing_info": 1})
+        if _ord and ((_ord.get("invoice_type") == "e-fatura") or bool((_ord.get("billing_info") or {}).get("is_corporate"))):
+            raise HTTPException(status_code=400, detail="Bu sipariş kurumsal/e-Fatura siparişi — gider pusulası düzenlenemez. Müşteriden iade faturası gerekir (Doğan'dan panele düşecek, onaylayınca stok +1).")
 
     # İade onayımız = gider pusulası oluşturmak. Stoğu BİR KEZ geri ekle (idempotent).
     await restock_claim_once(claim_id, "gider_pusulasi", current_user.get("email", ""))

@@ -31,6 +31,7 @@ import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
+import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -575,6 +576,21 @@ export default function AdminOrders({ unpaidView = false }) {
     setSelectedOrder(order);
     setEditMode(false);
     setDetailOpen(true);
+    // Detayı zenginleştirilmiş haliyle çek (kalem Marka/KDV + Pazaryeri alanları).
+    // Modal anında açılır; veri gelince birleştirilir.
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await axios.get(`${API}/orders/${order.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.data) {
+          setSelectedOrder(prev => (prev && prev.id === order.id ? { ...prev, ...res.data } : prev));
+        }
+      } catch {
+        /* detay zenginleştirme başarısızsa satır verisi kullanılmaya devam eder */
+      }
+    })();
   };
 
   // ---- Sipariş detayı düzenleme ----
@@ -1481,6 +1497,11 @@ export default function AdminOrders({ unpaidView = false }) {
                             <p className="font-medium">{item.productName || item.product_name || item.name || "Ürün"}</p>
                             {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
                             <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
+                            {item.brand && <p className="text-sm text-gray-500">Marka: {item.brand}</p>}
+                            {(item.vat_rate !== undefined && item.vat_rate !== null && item.vat_rate !== "") && (
+                              <p className="text-sm text-gray-500">KDV: %{item.vat_rate}</p>
+                            )}
+                            {item.barcode && <p className="text-xs text-gray-400">Barkod: {item.barcode}</p>}
                           </div>
                         )}
                       </div>
@@ -1543,6 +1564,7 @@ export default function AdminOrders({ unpaidView = false }) {
                 )}
               </div>
 
+              <OrderMarketplaceInfo order={selectedOrder} />
               <OrderEventsLog orderId={selectedOrder.id} />
             </div>
           )}
