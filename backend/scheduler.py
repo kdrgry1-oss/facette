@@ -147,6 +147,8 @@ async def _run_trendyol_auto_orders_pull():
                     data["created_at"] = datetime.now(timezone.utc).isoformat()
                     await _db.orders.insert_one(data)
                     imported += 1
+                    from routes.integrations import _decrement_stock_for_imported_order
+                    await _decrement_stock_for_imported_order(data, "trendyol")
             except Exception as _ex:
                 logger.error(f"[cron] Trendyol order import hata: {_ex}")
         try:
@@ -378,6 +380,8 @@ async def _ticimax_sync_orders():
                         doc["imported_at"] = datetime.now(timezone.utc).isoformat()
                         await db.orders.insert_one(doc)
                         new_count += 1
+                        from routes.integrations import _decrement_stock_for_imported_order
+                        await _decrement_stock_for_imported_order(doc, "ticimax")
                 except Exception as ie:
                     logger.warning(f"[cron][ticimax] upsert err: {ie}")
         if new_count > 0 or updated_count > 0:
