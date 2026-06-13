@@ -6,7 +6,7 @@
  */
 import {
   LayoutDashboard, Package, ShoppingCart, Tags, Image,
-  Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle,
+  Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle, Trash2,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
   Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain, Mail, Rss,
 } from "lucide-react";
@@ -25,6 +25,7 @@ export const navigationGroups = [
       { label: "İptaller", path: "/admin/iptaller", icon: XCircle },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },
       { label: "Ödeme Kaydı Bulunmayan", path: "/admin/odeme-bekleyen-siparisler", icon: AlertTriangle },
+      { label: "Silinen Siparişler", path: "/admin/silinen-siparisler", icon: Trash2 },
     ],
   },
   {

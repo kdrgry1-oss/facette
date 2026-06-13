@@ -330,6 +330,32 @@ async def get_order_by_number(order_number: str):
     return order
 
 
+@router.get("/deleted")
+async def list_deleted_orders(
+    page: int = 1,
+    limit: int = 50,
+    search: str = "",
+    current_user: dict = Depends(require_admin),
+):
+    """Silinen (arşivlenen) siparişler — deleted_orders koleksiyonundan, en yeni üstte."""
+    q = {}
+    if search:
+        q["$or"] = [
+            {"order_number": {"$regex": search, "$options": "i"}},
+            {"shipping_address.phone": {"$regex": search, "$options": "i"}},
+            {"shipping_address.email": {"$regex": search, "$options": "i"}},
+        ]
+    try:
+        limit = max(1, min(int(limit), 200))
+        page = max(1, int(page))
+    except Exception:
+        limit, page = 50, 1
+    skip = (page - 1) * limit
+    total = await db.deleted_orders.count_documents(q)
+    items = await db.deleted_orders.find(q, {"_id": 0}).sort("deleted_at", -1).skip(skip).limit(limit).to_list(limit)
+    return {"orders": items, "total": total, "page": page, "limit": limit}
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,
@@ -950,12 +976,44 @@ async def delete_order(
     order_id: str,
     current_user: dict = Depends(require_admin)
 ):
-    """Delete order (admin only)"""
-    result = await db.orders.delete_one({"id": order_id})
-    if result.deleted_count == 0:
+    """Siparişi sil — fiziksel silmeden ÖNCE deleted_orders arşivine taşı.
+    Böylece 'Silinen Siparişler' sayfasından görülüp geri alınabilir; ana orders
+    sorguları/raporları/dashboard hiç etkilenmez."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    
-    return {"message": "Sipariş silindi"}
+    order["deleted_at"] = datetime.now(timezone.utc).isoformat()
+    order["deleted_by"] = current_user.get("email", "")
+    try:
+        await db.deleted_orders.replace_one({"id": order_id}, order, upsert=True)
+    except Exception as _e:
+        logger.warning(f"archive deleted order failed {order_id}: {_e}")
+    await db.orders.delete_one({"id": order_id})
+    await _log_order_event(order_id, "delete", "Sipariş silindi (arşive taşındı)", current_user, {},
+                           order_number=order.get("order_number", ""))
+    return {"message": "Sipariş silindi", "archived": True}
+
+
+@router.post("/{order_id}/restore")
+async def restore_deleted_order(
+    order_id: str,
+    current_user: dict = Depends(require_admin)
+):
+    """Arşivlenen (silinen) siparişi orders'a geri taşır."""
+    arch = await db.deleted_orders.find_one({"id": order_id}, {"_id": 0})
+    if not arch:
+        raise HTTPException(status_code=404, detail="Silinen sipariş bulunamadı")
+    arch.pop("deleted_at", None)
+    arch.pop("deleted_by", None)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    arch["updated_at"] = now_iso
+    arch["restored_at"] = now_iso
+    arch["restored_by"] = current_user.get("email", "")
+    await db.orders.replace_one({"id": order_id}, arch, upsert=True)
+    await db.deleted_orders.delete_one({"id": order_id})
+    await _log_order_event(order_id, "status", "Sipariş geri alındı (arşivden)", current_user, {},
+                           order_number=arch.get("order_number", ""))
+    return {"message": "Sipariş geri alındı", "restored": True}
 
 
 # ==================== FAZ 1: STOCK AUTO-FLOW + AUTO-CANCEL + NOTES ====================
