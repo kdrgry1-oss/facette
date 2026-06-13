@@ -143,14 +143,17 @@ function DescriptionEditor({ value, onChange }) {
 
 
 
+const PRODUCTS_VIEW_KEY = "facette_products_view";
+const _loadProductsView = () => { try { return JSON.parse(localStorage.getItem(PRODUCTS_VIEW_KEY) || "{}") || {}; } catch (e) { return {}; } };
+
 export default function AdminProducts() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [search, setSearch] = useState(() => _loadProductsView().search || "");
+  const [page, setPage] = useState(() => _loadProductsView().page || 1);
+  const [pageSize, setPageSize] = useState(() => _loadProductsView().pageSize || 20);
   const [total, setTotal] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [barcodePushOpen, setBarcodePushOpen] = useState(false);
@@ -204,7 +207,7 @@ export default function AdminProducts() {
   const [techImporting, setTechImporting] = useState(false);
   const [techApplying, setTechApplying] = useState(false);
 
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(() => _loadProductsView().appliedFilters || {
     // Durum & kategori
     status: "all",
     category_id: "",
@@ -270,7 +273,7 @@ export default function AdminProducts() {
   };
   const [filterOptions, setFilterOptions] = useState({ brands: [], suppliers: [], currencies: [], attribute_groups: [] });
   // Uygulanan filtreler: liste yalnızca "Listele" / Enter ile bu state'e göre yenilenir.
-  const [appliedFilters, setAppliedFilters] = useState(FILTERS_INITIAL);
+  const [appliedFilters, setAppliedFilters] = useState(() => _loadProductsView().appliedFilters || FILTERS_INITIAL);
   // Taslak güncelleme: sadece input state'ini değiştirir, listeyi HEMEN yenilemez.
   const updateFilter = (key, value) => { setFilters((f) => ({ ...f, [key]: value })); };
   // Listele: taslak filtreleri uygula ve ilk sayfadan getir.
@@ -278,7 +281,7 @@ export default function AdminProducts() {
   const clearFilters = () => { setFilters(FILTERS_INITIAL); setAppliedFilters(FILTERS_INITIAL); setPage(1); };
   const [showFilters, setShowFilters] = useState(false);
   // Tablo sıralaması (3 durumlu: yön -> ters -> varsayılan)
-  const [sortBy, setSortBy] = useState({ field: null, dir: null });
+  const [sortBy, setSortBy] = useState(() => _loadProductsView().sortBy || { field: null, dir: null });
 
   const [formData, setFormData] = useState({
     name: "", slug: "", description: "", short_description: "",
@@ -395,6 +398,11 @@ export default function AdminProducts() {
     fetchTrendyolCategories();
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
+  }, [page, pageSize, search, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
+
+  // Görünüm kalıcılığı: yenilemede sayfa + boyut + arama + filtreler + sıralama korunur
+  useEffect(() => {
+    try { localStorage.setItem(PRODUCTS_VIEW_KEY, JSON.stringify({ page, pageSize, search, appliedFilters, sortBy })); } catch (e) {}
   }, [page, pageSize, search, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
 
   // Ürün detay alan şemasını bir kez çek (sekmelere gömülü ek alanlar için)

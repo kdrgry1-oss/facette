@@ -76,16 +76,19 @@ const cargoCompanies = [
   { value: "PTT", label: "PTT Kargo" },
 ];
 
+const ORDERS_VIEW_KEY = "facette_orders_view";
+const _loadOrdersView = () => { try { return JSON.parse(localStorage.getItem(ORDERS_VIEW_KEY) || "{}") || {}; } catch (e) { return {}; } };
+
 export default function AdminOrders({ unpaidView = false }) {
   const [orders, setOrders] = useState([]);
   const [riskMap, setRiskMap] = useState({});  // FAZ 6 — müşteri risk skorları
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(() => _loadOrdersView().page || 1);
+  const [pageSize, setPageSize] = useState(() => _loadOrdersView().pageSize || 20);
   const [total, setTotal] = useState(0);
   // --- Gelişmiş Filtreler (kullanıcı talebiyle geri eklendi) ---
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(() => _loadOrdersView().filters || {
     search: "", phone: "", email: "", order_number: "",
     cargo_tracking: "", invoice_number: "", coupon_code: "",
     start_date: "", end_date: "",
@@ -148,6 +151,11 @@ export default function AdminOrders({ unpaidView = false }) {
   useEffect(() => {
     fetchOrders();
   }, [page, pageSize, unpaidView, searchTick]);
+
+  // Görünüm kalıcılığı: yenilemede sayfa + boyut + filtreler korunur
+  useEffect(() => {
+    try { localStorage.setItem(ORDERS_VIEW_KEY, JSON.stringify({ page, pageSize, filters })); } catch (e) {}
+  }, [page, pageSize, filters]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.
@@ -364,35 +372,6 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
-  const handleBulkPrintLabels = async () => {
-    if (selectedOrders.length === 0) {
-      toast.error("Lütfen sipariş seçiniz");
-      return;
-    }
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(
-        `${API}/orders/bulk-labels`,
-        selectedOrders,
-        { 
-          headers: { Authorization: `Bearer ${token}` },
-          responseType: 'text'
-        }
-      );
-      
-      // Open in new window for printing
-      const printWindow = window.open('', '_blank', 'width=400,height=600');
-      if (printWindow) {
-        printWindow.document.write(res.data);
-        printWindow.document.close();
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
-      }
-    } catch (err) {
-      toast.error("Etiketler oluşturulamadı");
-    }
-  };
 
   const handleSendConfirmationSMS = async (orderId) => {
     try {
@@ -813,23 +792,6 @@ export default function AdminOrders({ unpaidView = false }) {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between flex-wrap gap-3">
           <span className="text-sm font-medium">{selectedOrders.length} sipariş seçildi</span>
           <div className="flex items-center gap-2 flex-wrap">
-            <button 
-              onClick={handleBulkPrintLabels}
-              className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
-              data-testid="bulk-print-labels-btn"
-            >
-              <Tag size={16} />
-              Toplu Kargo Etiketi
-            </button>
-            <select
-              value={selectedCargo}
-              onChange={(e) => setSelectedCargo(e.target.value)}
-              className="border px-2 py-1 rounded text-sm"
-            >
-              {cargoCompanies.map(c => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
             <button 
               onClick={handleBulkCargoBarcode}
               className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700"

@@ -3,6 +3,7 @@ import { Outlet, Link, NavLink, useLocation, Navigate } from "react-router-dom";
 import { LogOut, Menu, X, ChevronDown } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AppConfirmRoot } from "../../components/admin/AppConfirm";
+import FastTooltip from "../../components/admin/FastTooltip";
 import { getNavigationFor } from "../../lib/adminNav";
 
 function NavItem({ item, closeMobile }) {
@@ -202,6 +203,7 @@ export default function AdminLayout() {
         </div>
       </main>
       <AppConfirmRoot />
+      <FastTooltip />
     </div>
   );
 }
