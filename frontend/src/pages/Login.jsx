@@ -205,6 +205,18 @@ export default function Login() {
               />
             </div>
 
+            {!isRegister && (
+              <div className="text-right -mt-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => navigate("/sifremi-unuttum")}
+                  className="text-xs text-gray-500 hover:text-black underline"
+                >
+                  Şifremi unuttum?
+                </button>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}

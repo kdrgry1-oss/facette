@@ -18,6 +18,8 @@ const Search = lazy(() => import("./pages/Search"));
 const StaticPage = lazy(() => import("./pages/StaticPage"));
 const Account = lazy(() => import("./pages/Account"));
 const Login = lazy(() => import("./pages/Login"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const TrackOrder = lazy(() => import("./pages/TrackOrder"));
 const OrderSuccess = lazy(() => import("./pages/OrderSuccess"));
 const PaymentNotification = lazy(() => import("./pages/PaymentNotification"));
@@ -65,6 +67,8 @@ function App() {
                 <Route path="/gizlilik" element={<GizlilikPolitikasi />} />
                 <Route path="/hesabim" element={<Account />} />
                 <Route path="/giris" element={<Login />} />
+                <Route path="/sifremi-unuttum" element={<ForgotPassword />} />
+                <Route path="/sifre-sifirla" element={<ResetPassword />} />
                 <Route path="/siparis-takip" element={<TrackOrder />} />
                 <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
                 <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />

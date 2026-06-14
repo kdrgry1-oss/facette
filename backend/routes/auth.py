@@ -316,6 +316,7 @@ async def change_password(
 import random
 import hashlib
 import secrets
+import re
 from pydantic import BaseModel
 
 
@@ -460,6 +461,90 @@ async def forgot_password_reset(req: OTPResetReq):
     )
     await db.password_reset_otps.delete_one({"_id": rec["_id"]})
     return {"success": True, "message": "Şifreniz güncellendi"}
+
+
+class EmailResetReq(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password/email")
+@(limiter.limit("3/minute") if limiter else (lambda f: f))
+async def forgot_password_email(request: Request, req: EmailResetReq):
+    """E-posta ile şifre sıfırlama BAĞLANTISI gönderir (ZeptoMail üzerinden).
+    Privacy: e-posta sistemde olmasa bile aynı yanıt döner (enumeration önleme).
+    Üretilen token mevcut /forgot-password/reset endpoint'i ile tüketilir.
+    """
+    import os as _os
+    email = (req.email or "").strip().lower()
+    generic = {"success": True, "message": "Eğer e-posta adresi sistemimizde kayıtlıysa şifre sıfırlama bağlantısı gönderildi."}
+    if not email or "@" not in email:
+        return generic
+
+    now = datetime.now(timezone.utc)
+    now_ts = now.timestamp()
+    user = await db.users.find_one(
+        {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        {"_id": 0, "id": 1, "email": 1, "first_name": 1},
+    )
+    if not user or not user.get("id"):
+        logger.info(f"Email reset for unknown email (silent): {email}")
+        return generic
+
+    # Rate limit — aynı e-postaya son 60 sn içinde link atıldıysa sessizce aynı cevap
+    recent = await db.password_reset_otps.find_one(
+        {"email": email, "channel": "email"}, sort=[("created_at", -1)]
+    )
+    if recent:
+        try:
+            if (now - datetime.fromisoformat(recent["created_at"])).total_seconds() < 60:
+                return generic
+        except Exception:
+            pass
+
+    # Önceki e-posta token'larını geçersiz kıl
+    await db.password_reset_otps.update_many(
+        {"email": email, "channel": "email"},
+        {"$set": {"invalidated": True, "reset_token_expires": 0}},
+    )
+
+    reset_token = secrets.token_urlsafe(32)
+    await db.password_reset_otps.insert_one({
+        "email": email,
+        "channel": "email",
+        "user_id": user.get("id"),
+        "used": True,  # OTP doğrulama adımı yok; token doğrudan geçerli
+        "reset_token": reset_token,
+        "reset_token_expires": now_ts + 1800,  # 30 dk
+        "created_at": now.isoformat(),
+    })
+
+    site = _os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+    link = f"{site}/sifre-sifirla?token={reset_token}"
+    name = (user.get("first_name") or "").strip()
+    html = (
+        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111">'
+        '<h2 style="margin:0 0 12px">Şifre Sıfırlama</h2>'
+        f'<p>Merhaba {name or "değerli müşterimiz"},</p>'
+        '<p>Hesabınızın şifresini sıfırlamak için aşağıdaki butona tıklayın. '
+        'Bağlantı <b>30 dakika</b> geçerlidir.</p>'
+        f'<p style="margin:24px 0"><a href="{link}" '
+        'style="display:inline-block;padding:12px 24px;background:#111;color:#fff;'
+        'text-decoration:none;border-radius:8px">Şifremi Sıfırla</a></p>'
+        f'<p style="font-size:12px;color:#888;word-break:break-all">Buton çalışmazsa bu bağlantıyı kopyalayın: {link}</p>'
+        '<p style="font-size:12px;color:#888">Bu isteği siz yapmadıysanız e-postayı yok sayabilirsiniz; şifreniz değişmez.</p>'
+        '<hr style="border:none;border-top:1px solid #eee;margin:20px 0">'
+        '<p style="font-size:12px;color:#aaa">FACETTE · facette.com.tr</p>'
+        '</div>'
+    )
+    try:
+        from email_smtp import send_smtp_email
+        res = await send_smtp_email(db, user["email"], "Şifre Sıfırlama — FACETTE", html)
+        if not res.get("success"):
+            logger.warning(f"reset email send failed for {email}: {res.get('response')}")
+    except Exception as e:
+        logger.warning(f"reset email exception for {email}: {e}")
+
+    return generic
 
 @router.post("/google")
 async def google_signin(request: Request, payload: dict):
