@@ -403,8 +403,8 @@ export default function TicimaxReturns({ embedded = false }) {
                 <th className="px-3 py-2.5 font-medium">Ödeme Tipi</th>
                 <th className="px-3 py-2.5 font-medium">Tutar</th>
                 <th className="px-3 py-2.5 font-medium whitespace-nowrap">Sipariş Tarihi</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay Tarihi</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme Tarihi</th>
                 <th className="px-3 py-2.5 font-medium">Durum</th>
                 <th className="px-3 py-2.5 font-medium w-8"></th>
               </tr>
@@ -458,8 +458,8 @@ export default function TicimaxReturns({ embedded = false }) {
                           <span>Durum: <b className="text-gray-900">{STATUS_LABEL[r.status] || r.status}</b></span>
                           <span>Sipariş tutarı: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
                           <span>Fatura: <b className="text-gray-900">{r.invoice_number || "—"}</b></span>
-                          <span>İade Onay: <b className="text-gray-900">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</b></span>
-                          <span>İade Ödeme: <b className="text-gray-900">{r.refund_paid_at ? fmtDate(r.refund_paid_at) : "—"}</b></span>
+                          <span>İade Onay Tarihi: <b className="text-gray-900">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</b></span>
+                          <span>İade Ödeme Tarihi: <b className="text-gray-900">{r.refund_paid_at ? fmtDate(r.refund_paid_at) : "—"}</b></span>
                           {r.coupon_code && <span>Kupon: <b className="text-gray-900">{r.coupon_code}</b></span>}
                         </div>
 
