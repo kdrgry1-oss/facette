@@ -17,7 +17,6 @@ import AdminPageDesign from "./pages/admin/PageDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
 import Payments from "./pages/admin/Payments";
 import OrderStatusSettings from "./pages/admin/OrderStatusSettings";
-import SiteReturns from "./pages/admin/SiteReturns";
 import SenderAddress from "./pages/admin/SenderAddress";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
@@ -177,7 +176,6 @@ export default function AdminApp() {
         <Route path="popuplar" element={<Popups />} />
         <Route path="stok-alarm" element={<StockAlerts />} />
         <Route path="havale-bildirimleri" element={<HavaleNotifications />} />
-        <Route path="site-iadeler" element={<SiteReturns />} />
         <Route path="tickets" element={<Tickets />} />
         <Route path="kargo-odeme-kurallari" element={<ShippingPaymentRules />} />
         <Route path="doviz" element={<CurrencyRates />} />
