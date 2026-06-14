@@ -4,7 +4,6 @@ import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
-import SiteReturns from "./SiteReturns";
 import TicimaxReturns from "./TicimaxReturns";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -97,7 +96,7 @@ export default function Returns() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [platform, setPlatform] = useState("facette");
-  const [siteView, setSiteView] = useState("orders"); // Web Sitesi alt görünümü: orders | requests
+  // Web Sitesi sekmesi doğrudan sipariş bazlı iade akışını (TicimaxReturns) gösterir; alt-sekme yok.
   const [statusTab, setStatusTab] = useState("all");
   const [tabCounts, setTabCounts] = useState({});
   const [itemSel, setItemSel] = useState({}); // {claim_id: Set(claim_item_id)} - manuel adet onayı
@@ -422,22 +421,8 @@ export default function Returns() {
           ))}
         </div>
 
-        {/* Web Sitesi sekmesi: sipariş bazlı iadeler + site iade talepleri (tek sekme) */}
-        {platform === "facette" && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <button type="button" onClick={() => setSiteView("orders")}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${siteView === "orders" ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
-                Sipariş İadeleri
-              </button>
-              <button type="button" onClick={() => setSiteView("requests")}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${siteView === "requests" ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
-                Site İade Talepleri
-              </button>
-            </div>
-            {siteView === "orders" ? <TicimaxReturns embedded /> : <SiteReturns embedded />}
-          </div>
-        )}
+        {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
+        {platform === "facette" && <TicimaxReturns embedded />}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
         {platform === "trendyol" && (<>

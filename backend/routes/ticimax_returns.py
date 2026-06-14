@@ -100,6 +100,8 @@ async def list_ticimax_return_orders(
         "coupon_code": 1, "notes": 1, "shipping_address": 1, "billing_address": 1,
         "customer_name": 1, "full_name": 1, "items": 1,
         "created_at": 1, "updated_at": 1, "channel_source": 1, "invoice_number": 1,
+        "return_approved_at": 1, "refund_paid_at": 1, "return_request": 1,
+        "cargo_tracking_number": 1, "cargo_tracking_url": 1, "cargo_provider_name": 1,
     }
 
     cursor = (
@@ -156,7 +158,34 @@ async def list_ticimax_return_orders(
             "invoice_number": o.get("invoice_number") or "",
             "created_at": o.get("created_at") or "",
             "updated_at": o.get("updated_at") or "",
+            "return_approved_at": o.get("return_approved_at") or "",
+            "refund_paid_at": o.get("refund_paid_at") or "",
+            "cargo_tracking_number": o.get("cargo_tracking_number") or "",
+            "cargo_tracking_url": o.get("cargo_tracking_url") or "",
+            "cargo_provider_name": o.get("cargo_provider_name") or "",
         })
+
+    # İlgili customer_returns köprü kayıtları (kargo barkodu / iade kodu / reship / ödeme zamanı) — tek sorgu
+    _oids = [r["id"] for r in rows if r.get("id")]
+    _cr_map = {}
+    if _oids:
+        async for cr in db.customer_returns.find(
+            {"order_id": {"$in": _oids}},
+            {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
+             "reship_code": 1, "reshipped_at": 1, "refund_payment": 1},
+        ):
+            _cr_map[cr.get("order_id")] = cr
+    for r in rows:
+        cr = _cr_map.get(r["id"]) or {}
+        r["return_code"] = cr.get("return_code") or ""
+        r["return_barcode_url"] = cr.get("barcode_url") or ""
+        r["return_cargo_provider"] = cr.get("cargo_provider_name") or r.get("cargo_provider_name") or ""
+        r["reship_code"] = cr.get("reship_code") or ""
+        r["reshipped_at"] = cr.get("reshipped_at") or ""
+        # İade ödeme tarihi: sipariş damgası > köprü ödeme zamanı > (refunded ise) updated_at
+        if not r.get("refund_paid_at"):
+            _rp = (cr.get("refund_payment") or {}).get("at")
+            r["refund_paid_at"] = _rp or (r.get("updated_at") if r.get("status") in ("refunded", "partial_refunded") else "")
 
     # İstatistik: tüm iade grubunda durum + ödeme dağılımı (mevcut filtreden bağımsız,
     # sadece ticimax kaynağına bağlı) — sekmedeki rozetler için

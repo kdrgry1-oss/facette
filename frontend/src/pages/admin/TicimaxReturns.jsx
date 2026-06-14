@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const BACKEND = process.env.REACT_APP_BACKEND_URL;
 
 // TÜM sipariş durumları — order_statuses.py kataloğuyla birebir (iade sayfasında da hepsi seçilebilir)
 const STATUS_OPTS = [
@@ -78,6 +79,9 @@ export default function TicimaxReturns({ embedded = false }) {
   const [expandedId, setExpandedId] = useState(null);
   const [perms, setPerms] = useState([]);
   const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
+  const [selItems, setSelItems] = useState({}); // açılır detayda tiklenen kalemler: { "orderId::index": true }
+  const toggleItem = (rid, i) => setSelItems((s) => { const k = `${rid}::${i}`; const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; });
+  const selCount = (rid) => Object.keys(selItems).filter((k) => k.startsWith(`${rid}::`)).length;
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
 
@@ -390,7 +394,9 @@ export default function TicimaxReturns({ embedded = false }) {
                 <th className="px-3 py-2.5 font-medium">Müşteri</th>
                 <th className="px-3 py-2.5 font-medium">Ödeme Tipi</th>
                 <th className="px-3 py-2.5 font-medium">Tutar</th>
-                <th className="px-3 py-2.5 font-medium">Tarih</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Sipariş Tarihi</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme</th>
                 <th className="px-3 py-2.5 font-medium">Durum</th>
                 <th className="px-3 py-2.5 font-medium w-8"></th>
               </tr>
@@ -401,16 +407,7 @@ export default function TicimaxReturns({ embedded = false }) {
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
                       <div className="font-medium text-gray-900">{r.order_number}</div>
-                      {(r.items || []).length > 0 ? (
-                        <div
-                          className="text-xs text-gray-500 max-w-[280px] truncate"
-                          title={(r.items || []).map((it) => it.name).filter(Boolean).join(", ")}
-                        >
-                          {(r.items || []).map((it) => it.name).filter(Boolean).join(", ") || `${r.item_count} ürün`}
-                        </div>
-                      ) : (
-                        r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>
-                      )}
+                      {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="text-gray-800">{r.customer_name}</div>
@@ -423,6 +420,8 @@ export default function TicimaxReturns({ embedded = false }) {
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap">{fmtTL(r.total)}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.refund_paid_at ? fmtDate(r.refund_paid_at) : "—"}</td>
                     <td className="px-3 py-2.5">
                       <select
                         value={r.status}
@@ -441,7 +440,7 @@ export default function TicimaxReturns({ embedded = false }) {
                   </tr>
                   {expandedId === r.id && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={7} className="px-4 py-3">
+                      <td colSpan={9} className="px-4 py-3">
                         {/* Müşteri + sipariş özeti */}
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600 mb-3">
                           <span>Müşteri: <b className="text-gray-800">{r.customer_name}</b></span>
@@ -460,23 +459,44 @@ export default function TicimaxReturns({ embedded = false }) {
                           {r.coupon_code && <span>Kupon: <b className="text-gray-800">{r.coupon_code}</b></span>}
                         </div>
 
-                        {/* İade talep edilen ürünler: ne almış / kaç adet / birim ve satır tutarı */}
-                        <div className="text-[11px] font-semibold text-gray-500 mb-1">İade talep edilen ürünler ({r.item_count} adet)</div>
+                        {/* İade talep edilen ürünler — tiklenebilir (kısmi işlem için kalem seçimi) */}
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-[11px] font-semibold text-gray-500">İade talep edilen ürünler ({r.item_count} adet)</div>
+                          {selCount(r.id) > 0 && <div className="text-[11px] font-semibold text-orange-600">{selCount(r.id)} kalem seçili</div>}
+                        </div>
                         {(r.items || []).length > 0 ? (
                           <div className="space-y-1">
-                            {r.items.map((it, i) => (
-                              <div key={i} className="flex items-center gap-3 text-xs text-gray-700 bg-white border rounded-md px-2.5 py-1.5">
-                                <span className="flex-1 truncate">{it.name || "—"}</span>
-                                {it.size && <span className="text-gray-500">Beden: {it.size}</span>}
-                                {it.color && <span className="text-gray-500">Renk: {it.color}</span>}
-                                {it.barcode && <span className="text-gray-400">#{it.barcode}</span>}
-                                <span className="text-gray-500 whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
-                                <span className="font-medium whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
-                              </div>
-                            ))}
+                            {r.items.map((it, i) => {
+                              const sel = !!selItems[`${r.id}::${i}`];
+                              return (
+                                <label key={i} className={`flex items-center gap-3 text-xs text-gray-700 border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
+                                  <input type="checkbox" checked={sel} onChange={() => toggleItem(r.id, i)} className="shrink-0" />
+                                  <span className="flex-1 truncate">{it.name || "—"}</span>
+                                  {it.size && <span className="text-gray-500">Beden: {it.size}</span>}
+                                  {it.color && <span className="text-gray-500">Renk: {it.color}</span>}
+                                  {it.barcode && <span className="text-gray-400">#{it.barcode}</span>}
+                                  <span className="text-gray-500 whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
+                                  <span className="font-medium whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
+                                </label>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-xs text-gray-400">Ürün kalemi yok.</div>
+                        )}
+
+                        {/* İade kargo süreci: gelen iade barkodu/kodu + reddedilenlerde geri gönderim */}
+                        {(r.return_code || r.return_barcode_url || r.cargo_tracking_number || r.reship_code || r.return_cargo_provider) && (
+                          <div className="mt-2 text-[11px] text-gray-600 bg-white border rounded-md px-2.5 py-1.5 flex flex-wrap gap-x-5 gap-y-1 items-center">
+                            {r.return_cargo_provider && <span>İade kargo: <b className="text-gray-800">{r.return_cargo_provider}</b></span>}
+                            {r.return_code && <span>İade kodu: <b className="text-gray-800 font-mono">{r.return_code}</b></span>}
+                            {r.return_barcode_url && (
+                              <a href={r.return_barcode_url.startsWith("http") ? r.return_barcode_url : `${BACKEND}${r.return_barcode_url}`}
+                                target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Kargo barkodu</a>
+                            )}
+                            {r.cargo_tracking_number && <span>Takip no: <b className="text-gray-800 font-mono">{r.cargo_tracking_number}</b></span>}
+                            {r.reship_code && <span className="text-blue-700">Geri gönderim: <b className="font-mono">{r.reship_code}</b>{r.reshipped_at ? ` · ${fmtDate(r.reshipped_at)}` : ""}</span>}
+                          </div>
                         )}
 
                         {/* Tutar dökümü */}

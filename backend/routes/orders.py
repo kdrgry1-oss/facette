@@ -703,9 +703,15 @@ async def update_order_status(
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {valid_statuses}")
     
+    _now = datetime.now(timezone.utc).isoformat()
+    _set = {"status": status, "updated_at": _now}
+    if status == "return_approved":
+        _set["return_approved_at"] = _now
+    if status in ("refunded", "partial_refunded"):
+        _set["refund_paid_at"] = _now
     result = await db.orders.update_one(
         {"id": order_id},
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": _set}
     )
     
     if result.matched_count == 0:
@@ -3276,8 +3282,12 @@ async def update_return_status(return_id: str, payload: dict, current_user: dict
     await db.customer_returns.update_one({"id": return_id}, {"$set": {"status": new, "updated_at": now_iso}})
     order_status, event = _RETURN_STATUS_MAP[new]
     if order_status:
-        await db.orders.update_one({"id": rec["order_id"]},
-            {"$set": {"status": order_status, "return_request.status": new, "updated_at": now_iso}})
+        _oset = {"status": order_status, "return_request.status": new, "updated_at": now_iso}
+        if order_status == "return_approved":
+            _oset["return_approved_at"] = now_iso
+        if order_status in ("refunded", "partial_refunded"):
+            _oset["refund_paid_at"] = now_iso
+        await db.orders.update_one({"id": rec["order_id"]}, {"$set": _oset})
     else:
         await db.orders.update_one({"id": rec["order_id"]},
             {"$set": {"return_request.status": new, "updated_at": now_iso}})
@@ -3452,6 +3462,7 @@ async def approve_return(return_id: str, payload: dict,
     }})
     await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
         "status": "return_approved", "return_request.status": "approved", "updated_at": now_iso,
+        "return_approved_at": now_iso,
     }})
 
     # Bildirim: "İade Onaylandı" + tutar (kanal ayarı panelden yönetilir)
@@ -3781,6 +3792,7 @@ async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(defau
     }})
     await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
         "status": "refunded", "return_request.status": "refunded", "updated_at": now_iso,
+        "refund_paid_at": now_iso,
     }})
 
     import asyncio as _aio
