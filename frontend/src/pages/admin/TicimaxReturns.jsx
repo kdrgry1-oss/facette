@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download } from "lucide-react";
+import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -226,7 +226,7 @@ export default function TicimaxReturns({ embedded = false }) {
   const can = (k) => perms.includes("*") || perms.includes(k);
 
   // İade işlem akışı: Ticimax siparişini köprüle (customer_returns üret) → tutar önizleme → modal
-  const openWorkflow = async (row) => {
+  const openWorkflow = async (row, mode = "approve") => {
     try {
       setBusyId(row.id);
       const br = await axios.post(`${API}/admin/ticimax/returns/${row.id}/open`, {}, auth());
@@ -237,10 +237,18 @@ export default function TicimaxReturns({ embedded = false }) {
         const pv = await axios.get(`${API}/orders/returns/${returnId}/refund-preview?fault=customer`, auth());
         preview = pv.data?.breakdown || null;
       } catch { /* önizleme alınamazsa modal yine açılır */ }
+      // Seçili kalem(ler) varsa iade tutarını onların toplamından ön-doldur
+      const selAmount = (row.items || []).reduce(
+        (a, it, i) => (selItems[`${row.id}::${i}`] ? a + (Number(it.qty) || 1) * (Number(it.price) || 0) : a), 0
+      );
+      const hasSel = selAmount > 0;
       setWf({
         row, returnId, status: br.data?.status || "created", fault: "customer",
-        preview, finalAmount: preview?.auto_refund ?? 0, note: "", edited: false,
-        loading: false, rejectReason: "", reship: false, showReject: false, hasGider: false,
+        preview,
+        finalAmount: hasSel ? selAmount : (preview?.auto_refund ?? 0),
+        edited: hasSel, note: "",
+        loading: false, rejectReason: "", reship: false,
+        showReject: mode === "reject", hasGider: false,
       });
     } catch (e) {
       toast.error(e.response?.data?.detail || "İade işlem akışı açılamadı");
@@ -442,26 +450,22 @@ export default function TicimaxReturns({ embedded = false }) {
                     <tr className="bg-gray-50/60">
                       <td colSpan={9} className="px-4 py-3">
                         {/* Müşteri + sipariş özeti */}
-                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600 mb-3">
-                          <span>Müşteri: <b className="text-gray-800">{r.customer_name}</b></span>
-                          {r.phone && <span>Telefon: <b className="text-gray-800">{r.phone}</b></span>}
-                          {r.email && <span>E-posta: <b className="text-gray-800">{r.email}</b></span>}
+                        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-900 mb-3">
+                          <span>Müşteri: <b className="text-gray-900">{r.customer_name}</b></span>
                           {(r.address || r.city || r.district) && (
-                            <span className="lg:col-span-3">Adres: <b className="text-gray-800">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
+                            <span className="lg:col-span-3">Adres: <b className="text-gray-900">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
                           )}
-                          <span>Durum: <b className="text-gray-800">{STATUS_LABEL[r.status] || r.status}</b></span>
-                          <span>Ödeme: <b className="text-gray-800">{r.payment_label}</b></span>
-                          {r.payment_method_raw && <span>Ham ödeme: <b className="text-gray-800">{r.payment_method_raw}</b></span>}
-                          <span>Sipariş tutarı: <b className="text-gray-800">{fmtTL(r.total)}</b></span>
-                          {r.paid_amount > 0 && <span>Ödenen: <b className="text-gray-800">{fmtTL(r.paid_amount)}</b></span>}
-                          {r.invoice_number && <span>Fatura: <b className="text-gray-800">{r.invoice_number}</b></span>}
-                          {r.ticimax_order_id && <span>Kaynak No: <b className="text-gray-800">{r.ticimax_order_id}</b></span>}
-                          {r.coupon_code && <span>Kupon: <b className="text-gray-800">{r.coupon_code}</b></span>}
+                          <span>Durum: <b className="text-gray-900">{STATUS_LABEL[r.status] || r.status}</b></span>
+                          <span>Sipariş tutarı: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
+                          <span>Fatura: <b className="text-gray-900">{r.invoice_number || "—"}</b></span>
+                          <span>İade Onay: <b className="text-gray-900">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</b></span>
+                          <span>İade Ödeme: <b className="text-gray-900">{r.refund_paid_at ? fmtDate(r.refund_paid_at) : "—"}</b></span>
+                          {r.coupon_code && <span>Kupon: <b className="text-gray-900">{r.coupon_code}</b></span>}
                         </div>
 
                         {/* İade talep edilen ürünler — tiklenebilir (kısmi işlem için kalem seçimi) */}
                         <div className="flex items-center justify-between mb-1">
-                          <div className="text-[11px] font-semibold text-gray-500">İade talep edilen ürünler ({r.item_count} adet)</div>
+                          <div className="text-[11px] font-semibold text-gray-700">İade talep edilen ürünler ({r.item_count} adet)</div>
                           {selCount(r.id) > 0 && <div className="text-[11px] font-semibold text-orange-600">{selCount(r.id)} kalem seçili</div>}
                         </div>
                         {(r.items || []).length > 0 ? (
@@ -469,14 +473,15 @@ export default function TicimaxReturns({ embedded = false }) {
                             {r.items.map((it, i) => {
                               const sel = !!selItems[`${r.id}::${i}`];
                               return (
-                                <label key={i} className={`flex items-center gap-3 text-xs text-gray-700 border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
+                                <label key={i} className={`flex items-center gap-3 text-xs text-gray-900 border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
                                   <input type="checkbox" checked={sel} onChange={() => toggleItem(r.id, i)} className="shrink-0" />
-                                  <span className="flex-1 truncate">{it.name || "—"}</span>
-                                  {it.size && <span className="text-gray-500">Beden: {it.size}</span>}
-                                  {it.color && <span className="text-gray-500">Renk: {it.color}</span>}
-                                  {it.barcode && <span className="text-gray-400">#{it.barcode}</span>}
-                                  <span className="text-gray-500 whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
-                                  <span className="font-medium whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
+                                  <span className="truncate max-w-[260px]">{it.name || "—"}</span>
+                                  <span className="whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
+                                  <span className="font-semibold whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
+                                  {it.barcode && <span className="text-gray-700">#{it.barcode}</span>}
+                                  {it.size && <span className="text-gray-700">Beden: {it.size}</span>}
+                                  {it.color && <span className="text-gray-700">Renk: {it.color}</span>}
+                                  <span className="flex-1" />
                                 </label>
                               );
                             })}
@@ -487,51 +492,63 @@ export default function TicimaxReturns({ embedded = false }) {
 
                         {/* İade kargo süreci: gelen iade barkodu/kodu + reddedilenlerde geri gönderim */}
                         {(r.return_code || r.return_barcode_url || r.cargo_tracking_number || r.reship_code || r.return_cargo_provider) && (
-                          <div className="mt-2 text-[11px] text-gray-600 bg-white border rounded-md px-2.5 py-1.5 flex flex-wrap gap-x-5 gap-y-1 items-center">
-                            {r.return_cargo_provider && <span>İade kargo: <b className="text-gray-800">{r.return_cargo_provider}</b></span>}
-                            {r.return_code && <span>İade kodu: <b className="text-gray-800 font-mono">{r.return_code}</b></span>}
+                          <div className="mt-2 text-[11px] text-gray-900 bg-white border rounded-md px-2.5 py-1.5 flex flex-wrap gap-x-5 gap-y-1 items-center">
+                            {r.return_cargo_provider && <span>İade kargo: <b className="text-gray-900">{r.return_cargo_provider}</b></span>}
+                            {r.return_code && <span>İade kodu: <b className="text-gray-900 font-mono">{r.return_code}</b></span>}
                             {r.return_barcode_url && (
                               <a href={r.return_barcode_url.startsWith("http") ? r.return_barcode_url : `${BACKEND}${r.return_barcode_url}`}
                                 target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Kargo barkodu</a>
                             )}
-                            {r.cargo_tracking_number && <span>Takip no: <b className="text-gray-800 font-mono">{r.cargo_tracking_number}</b></span>}
+                            {r.cargo_tracking_number && <span>Takip no: <b className="text-gray-900 font-mono">{r.cargo_tracking_number}</b></span>}
                             {r.reship_code && <span className="text-blue-700">Geri gönderim: <b className="font-mono">{r.reship_code}</b>{r.reshipped_at ? ` · ${fmtDate(r.reshipped_at)}` : ""}</span>}
                           </div>
                         )}
 
                         {/* Tutar dökümü */}
                         {(r.subtotal > 0 || r.shipping_cost > 0 || r.discount > 0) && (
-                          <div className="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-6 gap-y-1 justify-end">
-                            {r.subtotal > 0 && <span>Ara toplam: <b className="text-gray-800">{fmtTL(r.subtotal)}</b></span>}
-                            {r.shipping_cost > 0 && <span>Kargo: <b className="text-gray-800">{fmtTL(r.shipping_cost)}</b></span>}
-                            {r.discount > 0 && <span>İndirim: <b className="text-gray-800">−{fmtTL(r.discount)}</b></span>}
+                          <div className="mt-2 text-xs text-gray-900 flex flex-wrap gap-x-6 gap-y-1 justify-start">
+                            {r.subtotal > 0 && <span>Ara toplam: <b className="text-gray-900">{fmtTL(r.subtotal)}</b></span>}
+                            {r.shipping_cost > 0 && <span>Kargo: <b className="text-gray-900">{fmtTL(r.shipping_cost)}</b></span>}
+                            {r.discount > 0 && <span>İndirim: <b className="text-gray-900">−{fmtTL(r.discount)}</b></span>}
                             <span>Genel toplam: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
                           </div>
                         )}
 
                         {/* İade/iptal durumu açıklaması */}
-                        {(r.status === "partial_refunded" || r.status === "returned" || r.status === "refunded" || r.status === "cancelled") && (
-                          <div className="mt-2 text-[11px] text-gray-500 bg-white border rounded-md px-2.5 py-1.5">
+                        {(r.status === "partial_refunded" || r.status === "cancelled") && (
+                          <div className="mt-2 text-[11px] text-gray-900 bg-white border rounded-md px-2.5 py-1.5">
                             {r.status === "cancelled" ? "Sipariş iptal edildi."
-                              : r.status === "partial_refunded" ? "Kısmi iade yapıldı. (Kaynak sistem kalem bazında ayrım vermiyor; iade edilen tutar yukarıdaki ödenen/tutar bilgisine yansır.)"
-                              : "Sipariş iade sürecinde / iade tamamlandı."}
+                              : "Kısmi iade yapıldı. (Kaynak sistem kalem bazında ayrım vermiyor; iade edilen tutar yukarıdaki tutar bilgisine yansır.)"}
                           </div>
                         )}
                         {wfCanAct && (
                           <div className="mt-3">
-                            <button
-                              onClick={() => openWorkflow(r)}
-                              disabled={busyId === r.id}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 disabled:opacity-60"
-                            >
-                              <Package size={14} /> İade İşlemleri (Onayla / Reddet / Öde)
-                            </button>
-                            <div className="text-[11px] text-gray-400 mt-1">
-                              Onay/ret tutar hesabı + gider pusulası + iade ödemesi; müşteriye SMS/mail gider.
+                            <div className="flex flex-wrap gap-2">
+                              {can("returns.approve") && (
+                                <button
+                                  onClick={() => openWorkflow(r, "approve")}
+                                  disabled={busyId === r.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                                >
+                                  <CheckCircle size={14} /> İade Onay{selCount(r.id) > 0 ? ` (${selCount(r.id)} kalem)` : ""}
+                                </button>
+                              )}
+                              {can("returns.reject") && (
+                                <button
+                                  onClick={() => openWorkflow(r, "reject")}
+                                  disabled={busyId === r.id}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-60"
+                                >
+                                  <XCircle size={14} /> İade Reddet
+                                </button>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-gray-700 mt-1">
+                              Onay/ret penceresi açılır: tutar + gider pusulası + iade ödemesi; müşteriye SMS/mail gider. Kalem seçiliyse iade tutarı seçili kalemlerden ön-dolar.
                             </div>
                           </div>
                         )}
-                        {r.notes && <div className="mt-2 text-[11px] text-gray-500">Not: {r.notes}</div>}
+                        {r.notes && <div className="mt-2 text-[11px] text-gray-700">Not: {r.notes}</div>}
                       </td>
                     </tr>
                   )}

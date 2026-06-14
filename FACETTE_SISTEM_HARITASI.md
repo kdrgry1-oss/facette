@@ -306,4 +306,12 @@ ama `AdminApp.jsx`'teki import+route gözden kaçtı → Cloudflare build kırı
 - `AdminApp.jsx` — `SiteReturns` import'u + `site-iadeler` route'u kaldırıldı.
 - `Returns.jsx` — `SiteReturns` import'u kaldırıldı; Web Sitesi doğrudan `<TicimaxReturns embedded/>`.
 
+
+**İade detay paneli yeniden düzenlendi (TicimaxReturns.jsx genişletilmiş satır):**
+- Silinen alanlar: Telefon, E-posta, Ödeme, Ham ödeme, Ödenen, Kaynak No, gri "Sipariş iade sürecinde" satırı.
+- Kalan + eklenen: Müşteri · Adres · Durum · Sipariş tutarı · **Fatura** (her zaman, boşsa "—", order.invoice_number'dan) · **İade Onay** tarihi · **İade Ödeme** tarihi.
+- Ürün satırı: fiyat/adet/toplam/barkod bloğu sola taşındı; toplam dökümü sola yaslandı.
+- Tüm metinler siyah (gri/silik kaldırıldı).
+- Alt buton ikiye ayrıldı: **İade Onay** (yeşil) + **İade Reddet** (kırmızı). İkisi de işlem modalını (tutar+gider+öde) onay/ret modunda açar; kalem seçiliyse iade tutarı seçili kalemlerin toplamından ön-dolar.
+
 **Sonuç:** import denetçisi → BROKEN: 0, ORPHANS: yalnız 31 shadcn `ui/*` (kasıtlı).
