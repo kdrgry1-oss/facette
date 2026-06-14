@@ -63,47 +63,71 @@ async def stock_valuation(
     manufacturer: Optional[str] = None,
     _=Depends(require_admin),
 ):
-    """Elinizdeki stoğun toplam alış (manuel maliyet) ve satış (price) değerini hesaplar.
-    İsteğe bağlı brand/category/manufacturer filtresi.
+    """Elinizdeki stoğun ALIŞ (purchase_price) ve SATIŞ (sale_price||price) değerini hesaplar.
+    - Maliyet kaynağı: ürünün `purchase_price` alanı; yoksa manuel product_costs kaydı.
+    - Hiç alış fiyatı olmayan ürünler TAHMİN EDİLMEZ; ayrı `missing_cost` listesinde döner
+      (alış değeri toplamına katılmaz, satış değerine katılır).
+    - Stok varyantlıysa gerçek adet = varyant stoklarının toplamı.
     """
-    q: dict = {"stock": {"$gt": 0}}
+    q: dict = {"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]}
     if brand: q["brand"] = brand
     if category: q["category"] = category
     if manufacturer: q["manufacturer"] = manufacturer
 
-    cost_map = await _build_cost_map()
+    cost_map = await _build_cost_map()  # product_costs (ikincil kaynak)
 
     total_units = 0
+    valued_units = 0
     total_sale_value = 0.0
     total_cost_value = 0.0
     by_brand: dict = defaultdict(lambda: {"units": 0, "cost": 0.0, "sale": 0.0})
     by_category: dict = defaultdict(lambda: {"units": 0, "cost": 0.0, "sale": 0.0})
+    missing: list = []
     cursor = db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
-                                    "brand": 1, "category": 1, "cost_price": 1, "stock_code": 1})
+                                    "sale_price": 1, "purchase_price": 1, "brand": 1,
+                                    "category": 1, "stock_code": 1, "variants": 1})
     async for p in cursor:
-        units = int(p.get("stock") or 0)
-        sale = float(p.get("price") or 0)
-        cost = cost_map.get(str(p.get("id")))
-        if cost is None:
-            cost = float(p.get("cost_price") or 0) or round(sale * 0.5, 2)
+        variants = p.get("variants") or []
+        units = (sum(int(v.get("stock") or 0) for v in variants) if variants
+                 else int(p.get("stock") or 0))
+        if units <= 0:
+            continue
+        sale = float(p.get("sale_price") or 0) or float(p.get("price") or 0)
+        pp = float(p.get("purchase_price") or 0)
+        cost = pp if pp > 0 else float(cost_map.get(str(p.get("id"))) or 0)
+
         total_units += units
         total_sale_value += units * sale
-        total_cost_value += units * cost
         b = p.get("brand") or "—"
         c = p.get("category") or "—"
         by_brand[b]["units"] += units
-        by_brand[b]["cost"] += units * cost
         by_brand[b]["sale"] += units * sale
         by_category[c]["units"] += units
-        by_category[c]["cost"] += units * cost
         by_category[c]["sale"] += units * sale
+
+        if cost > 0:
+            valued_units += units
+            total_cost_value += units * cost
+            by_brand[b]["cost"] += units * cost
+            by_category[c]["cost"] += units * cost
+        else:
+            missing.append({
+                "id": p.get("id"), "name": p.get("name") or "—",
+                "stock_code": p.get("stock_code") or "", "brand": b,
+                "units": units, "sale_price": round(sale, 2),
+                "sale_value": round(units * sale, 2),
+            })
 
     margin = (total_sale_value - total_cost_value)
     margin_pct = (margin / total_sale_value * 100) if total_sale_value else 0
+    missing.sort(key=lambda x: -x["sale_value"])
 
     return {
         "totals": {
             "units": total_units,
+            "valued_units": valued_units,
+            "missing_count": len(missing),
+            "missing_units": total_units - valued_units,
             "cost_value": round(total_cost_value, 2),
             "sale_value": round(total_sale_value, 2),
             "potential_profit": round(margin, 2),
@@ -113,6 +137,7 @@ async def stock_valuation(
                      for k, v in sorted(by_brand.items(), key=lambda kv: -kv[1]["sale"])[:50]],
         "by_category": [{"name": k, **{x: round(v[x], 2) if x != "units" else v[x] for x in v}}
                         for k, v in sorted(by_category.items(), key=lambda kv: -kv[1]["sale"])[:50]],
+        "missing_cost": missing[:500],
         "checked_at": _now().isoformat(),
     }
 

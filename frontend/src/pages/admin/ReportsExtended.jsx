@@ -93,15 +93,19 @@ function StockValuation() {
   if (loading) return <div className="text-gray-500 text-sm">Hesaplanıyor...</div>;
   if (!data) return null;
   const t = data.totals;
+  const missing = data.missing_cost || [];
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <KPI testid="kpi-units" label="Toplam Adet" value={fmtNum(t.units)} icon={Package} />
         <KPI testid="kpi-cost-value" label="Alış Değeri" value={fmtMoney(t.cost_value)} icon={DollarSign} tone="info" />
         <KPI testid="kpi-sale-value" label="Satış Değeri" value={fmtMoney(t.sale_value)} icon={Wallet} tone="ok" />
         <KPI testid="kpi-potential-profit" label="Potansiyel Kâr" value={fmtMoney(t.potential_profit)} icon={TrendingUp} tone="ok" />
         <KPI testid="kpi-margin" label="Marj" value={fmtPct(t.potential_margin_pct)} icon={Activity} tone="ok" />
+        {t.missing_count > 0 && (
+          <KPI testid="kpi-missing" label="Alış Girilmemiş" value={`${fmtNum(t.missing_count)} ürün`} icon={AlertTriangle} tone="warn" />
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -113,9 +117,50 @@ function StockValuation() {
                  { k: "cost", l: "Alış", money: true }, { k: "sale", l: "Satış", money: true }]} />
       </div>
 
+      {missing.length > 0 && (
+        <div className="border border-amber-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <span className="text-sm font-semibold text-amber-800">
+              Alış fiyatı girilmemiş ürünler ({fmtNum(t.missing_count)})
+            </span>
+            <span className="text-xs text-amber-700 ml-1">
+              — alış değerine dahil edilmedi. Ürünü açıp “Alış fiyatı” alanını doldurun.
+            </span>
+          </div>
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600 text-xs uppercase sticky top-0">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">Ürün</th>
+                  <th className="px-4 py-2 text-left font-medium">Stok Kodu</th>
+                  <th className="px-4 py-2 text-right font-medium">Stok</th>
+                  <th className="px-4 py-2 text-right font-medium">Satış Fiyatı</th>
+                  <th className="px-4 py-2 text-right font-medium">Satış Değeri</th>
+                </tr>
+              </thead>
+              <tbody>
+                {missing.map((m) => (
+                  <tr key={m.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-2 text-gray-900">
+                      <a href={`/admin/urunler/${m.id}`} target="_blank" rel="noopener noreferrer"
+                         className="text-blue-700 hover:underline">{m.name}</a>
+                    </td>
+                    <td className="px-4 py-2 text-gray-600 font-mono text-xs">{m.stock_code || "—"}</td>
+                    <td className="px-4 py-2 text-right text-gray-900">{fmtNum(m.units)}</td>
+                    <td className="px-4 py-2 text-right text-gray-900">{fmtMoney(m.sale_price)}</td>
+                    <td className="px-4 py-2 text-right font-medium text-gray-900">{fmtMoney(m.sale_value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <p className="text-xs text-gray-500">
-        💡 Manuel maliyet girilmemiş ürünler için satış fiyatının %50'si varsayılan maliyet olarak kullanılır.
-        Gerçek değer için "Maliyet Girişi" sekmesinden ürün başına maliyet girin.
+        💡 Alış değeri ürünlerin <b>Alış fiyatı</b> (purchase_price) alanından hesaplanır; girilmemiş ürünler tahmin edilmez,
+        yukarıda listelenir. Satış değeri tüm stoklu ürünlerin güncel satış fiyatından (indirimli varsa o) hesaplanır.
       </p>
     </div>
   );
