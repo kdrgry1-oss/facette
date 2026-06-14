@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, CreditCard } from "lucide-react";
+import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, CreditCard, Truck, Banknote } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -11,7 +11,7 @@ const STATUS_LABELS = {
   created: "Talep Oluşturuldu", in_transit: "Kargoya Verildi",
   received: "Teslim Alındı", returned: "Teslim Alındı",
   approved: "Onaylandı", rejected: "Reddedildi",
-  refunded: "Bedeli Ödendi", cancelled: "İptal",
+  refunded: "Bedeli Ödendi", partial_refunded: "Kısmi İade Yapıldı", cancelled: "İptal",
 };
 const STATUS_CLS = {
   created: "bg-rose-50 text-rose-700 border-rose-200",
@@ -21,10 +21,13 @@ const STATUS_CLS = {
   approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   rejected: "bg-gray-100 text-gray-600 border-gray-300",
   refunded: "bg-green-100 text-green-800 border-green-300",
+  partial_refunded: "bg-teal-50 text-teal-700 border-teal-200",
   cancelled: "bg-gray-100 text-gray-500 border-gray-300",
 };
 
-// Durum sütunu — TÜM durumlar elle değiştirilebilsin (_RETURN_STATUS_MAP ile birebir)
+// Durum sütunu — TÜM durumlar elle değiştirilebilsin (_RETURN_STATUS_MAP ile birebir).
+// "Kısmi İade Yapıldı" burada bilinçli olarak DURUYOR (operatör elle seçebilsin);
+// ayrı bir sekme DEĞİL — kısmilik zaten iade edilen ürünlerin seçimiyle oluşur.
 const ALL_STATUS_OPTS = [
   { value: "created", label: "Talep Oluşturuldu" },
   { value: "in_transit", label: "Kargoya Verildi" },
@@ -33,18 +36,19 @@ const ALL_STATUS_OPTS = [
   { value: "approved", label: "Onaylandı" },
   { value: "rejected", label: "Reddedildi" },
   { value: "refunded", label: "Bedeli Ödendi" },
+  { value: "partial_refunded", label: "Kısmi İade Yapıldı" },
   { value: "cancelled", label: "İptal" },
 ];
 
-// Üst sekmeler — ekran görüntüsündeki akışla aynı
+// 6 AŞAMALI operasyonel akış — "Tüm İadeler" yok, "Kısmi İade" ayrı sekme yok.
+// match(r) tüm satırı alır: gider pusulası durumuna göre aşama 4 ↔ 5 ayrımı yapılır.
 const TABS = [
-  { key: "all",        label: "Tüm İadeler",       match: () => true },
-  { key: "created",    label: "Talep Oluşturulan",  match: (s) => s === "created" },
-  { key: "in_transit", label: "Kargoya Verilen",    match: (s) => s === "in_transit" },
-  { key: "action",     label: "Aksiyon Bekleyen",   match: (s) => s === "received" || s === "returned" },
-  { key: "approved",   label: "Onaylanan",          match: (s) => s === "approved" },
-  { key: "rejected",   label: "Reddedilen",         match: (s) => s === "rejected" },
-  { key: "refunded",   label: "Bedeli Ödendi",      match: (s) => s === "refunded" },
+  { key: "created",    label: "Talep Oluşturulan", match: (r) => r.status === "created" },
+  { key: "in_transit", label: "İade Kargoda",      match: (r) => r.status === "in_transit" },
+  { key: "received",   label: "Teslim Alındı",     match: (r) => r.status === "received" || r.status === "returned" },
+  { key: "approved",   label: "Onaylananlar",      match: (r) => r.status === "approved" && !r.has_gider_pusulasi },
+  { key: "payment",    label: "İade Ödemeleri",    match: (r) => (r.status === "approved" && r.has_gider_pusulasi) || r.status === "refunded" || r.status === "partial_refunded" },
+  { key: "rejected",   label: "Reddedilenler",     match: (r) => r.status === "rejected" },
 ];
 
 const fmtTL = (v) => Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
@@ -52,12 +56,14 @@ const fmtTL = (v) => Number(v || 0).toLocaleString("tr-TR", { minimumFractionDig
 export default function SiteReturns({ embedded = false }) {
   const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState("created");
   const [perms, setPerms] = useState([]);
   const [busyId, setBusyId] = useState("");
+  const [selected, setSelected] = useState(new Set());
 
   const [approveM, setApproveM] = useState(null);
   const [rejectM, setRejectM] = useState(null);
+  const [payM, setPayM] = useState(null);
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
   const can = (key) => perms.includes("*") || perms.includes(key);
@@ -65,10 +71,8 @@ export default function SiteReturns({ embedded = false }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      // Tüm listeyi tek seferde çek; sekme sayıları + filtreleme client'ta
       const res = await axios.get(`${API}/orders/returns/admin/list?limit=500`, auth());
       const list = res.data?.returns || [];
-      // Mükerrer kayıt koruması — id'ye göre tekilleştir
       const seen = new Set();
       const uniq = list.filter((r) => (r.id && !seen.has(r.id) ? (seen.add(r.id), true) : false));
       setAllRows(uniq);
@@ -90,16 +94,17 @@ export default function SiteReturns({ embedded = false }) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadPerms(); }, [loadPerms]);
+  useEffect(() => { setSelected(new Set()); }, [tab]); // sekme değişince seçim sıfırlanır
 
   const counts = useMemo(() => {
     const c = {};
-    for (const t of TABS) c[t.key] = allRows.filter((r) => t.match(r.status)).length;
+    for (const t of TABS) c[t.key] = allRows.filter((r) => t.match(r)).length;
     return c;
   }, [allRows]);
 
   const rows = useMemo(() => {
     const t = TABS.find((x) => x.key === tab) || TABS[0];
-    return allRows.filter((r) => t.match(r.status));
+    return allRows.filter((r) => t.match(r));
   }, [allRows, tab]);
 
   const fmt = (d) => (d ? new Date(d).toLocaleString("tr-TR") : "");
@@ -123,7 +128,6 @@ export default function SiteReturns({ embedded = false }) {
   const openApprove = async (row) => {
     try {
       setBusyId(row.id);
-      // Varsayılan: müşteri kusuru (iade kargosu müşteriden) — iş kuralı
       const pv = await fetchPreview(row.id, "customer");
       setApproveM({ row, fault: "customer", preview: pv, finalAmount: pv?.auto_refund ?? 0, note: "", edited: false, loading: false });
     } catch (e) {
@@ -167,7 +171,7 @@ export default function SiteReturns({ embedded = false }) {
       setRejectM((m) => ({ ...m, loading: true }));
       const res = await axios.post(`${API}/orders/returns/${rejectM.row.id}/reject`,
         { reason: rejectM.reason.trim(), reship: !!rejectM.reship }, auth());
-      patchRow(rejectM.row.id, { status: "rejected" });
+      patchRow(rejectM.row.id, { status: "rejected", reship_code: res.data?.reship_code || "" });
       toast.success(res.data?.reship_code ? `Reddedildi · Geri gönderim: ${res.data.reship_code}` : "İade reddedildi");
       setRejectM(null);
     } catch (e) {
@@ -188,28 +192,70 @@ export default function SiteReturns({ embedded = false }) {
     } finally { setBusyId(""); }
   };
 
+  // ---- Gider pusulası: tek + toplu (aşama 4) ----
   const doGiderPusulasi = async (row) => {
     try {
       setBusyId(row.id);
       const res = await axios.post(`${API}/orders/returns/${row.id}/gider-pusulasi`, {}, auth());
+      patchRow(row.id, { has_gider_pusulasi: true, gider_pusulasi_no: res.data?.gider_pusulasi?.display_number });
       toast.success(`Gider pusulası: ${res.data?.gider_pusulasi?.display_number}`);
-      patchRow(row.id, { has_gider_pusulasi: true });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı");
     } finally { setBusyId(""); }
   };
+  const doBulkGider = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) { toast.error("Önce iade seç"); return; }
+    if (!window.confirm(`${ids.length} iade için gider pusulası oluşturulsun mu?`)) return;
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        const res = await axios.post(`${API}/orders/returns/${id}/gider-pusulasi`, {}, auth());
+        patchRow(id, { has_gider_pusulasi: true, gider_pusulasi_no: res.data?.gider_pusulasi?.display_number });
+        ok += 1;
+      } catch (e) { /* hatalı kaydı atla, devam et */ }
+    }
+    setSelected(new Set());
+    toast.success(`${ok}/${ids.length} gider pusulası oluşturuldu`);
+  };
 
-  const doRefundPay = async (row) => {
-    if (!window.confirm(`İade bedeli ödendi olarak işaretlensin mi?${row.refund_amount ? ` (${fmtTL(row.refund_amount)})` : ""}`)) return;
+  // ---- İade ödemesi (Havale/EFT veya Kredi Kartı) — aşama 5 (muhasebe) ----
+  const openPay = (row) => setPayM({ row, method: "havale_eft", amount: row.refund_amount ?? "", reference: "", loading: false });
+  const submitPay = async () => {
+    if (!payM) return;
     try {
-      setBusyId(row.id);
-      await axios.post(`${API}/orders/returns/${row.id}/refund-pay`, {}, auth());
-      patchRow(row.id, { status: "refunded" });
+      setPayM((m) => ({ ...m, loading: true }));
+      const body = { method: payM.method, reference: payM.reference };
+      if (payM.amount !== "" && payM.amount != null) body.amount = Number(payM.amount);
+      await axios.post(`${API}/orders/returns/${payM.row.id}/refund-pay`, body, auth());
+      patchRow(payM.row.id, {
+        status: "refunded",
+        refund_amount: body.amount != null ? body.amount : payM.row.refund_amount,
+        refund_payment: { method: payM.method, reference: payM.reference, amount: body.amount, at: new Date().toISOString() },
+      });
       toast.success("İade bedeli ödendi olarak işaretlendi");
+      setPayM(null);
     } catch (e) {
       toast.error(e.response?.data?.detail || "İşaretlenemedi");
+      setPayM((m) => ({ ...m, loading: false }));
+    }
+  };
+
+  // ---- Reddedilen → yeniden kargoya gönder (aşama 6) ----
+  const doReship = async (row) => {
+    if (!window.confirm("Ürün müşteriye geri gönderilsin mi? (yeni kargo barkodu üretilir)")) return;
+    try {
+      setBusyId(row.id);
+      const res = await axios.post(`${API}/orders/returns/${row.id}/reship`, {}, auth());
+      patchRow(row.id, { reship_code: res.data?.reship_code });
+      toast.success(`Geri gönderim barkodu: ${res.data?.reship_code}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Geri gönderilemedi");
     } finally { setBusyId(""); }
   };
+
+  const toggleSel = (id) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleSelAll = () => setSelected((s) => (s.size === rows.length ? new Set() : new Set(rows.map((r) => r.id))));
 
   const btn = "inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50";
 
@@ -222,15 +268,15 @@ export default function SiteReturns({ embedded = false }) {
         </div>
       )}
 
-      {/* ---- Sekmeler (sayımlı) ---- */}
+      {/* ---- 6 Aşama sekmesi ---- */}
       <div className="flex flex-wrap gap-1 mb-5 border-b border-gray-200">
-        {TABS.map((t) => {
+        {TABS.map((t, i) => {
           const active = tab === t.key;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`relative px-4 py-2.5 text-sm font-semibold transition-colors -mb-px border-b-2 ${
                 active ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
-              {t.label}
+              <span className={active ? "text-orange-300 mr-1" : "text-gray-300 mr-1"}>{i + 1}.</span>{t.label}
               <span className={`ml-2 text-xs font-bold px-1.5 py-0.5 rounded-full ${active ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-500"}`}>
                 {counts[t.key] ?? 0}
               </span>
@@ -239,50 +285,77 @@ export default function SiteReturns({ embedded = false }) {
         })}
       </div>
 
+      {/* ---- Aşama 4: toplu gider pusulası çubuğu ---- */}
+      {tab === "approved" && rows.length > 0 && can("returns.expense_note") && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+          <label className="flex items-center gap-2 text-sm text-purple-800 cursor-pointer">
+            <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleSelAll} />
+            Tümünü seç ({selected.size}/{rows.length})
+          </label>
+          <button disabled={selected.size === 0} onClick={doBulkGider}
+            className={`${btn} border-purple-300 bg-purple-600 text-white hover:bg-purple-700`}>
+            <FileText size={13} /> Seçili {selected.size} İade İçin Gider Pusulası Oluştur
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="p-10 text-center text-gray-400">Yükleniyor…</div>
       ) : rows.length === 0 ? (
         <div className="p-10 text-center text-gray-400 border rounded-xl bg-white">
-          <Package className="mx-auto mb-2 opacity-40" size={28} /> Bu sekmede iade talebi yok.
+          <Package className="mx-auto mb-2 opacity-40" size={28} /> Bu aşamada iade yok.
         </div>
       ) : (
         <div className="space-y-3">
           {rows.map((r) => {
-            const closed = ["refunded", "cancelled"].includes(r.status);
-            const canAct = ["created", "in_transit", "received", "returned"].includes(r.status);
             const isBusy = busyId === r.id;
+            const canAct = ["created", "in_transit", "received", "returned"].includes(r.status);
+            const showBar = canAct || ["approved", "rejected", "refunded", "partial_refunded"].includes(r.status);
             return (
               <div key={r.id} className="bg-white border rounded-xl p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-gray-900">{r.order_number}</span>
-                      <span className={`text-[10px] uppercase tracking-wide border px-2 py-0.5 rounded-full ${STATUS_CLS[r.status] || STATUS_CLS.created}`}>
-                        {STATUS_LABELS[r.status] || r.status}
-                      </span>
-                      {r.refund_amount != null && (r.status === "approved" || r.status === "refunded") && (
-                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                          İade: {fmtTL(r.refund_amount)}
+                  <div className="min-w-0 flex gap-3">
+                    {tab === "approved" && can("returns.expense_note") && (
+                      <input type="checkbox" className="mt-1 shrink-0" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} />
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-gray-900">{r.order_number}</span>
+                        <span className={`text-[10px] uppercase tracking-wide border px-2 py-0.5 rounded-full ${STATUS_CLS[r.status] || STATUS_CLS.created}`}>
+                          {STATUS_LABELS[r.status] || r.status}
                         </span>
-                      )}
-                      {r.has_gider_pusulasi && (
-                        <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">GP ✓</span>
-                      )}
+                        {r.refund_amount != null && ["approved", "refunded", "partial_refunded"].includes(r.status) && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            İade: {fmtTL(r.refund_amount)}
+                          </span>
+                        )}
+                        {r.has_gider_pusulasi && (
+                          <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">GP ✓ {r.gider_pusulasi_no || ""}</span>
+                        )}
+                        {r.refund_payment?.method && (
+                          <span className="text-[10px] text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                            {r.refund_payment.method === "kredi_karti" ? "Kredi Kartı" : "Havale/EFT"}{r.refund_payment.reference ? ` · ${r.refund_payment.reference}` : ""}
+                          </span>
+                        )}
+                        {r.reship_code && (
+                          <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">Geri gönderim: {r.reship_code}</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">{r.customer_name} · {r.customer_phone} · {r.customer_email}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Kod: <span className="font-mono font-medium text-gray-800">{r.return_code}</span> · {r.cargo_provider_name}
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">Oluşturma: {fmt(r.created_at)} · Geçerlilik: {fmt(r.valid_until)}</p>
+                      <div className="mt-2 text-xs text-gray-700">
+                        {(r.items || []).map((it, i) => (
+                          <span key={i} className="inline-block bg-gray-50 border border-gray-100 rounded px-2 py-0.5 mr-1 mb-1">
+                            {it.quantity}× {it.name}{it.size ? ` (${it.size}${it.color ? `/${it.color}` : ""})` : ""}
+                          </span>
+                        ))}
+                      </div>
+                      {r.reason && <p className="text-xs text-gray-500 mt-1 italic">Neden: {r.reason}</p>}
+                      {r.reject_reason && <p className="text-xs text-rose-600 mt-1">Ret sebebi: {r.reject_reason}</p>}
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">{r.customer_name} · {r.customer_phone} · {r.customer_email}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Kod: <span className="font-mono font-medium text-gray-800">{r.return_code}</span> · {r.cargo_provider_name}
-                    </p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">Oluşturma: {fmt(r.created_at)} · Geçerlilik: {fmt(r.valid_until)}</p>
-                    <div className="mt-2 text-xs text-gray-700">
-                      {(r.items || []).map((it, i) => (
-                        <span key={i} className="inline-block bg-gray-50 border border-gray-100 rounded px-2 py-0.5 mr-1 mb-1">
-                          {it.quantity}× {it.name}{it.size ? ` (${it.size}${it.color ? `/${it.color}` : ""})` : ""}
-                        </span>
-                      ))}
-                    </div>
-                    {r.reason && <p className="text-xs text-gray-500 mt-1 italic">Neden: {r.reason}</p>}
-                    {r.reject_reason && <p className="text-xs text-rose-600 mt-1">Ret sebebi: {r.reject_reason}</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
                     {r.barcode_url && (
@@ -294,7 +367,7 @@ export default function SiteReturns({ embedded = false }) {
                         </a>
                       </>
                     )}
-                    {/* Durum sütunu — TÜM durumlar elle değiştirilebilir */}
+                    {/* Durum sütunu — TÜM durumlar elle değiştirilebilir (Kısmi İade Yapıldı dahil) */}
                     <select value={r.status}
                       onChange={(e) => e.target.value !== r.status && changeStatus(r.id, e.target.value)}
                       className="border px-2 py-1.5 rounded text-xs" title="Durum (elle değiştir)">
@@ -303,9 +376,10 @@ export default function SiteReturns({ embedded = false }) {
                   </div>
                 </div>
 
-                {/* Aksiyon çubuğu — RBAC'a göre gösterilir (sadece SİTE iadeleri) */}
-                {!closed && (
+                {/* Aksiyon çubuğu — aşamaya/duruma göre (RBAC) */}
+                {showBar && (
                   <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                    {/* Aşama 1-3: Teslim alınana kadar Onayla / Reddet / Yeni Barkod */}
                     {canAct && can("returns.approve") && (
                       <button disabled={isBusy} onClick={() => openApprove(r)}
                         className={`${btn} border-emerald-300 text-emerald-700 hover:bg-emerald-50`}>
@@ -318,23 +392,38 @@ export default function SiteReturns({ embedded = false }) {
                         <X size={13} /> Reddet
                       </button>
                     )}
-                    {can("returns.cargo_rebook") && (
+                    {canAct && can("returns.cargo_rebook") && (
                       <button disabled={isBusy} onClick={() => doReissue(r)}
                         className={`${btn} border-gray-300 text-gray-700 hover:bg-gray-50`}>
                         <RefreshCw size={13} /> Yeni Barkod
                       </button>
                     )}
-                    {r.status === "approved" && can("returns.expense_note") && (
+                    {/* Aşama 4: Onaylanan → Gider Pusulası oluştur */}
+                    {r.status === "approved" && !r.has_gider_pusulasi && can("returns.expense_note") && (
                       <button disabled={isBusy} onClick={() => doGiderPusulasi(r)}
                         className={`${btn} border-purple-300 text-purple-700 hover:bg-purple-50`}>
-                        <FileText size={13} /> Gider Pusulası
+                        <FileText size={13} /> Gider Pusulası Oluştur
                       </button>
                     )}
-                    {["approved", "in_transit", "received", "returned"].includes(r.status) && r.has_gider_pusulasi && can("returns.refund_pay") && (
-                      <button disabled={isBusy} onClick={() => doRefundPay(r)}
+                    {/* Aşama 5: Gider pusulalı onaylı → İade Ödemesi (muhasebe) */}
+                    {r.status === "approved" && r.has_gider_pusulasi && can("returns.refund_pay") && (
+                      <button disabled={isBusy} onClick={() => openPay(r)}
                         className={`${btn} border-green-400 bg-green-600 text-white hover:bg-green-700`}>
                         <CreditCard size={13} /> İade Ödemesi Yap
                       </button>
+                    )}
+                    {/* Aşama 6: Reddedilen → yeniden kargoya gönder */}
+                    {r.status === "rejected" && can("returns.cargo_rebook") && (
+                      <button disabled={isBusy} onClick={() => doReship(r)}
+                        className={`${btn} border-blue-300 text-blue-700 hover:bg-blue-50`}>
+                        <Truck size={13} /> {r.reship_code ? "Tekrar Gönder" : "Yeniden Kargoya Gönder"}
+                      </button>
+                    )}
+                    {/* Ödenmiş kayıt bilgisi */}
+                    {["refunded", "partial_refunded"].includes(r.status) && (
+                      <span className="text-xs text-green-700 inline-flex items-center gap-1">
+                        <Check size={13} /> Ödendi{r.refund_payment?.at ? ` · ${fmt(r.refund_payment.at)}` : ""}
+                      </span>
                     )}
                   </div>
                 )}
@@ -418,6 +507,46 @@ export default function SiteReturns({ embedded = false }) {
               <button onClick={submitReject} disabled={rejectM.loading}
                 className="px-4 py-2 rounded-lg text-sm bg-rose-600 text-white font-bold hover:bg-rose-700 disabled:opacity-50">
                 {rejectM.loading ? "…" : "Reddet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- İade Ödeme Modalı (aşama 5 — muhasebe) ---- */}
+      {payM && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setPayM(null)}>
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-1">İade Ödemesi Yap</h3>
+            <p className="text-xs text-gray-500 mb-3">Sipariş {payM.row.order_number} · {payM.row.customer_name}</p>
+
+            <p className="text-xs font-bold text-gray-500 uppercase mb-1">Ödeme Yöntemi</p>
+            <div className="flex gap-2 mb-3">
+              {[["havale_eft", "Havale / EFT", Banknote], ["kredi_karti", "Kredi Kartı", CreditCard]].map(([v, l, Icon]) => (
+                <button key={v} onClick={() => setPayM((m) => ({ ...m, method: v }))}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs border inline-flex items-center justify-center gap-1.5 transition-colors ${payM.method === v ? "border-green-500 bg-green-50 text-green-700 font-semibold" : "border-gray-200 text-gray-600"}`}>
+                  <Icon size={14} /> {l}
+                </button>
+              ))}
+            </div>
+
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">İade Tutarı</label>
+            <input type="number" step="0.01" value={payM.amount}
+              onChange={(e) => setPayM((m) => ({ ...m, amount: e.target.value }))}
+              className="w-full px-3 py-2 border rounded-lg text-sm font-mono mb-3" />
+
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+              {payM.method === "kredi_karti" ? "İşlem / Referans No (opsiyonel)" : "IBAN / Dekont No (opsiyonel)"}
+            </label>
+            <input value={payM.reference} onChange={(e) => setPayM((m) => ({ ...m, reference: e.target.value }))}
+              className="w-full px-3 py-2 border rounded-lg text-sm mb-4"
+              placeholder={payM.method === "kredi_karti" ? "Örn. iyzico/banka işlem no" : "Örn. TR.. IBAN / dekont no"} />
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setPayM(null)} className="px-4 py-2 rounded-lg text-sm border">Vazgeç</button>
+              <button onClick={submitPay} disabled={payM.loading}
+                className="px-4 py-2 rounded-lg text-sm bg-green-600 text-white font-bold hover:bg-green-700 disabled:opacity-50">
+                {payM.loading ? "…" : "Ödemeyi Kaydet"}
               </button>
             </div>
           </div>

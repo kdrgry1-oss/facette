@@ -3233,6 +3233,7 @@ _RETURN_STATUS_MAP = {
     "received":    ("returned",          "order_returned"),
     "returned":    ("returned",          "order_returned"),
     "refunded":    ("refunded",          "order_refunded"),
+    "partial_refunded": ("partial_refunded", "order_partial_refunded"),
     "rejected":    ("return_rejected",   None),
     "cancelled":   ("delivered",         None),
 }
@@ -3771,6 +3772,7 @@ async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(defau
     payment = {
         "by": current_user.get("email") or current_user.get("id"),
         "at": now_iso, "method": method, "amount": amount,
+        "reference": str((payload or {}).get("reference") or "").strip(),
     }
     await db.customer_returns.update_one({"id": return_id}, {"$set": {
         "status": "refunded", "refund_payment": payment,
@@ -3812,3 +3814,38 @@ async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(defau
     _aio.create_task(_n())
 
     return {"success": True, "status": "refunded", "amount": amount}
+
+
+# ============================================================================
+# Aşama 6 — Reddedilen iadeyi müşteriye GERİ gönder (reship)
+# ============================================================================
+
+@router.post("/returns/{return_id}/reship")
+async def reship_return(return_id: str, payload: Optional[dict] = Body(default=None),
+                        current_user: dict = Depends(require_permission("returns.cargo_rebook"))):
+    """Aşama 6: Reddedilen iadede ürünü müşteriye GERİ gönderir (yeni kargo barkodu, alıcı = müşteri).
+    Reddetme anında reship yapılmadıysa ya da tekrar gönderim gerekiyorsa kullanılır."""
+    rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="İade bulunamadı")
+    if rec.get("status") != "rejected":
+        raise HTTPException(status_code=400, detail="Yalnızca reddedilmiş iadeler geri gönderilebilir.")
+    order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
+    addr = order.get("shipping_address") or {}
+    recipient = {
+        "name": addr.get("full_name") or f"{addr.get('first_name','')} {addr.get('last_name','')}".strip() or "Müşteri",
+        "phone": addr.get("phone", ""), "city": addr.get("city", ""),
+        "district": addr.get("district", ""), "address": addr.get("address", ""),
+    }
+    ref = f"RET{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
+    reship_code, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+        "reship_code": reship_code, "reshipped_at": now_iso,
+        "reshipped_by": current_user.get("email") or current_user.get("id"),
+        "updated_at": now_iso,
+    }})
+    await _log_order_event(rec.get("order_id"), "return", f"Reddedilen iade geri gönderildi: {reship_code}", current_user,
+                           {"return_id": return_id, "reship_code": reship_code},
+                           order_number=rec.get("order_number", ""))
+    return {"success": True, "reship_code": reship_code}
