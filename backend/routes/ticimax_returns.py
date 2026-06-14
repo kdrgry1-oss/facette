@@ -68,8 +68,9 @@ async def list_ticimax_return_orders(
 
     # Durum filtresi: tek durum verilmişse onu, yoksa tüm iade grubunu kullan
     if status:
-        # Artık herhangi bir sipariş durumuyla filtrelenebilir (yalnız iade grubuyla sınırlı değil)
-        base_filter["status"] = status
+        # Tek veya virgülle ayrılmış çoklu durum (örn. "refunded,partial_refunded" = 5. İade Ödemeleri hanesi)
+        _st = [s.strip() for s in status.split(",") if s.strip()]
+        base_filter["status"] = {"$in": _st} if len(_st) > 1 else (_st[0] if _st else {"$in": RETURN_STATUSES})
     else:
         base_filter["status"] = {"$in": RETURN_STATUSES}
 
@@ -280,7 +281,8 @@ async def export_ticimax_return_orders(
 
     base_filter = {"$or": [{"platform": "ticimax"}, {"source": "ticimax"}]}
     if status:
-        base_filter["status"] = status
+        _st = [s.strip() for s in status.split(",") if s.strip()]
+        base_filter["status"] = {"$in": _st} if len(_st) > 1 else (_st[0] if _st else {"$in": RETURN_STATUSES})
     else:
         base_filter["status"] = {"$in": RETURN_STATUSES}
     if payment:

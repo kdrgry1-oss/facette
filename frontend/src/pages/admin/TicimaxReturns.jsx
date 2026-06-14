@@ -31,17 +31,16 @@ const STATUS_OPTS = [
 const STATUS_LABEL = Object.fromEntries(STATUS_OPTS.map((s) => [s.value, s.label]));
 const STATUS_CLS = {}; // durum renkleri kaldırıldı — tüm durumlar nötr görünür
 
-// İade akışı sekmeleri (Trendyol benzeri) — her sekme tek bir order status'üne map'lenir.
-// "" = tüm iadeler. Sayaçlar status_counts'tan (filtreden bağımsız) gelir.
+// 6 AŞAMALI operasyonel iade akışı — "Tüm İadeler" yok, "Kısmi İade" ayrı sekme DEĞİL.
+// Her hane bir/birkaç order status'üne map'lenir; 5. hane refunded + partial_refunded'ı birlikte gösterir.
+// "Kısmi İade Yapıldı" durum açılır menüsünde elle seçilebilir kalır. Sayaçlar status_counts'tan gelir.
 const RETURN_TABS = [
-  { key: "", label: "Tüm İadeler" },
-  { key: "return_requested", label: "Talep Oluşturulan" },
-  { key: "return_approved", label: "Onaylanan" },
-  { key: "return_in_transit", label: "İade Kargoda" },
-  { key: "returned", label: "Teslim Alındı" },
-  { key: "partial_refunded", label: "Kısmi İade" },
-  { key: "refunded", label: "Bedeli Ödendi" },
-  { key: "return_rejected", label: "Reddedilen" },
+  { key: "return_requested",          label: "1. Talep Oluşturulan", statuses: ["return_requested"] },
+  { key: "return_in_transit",         label: "2. İade Kargoda",      statuses: ["return_in_transit"] },
+  { key: "returned",                  label: "3. Teslim Alındı",     statuses: ["returned"] },
+  { key: "return_approved",           label: "4. Onaylananlar",      statuses: ["return_approved"] },
+  { key: "refunded,partial_refunded", label: "5. İade Ödemeleri",    statuses: ["refunded", "partial_refunded"] },
+  { key: "return_rejected",           label: "6. Reddedilenler",     statuses: ["return_rejected"] },
 ];
 
 const PAYMENT_OPTS = [
@@ -67,7 +66,7 @@ export default function TicimaxReturns({ embedded = false }) {
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [redating, setRedating] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("return_requested");
   const [paymentFilter, setPaymentFilter] = useState("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -336,7 +335,7 @@ export default function TicimaxReturns({ embedded = false }) {
       {/* İade durum sekmeleri (Trendyol benzeri) — tıklanınca o duruma filtreler */}
       <div className="flex flex-wrap gap-1.5 mb-4 border-b border-gray-200 pb-2">
         {RETURN_TABS.map((t) => {
-          const n = t.key === "" ? totalReturns : (statusCounts[t.key] || 0);
+          const n = (t.statuses || [t.key]).reduce((a, s) => a + (statusCounts[s] || 0), 0);
           const active = statusFilter === t.key;
           return (
             <button
