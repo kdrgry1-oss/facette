@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, CreditCard, Truck, Banknote } from "lucide-react";
+import { RotateCcw, Package, ExternalLink, Check, X, RefreshCw, FileText, CreditCard, Truck, Banknote, Printer } from "lucide-react";
+import { GpPrintLayer, pad6 } from "../../components/admin/GiderPusulasiPrint";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -64,6 +65,20 @@ export default function SiteReturns({ embedded = false }) {
   const [approveM, setApproveM] = useState(null);
   const [rejectM, setRejectM] = useState(null);
   const [payM, setPayM] = useState(null);
+
+  // ---- Gider pusulası A4 yazdırma (Trendyol ile ORTAK numara serisi + hizalama) ----
+  const [bulkPrintData, setBulkPrintData] = useState(null);
+  const [gpStart, setGpStart] = useState(() => localStorage.getItem("gp_next_no") || "085490");
+  const [gpOverlay, setGpOverlay] = useState(() => localStorage.getItem("gp_overlay") !== "0");
+  const gpOffX = Number(localStorage.getItem("gp_off_x") || 0);
+  const gpOffY = Number(localStorage.getItem("gp_off_y") || 0);
+  const gpGuides = false;
+  const advanceGpNo = (count) => {
+    const base = parseInt(pad6(gpStart) || "0", 10);
+    const next = pad6(base + (count || 1));
+    setGpStart(next);
+    localStorage.setItem("gp_next_no", next);
+  };
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
   const can = (key) => perms.includes("*") || perms.includes(key);
@@ -192,31 +207,57 @@ export default function SiteReturns({ embedded = false }) {
     } finally { setBusyId(""); }
   };
 
-  // ---- Gider pusulası: tek + toplu (aşama 4) ----
+  // ---- Gider pusulası: oluştur+yazdır (tek+toplu) + yeniden yazdır (aşama 4) ----
+  // Matbu form no = gpStart (Trendyol ile ortak seri). Backend display_number = tracking_no.
   const doGiderPusulasi = async (row) => {
     try {
       setBusyId(row.id);
-      const res = await axios.post(`${API}/orders/returns/${row.id}/gider-pusulasi`, {}, auth());
-      patchRow(row.id, { has_gider_pusulasi: true, gider_pusulasi_no: res.data?.gider_pusulasi?.display_number });
-      toast.success(`Gider pusulası: ${res.data?.gider_pusulasi?.display_number}`);
+      const trackingNo = pad6(gpStart);
+      const res = await axios.post(`${API}/orders/returns/${row.id}/gider-pusulasi`, { tracking_no: trackingNo }, auth());
+      const gp = res.data?.gider_pusulasi || {};
+      patchRow(row.id, { has_gider_pusulasi: true, gider_pusulasi_no: gp.display_number || trackingNo });
+      setBulkPrintData([{ ...gp, assigned_no: trackingNo }]);
+      toast.success(`Gider pusulası: ${gp.display_number || trackingNo} · yazdırılıyor`);
+      setTimeout(() => { window.print(); advanceGpNo(1); }, 300);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı");
+    } finally { setBusyId(""); }
+  };
+  // Mevcut gider pusulasını yeniden yazdır (numara ilerletmez)
+  const doPrintGider = async (row) => {
+    try {
+      setBusyId(row.id);
+      const trackingNo = row.gider_pusulasi_no || pad6(gpStart);
+      const res = await axios.post(`${API}/orders/returns/${row.id}/gider-pusulasi`, { tracking_no: trackingNo }, auth());
+      const gp = res.data?.gider_pusulasi || {};
+      setBulkPrintData([{ ...gp, assigned_no: trackingNo }]);
+      setTimeout(() => window.print(), 300);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Yazdırılamadı");
     } finally { setBusyId(""); }
   };
   const doBulkGider = async () => {
     const ids = [...selected];
     if (ids.length === 0) { toast.error("Önce iade seç"); return; }
-    if (!window.confirm(`${ids.length} iade için gider pusulası oluşturulsun mu?`)) return;
-    let ok = 0;
+    if (!window.confirm(`${ids.length} iade için gider pusulası oluşturulup yazdırılsın mı?`)) return;
+    const base = parseInt(pad6(gpStart) || "0", 10);
+    const printable = [];
+    let i = 0;
     for (const id of ids) {
+      const trackingNo = pad6(base + i);
       try {
-        const res = await axios.post(`${API}/orders/returns/${id}/gider-pusulasi`, {}, auth());
-        patchRow(id, { has_gider_pusulasi: true, gider_pusulasi_no: res.data?.gider_pusulasi?.display_number });
-        ok += 1;
-      } catch (e) { /* hatalı kaydı atla, devam et */ }
+        const res = await axios.post(`${API}/orders/returns/${id}/gider-pusulasi`, { tracking_no: trackingNo }, auth());
+        const gp = res.data?.gider_pusulasi || {};
+        patchRow(id, { has_gider_pusulasi: true, gider_pusulasi_no: gp.display_number || trackingNo });
+        printable.push({ ...gp, assigned_no: trackingNo });
+        i += 1;
+      } catch (e) { /* hatalı kaydı atla, numara verme */ }
     }
     setSelected(new Set());
-    toast.success(`${ok}/${ids.length} gider pusulası oluşturuldu`);
+    if (printable.length === 0) { toast.error("Gider pusulası oluşturulamadı"); return; }
+    setBulkPrintData(printable);
+    toast.success(`${printable.length}/${ids.length} gider pusulası · yazdırılıyor`);
+    setTimeout(() => { window.print(); advanceGpNo(printable.length); }, 500);
   };
 
   // ---- İade ödemesi (Havale/EFT veya Kredi Kartı) — aşama 5 (muhasebe) ----
@@ -285,16 +326,28 @@ export default function SiteReturns({ embedded = false }) {
         })}
       </div>
 
-      {/* ---- Aşama 4: toplu gider pusulası çubuğu ---- */}
+      {/* ---- Aşama 4: toplu gider pusulası + yazdırma çubuğu ---- */}
       {tab === "approved" && rows.length > 0 && can("returns.expense_note") && (
         <div className="flex flex-wrap items-center gap-3 mb-3 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
           <label className="flex items-center gap-2 text-sm text-purple-800 cursor-pointer">
             <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleSelAll} />
             Tümünü seç ({selected.size}/{rows.length})
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-purple-800">
+            Sıradaki no:
+            <input value={gpStart}
+              onChange={(e) => setGpStart(e.target.value)}
+              onBlur={(e) => { const v = pad6(e.target.value); setGpStart(v); localStorage.setItem("gp_next_no", v); }}
+              className="w-24 border border-purple-300 rounded px-2 py-1 text-xs font-mono" />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-purple-800 cursor-pointer" title="Açık: veriler matbu formun üstüne basılır. Kapalı: gri referans form + veri (boş kağıt/hizalama testi).">
+            <input type="checkbox" checked={gpOverlay}
+              onChange={(e) => { setGpOverlay(e.target.checked); localStorage.setItem("gp_overlay", e.target.checked ? "1" : "0"); }} />
+            Matbu üzerine bas
+          </label>
           <button disabled={selected.size === 0} onClick={doBulkGider}
             className={`${btn} border-purple-300 bg-purple-600 text-white hover:bg-purple-700`}>
-            <FileText size={13} /> Seçili {selected.size} İade İçin Gider Pusulası Oluştur
+            <FileText size={13} /> Seçili {selected.size} İade · Gider Pusulası Oluştur + Yazdır
           </button>
         </div>
       )}
@@ -398,11 +451,18 @@ export default function SiteReturns({ embedded = false }) {
                         <RefreshCw size={13} /> Yeni Barkod
                       </button>
                     )}
-                    {/* Aşama 4: Onaylanan → Gider Pusulası oluştur */}
+                    {/* Aşama 4: Onaylanan → Gider Pusulası oluştur + yazdır */}
                     {r.status === "approved" && !r.has_gider_pusulasi && can("returns.expense_note") && (
                       <button disabled={isBusy} onClick={() => doGiderPusulasi(r)}
                         className={`${btn} border-purple-300 text-purple-700 hover:bg-purple-50`}>
-                        <FileText size={13} /> Gider Pusulası Oluştur
+                        <FileText size={13} /> Gider Pusulası Oluştur + Yazdır
+                      </button>
+                    )}
+                    {/* Gider pusulası varsa: yeniden yazdır (numara ilerletmez) */}
+                    {r.has_gider_pusulasi && can("returns.expense_note") && (
+                      <button disabled={isBusy} onClick={() => doPrintGider(r)}
+                        className={`${btn} border-purple-300 text-purple-700 hover:bg-purple-50`}>
+                        <Printer size={13} /> GP Yazdır
                       </button>
                     )}
                     {/* Aşama 5: Gider pusulalı onaylı → İade Ödemesi (muhasebe) */}
@@ -552,6 +612,9 @@ export default function SiteReturns({ embedded = false }) {
           </div>
         </div>
       )}
+
+      {/* Gizli A4 yazdırma katmanı — yalnız window.print() ile görünür (admin arayüzü gizlenir) */}
+      {bulkPrintData && <GpPrintLayer slips={bulkPrintData} overlay={gpOverlay} offX={gpOffX} offY={gpOffY} guides={gpGuides} />}
     </div>
   );
 }
