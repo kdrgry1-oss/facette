@@ -31,12 +31,15 @@ class HepsiburadaClient:
     SANDBOX = "https://mpop-sit.hepsiburada.com"
     PROD = "https://mpop.hepsiburada.com"
 
-    def __init__(self, merchant_id, secret_key, dev_username, test=True, timeout=30):
+    def __init__(self, merchant_id, secret_key, dev_username, test=True, timeout=30,
+                 oms_username=None, oms_password=None):
         if not (merchant_id and secret_key and dev_username):
             raise ValueError("merchant_id, secret_key ve dev_username zorunlu.")
         self.merchant_id = str(merchant_id).strip()
         self.secret_key = str(secret_key).strip()
         self.dev_username = str(dev_username).strip()
+        self.oms_username = (str(oms_username).strip() if oms_username else "")
+        self.oms_password = (str(oms_password).strip() if oms_password else "")
         self.base = self.SANDBOX if test else self.PROD
         self.timeout = timeout
         token = base64.b64encode(f"{self.merchant_id}:{self.secret_key}".encode()).decode()
@@ -122,12 +125,28 @@ class HepsiburadaClient:
         return out
 
     # ---------- Siparişler (OMS — Order Management System) ----------
-    # NOT: Siparişler MPOP'tan DEĞİL, ayrı OMS host'undan gelir. Auth aynı (Basic + User-Agent).
+    # NOT: Siparişler MPOP'tan DEĞİL, ayrı OMS host'undan gelir. OMS Basic auth genelde
+    # MPOP'tan FARKLI kimlik ister (merchant_id:secret_key 401 verir). Bu yüzden olası
+    # kombinasyonları sırayla deneriz; 401 olmayan ilk yanıtı kullanırız.
     OMS_SANDBOX = "https://oms-external-sit.hepsiburada.com"
     OMS_PROD = "https://oms-external.hepsiburada.com"
 
     def _oms_base(self):
         return self.OMS_SANDBOX if self.base == self.SANDBOX else self.OMS_PROD
+
+    def _oms_auth_candidates(self):
+        """OMS için denenecek Basic auth (kullanıcı:şifre) kombinasyonları — en olasıdan başlayarak."""
+        def b(u, p):
+            return "Basic " + base64.b64encode(f"{u}:{p}".encode()).decode()
+        cands = []
+        if self.oms_username and self.oms_password:
+            cands.append(("oms_username:oms_password", b(self.oms_username, self.oms_password)))
+        cands += [
+            ("dev_username:secret_key", b(self.dev_username, self.secret_key)),
+            ("merchant_id:secret_key", b(self.merchant_id, self.secret_key)),
+            ("dev_username:merchant_id", b(self.dev_username, self.merchant_id)),
+        ]
+        return cands
 
     def _oms_get(self, path, params=None):
         url = self._oms_base() + path
@@ -135,20 +154,30 @@ class HepsiburadaClient:
             clean = {k: v for k, v in params.items() if v not in (None, "")}
             if clean:
                 url += "?" + urllib.parse.urlencode(clean)
-        req = urllib.request.Request(url, headers={
-            "Authorization": self._auth,
-            "User-Agent": self.dev_username,
-            "Accept": "application/json",
-        })
-        try:
-            with urllib.request.urlopen(req, timeout=min(self.timeout, 15)) as r:
-                body = r.read().decode("utf-8", "replace")
-                return json.loads(body) if body else {}
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[:800]
-            raise HepsiburadaError(f"OMS HTTP {e.code} {path} -> {detail}")
-        except urllib.error.URLError as e:
-            raise HepsiburadaError(f"OMS baglanti hatasi {path}: {e}")
+        tried = []
+        for label, auth in self._oms_auth_candidates():
+            req = urllib.request.Request(url, headers={
+                "Authorization": auth,
+                "User-Agent": self.dev_username,
+                "Accept": "application/json",
+            })
+            try:
+                with urllib.request.urlopen(req, timeout=min(self.timeout, 15)) as r:
+                    body = r.read().decode("utf-8", "replace")
+                    return json.loads(body) if body else {}
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode("utf-8", "replace")[:300]
+                if e.code == 401:
+                    tried.append(label)
+                    continue  # bu kimlik reddedildi, sıradakini dene
+                raise HepsiburadaError(f"OMS HTTP {e.code} {path} -> {detail}")
+            except urllib.error.URLError as e:
+                raise HepsiburadaError(f"OMS baglanti hatasi {path}: {e}")
+        raise HepsiburadaError(
+            f"OMS 401 — denenen kimlik kombinasyonlarinin hepsi reddedildi ({', '.join(tried)}). "
+            f"Hepsiburada OMS icin AYRI Entegrasyon Kullanici Adi/Sifre gerekiyor olabilir "
+            f"(Merchant panel > Entegrasyon Bilgileri)."
+        )
 
     def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100):
         """Geçmiş sipariş kalemlerini tarih aralığına göre listeler.

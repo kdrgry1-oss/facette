@@ -130,6 +130,7 @@ async def _get_hb_client():
     du = (cr.get("dev_username") or "").strip()
     env = (cr.get("env") or cr.get("mode") or "").strip().lower()
     # 2) Yedek: eski db.settings (Entegrasyonlar modali). Kimlik VE ortam icin tamamlayici.
+    s = None
     if not (mid and sk and du) or not env:
         s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
         mid = mid or (s.get("merchant_id") or "").strip()
@@ -138,9 +139,17 @@ async def _get_hb_client():
         env = env or (s.get("mode") or "").strip().lower()
     if not (mid and sk and du):
         return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Entegrasyonlar → Hepsiburada altından kaydedin."
+    # Opsiyonel: OMS (siparis) icin AYRI Basic auth kimligi (varsa). Once marketplace_accounts, sonra db.settings.
+    oms_u = (cr.get("oms_username") or "").strip()
+    oms_p = (cr.get("oms_password") or "").strip()
+    if (not oms_u or not oms_p):
+        if s is None:
+            s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+        oms_u = oms_u or (s.get("oms_username") or "").strip()
+        oms_p = oms_p or (s.get("oms_password") or "").strip()
     test = env not in ("prod", "production", "live", "canli", "canlı")
     from hepsiburada_client import HepsiburadaClient
-    return HepsiburadaClient(mid, sk, du, test=test), None
+    return HepsiburadaClient(mid, sk, du, test=test, oms_username=oms_u, oms_password=oms_p), None
 
 
 async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
