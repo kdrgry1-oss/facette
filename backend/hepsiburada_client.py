@@ -141,7 +141,7 @@ class HepsiburadaClient:
             "Accept": "application/json",
         })
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with urllib.request.urlopen(req, timeout=min(self.timeout, 15)) as r:
                 body = r.read().decode("utf-8", "replace")
                 return json.loads(body) if body else {}
         except urllib.error.HTTPError as e:

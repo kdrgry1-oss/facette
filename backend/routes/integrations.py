@@ -2911,19 +2911,29 @@ def _hb_created_at(o):
 
 @router.post("/hepsiburada/orders/preview")
 async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict = Depends(require_admin)):
-    """Hepsiburada OMS'ten geçmiş siparişleri tarih aralığı veya sipariş no ile listeler (içe aktarmadan)."""
+    """Hepsiburada OMS'ten geçmiş siparişleri tarih aralığı veya sipariş no ile listeler (içe aktarmadan).
+    Hata durumunda 200 + {success:False, error, attempted_url} döner ki proxy/timeout mesajı maskelemesin."""
     import asyncio
     from .category_mapping import _get_hb_client
     client, err = await _get_hb_client()
     if err:
-        raise HTTPException(status_code=400, detail=err)
+        return {"success": False, "error": err}
+    try:
+        oms_base = client._oms_base()
+        mid = client.merchant_id
+    except Exception:
+        oms_base, mid = "?", "?"
+    attempted = f"{oms_base}/orders/merchantid/{mid}"
     try:
         if req.order_number and req.order_number.strip():
-            resp = await asyncio.to_thread(client.get_order_by_number, req.order_number.strip())
+            on = req.order_number.strip()
+            attempted = f"{oms_base}/orders/merchantid/{mid}/ordernumber/{on}"
+            resp = await asyncio.to_thread(client.get_order_by_number, on)
         else:
+            attempted += f"?beginDate={req.begin_date}&endDate={req.end_date}&offset=0&limit=200"
             resp = await asyncio.to_thread(client.get_orders, req.begin_date, req.end_date, 0, 200)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Hepsiburada OMS hatası: {e}")
+        return {"success": False, "error": str(e), "attempted_url": attempted}
     lines = _hb_normalize_lines(resp)
     grouped = _hb_group_orders(lines)
     preview = [map_hepsiburada_order(g) for g in grouped]
@@ -2936,6 +2946,7 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
     for p in preview:
         p["_already_imported"] = p["order_number"] in existing
     return {"success": True, "count": len(preview), "orders": grouped, "preview": preview,
+            "attempted_url": attempted,
             "raw_sample": (lines[:2] if isinstance(lines, list) else lines)}
 
 @router.post("/hepsiburada/orders/import-selected")

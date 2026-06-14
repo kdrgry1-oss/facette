@@ -1060,11 +1060,16 @@ function HepsiburadaOrderPull({ auth }) {
         ? { order_number: orderNo.trim() }
         : { begin_date: `${begin}T00:00:00`, end_date: `${end}T23:59:59` };
       const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, auth);
+      if (r.data && r.data.success === false) {
+        setErr((r.data.error || "Çekme başarısız") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
+        setRows(null); setRawSample(r.data.raw_sample || null);
+        return;
+      }
       const pv = r.data?.preview || [];
       setRows(pv); setRaws(r.data?.orders || []); setRawSample(r.data?.raw_sample || null);
       const s = new Set(); pv.forEach((p, i) => { if (!p._already_imported) s.add(i); }); setSel(s);
     } catch (e) {
-      setErr(e?.response?.data?.detail || "Çekme başarısız");
+      setErr(e?.response?.data?.detail || e?.message || "Çekme başarısız");
     } finally { setLoading(false); }
   };
 
@@ -1111,7 +1116,7 @@ function HepsiburadaOrderPull({ auth }) {
           </button>
         </div>
 
-        {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</div>}
+        {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 whitespace-pre-line">{err}</div>}
 
         {result && (
           <div className={`text-sm rounded-lg px-3 py-2 border ${result.error ? "text-red-700 bg-red-50 border-red-200" : "text-green-800 bg-green-50 border-green-200"}`}>
