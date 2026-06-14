@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap, Download } from "lucide-react";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import {
   AdvancedAttributeMatchModal,
@@ -236,6 +236,8 @@ export default function CategoryMapping() {
           <div className="text-2xl font-black text-red-800 mt-1">{data.unmatched}</div>
         </div>
       </div>
+
+      {active === "hepsiburada" && <HepsiburadaOrderPull auth={auth} />}
 
       {/* Filtreli Toplu Aktarım Paneli */}
       <FilteredPushPanel marketplace={active} auth={auth} categories={data.items} />
@@ -1028,6 +1030,145 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Hepsiburada Sipariş Çek (OMS) — geçmiş siparişleri tarih/sipariş-no ile içe aktar
+// ──────────────────────────────────────────────────────────────────────────────
+function HepsiburadaOrderPull({ auth }) {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [begin, setBegin] = useState(iso(new Date(Date.now() - 30 * 864e5)));
+  const [end, setEnd] = useState(iso(new Date()));
+  const [orderNo, setOrderNo] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState(null);
+  const [raws, setRaws] = useState([]);
+  const [sel, setSel] = useState(new Set());
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [rawSample, setRawSample] = useState(null);
+  const [err, setErr] = useState("");
+
+  const fmtTL = (n) => `${(Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
+
+  const pull = async () => {
+    setLoading(true); setErr(""); setResult(null); setRows(null); setSel(new Set());
+    try {
+      const body = orderNo.trim()
+        ? { order_number: orderNo.trim() }
+        : { begin_date: `${begin}T00:00:00`, end_date: `${end}T23:59:59` };
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, auth);
+      const pv = r.data?.preview || [];
+      setRows(pv); setRaws(r.data?.orders || []); setRawSample(r.data?.raw_sample || null);
+      const s = new Set(); pv.forEach((p, i) => { if (!p._already_imported) s.add(i); }); setSel(s);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Çekme başarısız");
+    } finally { setLoading(false); }
+  };
+
+  const toggle = (i) => { const s = new Set(sel); s.has(i) ? s.delete(i) : s.add(i); setSel(s); };
+  const allOn = rows && rows.length > 0 && sel.size === rows.length;
+  const toggleAll = () => setSel(allOn ? new Set() : new Set((rows || []).map((_, i) => i)));
+
+  const doImport = async () => {
+    if (sel.size === 0) return;
+    setImporting(true); setResult(null);
+    try {
+      const orders = [...sel].map((i) => raws[i]).filter(Boolean);
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/import-selected`, { orders }, auth);
+      setResult(r.data);
+      await pull();
+    } catch (e) {
+      setResult({ error: e?.response?.data?.detail || "Aktarım başarısız" });
+    } finally { setImporting(false); }
+  };
+
+  return (
+    <div className="border border-orange-200 rounded-xl mb-4 overflow-hidden">
+      <div className="px-4 py-2.5 bg-orange-50 border-b border-orange-200 flex items-center gap-2">
+        <Download size={16} className="text-orange-600" />
+        <span className="text-sm font-semibold text-orange-800">Hepsiburada Sipariş Çek</span>
+        <span className="text-xs text-orange-700">— geçmiş siparişleri tarih veya sipariş no ile sisteme aktar</span>
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Başlangıç</label>
+            <input type="date" value={begin} onChange={(e) => setBegin(e.target.value)} className="border rounded-lg px-2.5 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Bitiş</label>
+            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded-lg px-2.5 py-1.5 text-sm" />
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs text-gray-600 mb-1">veya Sipariş No (opsiyonel)</label>
+            <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} placeholder="Tek sipariş için no gir" className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
+          </div>
+          <button onClick={pull} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-60">
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> {loading ? "Çekiliyor…" : "Çek"}
+          </button>
+        </div>
+
+        {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</div>}
+
+        {result && (
+          <div className={`text-sm rounded-lg px-3 py-2 border ${result.error ? "text-red-700 bg-red-50 border-red-200" : "text-green-800 bg-green-50 border-green-200"}`}>
+            {result.error ? result.error : `Aktarıldı: ${result.imported} · Güncellendi: ${result.updated}${(result.errors && result.errors.length) ? ` · Hata: ${result.errors.length}` : ""}`}
+          </div>
+        )}
+
+        {rows && rows.length === 0 && !loading && <div className="text-sm text-gray-500">Bu kriterlerde sipariş bulunamadı.</div>}
+
+        {rows && rows.length > 0 && (
+          <>
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-gray-600">{rows.length} sipariş · {sel.size} seçili</div>
+              <button onClick={doImport} disabled={importing || sel.size === 0} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60">
+                <Download size={14} /> {importing ? "Aktarılıyor…" : `Seçili ${sel.size} Siparişi Aktar`}
+              </button>
+            </div>
+            <div className="border rounded-lg overflow-x-auto max-h-96">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600 text-xs uppercase sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 w-8 text-left"><input type="checkbox" checked={allOn} onChange={toggleAll} /></th>
+                    <th className="px-3 py-2 text-left font-medium">Sipariş No</th>
+                    <th className="px-3 py-2 text-left font-medium">Müşteri</th>
+                    <th className="px-3 py-2 text-right font-medium">Kalem</th>
+                    <th className="px-3 py-2 text-right font-medium">Tutar</th>
+                    <th className="px-3 py-2 text-left font-medium">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((p, i) => (
+                    <tr key={i} className={`border-t border-gray-100 ${p._already_imported ? "bg-gray-50" : ""}`}>
+                      <td className="px-3 py-2"><input type="checkbox" checked={sel.has(i)} onChange={() => toggle(i)} /></td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-900">{p.hepsiburada_order_number || p.order_number}</td>
+                      <td className="px-3 py-2 text-gray-900">{p.shipping_address?.first_name} {p.shipping_address?.last_name}</td>
+                      <td className="px-3 py-2 text-right text-gray-900">{p.items?.length || 0}</td>
+                      <td className="px-3 py-2 text-right text-gray-900">{fmtTL(p.total)}</td>
+                      <td className="px-3 py-2">
+                        {p._already_imported
+                          ? <span className="text-[11px] px-2 py-0.5 rounded bg-gray-200 text-gray-700">Zaten aktarıldı</span>
+                          : <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">Yeni</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {rawSample && (
+          <details className="text-xs">
+            <summary className="text-gray-500 cursor-pointer hover:text-black">Hepsiburada ham cevabı (debug — alan adları)</summary>
+            <pre className="text-[10px] mt-1 bg-gray-50 p-2 rounded border max-h-48 overflow-auto font-mono whitespace-pre-wrap">{JSON.stringify(rawSample, null, 2)}</pre>
+          </details>
+        )}
+      </div>
     </div>
   );
 }

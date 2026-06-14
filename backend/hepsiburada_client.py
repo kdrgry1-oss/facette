@@ -121,5 +121,45 @@ class HepsiburadaClient:
             page += 1
         return out
 
+    # ---------- Siparişler (OMS — Order Management System) ----------
+    # NOT: Siparişler MPOP'tan DEĞİL, ayrı OMS host'undan gelir. Auth aynı (Basic + User-Agent).
+    OMS_SANDBOX = "https://oms-external-sit.hepsiburada.com"
+    OMS_PROD = "https://oms-external.hepsiburada.com"
+
+    def _oms_base(self):
+        return self.OMS_SANDBOX if self.base == self.SANDBOX else self.OMS_PROD
+
+    def _oms_get(self, path, params=None):
+        url = self._oms_base() + path
+        if params:
+            clean = {k: v for k, v in params.items() if v not in (None, "")}
+            if clean:
+                url += "?" + urllib.parse.urlencode(clean)
+        req = urllib.request.Request(url, headers={
+            "Authorization": self._auth,
+            "User-Agent": self.dev_username,
+            "Accept": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                body = r.read().decode("utf-8", "replace")
+                return json.loads(body) if body else {}
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:800]
+            raise HepsiburadaError(f"OMS HTTP {e.code} {path} -> {detail}")
+        except urllib.error.URLError as e:
+            raise HepsiburadaError(f"OMS baglanti hatasi {path}: {e}")
+
+    def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100):
+        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler.
+        beginDate/endDate ISO-8601 (ör. 2026-06-01T00:00:00). OMS line-item bazlı döner."""
+        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}", params)
+
+    def get_order_by_number(self, order_number):
+        """Tek bir siparişi numarasına göre getirir."""
+        on = urllib.parse.quote(str(order_number), safe="")
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}/ordernumber/{on}")
+
 
 

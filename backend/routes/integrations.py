@@ -2796,6 +2796,175 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
         logger.error(f"Error importing selected orders: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================ HEPSİBURADA SİPARİŞLERİ (OMS) ============================
+class HbOrderPreviewReq(BaseModel):
+    begin_date: Optional[str] = None   # ISO: 2026-06-01T00:00:00
+    end_date: Optional[str] = None
+    order_number: Optional[str] = None
+
+class HbOrderImportReq(BaseModel):
+    orders: List[dict]
+
+def _hb_g(d: dict, *keys, default=""):
+    for k in keys:
+        v = (d or {}).get(k)
+        if v not in (None, ""):
+            return v
+    return default
+
+def _hb_normalize_lines(resp):
+    """OMS yanıtını kalem listesine indirger (list | {items|data|orders|content}...)."""
+    if isinstance(resp, list):
+        return resp
+    if isinstance(resp, dict):
+        for k in ("items", "data", "orders", "content", "lineItems", "details"):
+            v = resp.get(k)
+            if isinstance(v, list):
+                return v
+        if resp.get("orderNumber") or resp.get("orderId"):
+            return [resp]
+    return []
+
+def _hb_group_orders(lines):
+    """Kalemleri sipariş numarasına göre gruplar -> [{orderNumber, ...ortak..., lines:[...]}]."""
+    groups = {}
+    for ln in lines:
+        no = str(_hb_g(ln, "orderNumber", "orderId", "id", default="?"))
+        g = groups.get(no)
+        if not g:
+            g = {k: ln.get(k) for k in ("orderNumber", "orderId", "orderDate", "status",
+                 "customerName", "email", "customerEmail", "totalPrice", "shippingAddress",
+                 "shippingAddressDetail", "invoiceAddress", "customer") if k in ln}
+            g["orderNumber"] = no
+            g["lines"] = []
+            groups[no] = g
+        g["lines"].append(ln)
+    return list(groups.values())
+
+def map_hepsiburada_order(o: dict) -> dict:
+    from datetime import datetime, timezone
+    raw_no = str(_hb_g(o, "orderNumber", "orderId", "id"))
+    order_number = raw_no if raw_no.upper().startswith("HB") else f"HB{raw_no}"
+    lines = o.get("lines") or o.get("items") or []
+    items, subtotal = [], 0.0
+    for ln in lines:
+        try:
+            qty = int(float(_hb_g(ln, "quantity", "qty", default=1) or 1))
+        except Exception:
+            qty = 1
+        unit = float(_hb_g(ln, "price", "unitPrice", "totalPrice", "amount", default=0) or 0)
+        items.append({
+            "product_id": _hb_g(ln, "merchantSku", "sku", "hbSku", "productBarcode"),
+            "product_name": _hb_g(ln, "productName", "name", "lineItemName"),
+            "quantity": qty, "unit_price": unit, "price": unit,
+            "barcode": _hb_g(ln, "barcode", "productBarcode"),
+            "size": _hb_g(ln, "size", "variantValue"), "color": _hb_g(ln, "color"),
+            "currency": "TRY",
+        })
+        subtotal += unit * qty
+    total = float(_hb_g(o, "totalPrice", "totalAmount", default=subtotal) or subtotal)
+    ship = o.get("shippingAddress") or o.get("shippingAddressDetail") or {}
+    inv = o.get("invoiceAddress") or {}
+    cust = o.get("customer") or {}
+    cust_name = (_hb_g(o, "customerName") or _hb_g(cust, "name")
+                 or _hb_g(ship, "name", "firstName") or "Hepsiburada Müşterisi")
+    parts = str(cust_name).split(" ", 1)
+    return {
+        "order_number": order_number, "platform": "hepsiburada", "marketplace": "hepsiburada",
+        "hepsiburada_order_number": raw_no, "user_id": None, "items": items,
+        "shipping_address": {
+            "first_name": parts[0] if parts else "Hepsiburada",
+            "last_name": parts[1] if len(parts) > 1 else "Müşterisi",
+            "phone": _hb_g(ship, "phoneNumber", "phone", "gsm"),
+            "email": _hb_g(o, "email", "customerEmail"),
+            "address": _hb_g(ship, "address", "addressDetail", "fullAddress", "detail"),
+            "city": _hb_g(ship, "city"), "district": _hb_g(ship, "district", "town"),
+            "country": _hb_g(ship, "countryCode", "country", default="TR"),
+        },
+        "billing_address": {
+            "first_name": _hb_g(inv, "name", "firstName") or (parts[0] if parts else ""),
+            "last_name": _hb_g(inv, "lastName") or (parts[1] if len(parts) > 1 else ""),
+            "phone": _hb_g(inv, "phoneNumber", "phone"),
+            "address": _hb_g(inv, "address", "addressDetail", "fullAddress"),
+            "city": _hb_g(inv, "city"), "district": _hb_g(inv, "district", "town"),
+            "country": _hb_g(inv, "countryCode", "country", default="TR"),
+            "company_name": _hb_g(inv, "companyName", "company"),
+            "tax_number": _hb_g(inv, "taxNumber", "vkn"), "tax_office": _hb_g(inv, "taxOffice"),
+        },
+        "subtotal": subtotal, "shipping_cost": 0, "discount_amount": 0, "total": total,
+        "payment_method": "marketplace", "payment_status": "paid", "status": "confirmed",
+        "marketplace_status": _hb_g(o, "status"), "hb_order_date": _hb_g(o, "orderDate"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+def _hb_created_at(o):
+    from datetime import datetime, timezone
+    d = o.get("hb_order_date")
+    if isinstance(d, (int, float)) and d > 0:
+        try:
+            return datetime.fromtimestamp(d / 1000, tz=timezone.utc).isoformat()
+        except Exception:
+            pass
+    if isinstance(d, str) and len(d) >= 10 and "-" in d:
+        return d
+    return datetime.now(timezone.utc).isoformat()
+
+@router.post("/hepsiburada/orders/preview")
+async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict = Depends(require_admin)):
+    """Hepsiburada OMS'ten geçmiş siparişleri tarih aralığı veya sipariş no ile listeler (içe aktarmadan)."""
+    import asyncio
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        if req.order_number and req.order_number.strip():
+            resp = await asyncio.to_thread(client.get_order_by_number, req.order_number.strip())
+        else:
+            resp = await asyncio.to_thread(client.get_orders, req.begin_date, req.end_date, 0, 200)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Hepsiburada OMS hatası: {e}")
+    lines = _hb_normalize_lines(resp)
+    grouped = _hb_group_orders(lines)
+    preview = [map_hepsiburada_order(g) for g in grouped]
+    nums = [p["order_number"] for p in preview]
+    existing = set()
+    if nums:
+        async for o in db.orders.find({"order_number": {"$in": nums}, "platform": "hepsiburada"},
+                                       {"_id": 0, "order_number": 1}):
+            existing.add(o["order_number"])
+    for p in preview:
+        p["_already_imported"] = p["order_number"] in existing
+    return {"success": True, "count": len(preview), "orders": grouped, "preview": preview,
+            "raw_sample": (lines[:2] if isinstance(lines, list) else lines)}
+
+@router.post("/hepsiburada/orders/import-selected")
+async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user: dict = Depends(require_admin)):
+    """Önizlemeden seçilen Hepsiburada siparişlerini sisteme aktarır (Trendyol akışıyla aynı: stok düşümü + log)."""
+    imported = updated = 0
+    errors = []
+    for raw in req.orders:
+        order_data = map_hepsiburada_order(raw)
+        on = order_data["order_number"]
+        try:
+            existing = await db.orders.find_one({"order_number": on, "platform": "hepsiburada"})
+            if existing:
+                await db.orders.update_one({"_id": existing["_id"]},
+                                           {"$set": {k: v for k, v in order_data.items() if k != "status"}})
+                updated += 1
+            else:
+                order_data["id"] = generate_id()
+                order_data["created_at"] = _hb_created_at(order_data)
+                await db.orders.insert_one(order_data)
+                imported += 1
+                await _decrement_stock_for_imported_order(order_data, "hepsiburada")
+            await log_integration_event("hepsiburada", "import_order", "order", on, "success", "Sipariş aktarıldı.")
+        except Exception as e:
+            errors.append({"orderNumber": on, "error": str(e)})
+            await log_integration_event("hepsiburada", "import_order", "order", on, "error", f"Aktarım hatası: {e}", {"raw": raw})
+    return {"success": True, "imported": imported, "updated": updated, "errors": errors}
+
+
 @router.post("/trendyol/orders/import")
 async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     """Import orders from Trendyol (Last 15 days) auto job"""
