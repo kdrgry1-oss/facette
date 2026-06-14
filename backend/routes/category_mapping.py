@@ -129,15 +129,15 @@ async def _get_hb_client():
     sk = (cr.get("secret_key") or cr.get("password") or "").strip()
     du = (cr.get("dev_username") or "").strip()
     env = (cr.get("env") or cr.get("mode") or "").strip().lower()
-    # 2) Yedek: eski db.settings (Entegrasyonlar modali)
-    if not (mid and sk and du):
+    # 2) Yedek: eski db.settings (Entegrasyonlar modali). Kimlik VE ortam icin tamamlayici.
+    if not (mid and sk and du) or not env:
         s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
         mid = mid or (s.get("merchant_id") or "").strip()
         sk = sk or (s.get("secret_key") or s.get("password") or "").strip()
         du = du or (s.get("dev_username") or "").strip()
         env = env or (s.get("mode") or "").strip().lower()
     if not (mid and sk and du):
-        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Pazaryerleri Yönetimi → Hepsiburada altından kaydedin."
+        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Entegrasyonlar → Hepsiburada altından kaydedin."
     test = env not in ("prod", "production", "live", "canli", "canlı")
     from hepsiburada_client import HepsiburadaClient
     return HepsiburadaClient(mid, sk, du, test=test), None

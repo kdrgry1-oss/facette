@@ -6974,9 +6974,17 @@ async def get_marketplace_status(marketplace: str):
     settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
     if not settings:
         return {"configured": False, "mode": "sandbox"}
+    mode_raw = (settings.get("mode") or "sandbox").strip().lower()
+    is_live = mode_raw in ("live", "production", "prod", "canli", "canlı")
+    if marketplace == "hepsiburada":
+        configured = bool(settings.get("is_active") and settings.get("merchant_id")
+                          and (settings.get("secret_key") or settings.get("password"))
+                          and settings.get("dev_username"))
+    else:
+        configured = bool(settings.get("is_active") and (settings.get("api_key") or settings.get("merchant_id")))
     return {
-        "configured": bool(settings.get("is_active") and settings.get("api_key")),
-        "mode": settings.get("mode", "sandbox"),
+        "configured": configured,
+        "mode": "live" if is_live else "sandbox",
         "merchant_id": settings.get("merchant_id", "") if settings.get("is_active") else None
     }
 
