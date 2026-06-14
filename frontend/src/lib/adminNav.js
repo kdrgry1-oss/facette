@@ -5,7 +5,7 @@
  * DEĞİŞTİRMEYİN — aksi takdirde mevcut tercihler bozulur.
  */
 import {
-  LayoutDashboard, Package, ShoppingCart, Tags, Image,
+  LayoutDashboard, Package, ShoppingCart, Tags, Image, Phone,
   Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle, Trash2,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
   Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain, Mail, Rss,
@@ -21,6 +21,7 @@ export const navigationGroups = [
     icon: ShoppingCart,
     children: [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
+      { label: "Telefonla Sipariş", path: "/admin/telefonla-siparis", icon: Phone },
       { label: "İadeler", path: "/admin/iadeler", icon: RotateCcw },
       { label: "İptaller", path: "/admin/iptaller", icon: XCircle },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },

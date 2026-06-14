@@ -337,7 +337,7 @@ async def list_deleted_orders(
     search: str = "",
     current_user: dict = Depends(require_admin),
 ):
-    """Silinen (arşivlenen) siparişler — deleted_orders koleksiyonundan, en yeni üstte."""
+    """Silinen (arşivlenen) siparişler — orders_deleted koleksiyonundan, en yeni üstte."""
     q = {}
     if search:
         q["$or"] = [
@@ -351,8 +351,8 @@ async def list_deleted_orders(
     except Exception:
         limit, page = 50, 1
     skip = (page - 1) * limit
-    total = await db.deleted_orders.count_documents(q)
-    items = await db.deleted_orders.find(q, {"_id": 0}).sort("deleted_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.orders_deleted.count_documents(q)
+    items = await db.orders_deleted.find(q, {"_id": 0}).sort("deleted_at", -1).skip(skip).limit(limit).to_list(limit)
     return {"orders": items, "total": total, "page": page, "limit": limit}
 
 
@@ -976,7 +976,7 @@ async def delete_order(
     order_id: str,
     current_user: dict = Depends(require_admin)
 ):
-    """Siparişi sil — fiziksel silmeden ÖNCE deleted_orders arşivine taşı.
+    """Siparişi sil — fiziksel silmeden ÖNCE orders_deleted arşivine taşı.
     Böylece 'Silinen Siparişler' sayfasından görülüp geri alınabilir; ana orders
     sorguları/raporları/dashboard hiç etkilenmez."""
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
@@ -985,7 +985,7 @@ async def delete_order(
     order["deleted_at"] = datetime.now(timezone.utc).isoformat()
     order["deleted_by"] = current_user.get("email", "")
     try:
-        await db.deleted_orders.replace_one({"id": order_id}, order, upsert=True)
+        await db.orders_deleted.replace_one({"id": order_id}, order, upsert=True)
     except Exception as _e:
         logger.warning(f"archive deleted order failed {order_id}: {_e}")
     await db.orders.delete_one({"id": order_id})
@@ -1000,7 +1000,7 @@ async def restore_deleted_order(
     current_user: dict = Depends(require_admin)
 ):
     """Arşivlenen (silinen) siparişi orders'a geri taşır."""
-    arch = await db.deleted_orders.find_one({"id": order_id}, {"_id": 0})
+    arch = await db.orders_deleted.find_one({"id": order_id}, {"_id": 0})
     if not arch:
         raise HTTPException(status_code=404, detail="Silinen sipariş bulunamadı")
     arch.pop("deleted_at", None)
@@ -1010,7 +1010,7 @@ async def restore_deleted_order(
     arch["restored_at"] = now_iso
     arch["restored_by"] = current_user.get("email", "")
     await db.orders.replace_one({"id": order_id}, arch, upsert=True)
-    await db.deleted_orders.delete_one({"id": order_id})
+    await db.orders_deleted.delete_one({"id": order_id})
     await _log_order_event(order_id, "status", "Sipariş geri alındı (arşivden)", current_user, {},
                            order_number=arch.get("order_number", ""))
     return {"message": "Sipariş geri alındı", "restored": True}

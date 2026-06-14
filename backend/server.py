@@ -154,7 +154,7 @@ async def lifespan(app: FastAPI):
         await db.orders.create_index([("payment_status", 1), ("created_at", -1)])
         await db.order_events.create_index([("order_id", 1), ("created_at", -1)])
         await db.order_events.create_index([("created_at", -1)])
-        await db.deleted_orders.create_index([("deleted_at", -1)])
+        await db.orders_deleted.create_index([("deleted_at", -1)])
         await db.users.create_index("email", unique=True)
         # Security audit indexes — fast forensic queries as the collection grows
         await db.auth_audit_logs.create_index([("created_at", -1)])

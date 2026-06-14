@@ -23,6 +23,7 @@ import AdminLogin from "./pages/admin/AdminLogin";
 import AdminReturns from "./pages/admin/Returns";
 import AdminCancellations from "./pages/admin/Cancellations";
 import DeletedOrders from "./pages/admin/DeletedOrders";
+import TelefonSiparis from "./pages/admin/TelefonSiparis";
 import AttributeImport from "./pages/admin/AttributeImport";
 import AdminQuestions from "./pages/admin/Questions";
 import TrendyolLogs from "./pages/admin/TrendyolLogs";
@@ -109,6 +110,7 @@ export default function AdminApp() {
         <Route path="iadeler" element={<AdminReturns />} />
         <Route path="iptaller" element={<AdminCancellations />} />
         <Route path="silinen-siparisler" element={<DeletedOrders />} />
+        <Route path="telefonla-siparis" element={<TelefonSiparis />} />
         <Route path="iade-edilenler" element={<Navigate to="/admin/iadeler" replace />} />
         <Route path="sayfalar" element={<AdminPages />} />
         <Route path="ayarlar" element={<AdminSettings />} />
