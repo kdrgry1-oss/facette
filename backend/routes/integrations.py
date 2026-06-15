@@ -3031,31 +3031,98 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
     return {"success": True, "imported": imported, "updated": updated, "errors": errors}
 
 
+_BACKFILL_BG_TASKS: set = set()
+
+
+async def _run_cancellation_backfill_bg(config: dict, days_back: int):
+    """Ağır iptal backfill'i ARKA PLANDA çalıştırır (HTTP isteğini bloklamaz → proxy
+    timeout / Network Error olmaz). İlerlemeyi db.settings:trendyol_backfill_status'a yazar."""
+    import asyncio as _aio
+    from trendyol_client import TrendyolClient
+    try:
+        client = TrendyolClient(
+            supplier_id=config["supplier_id"], api_key=config["api_key"],
+            api_secret=config["api_secret"], mode=config["mode"],
+        )
+        now = datetime.now(timezone.utc)
+        total_window = timedelta(days=days_back)
+        chunk = timedelta(days=14)
+        cancel_updated = 0
+        cur_end = now
+        while (now - cur_end) < total_window:
+            cur_start = cur_end - chunk
+            if (now - cur_start) > total_window:
+                cur_start = now - total_window
+            try:
+                cancel_updated += await _sync_trendyol_status_passes(
+                    client, int(cur_start.timestamp() * 1000), int(cur_end.timestamp() * 1000),
+                    widen_cancel=False,
+                )
+            except Exception as _ce:
+                logger.error(f"[backfill cancel chunk] {_ce}")
+            cur_end = cur_start
+            await _aio.sleep(0.3)  # Trendyol rate limit
+            if cur_start <= now - total_window:
+                break
+        # Gerçek sebepleri çek + iptal siparişlerine bağla
+        claims_result = {}
+        try:
+            claims_result = await sync_trendyol_claims(days_back=days_back, current_user={"is_admin": True})
+        except Exception as _cl:
+            claims_result = {"error": str(_cl)}
+        total_cancelled = await db.orders.count_documents({"platform": "trendyol", "status": "cancelled"})
+        await db.settings.update_one(
+            {"id": "trendyol_backfill_status"},
+            {"$set": {
+                "id": "trendyol_backfill_status", "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "cancel_updated": cancel_updated, "total_trendyol_cancelled": total_cancelled,
+                "days_back": days_back, "claims": claims_result, "error": None,
+            }},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.error(f"[backfill bg] {e}")
+        try:
+            await db.settings.update_one(
+                {"id": "trendyol_backfill_status"},
+                {"$set": {"id": "trendyol_backfill_status", "running": False,
+                          "finished_at": datetime.now(timezone.utc).isoformat(), "error": str(e)}},
+                upsert=True,
+            )
+        except Exception:
+            pass
+
+
 @router.post("/trendyol/cancellations/backfill")
 async def backfill_trendyol_cancellations(
     days_back: int = 180,
     current_user: dict = Depends(require_admin),
 ):
-    """Eski/eksik Trendyol iptallerini GENİŞ pencerede toplu çeker. Trendyol sipariş ucu
-    sorgu başına ~14 günle sınırlı olduğundan dönemi 14 günlük dilimlere bölüp tarar;
-    İptaller'e düşmemiş iptalleri ekler/işaretler ve Claims API'sinden gerçek sebepleri
-    bağlar. diagnostic_sample: ham iptal kaydının alanları (gerçek sebep alanını görmek için)."""
+    """Eski/eksik Trendyol iptallerini GENİŞ pencerede toplu çeker. AĞIR iş ARKA PLANDA
+    koşar (HTTP isteği anında döner → proxy/Network Error olmaz). Hızlı teşhis hemen döner;
+    ilerleme /trendyol/cancellations/backfill/status'tan izlenir."""
     import asyncio as _aio
     config = await get_trendyol_config()
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    days_back = max(1, min(int(days_back or 180), 365))
+
+    # Zaten çalışan bir backfill var mı?
+    _cur = await db.settings.find_one({"id": "trendyol_backfill_status"}, {"_id": 0})
+    if _cur and _cur.get("running"):
+        return {"started": False, "already_running": True,
+                "message": "Bir backfill zaten çalışıyor. Lütfen bitmesini bekleyin."}
+
     from trendyol_client import TrendyolClient
     client = TrendyolClient(
         supplier_id=config["supplier_id"], api_key=config["api_key"],
         api_secret=config["api_secret"], mode=config["mode"],
     )
-    days_back = max(1, min(int(days_back or 180), 365))
     now = datetime.now(timezone.utc)
-    total_window = timedelta(days=days_back)
     chunk = timedelta(days=14)
 
-    # TEŞHİS: ilk iptal siparişinin ham alanlarını yakala (Trendyol public API iptal
-    # sebebini hangi alanda veriyor görmek için — sonraki düzeltme buna göre yapılır).
+    # HIZLI TEŞHİS (tek sorgu) — ham iptal kaydının alanlarını hemen döndür.
     sample = None
     try:
         _se = int(now.timestamp() * 1000)
@@ -3070,40 +3137,31 @@ async def backfill_trendyol_cancellations(
     except Exception as _de:
         sample = {"error": str(_de)}
 
-    cancel_updated = 0
-    cur_end = now
-    while (now - cur_end) < total_window:
-        cur_start = cur_end - chunk
-        if (now - cur_start) > total_window:
-            cur_start = now - total_window
-        try:
-            cancel_updated += await _sync_trendyol_status_passes(
-                client, int(cur_start.timestamp() * 1000), int(cur_end.timestamp() * 1000),
-                widen_cancel=False,
-            )
-        except Exception as _ce:
-            logger.error(f"[backfill cancel chunk] {_ce}")
-        cur_end = cur_start
-        await _aio.sleep(0.3)  # Trendyol rate limit
-        if cur_start <= now - total_window:
-            break
+    # Durum kaydını "running" yap ve ağır işi arka planda başlat.
+    await db.settings.update_one(
+        {"id": "trendyol_backfill_status"},
+        {"$set": {"id": "trendyol_backfill_status", "running": True,
+                  "started_at": datetime.now(timezone.utc).isoformat(),
+                  "days_back": days_back, "finished_at": None, "error": None,
+                  "diagnostic_sample": sample}},
+        upsert=True,
+    )
+    _t = _aio.create_task(_run_cancellation_backfill_bg(config, days_back))
+    _BACKFILL_BG_TASKS.add(_t)
+    _t.add_done_callback(_BACKFILL_BG_TASKS.discard)
 
-    # Gerçek sebepleri çek + iptal siparişlerine bağla (Claims API; geniş pencere)
-    claims_result = {}
-    try:
-        claims_result = await sync_trendyol_claims(days_back=days_back, current_user={"is_admin": True})
-    except Exception as _cl:
-        claims_result = {"error": str(_cl)}
-
-    total_cancelled = await db.orders.count_documents({"platform": "trendyol", "status": "cancelled"})
     return {
-        "message": f"Backfill tamam: {cancel_updated} iptal kaydı eklendi/güncellendi (son {days_back} gün). Trendyol iptal toplamı şimdi: {total_cancelled}.",
-        "cancel_updated": cancel_updated,
-        "total_trendyol_cancelled": total_cancelled,
-        "days_back": days_back,
-        "claims": claims_result,
+        "started": True,
+        "message": f"Backfill arka planda başladı (son {days_back} gün). Birkaç dakika sürebilir; bitince liste otomatik yenilenir.",
         "diagnostic_sample": sample,
     }
+
+
+@router.get("/trendyol/cancellations/backfill/status")
+async def backfill_trendyol_cancellations_status(current_user: dict = Depends(require_admin)):
+    """Backfill ilerleme/sonuç durumunu döner (frontend yoklaması için)."""
+    doc = await db.settings.find_one({"id": "trendyol_backfill_status"}, {"_id": 0})
+    return doc or {"running": False}
 
 
 @router.post("/trendyol/orders/import")
