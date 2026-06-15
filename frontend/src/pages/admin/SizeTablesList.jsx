@@ -16,7 +16,7 @@ export default function SizeTablesList() {
     (async () => {
       setLoading(true);
       try {
-        const { data } = await axios.get(`${API}/products?limit=500`, { headers: authHeaders() });
+        const { data } = await axios.get(`${API}/products?limit=500&admin_view=1`, { headers: authHeaders() });
         setProducts(data.products || data || []);
       } finally { setLoading(false); }
     })();

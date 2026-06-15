@@ -60,7 +60,7 @@ export default function ProductionPlan() {
       const [r, m, p, c] = await Promise.all([
         axios.get(`${API}/production-plan?search=${encodeURIComponent(search)}`, auth),
         axios.get(`${API}/vendors?vendor_type=manufacturer`, auth),
-        axios.get(`${API}/products?limit=500`, auth),
+        axios.get(`${API}/products?limit=500&admin_view=1`, auth),
         axios.get(`${API}/production-plan/collections`, auth),
       ]);
       setRows(r.data?.items || []);

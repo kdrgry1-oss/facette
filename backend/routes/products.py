@@ -320,6 +320,7 @@ async def get_products(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     status: Optional[str] = None,
+    admin_view: Optional[str] = None,
     brand: Optional[str] = None,
     min_stock: Optional[int] = None,
     max_stock: Optional[int] = None,
@@ -378,7 +379,13 @@ async def get_products(
                 _is_admin = True
         except Exception:
             pass
-    if status is None and _is_admin:
+    # KRİTİK: AuthContext token'ı GLOBAL eklediği için (axios.defaults) storefront
+    # istekleri de admin token taşır → _is_admin TEK BAŞINA storefront/admin ayrımı
+    # YAPAMAZ. Bu yüzden pasif/görselsiz ürünleri yalnızca admin panelin AÇIK
+    # `admin_view=1` bayrağıyla gösteririz. Storefront bu bayrağı göndermez → token
+    # olsa bile MÜŞTERİ görünümü alır (pasifler gizli).
+    _admin_view = _is_admin and str(admin_view or "").strip().lower() in ("1", "true", "yes", "evet")
+    if status is None and _admin_view:
         status = "all"
 
     # Status default to active for storefront compatibility unless specified differently
@@ -396,7 +403,7 @@ async def get_products(
     #     (çoğu import'tan gelen yarım kayıt) vitrinde gizlenir.
     # Bu, status parametresi ne gelirse gelsin storefront'u korur.
     # ===================================================================
-    if not _is_admin:
+    if not _admin_view:
         query["is_active"] = True
         query["images.0"] = {"$exists": True}
 
@@ -649,7 +656,7 @@ async def get_products(
 
     sort_order = -1 if order == "desc" else 1
 
-    if not _is_admin:
+    if not _admin_view:
         # ===============================================================
         # STOREFRONT: tükenen ürünler (efektif stok 0) ilgili listenin/
         # kategorinin EN SONUNDA gösterilir. Efektif stok = varyant varsa

@@ -665,7 +665,7 @@ export default function AdminProducts() {
       };
       Object.entries(tfMap).forEach(([k, param]) => set(param, f[k]));
 
-      const res = await axios.get(`${API}/products?${p.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(`${API}/products?${p.toString()}&admin_view=1`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts(res.data?.products || []);
       setTotal(res.data?.total || 0);
     } catch (err) {
@@ -1149,10 +1149,27 @@ export default function AdminProducts() {
       price: product.price || 0,
       sale_price: product.sale_price || null,
       category_name: product.category_name || "",
-      categories: (Array.isArray(product.categories) && product.categories.length)
-        ? product.categories
-        : (product.category_id ? [product.category_id]
-           : (categories.find(c => c.name === product.category_name)?.id ? [categories.find(c => c.name === product.category_name).id] : [])),
+      categories: (() => {
+        // Yaprak seçim: önce product.categories, yoksa category_id / category_name eşlemesi.
+        const leaf = (Array.isArray(product.categories) && product.categories.length)
+          ? product.categories.map(String)
+          : (product.category_id ? [String(product.category_id)]
+             : (categories.find(c => c.name === product.category_name)?.id
+                ? [String(categories.find(c => c.name === product.category_name).id)] : []));
+        // Ürünün GERÇEK üyeliği category_ids'te (En Yeniler dâhil). category_ids ataları da
+        // içerir; bu yüzden seçili yaprakların ATALARINI hariç tutup yalnızca "ekstra"
+        // üyelikleri (örn. En Yeniler) ekleriz → form gerçek üyeliği yansıtır, category_name bozulmaz.
+        const all = Array.isArray(product.category_ids) ? product.category_ids.map(String) : [];
+        if (!all.length) return leaf;
+        const byId = new Map(categories.map(c => [String(c.id), c]));
+        const anc = new Set();
+        for (const lid of leaf) {
+          let cur = byId.get(lid), g = 0;
+          while (cur && cur.parent_id && g++ < 20) { anc.add(String(cur.parent_id)); cur = byId.get(String(cur.parent_id)); }
+        }
+        const extras = all.filter(id => !leaf.includes(id) && !anc.has(id) && byId.has(id));
+        return [...leaf, ...extras];
+      })(),
       brand: product.brand || "FACETTE",
       images: product.images || [],
       is_active: product.is_active ?? true,
