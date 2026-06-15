@@ -860,6 +860,148 @@ async def _dhl_cargo_poll_tick():
         logger.info(f"[scheduler][dhl] polled {processed} site order(s)")
 
 
+async def _return_cargo_poll_tick():
+    """Her 5 dk: müşteriden depoya gelen İADE kargolarını MNG'den sorgula.
+      - Kargo hareketi (ilk okutma) -> 'return_in_transit' (İade Kargoda) + bildirim
+      - Depoya teslim -> 'returned' (Teslim Alındı; Aksiyon'a düşer) + returned_at + bildirim
+      - Barkod 3 gün geçerli: süre dolmuş + hâlâ kargoya verilmemiş -> 'expired'
+    customer_returns.status: created -> in_transit -> received | expired
+    orders.status:           return_requested -> return_in_transit -> returned
+    SOAP çağrıları thread executor'da çalışır (event loop bloklanmaz).
+    """
+    from routes.deps import db  # lazy
+    try:
+        from routes.orders import _get_mng_settings
+        from order_statuses import get_status_config
+        from notification_service import send_notification
+        from mng_kargo_client import get_mng_shipment_status
+    except Exception as e:
+        logger.warning(f"[scheduler][return] import skip: {e}")
+        return
+
+    s = await _get_mng_settings()
+    if not s.get("is_active") or not s.get("username"):
+        return
+    user, pw = s["username"], s["password"]
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    cutoff = (now - timedelta(days=45)).isoformat()
+    q = {
+        "status": {"$in": ["created", "in_transit"]},
+        "created_at": {"$gt": cutoff},
+        "$or": [
+            {"mng_ref": {"$nin": [None, ""]}},
+            {"return_code": {"$nin": [None, ""]}},
+        ],
+    }
+    try:
+        cfg = await get_status_config(db)
+    except Exception:
+        cfg = {"notify": {}}
+    notify = cfg.get("notify") or {}
+
+    def _expired(vu):
+        if not vu:
+            return False
+        try:
+            d = datetime.fromisoformat(str(vu).replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+        except Exception:
+            return False
+        return now > d
+
+    processed = 0
+    try:
+        async for rec in db.customer_returns.find(q, {"_id": 0, "barcode_png_b64": 0}).limit(120):
+            ref = str(rec.get("mng_ref") or rec.get("return_code") or "").strip()
+            if not ref:
+                continue
+            cur = rec.get("status")  # created | in_transit
+
+            try:
+                info = await asyncio.to_thread(
+                    get_mng_shipment_status, username=user, password=pw, siparis_no=ref
+                )
+            except Exception as e:
+                logger.warning(f"[scheduler][return] status err {ref}: {e}")
+                await asyncio.sleep(0.2)
+                continue
+
+            moved = delivered = False
+            teslim = aciklama = ""
+            if info and info.get("ok"):
+                teslim = (info.get("teslim_tarihi") or "").strip()
+                statu = (info.get("kargo_statu") or "0").strip()
+                aciklama = (info.get("kargo_statu_aciklama") or "")
+                _alow = aciklama.lower()
+                delivered = bool(teslim) or ("teslim" in _alow and "edilemedi" not in _alow)
+                _acc_kw = ("kabul", "şube", "sube", "okut", "teslim alın", "teslim alin",
+                           "işleme", "isleme", "çıkış", "cikis", "girdi", "transfer",
+                           "dağıt", "dagit", "yola")
+                moved = (statu not in ("", "0")) or any(k in _alow for k in _acc_kw)
+
+            new_ret = new_order = ev = None
+            ostamp = {}
+            if delivered:
+                new_ret, new_order, ev = "received", "returned", "order_returned"
+                ostamp["returned_at"] = _parse_tr_dt(teslim) or now_iso
+            elif moved and cur == "created":
+                new_ret, new_order, ev = "in_transit", "return_in_transit", "order_return_in_transit"
+                ostamp["return_shipped_at"] = now_iso
+
+            # Hareket yok / hâlâ created ve 3 günlük barkod süresi dolmuş -> expired
+            if new_ret is None:
+                if cur == "created" and _expired(rec.get("valid_until")):
+                    await db.customer_returns.update_one({"id": rec["id"]},
+                        {"$set": {"status": "expired", "updated_at": now_iso}})
+                    logger.info(f"[scheduler][return] {ref} -> expired (barkod 3g doldu)")
+                await asyncio.sleep(0.2)
+                continue
+
+            if new_ret == cur:  # idempotent
+                await asyncio.sleep(0.2)
+                continue
+
+            await db.customer_returns.update_one({"id": rec["id"]},
+                {"$set": {"status": new_ret, "cargo_status_text": aciklama, "updated_at": now_iso}})
+            order = await db.orders.find_one(
+                {"id": rec.get("order_id")},
+                {"_id": 0, "shipping_address": 1, "phone": 1, "email": 1, "total": 1}) or {}
+            await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
+                "status": new_order, "return_request.status": new_ret,
+                "updated_at": now_iso, **ostamp,
+            }})
+
+            nz = notify.get(new_order) or notify.get(new_ret) or {}
+            ch = [c for c in ("sms", "email") if nz.get(c)]
+            if ch and ev:
+                addr = order.get("shipping_address") or {}
+                try:
+                    await send_notification(
+                        db, ev,
+                        to_phone=addr.get("phone") or order.get("phone"),
+                        to_email=addr.get("email") or order.get("email"),
+                        variables={
+                            "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
+                            "order_number": rec.get("order_number", ""),
+                            "tracking_number": ref,
+                        },
+                        channels=ch,
+                    )
+                except Exception as e:
+                    logger.warning(f"[scheduler][return] notif {ref}: {e}")
+
+            logger.info(f"[scheduler][return] {ref} {cur} -> {new_ret}")
+            processed += 1
+            await asyncio.sleep(0.25)
+    except Exception as e:
+        logger.exception(f"[scheduler][return] poll tick failed: {e}")
+    if processed:
+        logger.info(f"[scheduler][return] polled {processed} return cargo(s)")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -1005,6 +1147,15 @@ def start_scheduler():
         minutes=5,
         id="dhl_cargo_poll",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
+        _return_cargo_poll_tick,
+        "interval",
+        minutes=5,
+        id="return_cargo_poll",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
         max_instances=1,
         coalesce=True,
     )

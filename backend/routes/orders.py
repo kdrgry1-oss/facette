@@ -3247,7 +3247,7 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     rec = {
         "id": rid, "order_id": order["id"], "order_number": order.get("order_number", ""),
         "user_id": order.get("user_id"), "items": items, "reason": reason,
-        "return_code": return_code, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
+        "return_code": return_code, "mng_ref": ref, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
         "barcode_png_b64": png_b64, "status": "created",
         "created_at": now_iso, "valid_until": valid_until,
     }
@@ -3647,7 +3647,7 @@ async def reissue_return_barcode(return_id: str,
     now = datetime.now(timezone.utc)
     valid_until = (now + timedelta(days=3)).isoformat()
     await db.customer_returns.update_one({"id": return_id}, {"$set": {
-        "return_code": code, "mng_ok": mng_ok, "barcode_png_b64": png_b64,
+        "return_code": code, "mng_ref": ref, "mng_ok": mng_ok, "barcode_png_b64": png_b64,
         "valid_until": valid_until, "updated_at": now.isoformat(),
         "status": "created" if rec.get("status") in (None, "created", "in_transit") else rec.get("status"),
     }})
