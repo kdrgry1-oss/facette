@@ -5631,6 +5631,33 @@ async def get_xml_feed_status():
 
 # ==================== TRENDYOL CLAIMS (İADE/İPTAL) ====================
 
+# Trendyol claim objesinde claim-level "status" alanı YOKTUR. Statü item bazındadır:
+# items[].claimItems[].claimItemStatus.name. Genel statü item'lardan türetilir.
+_CLAIM_STATUS_PRIORITY = ["WaitingInAction", "InAnalysis", "Created", "Unresolved", "Rejected", "Cancelled", "Accepted"]
+
+
+def _derive_claim_status(claim: dict) -> str:
+    """Trendyol claim objesinden genel statüyü item statülerinden türetir.
+
+    Bir item bile aksiyon bekliyorsa (WaitingInAction/InAnalysis) claim aksiyon bekler;
+    yoksa açık talep (Created) baskındır; hepsi terminal ise Accepted/Rejected/Cancelled.
+    Hiç statü bulunamazsa "" döner.
+    """
+    statuses = []
+    for item in (claim.get("items") or []):
+        for ci in (item.get("claimItems") or []):
+            nm = ((ci.get("claimItemStatus") or {}).get("name") or "").strip()
+            if nm:
+                statuses.append(nm)
+    if not statuses:
+        return ""
+    sset = set(statuses)
+    for p in _CLAIM_STATUS_PRIORITY:
+        if p in sset:
+            return p
+    return statuses[0]
+
+
 def _claim_bucket(c: dict) -> str:
     """Bir Trendyol claim'ini sekme kovasına eşler (status + kargo takip durumuna göre).
 
@@ -5662,7 +5689,7 @@ def _first_seen_stamps(claim: dict) -> dict:
     lastModifiedDate (ms epoch) varsa onu, yoksa şimdiyi kullanır. İdempotent katkı:
     yalnız ilgili terminal durumda alan döner; aksi halde boş dict.
     """
-    st = claim.get("status", "")
+    st = _derive_claim_status(claim)
     lm = claim.get("lastModifiedDate")
     iso = ""
     if lm:
@@ -5756,7 +5783,7 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                     {"_id": 1, "return_approved_at": 1, "return_rejected_at": 1}
                 )
                 if existing_claim:
-                    _new_status = claim.get("status", "")
+                    _new_status = _derive_claim_status(claim)
                     _lm = claim.get("lastModifiedDate")
                     _lm_iso = ""
                     if _lm:
@@ -5892,7 +5919,7 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                     "order_number": order_number,
                     "claim_type": claim_type,
                     "claim_reason": claim_reason,
-                    "claim_status": claim.get("status", "Returned"),
+                    "claim_status": _derive_claim_status(claim),
                     **_first_seen_stamps(claim),
                     "customer_name": f"{claim.get('customerFirstName', '')} {claim.get('customerLastName', '')}".strip(),
                     "created_date": created_date_str,
@@ -6206,6 +6233,46 @@ async def trendyol_claims_diagnostics(current_user: dict = Depends(require_admin
         },
         "note": "by_bucket panel ile tutmazsa _claim_bucket eşlemesi by_status_raw'a göre ayarlanır.",
     }
+
+
+@router.post("/trendyol/claims/repair-status")
+async def repair_trendyol_claim_status(current_user: dict = Depends(require_admin)):
+    """Mevcut TÜM claim kayıtlarının statüsünü KAYITLI raw_data'dan yeniden türetir.
+
+    Eski sync, claim-level olmayan `status` alanını okuduğu için kayıtlar statüsüz
+    yazılmıştı. Bu uç Trendyol API'sine YENİ istek atmadan raw_data'daki gerçek item
+    statülerinden (claimItemStatus.name) claim_status'ü, kargo alanlarını ve onay/ret
+    tarih damgalarını yeniden hesaplar. İdempotent — tekrar çağrılabilir.
+    """
+    cursor = db.trendyol_claims.find(
+        {}, {"_id": 0, "claim_id": 1, "raw_data": 1, "return_approved_at": 1, "return_rejected_at": 1}
+    )
+    scanned = 0
+    fixed = 0
+    bucket_after = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    async for c in cursor:
+        scanned += 1
+        raw = c.get("raw_data") or {}
+        if not raw:
+            continue
+        new_status = _derive_claim_status(raw)
+        cargo_no = str(raw.get("cargoTrackingNumber", "") or "")
+        _set = {
+            "claim_status": new_status,
+            "cargo_tracking_number": cargo_no,
+            "cargo_provider_name": raw.get("cargoProviderName", "") or "",
+        }
+        stamps = _first_seen_stamps(raw)
+        if stamps.get("return_approved_at") and not c.get("return_approved_at"):
+            _set["return_approved_at"] = stamps["return_approved_at"]
+        if stamps.get("return_rejected_at") and not c.get("return_rejected_at"):
+            _set["return_rejected_at"] = stamps["return_rejected_at"]
+        await db.trendyol_claims.update_one({"claim_id": c["claim_id"]}, {"$set": _set})
+        fixed += 1
+        b = _claim_bucket({"claim_status": new_status, "cargo_tracking_number": cargo_no})
+        if b in bucket_after:
+            bucket_after[b] += 1
+    return {"scanned": scanned, "fixed": fixed, "bucket_after": bucket_after}
 
 
 @router.get("/trendyol/claims/issue-reasons")
