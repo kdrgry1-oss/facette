@@ -90,6 +90,91 @@ async def _run_trendyol_auto_products_sync():
             pass
 
 
+async def _update_existing_trendyol_order(_db, existing, data, number, restock_source):
+    """Mevcut Trendyol siparişini günceller: status DIŞI alanları (isim/adres/kalem)
+    tazeler VE terminal pazaryeri durumlarını (iptal/iade) YANSITIR.
+
+    Eksik iptal kök nedeni: statussuz genel çekiş TÜM durumları döndürür (Cancelled
+    dahil) ama eskiden status hariç tutulduğu için satıcı/stok iptalleri (claim
+    ÜRETMEZ) 'confirmed' kalıp İptaller'e hiç düşmüyordu. Artık terminal durum
+    yansıtılır; confirmed→cancelled geçişinde idempotent stok iadesi yapılır
+    (status pass ile AYNI guard: stock_movements type=order_cancelled).
+
+    Döner: flipped_to_cancelled (bool).
+    """
+    _set = {k: v for k, v in data.items() if k != "status"}
+    _new_status = data.get("status")
+    _prev_status = existing.get("status")
+    if _new_status in ("cancelled", "returned") and _prev_status != _new_status:
+        _set["status"] = _new_status
+        if _new_status == "cancelled":
+            _set.setdefault("cancel_source", "trendyol")
+    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": _set})
+    _flipped = (_new_status == "cancelled" and _prev_status != "cancelled")
+    if _flipped and existing.get("id"):
+        try:
+            _already = await _db.stock_movements.find_one(
+                {"order_id": existing.get("id"), "type": "order_cancelled"}, {"_id": 1}
+            )
+            if not _already:
+                from routes.orders import _stock_delta_for_order
+                _moves = await _stock_delta_for_order(existing, +1)
+                await _db.stock_movements.insert_one({
+                    "id": str(uuid.uuid4()), "type": "order_cancelled",
+                    "order_id": existing.get("id"), "order_number": number,
+                    "items": _moves, "source": restock_source,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as _re:
+            logger.error(f"[cron] iptal restock {number}: {_re}")
+    return _flipped
+
+
+async def _reconcile_trendyol_terminal_30d(client):
+    """30 GÜNLÜK STATUSSUZ uzlaştırma — saatlik geniş taramadan çağrılır (hafif
+    cadence, sık değil → yük riski yok). Statussuz çekiş tüm durumları getirir;
+    terminal duruma (iptal/iade) geçmiş ama Facette'te güncellenmemiş siparişleri
+    İptaller/İadeler'e indirir. Satıcı/stok iptalleri (claim üretmeyen) buradan
+    garanti yakalanır. 14 günlük sık pull'un kaçırdığı 14-30 gün bandını kapatır."""
+    from datetime import datetime as _dt, timedelta as _td
+    from routes.deps import db as _db, generate_id
+    from routes.integrations import map_trendyol_order, _ms_to_iso
+    now_ = _dt.now()
+    start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
+    end_ms = int(now_.timestamp() * 1000)
+    flipped = 0
+    inserted = 0
+    page = 0
+    while page < 50:
+        resp = await client.get_orders(start_date_ms=start_ms, end_date_ms=end_ms, size=200, page=page)
+        chunk = resp.get("content", []) or []
+        for t_order in chunk:
+            try:
+                number = str(t_order.get("orderNumber"))
+                data = map_trendyol_order(t_order)
+                existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
+                if existing:
+                    if await _update_existing_trendyol_order(_db, existing, data, number, "trendyol_wide_reconcile_cancel"):
+                        flipped += 1
+                elif data.get("status") in ("cancelled", "returned"):
+                    # Hiç içe aktarılmamış ESKİ iptal/iade → İptaller'e indir.
+                    # Stok DÜŞÜLMEZ (hiç rezerve edilmemişti). created_at = gerçek
+                    # sipariş tarihi (orderDate) → İptaller'de tarih sıralaması doğru.
+                    data["id"] = generate_id()
+                    data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
+                    await _db.orders.insert_one(data)
+                    inserted += 1
+            except Exception as _e:
+                logger.error(f"[cron] terminal reconcile {t_order.get('orderNumber')}: {_e}")
+        total_pages = resp.get("totalPages") or 0
+        page += 1
+        if not chunk or page >= total_pages:
+            break
+    if flipped or inserted:
+        logger.info(f"[cron] 30g terminal uzlaştırma: {flipped} iptal yansıtıldı / {inserted} eklendi")
+    return flipped, inserted
+
+
 async def _run_trendyol_auto_orders_pull():
     """Scheduler tarafından Trendyol sipariş çekmeyi tetikler."""
     from routes.marketplace_hub import log_integration_event
@@ -140,15 +225,18 @@ async def _run_trendyol_auto_orders_pull():
                 existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
                 data = map_trendyol_order(t_order)
                 if existing:
-                    await _db.orders.update_one({"_id": existing["_id"]}, {"$set": {k: v for k, v in data.items() if k != "status"}})
+                    await _update_existing_trendyol_order(_db, existing, data, number, "trendyol_auto_pull_cancel")
                     updated += 1
                 else:
                     data["id"] = generate_id()
                     data["created_at"] = datetime.now(timezone.utc).isoformat()
                     await _db.orders.insert_one(data)
                     imported += 1
-                    from routes.integrations import _decrement_stock_for_imported_order
-                    await _decrement_stock_for_imported_order(data, "trendyol")
+                    # Zaten iptal/iade durumunda gelen YENİ sipariş için stok DÜŞÜLMEZ
+                    # (hiç rezerve edilmemişti → -1 yanlış olurdu).
+                    if data.get("status") not in ("cancelled", "returned"):
+                        from routes.integrations import _decrement_stock_for_imported_order
+                        await _decrement_stock_for_imported_order(data, "trendyol")
             except Exception as _ex:
                 logger.error(f"[cron] Trendyol order import hata: {_ex}")
         try:
@@ -217,6 +305,12 @@ async def _run_trendyol_status_wide_pass():
         start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
         end_ms = int(now_.timestamp() * 1000)
         await _sync_trendyol_status_passes(client, start_ms, end_ms)  # 3 durum, Cancelled 45g widen
+        # + 30 günlük STATUSSUZ uzlaştırma: status=Cancelled list sorgusunda güvenilir
+        # gelmeyen satıcı/stok iptallerini de garanti İptaller'e indirir.
+        try:
+            await _reconcile_trendyol_terminal_30d(client)
+        except Exception as _rex:
+            logger.error(f"[cron] 30g terminal uzlaştırma hatası: {_rex}")
     except Exception as e:
         logger.error(f"[cron] Trendyol geniş durum taraması hatası: {e}")
 
