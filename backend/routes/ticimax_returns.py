@@ -141,6 +141,7 @@ async def list_ticimax_return_orders(
             "subtotal": o.get("subtotal") or 0,
             "shipping_cost": o.get("shipping_cost") or 0,
             "discount": o.get("discount") or 0,
+            "reason": (o.get("return_request") or {}).get("reason") or "",
             "coupon_code": o.get("coupon_code") or "",
             "notes": o.get("notes") or "",
             "item_count": sum(int(i.get("quantity") or 1) for i in items),
@@ -172,11 +173,13 @@ async def list_ticimax_return_orders(
         async for cr in db.customer_returns.find(
             {"order_id": {"$in": _oids}},
             {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
-             "reship_code": 1, "reshipped_at": 1, "refund_payment": 1},
+             "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1},
         ):
             _cr_map[cr.get("order_id")] = cr
     for r in rows:
         cr = _cr_map.get(r["id"]) or {}
+        if cr.get("reason"):
+            r["reason"] = cr["reason"]
         r["return_code"] = cr.get("return_code") or ""
         r["return_barcode_url"] = cr.get("barcode_url") or ""
         r["return_cargo_provider"] = cr.get("cargo_provider_name") or r.get("cargo_provider_name") or ""

@@ -35,13 +35,15 @@ const STATUS_CLS = {}; // durum renkleri kaldırıldı — tüm durumlar nötr g
 // 6 AŞAMALI operasyonel iade akışı — "Tüm İadeler" yok, "Kısmi İade" ayrı sekme DEĞİL.
 // Her hane bir/birkaç order status'üne map'lenir; 5. hane refunded + partial_refunded'ı birlikte gösterir.
 // "Kısmi İade Yapıldı" durum açılır menüsünde elle seçilebilir kalır. Sayaçlar status_counts'tan gelir.
+const ALL_RETURN_STATUSES = ["return_requested", "return_in_transit", "returned", "return_approved", "refunded", "partial_refunded", "return_rejected"];
 const RETURN_TABS = [
-  { key: "return_requested",          label: "1. Talep Oluşturulan", statuses: ["return_requested"] },
-  { key: "return_in_transit",         label: "2. İade Kargoda",      statuses: ["return_in_transit"] },
-  { key: "returned",                  label: "3. Teslim Alındı",     statuses: ["returned"] },
-  { key: "return_approved",           label: "4. Onaylananlar",      statuses: ["return_approved"] },
-  { key: "refunded,partial_refunded", label: "5. İade Ödemeleri",    statuses: ["refunded", "partial_refunded"] },
-  { key: "return_rejected",           label: "6. Reddedilenler",     statuses: ["return_rejected"] },
+  { key: "",                          label: "Tüm İadeler",       statuses: ALL_RETURN_STATUSES },
+  { key: "return_requested",          label: "Talep Oluşturulan", statuses: ["return_requested"] },
+  { key: "return_in_transit",         label: "İade Kargoda",      statuses: ["return_in_transit"] },
+  { key: "returned",                  label: "Aksiyon Bekleyen",  statuses: ["returned"] },
+  { key: "return_approved",           label: "Onaylananlar",      statuses: ["return_approved"] },
+  { key: "refunded,partial_refunded", label: "İade Ödemeleri",    statuses: ["refunded", "partial_refunded"] },
+  { key: "return_rejected",           label: "Reddedilenler",     statuses: ["return_rejected"] },
 ];
 
 const PAYMENT_OPTS = [
@@ -67,7 +69,7 @@ export default function TicimaxReturns({ embedded = false }) {
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [redating, setRedating] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("return_requested");
+  const [statusFilter, setStatusFilter] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -400,11 +402,13 @@ export default function TicimaxReturns({ embedded = false }) {
               <tr>
                 <th className="px-3 py-2.5 font-medium">Sipariş</th>
                 <th className="px-3 py-2.5 font-medium">Müşteri</th>
-                <th className="px-3 py-2.5 font-medium">Ödeme Tipi</th>
-                <th className="px-3 py-2.5 font-medium">Tutar</th>
+                <th className="px-3 py-2.5 font-medium">Sebep</th>
+                <th className="px-3 py-2.5 font-medium">Ödeme</th>
+                <th className="px-3 py-2.5 font-medium">Kargo</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
                 <th className="px-3 py-2.5 font-medium whitespace-nowrap">Sipariş Tarihi</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay Tarihi</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme Tarihi</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay/Ret</th>
+                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme</th>
                 <th className="px-3 py-2.5 font-medium">Durum</th>
                 <th className="px-3 py-2.5 font-medium w-8"></th>
               </tr>
@@ -421,12 +425,25 @@ export default function TicimaxReturns({ embedded = false }) {
                       <div className="text-gray-800">{r.customer_name}</div>
                       {r.phone && <div className="text-xs text-gray-400">{r.phone}</div>}
                     </td>
+                    <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[140px] truncate" title={r.reason || ""}>{r.reason || "—"}</td>
                     <td className="px-3 py-2.5">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-xs border border-gray-200">
                         {payIcon(r.payment_method)} {r.payment_label}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">{fmtTL(r.total)}</td>
+                    <td className="px-3 py-2.5 text-xs">
+                      {(r.return_cargo_provider || r.cargo_provider_name || r.return_code) ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium text-orange-600 text-[11px]">{r.return_cargo_provider || r.cargo_provider_name || "Kargo"}</span>
+                          {r.return_code && <span className="font-mono text-[10px] text-gray-500 truncate max-w-[110px]" title={r.return_code}>{r.return_code}</span>}
+                        </div>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">
+                      {Number(r.discount) > 0 && <div className="text-gray-500 line-through text-xs leading-tight">{fmtTL(r.subtotal || r.total)}</div>}
+                      {Number(r.discount) > 0 && <div className="text-orange-600 text-xs font-bold leading-tight">-{fmtTL(r.discount)}</div>}
+                      <div className="font-bold text-gray-900 leading-tight">{fmtTL(r.total)}</div>
+                    </td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(r.created_at)}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</td>
                     <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{r.refund_paid_at ? fmtDate(r.refund_paid_at) : "—"}</td>
@@ -448,7 +465,7 @@ export default function TicimaxReturns({ embedded = false }) {
                   </tr>
                   {expandedId === r.id && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={9} className="px-4 py-3">
+                      <td colSpan={11} className="px-4 py-3">
                         {/* Müşteri + sipariş özeti */}
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-900 mb-3">
                           <span>Müşteri: <b className="text-gray-900">{r.customer_name}</b></span>
