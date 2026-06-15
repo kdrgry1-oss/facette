@@ -223,7 +223,22 @@ async def get_orders(
     _cached = _ORDERS_COUNT_CACHE.get(_sig)
 
     async def _do_find():
-        return await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        # created_at KARIŞIK TİPTE olabilir: bazı eski/migrasyon kayıtları BSON Date,
+        # çoğu ISO string. MongoDB karışık tipte önce TİP'e göre sıralar → tüm Date tipli
+        # kayıtlar (ör. Ticimax'tan taşınanlar) string tarihlerin üstüne çıkar ve liste
+        # gerçek tarih sırasını kaybeder. Bu yüzden created_at'i $convert ile Date'e
+        # normalize edip ona göre sıralarız (EN YENİ EN ÜSTTE), tip ne olursa olsun.
+        _pipe = [
+            {"$match": query},
+            {"$addFields": {"_sort_dt": {"$convert": {
+                "input": "$created_at", "to": "date", "onError": None, "onNull": None
+            }}}},
+            {"$sort": {"_sort_dt": -1, "created_at": -1, "_id": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$project": {"_id": 0, "_sort_dt": 0}},
+        ]
+        return await db.orders.aggregate(_pipe, allowDiskUse=True).to_list(limit)
 
     if _cached and (_now - _cached[1] < _ORDERS_COUNT_TTL):
         orders = await _do_find()
@@ -718,6 +733,57 @@ async def update_order_status(
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
     await _log_order_event(order_id, "status", f"Durum güncellendi: {status}", current_user, {"status": status})
+
+    # ---- FATURA İPTALİ (Doğan e-Arşiv) ----------------------------------------
+    # Sipariş iptal edildiyse ve Doğan'dan e-Arşiv fatura kesilmişse, faturayı da
+    # Doğan üzerinden iptal etmeyi dener. Best-effort: durum güncellemesini ASLA
+    # bloklamaz/bozmaz. e-Fatura iptali farklı bir süreç (alıcı onayı / iptal
+    # faturası) olduğundan otomatik iptal edilmez, manuel olarak işaretlenir.
+    if status == "cancelled":
+        try:
+            _od = await db.orders.find_one({"id": order_id}, {"_id": 0})
+            if (_od and _od.get("invoice_issued") and (_od.get("invoice_provider") == "dogan")
+                    and not _od.get("invoice_cancelled")):
+                _itype = str(_od.get("invoice_type") or "").lower()
+                if _itype in ("e-arsiv", "earsiv", "e-arşiv"):
+                    _ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+                    if _ds.get("enabled") and _ds.get("username"):
+                        from dogan_client import DoganClient as _DC
+                        from fastapi.concurrency import run_in_threadpool as _rtp
+                        _cli = _DC(username=_ds["username"], password=_ds["password"],
+                                   is_test=_ds.get("is_test", True))
+                        _cancel = await _rtp(
+                            _cli.cancel_earsiv_invoice,
+                            invoice_uuid=_od.get("invoice_uuid", "") or "",
+                            invoice_id=_od.get("invoice_dogan_id", "") or "",
+                            reason=f"Sipariş iptal edildi ({_od.get('order_number') or order_id})",
+                        )
+                        try:
+                            await _rtp(_cli.logout)
+                        except Exception:
+                            pass
+                        await db.orders.update_one({"id": order_id}, {"$set": {
+                            "invoice_cancelled": bool(_cancel.get("success")),
+                            "invoice_cancel_result": _cancel,
+                            "invoice_cancel_attempted_at": _now,
+                        }})
+                        await _log_order_event(
+                            order_id, "invoice",
+                            ("Doğan e-Arşiv fatura iptal edildi"
+                             if _cancel.get("success")
+                             else f"Doğan fatura iptali başarısız: {_cancel.get('message') or _cancel.get('error') or ''}"),
+                            current_user, {"cancel": _cancel})
+                else:
+                    await db.orders.update_one({"id": order_id}, {"$set": {
+                        "invoice_cancel_needs_manual": True,
+                        "invoice_cancel_attempted_at": _now,
+                    }})
+                    await _log_order_event(
+                        order_id, "invoice",
+                        "e-Fatura iptali manuel yapılmalı (Doğan portalı / iptal faturası).",
+                        current_user, {})
+        except Exception as _ic:
+            logger.error(f"[dogan invoice cancel {order_id}] {_ic}")
 
     # Bildirim tetikleme: status → event eşlemesi
     # NOT: Provider'lara gidiş yavaş olabilir — fire-and-forget task ile UI yanıtını

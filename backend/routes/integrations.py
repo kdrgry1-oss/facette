@@ -2540,18 +2540,50 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
                 for t_order in chunk:
                     onum = str(t_order.get("orderNumber"))
                     mapped = map_trendyol_order(t_order)
+                    _raw_status = t_order.get("status")
+                    # İptal/iade sebebi: Trendyol orders ucu çoğu zaman metinsel sebep
+                    # vermez; mevcut alanlardan dene, yoksa anlamlı bir etiket kullan.
+                    _reason = (t_order.get("cancellationReason") or t_order.get("cancelReason") or "")
+                    if not _reason:
+                        _reason = ("Trendyol iptali" if st == "Cancelled"
+                                   else ("Teslim edilemedi (Trendyol)" if st == "UnDelivered"
+                                         else "Trendyol iadesi"))
+                    _set = {
+                        "status": mapped.get("status"),
+                        "trendyol_status_raw": _raw_status,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if st == "Cancelled":
+                        _set["cancel_reason"] = _reason
+                        _set["cancel_source"] = "trendyol"
                     res = await db.orders.update_one(
                         {"order_number": onum, "platform": "trendyol"},
-                        {"$set": {
-                            "status": mapped.get("status"),
-                            "trendyol_status_raw": t_order.get("status"),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                        }},
+                        {"$set": _set},
                     )
                     if res.modified_count:
                         updated += 1
-                    # İptal senkronu → stoğu BİR KEZ geri ekle (idempotent; manuel iptalle aynı order_cancelled guard)
-                    if st == "Cancelled":
+                    # ÖNEMLİ ("bi düşüyor bi düşmüyor" kök nedeni): sipariş bizde YOKSA
+                    # (eski / hiç senkronlanmamış) eskiden update_one sessizce düşüyordu.
+                    # Artık tam kaydı iptal/iade durumuyla EKLERİZ → İptaller/İadeler
+                    # sayfasına garanti düşer. created_at = gerçek sipariş tarihi (orderDate)
+                    # ki tarih sıralaması doğru olsun.
+                    _was_new = (res.matched_count == 0)
+                    if _was_new:
+                        try:
+                            mapped["id"] = generate_id()
+                            mapped["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
+                            mapped["trendyol_status_raw"] = _raw_status
+                            if st == "Cancelled":
+                                mapped["cancel_reason"] = _reason
+                                mapped["cancel_source"] = "trendyol"
+                            await db.orders.insert_one(mapped)
+                            updated += 1
+                        except Exception as _ie:
+                            logger.error(f"[trendyol status upsert {onum}] {_ie}")
+                    # İptal senkronu → stoğu BİR KEZ geri ekle (idempotent; manuel iptalle aynı
+                    # order_cancelled guard). YENİ eklenen kayıtta stok geri EKLENMEZ: bu sipariş
+                    # bizde hiç olmadığı için stok daha önce DÜŞÜLMEDİ → +1 yanlış olurdu.
+                    if st == "Cancelled" and not _was_new:
                         try:
                             _o = await db.orders.find_one({"order_number": onum, "platform": "trendyol"}, {"_id": 0, "id": 1, "items": 1})
                             if _o:
@@ -2781,7 +2813,7 @@ async def import_selected_trendyol_orders(req: TrendyolOrderImportReq, current_u
                     updated_count += 1
                 else:
                     order_data["id"] = generate_id()
-                    order_data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    order_data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
                     await db.orders.insert_one(order_data)
                     imported_count += 1
                     await _decrement_stock_for_imported_order(order_data, "trendyol")
@@ -3036,7 +3068,7 @@ async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
                     updated_count += 1
                 else:
                     order_data["id"] = generate_id()
-                    order_data["created_at"] = datetime.now(timezone.utc).isoformat()
+                    order_data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
                     await db.orders.insert_one(order_data)
                     imported_count += 1
                     await _decrement_stock_for_imported_order(order_data, "trendyol")

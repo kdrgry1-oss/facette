@@ -105,6 +105,7 @@ export default function AdminOrders({ unpaidView = false }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState(null);
   const [bulkAction, setBulkAction] = useState("");
@@ -429,6 +430,33 @@ export default function AdminOrders({ unpaidView = false }) {
       }
     } catch (err) {
       toast.error("SMS gönderilemedi: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen en az bir sipariş seçin");
+      return;
+    }
+    if (!await window.appConfirm(`${selectedOrders.length} sipariş silinecek.\n\nSilinen siparişler "Silinen Siparişler" sayfasına taşınır ve oradan geri alınabilir.\n\nDevam edilsin mi?`)) return;
+    setBulkDeleting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const results = await Promise.allSettled(
+        selectedOrders.map((id) =>
+          axios.delete(`${API}/orders/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+        )
+      );
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      const fail = results.length - ok;
+      if (ok) toast.success(`${ok} sipariş silindi — Silinen Siparişler sayfasına taşındı`);
+      if (fail) toast.error(`${fail} sipariş silinemedi`);
+      setSelectedOrders([]);
+      fetchOrders();
+    } catch (err) {
+      toast.error("Toplu silme başarısız: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -872,6 +900,16 @@ export default function AdminOrders({ unpaidView = false }) {
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
+              data-testid="bulk-delete-btn"
+              title="Seçili siparişleri sil (Silinen Siparişler'e taşınır, geri alınabilir)"
+            >
+              <Trash2 size={16} />
+              {bulkDeleting ? "Siliniyor..." : "Seçilenleri Sil"}
+            </button>
           </div>
         </div>
       )}

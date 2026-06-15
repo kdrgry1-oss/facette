@@ -147,6 +147,91 @@ class DoganClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _list_earsiv_operations(self) -> list:
+        """E-Arşiv (EFaturaArchive) WSDL'indeki tüm operasyon adlarını döndürür.
+        İptal operasyonunu dinamik bulmak ve hata ayıklamak için kullanılır."""
+        try:
+            client = self._get_earsiv_client()
+            names = set()
+            for service in client.wsdl.services.values():
+                for port in service.ports.values():
+                    try:
+                        names.update(port.binding._operations.keys())
+                    except Exception:
+                        pass
+            return sorted(names)
+        except Exception:
+            return []
+
+    def cancel_earsiv_invoice(self, *, invoice_uuid: str = "", invoice_id: str = "",
+                               reason: str = "Sipariş iptal edildi") -> dict:
+        """E-Arşiv faturayı Doğan üzerinden iptal eder.
+
+        ÖNEMLİ: connector/test domaini geliştirme ortamında ağ izninde olmadığı için
+        WSDL'deki iptal operasyonunun adı/şeması BİREBİR doğrulanamadı. Bu yüzden:
+          - iptal operasyonunu WSDL'den DİNAMİK buluruz (CancelEArchiveInvoice / CancelInvoice
+            / 'cancel' içeren ilk operasyon),
+          - en yaygın payload şemasıyla çağırırız,
+          - HATA durumunda mevcut operasyon adlarını döndürürüz ki test ortamında
+            gerçek ad/şema netleşsin ve buraya birebir yazılabilsin.
+        Durum güncellemesini ASLA bloklamaz (çağıran taraf try/except ile sarmalıdır).
+        """
+        try:
+            client = self._get_earsiv_client()
+            ops = self._list_earsiv_operations()
+            cancel_op = None
+            for cand in ("CancelEArchiveInvoice", "CancelInvoice",
+                         "CancelArchiveInvoice", "CancelEArsivInvoice", "CancelEArchive"):
+                if cand in ops:
+                    cancel_op = cand
+                    break
+            if not cancel_op:
+                cancel_op = next((o for o in ops if "cancel" in o.lower()), None)
+            if not cancel_op:
+                return {"success": False, "error": "İptal operasyonu WSDL'de bulunamadı",
+                        "available_operations": ops}
+
+            from datetime import datetime, timezone
+            op = getattr(client.service, cancel_op)
+            cancel_payload = {
+                "CANCEL_REASON": (reason or "Sipariş iptal edildi")[:250],
+                "CANCEL_DATE": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            }
+            if invoice_uuid:
+                cancel_payload["UUID"] = invoice_uuid
+            if invoice_id:
+                cancel_payload["INVOICE_ID"] = invoice_id
+
+            # En yaygın imza: REQUEST_HEADER + tekil iptal kaydı. Param adı doğrulanamadığı
+            # için birkaç olası sarmalayıcı adını sırayla dener.
+            last_err = None
+            for wrap in ("CANCEL_INVOICE", "CANCEL", "INVOICE", "ARCHIVE_INVOICE_CANCEL"):
+                try:
+                    result = op(REQUEST_HEADER=self._make_header(), **{wrap: cancel_payload})
+                    from zeep.helpers import serialize_object
+                    ser = serialize_object(result) or {}
+                    err = (ser.get("ERROR_TYPE") or {}) if isinstance(ser, dict) else {}
+                    err_code = err.get("ERROR_CODE") if err else None
+                    if err_code:
+                        return {"success": False, "operation": cancel_op,
+                                "code": str(err_code),
+                                "message": str(err.get("ERROR_SHORT_DES") or "Bilinmeyen hata"),
+                                "raw": str(ser)[:600]}
+                    return {"success": True, "operation": cancel_op,
+                            "param": wrap, "raw": str(ser)[:600]}
+                except TypeError as te:
+                    last_err = str(te)
+                    continue  # param adı yanlış → sıradaki sarmalayıcıyı dene
+            return {"success": False, "operation": cancel_op,
+                    "error": f"İptal payload şeması eşleşmedi: {last_err}",
+                    "available_operations": ops}
+        except Exception as e:
+            try:
+                ops = self._list_earsiv_operations()
+            except Exception:
+                ops = []
+            return {"success": False, "error": str(e), "available_operations": ops}
+
     def check_user(self, vkn: str) -> dict:
         """Check if a VKN is registered for e-Fatura. Returns the user list with
         their PK aliases. is_efatura=True if INVOICE document_type alias exists.

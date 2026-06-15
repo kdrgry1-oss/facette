@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
-import { XCircle, Search, RefreshCw, X } from "lucide-react";
+import { XCircle, Search, RefreshCw, X, Trash2 } from "lucide-react";
 import { optimizeImg } from "../../lib/img";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -83,6 +83,7 @@ export default function Cancellations() {
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);   // detay modalı için sipariş
   const [savingId, setSavingId] = useState(null); // durum güncellenirken
+  const [deletingId, setDeletingId] = useState(null); // silinirken
   const pageSize = 20;
 
   const fetchCancelled = useCallback(async () => {
@@ -128,6 +129,22 @@ export default function Cancellations() {
     }
   }
 
+  async function handleDelete(orderId, orderNumber) {
+    if (!orderId) return;
+    if (!window.confirm(`Bu sipariş silinecek${orderNumber ? ` (${orderNumber})` : ""}.\n\nSilinen siparişler "Silinen Siparişler" sayfasına taşınır ve oradan geri alınabilir.\n\nDevam edilsin mi?`)) return;
+    setDeletingId(orderId);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.delete(`${API}/orders/${orderId}`, { headers: { Authorization: `Bearer ${token}` } });
+      setDetail((d) => (d && d.id === orderId ? null : d));
+      await fetchCancelled();
+    } catch (e) {
+      alert("Silinemedi: " + (e?.response?.data?.detail || e.message));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center gap-2 mb-1">
@@ -166,14 +183,16 @@ export default function Cancellations() {
               <th className="text-left font-medium px-3 py-2">Müşteri / Ürün</th>
               <th className="text-left font-medium px-3 py-2">Tutar</th>
               <th className="text-left font-medium px-3 py-2">Tarih</th>
+              <th className="text-left font-medium px-3 py-2">Sebep</th>
               <th className="text-left font-medium px-3 py-2">Durum</th>
+              <th className="text-left font-medium px-3 py-2">İşlem</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">Yükleniyor…</td></tr>
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">Yükleniyor…</td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
             ) : orders.map((o) => {
               const name = custName(o);
               const its = itemsOf(o);
@@ -206,6 +225,7 @@ export default function Cancellations() {
                     </div>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">{dt}</td>
+                  <td className="px-3 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <select
                       value={o.status || "cancelled"}
@@ -219,6 +239,16 @@ export default function Cancellations() {
                       ))}
                     </select>
                     {savingId === o.id && <span className="ml-1 text-xs text-gray-400">…</span>}
+                  </td>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDelete(o.id, o.order_number)}
+                      disabled={deletingId === o.id}
+                      title="Siparişi sil (arşive taşınır, geri alınabilir)"
+                      className="p-1.5 rounded hover:bg-red-50 text-red-600 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               );
