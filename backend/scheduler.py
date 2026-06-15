@@ -130,48 +130,61 @@ async def _update_existing_trendyol_order(_db, existing, data, number, restock_s
     return _flipped
 
 
-async def _reconcile_trendyol_terminal_30d(client):
-    """30 GÜNLÜK STATUSSUZ uzlaştırma — saatlik geniş taramadan çağrılır (hafif
-    cadence, sık değil → yük riski yok). Statussuz çekiş tüm durumları getirir;
-    terminal duruma (iptal/iade) geçmiş ama Facette'te güncellenmemiş siparişleri
-    İptaller/İadeler'e indirir. Satıcı/stok iptalleri (claim üretmeyen) buradan
-    garanti yakalanır. 14 günlük sık pull'un kaçırdığı 14-30 gün bandını kapatır."""
+async def _reconcile_trendyol_terminal(client, days_back=30, slice_days=15):
+    """STATUSSUZ uzlaştırma: statussuz çekiş tüm durumları getirir; terminal duruma
+    (iptal/iade) geçmiş ama Facette'te güncellenmemiş siparişleri İptaller/İadeler'e
+    yansıtır/ekler. Satıcı/stok iptalleri (claim üretmeyen, status=Cancelled list
+    sorgusunda güvenilir gelmeyen) buradan GARANTİ yakalanır. Volume için tarih
+    dilimlerine bölünür. TEK SEFERLİK geniş backfill için days_back büyük verilir."""
     from datetime import datetime as _dt, timedelta as _td
     from routes.deps import db as _db, generate_id
     from routes.integrations import map_trendyol_order, _ms_to_iso
+    import asyncio as _aio
     now_ = _dt.now()
-    start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
-    end_ms = int(now_.timestamp() * 1000)
     flipped = 0
     inserted = 0
-    page = 0
-    while page < 50:
-        resp = await client.get_orders(start_date_ms=start_ms, end_date_ms=end_ms, size=200, page=page)
-        chunk = resp.get("content", []) or []
-        for t_order in chunk:
+    elapsed = 0
+    slice_end = now_
+    while elapsed < days_back:
+        this_slice = min(slice_days, days_back - elapsed)
+        slice_start = slice_end - _td(days=this_slice)
+        start_ms = int(slice_start.timestamp() * 1000)
+        end_ms = int(slice_end.timestamp() * 1000)
+        page = 0
+        while page < 50:
             try:
-                number = str(t_order.get("orderNumber"))
-                data = map_trendyol_order(t_order)
-                existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
-                if existing:
-                    if await _update_existing_trendyol_order(_db, existing, data, number, "trendyol_wide_reconcile_cancel"):
-                        flipped += 1
-                elif data.get("status") in ("cancelled", "returned"):
-                    # Hiç içe aktarılmamış ESKİ iptal/iade → İptaller'e indir.
-                    # Stok DÜŞÜLMEZ (hiç rezerve edilmemişti). created_at = gerçek
-                    # sipariş tarihi (orderDate) → İptaller'de tarih sıralaması doğru.
-                    data["id"] = generate_id()
-                    data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
-                    await _db.orders.insert_one(data)
-                    inserted += 1
-            except Exception as _e:
-                logger.error(f"[cron] terminal reconcile {t_order.get('orderNumber')}: {_e}")
-        total_pages = resp.get("totalPages") or 0
-        page += 1
-        if not chunk or page >= total_pages:
-            break
+                resp = await client.get_orders(start_date_ms=start_ms, end_date_ms=end_ms, size=200, page=page)
+            except Exception as _qe:
+                logger.error(f"[cron] terminal reconcile sorgu hatası: {_qe}")
+                break
+            chunk = resp.get("content", []) or []
+            for t_order in chunk:
+                try:
+                    number = str(t_order.get("orderNumber"))
+                    data = map_trendyol_order(t_order)
+                    existing = await _db.orders.find_one({"order_number": number, "platform": "trendyol"})
+                    if existing:
+                        if await _update_existing_trendyol_order(_db, existing, data, number, "trendyol_terminal_reconcile"):
+                            flipped += 1
+                    elif data.get("status") in ("cancelled", "returned"):
+                        # Hiç içe aktarılmamış ESKİ iptal/iade → İptaller'e indir.
+                        # Stok DÜŞÜLMEZ (hiç rezerve edilmemişti). created_at = gerçek
+                        # sipariş tarihi (orderDate) → İptaller'de tarih sıralaması doğru.
+                        data["id"] = generate_id()
+                        data["created_at"] = _ms_to_iso(t_order.get("orderDate")) or datetime.now(timezone.utc).isoformat()
+                        await _db.orders.insert_one(data)
+                        inserted += 1
+                except Exception as _e:
+                    logger.error(f"[cron] terminal reconcile {t_order.get('orderNumber')}: {_e}")
+            total_pages = resp.get("totalPages") or 0
+            page += 1
+            if not chunk or page >= total_pages:
+                break
+        slice_end = slice_start
+        elapsed += this_slice
+        await _aio.sleep(0.3)  # Trendyol rate limit + sunucuyu yormama
     if flipped or inserted:
-        logger.info(f"[cron] 30g terminal uzlaştırma: {flipped} iptal yansıtıldı / {inserted} eklendi")
+        logger.info(f"[cron] terminal uzlaştırma {days_back}g: {flipped} iptal yansıtıldı / {inserted} eklendi")
     return flipped, inserted
 
 
@@ -305,70 +318,55 @@ async def _run_trendyol_status_wide_pass():
         start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
         end_ms = int(now_.timestamp() * 1000)
         await _sync_trendyol_status_passes(client, start_ms, end_ms)  # 3 durum, Cancelled 45g widen
-        # + 30 günlük STATUSSUZ uzlaştırma: status=Cancelled list sorgusunda güvenilir
-        # gelmeyen satıcı/stok iptallerini de garanti İptaller'e indirir.
-        try:
-            await _reconcile_trendyol_terminal_30d(client)
-        except Exception as _rex:
-            logger.error(f"[cron] 30g terminal uzlaştırma hatası: {_rex}")
     except Exception as e:
         logger.error(f"[cron] Trendyol geniş durum taraması hatası: {e}")
 
 
 async def _run_trendyol_deep_backfill_once():
-    """TEK SEFERLİK derin iptal taraması — geçmişteki TÜM Trendyol iptallerini sisteme taşır
-    (365 güne kadar, 14 günlük dilimler, sadece Cancelled). db.settings.trendyol_deep_backfill
-    'done' flag'i ile YALNIZCA BİR KEZ çalışır; sonra no-op (3 saatte bir ucuz flag kontrolü).
-    Buton YOK, tamamen otomatik. HTTP dışı (scheduler) olduğu için Network Error/timeout olmaz."""
+    """TEK SEFERLİK derin uzlaştırma — geçmişteki TÜM Trendyol iptallerini (satıcı/stok
+    dahil) sisteme taşır: 365 güne kadar STATUSSUZ tarama, terminal duruma geçmiş ama
+    Facette'te güncellenmemiş siparişleri İptaller'e indirir. Yeni flag
+    (trendyol_terminal_backfill) ile YALNIZCA BİR KEZ çalışır; sonra no-op. Sonrasında
+    günlük iptalleri 5 dk'lık anlık auto pull (14 gün, terminal flip) yakalar."""
     try:
         from routes.deps import db
-        flag = await db.settings.find_one({"id": "trendyol_deep_backfill"}, {"_id": 0})
+        flag = await db.settings.find_one({"id": "trendyol_terminal_backfill"}, {"_id": 0})
         if flag and flag.get("done"):
             return
-        from routes.integrations import get_trendyol_config, _sync_trendyol_status_passes, sync_trendyol_claims
+        from routes.integrations import get_trendyol_config, sync_trendyol_claims
         cfg = await get_trendyol_config()
         if not cfg.get("is_active"):
             return
-        from datetime import datetime as _dt, timedelta as _td
         from trendyol_client import TrendyolClient
-        import asyncio as _aio
         client = TrendyolClient(
             supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
             api_secret=cfg["api_secret"], mode=cfg["mode"],
         )
         await db.settings.update_one(
-            {"id": "trendyol_deep_backfill"},
-            {"$set": {"id": "trendyol_deep_backfill", "running": True,
+            {"id": "trendyol_terminal_backfill"},
+            {"$set": {"id": "trendyol_terminal_backfill", "running": True,
                       "started_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True,
         )
-        now_ = _dt.now()
-        total_days, chunk_d, added, d = 365, 14, 0, 0
-        while d < total_days:
-            end_ = now_ - _td(days=d)
-            start_ = now_ - _td(days=min(d + chunk_d, total_days))
-            try:
-                added += await _sync_trendyol_status_passes(
-                    client, int(start_.timestamp() * 1000), int(end_.timestamp() * 1000),
-                    widen_cancel=False, statuses=("Cancelled",),
-                )
-            except Exception as _ce:
-                logger.error(f"[deep backfill chunk d={d}] {_ce}")
-            d += chunk_d
-            await _aio.sleep(0.4)  # Trendyol rate limit + sunucuyu yormama
+        # STATUSSUZ 365 günlük uzlaştırma (15 günlük dilimler) → satıcı/stok iptalleri
+        # dahil TÜM takılı iptaller bir kerede İptaller'e iner.
+        flipped, inserted = await _reconcile_trendyol_terminal(client, days_back=365, slice_days=15)
+        # Müşteri iptal/iade sebeplerini de tazele (claim → cancel_reason).
         try:
             await sync_trendyol_claims(days_back=180, current_user={"is_admin": True})
         except Exception as _cl:
-            logger.error(f"[deep backfill claims] {_cl}")
+            logger.error(f"[terminal backfill claims] {_cl}")
         await db.settings.update_one(
-            {"id": "trendyol_deep_backfill"},
-            {"$set": {"id": "trendyol_deep_backfill", "done": True, "running": False,
-                      "added": added, "finished_at": datetime.now(timezone.utc).isoformat()}},
+            {"id": "trendyol_terminal_backfill"},
+            {"$set": {"id": "trendyol_terminal_backfill", "done": True, "running": False,
+                      "flipped": flipped, "inserted": inserted,
+                      "finished_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True,
         )
-        logger.info(f"[scheduler] Trendyol DERİN iptal backfill tamamlandı: {added} kayıt eklendi/güncellendi")
+        logger.info(f"[scheduler] Trendyol TEK SEFERLİK terminal backfill tamamlandı: "
+                    f"{flipped} iptal yansıtıldı / {inserted} eklendi")
     except Exception as e:
-        logger.error(f"[cron] Trendyol derin backfill hatası: {e}")
+        logger.error(f"[cron] Trendyol terminal backfill hatası: {e}")
 
 
 async def _run_trendyol_claims_sync():
@@ -888,8 +886,8 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Trendyol TEK SEFERLİK derin iptal backfill — geçmişteki TÜM iptalleri sisteme taşır.
-    # Flag korumalı (db.settings.trendyol_deep_backfill.done) → bir kez çalışır, sonra no-op.
+    # Trendyol TEK SEFERLİK terminal backfill — geçmişteki TÜM iptalleri (satıcı dahil) taşır.
+    # Flag korumalı (db.settings.trendyol_terminal_backfill.done) → bir kez çalışır, sonra no-op.
     # 3 saatte bir tetiklenir ama done ise hiçbir şey yapmaz (sadece ucuz flag kontrolü).
     _scheduler.add_job(
         _run_trendyol_deep_backfill_once,
