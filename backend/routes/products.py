@@ -771,13 +771,26 @@ async def list_trashed_products(
     return {"products": products, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 @router.get("/{product_id}")
-async def get_product(product_id: str):
+async def get_product(product_id: str, request: Request):
     """Get single product by ID or slug"""
     product = await db.products.find_one(
         {"$or": [{"id": product_id}, {"slug": product_id}, {"slug_aliases": product_id}]},
         {"_id": 0}
     )
     if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    # PASİF/SİLİNMİŞ ürün direkt link ile açılamaz: yalnızca admin görebilir,
+    # müşteri için "bulunamadı" döner (vitrin gizliliği detay sayfasında da geçerli).
+    _is_admin = False
+    _auth = request.headers.get("authorization") or ""
+    if _auth.lower().startswith("bearer "):
+        try:
+            from .deps import _decode_jwt_strict
+            if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
+                _is_admin = True
+        except Exception:
+            pass
+    if not _is_admin and (product.get("is_active") is not True or product.get("is_deleted")):
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     # Varyantları global Beden Havuzu (variant_options) sırasına göre diz —
     # böylece storefront'ta XS, S, M, L, XL... admin'in tanımladığı sırayla görünür.

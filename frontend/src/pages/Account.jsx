@@ -300,7 +300,7 @@ export default function Account() {
       {/* ───────────────────── Content ───────────────────── */}
       <main className="max-w-screen-xl mx-auto px-4 py-8 md:py-10">
         {activeTab === "profile"   && <ProfilePane user={user} editing={editingProfile} setEditing={setEditingProfile} form={profileForm} setForm={setProfileForm} onSubmit={handleUpdateProfile} />}
-        {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} />}
+        {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} onChanged={fetchOrders} />}
         {activeTab === "addresses" && <AddressesPane loading={loading} addresses={addresses} editing={editingAddress} setEditing={setEditingAddress} form={addressForm} setForm={setAddressForm} onSubmit={handleSaveAddress} onDelete={handleDeleteAddress} />}
         {activeTab === "favorites" && <FavoritesPane />}
         {activeTab === "security"  && <SecurityPane />}
@@ -405,7 +405,7 @@ function Row({ k, v, icon: Icon }) {
 
 /* ═══════════════════════════════ ORDERS ═══════════════════════════════ */
 
-function OrdersPane({ loading, orders, expandedOrder, setExpandedOrder }) {
+function OrdersPane({ loading, orders, expandedOrder, setExpandedOrder, onChanged }) {
   if (loading) {
     return (
       <div className="space-y-3">
@@ -447,16 +447,37 @@ function OrdersPane({ loading, orders, expandedOrder, setExpandedOrder }) {
           order={order}
           expanded={expandedOrder === (order.id || order.order_number)}
           onToggle={() => setExpandedOrder(expandedOrder === (order.id || order.order_number) ? null : (order.id || order.order_number))}
+          onChanged={onChanged}
         />
       ))}
     </div>
   );
 }
 
-function OrderCard({ order, expanded, onToggle }) {
+function OrderCard({ order, expanded, onToggle, onChanged }) {
   const status = ORDER_STATUS[order.status] || ORDER_STATUS.pending;
   const _deliveredAt = order.delivered_at ? new Date(order.delivered_at) : null;
   const canReturn = order.status === "delivered" && _deliveredAt && (Date.now() - _deliveredAt.getTime()) <= 14 * 24 * 3600 * 1000;
+  // Müşteri iptali: yalnızca "Hazırlanıyor" durumuna geçmeden. Backend guard ile birebir aynı set.
+  const CANCELLABLE = ["pending", "awaiting_payment", "payment_notified", "confirmed"];
+  const canCancel = CANCELLABLE.includes(order.status);
+  const [cancelling, setCancelling] = useState(false);
+  const handleCancel = async () => {
+    if (!window.confirm("Siparişinizi iptal etmek istediğinize emin misiniz?")) return;
+    setCancelling(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/my-orders/${order.id || order.order_number}/cancel`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success("Siparişiniz iptal edildi");
+      onChanged && onChanged();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Sipariş iptal edilemedi");
+    } finally {
+      setCancelling(false);
+    }
+  };
   const StatusIcon = status.icon;
   const items = order.items || [];
   const itemCount = items.reduce((s, i) => s + (i.quantity || 1), 0);
@@ -548,6 +569,19 @@ function OrderCard({ order, expanded, onToggle }) {
               <a href={`/iade/${order.order_number}`} className="inline-block bg-black text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-gray-800 shrink-0">İade Talebi</a>
             </div>
           ) : null}
+          {canCancel && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm text-gray-700">Siparişiniz henüz hazırlanmaya başlamadı. Dilerseniz iptal edebilirsiniz.</span>
+              <button
+                onClick={handleCancel}
+                disabled={cancelling}
+                data-testid={`cancel-order-${order.id}`}
+                className="inline-block bg-red-600 text-white px-4 py-2 rounded-md text-xs uppercase tracking-[0.15em] hover:bg-red-700 disabled:opacity-50 shrink-0"
+              >
+                {cancelling ? "İptal ediliyor..." : "Siparişi İptal Et"}
+              </button>
+            </div>
+          )}
           {/* Items */}
           <div className="space-y-3">
             {items.length === 0 && (

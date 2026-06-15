@@ -28,6 +28,82 @@ async def get_my_orders(
         "pages": (total + limit - 1) // limit
     }
 
+
+# Müşterinin kendi siparişini iptal edebileceği durumlar = "Hazırlanıyor" ÖNCESİ.
+# Bu set, frontend butonunun görünürlüğüyle birebir aynı tutulmalıdır.
+_CUSTOMER_CANCELLABLE = {"pending", "awaiting_payment", "payment_notified", "confirmed"}
+
+
+@router.post("/my-orders/{order_id}/cancel")
+async def cancel_my_order(order_id: str, current_user: dict = Depends(require_auth)):
+    """Üye, kendi siparişini YALNIZCA 'Hazırlanıyor' durumuna geçmeden iptal edebilir.
+    Sunucu tarafı guard zorunludur — frontend'in butonu gizlemesine güvenilmez."""
+    order = await db.orders.find_one(
+        {"$or": [{"id": order_id}, {"order_number": order_id}], "user_id": current_user.get("id")},
+        {"_id": 0},
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    cur = order.get("status") or "pending"
+    if cur == "cancelled":
+        return {"success": True, "status": "cancelled", "message": "Sipariş zaten iptal edilmiş."}
+    if cur not in _CUSTOMER_CANCELLABLE:
+        raise HTTPException(
+            status_code=409,
+            detail="Siparişiniz hazırlanmaya başladığı için artık iptal edilemiyor. "
+                   "Lütfen bizimle iletişime geçin.",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one(
+        {"id": order.get("id")},
+        {"$set": {
+            "status": "cancelled",
+            "updated_at": now_iso,
+            "cancelled_at": now_iso,
+            "cancel_source": "customer",
+            "cancel_reason": "Müşteri iptali (üye paneli)",
+        }},
+    )
+
+    # Stok geri ekleme — panel/Trendyol iptal akışıyla AYNI idempotent guard (order_cancelled)
+    try:
+        already = await db.stock_movements.find_one(
+            {"order_id": order.get("id"), "type": "order_cancelled"}, {"_id": 1}
+        )
+        if not already:
+            from routes.orders import _stock_delta_for_order
+            moves = await _stock_delta_for_order(order, +1)
+            await db.stock_movements.insert_one({
+                "id": generate_id(),
+                "type": "order_cancelled",
+                "order_id": order.get("id"),
+                "order_number": order.get("order_number", ""),
+                "items": moves,
+                "source": "customer_cancel",
+                "created_at": now_iso,
+            })
+    except Exception as _e:
+        logger.error(f"[customer cancel restock {order_id}] {_e}")
+
+    # Sipariş olay günlüğü (admin tarafında görünür)
+    try:
+        await db.order_events.insert_one({
+            "id": generate_id(),
+            "order_id": order.get("id"),
+            "order_number": order.get("order_number", ""),
+            "event_type": "status",
+            "description": "Müşteri siparişi iptal etti (üye paneli)",
+            "actor": current_user.get("email", "") or "müşteri",
+            "created_at": now_iso,
+        })
+    except Exception:
+        pass
+
+    return {"success": True, "status": "cancelled", "message": "Siparişiniz iptal edildi."}
+
+
 @router.put("/users/me")
 async def update_my_profile(
     profile_data: dict,
