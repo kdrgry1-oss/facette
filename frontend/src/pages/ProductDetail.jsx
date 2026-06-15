@@ -197,6 +197,12 @@ export default function ProductDetail() {
       toast.error("Lütfen beden seçiniz");
       return;
     }
+
+    // Varyantsız ürünlerde ürün stoğu yoksa engelle (tükendi)
+    if (!(product.variants?.length > 0) && (Number(product.stock) || 0) <= 0) {
+      toast.error("Bu ürün tükendi");
+      return;
+    }
     
     // Check stock for selected variant
     if (selectedVariant && selectedVariant.stock < quantity) {
@@ -498,7 +504,9 @@ export default function ProductDetail() {
 
             {/* Add to Cart */}
             {(() => {
-              const oosSelected = selectedVariant && selectedVariant.stock === 0;
+              const _hasVariants = (product.variants?.length || 0) > 0;
+              const _productOOS = !_hasVariants && (Number(product.stock) || 0) <= 0;
+              const oosSelected = (selectedVariant && selectedVariant.stock === 0) || _productOOS;
               return (
                 <div className="mb-6">
                   <div className="flex gap-2">

@@ -369,15 +369,17 @@ async def get_products(
     # Admin (token'lı istek): status verilmemişse pasif ürünler de görünsün ki
     # arama/listede hiçbir ürün "kaybolmasın". Storefront token göndermez →
     # aktif default korunur, vitrin etkilenmez.
-    if status is None:
-        _auth = request.headers.get("authorization") or ""
-        if _auth.lower().startswith("bearer "):
-            try:
-                from .deps import _decode_jwt_strict
-                if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
-                    status = "all"
-            except Exception:
-                pass
+    _is_admin = False
+    _auth = request.headers.get("authorization") or ""
+    if _auth.lower().startswith("bearer "):
+        try:
+            from .deps import _decode_jwt_strict
+            if _decode_jwt_strict(_auth.split(" ", 1)[1]).get("is_admin"):
+                _is_admin = True
+        except Exception:
+            pass
+    if status is None and _is_admin:
+        status = "all"
 
     # Status default to active for storefront compatibility unless specified differently
     if status == "all":
@@ -386,6 +388,17 @@ async def get_products(
         query["is_active"] = False
     else:
         query["is_active"] = True
+
+    # ===================================================================
+    # STOREFRONT (müşteri) GÖRÜNÜRLÜK KURALI — admin DEĞİLSE zorunlu:
+    #   • Yalnızca aktif ürünler (pasife alınanlar müşteriye görünmez).
+    #   • En az bir görseli olan ürünler — görselsiz/placeholder ürünler
+    #     (çoğu import'tan gelen yarım kayıt) vitrinde gizlenir.
+    # Bu, status parametresi ne gelirse gelsin storefront'u korur.
+    # ===================================================================
+    if not _is_admin:
+        query["is_active"] = True
+        query["images.0"] = {"$exists": True}
 
     if brand:
         query["brand"] = {"$regex": brand, "$options": "i"}
@@ -439,10 +452,28 @@ async def get_products(
         # 'Takım'/'Tişört'/'GİYİM' tutar. _slug_to_diacritic_regex ile eşleştirilir.
         # =====================================================================
         cat_slug = category.strip().lower()
-        SPECIAL_NEWEST = {"en-yeniler", "en-yeni", "yeniler", "tum-urunler", "tumu", "all"}
-        if cat_slug in SPECIAL_NEWEST:
-            # Üst kategori değil — tüm aktif ürünler default sıralama (created_at desc)
+        SHOW_ALL = {"tum-urunler", "tumu", "all"}
+        EN_YENILER = {"en-yeniler", "en-yeni", "yeniler", "yeni", "yeni-urunler"}
+        if cat_slug in SHOW_ALL:
+            # "Tümü" — gerçekten tüm aktif ürünler, default sıralama (created_at desc)
             pass
+        elif cat_slug in EN_YENILER:
+            # "En Yeniler" GERÇEK kategori üyeliğiyle filtrelenir (tüm ürünler DEĞİL).
+            # Yerel "En Yeniler" kategorisinin id'sini bulup category_ids ile eşleştir.
+            # (Ticimax En Yeniler eşitlemesi bu kategoriye üyelik yazar.)
+            _en_id = None
+            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1}):
+                _sl = (_c.get("slug") or "").strip().lower()
+                _nm = (_c.get("name") or "").strip()
+                if _sl in EN_YENILER or generate_slug(_nm) in EN_YENILER:
+                    _en_id = _c.get("id")
+                    break
+            if _en_id:
+                and_clauses.append({"category_ids": _en_id})
+            else:
+                # Yerel "En Yeniler" kategorisi yoksa: yanlışlıkla tüm ürünleri
+                # göstermek yerine boş döndür (eşleşmeyen sentinel).
+                and_clauses.append({"id": "__en_yeniler_category_missing__"})
         elif cat_slug == "sale":
             and_clauses.append({"$or": [
                 {"sale_price": {"$gt": 0}},

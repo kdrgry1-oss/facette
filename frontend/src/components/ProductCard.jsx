@@ -23,9 +23,19 @@ export default function ProductCard({ product }) {
   const hasDiscount = Boolean(product.sale_price && product.sale_price < product.price);
   const displayPrice = product.sale_price || product.price;
 
+  // Efektif stok: varyant varsa varyant stokları toplamı, yoksa ürün stoğu.
+  const variants = product.variants || [];
+  const variantStock = variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+  const effectiveStock = variants.length > 0 ? variantStock : (Number(product.stock) || 0);
+  const isSoldOut = effectiveStock <= 0;
+
   const handleQuickAdd = (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isSoldOut) {
+      toast.error("Bu ürün tükendi");
+      return;
+    }
     addItem(product);
     toast.success("Ürün sepete eklendi");
   };
@@ -68,11 +78,18 @@ export default function ProductCard({ product }) {
           <img
             src={optimizeImg(images[currentImageIndex] || "/placeholder.jpg", 700)}
             alt={product.name}
-            className="w-full h-full object-cover object-top transition-opacity duration-200"
+            className={`w-full h-full object-cover object-top transition-opacity duration-200 ${isSoldOut ? "opacity-60" : ""}`}
             loading="lazy"
             decoding="async"
           />
-          
+
+          {/* Tükendi rozeti — efektif stok yoksa */}
+          {isSoldOut && (
+            <div className="absolute top-3 left-3 z-10 bg-black/80 text-white text-[10px] uppercase tracking-wider px-2 py-1">
+              Tükendi
+            </div>
+          )}
+
           {/* Favorite Button - Top Right */}
           <button
             onClick={handleFavorite}
@@ -115,10 +132,11 @@ export default function ProductCard({ product }) {
             {/* Add to cart icon next to name */}
             <button
               onClick={handleQuickAdd}
-              className="flex-shrink-0 p-1 hover:opacity-60 transition-opacity"
+              disabled={isSoldOut}
+              className={`flex-shrink-0 p-1 transition-opacity ${isSoldOut ? "opacity-30 cursor-not-allowed" : "hover:opacity-60"}`}
               data-testid={`quick-add-${product.id}`}
-              aria-label="Sepete ekle"
-              title="Sepete Ekle"
+              aria-label={isSoldOut ? "Tükendi" : "Sepete ekle"}
+              title={isSoldOut ? "Tükendi" : "Sepete Ekle"}
             >
               <ShoppingBag size={18} strokeWidth={1.5} />
             </button>
