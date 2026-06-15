@@ -5665,7 +5665,8 @@ def _claim_bucket(c: dict) -> str:
     Created + takip no DOLU  -> kargoya_verilen  (iade kargoda)
     WaitingInAction/InAnalysis -> aksiyon_bekleyen
     Accepted                  -> onaylanan
-    Rejected/Cancelled/Unresolved -> reddedilen
+    Rejected/Unresolved       -> reddedilen
+    Cancelled                 -> iptal (iptal edilmiş iade talebi; ayrı sekme)
 
     NOT: Bu eşleme canlı 34/54/16/3583/49 sayılarıyla kalibre edilecek tek noktadır;
     backfill sonrası gerçek dağılım ile bire bir tutmazsa yalnız burası ayarlanır.
@@ -5674,7 +5675,9 @@ def _claim_bucket(c: dict) -> str:
     has_cargo = bool(str(c.get("cargo_tracking_number") or "").strip())
     if st == "Accepted":
         return "onaylanan"
-    if st in ("Rejected", "Cancelled", "Unresolved"):
+    if st == "Cancelled":
+        return "iptal"
+    if st in ("Rejected", "Unresolved"):
         return "reddedilen"
     if st in ("WaitingInAction", "InAnalysis"):
         return "aksiyon_bekleyen"
@@ -6104,7 +6107,7 @@ async def get_trendyol_claims(
     (trendyol, hepsiburada, ...). Ayrım `_claim_is_site_order` kuralıyla yapılır.
     """
     # Sekme kovası eşlemesi artık _claim_bucket(c) helper'ında (status + kargo takip durumu).
-    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "aksiyon_bekleyen", "onaylanan", "reddedilen"}
+    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "aksiyon_bekleyen", "onaylanan", "reddedilen", "iptal"}
 
     base_query = {}
     if claim_type:
@@ -6155,7 +6158,7 @@ async def get_trendyol_claims(
     claims = filtered[skip: skip + limit]
 
     # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, _claim_bucket ile.
-    _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0, "iptal": 0}
     for c in platform_scoped:
         _b = _claim_bucket(c)
         if _b in _bcount:
@@ -6206,7 +6209,7 @@ async def trendyol_claims_diagnostics(current_user: dict = Depends(require_admin
         uniq.append(c)
 
     by_status = {}
-    by_bucket = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    by_bucket = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0, "iptal": 0}
     created_with_cargo = 0
     created_without_cargo = 0
     for c in uniq:
@@ -6249,7 +6252,7 @@ async def repair_trendyol_claim_status(current_user: dict = Depends(require_admi
     )
     scanned = 0
     fixed = 0
-    bucket_after = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    bucket_after = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0, "iptal": 0}
     async for c in cursor:
         scanned += 1
         raw = c.get("raw_data") or {}
@@ -6273,6 +6276,96 @@ async def repair_trendyol_claim_status(current_user: dict = Depends(require_admi
         if b in bucket_after:
             bucket_after[b] += 1
     return {"scanned": scanned, "fixed": fixed, "bucket_after": bucket_after}
+
+
+@router.post("/trendyol/claims/dedupe")
+async def dedupe_trendyol_claims(current_user: dict = Depends(require_admin)):
+    """Aynı claim_id'ye sahip MÜKERRER belgeleri temizler (her claim_id için en güncel
+    updated_at olanı tutar), sonra claim_id üzerinde unique index kurarak gelecekte
+    mükerrerlenmeyi engeller. İdempotent — tekrar çağrılabilir.
+    """
+    pipeline = [
+        {"$group": {"_id": "$claim_id", "count": {"$sum": 1}}},
+        {"$match": {"count": {"$gt": 1}}},
+    ]
+    groups = await db.trendyol_claims.aggregate(pipeline).to_list(None)
+    removed = 0
+    affected = 0
+    for g in groups:
+        cid = g["_id"]
+        docs = await db.trendyol_claims.find(
+            {"claim_id": cid}, {"_id": 1, "updated_at": 1, "created_date": 1, "created_at": 1}
+        ).to_list(None)
+        if len(docs) <= 1:
+            continue
+        docs.sort(key=lambda d: (str(d.get("updated_at") or ""), str(d.get("created_date") or ""), str(d.get("created_at") or "")), reverse=True)
+        to_delete = [d["_id"] for d in docs[1:]]
+        if to_delete:
+            res = await db.trendyol_claims.delete_many({"_id": {"$in": to_delete}})
+            removed += res.deleted_count
+            affected += 1
+    index_created = False
+    index_error = ""
+    try:
+        await db.trendyol_claims.create_index("claim_id", unique=True, name="uniq_claim_id")
+        index_created = True
+    except Exception as e:
+        index_error = str(e)[:200]
+    remaining = await db.trendyol_claims.count_documents({})
+    return {
+        "duplicate_groups": len(groups),
+        "claims_affected": affected,
+        "removed": removed,
+        "index_created": index_created,
+        "index_error": index_error,
+        "remaining_docs": remaining,
+    }
+
+
+@router.get("/trendyol/claims/shipment-probe")
+async def trendyol_shipment_probe(order_number: str = "", current_user: dict = Depends(require_admin)):
+    """GEÇİCİ ARAŞTIRMA: Trendyol sipariş paketi servisini (getShipmentPackages) bir iadenin
+    orderNumber'ı ile sorgular ve paket durum/satır alanlarını döndürür. Amaç: talep vs
+    kargoya-verilen ayrımı için kullanılabilir bir 'shipped/returned' sinyali var mı görmek.
+    """
+    headers = await get_trendyol_headers()
+    if not headers:
+        raise HTTPException(status_code=400, detail="Trendyol kimliği yapılandırılmamış")
+    config = await get_trendyol_config()
+    base = config["base_url"]
+    sid = config["supplier_id"]
+    probed = []
+    # order_number verilmezse birkaç açık (Created) claim üzerinde dene
+    targets = []
+    if order_number:
+        targets = [order_number]
+    else:
+        async for c in db.trendyol_claims.find({"claim_status": "Created"}, {"_id": 0, "order_number": 1}).limit(3):
+            on = c.get("order_number")
+            if on:
+                targets.append(on)
+    for on in targets:
+        url = f"{base}/sapigw/suppliers/{sid}/orders?orderNumber={on}"
+        try:
+            async with httpx.AsyncClient(timeout=30) as cx:
+                r = await cx.get(url, headers=headers)
+            try:
+                data = r.json()
+            except Exception:
+                data = {"_text": r.text[:500]}
+            pkgs = []
+            for pkg in (data.get("content") or [])[:5]:
+                pkgs.append({
+                    "id": pkg.get("id"),
+                    "status": pkg.get("status"),
+                    "cargoTrackingNumber": pkg.get("cargoTrackingNumber"),
+                    "lines_status": [l.get("orderLineItemStatusName") for l in (pkg.get("lines") or [])[:4]],
+                    "top_keys": list(pkg.keys()),
+                })
+            probed.append({"order_number": on, "http": r.status_code, "package_count": len(data.get("content") or []), "packages": pkgs})
+        except Exception as e:
+            probed.append({"order_number": on, "error": str(e)[:200]})
+    return {"base": base, "supplier_id": sid, "probed": probed}
 
 
 @router.get("/trendyol/claims/issue-reasons")
