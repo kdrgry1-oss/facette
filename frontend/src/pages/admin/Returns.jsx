@@ -22,7 +22,6 @@ const STATUS_TABS = [
   { key: "aksiyon_bekleyen", label: "Aksiyon Bekleyen" },
   { key: "onaylanan", label: "Onaylanan" },
   { key: "reddedilen", label: "Reddedilen" },
-  { key: "iptal", label: "İptal" },
 ];
 
 function formatCurrency(val) {
@@ -428,7 +427,7 @@ export default function Returns() {
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white p-4 rounded-xl border shadow-sm">
             <p className="text-xs text-gray-500 font-bold uppercase">Toplam İade</p>
-            <p className="text-2xl font-bold text-red-600 mt-1">{stats.total_returns || 0}</p>
+            <p className="text-2xl font-bold text-red-600 mt-1">{tabCounts.all ?? 0}</p>
           </div>
           <div className="bg-white p-4 rounded-xl border shadow-sm">
             <p className="text-xs text-gray-500 font-bold uppercase">Toplam İade Tutarı</p>

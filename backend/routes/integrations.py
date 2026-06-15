@@ -6107,7 +6107,7 @@ async def get_trendyol_claims(
     (trendyol, hepsiburada, ...). Ayrım `_claim_is_site_order` kuralıyla yapılır.
     """
     # Sekme kovası eşlemesi artık _claim_bucket(c) helper'ında (status + kargo takip durumu).
-    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "acik_iade", "aksiyon_bekleyen", "onaylanan", "reddedilen", "iptal"}
+    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "acik_iade", "aksiyon_bekleyen", "onaylanan", "reddedilen"}
 
     base_query = {}
     if claim_type:
@@ -6147,13 +6147,18 @@ async def get_trendyol_claims(
     # kabul edilir ama bu endpoint'te artik filtreleme yapmaz.)
     platform_scoped = deduped
 
+    # İptal (Cancelled iade statüsü) bu iade ekranından TAMAMEN dışlanır; iptaller
+    # ayrı bir alandan yönetilir. Böylece "Tüm İadeler" sekmesi ve "Toplam İade"
+    # kartı aynı evreni (iptal-hariç tekil iade) sayar.
+    iade_scoped = [c for c in platform_scoped if _claim_bucket(c) != "iptal"]
+
     # (c) status sekmesi filtresi (bellekte) — _claim_bucket ile
     if want_tab == "acik_iade":
-        filtered = [c for c in platform_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
+        filtered = [c for c in iade_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
     elif want_tab is not None:
-        filtered = [c for c in platform_scoped if _claim_bucket(c) == want_tab]
+        filtered = [c for c in iade_scoped if _claim_bucket(c) == want_tab]
     else:
-        filtered = platform_scoped
+        filtered = iade_scoped
 
     total = len(filtered)
     skip = (page - 1) * limit
@@ -6174,21 +6179,18 @@ async def get_trendyol_claims(
         c["bucket"] = _b
         c["bucket_label"] = _BUCKET_LABEL.get(_b, "—")
 
-    # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, _claim_bucket ile.
-    _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0, "iptal": 0}
-    for c in platform_scoped:
+    # Sekme adetleri — iade_scoped (iptal hariç) üzerinden, _claim_bucket ile.
+    _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    for c in iade_scoped:
         _b = _claim_bucket(c)
         if _b in _bcount:
             _bcount[_b] += 1
-    tab_counts = {"all": len(platform_scoped), **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
+    tab_counts = {"all": len(iade_scoped), **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
 
-    # İstatistikler
-    total_returns = await db.trendyol_claims.count_documents({"claim_type": "RETURN"})
+    # İstatistikler — "Toplam İade" kartı = "Tüm İadeler" sekmesi (iptal hariç tekil iade).
+    total_returns = len(iade_scoped)
     total_cancels = await db.trendyol_claims.count_documents({"claim_type": "CANCEL"})
-
-    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$refund_amount"}}}]
-    refund_result = await db.trendyol_claims.aggregate(pipeline).to_list(1)
-    total_refund = refund_result[0]["total"] if refund_result else 0
+    total_refund = sum((c.get("refund_amount") or 0) for c in iade_scoped)
 
     return {
         "claims": claims,
