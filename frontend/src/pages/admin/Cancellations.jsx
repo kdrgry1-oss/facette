@@ -84,7 +84,6 @@ export default function Cancellations() {
   const [detail, setDetail] = useState(null);   // detay modalı için sipariş
   const [savingId, setSavingId] = useState(null); // durum güncellenirken
   const [deletingId, setDeletingId] = useState(null); // silinirken
-  const [backfilling, setBackfilling] = useState(false); // Trendyol toplu iptal çekme
   const pageSize = 20;
 
   const fetchCancelled = useCallback(async () => {
@@ -146,52 +145,6 @@ export default function Cancellations() {
     }
   }
 
-  async function handleBackfill() {
-    if (backfilling) return;
-    if (!window.confirm("Trendyol'daki son 180 günün TÜM iptalleri çekilecek; İptaller'e düşmemiş eski iptaller eklenecek ve gerçek iptal sebepleri bağlanacak.\n\nİşlem arka planda çalışır, birkaç dakika sürebilir. Bitince liste otomatik yenilenir. Devam edilsin mi?")) return;
-    setBackfilling(true);
-    const token = localStorage.getItem("token");
-    try {
-      const res = await axios.post(
-        `${API}/integrations/trendyol/cancellations/backfill?days_back=180`,
-        null,
-        { headers: { Authorization: `Bearer ${token}` }, timeout: 60000 }
-      );
-      const d = res.data || {};
-      if (d.diagnostic_sample) console.log("Trendyol iptal teşhis örneği (ham alanlar):", d.diagnostic_sample);
-      alert(d.message || "Backfill arka planda başladı.");
-    } catch (e) {
-      alert("Toplu çekme başlatılamadı: " + (e?.response?.data?.detail || e.message));
-      setBackfilling(false);
-      return;
-    }
-    // Durumu yokla — bitince özet + liste yenile (en fazla ~10 dk)
-    const startedAt = Date.now();
-    const poll = async () => {
-      try {
-        const s = await axios.get(
-          `${API}/integrations/trendyol/cancellations/backfill/status`,
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 }
-        );
-        const st = s.data || {};
-        if (st.running === false && (st.finished_at || st.error)) {
-          if (st.error) alert("Backfill hatası: " + st.error);
-          else alert(`Backfill tamamlandı: ${st.cancel_updated ?? 0} iptal eklendi/güncellendi. Trendyol iptal toplamı: ${st.total_trendyol_cancelled ?? "?"}.`);
-          setBackfilling(false);
-          await fetchCancelled();
-          return;
-        }
-      } catch (_e) { /* yoklama hatasını yut, tekrar dene */ }
-      if (Date.now() - startedAt > 10 * 60 * 1000) { // güvenlik zaman aşımı
-        setBackfilling(false);
-        await fetchCancelled();
-        return;
-      }
-      setTimeout(poll, 5000);
-    };
-    setTimeout(poll, 5000);
-  }
-
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center gap-2 mb-1">
@@ -217,12 +170,6 @@ export default function Cancellations() {
         <button onClick={applySearch} className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm">Ara</button>
         <button onClick={fetchCancelled} className="px-3 py-2 border rounded-lg text-sm flex items-center gap-1">
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Yenile
-        </button>
-        <button onClick={handleBackfill} disabled={backfilling}
-          title="Trendyol'daki son 180 günün tüm iptallerini çeker; eksik/eski iptalleri ekler ve gerçek sebepleri bağlar"
-          className="px-3 py-2 rounded-lg text-sm flex items-center gap-1 bg-orange-500 text-white disabled:opacity-60">
-          <RefreshCw className={`w-4 h-4 ${backfilling ? "animate-spin" : ""}`} />
-          {backfilling ? "Çekiliyor…" : "Trendyol'dan Tüm İptalleri Çek"}
         </button>
         <span className="text-sm text-gray-500 ml-auto">Toplam {total} iptal</span>
       </div>

@@ -221,6 +221,62 @@ async def _run_trendyol_status_wide_pass():
         logger.error(f"[cron] Trendyol geniş durum taraması hatası: {e}")
 
 
+async def _run_trendyol_deep_backfill_once():
+    """TEK SEFERLİK derin iptal taraması — geçmişteki TÜM Trendyol iptallerini sisteme taşır
+    (365 güne kadar, 14 günlük dilimler, sadece Cancelled). db.settings.trendyol_deep_backfill
+    'done' flag'i ile YALNIZCA BİR KEZ çalışır; sonra no-op (3 saatte bir ucuz flag kontrolü).
+    Buton YOK, tamamen otomatik. HTTP dışı (scheduler) olduğu için Network Error/timeout olmaz."""
+    try:
+        from routes.deps import db
+        flag = await db.settings.find_one({"id": "trendyol_deep_backfill"}, {"_id": 0})
+        if flag and flag.get("done"):
+            return
+        from routes.integrations import get_trendyol_config, _sync_trendyol_status_passes, sync_trendyol_claims
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        from datetime import datetime as _dt, timedelta as _td
+        from trendyol_client import TrendyolClient
+        import asyncio as _aio
+        client = TrendyolClient(
+            supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+            api_secret=cfg["api_secret"], mode=cfg["mode"],
+        )
+        await db.settings.update_one(
+            {"id": "trendyol_deep_backfill"},
+            {"$set": {"id": "trendyol_deep_backfill", "running": True,
+                      "started_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        now_ = _dt.now()
+        total_days, chunk_d, added, d = 365, 14, 0, 0
+        while d < total_days:
+            end_ = now_ - _td(days=d)
+            start_ = now_ - _td(days=min(d + chunk_d, total_days))
+            try:
+                added += await _sync_trendyol_status_passes(
+                    client, int(start_.timestamp() * 1000), int(end_.timestamp() * 1000),
+                    widen_cancel=False, statuses=("Cancelled",),
+                )
+            except Exception as _ce:
+                logger.error(f"[deep backfill chunk d={d}] {_ce}")
+            d += chunk_d
+            await _aio.sleep(0.4)  # Trendyol rate limit + sunucuyu yormama
+        try:
+            await sync_trendyol_claims(days_back=180, current_user={"is_admin": True})
+        except Exception as _cl:
+            logger.error(f"[deep backfill claims] {_cl}")
+        await db.settings.update_one(
+            {"id": "trendyol_deep_backfill"},
+            {"$set": {"id": "trendyol_deep_backfill", "done": True, "running": False,
+                      "added": added, "finished_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        logger.info(f"[scheduler] Trendyol DERİN iptal backfill tamamlandı: {added} kayıt eklendi/güncellendi")
+    except Exception as e:
+        logger.error(f"[cron] Trendyol derin backfill hatası: {e}")
+
+
 async def _run_trendyol_claims_sync():
     """Trendyol iade/iptal (claims) senkronu — periyodik. Müşterinin Trendyol'da seçtiği
     GERÇEK iptal sebebini çeker ve CANCEL claim'leri eşleşen iptal siparişlerine bağlar
@@ -727,14 +783,26 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Trendyol claims (iade/iptal) senkronu — her 30 DK (eskiden 15 dk). Müşterinin seçtiği
-    # GERÇEK iptal sebebini çeker ve claim'leri iptal siparişlerine bağlar.
+    # Trendyol claims (iade/iptal) senkronu — her 30 DK. Müşterinin seçtiği GERÇEK iptal/iade
+    # sebebini çeker ve claim'leri eşleşen iptal siparişlerine bağlar.
     _scheduler.add_job(
         _run_trendyol_claims_sync,
         "interval",
         minutes=30,
         id="trendyol_claims_sync_30m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Trendyol TEK SEFERLİK derin iptal backfill — geçmişteki TÜM iptalleri sisteme taşır.
+    # Flag korumalı (db.settings.trendyol_deep_backfill.done) → bir kez çalışır, sonra no-op.
+    # 3 saatte bir tetiklenir ama done ise hiçbir şey yapmaz (sadece ucuz flag kontrolü).
+    _scheduler.add_job(
+        _run_trendyol_deep_backfill_once,
+        "interval",
+        hours=3,
+        id="trendyol_deep_backfill_once",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4),
         max_instances=1,
         coalesce=True,
     )
