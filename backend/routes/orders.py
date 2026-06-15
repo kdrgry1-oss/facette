@@ -2718,7 +2718,12 @@ async def get_cargo_label(order_id: str, token: str = None):
     # Tek barkod: NZ > GONDERI_NO > MNG_SIPARIS_NO > tracking > sipariş_no
     real_kargo_takip = mng_nz_barkod or mng_gonderi_no or mng_siparis_no or barkod or ""
     siparis_no = str(order.get("order_number") or order_id)
-    main_barcode = real_kargo_takip or siparis_no  # ✅ TEK barkod — etiketin merkezi
+    # ✅ Barkod ÇUBUKLARI = SİPARİŞ NO (W10047). Depo/operasyon barkodu okutunca siparişi
+    # bulabilsin diye. Önceden çubuklar kargo takip no'yu (örn. 170553284) kodluyordu ama
+    # alttaki yazı sipariş no idi → okutunca sipariş no yerine takip no çıkıyordu.
+    main_barcode = siparis_no
+    tracking_line = (f'<div style="font-size:9px;color:#555;margin-top:3px;letter-spacing:.3px;">Kargo Takip: {real_kargo_takip}</div>'
+                     if real_kargo_takip and real_kargo_takip != siparis_no else "")
     sender = await _get_sender_info()
     mng = await _get_mng_settings()
     sender_company = mng.get("customer_code") or sender["name"] or "FACETTE"
@@ -2865,6 +2870,7 @@ async def get_cargo_label(order_id: str, token: str = None):
     <div class="barcode-band">
       <div class="barcode">*{main_barcode}*</div>
       <div class="barcode-num">{siparis_no}</div>
+      {tracking_line}
     </div>
 
   </div>
