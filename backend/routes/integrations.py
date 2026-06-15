@@ -2521,14 +2521,14 @@ async def log_integration_event(platform: str, action: str, entity_type: str, en
     except Exception as e:
         logger.error(f"Failed to log integration event: {str(e)}")
 
-async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen_cancel=True):
+async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen_cancel=True, statuses=("Cancelled", "Returned", "UnDelivered")):
     """İptal/iade/teslim edilemedi gibi durum değişikliklerini ayrı status
     sorgularıyla yakalar; yalnızca MEVCUT siparişlerin status alanını günceller
     (kaydı baştan ezmez). Trendyol orders ucu ~2 haftalık pencereyle sınırlıdır;
     daha eski iadeler İadeler (claims) modülünden takip edilir."""
     from datetime import datetime, timezone, timedelta
     updated = 0
-    for st in ("Cancelled", "Returned", "UnDelivered"):
+    for st in statuses:
         # İptaller daha GENİŞ pencerede taranır: Trendyol startDate/endDate sipariş
         # TARİHİNE göre filtreler → 14 günden eski bir sipariş sonradan iptal olursa dar
         # pencereye girmez ve İptaller'e hiç düşmezdi ("bazıları düşmemiş" kök nedeni).

@@ -172,9 +172,10 @@ async def _run_trendyol_auto_orders_pull():
 
 
 async def _run_trendyol_cancel_pass():
-    """HAFİF iptal/iade taraması — her 60 sn. Tam sipariş import'u YAPMAZ; yalnızca
-    Trendyol status pass'lerini (Cancelled/Returned/UnDelivered) geniş pencerede çalıştırır
-    → iptaller İptaller'e hızlı düşer. (Tam import yine `orders_interval_min` ile çalışır.)"""
+    """HAFİF + SIK iptal taraması (5 dk). Yalnızca Cancelled, son 14 gün, dar pencere →
+    yeni iptaller İptaller'e hızlı düşer ama sunucuyu yormaz. Eski/geç iptaller ve
+    iade/teslim-edilemedi ayrı SAATLİK geniş tarama (_run_trendyol_status_wide_pass) ile
+    kapanır; derin geçmiş manuel backfill butonuyla çekilir."""
     try:
         from routes.integrations import get_trendyol_config
         cfg = await get_trendyol_config()
@@ -188,13 +189,36 @@ async def _run_trendyol_cancel_pass():
             api_secret=cfg["api_secret"], mode=cfg["mode"],
         )
         now_ = _dt.now()
-        # Cancelled için status pass içinde pencere zaten 45 güne genişletiliyor;
-        # buradan 30 günlük taban veriyoruz (Returned/UnDelivered de makul kapsansın).
+        start_ms = int((now_ - _td(days=14)).timestamp() * 1000)
+        end_ms = int(now_.timestamp() * 1000)
+        # Sadece Cancelled + dar 14g pencere (widen_cancel=False) → hafif.
+        await _sync_trendyol_status_passes(client, start_ms, end_ms, widen_cancel=False, statuses=("Cancelled",))
+    except Exception as e:
+        logger.error(f"[cron] Trendyol hızlı iptal taraması hatası: {e}")
+
+
+async def _run_trendyol_status_wide_pass():
+    """GENİŞ durum taraması — SAATTE BİR (sık değil → hafif). Cancelled 45 güne kadar
+    (geç iptaller), Returned/UnDelivered 30 gün. Sık 5 dk'lık taramanın kaçırdığı
+    eski/geç durum değişikliklerini kapatır."""
+    try:
+        from routes.integrations import get_trendyol_config
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        from datetime import datetime as _dt, timedelta as _td
+        from trendyol_client import TrendyolClient
+        from routes.integrations import _sync_trendyol_status_passes
+        client = TrendyolClient(
+            supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+            api_secret=cfg["api_secret"], mode=cfg["mode"],
+        )
+        now_ = _dt.now()
         start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
         end_ms = int(now_.timestamp() * 1000)
-        await _sync_trendyol_status_passes(client, start_ms, end_ms)
+        await _sync_trendyol_status_passes(client, start_ms, end_ms)  # 3 durum, Cancelled 45g widen
     except Exception as e:
-        logger.error(f"[cron] Trendyol iptal taraması hatası: {e}")
+        logger.error(f"[cron] Trendyol geniş durum taraması hatası: {e}")
 
 
 async def _run_trendyol_claims_sync():
@@ -681,25 +705,36 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Trendyol İPTAL/iade HIZLI tarama — her 60 sn. Tam import yapmaz; sadece status
-    # pass'leri geniş pencerede çalıştırır → iptaller İptaller'e ~1 dk içinde düşer.
+    # Trendyol İPTAL HIZLI tarama — her 5 DK (eskiden 60 sn idi; site yavaşlamasının
+    # sebebi buydu). Sadece Cancelled + 14g dar pencere → hafif. Yeni iptaller ~5 dk'da düşer.
     _scheduler.add_job(
         _run_trendyol_cancel_pass,
         "interval",
-        seconds=60,
-        id="trendyol_cancel_pass_60s",
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+        minutes=5,
+        id="trendyol_cancel_pass_5m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
         max_instances=1,
         coalesce=True,
     )
-    # Trendyol claims (iade/iptal) senkronu — her 15 dk. Müşterinin seçtiği GERÇEK iptal
-    # sebebini çeker ve CANCEL claim'leri iptal siparişlerine bağlar.
+    # Trendyol GENİŞ durum taraması — SAATTE BİR. Cancelled 45g + Returned/UnDelivered 30g.
+    # Sık taramanın kaçırdığı eski/geç durum değişikliklerini kapatır (sık değil → hafif).
+    _scheduler.add_job(
+        _run_trendyol_status_wide_pass,
+        "interval",
+        minutes=60,
+        id="trendyol_status_wide_60m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Trendyol claims (iade/iptal) senkronu — her 30 DK (eskiden 15 dk). Müşterinin seçtiği
+    # GERÇEK iptal sebebini çeker ve claim'leri iptal siparişlerine bağlar.
     _scheduler.add_job(
         _run_trendyol_claims_sync,
         "interval",
-        minutes=15,
-        id="trendyol_claims_sync_15m",
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+        minutes=30,
+        id="trendyol_claims_sync_30m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
         max_instances=1,
         coalesce=True,
     )
