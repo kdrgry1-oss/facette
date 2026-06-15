@@ -398,19 +398,19 @@ export default function TicimaxReturns({ embedded = false }) {
       ) : (
         <div className="border rounded-xl overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-left text-xs uppercase">
+            <thead className="bg-gray-50 border-b text-gray-500 text-left text-xs uppercase">
               <tr>
-                <th className="px-3 py-2.5 font-medium">Sipariş</th>
-                <th className="px-3 py-2.5 font-medium">Müşteri</th>
-                <th className="px-3 py-2.5 font-medium">Sebep</th>
-                <th className="px-3 py-2.5 font-medium">Ödeme</th>
-                <th className="px-3 py-2.5 font-medium">Kargo</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">Sipariş Tarihi</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Onay/Ret</th>
-                <th className="px-3 py-2.5 font-medium whitespace-nowrap">İade Ödeme</th>
-                <th className="px-3 py-2.5 font-medium">Durum</th>
-                <th className="px-3 py-2.5 font-medium w-8"></th>
+                <th className="px-3 py-2.5 font-bold">Sipariş No</th>
+                <th className="px-3 py-2.5 font-bold">Müşteri</th>
+                <th className="px-3 py-2.5 font-bold">Sebep</th>
+                <th className="px-3 py-2.5 font-bold">Ödeme</th>
+                <th className="px-3 py-2.5 font-bold">Kargo</th>
+                <th className="px-3 py-2.5 font-bold text-right whitespace-nowrap">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
+                <th className="px-3 py-2.5 font-bold whitespace-nowrap">Sipariş Tarihi</th>
+                <th className="px-3 py-2.5 font-bold whitespace-nowrap">İade Onay/Ret</th>
+                <th className="px-3 py-2.5 font-bold whitespace-nowrap">İade Ödeme</th>
+                <th className="px-3 py-2.5 font-bold">Durum</th>
+                <th className="px-3 py-2.5 font-bold text-right w-8">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -418,7 +418,7 @@ export default function TicimaxReturns({ embedded = false }) {
                 <Fragment key={r.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
-                      <div className="font-medium text-gray-900">{r.order_number}</div>
+                      <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
                       {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
                     </td>
                     <td className="px-3 py-2.5">
@@ -427,7 +427,7 @@ export default function TicimaxReturns({ embedded = false }) {
                     </td>
                     <td className="px-3 py-2.5 text-xs text-gray-600 max-w-[140px] truncate" title={r.reason || ""}>{r.reason || "—"}</td>
                     <td className="px-3 py-2.5">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 text-xs border border-gray-200">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border ${r.payment_method === "credit_card" ? "bg-blue-100 text-blue-700 border-blue-200" : r.payment_method === "bank_transfer" ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}>
                         {payIcon(r.payment_method)} {r.payment_label}
                       </span>
                     </td>

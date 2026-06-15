@@ -2379,7 +2379,7 @@ async def create_cargo_barcode(
     # NZ-formatlı havuz tahsis edilen kurumsal hesaplarda GONDERI_NO field'ında ayrı bir kod gelir
     # Öncelik: NZ (anında MNGGonderiBarkod) → GONDERI_NO (FaturaSiparisListesi sonradan dolu) → MNG_SIPARIS_NO
     public_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or barkod
-    track_link = kargo_takip_url or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
+    track_link = kargo_takip_url or "https://www.dhlecommerce.com.tr/gonderitakip"
     update_doc = {
         "cargo_tracking_number": public_tracking,
         "cargo_tracking_link": track_link,
@@ -2481,7 +2481,7 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
     gonderi_no = info.get("gonderi_no") or ""
     mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
     public_tracking = gonderi_no or mng_siparis_no
-    track_link = info.get("kargo_takip_url") or (f"https://kargotakip.mngkargo.com.tr/?BarkodNo={public_tracking}" if public_tracking else "")
+    track_link = info.get("kargo_takip_url") or "https://www.dhlecommerce.com.tr/gonderitakip"
 
     update = {
         "cargo_tracking_number": public_tracking,
@@ -2511,6 +2511,106 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
             f"✅ Güncel takip: {public_tracking} ({info.get('kargo_statu_aciklama') or 'durum güncellendi'})"
         ),
     }
+
+
+@router.post("/cargo/backfill-tracking")
+async def backfill_cargo_tracking(
+    since: str = "2026-06-06",
+    force: bool = False,
+    current_user: dict = Depends(require_admin),
+):
+    """6 Haziran (vb.) sonrası kargoya verilmiş siparişlerin MNG/DHL takip
+    numaralarını toplu çeker ve siparişlere işler.
+
+    - get_mng_shipment_status (SALT OKUMA) kullanır → yeni kargo OLUŞTURMAZ.
+    - Bildirim göndermez (db.orders doğrudan güncellenir).
+    - force=False → yalnızca cargo_tracking_number'ı eksik olanlar.
+    - force=True  → mevcut no'ları da MNG'den yeniden çeker.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from mng_kargo_client import get_mng_shipment_status
+
+    settings = await _get_mng_settings()
+    SHIPPED_STATUSES = [
+        "shipped", "in_transit", "out_for_delivery", "delivered",
+        "return_requested", "return_approved", "return_in_transit",
+        "returned", "undelivered",
+    ]
+    cur = db.orders.find(
+        {"created_at": {"$gte": since}, "status": {"$in": SHIPPED_STATUSES}},
+        {"_id": 0, "id": 1, "order_number": 1, "cargo_tracking_number": 1, "cargo": 1, "status": 1},
+    )
+    orders = await cur.to_list(length=5000)
+
+    updated, skipped, failed = [], [], []
+    for o in orders:
+        existing = o.get("cargo_tracking_number") or (o.get("cargo") or {}).get("tracking_number")
+        if existing and not force:
+            skipped.append(o.get("order_number"))
+            continue
+        siparis_no = str(o.get("order_number") or o.get("id"))
+        try:
+            info = get_mng_shipment_status(
+                username=settings["username"], password=settings["password"], siparis_no=siparis_no
+            )
+        except Exception as e:
+            failed.append({"no": siparis_no, "err": str(e)[:100]})
+            continue
+        if not info.get("ok"):
+            failed.append({"no": siparis_no, "err": info.get("error") or "MNG durumu alınamadı"})
+            continue
+        gonderi = info.get("gonderi_no") or info.get("mng_siparis_no") or ""
+        if not gonderi:
+            failed.append({"no": siparis_no, "err": "gonderi_no boş"})
+            continue
+        await db.orders.update_one(
+            {"id": o["id"]},
+            {"$set": {
+                "cargo_tracking_number": gonderi,
+                "cargo_tracking_link": info.get("kargo_takip_url") or "https://www.dhlecommerce.com.tr/gonderitakip",
+                "cargo.tracking_number": gonderi,
+                "cargo.tracking_link": info.get("kargo_takip_url") or "https://www.dhlecommerce.com.tr/gonderitakip",
+                "cargo.mng_gonderi_no": gonderi,
+                "cargo.mng_kargo_statu": info.get("kargo_statu"),
+                "cargo.mng_kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        updated.append({"no": siparis_no, "gonderi_no": gonderi})
+
+    return {
+        "since": since, "force": force, "scanned": len(orders),
+        "updated": len(updated), "skipped": len(skipped), "failed": len(failed),
+        "updatedList": updated[:100], "failedList": failed[:30],
+    }
+
+
+@router.post("/returns/bulk-mark-refunded-silent")
+async def bulk_mark_refunded_silent(payload: dict, current_user: dict = Depends(require_admin)):
+    """Verilen sipariş ID'lerini 'İade Bedeli Ödendi' (refunded) durumuna alır.
+
+    BİLDİRİMSİZ: db.orders doğrudan güncellenir, send_notification çağrılmaz →
+    bu siparişler için müşteriye SMS/e-posta GİTMEZ. (Tek seferlik toplu işlem.)
+    """
+    order_ids = payload.get("order_ids") or []
+    if not isinstance(order_ids, list) or not order_ids:
+        raise HTTPException(status_code=400, detail="order_ids (liste) gerekli")
+    now = datetime.now(timezone.utc).isoformat()
+    done, missing = [], []
+    for oid in order_ids:
+        res = await db.orders.update_one(
+            {"id": oid},
+            {"$set": {
+                "status": "refunded",
+                "refund_paid_at": now,
+                "return_approved_at": now,
+                "updated_at": now,
+                "refund_silent_bulk": True,
+            }},
+        )
+        (done if res.matched_count else missing).append(oid)
+    return {"requested": len(order_ids), "updated": len(done), "updatedIds": done, "missingIds": missing}
 
 
 @router.post("/{order_id}/create-mng-shipment")
