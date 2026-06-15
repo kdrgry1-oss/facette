@@ -6156,6 +6156,58 @@ async def get_trendyol_claims(
         }
     }
 
+
+@router.get("/trendyol/claims/diagnostics")
+async def trendyol_claims_diagnostics(current_user: dict = Depends(require_admin)):
+    """Kova kalibrasyonu teşhisi: ham status dağılımı + kova eşlemesi + kargo kırılımı.
+
+    Panel'deki Trendyol sekme sayılarını (talep/kargoda/aksiyon/onay/ret) gerçek veriyle
+    karşılaştırıp _claim_bucket eşlemesini doğrulamak/ayarlamak için kullanılır.
+    Backfill bitince çağır; by_bucket panel sayılarıyla tutmazsa by_status_raw'a bakıp
+    _claim_bucket tek noktadan düzeltilir.
+    """
+    rows = await db.trendyol_claims.find(
+        {}, {"_id": 0, "claim_status": 1, "cargo_tracking_number": 1, "claim_id": 1}
+    ).to_list(None)
+    seen = set()
+    uniq = []
+    for c in rows:
+        cid = c.get("claim_id")
+        if cid in seen:
+            continue
+        seen.add(cid)
+        uniq.append(c)
+
+    by_status = {}
+    by_bucket = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    created_with_cargo = 0
+    created_without_cargo = 0
+    for c in uniq:
+        st = (c.get("claim_status") or "").strip() or "(boş)"
+        by_status[st] = by_status.get(st, 0) + 1
+        b = _claim_bucket(c)
+        if b in by_bucket:
+            by_bucket[b] += 1
+        if (c.get("claim_status") or "").strip() == "Created":
+            if str(c.get("cargo_tracking_number") or "").strip():
+                created_with_cargo += 1
+            else:
+                created_without_cargo += 1
+
+    return {
+        "total_unique_claims": len(uniq),
+        "by_status_raw": by_status,
+        "by_bucket": by_bucket,
+        "created_with_cargo": created_with_cargo,
+        "created_without_cargo": created_without_cargo,
+        "expected_from_panel": {
+            "talep_olusturulan": 34, "kargoya_verilen": 54,
+            "aksiyon_bekleyen": 16, "onaylanan": 3583, "reddedilen": 49,
+        },
+        "note": "by_bucket panel ile tutmazsa _claim_bucket eşlemesi by_status_raw'a göre ayarlanır.",
+    }
+
+
 @router.get("/trendyol/claims/issue-reasons")
 async def get_trendyol_issue_reasons(current_user: dict = Depends(require_admin)):
     """Fetch claim issue reasons from Trendyol"""
