@@ -374,15 +374,49 @@ async def _run_trendyol_claims_sync():
     GERÇEK iptal sebebini çeker ve CANCEL claim'leri eşleşen iptal siparişlerine bağlar
     (İptaller'de "Trendyol iptali" yerine gerçek sebep görünür)."""
     try:
-        from routes.integrations import get_trendyol_config, sync_trendyol_claims
+        from routes.integrations import get_trendyol_config
         cfg = await get_trendyol_config()
         if not cfg.get("is_active"):
             return
-        # sync_trendyol_claims gövdesi current_user'ı KULLANMAZ (yalnızca require_admin
-        # bağımlılığı); scheduler'dan dummy admin ile doğrudan çağrılabilir.
-        await sync_trendyol_claims(days_back=45, current_user={"is_admin": True})
+        # Çekirdek senkron (require_admin bypass) — periyodik kısa pencere; durum
+        # geçişleri (Created→Accepted/Rejected) her turda canlı tazelenir.
+        from routes.integrations import _sync_trendyol_claims_core
+        await _sync_trendyol_claims_core(days_back=60)
     except Exception as e:
         logger.error(f"[cron] Trendyol claims senkron hatası: {e}")
+
+
+async def _run_trendyol_claims_deep_backfill_once():
+    """TEK SEFERLİK derin claims backfill — geçmişteki TÜM Trendyol iadelerini (3 yıl)
+    çeker; eski onaylı/reddedilen claim'ler de sekme sayılarına yansısın. Ayrı flag
+    (trendyol_claims_deep_backfill) ile YALNIZCA BİR KEZ çalışır; sonra no-op."""
+    try:
+        from routes.deps import db
+        flag = await db.settings.find_one({"id": "trendyol_claims_deep_backfill"}, {"_id": 0})
+        if flag and flag.get("done"):
+            return
+        from routes.integrations import get_trendyol_config, _sync_trendyol_claims_core
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        await db.settings.update_one(
+            {"id": "trendyol_claims_deep_backfill"},
+            {"$set": {"id": "trendyol_claims_deep_backfill", "running": True,
+                      "started_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        res = await _sync_trendyol_claims_core(days_back=1095)
+        await db.settings.update_one(
+            {"id": "trendyol_claims_deep_backfill"},
+            {"$set": {"id": "trendyol_claims_deep_backfill", "done": True, "running": False,
+                      "total_synced": res.get("total_synced", 0),
+                      "finished_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        logger.info(f"[scheduler] Trendyol TEK SEFERLİK claims derin backfill tamamlandı: "
+                    f"{res.get('total_synced', 0)} kayıt")
+    except Exception as e:
+        logger.error(f"[cron] Trendyol claims derin backfill hatası: {e}")
 
 
 async def _marketplace_sync_tick():
@@ -883,6 +917,17 @@ def start_scheduler():
         minutes=30,
         id="trendyol_claims_sync_30m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Trendyol claims TEK SEFERLİK derin backfill (3 yıl) — geçmiş onaylı/reddedilen iadeler
+    # de sekme sayılarına insin. Flag korumalı (trendyol_claims_deep_backfill.done) → bir kez.
+    _scheduler.add_job(
+        _run_trendyol_claims_deep_backfill_once,
+        "interval",
+        hours=6,
+        id="trendyol_claims_deep_backfill_once",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6),
         max_instances=1,
         coalesce=True,
     )

@@ -5631,12 +5631,59 @@ async def get_xml_feed_status():
 
 # ==================== TRENDYOL CLAIMS (İADE/İPTAL) ====================
 
-@router.get("/trendyol/claims/sync")
-async def sync_trendyol_claims(
-    days_back: int = 90,
-    current_user: dict = Depends(require_admin)
-):
-    """Trendyol'dan iade/iptal (claim) kayıtlarını çeker ve MongoDB'ye kaydeder."""
+def _claim_bucket(c: dict) -> str:
+    """Bir Trendyol claim'ini sekme kovasına eşler (status + kargo takip durumuna göre).
+
+    Created + takip no BOŞ  -> talep_olusturulan (müşteri henüz kargoya vermedi)
+    Created + takip no DOLU  -> kargoya_verilen  (iade kargoda)
+    WaitingInAction/InAnalysis -> aksiyon_bekleyen
+    Accepted                  -> onaylanan
+    Rejected/Cancelled/Unresolved -> reddedilen
+
+    NOT: Bu eşleme canlı 34/54/16/3583/49 sayılarıyla kalibre edilecek tek noktadır;
+    backfill sonrası gerçek dağılım ile bire bir tutmazsa yalnız burası ayarlanır.
+    """
+    st = (c.get("claim_status") or "").strip()
+    has_cargo = bool(str(c.get("cargo_tracking_number") or "").strip())
+    if st == "Accepted":
+        return "onaylanan"
+    if st in ("Rejected", "Cancelled", "Unresolved"):
+        return "reddedilen"
+    if st in ("WaitingInAction", "InAnalysis"):
+        return "aksiyon_bekleyen"
+    if st == "Created":
+        return "kargoya_verilen" if has_cargo else "talep_olusturulan"
+    return "talep_olusturulan"
+
+
+def _first_seen_stamps(claim: dict) -> dict:
+    """Yeni bir claim ilk kez yazılırken status'una göre onay/ret tarih damgası üretir.
+
+    lastModifiedDate (ms epoch) varsa onu, yoksa şimdiyi kullanır. İdempotent katkı:
+    yalnız ilgili terminal durumda alan döner; aksi halde boş dict.
+    """
+    st = claim.get("status", "")
+    lm = claim.get("lastModifiedDate")
+    iso = ""
+    if lm:
+        try:
+            iso = datetime.fromtimestamp(lm / 1000, tz=timezone.utc).isoformat()
+        except Exception:
+            iso = ""
+    if not iso:
+        iso = datetime.now(timezone.utc).isoformat()
+    if st == "Accepted":
+        return {"return_approved_at": iso}
+    if st in ("Rejected", "Cancelled"):
+        return {"return_rejected_at": iso}
+    return {}
+
+
+async def _sync_trendyol_claims_core(days_back: int = 1095):
+    """Trendyol claims çekirdek senkron — endpoint + scheduler ortak kullanır.
+
+    days_back: geçmiş tarama penceresi (ilk backfill 1095=3yıl; scheduler kısa pencere).
+    """
     config = await get_trendyol_config()
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
@@ -5701,9 +5748,36 @@ async def sync_trendyol_claims(
                 if not claim_id:
                     continue
 
-                # Zaten kayıtlı iade varsa atla (sadece yeni olanları işle)
-                existing_claim = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 1, "items": 1})
+                # Mevcut claim: pahalı order API'sini TEKRAR ÇEKME (iskonto zaten kayıtlı),
+                # ama DURUM/kargo/tarih alanlarını canlı tazele — durum geçişleri (Created→
+                # Accepted/Rejected) yansısın. Trendyol kayıtları lastModifiedDate sırasıyla gelir.
+                existing_claim = await db.trendyol_claims.find_one(
+                    {"claim_id": claim_id},
+                    {"_id": 1, "return_approved_at": 1, "return_rejected_at": 1}
+                )
                 if existing_claim:
+                    _new_status = claim.get("status", "")
+                    _lm = claim.get("lastModifiedDate")
+                    _lm_iso = ""
+                    if _lm:
+                        try:
+                            _lm_iso = datetime.fromtimestamp(_lm / 1000, tz=timezone.utc).isoformat()
+                        except Exception:
+                            _lm_iso = ""
+                    _now_iso = datetime.now(timezone.utc).isoformat()
+                    _set = {
+                        "claim_status": _new_status,
+                        "cargo_tracking_number": str(claim.get("cargoTrackingNumber", "")),
+                        "cargo_provider_name": claim.get("cargoProviderName", ""),
+                        "raw_data": claim,
+                        "updated_at": _now_iso,
+                    }
+                    # Durum geçiş tarih damgaları (idempotent — yalnız ilk geçişte yazılır)
+                    if _new_status == "Accepted" and not existing_claim.get("return_approved_at"):
+                        _set["return_approved_at"] = _lm_iso or _now_iso
+                    if _new_status in ("Rejected", "Cancelled") and not existing_claim.get("return_rejected_at"):
+                        _set["return_rejected_at"] = _lm_iso or _now_iso
+                    await db.trendyol_claims.update_one({"claim_id": claim_id}, {"$set": _set})
                     total_synced += 1
                     continue
 
@@ -5819,6 +5893,7 @@ async def sync_trendyol_claims(
                     "claim_type": claim_type,
                     "claim_reason": claim_reason,
                     "claim_status": claim.get("status", "Returned"),
+                    **_first_seen_stamps(claim),
                     "customer_name": f"{claim.get('customerFirstName', '')} {claim.get('customerLastName', '')}".strip(),
                     "created_date": created_date_str,
                     "items": claim_items,
@@ -5866,6 +5941,19 @@ async def sync_trendyol_claims(
         "total_synced": total_synced,
         "days_back": days_back
     }
+
+
+@router.get("/trendyol/claims/sync")
+async def sync_trendyol_claims(
+    days_back: int = 1095,
+    current_user: dict = Depends(require_admin)
+):
+    """Trendyol'dan iade/iptal (claim) kayıtlarını çeker ve MongoDB'ye kaydeder.
+
+    days_back varsayılan 1095 (3 yıl) — geçmiş backfill için. UI bu ucu tetikler;
+    durum geçişleri her çağrıda canlı tazelenir.
+    """
+    return await _sync_trendyol_claims_core(days_back)
 
 
 @router.post("/trendyol/claims/fix-discounts")
@@ -5988,14 +6076,8 @@ async def get_trendyol_claims(
     `platform` = 'facette' (web/site iadeleri) veya bir pazaryeri anahtarı
     (trendyol, hepsiburada, ...). Ayrım `_claim_is_site_order` kuralıyla yapılır.
     """
-    # Trendyol claim_status -> sekme kovasi eslemesi (buyuk kovalar net: Accepted/Rejected).
-    STATUS_BUCKETS = {
-        "talep_olusturulan": ["Created", "WaitingInAction"],
-        "kargoya_verilen": ["InAnalysis", "Unresolved", "Returned"],
-        "aksiyon_bekleyen": ["WaitingInAction", "InAnalysis"],
-        "onaylanan": ["Accepted"],
-        "reddedilen": ["Rejected", "Cancelled"],
-    }
+    # Sekme kovası eşlemesi artık _claim_bucket(c) helper'ında (status + kargo takip durumu).
+    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "aksiyon_bekleyen", "onaylanan", "reddedilen"}
 
     base_query = {}
     if claim_type:
@@ -6009,7 +6091,7 @@ async def get_trendyol_claims(
             {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
         ]
 
-    status_keys = set(STATUS_BUCKETS[status]) if (status and status != "all" and status in STATUS_BUCKETS) else None
+    want_tab = status if (status and status != "all" and status in _VALID_TABS) else None
 
     # base_query (arama/tip filtreli, AMA status filtresiz) ile TÜM kayıtları çek.
     # Status filtresi bellekte uygulanır ki tab_counts tüm kovaları doğru sayabilsin.
@@ -6035,9 +6117,9 @@ async def get_trendyol_claims(
     # kabul edilir ama bu endpoint'te artik filtreleme yapmaz.)
     platform_scoped = deduped
 
-    # (c) status sekmesi filtresi (bellekte)
-    if status_keys is not None:
-        filtered = [c for c in platform_scoped if c.get("claim_status") in status_keys]
+    # (c) status sekmesi filtresi (bellekte) — _claim_bucket ile
+    if want_tab is not None:
+        filtered = [c for c in platform_scoped if _claim_bucket(c) == want_tab]
     else:
         filtered = platform_scoped
 
@@ -6045,19 +6127,13 @@ async def get_trendyol_claims(
     skip = (page - 1) * limit
     claims = filtered[skip: skip + limit]
 
-    # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, her kova doğru sayılır.
-    def _bucket_count_mem(keys):
-        ks = set(keys)
-        return sum(1 for c in platform_scoped if c.get("claim_status") in ks)
-
-    tab_counts = {
-        "all": len(platform_scoped),
-        "talep_olusturulan": _bucket_count_mem(STATUS_BUCKETS["talep_olusturulan"]),
-        "kargoya_verilen": _bucket_count_mem(STATUS_BUCKETS["kargoya_verilen"]),
-        "aksiyon_bekleyen": _bucket_count_mem(STATUS_BUCKETS["aksiyon_bekleyen"]),
-        "onaylanan": _bucket_count_mem(STATUS_BUCKETS["onaylanan"]),
-        "reddedilen": _bucket_count_mem(STATUS_BUCKETS["reddedilen"]),
-    }
+    # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, _claim_bucket ile.
+    _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    for c in platform_scoped:
+        _b = _claim_bucket(c)
+        if _b in _bcount:
+            _bcount[_b] += 1
+    tab_counts = {"all": len(platform_scoped), **_bcount}
 
     # İstatistikler
     total_returns = await db.trendyol_claims.count_documents({"claim_type": "RETURN"})
