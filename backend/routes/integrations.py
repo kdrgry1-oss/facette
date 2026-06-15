@@ -2526,14 +2526,22 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
     sorgularıyla yakalar; yalnızca MEVCUT siparişlerin status alanını günceller
     (kaydı baştan ezmez). Trendyol orders ucu ~2 haftalık pencereyle sınırlıdır;
     daha eski iadeler İadeler (claims) modülünden takip edilir."""
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     updated = 0
     for st in ("Cancelled", "Returned", "UnDelivered"):
+        # İptaller daha GENİŞ pencerede taranır: Trendyol startDate/endDate sipariş
+        # TARİHİNE göre filtreler → 14 günden eski bir sipariş sonradan iptal olursa dar
+        # pencereye girmez ve İptaller'e hiç düşmezdi ("bazıları düşmemiş" kök nedeni).
+        # Cancelled için pencereyi 45 güne kadar geriye çek.
+        _start = start_date_ms
+        if st == "Cancelled":
+            _wide = int((datetime.now(timezone.utc) - timedelta(days=45)).timestamp() * 1000)
+            _start = min(start_date_ms, _wide) if start_date_ms else _wide
         try:
             page = 0
             while page < 25:
                 resp = await client.get_orders(
-                    start_date_ms=start_date_ms, end_date_ms=end_date_ms,
+                    start_date_ms=_start, end_date_ms=end_date_ms,
                     status=st, size=200, page=page,
                 )
                 chunk = resp.get("content", []) or []
@@ -2544,6 +2552,21 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
                     # İptal/iade sebebi: Trendyol orders ucu çoğu zaman metinsel sebep
                     # vermez; mevcut alanlardan dene, yoksa anlamlı bir etiket kullan.
                     _reason = (t_order.get("cancellationReason") or t_order.get("cancelReason") or "")
+                    if not _reason and st == "Cancelled":
+                        # GERÇEK müşteri iptal sebebi Trendyol Claims API'sinde tutulur
+                        # (claim_type=CANCEL, claim_reason=sebep adı). İptaller'de jenerik
+                        # "Trendyol iptali" yerine müşterinin Trendyol'da seçtiği sebebi göster.
+                        try:
+                            _cl = await db.trendyol_claims.find_one(
+                                {"order_number": onum, "claim_type": "CANCEL",
+                                 "claim_reason": {"$nin": ["", None]}},
+                                {"_id": 0, "claim_reason": 1},
+                                sort=[("updated_at", -1)],
+                            )
+                            if _cl and _cl.get("claim_reason"):
+                                _reason = _cl["claim_reason"]
+                        except Exception:
+                            pass
                     if not _reason:
                         _reason = ("Trendyol iptali" if st == "Cancelled"
                                    else ("Teslim edilemedi (Trendyol)" if st == "UnDelivered"
@@ -5789,6 +5812,20 @@ async def sync_trendyol_claims(
                     upsert=True
                 )
                 total_synced += 1
+
+                # CANCEL tipi claim → İptaller'de zaten cancelled olan siparişin jenerik
+                # "Trendyol iptali" etiketini, müşterinin Trendyol'da seçtiği GERÇEK sebeple
+                # değiştir. (Status'u burada DEĞİŞTİRMEYİZ; kısmi iptal riskine karşı status
+                # yalnızca order-status pass'inde, siparişin genel durumuna göre set edilir.)
+                if claim_type == "CANCEL" and claim_reason and order_number:
+                    try:
+                        await db.orders.update_one(
+                            {"order_number": str(order_number), "platform": "trendyol", "status": "cancelled"},
+                            {"$set": {"cancel_reason": claim_reason, "cancel_source": "trendyol",
+                                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+                        )
+                    except Exception as _ce:
+                        logger.error(f"[trendyol claim->order reason {order_number}] {_ce}")
 
             current_page += 1
             if current_page >= total_pages:

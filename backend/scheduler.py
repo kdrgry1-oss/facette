@@ -171,6 +171,48 @@ async def _run_trendyol_auto_orders_pull():
             pass
 
 
+async def _run_trendyol_cancel_pass():
+    """HAFİF iptal/iade taraması — her 60 sn. Tam sipariş import'u YAPMAZ; yalnızca
+    Trendyol status pass'lerini (Cancelled/Returned/UnDelivered) geniş pencerede çalıştırır
+    → iptaller İptaller'e hızlı düşer. (Tam import yine `orders_interval_min` ile çalışır.)"""
+    try:
+        from routes.integrations import get_trendyol_config
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        from datetime import datetime as _dt, timedelta as _td
+        from trendyol_client import TrendyolClient
+        from routes.integrations import _sync_trendyol_status_passes
+        client = TrendyolClient(
+            supplier_id=cfg["supplier_id"], api_key=cfg["api_key"],
+            api_secret=cfg["api_secret"], mode=cfg["mode"],
+        )
+        now_ = _dt.now()
+        # Cancelled için status pass içinde pencere zaten 45 güne genişletiliyor;
+        # buradan 30 günlük taban veriyoruz (Returned/UnDelivered de makul kapsansın).
+        start_ms = int((now_ - _td(days=30)).timestamp() * 1000)
+        end_ms = int(now_.timestamp() * 1000)
+        await _sync_trendyol_status_passes(client, start_ms, end_ms)
+    except Exception as e:
+        logger.error(f"[cron] Trendyol iptal taraması hatası: {e}")
+
+
+async def _run_trendyol_claims_sync():
+    """Trendyol iade/iptal (claims) senkronu — periyodik. Müşterinin Trendyol'da seçtiği
+    GERÇEK iptal sebebini çeker ve CANCEL claim'leri eşleşen iptal siparişlerine bağlar
+    (İptaller'de "Trendyol iptali" yerine gerçek sebep görünür)."""
+    try:
+        from routes.integrations import get_trendyol_config, sync_trendyol_claims
+        cfg = await get_trendyol_config()
+        if not cfg.get("is_active"):
+            return
+        # sync_trendyol_claims gövdesi current_user'ı KULLANMAZ (yalnızca require_admin
+        # bağımlılığı); scheduler'dan dummy admin ile doğrudan çağrılabilir.
+        await sync_trendyol_claims(days_back=45, current_user={"is_admin": True})
+    except Exception as e:
+        logger.error(f"[cron] Trendyol claims senkron hatası: {e}")
+
+
 async def _marketplace_sync_tick():
     """
     Her dk'da bir çalışır; her marketplace_account'un auto_sync ayarlarına
@@ -636,6 +678,28 @@ def start_scheduler():
         minutes=1,
         id="marketplace_auto_sync_tick",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Trendyol İPTAL/iade HIZLI tarama — her 60 sn. Tam import yapmaz; sadece status
+    # pass'leri geniş pencerede çalıştırır → iptaller İptaller'e ~1 dk içinde düşer.
+    _scheduler.add_job(
+        _run_trendyol_cancel_pass,
+        "interval",
+        seconds=60,
+        id="trendyol_cancel_pass_60s",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Trendyol claims (iade/iptal) senkronu — her 15 dk. Müşterinin seçtiği GERÇEK iptal
+    # sebebini çeker ve CANCEL claim'leri iptal siparişlerine bağlar.
+    _scheduler.add_job(
+        _run_trendyol_claims_sync,
+        "interval",
+        minutes=15,
+        id="trendyol_claims_sync_15m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
         max_instances=1,
         coalesce=True,
     )
