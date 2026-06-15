@@ -59,6 +59,10 @@ function custName(o) {
   const a = o.shipping_address || {};
   return `${a.first_name || ""} ${a.last_name || ""}`.trim() || a.full_name || o.customer_name || "—";
 }
+function invoiceName(o) {
+  const b = o.billing_address || {};
+  return `${b.first_name || ""} ${b.last_name || ""}`.trim() || b.full_name || "";
+}
 function itemsOf(o) {
   return o.items || o.lines || [];
 }
@@ -195,6 +199,8 @@ export default function Cancellations() {
               <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
             ) : orders.map((o) => {
               const name = custName(o);
+              const invName = invoiceName(o);
+              const diffInv = invName && invName !== name;
               const its = itemsOf(o);
               const dt = o.created_at ? new Date(o.created_at).toLocaleString("tr-TR") : "—";
               return (
@@ -206,7 +212,10 @@ export default function Cancellations() {
                   <td className="px-3 py-2 font-medium">{o.order_number || o.id}</td>
                   <td className="px-3 py-2">{platformLabel(o.platform)}</td>
                   <td className="px-3 py-2">
-                    <div>{name}</div>
+                    <div>{diffInv ? invName : name}</div>
+                    {diffInv && (
+                      <div className="text-xs text-gray-500 mt-0.5">Teslimat: {name}</div>
+                    )}
                     {its.length > 0 && (
                       <div className="text-xs text-gray-500 mt-0.5">
                         {itemTitle(its[0])}{its.length > 1 ? ` +${its.length - 1} ürün` : ""}
@@ -298,9 +307,13 @@ export default function Cancellations() {
                   const a = detail.shipping_address || {};
                   const addrLine = a.address || a.address_line1 || "";
                   const region = [a.district || a.state, a.city].filter(Boolean).join(" / ");
+                  const shipNm = custName(detail);
+                  const invNm = invoiceName(detail);
+                  const diffNm = invNm && invNm !== shipNm;
                   return (
                     <div className="text-sm text-gray-900 space-y-0.5">
-                      <div className="font-medium">{custName(detail)}</div>
+                      <div className="font-medium">{diffNm ? invNm : shipNm}</div>
+                      {diffNm && <div className="text-gray-600">Teslimat: {shipNm}</div>}
                       {(a.phone || detail.phone) && <div>{a.phone || detail.phone}</div>}
                       {(a.email || detail.email) && <div className="text-gray-600">{a.email || detail.email}</div>}
                       {addrLine && <div className="text-gray-600">{addrLine}</div>}
