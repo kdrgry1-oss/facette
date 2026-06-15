@@ -648,8 +648,38 @@ async def get_products(
         query.setdefault("$and", []).extend(and_clauses)
 
     sort_order = -1 if order == "desc" else 1
-    
-    products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
+
+    if not _is_admin:
+        # ===============================================================
+        # STOREFRONT: tükenen ürünler (efektif stok 0) ilgili listenin/
+        # kategorinin EN SONUNDA gösterilir. Efektif stok = varyant varsa
+        # varyant stokları toplamı, yoksa ürün stoğu. Önce stoğu olanlar,
+        # sonra istenen sıralama (created_at/price vb.).
+        # ===============================================================
+        pipeline = [
+            {"$match": query},
+            {"$addFields": {
+                "_eff_stock": {
+                    "$cond": [
+                        {"$gt": [{"$size": {"$ifNull": ["$variants", []]}}, 0]},
+                        {"$sum": {"$map": {
+                            "input": {"$ifNull": ["$variants", []]},
+                            "as": "v",
+                            "in": {"$ifNull": ["$$v.stock", 0]},
+                        }}},
+                        {"$ifNull": ["$stock", 0]},
+                    ]
+                }
+            }},
+            {"$addFields": {"_in_stock": {"$cond": [{"$gt": ["$_eff_stock", 0]}, 1, 0]}}},
+            {"$sort": {"_in_stock": -1, sort: sort_order, "_id": 1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$project": {"_id": 0, "_eff_stock": 0, "_in_stock": 0}},
+        ]
+        products = await db.products.aggregate(pipeline, allowDiskUse=True).to_list(limit)
+    else:
+        products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
     total = await db.products.count_documents(query)
     
     return {

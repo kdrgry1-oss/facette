@@ -78,12 +78,12 @@ export default function ProductCard({ product }) {
           <img
             src={optimizeImg(images[currentImageIndex] || "/placeholder.jpg", 700)}
             alt={product.name}
-            className={`w-full h-full object-cover object-top transition-opacity duration-200 ${isSoldOut ? "opacity-60" : ""}`}
+            className="w-full h-full object-cover object-top transition-opacity duration-200"
             loading="lazy"
             decoding="async"
           />
 
-          {/* Tükendi rozeti — efektif stok yoksa */}
+          {/* Tükendi rozeti — efektif stok yoksa (görsel net kalır) */}
           {isSoldOut && (
             <div className="absolute top-3 left-3 z-10 bg-black/80 text-white text-[10px] uppercase tracking-wider px-2 py-1">
               Tükendi
