@@ -6107,7 +6107,7 @@ async def get_trendyol_claims(
     (trendyol, hepsiburada, ...). Ayrım `_claim_is_site_order` kuralıyla yapılır.
     """
     # Sekme kovası eşlemesi artık _claim_bucket(c) helper'ında (status + kargo takip durumu).
-    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "aksiyon_bekleyen", "onaylanan", "reddedilen", "iptal"}
+    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "acik_iade", "aksiyon_bekleyen", "onaylanan", "reddedilen", "iptal"}
 
     base_query = {}
     if claim_type:
@@ -6148,7 +6148,9 @@ async def get_trendyol_claims(
     platform_scoped = deduped
 
     # (c) status sekmesi filtresi (bellekte) — _claim_bucket ile
-    if want_tab is not None:
+    if want_tab == "acik_iade":
+        filtered = [c for c in platform_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
+    elif want_tab is not None:
         filtered = [c for c in platform_scoped if _claim_bucket(c) == want_tab]
     else:
         filtered = platform_scoped
@@ -6157,13 +6159,28 @@ async def get_trendyol_claims(
     skip = (page - 1) * limit
     claims = filtered[skip: skip + limit]
 
+    # Her claim'e kova + Türkçe durum etiketi ekle (frontend durum rozeti için).
+    # talep/kargoda tek "Açık İade" altında birleşir; geçmiş kovalar korunur.
+    _BUCKET_LABEL = {
+        "talep_olusturulan": "Açık İade",
+        "kargoya_verilen": "Açık İade",
+        "aksiyon_bekleyen": "Aksiyon Bekleyen",
+        "onaylanan": "Onaylandı",
+        "reddedilen": "Reddedildi",
+        "iptal": "İptal",
+    }
+    for c in claims:
+        _b = _claim_bucket(c)
+        c["bucket"] = _b
+        c["bucket_label"] = _BUCKET_LABEL.get(_b, "—")
+
     # Sekme adetleri — platform_scoped (status filtresiz) üzerinden, _claim_bucket ile.
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0, "iptal": 0}
     for c in platform_scoped:
         _b = _claim_bucket(c)
         if _b in _bcount:
             _bcount[_b] += 1
-    tab_counts = {"all": len(platform_scoped), **_bcount}
+    tab_counts = {"all": len(platform_scoped), **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
 
     # İstatistikler
     total_returns = await db.trendyol_claims.count_documents({"claim_type": "RETURN"})

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle, CreditCard, Truck } from "lucide-react";
+import { RefreshCw, Search, FileText, Printer, ChevronDown, ChevronUp, CreditCard, Truck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import TicimaxReturns from "./TicimaxReturns";
 
@@ -18,11 +18,11 @@ const PLATFORMS = [
 
 const STATUS_TABS = [
   { key: "all", label: "Tüm İadeler" },
-  { key: "talep_olusturulan", label: "Talep Oluşturulan" },
-  { key: "kargoya_verilen", label: "Kargoya Verilen" },
+  { key: "acik_iade", label: "Açık İade" },
   { key: "aksiyon_bekleyen", label: "Aksiyon Bekleyen" },
   { key: "onaylanan", label: "Onaylanan" },
   { key: "reddedilen", label: "Reddedilen" },
+  { key: "iptal", label: "İptal" },
 ];
 
 function formatCurrency(val) {
@@ -79,10 +79,15 @@ const GP_SLIP_H_MM = 210;       // sütun yüksekliği (A4 yatay)
 const GP_PAGE_W_MM = 297;       // A4 yatay genişlik
 const GP_PAGE_H_MM = 210;       // A4 yatay yükseklik
 
-function ActionBadge({ action }) {
-  if (action === "approved") return <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">Onaylandı</span>;
-  if (action === "issued") return <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full">İtiraz Edildi</span>;
-  return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">Bekliyor</span>;
+function DurumBadge({ claim }) {
+  const b = claim.bucket;
+  const cls =
+    b === "onaylanan" ? "bg-green-100 text-green-700" :
+    b === "reddedilen" ? "bg-red-100 text-red-700" :
+    b === "iptal" ? "bg-gray-200 text-gray-600" :
+    b === "aksiyon_bekleyen" ? "bg-amber-100 text-amber-700" :
+    "bg-blue-100 text-blue-700"; // açık iade (talep + kargoda)
+  return <span className={`px-2 py-0.5 ${cls} text-xs font-bold rounded-full whitespace-nowrap`}>{claim.bucket_label || "—"}</span>;
 }
 
 export default function Returns() {
@@ -99,14 +104,6 @@ export default function Returns() {
   // Web Sitesi sekmesi doğrudan sipariş bazlı iade akışını (TicimaxReturns) gösterir; alt-sekme yok.
   const [statusTab, setStatusTab] = useState("all");
   const [tabCounts, setTabCounts] = useState({});
-  const [itemSel, setItemSel] = useState({}); // {claim_id: Set(claim_item_id)} - manuel adet onayı
-  const toggleItem = (claimId, itemId, allIds) => {
-    setItemSel(prev => {
-      const cur = new Set(prev[claimId] || allIds);
-      if (cur.has(itemId)) cur.delete(itemId); else cur.add(itemId);
-      return { ...prev, [claimId]: cur };
-    });
-  };
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [expandedId, setExpandedId] = useState(null);
   const [gpModalOpen, setGpModalOpen] = useState(false);
@@ -120,12 +117,6 @@ export default function Returns() {
   const [gpOffY, setGpOffY] = useState(() => parseFloat(localStorage.getItem("gp_off_y")) || 0);
   const [gpGuides, setGpGuides] = useState(false);
   const autoRefreshRef = useRef(null);
-
-  // A2 - Ret sebebi modal state
-  const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [rejectTargetClaim, setRejectTargetClaim] = useState(null);
-  const [rejectReason, setRejectReason] = useState("");
-  const [rejectReasonId, setRejectReasonId] = useState(1);
 
   // Iyzico kısmi iade modal state
   const [refundModalOpen, setRefundModalOpen] = useState(false);
@@ -201,52 +192,6 @@ export default function Returns() {
       toast.error(err.response?.data?.detail || "Senkronizasyon hatası");
     } finally {
       setSyncing(false);
-    }
-  };
-
-  const handleApprove = async (claim, explicitIds) => {
-    const claimItemIds = (explicitIds && explicitIds.length)
-      ? explicitIds
-      : (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
-    if (!claimItemIds.length) { toast.error("Onaylanacak ürün seçilmedi"); return; }
-    if (!await window.appConfirm(`Seçili ${claimItemIds.length} ürünün iadesini onaylamak istediğinize emin misiniz?`)) return;
-    try {
-      const token = localStorage.getItem("token");
-      await axios.post(`${API}/integrations/trendyol/claims/${claim.claim_id}/approve`,
-        { claim_item_ids: claimItemIds },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success("İade onaylandı");
-      fetchClaims();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Onay hatası");
-    }
-  };
-
-  const handleIssue = async (claim) => {
-    // A2 - open reject reason modal instead of prompt
-    setRejectTargetClaim(claim);
-    setRejectReason("");
-    setRejectReasonId(1);
-    setRejectModalOpen(true);
-  };
-
-  const submitReject = async () => {
-    if (!rejectTargetClaim) return;
-    if (!rejectReason.trim()) { toast.error("Ret sebebi boş olamaz"); return; }
-    try {
-      const token = localStorage.getItem("token");
-      const claimItemIds = (rejectTargetClaim.items || []).map(i => i.claim_item_id).filter(Boolean);
-      await axios.post(`${API}/integrations/trendyol/claims/${rejectTargetClaim.claim_id}/issue`,
-        { claim_item_ids: claimItemIds, issue_reason_id: Number(rejectReasonId) || 1, description: rejectReason.trim() },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success("İtiraz oluşturuldu");
-      setRejectModalOpen(false);
-      setRejectTargetClaim(null);
-      fetchClaims();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "İtiraz hatası");
     }
   };
 
@@ -516,22 +461,23 @@ export default function Returns() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kargo</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
-                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tarih</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Tarihi</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İade Onay/Ret</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İade Ödeme</th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Durum</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-gray-400">Yükleniyor...</td></tr>
               ) : claims.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
               ) : claims.map(claim => {
                 const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
                 const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
                 const totalNet = (claim.items || []).reduce((s, i) => s + (i.price || 0), 0);
                 const isExpanded = expandedId === claim.claim_id;
-                const isActioned = !!claim.panel_action;
 
                 return (
                   <tr key={claim.claim_id} className={`${selectedIds.has(claim.claim_id) ? "bg-blue-50" : "hover:bg-gray-50"} transition-colors`}>
@@ -549,37 +495,18 @@ export default function Returns() {
                       {isExpanded && (
                         <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs space-y-1">
                           <p className="mb-1"><strong>Claim ID:</strong> {claim.claim_id}{claim.invoice_number ? ` · Fatura: ${claim.invoice_number}` : ""}</p>
-                          {(() => {
-                            const allIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
-                            const selIds = itemSel[claim.claim_id] || new Set(allIds);
-                            return (
-                              <>
-                                <div className="rounded-lg border bg-white divide-y">
-                                  {(claim.items || []).map((item, ii) => (
-                                    <label key={ii} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-50">
-                                      <input type="checkbox" className="rounded"
-                                        checked={selIds.has(item.claim_item_id)}
-                                        onChange={() => toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
-                                      <span className="flex-1">
-                                        <span className="font-medium">{item.productName || "-"}</span>
-                                        {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
-                                        {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}
-                                      </span>
-                                      <span className="font-mono">{formatCurrency(item.price)}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                                {!isActioned && (
-                                  <button onClick={() => handleApprove(claim, Array.from(selIds))}
-                                    data-testid={`approve-items-${claim.claim_id}`}
-                                    disabled={selIds.size === 0}
-                                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-50">
-                                    <Check size={13} /> Seçili {selIds.size} ürünü İade Onayla
-                                  </button>
-                                )}
-                              </>
-                            );
-                          })()}
+                          <div className="rounded-lg border bg-white divide-y">
+                            {(claim.items || []).map((item, ii) => (
+                              <div key={ii} className="flex items-center gap-2 px-2 py-1.5">
+                                <span className="flex-1">
+                                  <span className="font-medium">{item.productName || "-"}</span>
+                                  {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
+                                  {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}
+                                </span>
+                                <span className="font-mono">{formatCurrency(item.price)}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </td>
@@ -612,28 +539,12 @@ export default function Returns() {
                       )}
                       <div className="font-bold text-gray-900 leading-tight">{formatCurrency(totalNet)}</div>
                     </td>
-                    <td className="px-3 py-3 text-xs text-gray-500">{formatDate(claim.created_date)}</td>
-                    <td className="px-3 py-3 text-center"><ActionBadge action={claim.panel_action} /></td>
+                    <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(claim.created_date)}</td>
+                    <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(claim.return_approved_at || claim.return_rejected_at)}</td>
+                    <td className="px-3 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(claim.return_paid_at)}</td>
+                    <td className="px-3 py-3 text-center"><DurumBadge claim={claim} /></td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        {!isActioned ? (
-                          <>
-                            <button onClick={() => handleApprove(claim)}
-                              data-testid={`approve-${claim.claim_id}`}
-                              className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors" title="Onayla">
-                              <Check size={14} />
-                            </button>
-                            <button onClick={() => handleIssue(claim)}
-                              data-testid={`issue-${claim.claim_id}`}
-                              className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors" title="İtiraz">
-                              <X size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic px-1">
-                            {claim.panel_action === "approved" ? "Onaylandı" : "İtiraz"}
-                          </span>
-                        )}
                         {claim.gider_pusulasi_no && (
                           <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
                             #{claim.gider_pusulasi_no}
@@ -713,67 +624,6 @@ export default function Returns() {
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* A2 - Reject/Issue Reason Modal */}
-      <Dialog open={rejectModalOpen} onOpenChange={(o) => { setRejectModalOpen(o); if (!o) setRejectTargetClaim(null); }}>
-        <DialogContent data-testid="reject-reason-modal">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <X size={18} className="text-red-600" />
-              İade Reddet / İtiraz
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            {rejectTargetClaim && (
-              <div className="bg-gray-50 border rounded-lg p-3 text-sm">
-                <p className="font-bold text-gray-900">Sipariş: {rejectTargetClaim.order_number}</p>
-                <p className="text-xs text-gray-500 mt-1">{rejectTargetClaim.customer_name || "-"} · {rejectTargetClaim.claim_reason || ""}</p>
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium mb-1">İtiraz Sebep Kodu</label>
-              <select
-                value={rejectReasonId}
-                onChange={(e) => setRejectReasonId(e.target.value)}
-                data-testid="reject-reason-id"
-                className="w-full border px-3 py-2 rounded text-sm bg-white"
-              >
-                <option value="1">1 - Ürün eksiksiz/hasarsız</option>
-                <option value="2">2 - Ürün kullanılmış</option>
-                <option value="3">3 - İade süresi aşıldı</option>
-                <option value="4">4 - Ürün orijinalinden farklı</option>
-                <option value="99">99 - Diğer</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Ret Sebebi Açıklaması <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Müşteriye iletilecek itiraz nedenini detaylı yazın..."
-                className="w-full border rounded-lg p-3 text-sm min-h-[120px]"
-                data-testid="reject-reason-text"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button onClick={() => setRejectModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">
-                İptal
-              </button>
-              <button
-                onClick={submitReject}
-                disabled={!rejectReason.trim()}
-                data-testid="submit-reject-btn"
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-bold"
-              >
-                <X size={14} className="inline mr-1" /> Reddet ve Gönder
-              </button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
 
