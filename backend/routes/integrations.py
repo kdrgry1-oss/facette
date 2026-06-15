@@ -2521,7 +2521,7 @@ async def log_integration_event(platform: str, action: str, entity_type: str, en
     except Exception as e:
         logger.error(f"Failed to log integration event: {str(e)}")
 
-async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
+async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen_cancel=True):
     """İptal/iade/teslim edilemedi gibi durum değişikliklerini ayrı status
     sorgularıyla yakalar; yalnızca MEVCUT siparişlerin status alanını günceller
     (kaydı baştan ezmez). Trendyol orders ucu ~2 haftalık pencereyle sınırlıdır;
@@ -2534,7 +2534,7 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms):
         # pencereye girmez ve İptaller'e hiç düşmezdi ("bazıları düşmemiş" kök nedeni).
         # Cancelled için pencereyi 45 güne kadar geriye çek.
         _start = start_date_ms
-        if st == "Cancelled":
+        if st == "Cancelled" and widen_cancel:
             _wide = int((datetime.now(timezone.utc) - timedelta(days=45)).timestamp() * 1000)
             _start = min(start_date_ms, _wide) if start_date_ms else _wide
         try:
@@ -3029,6 +3029,81 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
             errors.append({"orderNumber": on, "error": str(e)})
             await log_integration_event("hepsiburada", "import_order", "order", on, "error", f"Aktarım hatası: {e}", {"raw": raw})
     return {"success": True, "imported": imported, "updated": updated, "errors": errors}
+
+
+@router.post("/trendyol/cancellations/backfill")
+async def backfill_trendyol_cancellations(
+    days_back: int = 180,
+    current_user: dict = Depends(require_admin),
+):
+    """Eski/eksik Trendyol iptallerini GENİŞ pencerede toplu çeker. Trendyol sipariş ucu
+    sorgu başına ~14 günle sınırlı olduğundan dönemi 14 günlük dilimlere bölüp tarar;
+    İptaller'e düşmemiş iptalleri ekler/işaretler ve Claims API'sinden gerçek sebepleri
+    bağlar. diagnostic_sample: ham iptal kaydının alanları (gerçek sebep alanını görmek için)."""
+    import asyncio as _aio
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(
+        supplier_id=config["supplier_id"], api_key=config["api_key"],
+        api_secret=config["api_secret"], mode=config["mode"],
+    )
+    days_back = max(1, min(int(days_back or 180), 365))
+    now = datetime.now(timezone.utc)
+    total_window = timedelta(days=days_back)
+    chunk = timedelta(days=14)
+
+    # TEŞHİS: ilk iptal siparişinin ham alanlarını yakala (Trendyol public API iptal
+    # sebebini hangi alanda veriyor görmek için — sonraki düzeltme buna göre yapılır).
+    sample = None
+    try:
+        _se = int(now.timestamp() * 1000)
+        _ss = int((now - chunk).timestamp() * 1000)
+        _diag = await client.get_orders(start_date_ms=_ss, end_date_ms=_se, status="Cancelled", size=50, page=0)
+        for _o in (_diag.get("content") or [])[:1]:
+            sample = {
+                "top_level_keys": sorted([str(k) for k in _o.keys()]),
+                "reason_candidates": {k: _o.get(k) for k in ("cancellationReason", "cancelReason", "status", "packageHistories") if k in _o},
+                "first_line_keys": sorted([str(k) for k in (_o.get("lines") or [{}])[0].keys()]),
+            }
+    except Exception as _de:
+        sample = {"error": str(_de)}
+
+    cancel_updated = 0
+    cur_end = now
+    while (now - cur_end) < total_window:
+        cur_start = cur_end - chunk
+        if (now - cur_start) > total_window:
+            cur_start = now - total_window
+        try:
+            cancel_updated += await _sync_trendyol_status_passes(
+                client, int(cur_start.timestamp() * 1000), int(cur_end.timestamp() * 1000),
+                widen_cancel=False,
+            )
+        except Exception as _ce:
+            logger.error(f"[backfill cancel chunk] {_ce}")
+        cur_end = cur_start
+        await _aio.sleep(0.3)  # Trendyol rate limit
+        if cur_start <= now - total_window:
+            break
+
+    # Gerçek sebepleri çek + iptal siparişlerine bağla (Claims API; geniş pencere)
+    claims_result = {}
+    try:
+        claims_result = await sync_trendyol_claims(days_back=days_back, current_user={"is_admin": True})
+    except Exception as _cl:
+        claims_result = {"error": str(_cl)}
+
+    total_cancelled = await db.orders.count_documents({"platform": "trendyol", "status": "cancelled"})
+    return {
+        "message": f"Backfill tamam: {cancel_updated} iptal kaydı eklendi/güncellendi (son {days_back} gün). Trendyol iptal toplamı şimdi: {total_cancelled}.",
+        "cancel_updated": cancel_updated,
+        "total_trendyol_cancelled": total_cancelled,
+        "days_back": days_back,
+        "claims": claims_result,
+        "diagnostic_sample": sample,
+    }
 
 
 @router.post("/trendyol/orders/import")
@@ -5813,11 +5888,12 @@ async def sync_trendyol_claims(
                 )
                 total_synced += 1
 
-                # CANCEL tipi claim → İptaller'de zaten cancelled olan siparişin jenerik
-                # "Trendyol iptali" etiketini, müşterinin Trendyol'da seçtiği GERÇEK sebeple
-                # değiştir. (Status'u burada DEĞİŞTİRMEYİZ; kısmi iptal riskine karşı status
-                # yalnızca order-status pass'inde, siparişin genel durumuna göre set edilir.)
-                if claim_type == "CANCEL" and claim_reason and order_number:
+                # Claim sebebini eşleşen İPTAL siparişine bağla. claim_type sınıflandırması
+                # (CANCEL/RETURN) Trendyol sebep koduna göre dar kalabildiğinden ONA GÜVENMEYİZ:
+                # sipariş zaten status=cancelled ise (iade post-teslimat olduğundan iptalle
+                # karışmaz) o claim'in sebebi = iptal sebebidir. Böylece "Stok tükendi",
+                # "Adreste bulunmayacağım" gibi gerçek sebepler İptaller'e yazılır.
+                if claim_reason and order_number:
                     try:
                         await db.orders.update_one(
                             {"order_number": str(order_number), "platform": "trendyol", "status": "cancelled"},

@@ -84,6 +84,7 @@ export default function Cancellations() {
   const [detail, setDetail] = useState(null);   // detay modalı için sipariş
   const [savingId, setSavingId] = useState(null); // durum güncellenirken
   const [deletingId, setDeletingId] = useState(null); // silinirken
+  const [backfilling, setBackfilling] = useState(false); // Trendyol toplu iptal çekme
   const pageSize = 20;
 
   const fetchCancelled = useCallback(async () => {
@@ -145,6 +146,27 @@ export default function Cancellations() {
     }
   }
 
+  async function handleBackfill() {
+    if (backfilling) return;
+    if (!window.confirm("Trendyol'daki son 180 günün TÜM iptalleri çekilecek; İptaller'e düşmemiş eski iptaller eklenecek ve gerçek iptal sebepleri bağlanacak.\n\nBu işlem birkaç dakika sürebilir. Devam edilsin mi?")) return;
+    setBackfilling(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.post(
+        `${API}/integrations/trendyol/cancellations/backfill?days_back=180`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 300000 }
+      );
+      const d = res.data || {};
+      alert(`${d.message || "Backfill tamamlandı."}`);
+      await fetchCancelled();
+    } catch (e) {
+      alert("Toplu çekme hatası: " + (e?.response?.data?.detail || e.message));
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center gap-2 mb-1">
@@ -170,6 +192,12 @@ export default function Cancellations() {
         <button onClick={applySearch} className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm">Ara</button>
         <button onClick={fetchCancelled} className="px-3 py-2 border rounded-lg text-sm flex items-center gap-1">
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Yenile
+        </button>
+        <button onClick={handleBackfill} disabled={backfilling}
+          title="Trendyol'daki son 180 günün tüm iptallerini çeker; eksik/eski iptalleri ekler ve gerçek sebepleri bağlar"
+          className="px-3 py-2 rounded-lg text-sm flex items-center gap-1 bg-orange-500 text-white disabled:opacity-60">
+          <RefreshCw className={`w-4 h-4 ${backfilling ? "animate-spin" : ""}`} />
+          {backfilling ? "Çekiliyor…" : "Trendyol'dan Tüm İptalleri Çek"}
         </button>
         <span className="text-sm text-gray-500 ml-auto">Toplam {total} iptal</span>
       </div>
