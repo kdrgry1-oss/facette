@@ -126,6 +126,9 @@ export default function AdminOrders({ unpaidView = false }) {
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
 
+  // Manuel (kısmi) iade pop-up — sipariş panelinde iade durumu seçilince açılır
+  const [returnModal, setReturnModal] = useState({ open: false, order: null, status: "returned", selected: {}, reason: "", busy: false });
+
   const openNoteModal = (order) => {
     setNoteTargetOrder(order);
     setNoteText("");
@@ -206,6 +209,11 @@ export default function AdminOrders({ unpaidView = false }) {
    *   engellenir). Güncelleme sonrası liste ve (açıksa) detay modal tazelenir.
    */
   const handleStatusChange = async (orderId, newStatus) => {
+    // İade durumları → kalem seçimli pop-up (kısmi iade akışı); diğer durumlar direkt değişir
+    if (newStatus === "returned" || newStatus === "refunded") {
+      const ord = orders.find((o) => o.id === orderId) || (selectedOrder?.id === orderId ? selectedOrder : null);
+      if (ord) { openReturnModal(ord, newStatus); return; }
+    }
     try {
       const token = localStorage.getItem('token');
       await axios.put(`${API}/orders/${orderId}/status?status=${newStatus}`, {}, {
@@ -218,6 +226,38 @@ export default function AdminOrders({ unpaidView = false }) {
       }
     } catch (err) {
       toast.error("Güncelleme başarısız");
+    }
+  };
+
+  // ── Manuel kısmi iade ───────────────────────────────────────────────
+  const openReturnModal = (order, status) => {
+    const items = order.items || [];
+    const sel = {};
+    items.forEach((_, i) => { sel[i] = true; }); // varsayılan: tüm kalemler seçili (tam iade)
+    setReturnModal({ open: true, order, status, selected: sel, reason: "", busy: false });
+  };
+  const toggleReturnItem = (i) => {
+    setReturnModal((m) => ({ ...m, selected: { ...m.selected, [i]: !m.selected[i] } }));
+  };
+  const submitReturn = async () => {
+    const m = returnModal;
+    if (!m.order) return;
+    const idx = Object.keys(m.selected).filter((k) => m.selected[k]).map((k) => parseInt(k, 10));
+    if (!idx.length) { toast.error("En az bir kalem seçin"); return; }
+    setReturnModal((s) => ({ ...s, busy: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/orders/${m.order.id}/admin-return`,
+        { item_indexes: idx, reason: m.reason, target_status: m.status },
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(res.data?.is_full
+        ? "Sipariş tamamen iade alındı"
+        : `Kısmi iade: ${res.data?.items_count} kalem (sipariş açık kaldı)`);
+      setReturnModal({ open: false, order: null, status: "returned", selected: {}, reason: "", busy: false });
+      fetchOrders();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "İade işlenemedi");
+      setReturnModal((s) => ({ ...s, busy: false }));
     }
   };
 
@@ -1002,7 +1042,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         )}
                       </button>
                     </td>
-                    <td className="font-medium">{order.order_number}</td>
+                    <td className="font-medium">{order.order_number}{order.has_partial_return ? <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 align-middle" title="Bu siparişte bir veya daha fazla kalem iade edildi">kısmi iade</span> : null}</td>
                     <td>
                       <div>
                         {(() => {
@@ -1764,6 +1804,58 @@ export default function AdminOrders({ unpaidView = false }) {
               >
                 {savingNote ? "Kaydediliyor..." : "Not Ekle"}
               </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manuel (kısmi) iade pop-up — kalem seç → seçilmeyenler siparişte kalır */}
+      <Dialog open={returnModal.open} onOpenChange={(o) => !o && setReturnModal((m) => ({ ...m, open: false }))}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {returnModal.status === "refunded" ? "İade Bedeli Ödendi" : "İade Al"}
+              {returnModal.order?.order_number ? ` — ${returnModal.order.order_number}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              İade edilecek kalemleri seçin. <b>Seçilmeyenler siparişte kalır</b> (sipariş açık).
+              Tüm kalemler seçilirse sipariş tamamen iade alanına taşınır.
+            </p>
+            <div className="border rounded-lg divide-y">
+              {(returnModal.order?.items || []).map((it, i) => {
+                const checked = !!returnModal.selected[i];
+                return (
+                  <label key={i} className={`flex items-center gap-3 px-3 py-2 cursor-pointer ${checked ? "bg-orange-50" : ""}`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleReturnItem(i)} className="w-4 h-4 accent-orange-600" />
+                    <span className="flex-1 text-sm">
+                      <span className="font-medium">{it.name || it.product_name || "Ürün"}</span>
+                      {(it.size || it.color) ? <span className="text-gray-500"> · {[it.size, it.color].filter(Boolean).join(" / ")}</span> : null}
+                      <span className="text-gray-500"> · {it.quantity || 1} adet</span>
+                    </span>
+                    <span className="text-sm font-semibold text-gray-700">
+                      {((Number(it.price || it.unit_price || 0)) * (Number(it.quantity) || 1)).toLocaleString("tr-TR")} ₺
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <textarea value={returnModal.reason} onChange={(e) => setReturnModal((m) => ({ ...m, reason: e.target.value }))}
+              placeholder="İade nedeni (opsiyonel)" rows={2}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
+            <div className="flex justify-between items-center pt-1">
+              <span className="text-xs text-gray-500">
+                {Object.values(returnModal.selected).filter(Boolean).length} / {(returnModal.order?.items || []).length} kalem seçili
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => setReturnModal((m) => ({ ...m, open: false }))}
+                  className="px-4 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Vazgeç</button>
+                <button onClick={submitReturn} disabled={returnModal.busy}
+                  className="px-4 py-2 text-sm rounded-lg bg-orange-600 text-white font-medium hover:bg-orange-700 disabled:opacity-50">
+                  {returnModal.busy ? "İşleniyor..." : "İadeyi Onayla"}
+                </button>
+              </div>
             </div>
           </div>
         </DialogContent>

@@ -3417,6 +3417,86 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     return {"success": True, "return": _public_return(rec)}
 
 
+@router.post("/{order_id}/admin-return")
+async def admin_manual_return(order_id: str, payload: dict = Body(default={}),
+                              current_user: dict = Depends(require_admin)):
+    """Admin: sipariş panelinden MANUEL (kısmi) iade.
+    - payload.item_indexes: iade edilecek kalem index'leri (boşsa TÜM sipariş).
+    - Seçili kalemler customer_returns'e yazılır (gider pusulası bu kayıttan üretilir → kısmi olur).
+    - TÜM kalemler seçildiyse sipariş target_status'e (returned/refunded) taşınır.
+    - KISMİ ise sipariş AÇIK kalır; kalem bazında iade kaydı order.partial_returns'e işlenir
+      ve order.has_partial_return=True olur (eski kayıtlarda 'bir kalem iade edildi' görünür)."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    src_items = order.get("items") or []
+    sel = payload.get("item_indexes")
+    target_status = (payload.get("target_status") or "returned").strip()
+    if target_status not in ("returned", "refunded", "return_requested", "return_in_transit"):
+        target_status = "returned"
+
+    chosen, chosen_idx = [], []
+    if isinstance(sel, list) and sel:
+        for idx in sel:
+            try:
+                i = int(idx)
+                chosen.append(src_items[i]); chosen_idx.append(i)
+            except Exception:
+                continue
+    if not chosen:
+        chosen = list(src_items); chosen_idx = list(range(len(src_items)))
+
+    items = [{
+        "name": it.get("name") or it.get("product_name") or "Ürün",
+        "size": it.get("size", ""), "color": it.get("color", ""),
+        "quantity": int(it.get("quantity", 1) or 1),
+        "price": float(it.get("price") or it.get("unit_price") or 0),
+        "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+        "discount_amount": float(it.get("discount_amount") or it.get("discount") or 0),
+        "product_id": it.get("product_id") or it.get("sku") or it.get("barcode") or "",
+    } for it in chosen]
+    reason = (payload.get("reason") or "").strip()[:500]
+    is_full = (len(src_items) > 0 and len(chosen_idx) >= len(src_items))
+
+    rid = generate_id()
+    now = datetime.now(timezone.utc); now_iso = now.isoformat()
+    rec = {
+        "id": rid, "order_id": order["id"], "order_number": order.get("order_number", ""),
+        "user_id": order.get("user_id"), "items": items, "reason": reason,
+        "return_code": f"MAN{order.get('order_number','')}{rid[:6]}".replace(" ", ""),
+        "cargo_provider_name": order.get("cargo_provider_name", ""),
+        "status": "returned" if target_status in ("returned", "refunded") else "created",
+        "source": "admin_manual", "is_partial": (not is_full), "item_indexes": chosen_idx,
+        "created_at": now_iso, "updated_at": now_iso,
+    }
+    await db.customer_returns.insert_one({**rec})
+
+    if is_full:
+        # Tüm kalemler iade → siparişi iade alanına taşı
+        await db.orders.update_one({"id": order["id"]}, {"$set": {
+            "status": target_status, "updated_at": now_iso,
+            "return_request": {"return_id": rid, "status": "returned",
+                               "items_count": len(items), "created_at": now_iso, "partial": False},
+        }})
+    else:
+        # Kısmi iade → sipariş AÇIK kalır; kalem bazında iade kaydını işle
+        prev = order.get("partial_returns") or []
+        prev.append({"return_id": rid, "item_indexes": chosen_idx,
+                     "items_count": len(items), "created_at": now_iso, "reason": reason})
+        await db.orders.update_one({"id": order["id"]}, {"$set": {
+            "has_partial_return": True, "partial_returns": prev, "updated_at": now_iso,
+        }})
+
+    await _log_order_event(order["id"], "return",
+                           ("Tüm sipariş iade alındı (manuel)" if is_full else f"Kısmi iade (manuel): {len(items)} kalem"),
+                           current_user, {"return_id": rid, "item_indexes": chosen_idx, "partial": (not is_full)},
+                           order_number=order.get("order_number", ""))
+    return {"success": True, "return_id": rid, "partial": (not is_full), "items_count": len(items), "is_full": is_full}
+
+
 @router.get("/{order_id}/return")
 async def get_return_info(order_id: str, current_user: dict = Depends(get_current_user)):
     """Müşteri: bir siparişin iade kaydını getir (ekranda barkod/kod göstermek için)."""
@@ -3909,6 +3989,17 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
                  or ship.get("full_name", "") or "Müşteri")
 
     items = rec.get("items", []) or []
+    # Kısmi gider pusulası: yalnızca seçili kalemler (item_indexes verilirse SADECE onlar hesaplanır)
+    _sel_idx = (payload or {}).get("item_indexes")
+    if isinstance(_sel_idx, list) and _sel_idx:
+        _filtered = []
+        for _i in _sel_idx:
+            try:
+                _filtered.append(items[int(_i)])
+            except Exception:
+                continue
+        if _filtered:
+            items = _filtered
     total_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
     total_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * int(it.get("quantity", 1) or 1) for it in items))
     total_discount = _round2(max(0.0, total_gross - total_net))

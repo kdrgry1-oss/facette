@@ -6636,6 +6636,17 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     _cust_country = _ship.get("country", "") or "Türkiye"
 
     items = claim.get("items", [])
+    # Kısmi gider pusulası: yalnızca seçili kalemler (item_indexes verilirse SADECE onlar hesaplanır)
+    _sel_idx = (payload or {}).get("item_indexes")
+    if isinstance(_sel_idx, list) and _sel_idx:
+        _filtered = []
+        for _i in _sel_idx:
+            try:
+                _filtered.append(items[int(_i)])
+            except Exception:
+                continue
+        if _filtered:
+            items = _filtered
     total_net = sum(item.get("price", 0) * item.get("quantity", 1) for item in items)
     total_discount = sum(item.get("discount_amount", 0) * item.get("quantity", 1) for item in items)
     total_gross = sum(item.get("unit_price", 0) * item.get("quantity", 1) for item in items)

@@ -317,8 +317,13 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
       const trackingNo = String(gpStart || "").trim();
+      // Kısmi gider pusulası: açılır detayda seçili kalem index'leri (hiç seçim yoksa tüm sipariş)
+      const selIdx = Object.keys(selItems)
+        .filter((k) => k.startsWith(`${r.id}::`) && selItems[k])
+        .map((k) => parseInt(k.split("::")[1], 10))
+        .filter((n) => !Number.isNaN(n));
       const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`,
-        { tracking_no: trackingNo }, auth());
+        selIdx.length ? { tracking_no: trackingNo, item_indexes: selIdx } : { tracking_no: trackingNo }, auth());
       const gp = res.data?.gider_pusulasi;
       toast.success(`Gider pusulası: ${gp?.display_number || trackingNo}`);
       if (gp && onGiderCreated) onGiderCreated({ ...gp, assigned_no: trackingNo });
