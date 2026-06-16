@@ -2379,9 +2379,9 @@ async def create_cargo_barcode(
     # NZ-formatlı havuz tahsis edilen kurumsal hesaplarda GONDERI_NO field'ında ayrı bir kod gelir
     # Öncelik: NZ (anında MNGGonderiBarkod) → GONDERI_NO (FaturaSiparisListesi sonradan dolu) → MNG_SIPARIS_NO
     public_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or barkod
-    # MNG->DHL devri: MNG'nin dondurdugu eski link (kargotakip.mngkargo.com.tr) anasayfaya gidiyor.
-    # DHL deep-link vermiyor; her zaman DHL eCommerce takip sayfasi kullanilir (no kopyalanip orada sorgulanir).
-    track_link = "https://www.dhlecommerce.com.tr/gonderitakip"
+    # MNG->DHL devri: kargotakip.dhlecommerce.com.tr/?takipNo={no} dogru deep-link (no ile direkt takip,
+    # form/CAPTCHA gerektirmez). No yoksa manuel takip sayfasina dusulur.
+    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={public_tracking}" if public_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
     update_doc = {
         "cargo_tracking_number": public_tracking,
         "cargo_tracking_link": track_link,
@@ -2483,7 +2483,7 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
     gonderi_no = info.get("gonderi_no") or ""
     mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
     public_tracking = gonderi_no or mng_siparis_no
-    track_link = "https://www.dhlecommerce.com.tr/gonderitakip"
+    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={public_tracking}" if public_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
 
     update = {
         "cargo_tracking_number": public_tracking,
@@ -2570,9 +2570,9 @@ async def backfill_cargo_tracking(
             {"id": o["id"]},
             {"$set": {
                 "cargo_tracking_number": gonderi,
-                "cargo_tracking_link": "https://www.dhlecommerce.com.tr/gonderitakip",
+                "cargo_tracking_link": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={gonderi}",
                 "cargo.tracking_number": gonderi,
-                "cargo.tracking_link": "https://www.dhlecommerce.com.tr/gonderitakip",
+                "cargo.tracking_link": f"https://kargotakip.dhlecommerce.com.tr/?takipNo={gonderi}",
                 "cargo.mng_gonderi_no": gonderi,
                 "cargo.mng_kargo_statu": info.get("kargo_statu"),
                 "cargo.mng_kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
@@ -2617,24 +2617,29 @@ async def bulk_mark_refunded_silent(payload: dict, current_user: dict = Depends(
 
 @router.post("/cargo/relink-dhl")
 async def relink_cargo_dhl(current_user: dict = Depends(require_admin)):
-    """Eski MNG takip linklerini (kargotakip.mngkargo.com.tr / ?BarkodNo= -> anasayfaya gidiyor)
-    toplu olarak DHL eCommerce gonderitakip sayfasiyla degistirir.
-    Bildirimsiz; MNG API cagirmaz; sadece link string'i guncellenir (no/durum degismez)."""
-    GT = "https://www.dhlecommerce.com.tr/gonderitakip"
+    """Eski/yanlis kargo takip linklerini DHL deep-link formatina cevirir:
+    kargotakip.dhlecommerce.com.tr/?takipNo={no} (no ile direkt takip, form/CAPTCHA yok).
+    Sadece MNG/DHL linki olan siparisleri etkiler (Trendyol/HB kendi linkine dokunulmaz).
+    No bos olan kayitlarda manuel takip sayfasina dusulur. Bildirimsiz; MNG API cagirmaz."""
     now = datetime.now(timezone.utc).isoformat()
-    rx = {"$regex": "mngkargo|BarkodNo", "$options": "i"}
-    q_top = {"cargo_tracking_link": rx}
-    q_nested = {"cargo.tracking_link": rx}
-    matched_top = await db.orders.count_documents(q_top)
-    matched_nested = await db.orders.count_documents(q_nested)
-    r_top = await db.orders.update_many(q_top, {"$set": {"cargo_tracking_link": GT, "updated_at": now}})
-    r_nested = await db.orders.update_many(q_nested, {"$set": {"cargo.tracking_link": GT}})
-    return {
-        "matched_top": matched_top,
-        "modified_top": r_top.modified_count,
-        "matched_nested": matched_nested,
-        "modified_nested": r_nested.modified_count,
+    DEEP = "https://kargotakip.dhlecommerce.com.tr/?takipNo="
+    FALLBACK = "https://www.dhlecommerce.com.tr/gonderitakip"
+    rx = {"$regex": "mngkargo|dhlecommerce|gonderitakip|BarkodNo", "$options": "i"}
+    q = {"cargo_tracking_link": rx}
+    matched = await db.orders.count_documents(q)
+    link_expr = {
+        "$cond": [
+            {"$gt": [{"$strLenCP": {"$ifNull": ["$cargo_tracking_number", ""]}}, 0]},
+            {"$concat": [DEEP, "$cargo_tracking_number"]},
+            FALLBACK,
+        ]
     }
+    r = await db.orders.update_many(q, [{"$set": {
+        "cargo_tracking_link": link_expr,
+        "cargo.tracking_link": link_expr,
+        "updated_at": now,
+    }}])
+    return {"matched": matched, "modified": r.modified_count}
 
 
 @router.post("/{order_id}/create-mng-shipment")
