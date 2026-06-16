@@ -5783,7 +5783,7 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                 # Accepted/Rejected) yansısın. Trendyol kayıtları lastModifiedDate sırasıyla gelir.
                 existing_claim = await db.trendyol_claims.find_one(
                     {"claim_id": claim_id},
-                    {"_id": 1, "return_approved_at": 1, "return_rejected_at": 1}
+                    {"_id": 1, "return_approved_at": 1, "return_rejected_at": 1, "manual_locked": 1}
                 )
                 if existing_claim:
                     _new_status = _derive_claim_status(claim)
@@ -5796,17 +5796,20 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                             _lm_iso = ""
                     _now_iso = datetime.now(timezone.utc).isoformat()
                     _set = {
-                        "claim_status": _new_status,
                         "cargo_tracking_number": str(claim.get("cargoTrackingNumber", "")),
                         "cargo_provider_name": claim.get("cargoProviderName", ""),
                         "raw_data": claim,
                         "updated_at": _now_iso,
                     }
-                    # Durum geçiş tarih damgaları (idempotent — yalnız ilk geçişte yazılır)
-                    if _new_status == "Accepted" and not existing_claim.get("return_approved_at"):
-                        _set["return_approved_at"] = _lm_iso or _now_iso
-                    if _new_status in ("Rejected", "Cancelled") and not existing_claim.get("return_rejected_at"):
-                        _set["return_rejected_at"] = _lm_iso or _now_iso
+                    # MANUEL KİLİT: admin durumu elle ilerlettiyse (manual_locked) Trendyol senkronu
+                    # claim_status'u EZMEZ — yalnız kargo/raw bilgisi tazelenir, durum manuel kalır.
+                    if not existing_claim.get("manual_locked"):
+                        _set["claim_status"] = _new_status
+                        # Durum geçiş tarih damgaları (idempotent — yalnız ilk geçişte yazılır)
+                        if _new_status == "Accepted" and not existing_claim.get("return_approved_at"):
+                            _set["return_approved_at"] = _lm_iso or _now_iso
+                        if _new_status in ("Rejected", "Cancelled") and not existing_claim.get("return_rejected_at"):
+                            _set["return_rejected_at"] = _lm_iso or _now_iso
                     await db.trendyol_claims.update_one({"claim_id": claim_id}, {"$set": _set})
                     total_synced += 1
                     continue
@@ -6429,6 +6432,41 @@ async def dedupe_trendyol_claims(current_user: dict = Depends(require_admin)):
         "index_error": index_error,
         "remaining_docs": remaining,
     }
+
+
+@router.post("/trendyol/claims/{claim_id}/set-status")
+async def set_trendyol_claim_status(claim_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """Trendyol iade durumunu MANUEL ilerletir ve KİLİTLER.
+
+    manual_locked=True olunca sonraki Trendyol senkronları bu claim'in claim_status'unu
+    EZMEZ (yalnız kargo/raw bilgisi tazelenir). Kilidi kaldırmak için /unlock çağrılır.
+    """
+    new_status = (payload.get("status") or "").strip()
+    valid = {"Created", "WaitingInAction", "InAnalysis", "Accepted", "Rejected", "Unresolved", "Cancelled"}
+    if new_status not in valid:
+        raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli: {', '.join(sorted(valid))}")
+    now = datetime.now(timezone.utc).isoformat()
+    _set = {"claim_status": new_status, "manual_locked": True, "manual_status_at": now, "updated_at": now}
+    if new_status == "Accepted":
+        _set["return_approved_at"] = now
+    if new_status in ("Rejected", "Cancelled"):
+        _set["return_rejected_at"] = now
+    res = await db.trendyol_claims.update_one({"claim_id": claim_id}, {"$set": _set})
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="İade (claim) bulunamadı")
+    return {"success": True, "claim_id": claim_id, "status": new_status, "manual_locked": True}
+
+
+@router.post("/trendyol/claims/{claim_id}/unlock")
+async def unlock_trendyol_claim(claim_id: str, current_user: dict = Depends(require_admin)):
+    """Manuel kilidi kaldırır → durum tekrar Trendyol senkronundan güncellenmeye başlar."""
+    res = await db.trendyol_claims.update_one(
+        {"claim_id": claim_id},
+        {"$set": {"manual_locked": False, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="İade (claim) bulunamadı")
+    return {"success": True, "claim_id": claim_id, "manual_locked": False}
 
 
 @router.get("/trendyol/claims/shipment-probe")

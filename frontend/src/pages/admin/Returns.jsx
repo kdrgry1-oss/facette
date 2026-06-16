@@ -78,6 +78,15 @@ const GP_SLIP_H_MM = 210;       // sütun yüksekliği (A4 yatay)
 const GP_PAGE_W_MM = 297;       // A4 yatay genişlik
 const GP_PAGE_H_MM = 210;       // A4 yatay yükseklik
 
+// Trendyol iade durumu — manuel ilerletme seçenekleri (Türkçe etiketli)
+const CLAIM_STATUS_OPTS = [
+  { value: "Created", label: "Açık İade" },
+  { value: "WaitingInAction", label: "Aksiyon Bekleyen" },
+  { value: "Accepted", label: "Onaylandı" },
+  { value: "Rejected", label: "Reddedildi" },
+  { value: "Cancelled", label: "İptal" },
+];
+
 function ActionBadge({ action }) {
   if (action === "approved") return <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">Onaylandı</span>;
   if (action === "issued") return <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full">İtiraz Edildi</span>;
@@ -239,6 +248,31 @@ export default function Returns() {
     }
   };
 
+  const [statusBusyId, setStatusBusyId] = useState(null);
+  // Trendyol iade durumunu MANUEL ilerlet + kilitle (sonraki senkron bu durumu ezmez)
+  const changeClaimStatus = async (claimId, newStatus) => {
+    setStatusBusyId(claimId);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/integrations/trendyol/claims/${claimId}/set-status`,
+        { status: newStatus }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Durum güncellendi · manuel kilitlendi (senkron ezmeyecek)");
+      fetchClaims();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Durum güncellenemedi");
+    } finally { setStatusBusyId(null); }
+  };
+  // Manuel kilidi kaldır → durum tekrar Trendyol senkronundan güncellenir
+  const unlockClaim = async (claimId) => {
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/integrations/trendyol/claims/${claimId}/unlock`, {},
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Kilit kaldırıldı · durum tekrar Trendyol'dan senkronlanacak");
+      fetchClaims();
+    } catch (e) { toast.error("Kilit kaldırılamadı"); }
+  };
+
   const advanceGpNo = (count) => {
     const base = parseInt(pad6(gpStart) || "0", 10);
     const next = pad6(base + (count || 1));
@@ -356,37 +390,8 @@ export default function Returns() {
           </div>
         </div>
 
-        {/* Platform barı — en başta Web Sitesi, sonra pazaryerleri */}
-        <div className="flex items-center gap-1 overflow-x-auto border-b mb-4 pb-px">
-          {PLATFORMS.map((pf) => (
-            <button key={pf.key}
-              onClick={() => { setPlatform(pf.key); setStatusTab("all"); setPage(1); setSelectedIds(new Set()); }}
-              className={`flex items-center gap-2 whitespace-nowrap px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${platform === pf.key ? "border-orange-500 text-orange-600 font-semibold" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
-              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${pf.color}`}>{pf.badge}</span>
-              {pf.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
-        {platform === "facette" && <TicimaxReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); advanceGpNo(1); }} />}
-
-        {/* Trendyol (pazaryeri) sekmesi gövdesi */}
-        {platform === "trendyol" && (<>
-        {/* Durum sekmeleri */}
-        <div className="flex items-center gap-2 overflow-x-auto mb-4">
-          {STATUS_TABS.map((t) => (
-            <button key={t.key}
-              onClick={() => { setStatusTab(t.key); setPage(1); }}
-              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-sm border transition-colors ${statusTab === t.key ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
-              {t.label}
-              <span className={`ml-1.5 text-xs ${statusTab === t.key ? "text-gray-300" : "text-gray-400"}`}>{tabCounts[t.key] ?? 0}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Gider Pusulası Ayarları */}
-        <div className="flex flex-wrap items-end gap-4 mb-6 p-3 bg-purple-50 border border-purple-200 rounded-xl">
+        {/* Gider Pusulası Ayarları — ORTAK alan: Web Sitesi + Trendyol aynı no serisini paylaşır */}
+        <div className="flex flex-wrap items-end gap-4 mb-4 p-3 bg-purple-50 border border-purple-200 rounded-xl">
           <div>
             <label className="block text-[11px] font-bold text-purple-800 uppercase mb-1">Gider Pusulası Başlangıç No</label>
             <input value={gpStart}
@@ -425,6 +430,37 @@ export default function Returns() {
             A4 yatay, aynı pusula 4 kopya. Numara kağıda basılmaz (matbuda var); takip için satırda/önizlemede görünür. Her iade çıktısı no'yu 1 ilerletir.
           </p>
         </div>
+
+
+        {/* Platform barı — en başta Web Sitesi, sonra pazaryerleri */}
+        <div className="flex items-center gap-1 overflow-x-auto border-b mb-4 pb-px">
+          {PLATFORMS.map((pf) => (
+            <button key={pf.key}
+              onClick={() => { setPlatform(pf.key); setStatusTab("all"); setPage(1); setSelectedIds(new Set()); }}
+              className={`flex items-center gap-2 whitespace-nowrap px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${platform === pf.key ? "border-orange-500 text-orange-600 font-semibold" : "border-transparent text-gray-500 hover:text-gray-800"}`}>
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${pf.color}`}>{pf.badge}</span>
+              {pf.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
+        {platform === "facette" && <TicimaxReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); advanceGpNo(1); }} />}
+
+        {/* Trendyol (pazaryeri) sekmesi gövdesi */}
+        {platform === "trendyol" && (<>
+        {/* Durum sekmeleri */}
+        <div className="flex items-center gap-2 overflow-x-auto mb-4">
+          {STATUS_TABS.map((t) => (
+            <button key={t.key}
+              onClick={() => { setStatusTab(t.key); setPage(1); }}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-sm border transition-colors ${statusTab === t.key ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
+              {t.label}
+              <span className={`ml-1.5 text-xs ${statusTab === t.key ? "text-gray-300" : "text-gray-400"}`}>{tabCounts[t.key] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -560,7 +596,28 @@ export default function Returns() {
                       <div className="font-bold text-gray-900 leading-tight">{formatCurrency(totalNet)}</div>
                     </td>
                     <td className="px-3 py-3 text-xs text-gray-500">{formatDate(claim.created_date)}</td>
-                    <td className="px-3 py-3 text-center"><ActionBadge action={claim.panel_action} /></td>
+                    <td className="px-3 py-3 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <ActionBadge action={claim.panel_action} />
+                        <select
+                          value={claim.claim_status || ""}
+                          onChange={(e) => changeClaimStatus(claim.claim_id, e.target.value)}
+                          disabled={statusBusyId === claim.claim_id}
+                          title={claim.manual_locked ? "Manuel kilitli — Trendyol senkronu bu durumu ezmez" : "Durumu manuel ilerlet (sonrasında senkron ezmez)"}
+                          className={`text-[11px] border rounded-md px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-gray-300 ${claim.manual_locked ? "border-amber-400 bg-amber-50 text-amber-800 font-semibold" : "border-gray-200 text-gray-600"}`}
+                        >
+                          {claim.claim_status && !CLAIM_STATUS_OPTS.some(o => o.value === claim.claim_status) && (
+                            <option value={claim.claim_status}>{claim.bucket_label || claim.claim_status}</option>
+                          )}
+                          {CLAIM_STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                        {claim.manual_locked && (
+                          <button onClick={() => unlockClaim(claim.claim_id)}
+                            title="Manuel kilidi kaldır — durum tekrar Trendyol'dan senkronlanır"
+                            className="text-[10px] text-amber-700 hover:underline">🔒 kilidi aç</button>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
                         {claim.gider_pusulasi_no && (
