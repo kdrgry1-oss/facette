@@ -341,7 +341,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
         <button
           onClick={pullFromTicimax}
           disabled={pulling}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-60"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-60"
         >
           <RefreshCw size={15} className={pulling ? "animate-spin" : ""} />
           {pulling ? "Çekiliyor…" : "Siparişleri Çek"}
@@ -350,7 +350,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
           onClick={refreshDates}
           disabled={redating || pulling}
           title="Tüm siparişlerin tarihini Ticimax'taki gerçek sipariş tarihine günceller"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-bold hover:bg-slate-700 disabled:opacity-60"
         >
           <RefreshCw size={15} className={redating ? "animate-spin" : ""} />
           {redating ? "Tarihler düzeltiliyor…" : "Tarihleri Düzelt"}
@@ -359,15 +359,15 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
           onClick={exportExcel}
           disabled={exporting}
           title="İade siparişlerini (mevcut filtreyle) Excel olarak indir"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-bold hover:bg-green-700 disabled:opacity-60"
         >
           <Download size={15} />
           {exporting ? "Hazırlanıyor…" : "Excel'e Aktar"}
         </button>
       </div>
 
-      {/* İade durum sekmeleri (Trendyol benzeri) — tıklanınca o duruma filtreler */}
-      <div className="flex flex-wrap gap-1.5 mb-4 border-b border-gray-200 pb-2">
+      {/* İade durum sekmeleri — Trendyol sekmeleriyle birebir görsel dil (oval/pill) */}
+      <div className="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">
         {RETURN_TABS.map((t) => {
           const n = (t.statuses || [t.key]).reduce((a, s) => a + (statusCounts[s] || 0), 0);
           const active = statusFilter === t.key;
@@ -375,16 +375,14 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
             <button
               key={t.key || "all"}
               onClick={() => setStatusFilter(t.key)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-sm border transition-colors ${
                 active
-                  ? "bg-orange-500 text-white border-orange-500 shadow-sm"
-                  : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
               }`}
             >
               {t.label}
-              <span className={`inline-flex items-center justify-center min-w-[1.25rem] px-1 rounded-full text-[11px] ${
-                active ? "bg-white/25 text-white" : "bg-gray-100 text-gray-500"
-              }`}>{n}</span>
+              <span className={`ml-1.5 text-xs ${active ? "text-gray-300" : "text-gray-400"}`}>{n}</span>
             </button>
           );
         })}
@@ -398,7 +396,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Sipariş no / müşteri / telefon…"
-            className="pl-8 pr-3 py-2 text-sm border rounded-lg w-64 focus:outline-none focus:ring-1 focus:ring-orange-400"
+            className="pl-8 pr-3 py-2 text-sm border rounded-lg w-64 focus:outline-none focus:ring-1 focus:ring-gray-300"
           />
         </div>
         <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="py-2 px-3 text-sm border rounded-lg">
@@ -472,7 +470,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                         value={r.status}
                         disabled={busyId === r.id}
                         onChange={(e) => changeStatus(r, e.target.value)}
-                        className={`text-xs border rounded-md px-2 py-1 font-medium focus:outline-none focus:ring-1 focus:ring-orange-400 ${STATUS_CLS[r.status] || "bg-gray-50 text-gray-700 border-gray-200"}`}
+                        className={`text-xs border rounded-md px-2 py-1 font-medium focus:outline-none focus:ring-1 focus:ring-gray-300 ${STATUS_CLS[r.status] || "bg-gray-50 text-gray-700 border-gray-200"}`}
                       >
                         {STATUS_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
