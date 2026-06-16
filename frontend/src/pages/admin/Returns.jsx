@@ -304,7 +304,9 @@ export default function Returns() {
   const printSingleGp = () => {
     if (!gpData) return;
     setBulkPrintData([gpData]);
-    setTimeout(() => { window.print(); advanceGpNo(1); }, 300);
+    // Numara, pusula OLUŞTURULURKEN (onGiderCreated / handleGiderPusulasi) zaten 1 ilerledi.
+    // Yazdırırken TEKRAR ilerletmek 2'şer atlamaya yol açıyordu → burada advance YOK.
+    setTimeout(() => { window.print(); }, 300);
   };
 
   const handleBulkPrint = async () => {
