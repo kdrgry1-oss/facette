@@ -960,6 +960,7 @@ export default function AdminOrders({ unpaidView = false }) {
               <th>Ödeme Tipi</th>
               <th>Platform</th>
               <th>Durum</th>
+              <th>Kargo</th>
               <th>Tarih</th>
               <th>İşlemler</th>
             </tr>
@@ -967,11 +968,11 @@ export default function AdminOrders({ unpaidView = false }) {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="text-center py-8">Yükleniyor...</td>
+                <td colSpan={10} className="text-center py-8">Yükleniyor...</td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={9} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
+                <td colSpan={10} className="text-center py-8 text-gray-500">Sipariş bulunamadı</td>
               </tr>
             ) : (
               orders.map((order) => {
@@ -1122,6 +1123,33 @@ export default function AdminOrders({ unpaidView = false }) {
                           ))}
                         </SelectContent>
                       </Select>
+                    </td>
+                    <td>
+                      {(() => {
+                        const trk = order.cargo_tracking_number || order.cargo?.tracking_number || order.tracking_number || "";
+                        const url = order.cargo_tracking_url || order.cargo?.tracking_url || "";
+                        const lastText = order.cargo_last_status_text || "";
+                        const lastAt = order.cargo_last_event_at || order.shipped_at || "";
+                        const hist = order.cargo_status_history;
+                        // "İlk hareket okundu" = kargo firmasından en az bir hareket geldi (ya da durum kargoda+)
+                        const moved = !!(lastAt || lastText || (Array.isArray(hist) && hist.length > 0) ||
+                                         ["shipped", "in_transit", "out_for_delivery", "delivered"].includes(order.status));
+                        if (!trk && !moved) return <span className="text-gray-300">—</span>;
+                        const body = (
+                          <span className="inline-flex flex-col gap-0.5 leading-tight">
+                            <span className={`inline-flex items-center gap-1.5 ${moved ? "text-emerald-600" : "text-gray-400"}`}>
+                              <Truck size={16} />
+                              {trk
+                                ? <span className="font-mono text-xs font-bold text-gray-700 break-all">{trk}</span>
+                                : <span className="text-xs text-gray-400">hareket bekleniyor</span>}
+                            </span>
+                            {moved && lastText && <span className="text-[10px] text-gray-500">{lastText}</span>}
+                          </span>
+                        );
+                        return url
+                          ? <a href={url} target="_blank" rel="noopener noreferrer" title={`Kargo takip: ${trk}`} className="hover:underline">{body}</a>
+                          : <span title={moved ? (lastText || "Kargoda") : "Takip no atandı — ilk hareket bekleniyor"}>{body}</span>;
+                      })()}
                     </td>
                     <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
                     <td>
