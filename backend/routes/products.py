@@ -501,6 +501,18 @@ async def get_products(
             # Breadcrumb segment eşleşmesi: üst kategori (GİYİM>...) ya da yaprak (...>Şort)
             cat_or.append({"breadcrumb": {"$regex": f"(?:^|>){dia}(?:>|$)", "$options": "i"}})
             cat_or.append({"category_slug": cat_slug})
+            # ÇOKLU KATEGORİ: slug'a karşılık gelen kategori id'lerini category_ids içinde de ara.
+            # Ürün ana kategoride olmasa bile (ör. ana "Pantolon") admin'de ekstra eklendiği
+            # "Şort" kategorisinde de müşteriye görünür.
+            _slug_cat_ids = []
+            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1}):
+                _csl = (_c.get("slug") or "").strip().lower()
+                _cnm = (_c.get("name") or "").strip()
+                if _csl == cat_slug or (_cnm and generate_slug(_cnm) == cat_slug):
+                    if _c.get("id"):
+                        _slug_cat_ids.append(_c["id"])
+            if _slug_cat_ids:
+                cat_or.append({"category_ids": {"$in": _slug_cat_ids}})
             and_clauses.append({"$or": cat_or})
     
     if search:
@@ -655,6 +667,10 @@ async def get_products(
         query.setdefault("$and", []).extend(and_clauses)
 
     sort_order = -1 if order == "desc" else 1
+    # Kategori sayfasında kullanıcı özel sıralama seçmediyse (default created_at):
+    # urun_karti_id (sayısal) DESC — yüksek kart id = en yeni ürün, kategoride en üstte.
+    _cat_view = bool(category or category_id)
+    _card_sort = _cat_view and sort == "created_at"
 
     if not _admin_view:
         # ===============================================================
@@ -679,10 +695,12 @@ async def get_products(
                 }
             }},
             {"$addFields": {"_in_stock": {"$cond": [{"$gt": ["$_eff_stock", 0]}, 1, 0]}}},
-            {"$sort": {"_in_stock": -1, sort: sort_order, "_id": 1}},
+            {"$addFields": {"_card_num": {"$convert": {"input": "$urun_karti_id", "to": "long", "onError": 0, "onNull": 0}}}},
+            ({"$sort": {"_in_stock": -1, "_card_num": -1, "_id": -1}} if _card_sort
+             else {"$sort": {"_in_stock": -1, sort: sort_order, "_id": 1}}),
             {"$skip": skip},
             {"$limit": limit},
-            {"$project": {"_id": 0, "_eff_stock": 0, "_in_stock": 0}},
+            {"$project": {"_id": 0, "_eff_stock": 0, "_in_stock": 0, "_card_num": 0}},
         ]
         products = await db.products.aggregate(pipeline, allowDiskUse=True).to_list(limit)
     else:

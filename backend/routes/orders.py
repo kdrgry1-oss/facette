@@ -2232,6 +2232,15 @@ async def create_cargo_barcode(
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
+    # Havale/EFT siparişi ödeme onaylanmadan kargo barkodu OLUŞTURULMAZ (fatura ile aynı kural).
+    _bc_pm = (order.get("payment_method") or "").lower()
+    _bc_ps = (order.get("payment_status") or "").lower()
+    if _bc_pm in _HAVALE_PMS and _bc_ps not in _SETTLED_PAY:
+        raise HTTPException(status_code=400, detail=(
+            "Havale onaylanmadığı için bu siparişe kargo barkodu oluşturulamadı. "
+            "Önce siparişin ödemesini 'Ödendi' olarak işaretleyin (havale onayı), sonra barkod alın."
+        ))
+
     # Eğer mevcut barkod varsa direkt dön
     if order.get("cargo_tracking_number"):
         return {
