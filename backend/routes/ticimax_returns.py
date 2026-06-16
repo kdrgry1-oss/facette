@@ -121,6 +121,16 @@ async def list_ticimax_return_orders(
                 or " ".join([bill.get("first_name") or "", bill.get("last_name") or ""]).strip()
                 or bill.get("name") or "—")
         items = o.get("items") or []
+        # Brüt / iskonto order-seviyesinde yoksa kalemlerden türet (unit_price=brüt, price=net).
+        _calc_gross = sum(round(float(i.get("unit_price") or i.get("list_price") or i.get("original_price") or i.get("price") or 0), 2) * int(i.get("quantity") or 1) for i in items)
+        _calc_net = sum(round(float(i.get("price") or 0), 2) * int(i.get("quantity") or 1) for i in items)
+        _calc_idisc = sum(round(float(i.get("discount_amount") or i.get("discount") or 0), 2) * int(i.get("quantity") or 1) for i in items)
+        _o_sub = float(o.get("subtotal") or 0)
+        _o_disc = float(o.get("discount") or 0)
+        _o_total = float(o.get("total") or 0)
+        _r_total = _o_total if _o_total > 0 else round(_calc_net, 2)
+        _r_subtotal = _o_sub if _o_sub > 0 else round(_calc_gross, 2)
+        _r_discount = _o_disc if _o_disc > 0 else (round(_calc_idisc, 2) if _calc_idisc > 0 else round(max(0.0, _r_subtotal - _r_total), 2))
         rows.append({
             "id": o.get("id"),
             "order_number": o.get("order_number"),
@@ -136,11 +146,11 @@ async def list_ticimax_return_orders(
             "payment_label": _payment_label(o.get("payment_method") or "", o.get("payment_method_raw") or ""),
             "payment_method_raw": o.get("payment_method_raw") or "",
             "payment_status": o.get("payment_status") or "",
-            "total": o.get("total") or 0,
+            "total": _r_total,
             "paid_amount": o.get("paid_amount") or 0,
-            "subtotal": o.get("subtotal") or 0,
+            "subtotal": _r_subtotal,
             "shipping_cost": o.get("shipping_cost") or 0,
-            "discount": o.get("discount") or 0,
+            "discount": _r_discount,
             "reason": (o.get("return_request") or {}).get("reason") or "",
             "coupon_code": o.get("coupon_code") or "",
             "notes": o.get("notes") or "",
@@ -153,6 +163,8 @@ async def list_ticimax_return_orders(
                     "color": i.get("color") or "",
                     "barcode": i.get("barcode") or "",
                     "price": i.get("price") or 0,
+                    "unit_price": i.get("unit_price") or i.get("list_price") or i.get("price") or 0,
+                    "discount": i.get("discount_amount") or i.get("discount") or 0,
                 }
                 for i in items
             ],
