@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, Check, FileText, Printer, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Check, FileText, Printer, Download, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import TicimaxReturns from "./TicimaxReturns";
 
@@ -18,8 +18,7 @@ const PLATFORMS = [
 
 const STATUS_TABS = [
   { key: "all", label: "Tüm İadeler" },
-  { key: "talep_olusturulan", label: "Talep Oluşturulan" },
-  { key: "kargoya_verilen", label: "Kargoya Verilen" },
+  { key: "acik_iade", label: "Açık İade" },
   { key: "aksiyon_bekleyen", label: "Aksiyon Bekleyen" },
   { key: "onaylanan", label: "Onaylanan" },
   { key: "reddedilen", label: "Reddedilen" },
@@ -93,6 +92,7 @@ export default function Returns() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState({});
   const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [platform, setPlatform] = useState("facette");
@@ -189,6 +189,34 @@ export default function Returns() {
       toast.error(err.response?.data?.detail || "Senkronizasyon hatası");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // Bulunulan sekmenin (statusTab) Excel çıktısı — backend openpyxl üretir
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (statusTab && statusTab !== "all") params.append("status", statusTab);
+      if (debouncedSearch) params.append("search", debouncedSearch);
+      const res = await fetch(`${API}/integrations/trendyol/claims/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+      if (!res.ok) throw new Error("export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `trendyol-iadeleri-${statusTab || "tum"}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Excel indirildi");
+    } catch (e) {
+      toast.error("Excel aktarımı başarısız");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -309,6 +337,14 @@ export default function Returns() {
                 className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 transition-colors disabled:opacity-50">
                 <Printer size={16} />
                 Toplu Yazdır ({selectedIds.size})
+              </button>
+            )}
+            {platform !== "facette" && (
+              <button onClick={exportExcel} disabled={exporting}
+                data-testid="export-excel-btn"
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50">
+                <Download size={16} />
+                {exporting ? "Hazırlanıyor..." : "Excel"}
               </button>
             )}
             <button onClick={handleSync} disabled={syncing}

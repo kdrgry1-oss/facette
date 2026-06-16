@@ -1598,6 +1598,7 @@ export default function AdminProducts() {
               <SortTH field="stock_code" label="Stok Kodu" />
               <th>Bedenler</th>
               <SortTH field="price" label="Fiyat" />
+              <th className="text-center">Stok</th>
               <SortTH field="is_active" label="Durum" firstDir="desc" />
               <th>İşlemler</th>
               <SortTH field="created_at" label="Eklenme Tarihi" firstDir="desc" />
@@ -1605,9 +1606,9 @@ export default function AdminProducts() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} className="text-center py-8">Yükleniyor...</td></tr>
+              <tr><td colSpan={11} className="text-center py-8">Yükleniyor...</td></tr>
             ) : products.length === 0 ? (
-              <tr><td colSpan={10} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
+              <tr><td colSpan={11} className="text-center py-8 text-gray-500">Ürün bulunamadı</td></tr>
             ) : (
               products.map((product) => (
                 <tr key={product.id} data-testid={`product-row-${product.id}`}>
@@ -1678,28 +1679,28 @@ export default function AdminProducts() {
                     )}
                   </td>
                   <td>
-                    <div className="flex flex-col gap-1 items-start">
-                      <div className="flex gap-1 items-center">
-                        <button
-                          onClick={() => setProductActive(product, true)}
-                          title="Aktif yap"
-                          data-testid={`product-set-active-${product.id}`}
-                          className={`w-6 h-6 text-xs font-bold rounded transition-colors ${product.is_active ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-green-200 hover:text-green-800'}`}
-                        >
-                          A
-                        </button>
-                        <button
-                          onClick={() => setProductActive(product, false)}
-                          title="Pasif yap"
-                          data-testid={`product-set-passive-${product.id}`}
-                          className={`w-6 h-6 text-xs font-bold rounded transition-colors ${!product.is_active ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-red-200 hover:text-red-800'}`}
-                        >
-                          P
-                        </button>
-                      </div>
-                      <div className={`text-xs font-medium ${(product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : product.stock || 0) < 5 ? 'text-red-600' : 'text-gray-500'}`}>
-                        Stok: {product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : (product.stock || 0)}
-                      </div>
+                    <div className={`text-sm font-bold ${(product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : product.stock || 0) < 5 ? 'text-red-600' : 'text-gray-700'}`}>
+                      {product.variants?.length > 0 ? product.variants.reduce((s, v) => s + (v.stock || 0), 0) : (product.stock || 0)}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="flex gap-1 items-center">
+                      <button
+                        onClick={() => setProductActive(product, true)}
+                        title="Aktif yap"
+                        data-testid={`product-set-active-${product.id}`}
+                        className={`w-6 h-6 text-xs font-bold rounded transition-colors ${product.is_active ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-green-200 hover:text-green-800'}`}
+                      >
+                        A
+                      </button>
+                      <button
+                        onClick={() => setProductActive(product, false)}
+                        title="Pasif yap"
+                        data-testid={`product-set-passive-${product.id}`}
+                        className={`w-6 h-6 text-xs font-bold rounded transition-colors ${!product.is_active ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-500 hover:bg-red-200 hover:text-red-800'}`}
+                      >
+                        P
+                      </button>
                     </div>
                   </td>
                   <td>

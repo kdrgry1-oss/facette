@@ -6206,6 +6206,96 @@ async def get_trendyol_claims(
     }
 
 
+@router.get("/trendyol/claims/export")
+async def export_trendyol_claims(
+    status: str = "",
+    search: str = "",
+    current_user: dict = Depends(require_admin),
+):
+    """Trendyol iadelerini bulunulan sekme (status) + arama filtresiyle Excel'e aktarır.
+    Liste endpoint'iyle (get_trendyol_claims) AYNI dedup + kova mantığını kullanır;
+    böylece hangi sekmedeyse o sekmenin kayıtları döner.
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from fastapi.responses import StreamingResponse
+
+    _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "acik_iade", "aksiyon_bekleyen", "onaylanan", "reddedilen"}
+    base_query = {}
+    if search:
+        base_query["$or"] = [
+            {"order_number": {"$regex": search, "$options": "i"}},
+            {"customer_name": {"$regex": search, "$options": "i"}},
+            {"claim_id": {"$regex": search, "$options": "i"}},
+            {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
+        ]
+    want_tab = status if (status and status != "all" and status in _VALID_TABS) else None
+
+    raw = await db.trendyol_claims.find(base_query, {"_id": 0, "raw_data": 0}).sort("created_date", -1).to_list(None)
+    seen = set(); deduped = []
+    for c in raw:
+        cid = c.get("claim_id") or c.get("order_number")
+        if cid in seen:
+            continue
+        seen.add(cid); deduped.append(c)
+    iade_scoped = [c for c in deduped if _claim_bucket(c) != "iptal"]
+    if want_tab == "acik_iade":
+        rows = [c for c in iade_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
+    elif want_tab is not None:
+        rows = [c for c in iade_scoped if _claim_bucket(c) == want_tab]
+    else:
+        rows = iade_scoped
+
+    _BUCKET_LABEL = {
+        "talep_olusturulan": "Açık İade", "kargoya_verilen": "Açık İade",
+        "aksiyon_bekleyen": "Aksiyon Bekleyen", "onaylanan": "Onaylandı",
+        "reddedilen": "Reddedildi", "iptal": "İptal",
+    }
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Trendyol İadeleri"
+    headers = ["Sipariş No", "Müşteri", "Ürün", "Tutar", "Tarih", "Durum", "Gider Pusulası No"]
+    ws.append(headers)
+    hfill = PatternFill("solid", fgColor="FCE4B6")
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = hfill
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    for c in rows:
+        items = c.get("items") or []
+        urun = ", ".join([
+            (i.get("product_name") or i.get("name") or "").strip()
+            for i in items if (i.get("product_name") or i.get("name"))
+        ])
+        b = _claim_bucket(c)
+        ws.append([
+            c.get("order_number") or "",
+            c.get("customer_name") or "",
+            urun,
+            float(c.get("refund_amount") or 0),
+            str(c.get("created_date") or "")[:10],
+            _BUCKET_LABEL.get(b, "—"),
+            c.get("gider_pusulasi_no") or "",
+        ])
+
+    for col in ws.columns:
+        ml = max((len(str(cc.value)) for cc in col if cc.value is not None), default=10)
+        ws.column_dimensions[col[0].column_letter].width = min(ml + 2, 50)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"trendyol-iadeleri-{status or 'tum'}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.get("/trendyol/claims/diagnostics")
 async def trendyol_claims_diagnostics(current_user: dict = Depends(require_admin)):
     """Kova kalibrasyonu teşhisi: ham status dağılımı + kova eşlemesi + kargo kırılımı.

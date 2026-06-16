@@ -148,9 +148,10 @@ async def get_orders(
         _st = [x.strip() for x in str(status).split(",") if x.strip()]
         query["status"] = _st[0] if len(_st) == 1 else {"$in": _st}
     elif hide_closed and str(hide_closed).lower() not in ("0", "false", ""):
-        # Ana "Tüm Siparişler" görünümü: iptal/iade/iade-ödemesi yapılanlar gizlenir
+        # Ana "Tüm Siparişler" görünümü: iptal/iade/iade-ödemesi-bekleyen/yapılan gizlenir
         # (İptaller ve İade Edilenler sayfalarında ayrıca listelenir).
-        query["status"] = {"$nin": ["cancelled", "returned", "refunded"]}
+        # return_approved = iade onaylandı, "İade Bedeli Öde" aşamasında → buradan da çıkar.
+        query["status"] = {"$nin": ["cancelled", "returned", "refunded", "return_approved"]}
     if phone:
         query["shipping_address.phone"] = {"$regex": phone, "$options": "i"}
     if email:
