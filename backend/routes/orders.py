@@ -2388,19 +2388,24 @@ async def create_cargo_barcode(
     # Self Barkod hesapları için: MNG_SIPARIS_NO zaten gerçek kargo takip kodudur
     # NZ-formatlı havuz tahsis edilen kurumsal hesaplarda GONDERI_NO field'ında ayrı bir kod gelir
     # Öncelik: NZ (anında MNGGonderiBarkod) → GONDERI_NO (FaturaSiparisListesi sonradan dolu) → MNG_SIPARIS_NO
-    public_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or barkod
+    # Gerçek kargo takip no SADECE kargo firması gönderi numarası üretince dolar (NZ barkod / NZ gönderi / GONDERI_NO).
+    # MNG Self Barkod (barkod = MNG_SIPARIS_NO) = bizim oluşturduğumuz barkod → kargoya verildiği/kargoda olduğu
+    # anlamına GELMEZ, bu yüzden takip no olarak YAZILMAZ. Gerçek no scheduler/backfill ile sonradan yakalanır.
+    real_tracking = nz_barkod or nz_gonderi_no or gonderi_no_status or ""
+    public_tracking = real_tracking or barkod  # bildirim metni / geriye dönük fallback
     # MNG->DHL devri: kargotakip.dhlecommerce.com.tr/?takipNo={no} dogru deep-link (no ile direkt takip,
-    # form/CAPTCHA gerektirmez). No yoksa manuel takip sayfasina dusulur.
-    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={public_tracking}" if public_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
+    # form/CAPTCHA gerektirmez). Gerçek no yoksa manuel takip sayfasina dusulur.
+    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={real_tracking}" if real_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
     update_doc = {
-        "cargo_tracking_number": public_tracking,
+        "cargo_tracking_number": real_tracking,    # SADECE gerçek takip no; yoksa boş (scheduler/backfill doldurur)
+        "cargo_barcode_number": barkod,            # MNG Self Barkod — bizim barkodumuz (takip no DEĞİL)
         "cargo_tracking_link": track_link,
         "cargo_provider_name": "MNG Kargo",
         "cargo_provider_code": "MNG",
         "cargo": {
             "provider": "MNG",
             "provider_name": "MNG Kargo",
-            "tracking_number": public_tracking,
+            "tracking_number": real_tracking,
             "tracking_link": track_link,
             "label_format": "10x15cm",
             "mng_siparis_no": barkod,                      # MNG Self Barkod (her zaman dolu)
@@ -2572,9 +2577,9 @@ async def backfill_cargo_tracking(
         if not info.get("ok"):
             failed.append({"no": siparis_no, "err": info.get("error") or "MNG durumu alınamadı"})
             continue
-        gonderi = info.get("gonderi_no") or info.get("mng_siparis_no") or ""
+        gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; barkoda (mng_siparis_no) düşme
         if not gonderi:
-            failed.append({"no": siparis_no, "err": "gonderi_no boş"})
+            failed.append({"no": siparis_no, "err": "gonderi_no boş (kargo firması henüz takip no üretmedi)"})
             continue
         await db.orders.update_one(
             {"id": o["id"]},

@@ -1126,29 +1126,41 @@ export default function AdminOrders({ unpaidView = false }) {
                     </td>
                     <td>
                       {(() => {
-                        const trk = order.cargo_tracking_number || order.cargo?.tracking_number || order.tracking_number || "";
-                        const url = order.cargo_tracking_url || order.cargo?.tracking_url || "";
-                        const lastText = order.cargo_last_status_text || "";
-                        const lastAt = order.cargo_last_event_at || order.shipped_at || "";
-                        const hist = order.cargo_status_history;
-                        // "İlk hareket okundu" = kargo firmasından en az bir hareket geldi (ya da durum kargoda+)
-                        const moved = !!(lastAt || lastText || (Array.isArray(hist) && hist.length > 0) ||
-                                         ["shipped", "in_transit", "out_for_delivery", "delivered"].includes(order.status));
-                        if (!trk && !moved) return <span className="text-gray-300">—</span>;
-                        const body = (
-                          <span className="inline-flex flex-col gap-0.5 leading-tight">
-                            <span className={`inline-flex items-center gap-1.5 ${moved ? "text-emerald-600" : "text-gray-400"}`}>
-                              <Truck size={16} />
-                              {trk
-                                ? <span className="font-mono text-xs font-bold text-gray-700 break-all">{trk}</span>
-                                : <span className="text-xs text-gray-400">hareket bekleniyor</span>}
+                        const c = order.cargo || {};
+                        const barcodeNo = order.cargo_barcode_number || c.mng_siparis_no || ""; // bizim barkodumuz — takip no DEĞİL
+                        // Gerçek kargo takip no: kargo firması gönderi numarası (NZ / GONDERI_NO) — barkod hariç
+                        let trk = order.cargo_gonderi_no || c.mng_nz_barkod || c.mng_nz_gonderi_no || c.mng_gonderi_no || "";
+                        if (!trk) {
+                          const ctn = order.cargo_tracking_number || c.tracking_number || "";
+                          if (ctn && ctn !== barcodeNo) trk = ctn; // eski kayıt: scheduler gerçek no yazmışsa
+                        }
+                        const url = order.cargo_tracking_url || order.cargo_tracking_link || c.tracking_link || "";
+                        const lastText = order.cargo_last_status_text || order.cargo_status_text || "";
+                        // Gerçek takip no var → kargo firması yakaladı: yeşil kamyon + no
+                        if (trk) {
+                          const body = (
+                            <span className="inline-flex flex-col gap-0.5 leading-tight">
+                              <span className="inline-flex items-center gap-1.5 text-emerald-600">
+                                <Truck size={16} />
+                                <span className="font-mono text-xs font-bold text-gray-700 break-all">{trk}</span>
+                              </span>
+                              {lastText && <span className="text-[10px] text-gray-500">{lastText}</span>}
                             </span>
-                            {moved && lastText && <span className="text-[10px] text-gray-500">{lastText}</span>}
-                          </span>
-                        );
-                        return url
-                          ? <a href={url} target="_blank" rel="noopener noreferrer" title={`Kargo takip: ${trk}`} className="hover:underline">{body}</a>
-                          : <span title={moved ? (lastText || "Kargoda") : "Takip no atandı — ilk hareket bekleniyor"}>{body}</span>;
+                          );
+                          return url
+                            ? <a href={url} target="_blank" rel="noopener noreferrer" title={`Kargo takip: ${trk}`} className="hover:underline">{body}</a>
+                            : <span title={lastText || "Kargoda"}>{body}</span>;
+                        }
+                        // Sadece barkod oluşturulmuş — kargo firması takip no'yu henüz üretmedi (kargoda değil)
+                        if (barcodeNo) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 text-gray-300" title={`Barkod hazır: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
+                              <Truck size={16} />
+                              <span className="text-[10px] text-gray-400">takip bekleniyor</span>
+                            </span>
+                          );
+                        }
+                        return <span className="text-gray-300">—</span>;
                       })()}
                     </td>
                     <td className="text-sm text-gray-500">{formatDate(order.created_at)}</td>
