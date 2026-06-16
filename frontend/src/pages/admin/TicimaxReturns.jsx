@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle } from "lucide-react";
+import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle, FileText } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -64,7 +64,7 @@ const fmtDate = (s) => {
   catch { return String(s).slice(0, 10); }
 };
 
-export default function TicimaxReturns({ embedded = false }) {
+export default function TicimaxReturns({ embedded = false, gpStart = "085490", onGiderCreated }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
@@ -308,6 +308,26 @@ export default function TicimaxReturns({ embedded = false }) {
     } catch (e) { toast.error(e.response?.data?.detail || "İşaretlenemedi"); setWf((m) => ({ ...m, loading: false })); }
   };
 
+  // Satır-içi gider pusulası (Trendyol ile ORTAK seri): siparişi köprüle → gider pusulası
+  // (tracking_no = ortak başlangıç no gpStart) → parent yazdırma modalını aç + sayacı +1 ilerlet.
+  const handleSiteGider = async (r) => {
+    try {
+      setBusyId(r.id);
+      const br = await axios.post(`${API}/admin/ticimax/returns/${r.id}/open`, {}, auth());
+      const returnId = br.data?.return_id;
+      if (!returnId) throw new Error("bridge");
+      const trackingNo = String(gpStart || "").trim();
+      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`,
+        { tracking_no: trackingNo }, auth());
+      const gp = res.data?.gider_pusulasi;
+      toast.success(`Gider pusulası: ${gp?.display_number || trackingNo}`);
+      if (gp && onGiderCreated) onGiderCreated({ ...gp, assigned_no: trackingNo });
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı");
+    } finally { setBusyId(""); }
+  };
+
   const wfCanAct = can("returns.approve") || can("returns.reject") || can("returns.expense_note") || can("returns.refund_pay");
 
   return (
@@ -458,9 +478,29 @@ export default function TicimaxReturns({ embedded = false }) {
                       </select>
                     </td>
                     <td className="px-3 py-2.5">
-                      <button onClick={() => setExpandedId(expandedId === r.id ? null : r.id)} className="text-gray-400 hover:text-gray-700">
-                        {expandedId === r.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        {can("returns.approve") && (
+                          <button onClick={() => openWorkflow(r, "approve")} disabled={busyId === r.id}
+                            className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 disabled:opacity-50" title="Onayla">
+                            <CheckCircle size={14} />
+                          </button>
+                        )}
+                        {can("returns.reject") && (
+                          <button onClick={() => openWorkflow(r, "reject")} disabled={busyId === r.id}
+                            className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 disabled:opacity-50" title="Reddet">
+                            <XCircle size={14} />
+                          </button>
+                        )}
+                        {can("returns.expense_note") && (
+                          <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
+                            className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">
+                            <FileText size={14} />
+                          </button>
+                        )}
+                        <button onClick={() => setExpandedId(expandedId === r.id ? null : r.id)} className="text-gray-400 hover:text-gray-700 px-1" title="Detay">
+                          {expandedId === r.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {expandedId === r.id && (

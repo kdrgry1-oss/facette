@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, Check, X, FileText, Printer, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Check, FileText, Printer, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import TicimaxReturns from "./TicimaxReturns";
 
@@ -122,10 +122,6 @@ export default function Returns() {
   const autoRefreshRef = useRef(null);
 
   // A2 - Ret sebebi modal state
-  const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [rejectTargetClaim, setRejectTargetClaim] = useState(null);
-  const [rejectReason, setRejectReason] = useState("");
-  const [rejectReasonId, setRejectReasonId] = useState(1);
 
   const limit = 20;
 
@@ -215,33 +211,6 @@ export default function Returns() {
     }
   };
 
-  const handleIssue = async (claim) => {
-    // A2 - open reject reason modal instead of prompt
-    setRejectTargetClaim(claim);
-    setRejectReason("");
-    setRejectReasonId(1);
-    setRejectModalOpen(true);
-  };
-
-  const submitReject = async () => {
-    if (!rejectTargetClaim) return;
-    if (!rejectReason.trim()) { toast.error("Ret sebebi boş olamaz"); return; }
-    try {
-      const token = localStorage.getItem("token");
-      const claimItemIds = (rejectTargetClaim.items || []).map(i => i.claim_item_id).filter(Boolean);
-      await axios.post(`${API}/integrations/trendyol/claims/${rejectTargetClaim.claim_id}/issue`,
-        { claim_item_ids: claimItemIds, issue_reason_id: Number(rejectReasonId) || 1, description: rejectReason.trim() },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success("İtiraz oluşturuldu");
-      setRejectModalOpen(false);
-      setRejectTargetClaim(null);
-      fetchClaims();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "İtiraz hatası");
-    }
-  };
-
   const advanceGpNo = (count) => {
     const base = parseInt(pad6(gpStart) || "0", 10);
     const next = pad6(base + (count || 1));
@@ -260,6 +229,7 @@ export default function Returns() {
       );
       setGpData({ ...res.data.gider_pusulasi, assigned_no: trackingNo });
       setGpModalOpen(true);
+      advanceGpNo(1);
       fetchClaims();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Gider pusulası oluşturulamadı");
@@ -363,7 +333,7 @@ export default function Returns() {
         </div>
 
         {/* Web Sitesi sekmesi: doğrudan sipariş bazlı iade akışı (alt-sekme yok — üstte zaten "Web Sitesi" yazıyor) */}
-        {platform === "facette" && <TicimaxReturns embedded />}
+        {platform === "facette" && <TicimaxReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); advanceGpNo(1); }} />}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
         {platform === "trendyol" && (<>
@@ -557,24 +527,6 @@ export default function Returns() {
                     <td className="px-3 py-3 text-center"><ActionBadge action={claim.panel_action} /></td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        {!isActioned ? (
-                          <>
-                            <button onClick={() => handleApprove(claim)}
-                              data-testid={`approve-${claim.claim_id}`}
-                              className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors" title="Onayla">
-                              <Check size={14} />
-                            </button>
-                            <button onClick={() => handleIssue(claim)}
-                              data-testid={`issue-${claim.claim_id}`}
-                              className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors" title="İtiraz">
-                              <X size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic px-1">
-                            {claim.panel_action === "approved" ? "Onaylandı" : "İtiraz"}
-                          </span>
-                        )}
                         {claim.gider_pusulasi_no && (
                           <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
                             #{claim.gider_pusulasi_no}
@@ -645,66 +597,6 @@ export default function Returns() {
         </DialogContent>
       </Dialog>
 
-      {/* A2 - Reject/Issue Reason Modal */}
-      <Dialog open={rejectModalOpen} onOpenChange={(o) => { setRejectModalOpen(o); if (!o) setRejectTargetClaim(null); }}>
-        <DialogContent data-testid="reject-reason-modal">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <X size={18} className="text-red-600" />
-              İade Reddet / İtiraz
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            {rejectTargetClaim && (
-              <div className="bg-gray-50 border rounded-lg p-3 text-sm">
-                <p className="font-bold text-gray-900">Sipariş: {rejectTargetClaim.order_number}</p>
-                <p className="text-xs text-gray-500 mt-1">{rejectTargetClaim.customer_name || "-"} · {rejectTargetClaim.claim_reason || ""}</p>
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium mb-1">İtiraz Sebep Kodu</label>
-              <select
-                value={rejectReasonId}
-                onChange={(e) => setRejectReasonId(e.target.value)}
-                data-testid="reject-reason-id"
-                className="w-full border px-3 py-2 rounded text-sm bg-white"
-              >
-                <option value="1">1 - Ürün eksiksiz/hasarsız</option>
-                <option value="2">2 - Ürün kullanılmış</option>
-                <option value="3">3 - İade süresi aşıldı</option>
-                <option value="4">4 - Ürün orijinalinden farklı</option>
-                <option value="99">99 - Diğer</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Ret Sebebi Açıklaması <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Müşteriye iletilecek itiraz nedenini detaylı yazın..."
-                className="w-full border rounded-lg p-3 text-sm min-h-[120px]"
-                data-testid="reject-reason-text"
-                required
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button onClick={() => setRejectModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">
-                İptal
-              </button>
-              <button
-                onClick={submitReject}
-                disabled={!rejectReason.trim()}
-                data-testid="submit-reject-btn"
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-bold"
-              >
-                <X size={14} className="inline mr-1" /> Reddet ve Gönder
-              </button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
     </div>
   );
