@@ -142,6 +142,26 @@ export default function Checkout() {
       .catch(() => {});
   }, [user]);
 
+  // Kayıtlı adres yoksa (misafir dahil) tarayıcıda daha önce girilen adresi otomatik yükle
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("facette_last_address");
+      if (!saved) return;
+      const a = JSON.parse(saved);
+      if (!a || (!a.first_name && !a.address)) return;
+      setShippingAddress((p) => (p.first_name || p.address) ? p : { ...emptyAddress, ...a, email: user?.email || a.email || "" });
+      setBillingAddress((p) => (p.first_name || p.address) ? p : { ...emptyAddress, ...a });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Girilen adresi tarayıcıda hatırla → sonraki siparişte otomatik gelsin
+  useEffect(() => {
+    if (shippingAddress && (shippingAddress.first_name || shippingAddress.address)) {
+      try { localStorage.setItem("facette_last_address", JSON.stringify(shippingAddress)); } catch {}
+    }
+  }, [shippingAddress]);
+
   // Madde 4 — Kampanya motoru: otomatik kampanyalar + (varsa) girilen kodu BIRLIKTE hesaplar.
   // Sunucudaki /coupons/evaluate ile ayni sonuc (onizleme = siparis).
   const recalcPromotions = async (code = "") => {
@@ -1142,11 +1162,13 @@ export default function Checkout() {
               <div>
                 <label className="block text-xs text-gray-700 mb-1">Ad *</label>
                 <input value={addressForm.first_name} onChange={(e) => setAddressForm({ ...addressForm, first_name: e.target.value })}
+                  autoComplete="given-name"
                   className="w-full border rounded px-3 py-2 text-sm" required />
               </div>
               <div>
                 <label className="block text-xs text-gray-700 mb-1">Soyad *</label>
                 <input value={addressForm.last_name} onChange={(e) => setAddressForm({ ...addressForm, last_name: e.target.value })}
+                  autoComplete="family-name"
                   className="w-full border rounded px-3 py-2 text-sm" required />
               </div>
               <div className="md:col-span-2">
@@ -1158,7 +1180,7 @@ export default function Checkout() {
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-700 mb-1">Adres *</label>
                 <textarea value={addressForm.address} onChange={(e) => setAddressForm({ ...addressForm, address: e.target.value })}
-                  rows={3}
+                  rows={3} autoComplete="street-address"
                   className="w-full border rounded px-3 py-2 text-sm resize-none" required />
               </div>
               <div className="md:col-span-2">
@@ -1172,6 +1194,7 @@ export default function Checkout() {
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-700 mb-1">Posta Kodu</label>
                 <input value={addressForm.postal_code} onChange={(e) => setAddressForm({ ...addressForm, postal_code: e.target.value })}
+                  autoComplete="postal-code"
                   className="w-full border rounded px-3 py-2 text-sm" />
               </div>
             </div>
