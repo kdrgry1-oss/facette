@@ -2370,25 +2370,33 @@ async def create_cargo_barcode(
         # mevcut kaydı FaturaSiparisListesi'nden çekip kurtarıyoruz (yeni kayıt oluşturmadan).
         _recovered = False
         if ("ZATEN VAR" in _hata.upper()) or ("E005" in _hata.upper()):
+            # Kayıt MNG'de KESİN var. Gerçek MNG gönderi no'yu çekmeyi dene (FaturaSiparisListesi);
+            # ama günlük sorgu limiti ("GUNLUK SORGULAMA SINIRI") veya boş dönse BİLE sipariş_no'yu
+            # barkod kabul edip kurtar — etiket barkodu zaten sipariş no'yu kodluyor, gerçek gönderi no
+            # sonradan scheduler/backfill ile dolar. Amaç: etiket HEMEN oluşsun.
+            _existing_barkod = ""
+            _existing_gonderi = ""
             try:
                 from mng_kargo_client import get_mng_shipment_status as _gss_recover
                 _rec = await _aio_cargo.to_thread(
                     _gss_recover,
                     username=settings["username"], password=settings["password"], siparis_no=siparis_no
                 )
-                if _rec.get("ok") and (_rec.get("mng_siparis_no") or _rec.get("gonderi_no")):
-                    res = {
-                        "ok": True,
-                        "barkod": _rec.get("mng_siparis_no") or _rec.get("gonderi_no") or siparis_no,
-                        "gonderi_no": _rec.get("gonderi_no") or "",
-                        "raw": "recovered_from_E005",
-                    }
-                    _recovered = True
-                    logger.info(f"E005 kurtarma başarılı (siparis_no={siparis_no}): barkod={res['barkod']}")
+                if _rec.get("ok"):
+                    _existing_barkod = (_rec.get("mng_siparis_no") or "").strip()
+                    _existing_gonderi = (_rec.get("gonderi_no") or "").strip()
                 else:
-                    logger.warning(f"E005 ama FaturaSiparisListesi kayıt döndürmedi (siparis_no={siparis_no}): {_rec}")
+                    logger.warning(f"E005 FaturaSiparisListesi başarısız (siparis_no={siparis_no}): {_rec.get('error')}")
             except Exception as _re:
-                logger.warning(f"E005 kurtarma denemesi başarısız (siparis_no={siparis_no}): {_re}")
+                logger.warning(f"E005 kurtarma sorgusu hata (siparis_no={siparis_no}): {_re}")
+            res = {
+                "ok": True,
+                "barkod": _existing_barkod or siparis_no,   # gerçek MNG no varsa o; yoksa sipariş no (etiket için yeterli)
+                "gonderi_no": _existing_gonderi,
+                "raw": "recovered_from_E005",
+            }
+            _recovered = True
+            logger.info(f"E005 kurtarma (siparis_no={siparis_no}): barkod={res['barkod']}, gonderi={_existing_gonderi or '(sonra dolacak)'}")
 
         if not _recovered:
             # MNG hatasını cargo_logs'a yaz
