@@ -1579,6 +1579,78 @@ async def bulk_update_vat(
     result = await db.products.update_many({}, {"$set": {"vat_rate": vat_rate}})
     return {"message": f"{result.modified_count} ürünün KDV oranı %{vat_rate} olarak güncellendi."}
 
+
+@router.post("/bulk/add-to-category-after")
+async def bulk_add_to_category_after(
+    after_card_id: int = Query(..., description="Bu Ürün Kart ID'den BÜYÜK sayısal kartlı ürünler kategoriye eklenir"),
+    category_slug: str = Query("en-yeniler", description="Hedef kategori slug'ı (varsayılan: en-yeniler)"),
+    set_is_new: bool = Query(True, description="Eşleşen ürünlerde is_new=True yapılsın mı"),
+    dry_run: bool = Query(True, description="True → sadece önizleme (YAZMAZ). False → uygular."),
+    current_user: dict = Depends(require_admin),
+):
+    """urun_karti_id (sayısal) > after_card_id olan TÜM ürünleri verilen kategoriye ekler.
+
+    - Üyelik çoklu kategori dizilerine (category_ids + categories) addToSet ile yazılır;
+      ürünün mevcut/ana kategorisini BOZMAZ (category_id/category_name'e dokunulmaz).
+    - İdempotent: tekrar çalıştırmak güvenli (zaten ekliyse değişmez).
+    - dry_run=True (VARSAYILAN) → yalnız eşleşen sayıyı + örnek döner, hiçbir şey yazmaz.
+      Önce dry-run ile sayıyı gör, doğruysa dry_run=false ile uygula.
+    """
+    target_slug = (category_slug or "").strip().lower()
+    cat_id = None
+    cat_name = None
+    async for c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1}):
+        sl = (c.get("slug") or "").strip().lower()
+        nm = (c.get("name") or "").strip()
+        if sl == target_slug or generate_slug(nm) == target_slug:
+            cat_id = c.get("id")
+            cat_name = nm
+            break
+    if not cat_id:
+        raise HTTPException(status_code=404, detail=f"'{category_slug}' kategorisi bulunamadı.")
+
+    cat_ids_all = await _expand_category_ids([cat_id])  # ataları dahil (En Yeniler kökse sadece kendisi)
+
+    matched = 0
+    updated = 0
+    sample = []
+    cursor = db.products.find(
+        {"urun_karti_id": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "urun_karti_id": 1, "name": 1},
+    )
+    async for p in cursor:
+        v = str(p.get("urun_karti_id") or "").strip()
+        if not v.isdigit() or int(v) <= after_card_id:
+            continue
+        matched += 1
+        if len(sample) < 15:
+            sample.append({"urun_karti_id": v, "name": (p.get("name") or "")[:40]})
+        if not dry_run:
+            ops = {
+                "$addToSet": {"category_ids": {"$each": cat_ids_all}, "categories": cat_id},
+                "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+            }
+            if set_is_new:
+                ops["$set"]["is_new"] = True
+            await db.products.update_one({"id": p["id"]}, ops)
+            updated += 1
+
+    return {
+        "category": {"id": cat_id, "name": cat_name, "expanded_ids": cat_ids_all},
+        "after_card_id": after_card_id,
+        "matched": matched,
+        "updated": (0 if dry_run else updated),
+        "dry_run": dry_run,
+        "sample": sample,
+        "message": (
+            f"DRY-RUN: Kart ID > {after_card_id} olan {matched} ürün '{cat_name}' kategorisine eklenecek (henüz YAZILMADI). "
+            f"Uygulamak için aynı isteği dry_run=false ile çağırın."
+            if dry_run else
+            f"{updated} ürün '{cat_name}' kategorisine eklendi (Kart ID > {after_card_id})."
+        ),
+    }
+
+
 @router.get("/export/excel")
 async def export_products_excel(current_user: dict = Depends(require_admin)):
     """Export all products to an Excel file (variants as rows with dynamic attributes)"""
