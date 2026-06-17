@@ -729,6 +729,27 @@ async def update_order_status(
         _set["return_approved_at"] = _now
     if status in ("refunded", "partial_refunded"):
         _set["refund_paid_at"] = _now
+
+    # "Sipariş Onaylandı" (confirmed) → havale/EFT siparişinde ödeme bildirimini de
+    # OTOMATİK onayla: payment_status=paid. Sipariş içine girmeden listeden onaylayınca
+    # içerideki ödeme onayı tetiklenir, fatura/kargo kilidi açılır. Kapıda ödeme HARİÇ
+    # (teslimde ödenir), kredi kartı zaten 'paid' olduğundan etkilenmez.
+    _confirm_paid = False
+    _od_pre = None
+    if status == "confirmed":
+        _od_pre = await db.orders.find_one(
+            {"id": order_id},
+            {"_id": 0, "payment_method": 1, "payment_status": 1, "order_number": 1},
+        )
+        if _od_pre:
+            _pm = (_od_pre.get("payment_method") or "").lower()
+            if _pm in _HAVALE_PMS and _od_pre.get("payment_status") != "paid":
+                _set["payment_status"] = "paid"
+                _set["paid_at"] = _now
+                _set["paid_by"] = current_user.get("email", "")
+                _set["payment_approved_via"] = "status_confirm"
+                _confirm_paid = True
+
     result = await db.orders.update_one(
         {"id": order_id},
         {"$set": _set}
@@ -738,6 +759,13 @@ async def update_order_status(
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
     await _log_order_event(order_id, "status", f"Durum güncellendi: {status}", current_user, {"status": status})
+    if _confirm_paid:
+        await _log_order_event(
+            order_id, "payment",
+            "Ödeme onaylandı (sipariş onayı ile otomatik · havale/EFT)",
+            current_user, {"payment_status": "paid", "via": "status_confirm"},
+            order_number=(_od_pre or {}).get("order_number", ""),
+        )
 
     # ---- FATURA İPTALİ (Doğan e-Arşiv) ----------------------------------------
     # Sipariş iptal edildiyse ve Doğan'dan e-Arşiv fatura kesilmişse, faturayı da
