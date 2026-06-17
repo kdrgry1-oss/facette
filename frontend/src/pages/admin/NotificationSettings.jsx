@@ -206,7 +206,7 @@ export default function NotificationSettings() {
           <button onClick={handleTest} disabled={testing}
             className="bg-blue-600 text-white px-4 py-2 rounded text-sm disabled:opacity-60"
             data-testid="test-send-btn">
-            {testing ? "Gönderiliyor..." : "Test Gönder"}
+            {testing ? "Gönderiliyor..." : `Test ${testChannel === "email" ? "E-posta" : testChannel === "whatsapp" ? "WhatsApp" : "SMS"} Gönder`}
           </button>
         </div>
         <textarea value={testMsg} onChange={(e) => setTestMsg(e.target.value)}

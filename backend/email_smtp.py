@@ -35,11 +35,22 @@ def _auth_header(token: str) -> str:
 
 
 async def send_smtp_email(db, to: str, subject: str, html: str,
-                          from_name=None, reply_to=None, text=None) -> dict:
-    """Tek aliciya ZeptoMail API ile mail. Doner: {success, response}."""
+                          from_name=None, reply_to=None, text=None, wrap=True) -> dict:
+    """Tek aliciya ZeptoMail API ile mail. Doner: {success, response}.
+    wrap=True (varsayilan): HTML markali FACETTE kabuguna (logo + sosyal footer) sarilir.
+    Zaten markaliysa tekrar sarilmaz (idempotent). Boylece sistemden cikan TUM mailler
+    -- uyelik, sifre, s3 durum bildirimi, toplu, test -- istisnasiz ayni tasarimda gider.
+    Markasiz gitmesi gereken ozel durumlar icin wrap=False gecilebilir."""
     cfg = await get_smtp_config(db)
     if not is_configured(cfg):
         return {"success": False, "response": "email_not_configured"}
+
+    if wrap:
+        try:
+            from email_layout import render_email
+            html = render_email(subject, html or "")
+        except Exception:
+            pass  # sarma basarisiz olursa ham HTML ile devam (mail asla bloklanmaz)
 
     sender = cfg.get("username")
     name = from_name or cfg.get("from_name") or "FACETTE"

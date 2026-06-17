@@ -71,12 +71,47 @@ async def register(
     try:
         import os as _os
         from notification_service import send_notification
+
+        # Aktif "hoş geldin" kuponu (ilk siparişe özel) — DİNAMİK, son oluşturulan baz alınır.
+        coupon_code, coupon_discount, coupon_block = "", "", ""
+        try:
+            _c = await db.coupons.find_one(
+                {"is_active": True, "first_order_only": True},
+                {"_id": 0}, sort=[("created_at", -1)],
+            )
+            if _c and (_c.get("code") or "").strip():
+                coupon_code = _c["code"].strip()
+                _v = float(_c.get("value") or 0)
+                if (_c.get("type") or "percent") == "percent":
+                    coupon_discount = f"%{int(_v)}" if _v == int(_v) else f"%{_v:g}"
+                else:
+                    coupon_discount = f"{int(_v)} TL" if _v == int(_v) else f"{_v:g} TL"
+                coupon_block = (
+                    '<div style="margin:20px 0 2px;border:1px dashed #c9c4bb;background:#faf8f5;'
+                    'padding:24px 18px;text-align:center;">'
+                    '<div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;'
+                    'color:#8a8579;margin:0 0 8px;">Hoş Geldin Hediyen</div>'
+                    f'<div style="font-size:15px;color:#3a3631;margin:0 0 14px;">İlk siparişinde '
+                    f'<b>{coupon_discount} indirim</b></div>'
+                    '<div style="display:inline-block;border:1px solid #1a1a1a;padding:13px 30px;'
+                    'font-size:22px;font-weight:700;letter-spacing:5px;color:#1a1a1a;">'
+                    f'{coupon_code}</div>'
+                    '<div style="font-size:11px;color:#a39e95;margin:12px 0 0;">'
+                    'Kodu sepette uygula · ilk siparişe özel</div>'
+                    '</div>'
+                )
+        except Exception as _ce:
+            logger.warning(f"welcome coupon lookup failed: {_ce}")
+
         await send_notification(
             db, "welcome",
             to_email=email,
             variables={
                 "customer_name": (user.get("first_name") or "").strip() or "değerli müşterimiz",
                 "site_url": _os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/"),
+                "coupon_code": coupon_code,
+                "coupon_discount": coupon_discount,
+                "coupon_block": coupon_block,  # her zaman geçilir (boşsa "") → {coupon_block} literal kalmaz
             },
             channels=["email"],
         )

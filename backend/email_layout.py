@@ -70,6 +70,8 @@ def email_shell(*, eyebrow="", title="", intro_html="", icon="",
     bölümler atlanır. İçerik argümanları {placeholder} içerebilir — korunur."""
     yr = str(year or datetime.now(timezone.utc).year)
     P = []
+    # Sentinel — render_email zaten markalı maili tekrar sarmasın diye.
+    P.append("<!--fct-shell-->")
 
     if preheader:
         P.append('<div style="display:none;max-height:0;overflow:hidden;opacity:0;'
@@ -177,3 +179,16 @@ def info_row(label: str, value_html: str) -> str:
         '<div style="font-size:16px;color:' + _INK + ';font-weight:600;">' + value_html + '</div>'
         '</td></tr></table>'
     )
+
+
+def render_email(subject: str = "", inner_html: str = "") -> str:
+    """Herhangi bir e-posta HTML'ini markalı kabuğa sarar (logo + içerik + sosyal footer).
+    Zaten markalıysa (email_shell ile üretilmiş) olduğu gibi döner — idempotent.
+    Bu sayede send_smtp_email üzerinden giden TÜM mailler istisnasız markalı olur."""
+    html = inner_html or ""
+    low = html.lower()
+    if ("<!--fct-shell-->" in low) or (LOGO_URL.lower() in low):
+        return html  # zaten markalı
+    # Konudan temiz bir başlık türet ("... — 913BS" / "... — FACETTE" kuyruğunu at)
+    title = (subject or "").split(" — ")[0].strip()
+    return email_shell(title=title, intro_html=html, preheader=(subject or "").strip())

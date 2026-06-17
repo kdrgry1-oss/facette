@@ -355,6 +355,7 @@ _EMAIL_HTML_TEMPLATES = {
         "body": email_shell(
             icon="✓", eyebrow="HOŞ GELDİN", title="Aramıza hoş geldin",
             intro_html="Merhaba {customer_name}, FACETTE ailesine katıldığın için teşekkür ederiz. Yeni sezon parçalarını ve sana özel fırsatları keşfetmeye hemen başlayabilirsin.",
+            body_html="{coupon_block}",
             cta_text="ALIŞVERİŞE BAŞLA", cta_url="{site_url}",
         ),
     },

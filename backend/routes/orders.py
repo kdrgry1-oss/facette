@@ -2642,54 +2642,86 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
 
 @router.post("/cargo/backfill-tracking")
 async def backfill_cargo_tracking(
-    since: str = "2026-06-06",
+    since: str = "",
     force: bool = False,
+    all_statuses: bool = False,
     current_user: dict = Depends(require_admin),
 ):
-    """6 Haziran (vb.) sonrası kargoya verilmiş siparişlerin MNG/DHL takip
-    numaralarını toplu çeker ve siparişlere işler.
+    """Kargoya verilmiş siparişlerin MNG (DHL eCommerce) takip numaralarını TOPLU çeker.
 
-    - get_mng_shipment_status (SALT OKUMA) kullanır → yeni kargo OLUŞTURMAZ.
-    - Bildirim göndermez (db.orders doğrudan güncellenir).
-    - force=False → yalnızca cargo_tracking_number'ı eksik olanlar.
-    - force=True  → mevcut no'ları da MNG'den yeniden çeker.
+    - since boş → TÜM ZAMANLAR (tarih sınırı yok). Tarih verilirse (YYYY-MM-DD) o tarihten sonrası.
+    - force=False → yalnız takip no'su EKSİK olanları sorgular (verimli); force=True → hepsini yeniden.
+    - all_statuses=True → durum filtresi uygulamaz (varsayılan: yalnız kargo durumundaki siparişler).
+    - get_mng_shipment_status (SALT OKUMA) → yeni kargo OLUŞTURMAZ, bildirim göndermez.
+    - MNG sorgusu thread'de (event loop bloklanmaz); sıralı → MNG'yi hammer'lamaz.
+
+    ÖNEMLİ: Gerçek takip no'yu MNG 'FaturaSiparisListesi' üretir — MNG kargoyu okutunca dolar
+    ve bu sorgu MNG tarafında IP whitelist ister. DHL'in bir 'günlük sorgu limiti' YOKTUR.
+    Dönüşteki 'diagnosis' her siparişin GERÇEK nedenini sayar (atanmadı / yetki / hata).
     """
-    import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    import asyncio
     from mng_kargo_client import get_mng_shipment_status
 
     settings = await _get_mng_settings()
-    SHIPPED_STATUSES = [
-        "shipped", "in_transit", "out_for_delivery", "delivered",
-        "return_requested", "return_approved", "return_in_transit",
-        "returned", "undelivered",
-    ]
+    q = {}
+    if since:
+        q["created_at"] = {"$gte": since}
+    if not all_statuses:
+        q["status"] = {"$in": [
+            "shipped", "in_transit", "out_for_delivery", "delivered",
+            "return_requested", "return_approved", "return_in_transit",
+            "returned", "undelivered",
+        ]}
     cur = db.orders.find(
-        {"created_at": {"$gte": since}, "status": {"$in": SHIPPED_STATUSES}},
+        q,
         {"_id": 0, "id": 1, "order_number": 1, "cargo_tracking_number": 1, "cargo": 1, "status": 1},
-    )
-    orders = await cur.to_list(length=5000)
+    ).sort("created_at", -1)
+    orders = await cur.to_list(length=20000)
 
     updated, skipped, failed = [], [], []
+    # Gerçek neden sayaçları — kullanıcı "limit mi?" diye soruyor; net görünsün.
+    diagnosis = {
+        "guncellendi": 0,
+        "zaten_takip_no_vardi": 0,
+        "mngde_kayit_var_takip_no_yok": 0,  # MNG kaydı oluşmuş, GONDERI_NO atanmamış (kargo henüz okutulmadı)
+        "mngde_kayit_yok_veya_yetki": 0,    # hiç satır dönmedi → bulunamadı VEYA IP whitelist/yetki eksik
+        "sorgu_hatasi": 0,                  # exception / SOAP hatası
+    }
+    site_taranan = 0
     for o in orders:
+        on = str(o.get("order_number") or "")
+        if on and on[:2] not in ("TY", "HB"):
+            site_taranan += 1
         existing = o.get("cargo_tracking_number") or (o.get("cargo") or {}).get("tracking_number")
         if existing and not force:
-            skipped.append(o.get("order_number"))
+            skipped.append(on)
+            diagnosis["zaten_takip_no_vardi"] += 1
             continue
-        siparis_no = str(o.get("order_number") or o.get("id"))
+        siparis_no = on or str(o.get("id"))
         try:
-            info = get_mng_shipment_status(
-                username=settings["username"], password=settings["password"], siparis_no=siparis_no
+            info = await asyncio.to_thread(
+                get_mng_shipment_status,
+                username=settings["username"], password=settings["password"], siparis_no=siparis_no,
             )
         except Exception as e:
-            failed.append({"no": siparis_no, "err": str(e)[:100]})
+            failed.append({"no": siparis_no, "reason": "sorgu_hatasi", "err": str(e)[:160]})
+            diagnosis["sorgu_hatasi"] += 1
             continue
         if not info.get("ok"):
-            failed.append({"no": siparis_no, "err": info.get("error") or "MNG durumu alınamadı"})
+            failed.append({"no": siparis_no, "reason": "sorgu_hatasi", "err": (info.get("error") or "")[:160]})
+            diagnosis["sorgu_hatasi"] += 1
             continue
-        gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; barkoda (mng_siparis_no) düşme
+        gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; barkoda düşme
         if not gonderi:
-            failed.append({"no": siparis_no, "err": "gonderi_no boş (kargo firması henüz takip no üretmedi)"})
+            has_record = bool((info.get("mng_siparis_no") or "").strip())
+            reason = "mngde_kayit_var_takip_no_yok" if has_record else "mngde_kayit_yok_veya_yetki"
+            diagnosis[reason] += 1
+            failed.append({
+                "no": siparis_no, "reason": reason,
+                "kargo_statu": info.get("kargo_statu"),
+                "kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
+                "mng_siparis_no": info.get("mng_siparis_no"),
+            })
             continue
         await db.orders.update_one(
             {"id": o["id"]},
@@ -2705,11 +2737,18 @@ async def backfill_cargo_tracking(
             }},
         )
         updated.append({"no": siparis_no, "gonderi_no": gonderi})
+        diagnosis["guncellendi"] += 1
 
     return {
-        "since": since, "force": force, "scanned": len(orders),
+        "since": since or "(tüm zamanlar)", "force": force, "all_statuses": all_statuses,
+        "scanned": len(orders), "site_taranan": site_taranan,
         "updated": len(updated), "skipped": len(skipped), "failed": len(failed),
-        "updatedList": updated[:100], "failedList": failed[:30],
+        "diagnosis": diagnosis,
+        "aciklama": ("DHL'in günlük sorgu limiti YOKTUR. Takip no MNG 'FaturaSiparisListesi'nden gelir; "
+                     "MNG kargoyu okutunca dolar (IP whitelist gerektirir). "
+                     "'mngde_kayit_var_takip_no_yok' = MNG kaydı oluşmuş ama numara henüz atanmamış. "
+                     "'mngde_kayit_yok_veya_yetki' = MNG'den satır dönmedi (bulunamadı VEYA whitelist/yetki eksik)."),
+        "updatedList": updated[:200], "failedList": failed[:80],
     }
 
 
