@@ -2727,6 +2727,18 @@ async def mng_connection_test(current_user: dict = Depends(require_admin)):
     return out
 
 
+@router.get("/cargo/logs")
+async def get_cargo_logs_diag(limit: int = 10, current_user: dict = Depends(require_admin)):
+    """TEŞHİS: Son kargo işlem logları (create_shipment hataları/exception'ları dahil).
+    create-mng-shipment 503/502 verdiğinde gerçek MNG hatası buraya yazılır."""
+    try:
+        logs = await db.cargo_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(
+            length=min(int(limit or 10), 50))
+        return {"ok": True, "count": len(logs), "logs": logs}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
 @router.post("/bulk/cargo-barcode")
 async def bulk_create_cargo_barcode(
     order_ids: List[str],
