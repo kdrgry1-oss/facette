@@ -172,6 +172,20 @@ _DEFAULT_TEMPLATES = {
         "Kargonuz teslim edilemedi, subede bekliyor. Takip: {tracking_number}. Facette",
     ("order_cancelled", "sms"):
         "{order_number} numarali siparisiniz iptal edildi. Bilgi: destek@facette.com",
+    ("order_awaiting_payment", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisiniz alindi. Havale/EFT odemenizi bekliyoruz; detaylar e-postanizda. Facette",
+    ("order_payment_notified", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisiniz icin odeme bildiriminiz alindi, kontrol ediliyor. Facette",
+    ("order_return_requested", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisiniz icin iade talebiniz olusturuldu. Iade kodu: {return_code}. Facette",
+    ("order_return_approved", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisinize ait iadeniz onaylandi. Iade bedeli: {refund_amount} TL. Facette",
+    ("order_return_rejected", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali iade talebiniz degerlendirildi. Detaylar e-postanizda. Facette",
+    ("order_refunded", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisiniz icin iade bedeli {refund_amount} TL hesabiniza iade edildi. Facette",
+    ("order_partial_refunded", "sms"):
+        "Merhaba {customer_name}, {order_number} numarali siparisiniz icin {refund_amount} TL kismi iade yapildi. Facette",
     ("password_reset_otp", "sms"):
         "Facette dogrulama kodunuz: {otp_code} (5 dk gecerli).",
     ("abandoned_cart", "sms"):
