@@ -40,6 +40,7 @@ from routes import (
     settings_router,
 )
 from routes.vendors import router as vendors_router
+from routes.pages import router as pages_router
 from routes.admin_rbac import router as admin_rbac_router
 from routes.seo import router as seo_router
 from routes.size_tables import router as size_tables_router, public_router as size_tables_public_router
@@ -531,6 +532,7 @@ api_router.include_router(orders_router)
 api_router.include_router(categories_router)
 api_router.include_router(banners_router)
 api_router.include_router(cms_router)
+api_router.include_router(pages_router)
 # Iyzico endpoint'leri — integrations_router'ın catch-all /{marketplace} rotasından ÖNCE include edilmeli
 from routes.integrations_iyzico import router as iyzico_router
 from routes.integrations_dogan import router as dogan_router
