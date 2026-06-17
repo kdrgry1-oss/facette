@@ -34,6 +34,7 @@ export default function NotificationTemplates() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // "event|channel"
   const [testTo, setTestTo] = useState("");
+  const [testOrderNo, setTestOrderNo] = useState("");
   const [testEvent, setTestEvent] = useState("order_shipped");
   const [testSending, setTestSending] = useState(null);
   const [testResult, setTestResult] = useState(null);
@@ -97,6 +98,7 @@ export default function NotificationTemplates() {
         event: testEvent,
         channel,
         to: testTo.trim(),
+        order_number: testOrderNo.trim(),
       }, auth);
       const ok = r.data?.success !== false;
       setTestResult({ channel, ok, data: r.data });
@@ -179,12 +181,12 @@ export default function NotificationTemplates() {
           <h2 className="font-semibold">Test Gönderimi</h2>
         </div>
         <p className="text-xs text-gray-500">
-          Bir sipariş durumu seçin, telefon/e-posta girin: o durumun <b>gerçek şablonu</b>, en son
-          kargoya verilen siparişin <b>gerçek verisiyle</b> (isim, sipariş no, takip no…) doldurulup
-          gönderilir — böylece her durumda bildirimin tam nasıl gideceğini görürsünüz.
-          SMS/WhatsApp için telefon, e-posta testi için e-posta girin.
+          Bir sipariş durumu seçin, <b>sipariş no</b> ve telefon/e-posta girin: o durumun <b>gerçek şablonu</b>,
+          girdiğiniz siparişin <b>gerçek verisiyle</b> (isim, sipariş no, takip no…) doldurulup gönderilir —
+          böylece her durumda bildirimin tam nasıl gideceğini görürsünüz. Sipariş no boş bırakılırsa
+          en son kargoya verilen sipariş baz alınır. SMS/WhatsApp için telefon, e-posta testi için e-posta girin.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <select value={testEvent} onChange={(e) => setTestEvent(e.target.value)}
             className="w-full border border-gray-200 rounded px-3 py-2 text-sm bg-white"
             data-testid="notif-test-event">
@@ -192,6 +194,10 @@ export default function NotificationTemplates() {
               <option key={ev.key} value={ev.key}>{ev.name}</option>
             ))}
           </select>
+          <input value={testOrderNo} onChange={(e) => setTestOrderNo(e.target.value)}
+            placeholder="Sipariş No (örn. 913BS3894E)"
+            className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
+            data-testid="notif-test-orderno" />
           <input value={testTo} onChange={(e) => setTestTo(e.target.value)}
             placeholder="Telefon (5XXXXXXXXX) veya e-posta"
             className="w-full border border-gray-200 rounded px-3 py-2 text-sm"

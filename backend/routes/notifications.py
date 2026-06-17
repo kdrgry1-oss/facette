@@ -63,6 +63,7 @@ class TestTemplateReq(BaseModel):
     event: str
     channel: str  # sms|whatsapp|email
     to: str
+    order_number: Optional[str] = None  # verilirse bu siparişi baz al; boşsa en son kargolanan
 
 
 @router.get("/providers/catalog")
@@ -343,16 +344,29 @@ async def send_test_template(req: TestTemplateReq, current_user: dict = Depends(
     siparişin gerçek verisiyle doldurup verilen numaraya/e-postaya gönderir.
     Böylece her durumda SMS/WhatsApp/E-posta'nın tam nasıl gideceği görülür.
     """
-    # En son kargoya verilen siparişi baz al (tüm değişkenler bu siparişte dolu)
-    order = await db.orders.find_one({"status": "shipped"}, {"_id": 0}, sort=[("shipped_at", -1)])
-    if not order:
-        order = await db.orders.find_one(
-            {"cargo_tracking_number": {"$nin": [None, ""]}}, {"_id": 0}, sort=[("updated_at", -1)]
-        )
-    if not order:
-        order = await db.orders.find_one({}, {"_id": 0}, sort=[("created_at", -1)])
-    if not order:
-        raise HTTPException(status_code=404, detail="Baz alınacak sipariş bulunamadı")
+    # Sipariş no verildiyse O siparişi baz al; verilmediyse en son kargoya verileni.
+    req_no = (req.order_number or "").strip()
+    if req_no:
+        order = await db.orders.find_one({"order_number": req_no}, {"_id": 0})
+        if not order:
+            # numara biçimi/harf farkını tolere et (tam eşleşme, büyük/küçük harf duyarsız)
+            import re as _re
+            order = await db.orders.find_one(
+                {"order_number": {"$regex": f"^{_re.escape(req_no)}$", "$options": "i"}}, {"_id": 0}
+            )
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Sipariş bulunamadı: {req_no}")
+    else:
+        # En son kargoya verilen siparişi baz al (tüm değişkenler bu siparişte dolu)
+        order = await db.orders.find_one({"status": "shipped"}, {"_id": 0}, sort=[("shipped_at", -1)])
+        if not order:
+            order = await db.orders.find_one(
+                {"cargo_tracking_number": {"$nin": [None, ""]}}, {"_id": 0}, sort=[("updated_at", -1)]
+            )
+        if not order:
+            order = await db.orders.find_one({}, {"_id": 0}, sort=[("created_at", -1)])
+        if not order:
+            raise HTTPException(status_code=404, detail="Baz alınacak sipariş bulunamadı")
 
     addr = order.get("shipping_address") or {}
     full_name = (
