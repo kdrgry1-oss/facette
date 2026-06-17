@@ -87,6 +87,142 @@ async def _enrich_items_with_products(items):
         return items
 
 
+async def _order_notify_vars(order: dict, **extra) -> dict:
+    """Bir sipariş dokümanından TÜM bildirim değişkenlerini (email + SMS şablonlarının
+    kullandığı her placeholder) tek elden üretir. Amaç: hiçbir ma/sms'te {order_date},
+    {items_html}, {subtotal}, {shipping_*}, {tracking_*} gibi alanlar BOŞ/ham kalmasın.
+    Her order-bildirim çağrısı bunu kullanır → değişken↔veri köprüsü her yerde aynı.
+    **extra ile event'e özel değerler (return_code, refund_amount, reason...) eklenir/üzerine yazılır.
+    """
+    import os as _os
+    ship = order.get("shipping_address") or {}
+    full_name = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                 or ship.get("full_name") or ship.get("name") or "Müşterimiz")
+
+    # Kalemler tablosu (items_html) — sipariş onay mailindeki ürün listesi
+    items_rows = ""
+    for it in (order.get("items") or []):
+        name = it.get("name") or it.get("product_name") or "Ürün"
+        qty = int(it.get("quantity") or 1)
+        price = float(it.get("price") or 0)
+        size = (it.get("size") or it.get("variant_size") or "")
+        color = (it.get("color") or it.get("variant_color") or "")
+        img = (it.get("image") or it.get("image_url") or it.get("thumbnail")
+               or (it.get("images") or [""])[0] if it.get("images") else
+               (it.get("image") or it.get("image_url") or it.get("thumbnail") or ""))
+        meta = " · ".join([x for x in [f"Beden: {size}" if size else "",
+                                       f"Renk: {color}" if color else "",
+                                       f"Adet: {qty}"] if x])
+        items_rows += (
+            f'<tr><td style="padding:12px 0;border-bottom:1px solid #f0f0f0;width:80px;">'
+            f'<img src="{img}" alt="" style="width:64px;height:80px;object-fit:cover;background:#fafafa;"/></td>'
+            f'<td style="padding:12px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#111;">{name}'
+            f'<div style="color:#999;font-size:11px;margin-top:4px;">{meta}</div></td>'
+            f'<td style="padding:12px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-size:13px;color:#111;white-space:nowrap;">{(price*qty):.2f} TL</td></tr>'
+        )
+    items_html = ('<div style="padding:0 24px 16px;"><table cellpadding="0" cellspacing="0" border="0" '
+                  f'style="width:100%;">{items_rows}</table></div>') if items_rows else ""
+
+    base_url = (_os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL")
+                or _os.environ.get("SITE_URL") or "https://facette.com.tr").rstrip("/")
+    onum = order.get("order_number") or order.get("id") or ""
+    order_link = f"{base_url}/order-success/{onum}" if base_url else "#"
+    order_date = str(order.get("created_at") or "")[:10]
+
+    subtotal = float(order.get("subtotal") or 0)
+    shipping_cost = float(order.get("shipping_cost") or 0)
+    discount = float(order.get("discount") or order.get("discount_amount") or 0)
+    total = float(order.get("total") or 0)
+
+    cargo = order.get("cargo") or {}
+    real_tn = (order.get("cargo_tracking_number") or cargo.get("tracking_number") or "")
+    track_link = (order.get("cargo_tracking_link") or cargo.get("tracking_link")
+                  or (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={real_tn}" if real_tn
+                      else "https://www.dhlecommerce.com.tr/gonderitakip"))
+    cargo_provider = (order.get("cargo_provider_name") or cargo.get("provider_name") or "MNG Kargo")
+
+    try:
+        from order_statuses import customer_label_for as _clf
+        status_label = _clf(order.get("status") or "")
+    except Exception:
+        status_label = ""
+
+    # Havale/EFT → banka bilgileri (ödeme bekleyen siparişlerde mailde gösterilir)
+    bank = {}
+    if (order.get("status") == "awaiting_payment"
+            or (order.get("payment_method") or "").lower() in
+            ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "havale/eft")):
+        try:
+            _pay = await db.settings.find_one({"id": "payment"}, {"_id": 0}) or {}
+            _banks = _pay.get("bank_accounts") or []
+            bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
+        except Exception:
+            bank = {}
+
+    v = {
+        "customer_name": full_name,
+        "first_name": ship.get("first_name", "") or (full_name.split(" ")[0] if full_name else ""),
+        "name": full_name,
+        "order_number": onum,
+        "order_date": order_date,
+        "amount": f"{total:.2f} TL",
+        "subtotal": f"{subtotal:.2f}",
+        "shipping_cost": f"{shipping_cost:.2f}",
+        "discount": f"{discount:.2f}",
+        "total": f"{total:.2f}",
+        "items_html": items_html,
+        "shipping_full_name": full_name,
+        "shipping_address": ship.get("address", ""),
+        "shipping_city": ship.get("city", ""),
+        "shipping_district": ship.get("district", ""),
+        "shipping_phone": ship.get("phone", ""),
+        "tracking_number": real_tn,
+        "tracking_link": track_link,
+        "tracking_url": track_link,
+        "cargo_provider": cargo_provider,
+        "cargo_company": cargo_provider,
+        "status_label": status_label,
+        "order_link": order_link,
+        "site_url": base_url,
+        "cart_url": f"{base_url}/sepet",
+        "bank_name": (bank or {}).get("bank_name", ""),
+        "bank_branch": (bank or {}).get("branch", ""),
+        "bank_iban": (bank or {}).get("iban", ""),
+        "bank_account_holder": (bank or {}).get("account_holder", ""),
+        "payment_url": (f"{base_url}/odeme-bildirimi/{onum}" if base_url else order_link),
+    }
+    if extra:
+        v.update({k: val for k, val in extra.items() if val is not None})
+    return v
+
+
+async def _product_vat_map(order: dict) -> dict:
+    """Sipariş kalemlerinin ürünlerinden product_id → vat_rate (KDV) haritası.
+    Fatura kesiminde, kalemde vat_rate yoksa ürünün KDV oranı kullanılır (DİNAMİK)."""
+    pids = list({it.get("product_id") for it in (order.get("items") or []) if it.get("product_id")})
+    m = {}
+    if pids:
+        try:
+            async for p in db.products.find({"id": {"$in": pids}}, {"_id": 0, "id": 1, "vat_rate": 1}):
+                if p.get("vat_rate") not in (None, ""):
+                    m[p["id"]] = float(p["vat_rate"])
+        except Exception:
+            pass
+    return m
+
+
+def _item_kdv(it: dict, vat_map: dict, default: float = 20.0) -> float:
+    """Kalem KDV oranı: önce kalemin vat_rate/kdv_rate'i, sonra ürünün vat_rate'i, en son default.
+    Eskiden sabit 10.0'a düşüyordu; artık ürün içindeki gerçek KDV alanına köprüleniyor."""
+    for cand in (it.get("vat_rate"), it.get("kdv_rate"), vat_map.get(it.get("product_id"))):
+        if cand not in (None, ""):
+            try:
+                return float(cand)
+            except Exception:
+                pass
+    return float(default)
+
+
 def generate_order_number() -> str:
     import secrets
     return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
@@ -619,29 +755,7 @@ async def create_order(
                 _banks = _pay.get("bank_accounts") or []
                 _hv_bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
 
-            variables = {
-                "customer_name": full_name,
-                "first_name": ship.get("first_name", "") or full_name.split(" ")[0],
-                "order_number": order["order_number"],
-                "order_date": order_date,
-                "amount": f"{order['total']:.2f} TL",
-                "subtotal": f"{order['subtotal']:.2f}",
-                "shipping_cost": f"{order['shipping_cost']:.2f}",
-                "discount": f"{order['discount']:.2f}",
-                "total": f"{order['total']:.2f}",
-                "items_html": items_html,
-                "shipping_full_name": full_name,
-                "shipping_address": ship.get("address", ""),
-                "shipping_city": ship.get("city", ""),
-                "shipping_district": ship.get("district", ""),
-                "shipping_phone": ship.get("phone", ""),
-                "order_link": order_link,
-                "bank_name": (_hv_bank or {}).get("bank_name", ""),
-                "bank_branch": (_hv_bank or {}).get("branch", ""),
-                "bank_iban": (_hv_bank or {}).get("iban", ""),
-                "bank_account_holder": (_hv_bank or {}).get("account_holder", ""),
-                "payment_url": (f"{base_url}/odeme-bildirimi/{order['order_number']}" if base_url else order_link),
-            }
+            variables = await _order_notify_vars(order)
             if order.get("status") == "awaiting_payment":
                 from order_statuses import get_status_config
                 _cfg = await get_status_config(db)
@@ -852,22 +966,7 @@ async def update_order_status(
             _track_link = (order_doc.get("cargo_tracking_link")
                            or order_doc.get("cargo_tracking_url")
                            or order_doc.get("tracking_url") or "")
-            variables = {
-                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                "order_number": order_doc.get("order_number", ""),
-                "amount": f"{order_doc.get('total', 0):.2f} TL",
-                "tracking_number": order_doc.get("cargo_tracking_number", "") or order_doc.get("tracking_number", ""),
-                "tracking_link": _track_link,
-                "tracking_url": _track_link,
-                "cargo_provider": order_doc.get("cargo_provider_name") or order_doc.get("cargo_provider") or "",
-                "order_link": (f"{_base}/hesabim/siparisler" if _base else ""),
-                "status_label": customer_label_for_cfg(status, _cfg),
-                "bank_name": (_bank or {}).get("bank_name", ""),
-                "bank_branch": (_bank or {}).get("branch", ""),
-                "bank_iban": (_bank or {}).get("iban", ""),
-                "bank_account_holder": (_bank or {}).get("account_holder", ""),
-                "payment_url": (f"{_base}/odeme-bildirimi/{order_doc.get('order_number','')}" if _base else ""),
-            }
+            variables = await _order_notify_vars(order_doc, status_label=customer_label_for_cfg(status, _cfg))
             await send_notification(
                 db, ev,
                 to_phone=addr.get("phone") or order_doc.get("phone"),
@@ -1019,13 +1118,7 @@ async def mark_order_paid(
                     db, "order_confirmed",
                     to_phone=addr.get("phone") or order_doc.get("phone"),
                     to_email=addr.get("email") or order_doc.get("email"),
-                    variables={
-                        "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                        "order_number": order_doc.get("order_number", ""),
-                        "amount": f"{order_doc.get('total', 0):.2f} TL",
-                        "status_label": customer_label_for("confirmed"),
-                        "order_link": (f"{_base}/order-success/{order_doc.get('order_number','')}" if _base else "#"),
-                    },
+                    variables=await _order_notify_vars(order_doc, status_label=customer_label_for("confirmed")),
                     channels=ch,
                 )
             except Exception as e:
@@ -1366,12 +1459,7 @@ async def ship_order(
                 db, "order_shipped",
                 to_phone=addr.get("phone") or existing.get("phone"),
                 to_email=addr.get("email") or existing.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": existing.get("order_number", ""),
-                    "tracking_number": tracking_number.strip(),
-                    "cargo_company": cargo_company,
-                },
+                variables=await _order_notify_vars(existing, tracking_number=tracking_number.strip(), cargo_company=cargo_company, cargo_provider=cargo_company),
             )
         except Exception as _e:
             logger.warning(f"order_shipped notification failed: {_e}")
@@ -1419,13 +1507,7 @@ async def mark_order_undelivered(
                 db, "order_undelivered",
                 to_phone=addr.get("phone") or existing.get("phone"),
                 to_email=addr.get("email") or existing.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": existing.get("order_number", ""),
-                    "tracking_number": existing.get("cargo_tracking_number", ""),
-                    "reason": reason,
-                    "branch_info": branch_info,
-                },
+                variables=await _order_notify_vars(existing, reason=reason, branch_info=branch_info),
             )
         except Exception as _e:
             logger.warning(f"order_undelivered notification failed: {_e}")
@@ -1584,7 +1666,9 @@ async def create_invoice_for_order(
                     is_test=dogan_settings.get("is_test", True),
                 )
                 chk = await _rtp(_tmp.check_user, customer_vkn_raw)
-                if chk.get("is_efatura") and len(customer_vkn_raw) == 10:
+                # Mükellef ise e-Fatura'ya yükselt — VKN (10) VEYA e-Fatura mükellefi
+                # TCKN'li şahıs firması (11). Builder TCKN/VKN şemasını otomatik kurar.
+                if chk.get("is_efatura"):
                     invoice_type = "e-fatura"
                     receiver_alias = chk.get("invoice_alias") or ""
                 else:
@@ -1702,6 +1786,7 @@ async def create_invoice_for_order(
                     return _v["barcode"]
             return _p.get("barcode") or ""
 
+        _vat_map = await _product_vat_map(order)
         line_items = []
         for it in (order.get("items") or []):
             _bc = _item_barcode(it)
@@ -1709,7 +1794,7 @@ async def create_invoice_for_order(
                 "name": it.get("product_name") or it.get("name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
-                "kdv_rate": float(it.get("kdv_rate") or 10.0),
+                "kdv_rate": _item_kdv(it, _vat_map),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": _bc,
                 # Doğan şablonu Barkod/Renk/Beden sütunlarını satır notundan parse eder:
@@ -1918,13 +2003,14 @@ async def create_invoice_for_order(
                 detail=f"Müşteri ({customer_vkn}) e-Fatura mükellefi değil veya alias bulunamadı."
             )
 
+        _vat_map = await _product_vat_map(order)
         line_items = []
         for it in (order.get("items") or []):
             line_items.append({
                 "name": it.get("product_name") or it.get("name") or "Ürün",
                 "qty": int(it.get("quantity") or 1),
                 "unit_price": float(it.get("price") or 0),
-                "kdv_rate": float(it.get("kdv_rate") or 10.0),
+                "kdv_rate": _item_kdv(it, _vat_map),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "buyer_sku": it.get("sku") or it.get("product_code") or "",
                 "barcode": it.get("barcode") or "",
@@ -2545,16 +2631,7 @@ async def create_cargo_barcode(
             event="order_shipped",
             to_phone=ship_addr.get("phone") or order.get("customer_phone"),
             to_email=ship_addr.get("email") or order.get("customer_email") or order.get("user_email"),
-            variables={
-                "customer_name": full_name or "Müşterimiz",   # sablon {customer_name} icin
-                "name": full_name,
-                "first_name": ship_addr.get("first_name", ""),
-                "order_number": order.get("order_number") or order_id,
-                "tracking_number": _real_tn,
-                "tracking_link": track_link,
-                "cargo_provider": "MNG Kargo",
-                "total": float(order.get("total") or 0),
-            },
+            variables=await _order_notify_vars(order, order_number=order.get("order_number") or order_id, tracking_number=_real_tn, tracking_link=track_link, tracking_url=track_link, cargo_provider="MNG Kargo"),
         )
     except Exception as ne:
         logger.warning(f"Kargo bildirimi gönderilemedi (order={order_id}): {ne}")
@@ -3358,10 +3435,7 @@ async def submit_payment_notification(
                 db, "order_payment_notified",
                 to_phone=addr.get("phone") or order.get("phone"),
                 to_email=addr.get("email") or order.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": order_number,
-                },
+                variables=await _order_notify_vars(order, order_number=order_number),
                 channels=ch,
             )
         except Exception as e:
@@ -3495,13 +3569,7 @@ async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: 
             db, "order_return_requested",
             to_phone=addr.get("phone") or order.get("phone"),
             to_email=addr.get("email") or order.get("email"),
-            variables={
-                "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                "order_number": order.get("order_number", ""),
-                "return_code": code,
-                "valid_until": vu,
-                "return_barcode_img": barcode_img,
-            },
+            variables=await _order_notify_vars(order, return_code=code, valid_until=vu, return_barcode_img=barcode_img),
             channels=ch,
         )
     except Exception as e:
@@ -3819,12 +3887,7 @@ async def update_return_status(return_id: str, payload: dict, current_user: dict
                     db, event,
                     to_phone=addr.get("phone") or (o or {}).get("phone"),
                     to_email=addr.get("email") or (o or {}).get("email"),
-                    variables={
-                        "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                        "order_number": rec.get("order_number", ""),
-                        "return_code": rec.get("return_code", ""),
-                        "status_label": customer_label_for(order_status),
-                    },
+                    variables=await _order_notify_vars(o or {}, order_number=rec.get("order_number", ""), return_code=rec.get("return_code", ""), status_label=customer_label_for(order_status)),
                     channels=ch,
                 )
             except Exception as e:
@@ -4051,13 +4114,7 @@ async def approve_return(return_id: str, payload: dict,
                 db, "order_return_approved",
                 to_phone=addr.get("phone") or order.get("phone"),
                 to_email=addr.get("email") or order.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": rec.get("order_number", ""),
-                    "return_code": rec.get("return_code", ""),
-                    "refund_amount": f"{final_amount:.2f}",
-                    "status_label": customer_label_for("return_approved"),
-                },
+                variables=await _order_notify_vars(order, order_number=rec.get("order_number", ""), return_code=rec.get("return_code", ""), refund_amount=f"{final_amount:.2f}", status_label=customer_label_for("return_approved")),
                 channels=ch,
             )
         except Exception as e:
@@ -4220,14 +4277,7 @@ async def reject_return(return_id: str, payload: dict,
                 db, "order_return_rejected",
                 to_phone=addr.get("phone") or order.get("phone"),
                 to_email=addr.get("email") or order.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": rec.get("order_number", ""),
-                    "return_code": rec.get("return_code", ""),
-                    "reason": reason,
-                    "reship_code": reship_code,
-                    "status_label": customer_label_for("return_rejected"),
-                },
+                variables=await _order_notify_vars(order, order_number=rec.get("order_number", ""), return_code=rec.get("return_code", ""), reason=reason, reship_code=reship_code, status_label=customer_label_for("return_rejected")),
                 channels=ch,
             )
         except Exception as e:
@@ -4391,13 +4441,7 @@ async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(defau
                 db, "order_refunded",
                 to_phone=addr.get("phone") or order.get("phone"),
                 to_email=addr.get("email") or order.get("email"),
-                variables={
-                    "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
-                    "order_number": rec.get("order_number", ""),
-                    "return_code": rec.get("return_code", ""),
-                    "refund_amount": f"{(amount or 0):.2f}",
-                    "status_label": customer_label_for("refunded"),
-                },
+                variables=await _order_notify_vars(order, order_number=rec.get("order_number", ""), return_code=rec.get("return_code", ""), refund_amount=f"{(amount or 0):.2f}", status_label=customer_label_for("refunded")),
                 channels=ch,
             )
         except Exception as e:
