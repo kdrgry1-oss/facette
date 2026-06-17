@@ -1519,7 +1519,7 @@ async def sync_products_to_trendyol(
                 "description": clean_desc,
                 "currencyType": product.get("currency", "TRY"),
                 "listPrice": calculate_trendyol_price(float(product.get("price", 0)), product, config),
-                "salePrice": calculate_trendyol_price(float(product.get("sale_price") or product.get("price", 0)), product, config),
+                "salePrice": calculate_trendyol_price(float(product.get("price", 0)), product, config),
                 "vatRate": int(product.get("vat_rate", 20)),
                 "cargoCompanyId": 10, # Assuming 10 is MNG Kargo (Needs specific Cargo Provider ID)
                 "dimensionalWeight": float(product.get("cargo_weight", 1)),
@@ -2298,7 +2298,7 @@ async def _sync_inventory_to_trendyol(products: list):
         markup = float(_mult) if (_mult is not None and float(_mult) > 0) else default_markup
         factor = 1 + markup / 100.0
         base_price = float(product.get("price", 0) or 0) * factor
-        sale_price = float(product.get("sale_price") or product.get("price", 0) or 0) * factor
+        sale_price = float(product.get("price", 0) or 0) * factor  # Trendyol: indirimsiz satis fiyati
         variants = product.get("variants", [])
         if not variants:
             if product.get("barcode"):
@@ -6786,7 +6786,7 @@ async def update_trendyol_stock_price(
     variants = product.get("variants", [])
     trendyol_multiplier = float(config.get("default_markup", 0) or 0)
     base_price = product.get("price", 0)
-    sale_price = product.get("sale_price") or base_price
+    sale_price = base_price  # Trendyol: indirimsiz satis fiyati
     
     if trendyol_multiplier > 0:
         sale_price = sale_price * (1 + trendyol_multiplier / 100)
@@ -6879,7 +6879,7 @@ async def update_trendyol_category_stock_price(
     for product in products:
         trendyol_multiplier = float(config.get("default_markup", 0) or 0)
         base_price = product.get("price", 0)
-        sale_price = product.get("sale_price") or base_price
+        sale_price = base_price  # Trendyol: indirimsiz satis fiyati
         
         if trendyol_multiplier > 0:
             sale_price = sale_price * (1 + trendyol_multiplier / 100)
@@ -7259,7 +7259,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
         # Calculate prices
         base_price = product.get("price", 0)
         list_price = calculate_trendyol_price(base_price, product, config)
-        sale_price = calculate_trendyol_price(product.get("sale_price") or base_price, product, config)
+        sale_price = calculate_trendyol_price(base_price, product, config)  # Trendyol: indirimsiz satis fiyati
 
         # Build items
         items = []
