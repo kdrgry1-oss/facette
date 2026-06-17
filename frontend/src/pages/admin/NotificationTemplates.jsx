@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Save, RefreshCw, Mail, MessageSquare, Phone } from "lucide-react";
+import { Save, RefreshCw, Mail, MessageSquare, Phone, Send } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -33,6 +33,10 @@ export default function NotificationTemplates() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // "event|channel"
+  const [testTo, setTestTo] = useState("");
+  const [testMsg, setTestMsg] = useState("Facette test bildirimi ✓");
+  const [testSending, setTestSending] = useState(null);
+  const [testResult, setTestResult] = useState(null);
 
   const token = localStorage.getItem("token");
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -82,6 +86,26 @@ export default function NotificationTemplates() {
       toast.success(`${r.data.created} varsayılan şablon oluşturuldu`);
       await load();
     } catch (e) { toast.error("Seed hatası"); }
+  };
+
+  const sendTest = async (channel) => {
+    if (!testTo.trim()) { toast.error("Önce telefon numarası veya e-posta girin"); return; }
+    setTestSending(channel);
+    setTestResult(null);
+    try {
+      const r = await axios.post(`${API}/notifications/test`, {
+        channel,
+        to: testTo.trim(),
+        message: testMsg || "Facette test bildirimi ✓",
+      }, auth);
+      const ok = r.data?.success !== false;
+      setTestResult({ channel, ok, data: r.data });
+      if (ok) toast.success(`${CHANNEL_META[channel].label} test gönderildi`);
+      else toast.error(`${CHANNEL_META[channel].label}: ${r.data?.error || r.data?.detail || "gönderilemedi"}`);
+    } catch (e) {
+      setTestResult({ channel, ok: false, data: e?.response?.data || { error: e.message } });
+      toast.error("Hata: " + (e?.response?.data?.detail || e.message));
+    } finally { setTestSending(null); }
   };
 
   if (loading) return <div className="p-6 text-gray-500">Yükleniyor...</div>;
@@ -146,6 +170,50 @@ export default function NotificationTemplates() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ===== TEST GÖNDERİMİ ===== */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3" data-testid="notification-test-panel">
+        <div className="flex items-center gap-2">
+          <Send size={16} className="text-gray-700" />
+          <h2 className="font-semibold">Test Gönderimi</h2>
+        </div>
+        <p className="text-xs text-gray-500">
+          Bir telefon numarası (5XXXXXXXXX) veya e-posta girin; test bildirimini gönderip nasıl ulaştığını görün.
+          SMS ve WhatsApp için telefon, e-posta testi için e-posta adresi kullanın.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input value={testTo} onChange={(e) => setTestTo(e.target.value)}
+            placeholder="Telefon (5XXXXXXXXX) veya e-posta"
+            className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
+            data-testid="notif-test-to" />
+          <input value={testMsg} onChange={(e) => setTestMsg(e.target.value)}
+            placeholder="Test mesajı"
+            className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
+            data-testid="notif-test-msg" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {["sms", "whatsapp", "email"].map(ch => {
+            const meta = CHANNEL_META[ch];
+            const Ico = meta.icon;
+            return (
+              <button key={ch} onClick={() => sendTest(ch)} disabled={!!testSending}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm border border-gray-200 hover:bg-gray-50 disabled:opacity-60"
+                data-testid={`notif-test-${ch}`}>
+                <Ico size={14} className={meta.color} />
+                {testSending === ch ? "Gönderiliyor..." : `Test ${meta.label} Gönder`}
+              </button>
+            );
+          })}
+        </div>
+        {testResult && (
+          <div className={`text-xs rounded p-3 border ${testResult.ok ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"}`}
+            data-testid="notif-test-result">
+            <b>{CHANNEL_META[testResult.channel]?.label} sonucu:</b>{" "}
+            {testResult.ok ? "Başarılı ✓" : "Başarısız ✗"}
+            <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] opacity-80">{JSON.stringify(testResult.data, null, 2)}</pre>
+          </div>
+        )}
       </div>
     </div>
   );
