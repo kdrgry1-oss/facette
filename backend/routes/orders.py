@@ -2500,16 +2500,20 @@ async def create_cargo_barcode(
             f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip()
             or ship_addr.get("name") or ""
         )
+        # Gercek MNG/DHL gonderi no (siparis no DEGIL). E005 kurtarmasinda barkod=siparis_no
+        # oldugu icin SMS'te yanlislikla siparis no gozukuyordu; gercek no yoksa bos birak.
+        _real_tn = (nz_barkod or nz_gonderi_no or gonderi_no_status or "").strip()
         await send_notification(
             db,
             event="order_shipped",
             to_phone=ship_addr.get("phone") or order.get("customer_phone"),
             to_email=ship_addr.get("email") or order.get("customer_email") or order.get("user_email"),
             variables={
+                "customer_name": full_name or "Müşterimiz",   # sablon {customer_name} icin
                 "name": full_name,
                 "first_name": ship_addr.get("first_name", ""),
                 "order_number": order.get("order_number") or order_id,
-                "tracking_number": barkod,
+                "tracking_number": _real_tn,
                 "tracking_link": track_link,
                 "cargo_provider": "MNG Kargo",
                 "total": float(order.get("total") or 0),
