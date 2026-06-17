@@ -89,6 +89,15 @@ export default function NotificationTemplates() {
     } catch (e) { toast.error("Seed hatası"); }
   };
 
+  const seedForce = async () => {
+    if (!window.confirm("Tüm e-posta şablonları yeni FACETTE tasarımına (logo · içerik · INSTAGRAM·TIKTOK) güncellenecek. Manuel düzenlediğiniz şablonlara dokunulmaz. Devam edilsin mi?")) return;
+    try {
+      const r = await axios.post(`${API}/notifications/templates/seed?force=true`, {}, auth);
+      toast.success(`${r.data.updated || 0} şablon güncellendi · ${r.data.created || 0} yeni oluşturuldu`);
+      await load();
+    } catch (e) { toast.error("Güncelleme hatası: " + (e?.response?.data?.detail || e.message)); }
+  };
+
   const sendTest = async (channel) => {
     if (!testTo.trim()) { toast.error("Önce telefon numarası veya e-posta girin"); return; }
     setTestSending(channel);
@@ -119,9 +128,14 @@ export default function NotificationTemplates() {
           <h1 className="text-2xl font-semibold">Bildirim Şablonları</h1>
           <p className="text-sm text-gray-500 mt-1">Her event × kanal için metni özelleştirin.</p>
         </div>
-        <button onClick={seed} className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded text-sm">
-          <RefreshCw size={14} /> Default Şablonları Oluştur
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={seedForce} className="inline-flex items-center gap-2 bg-gray-900 text-white hover:bg-black px-3 py-2 rounded text-sm" data-testid="notif-seed-force">
+            <RefreshCw size={14} /> E-postaları Yeni Tasarıma Güncelle
+          </button>
+          <button onClick={seed} className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded text-sm">
+            <RefreshCw size={14} /> Default Şablonları Oluştur
+          </button>
+        </div>
       </div>
 
       <div className="text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded p-3">

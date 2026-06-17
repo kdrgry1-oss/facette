@@ -3391,24 +3391,34 @@ def _public_return(rec: dict) -> dict:
 
 
 async def _ensure_return_email_template():
-    """İade e-posta şablonunun barkod görseli + kod + 3 gün geçerlilik içermesini garanti eder."""
-    body = (
-        "<p>Merhaba {customer_name},</p>"
-        "<p><b>{order_number}</b> numaralı siparişiniz için iade talebiniz oluşturuldu.</p>"
-        "<p>İade kargo kodunuz: <b>{return_code}</b></p>"
-        "<p>Bu kod <b>3 gün</b> geçerlidir (son geçerlilik: {valid_until}). Ürünü en yakın DHL / MNG şubesine "
-        "bu kodu veya aşağıdaki barkodu göstererek teslim edebilirsiniz.</p>"
-        "{return_barcode_img}"
+    """İade e-posta şablonunu markalı tasarım (logo · kod · barkod · footer) ile garanti eder."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from email_layout import email_shell, info_row
+    SENTINEL = "<!--facette-email-v2-->"
+    body = SENTINEL + email_shell(
+        icon="↩", eyebrow="İADE", title="İade talebin oluşturuldu",
+        intro_html=("Merhaba {customer_name}, {order_number} numaralı siparişin için iade talebin oluşturuldu. "
+                    "Ürünü en yakın DHL / MNG şubesine aşağıdaki kodu veya barkodu göstererek teslim edebilirsin."),
+        body_html=(info_row("İade Kargo Kodu", "{return_code}")
+                   + '<div style="text-align:center;margin-top:18px;">{return_barcode_img}</div>'),
+        note_title="Bu kod 3 gün geçerlidir.",
+        note_html="Son geçerlilik: {valid_until}",
+        preheader="İade kargo kodun: {return_code}",
     )
     try:
         tpl = await db.notification_templates.find_one(
             {"event": "order_return_requested", "channel": "email"}, {"_id": 0}
         )
-        if not tpl or "{return_barcode_img}" not in (tpl.get("body") or ""):
+        cur = (tpl or {}).get("body") or ""
+        # Eski tasarımı (veya barkodsuz/markasız olanı) yeni markalı tasarıma yükselt;
+        # admin manuel düzenlediyse dokunma.
+        needs_update = (not tpl) or (SENTINEL not in cur) or ("{return_barcode_img}" not in cur)
+        if needs_update and not (tpl or {}).get("manually_edited"):
             await db.notification_templates.update_one(
                 {"event": "order_return_requested", "channel": "email"},
                 {"$set": {"event": "order_return_requested", "channel": "email", "enabled": True,
-                          "subject": "İade Talebiniz Oluşturuldu — {order_number}", "body": body,
+                          "subject": "İade talebin oluşturuldu · {order_number}", "body": body,
                           "updated_at": datetime.now(timezone.utc).isoformat()}},
                 upsert=True,
             )

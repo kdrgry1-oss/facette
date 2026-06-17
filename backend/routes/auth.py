@@ -67,6 +67,21 @@ async def register(
 
     await db.users.insert_one(user)
     token = create_token(user["id"])
+    # Hoş geldin e-postası (best-effort; kaydı asla bloklamaz)
+    try:
+        import os as _os
+        from notification_service import send_notification
+        await send_notification(
+            db, "welcome",
+            to_email=email,
+            variables={
+                "customer_name": (user.get("first_name") or "").strip() or "değerli müşterimiz",
+                "site_url": _os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/"),
+            },
+            channels=["email"],
+        )
+    except Exception as _e:
+        logger.warning(f"welcome email failed for {email}: {_e}")
     await write_audit_log(
         "register", user_id=user["id"], email=email,
         ip=client_ip_from_request(request),
@@ -521,20 +536,21 @@ async def forgot_password_email(request: Request, req: EmailResetReq):
     site = _os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
     link = f"{site}/sifre-sifirla?token={reset_token}"
     name = (user.get("first_name") or "").strip()
-    html = (
-        '<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;color:#111">'
-        '<h2 style="margin:0 0 12px">Şifre Sıfırlama</h2>'
-        f'<p>Merhaba {name or "değerli müşterimiz"},</p>'
-        '<p>Hesabınızın şifresini sıfırlamak için aşağıdaki butona tıklayın. '
-        'Bağlantı <b>30 dakika</b> geçerlidir.</p>'
-        f'<p style="margin:24px 0"><a href="{link}" '
-        'style="display:inline-block;padding:12px 24px;background:#111;color:#fff;'
-        'text-decoration:none;border-radius:8px">Şifremi Sıfırla</a></p>'
-        f'<p style="font-size:12px;color:#888;word-break:break-all">Buton çalışmazsa bu bağlantıyı kopyalayın: {link}</p>'
-        '<p style="font-size:12px;color:#888">Bu isteği siz yapmadıysanız e-postayı yok sayabilirsiniz; şifreniz değişmez.</p>'
-        '<hr style="border:none;border-top:1px solid #eee;margin:20px 0">'
-        '<p style="font-size:12px;color:#aaa">FACETTE · facette.com.tr</p>'
-        '</div>'
+    from email_layout import email_shell
+    html = email_shell(
+        icon="🔒",
+        eyebrow="HESAP GÜVENLİĞİ",
+        title="Şifrenizi sıfırlayın",
+        intro_html=(
+            "Merhaba " + (name or "değerli müşterimiz") + ",<br>"
+            "Facette hesabınız için bir şifre sıfırlama talebi aldık. "
+            "Yeni bir şifre belirlemek için aşağıdaki butona tıklamanız yeterli."
+        ),
+        cta_text="ŞİFREYİ SIFIRLA", cta_url=link,
+        fallback_url=link,
+        note_title="Bu bağlantı 30 dakika geçerlidir.",
+        note_html="Eğer bu talebi siz oluşturmadıysanız bu e-postayı yok sayabilirsiniz; şifreniz değişmeden kalır.",
+        preheader="Şifre sıfırlama bağlantınız",
     )
     try:
         from email_smtp import send_smtp_email

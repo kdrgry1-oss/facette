@@ -1002,6 +1002,88 @@ async def _return_cargo_poll_tick():
         logger.info(f"[scheduler][return] polled {processed} return cargo(s)")
 
 
+async def _notify_back_in_stock():
+    """Favorilenen ürünlerden stoğu 'yok' → 'var' geçenleri tespit edip, o ürünü
+    favorileyen kullanıcılara 'tekrar stokta' e-postası gönderir.
+
+    db.product_stock_flags ile her favorilenen ürünün stok durumu izlenir; bildirim
+    YALNIZCA 0→var geçişinde (ve restok döngüsü başına bir kez) atılır. İlk görülmede
+    (flag yok → prev=None) bildirim ATILMAZ; bu deploy sonrası toplu spam'i önler.
+    Stok master'ı Facette olduğundan (sipariş/iptal/iade/admin/pazaryeri fark etmez)
+    bu periyodik kontrol tüm stok-giriş yollarını tek noktadan yakalar.
+    """
+    import os
+    from routes.deps import db
+    try:
+        from notification_service import send_notification
+    except Exception as e:
+        logger.warning(f"[scheduler] back-in-stock skip (import): {e}")
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    site = os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+    try:
+        fav_pids = await db.favorites.distinct("product_id")
+        if not fav_pids:
+            return
+        notified = 0
+        for pid in fav_pids:
+            if not pid:
+                continue
+            prod = await db.products.find_one(
+                {"id": pid},
+                {"_id": 0, "id": 1, "name": 1, "slug": 1, "stock": 1, "variants": 1, "is_active": 1},
+            )
+            if not prod:
+                continue
+            variants = prod.get("variants") or []
+            if variants:
+                total = sum(int(v.get("stock") or 0) for v in variants if isinstance(v, dict))
+            else:
+                total = int(prod.get("stock") or 0)
+            in_stock = (total > 0) and (prod.get("is_active", True) is not False)
+            flag = await db.product_stock_flags.find_one({"product_id": pid}, {"_id": 0, "in_stock": 1})
+            prev = flag.get("in_stock") if flag else None
+            await db.product_stock_flags.update_one(
+                {"product_id": pid},
+                {"$set": {"product_id": pid, "in_stock": in_stock, "updated_at": now_iso}},
+                upsert=True,
+            )
+            # Sadece 'yok' → 'var' geçişinde bildir (ilk görülmede prev=None → atla)
+            if prev is False and in_stock:
+                favs = await db.favorites.find(
+                    {"product_id": pid}, {"_id": 0, "user_id": 1}
+                ).to_list(10000)
+                uids = list({f.get("user_id") for f in favs if f.get("user_id")})
+                if not uids:
+                    continue
+                users = await db.users.find(
+                    {"id": {"$in": uids}}, {"_id": 0, "email": 1, "first_name": 1}
+                ).to_list(10000)
+                link = f"{site}/urun/{prod.get('slug') or prod.get('id')}"
+                for u in users:
+                    email = (u.get("email") or "").strip()
+                    if not email or "@" not in email:
+                        continue
+                    try:
+                        await send_notification(
+                            db, "wishlist_back_in_stock",
+                            to_email=email,
+                            variables={
+                                "customer_name": (u.get("first_name") or "").strip() or "değerli müşterimiz",
+                                "product_name": prod.get("name") or "Favori ürünün",
+                                "product_link": link,
+                            },
+                            channels=["email"],
+                        )
+                        notified += 1
+                    except Exception as ie:
+                        logger.warning(f"[scheduler] back-in-stock send failed ({email}): {ie}")
+        if notified:
+            logger.info(f"[scheduler] back-in-stock notified={notified}")
+    except Exception as e:
+        logger.exception(f"[scheduler] back_in_stock failed: {e}")
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -1091,6 +1173,17 @@ def start_scheduler():
         "interval",
         hours=24,
         id="abandoned_cart_reminders",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Favori ürün tekrar stokta — her 30 dk favorilenen ürünlerin stoğunu kontrol eder;
+    # 'yok'→'var' geçişinde o ürünü favorileyenlere markalı e-posta atar (döngü başına 1 kez).
+    _scheduler.add_job(
+        _notify_back_in_stock,
+        "interval",
+        minutes=30,
+        id="wishlist_back_in_stock",
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         max_instances=1,
         coalesce=True,

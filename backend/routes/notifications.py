@@ -30,6 +30,7 @@ from notification_service import (
     render_template,
     _get_template,
 )
+from email_layout import email_shell, info_row
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -178,97 +179,187 @@ _DEFAULT_TEMPLATES = {
 }
 
 
-# Zengin HTML e-posta şablonları (ZaraHome / Trendyol esinlenmiş minimal tasarım)
+# =============================================================================
+# Markalı HTML e-posta şablonları — tümü email_layout.email_shell ile üretilir
+# (üstte FACETTE logosu · ortada bilgiler · altta INSTAGRAM·TIKTOK + telif).
+# {customer_name} vb. placeholder'lar korunur; gönderimde render_template doldurur.
+# =============================================================================
+
+# Sipariş onay maili gövdesi: sipariş no + tarih + kalemler + toplamlar + adres
+_CONFIRMED_BODY = (
+    info_row("Sipariş Numarası", "{order_number}")
+    + '<div style="font-size:11px;color:#9a9a93;margin:4px 0 14px;padding:0 2px;">Sipariş tarihi: {order_date}</div>'
+    + "{items_html}"
+    + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;color:#444;margin-top:6px;">'
+      '<tr><td style="padding:6px 0;">Ara Toplam</td><td style="text-align:right;padding:6px 0;">{subtotal} TL</td></tr>'
+      '<tr><td style="padding:6px 0;">Kargo</td><td style="text-align:right;padding:6px 0;">{shipping_cost} TL</td></tr>'
+      '<tr><td style="padding:6px 0;color:#b08968;">İndirim</td><td style="text-align:right;padding:6px 0;color:#b08968;">-{discount} TL</td></tr>'
+      '<tr><td style="padding:14px 0 0;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;">Toplam</td>'
+      '<td style="text-align:right;padding:14px 0 0;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;">{amount}</td></tr>'
+      '</table>'
+    + '<div style="margin-top:24px;">'
+      '<div style="font-size:11px;letter-spacing:1.5px;color:#9a9a93;text-transform:uppercase;margin:0 0 8px;">Teslimat Adresi</div>'
+      '<div style="font-size:13px;color:#444;line-height:1.6;">{shipping_full_name}<br/>{shipping_address}<br/>{shipping_district} / {shipping_city}<br/>{shipping_phone}</div>'
+      '</div>'
+)
+
 _EMAIL_HTML_TEMPLATES = {
     "order_confirmed": {
         "subject": "Siparişin alındı · {order_number}",
-        "body": """
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#fafafa;padding:0;margin:0;">
-  <div style="max-width:600px;margin:0 auto;background:#ffffff;">
-    <div style="text-align:center;padding:32px 24px 16px;border-bottom:1px solid #efefef;">
-      <h1 style="margin:0;font-size:22px;font-weight:300;letter-spacing:6px;color:#111;">FACETTE</h1>
-    </div>
-    <div style="padding:48px 24px 16px;text-align:center;">
-      <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:50%;background:#f7f3ee;margin-bottom:18px;">
-        <span style="font-size:28px;color:#b08968;">✓</span>
-      </div>
-      <h2 style="margin:0 0 8px;font-size:18px;font-weight:500;color:#111;letter-spacing:1px;">SİPARİŞİN ALINDI</h2>
-      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:8px 0 4px;">Sevgili {customer_name},</p>
-      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:0;">Siparişin için teşekkür ederiz. Hazırlanmaya başladığında seni bilgilendireceğiz.</p>
-    </div>
-    <div style="padding:0 24px 16px;">
-      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#fafafa;padding:18px;border-radius:4px;">
-        <tr><td style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;padding-bottom:8px;">Sipariş Numarası</td></tr>
-        <tr><td style="font-size:16px;color:#111;font-weight:500;">{order_number}</td></tr>
-        <tr><td style="font-size:11px;color:#999;padding-top:12px;">Sipariş tarihi: {order_date}</td></tr>
-      </table>
-    </div>
-    {items_html}
-    <div style="padding:0 24px 16px;">
-      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;font-size:13px;color:#444;">
-        <tr><td style="padding:6px 0;">Ara Toplam</td><td style="text-align:right;padding:6px 0;">{subtotal} TL</td></tr>
-        <tr><td style="padding:6px 0;">Kargo</td><td style="text-align:right;padding:6px 0;">{shipping_cost} TL</td></tr>
-        <tr><td style="padding:6px 0;color:#b08968;">İndirim</td><td style="text-align:right;padding:6px 0;color:#b08968;">-{discount} TL</td></tr>
-        <tr><td style="padding:14px 0 6px;font-weight:600;color:#111;border-top:1px solid #eee;">Toplam</td><td style="text-align:right;padding:14px 0 6px;font-weight:600;color:#111;border-top:1px solid #eee;">{amount}</td></tr>
-      </table>
-    </div>
-    <div style="padding:16px 24px 32px;border-top:1px solid #efefef;">
-      <p style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;margin:0 0 8px;">Teslimat Adresi</p>
-      <p style="font-size:13px;color:#444;line-height:1.6;margin:0;">{shipping_full_name}<br/>{shipping_address}<br/>{shipping_district} / {shipping_city}<br/>{shipping_phone}</p>
-    </div>
-    <div style="text-align:center;padding:0 24px 40px;">
-      <a href="{order_link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:14px 36px;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Siparişimi Görüntüle</a>
-    </div>
-    <div style="background:#fafafa;padding:24px;text-align:center;color:#999;font-size:11px;letter-spacing:0.5px;line-height:1.7;">
-      <p style="margin:0;">FACETTE · facette.com.tr</p>
-      <p style="margin:6px 0 0;">Sorularınız için: destek@facette.com.tr</p>
-    </div>
-  </div>
-</div>
-""".strip(),
+        "body": email_shell(
+            icon="✓", eyebrow="SİPARİŞİN ALINDI", title="Siparişin alındı",
+            intro_html="Sevgili {customer_name}, siparişin için teşekkür ederiz. Hazırlanmaya başladığında seni bilgilendireceğiz.",
+            body_html=_CONFIRMED_BODY,
+            cta_text="SİPARİŞİMİ GÖRÜNTÜLE", cta_url="{order_link}",
+            preheader="Siparişin alındı · {order_number}",
+        ),
+    },
+    "order_pending": {
+        "subject": "Siparişin alındı · {order_number}",
+        "body": email_shell(
+            icon="✓", eyebrow="SİPARİŞİN ALINDI", title="Siparişin alındı",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişin alındı ve onay bekliyor. Onaylandığında seni bilgilendireceğiz.",
+            cta_text="SİPARİŞİMİ GÖRÜNTÜLE", cta_url="{order_link}",
+        ),
+    },
+    "order_awaiting_payment": {
+        "subject": "Siparişin alındı · Ödeme bekleniyor · {order_number}",
+        "body": email_shell(
+            icon="₺", eyebrow="ÖDEME BEKLENİYOR", title="Ödemeni bekliyoruz",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişini aldık. Havale/EFT ödemen tarafımıza ulaştığında siparişin hazırlanmaya başlanır.",
+            body_html=info_row("Sipariş Tutarı", "{amount}"),
+            cta_text="SİPARİŞİMİ GÖRÜNTÜLE", cta_url="{order_link}",
+        ),
+    },
+    "order_payment_notified": {
+        "subject": "Ödeme bildirimin alındı · {order_number}",
+        "body": email_shell(
+            icon="✓", eyebrow="ÖDEME BİLDİRİMİ", title="Bildirimin alındı",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişin için ödeme bildirimini aldık. Ödemen doğrulandığında siparişin hazırlanmaya başlanır.",
+        ),
+    },
+    "order_preparing": {
+        "subject": "Siparişin hazırlanıyor · {order_number}",
+        "body": email_shell(
+            icon="✓", eyebrow="SİPARİŞ DURUMU", title="Siparişin hazırlanıyor",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişin özenle hazırlanıyor. Kargoya verildiğinde seni bilgilendireceğiz.",
+        ),
+    },
+    "order_packed": {
+        "subject": "Siparişin paketlendi · {order_number}",
+        "body": email_shell(
+            icon="✓", eyebrow="SİPARİŞ DURUMU", title="Siparişin paketlendi",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişin paketlendi ve kargoya verilmek üzere hazır.",
+        ),
+    },
+    "order_ready_to_ship": {
+        "subject": "Siparişin kargoya hazır · {order_number}",
+        "body": email_shell(
+            icon="↗", eyebrow="SİPARİŞ DURUMU", title="Kargoya hazır",
+            intro_html="Sevgili {customer_name}, {order_number} numaralı siparişin kargoya verilmek üzere hazır. Çok yakında yola çıkıyor.",
+        ),
     },
     "order_shipped": {
         "subject": "Kargoya verildi · {order_number}",
-        "body": """
-<div style="font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;background:#fafafa;margin:0;padding:0;">
-  <div style="max-width:600px;margin:0 auto;background:#fff;">
-    <div style="text-align:center;padding:32px 24px 16px;border-bottom:1px solid #efefef;">
-      <h1 style="margin:0;font-size:22px;font-weight:300;letter-spacing:6px;color:#111;">FACETTE</h1>
-    </div>
-    <div style="padding:48px 24px 24px;text-align:center;">
-      <div style="font-size:42px;margin-bottom:8px;">📦</div>
-      <h2 style="margin:0 0 8px;font-size:18px;font-weight:500;color:#111;letter-spacing:1px;">KARGOYA VERİLDİ</h2>
-      <p style="color:#6b6b6b;font-size:13px;line-height:1.7;margin:0;">Sevgili {customer_name}, siparişin {cargo_provider} kargosuna teslim edildi.</p>
-    </div>
-    <div style="padding:0 24px 16px;">
-      <table cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#fafafa;padding:18px;border-radius:4px;">
-        <tr><td style="font-size:11px;letter-spacing:1.5px;color:#999;text-transform:uppercase;padding-bottom:6px;">Kargo Takip Numarası</td></tr>
-        <tr><td style="font-size:18px;color:#111;font-weight:600;font-family:monospace;letter-spacing:1px;">{tracking_number}</td></tr>
-      </table>
-    </div>
-    <div style="text-align:center;padding:8px 24px 40px;">
-      <a href="{tracking_link}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:14px 36px;font-size:12px;letter-spacing:2px;text-transform:uppercase;">Kargo Takibi</a>
-    </div>
-    <div style="background:#fafafa;padding:24px;text-align:center;color:#999;font-size:11px;letter-spacing:0.5px;">
-      <p style="margin:0;">FACETTE · facette.com.tr</p>
-    </div>
-  </div>
-</div>
-""".strip(),
+        "body": email_shell(
+            icon="↗", eyebrow="KARGO", title="Kargoya verildi",
+            intro_html="Sevgili {customer_name}, siparişin {cargo_provider} kargosuna teslim edildi.",
+            body_html=info_row("Kargo Takip Numarası", "{tracking_number}"),
+            cta_text="KARGO TAKİBİ", cta_url="{tracking_link}",
+            preheader="Siparişin yola çıktı · {tracking_number}",
+        ),
+    },
+    "order_in_transit": {
+        "subject": "Kargon yolda · {order_number}",
+        "body": email_shell(
+            icon="↗", eyebrow="KARGO", title="Kargon yolda",
+            intro_html="Sevgili {customer_name}, siparişin sana doğru yolda. Takip numaranla durumu izleyebilirsin.",
+            body_html=info_row("Kargo Takip Numarası", "{tracking_number}"),
+            cta_text="KARGO TAKİBİ", cta_url="{tracking_link}",
+        ),
+    },
+    "order_out_for_delivery": {
+        "subject": "Siparişin dağıtımda · {order_number}",
+        "body": email_shell(
+            icon="↗", eyebrow="KARGO", title="Siparişin dağıtımda",
+            intro_html="Sevgili {customer_name}, siparişin bugün adresine teslim edilmek üzere dağıtıma çıktı.",
+            body_html=info_row("Kargo Takip Numarası", "{tracking_number}"),
+            cta_text="KARGO TAKİBİ", cta_url="{tracking_link}",
+        ),
     },
     "order_delivered": {
         "subject": "Siparişin teslim edildi · {order_number}",
-        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;color:#111;margin:0 0 32px;">FACETTE</h1><div style="font-size:42px;margin:16px 0;">🎉</div><h2 style="font-size:18px;font-weight:500;letter-spacing:1px;margin:0 0 12px;">SİPARİŞİN TESLİM EDİLDİ</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, {order_number} numaralı siparişin teslim edildi. Tercihin için teşekkür ederiz.</p></div>""",
-    },
-    "order_cancelled": {
-        "subject": "Siparişin iptal edildi · {order_number}",
-        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;margin:0 0 32px;">FACETTE</h1><h2 style="font-size:18px;font-weight:500;margin:0 0 12px;">Siparişin iptal edildi</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, {order_number} numaralı siparişin iptal edilmiştir. Ödemeniz iade edilecektir.</p></div>""",
+        "body": email_shell(
+            icon="★", eyebrow="TESLİMAT", title="Siparişin teslim edildi",
+            intro_html="Merhaba {customer_name}, {order_number} numaralı siparişin teslim edildi. Bizi tercih ettiğin için teşekkür ederiz.",
+        ),
     },
     "order_undelivered": {
         "subject": "Kargon şubede bekliyor · {order_number}",
-        "body": """<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;padding:48px 24px;text-align:center;"><h1 style="font-size:22px;font-weight:300;letter-spacing:6px;margin:0 0 32px;">FACETTE</h1><h2 style="font-size:18px;font-weight:500;margin:0 0 12px;">Kargon teslim edilemedi</h2><p style="color:#6b6b6b;font-size:13px;line-height:1.7;">Merhaba {customer_name}, kargon teslim edilemedi ve şubede bekliyor.<br/>Takip: <strong>{tracking_number}</strong></p></div>""",
+        "body": email_shell(
+            icon="◷", eyebrow="KARGO", title="Kargon şubede bekliyor",
+            intro_html="Merhaba {customer_name}, kargon teslim edilemedi ve şubede seni bekliyor. Takip numaranla detayları görebilirsin.",
+            body_html=info_row("Kargo Takip Numarası", "{tracking_number}"),
+        ),
+    },
+    "order_cancelled": {
+        "subject": "Siparişin iptal edildi · {order_number}",
+        "body": email_shell(
+            icon="✕", eyebrow="SİPARİŞ", title="Siparişin iptal edildi",
+            intro_html="Merhaba {customer_name}, {order_number} numaralı siparişin iptal edilmiştir. Ödemen alındıysa iade edilecektir.",
+        ),
+    },
+    "order_returned": {
+        "subject": "İaden tamamlandı · {order_number}",
+        "body": email_shell(
+            icon="✓", eyebrow="İADE", title="İaden tamamlandı",
+            intro_html="Merhaba {customer_name}, {order_number} numaralı siparişine ait iaden tarafımıza ulaştı ve işleme alındı. İade bedelin kısa süre içinde tarafına aktarılacaktır.",
+        ),
+    },
+    "order_refunded": {
+        "subject": "İade bedelin ödendi · {order_number}",
+        "body": email_shell(
+            icon="₺", eyebrow="İADE", title="İade bedelin ödendi",
+            intro_html="Merhaba {customer_name}, {order_number} numaralı siparişin için iade bedeli hesabına/kartına iade edilmiştir. Bankana bağlı olarak hesabına yansıması birkaç iş günü sürebilir.",
+        ),
+    },
+    "abandoned_cart": {
+        "subject": "Sepetinde ürünler kaldı",
+        "body": email_shell(
+            icon="→", eyebrow="SEPETİN", title="Sepetinde ürünler kaldı",
+            intro_html="Beğendiğin ürünler seni bekliyor. Siparişini tamamlamak için aşağıdaki butona dokunman yeterli.",
+            cta_text="SEPETE DÖN", cta_url="{cart_url}",
+        ),
+    },
+    "order_return_in_transit": {
+        "subject": "İaden kargoda · {order_number}",
+        "body": email_shell(
+            icon="↩", eyebrow="İADE", title="İaden kargoda",
+            intro_html="Merhaba {customer_name}, {order_number} numaralı siparişine ait iade kargon yola çıktı. Bize ulaştığında işleme alıp seni bilgilendireceğiz.",
+            body_html=info_row("Kargo Takip Numarası", "{tracking_number}"),
+        ),
+    },
+    "wishlist_back_in_stock": {
+        "subject": "Favorindeki ürün tekrar stokta · {product_name}",
+        "body": email_shell(
+            icon="★", eyebrow="TEKRAR STOKTA", title="Beklediğin ürün geri geldi",
+            intro_html="Merhaba {customer_name}, favori listendeki <b>{product_name}</b> tekrar stoklarımızda. Tükenmeden tamamlamak istersen aşağıdan inceleyebilirsin.",
+            cta_text="ÜRÜNÜ İNCELE", cta_url="{product_link}",
+            note_title="Stoklarla sınırlı",
+            note_html="Bu ürün yeniden hızla tükenebilir; kaçırmamak için kısa sürede karar vermeni öneririz.",
+            preheader="Favorindeki ürün tekrar stokta",
+        ),
+    },
+    "welcome": {
+        "subject": "Aramıza hoş geldin · FACETTE",
+        "body": email_shell(
+            icon="✓", eyebrow="HOŞ GELDİN", title="Aramıza hoş geldin",
+            intro_html="Merhaba {customer_name}, FACETTE ailesine katıldığın için teşekkür ederiz. Yeni sezon parçalarını ve sana özel fırsatları keşfetmeye hemen başlayabilirsin.",
+            cta_text="ALIŞVERİŞE BAŞLA", cta_url="{site_url}",
+        ),
     },
 }
+
 
 # FACETTE Muli marka e-posta şablonları (email_templates.py) — eski ZaraHome tasarımını override eder.
 try:
@@ -300,7 +391,10 @@ async def seed_templates(
                 body = _DEFAULT_TEMPLATES.get((ev_key, ch), "")
                 subj = ev["name"] if ch == "email" else ""
                 if ch == "email" and not body:
-                    body = f"<p>Merhaba {{customer_name}},</p><p>{ev['name']} bildirimi.</p>"
+                    body = email_shell(
+                        eyebrow="FACETTE", title=ev["name"],
+                        intro_html="Merhaba {customer_name}, " + ev["name"].lower() + " bildirimini sizinle paylaşıyoruz.",
+                    )
 
             if existing:
                 # force ile yeniden seedle (manuel düzenlenmemişlere yeniden uygula)

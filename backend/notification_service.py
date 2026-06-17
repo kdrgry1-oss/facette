@@ -72,6 +72,8 @@ DEFAULT_EVENTS = [
     {"key": "order_refunded", "name": "İade Bedeli Ödendi"},
     {"key": "password_reset_otp", "name": "Şifre Sıfırlama Kodu"},
     {"key": "abandoned_cart", "name": "Sepette Ürün Kaldı"},
+    {"key": "wishlist_back_in_stock", "name": "Favori Ürün Tekrar Stokta"},
+    {"key": "welcome", "name": "Hoş Geldin (Üyelik)"},
     {"key": "stock_alert", "name": "Stok Uyarısı (Admin)"},
     {"key": "admin_new_order", "name": "Yeni Sipariş (Admin)"},
 ]
