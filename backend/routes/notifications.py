@@ -27,6 +27,8 @@ from notification_service import (
     CHANNELS,
     send_notification,
     test_provider,
+    render_template,
+    _get_template,
 )
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -55,6 +57,12 @@ class TestReq(BaseModel):
     provider_key: Optional[str] = None
     to: str
     message: str = "Facette test bildirimi ✓"
+
+
+class TestTemplateReq(BaseModel):
+    event: str
+    channel: str  # sms|whatsapp|email
+    to: str
 
 
 @router.get("/providers/catalog")
@@ -261,6 +269,13 @@ _EMAIL_HTML_TEMPLATES = {
     },
 }
 
+# FACETTE Muli marka e-posta şablonları (email_templates.py) — eski ZaraHome tasarımını override eder.
+try:
+    from email_templates import FACETTE_EMAIL_TEMPLATES as _FET
+    _EMAIL_HTML_TEMPLATES = _FET
+except Exception:
+    pass
+
 
 @router.post("/templates/seed")
 async def seed_templates(
@@ -319,6 +334,83 @@ async def seed_templates(
 async def send_test(req: TestReq, current_user: dict = Depends(require_admin)):
     res = await test_provider(db, req.channel, req.provider_key, req.to, req.message)
     return res
+
+
+@router.post("/test-template")
+async def send_test_template(req: TestTemplateReq, current_user: dict = Depends(require_admin)):
+    """
+    Seçilen sipariş durumunun (event) GERÇEK şablonunu, en son kargoya verilen
+    siparişin gerçek verisiyle doldurup verilen numaraya/e-postaya gönderir.
+    Böylece her durumda SMS/WhatsApp/E-posta'nın tam nasıl gideceği görülür.
+    """
+    # En son kargoya verilen siparişi baz al (tüm değişkenler bu siparişte dolu)
+    order = await db.orders.find_one({"status": "shipped"}, {"_id": 0}, sort=[("shipped_at", -1)])
+    if not order:
+        order = await db.orders.find_one(
+            {"cargo_tracking_number": {"$nin": [None, ""]}}, {"_id": 0}, sort=[("updated_at", -1)]
+        )
+    if not order:
+        order = await db.orders.find_one({}, {"_id": 0}, sort=[("created_at", -1)])
+    if not order:
+        raise HTTPException(status_code=404, detail="Baz alınacak sipariş bulunamadı")
+
+    addr = order.get("shipping_address") or {}
+    full_name = (
+        f"{addr.get('first_name','')} {addr.get('last_name','')}".strip()
+        or addr.get("name") or addr.get("full_name") or "Müşterimiz"
+    )
+    cargo = order.get("cargo") or {}
+    real_tn = (
+        cargo.get("mng_nz_barkod") or cargo.get("mng_nz_gonderi_no")
+        or cargo.get("mng_gonderi_no") or order.get("cargo_tracking_number") or ""
+    ).strip()
+    track_link = cargo.get("tracking_link") or order.get("cargo_tracking_url") or ""
+    ev_name = next((e["name"] for e in DEFAULT_EVENTS if e["key"] == req.event), req.event)
+
+    variables = {
+        "customer_name": full_name,
+        "name": full_name,
+        "first_name": addr.get("first_name", ""),
+        "order_number": order.get("order_number") or "",
+        "tracking_number": real_tn,
+        "tracking_link": track_link,
+        "tracking_url": track_link,
+        "cargo_provider": cargo.get("provider_name") or order.get("cargo_provider_name") or "MNG Kargo",
+        "amount": float(order.get("total") or 0),
+        "total": float(order.get("total") or 0),
+        "status_label": ev_name,
+        "otp_code": "123456",
+        "cart_url": "https://facette.com.tr/sepet",
+    }
+
+    to_phone = req.to.strip() if req.channel in ("sms", "whatsapp") else None
+    to_email = req.to.strip() if req.channel == "email" else None
+
+    res = await send_notification(
+        db, req.event,
+        to_phone=to_phone, to_email=to_email,
+        variables=variables, channels=[req.channel],
+    )
+
+    # Render edilmiş önizleme (panelde göstermek için)
+    preview = ""
+    try:
+        tpl = await _get_template(db, req.event, req.channel)
+        if tpl:
+            preview = render_template(tpl.get("body", "") or "", variables)
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "based_on_order": order.get("order_number"),
+        "event": req.event,
+        "event_name": ev_name,
+        "channel": req.channel,
+        "variables": variables,
+        "preview": preview,
+        "result": res,
+    }
 
 
 @router.get("/logs")

@@ -34,7 +34,7 @@ export default function NotificationTemplates() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // "event|channel"
   const [testTo, setTestTo] = useState("");
-  const [testMsg, setTestMsg] = useState("Facette test bildirimi ✓");
+  const [testEvent, setTestEvent] = useState("order_shipped");
   const [testSending, setTestSending] = useState(null);
   const [testResult, setTestResult] = useState(null);
 
@@ -93,14 +93,14 @@ export default function NotificationTemplates() {
     setTestSending(channel);
     setTestResult(null);
     try {
-      const r = await axios.post(`${API}/notifications/test`, {
+      const r = await axios.post(`${API}/notifications/test-template`, {
+        event: testEvent,
         channel,
         to: testTo.trim(),
-        message: testMsg || "Facette test bildirimi ✓",
       }, auth);
       const ok = r.data?.success !== false;
       setTestResult({ channel, ok, data: r.data });
-      if (ok) toast.success(`${CHANNEL_META[channel].label} test gönderildi`);
+      if (ok) toast.success(`${CHANNEL_META[channel].label} gönderildi · baz sipariş: ${r.data?.based_on_order || "-"}`);
       else toast.error(`${CHANNEL_META[channel].label}: ${r.data?.error || r.data?.detail || "gönderilemedi"}`);
     } catch (e) {
       setTestResult({ channel, ok: false, data: e?.response?.data || { error: e.message } });
@@ -179,18 +179,23 @@ export default function NotificationTemplates() {
           <h2 className="font-semibold">Test Gönderimi</h2>
         </div>
         <p className="text-xs text-gray-500">
-          Bir telefon numarası (5XXXXXXXXX) veya e-posta girin; test bildirimini gönderip nasıl ulaştığını görün.
-          SMS ve WhatsApp için telefon, e-posta testi için e-posta adresi kullanın.
+          Bir sipariş durumu seçin, telefon/e-posta girin: o durumun <b>gerçek şablonu</b>, en son
+          kargoya verilen siparişin <b>gerçek verisiyle</b> (isim, sipariş no, takip no…) doldurulup
+          gönderilir — böylece her durumda bildirimin tam nasıl gideceğini görürsünüz.
+          SMS/WhatsApp için telefon, e-posta testi için e-posta girin.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <select value={testEvent} onChange={(e) => setTestEvent(e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-2 text-sm bg-white"
+            data-testid="notif-test-event">
+            {(catalog.events || []).map(ev => (
+              <option key={ev.key} value={ev.key}>{ev.name}</option>
+            ))}
+          </select>
           <input value={testTo} onChange={(e) => setTestTo(e.target.value)}
             placeholder="Telefon (5XXXXXXXXX) veya e-posta"
             className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
             data-testid="notif-test-to" />
-          <input value={testMsg} onChange={(e) => setTestMsg(e.target.value)}
-            placeholder="Test mesajı"
-            className="w-full border border-gray-200 rounded px-3 py-2 text-sm"
-            data-testid="notif-test-msg" />
         </div>
         <div className="flex flex-wrap gap-2">
           {["sms", "whatsapp", "email"].map(ch => {
@@ -210,8 +215,23 @@ export default function NotificationTemplates() {
           <div className={`text-xs rounded p-3 border ${testResult.ok ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-800"}`}
             data-testid="notif-test-result">
             <b>{CHANNEL_META[testResult.channel]?.label} sonucu:</b>{" "}
-            {testResult.ok ? "Başarılı ✓" : "Başarısız ✗"}
-            <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] opacity-80">{JSON.stringify(testResult.data, null, 2)}</pre>
+            {testResult.ok ? "Gönderildi ✓" : "Başarısız ✗"}
+            {testResult.data?.based_on_order && (
+              <div className="mt-1">
+                Baz alınan sipariş: <b>{testResult.data.based_on_order}</b>
+                {testResult.data?.event_name ? ` · ${testResult.data.event_name}` : ""}
+              </div>
+            )}
+            {testResult.data?.preview && (
+              <div className="mt-1">
+                Giden mesaj:
+                <pre className="mt-0.5 whitespace-pre-wrap break-words text-[11px] bg-white/70 rounded p-2 border border-gray-200 text-gray-800">{testResult.data.preview}</pre>
+              </div>
+            )}
+            <details className="mt-1">
+              <summary className="cursor-pointer opacity-70">Teknik detay</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-all text-[11px] opacity-80">{JSON.stringify(testResult.data?.result ?? testResult.data, null, 2)}</pre>
+            </details>
           </div>
         )}
       </div>
