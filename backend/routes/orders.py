@@ -2364,19 +2364,46 @@ async def create_cargo_barcode(
         raise HTTPException(status_code=502, detail=f"MNG Kargo bağlantı hatası: {str(_mng_exc)[:300]}")
 
     if not res.get("ok"):
-        # MNG hatasını orderhist log et
-        await db.cargo_logs.insert_one({
-            "id": generate_id(),
-            "order_id": order_id,
-            "provider": "MNG",
-            "action": "create_shipment",
-            "status": "error",
-            "request_summary": {"siparis_no": siparis_no, "alici_ad": full_name, "il": il, "ilce": ilce},
-            "error": res.get("hata"),
-            "raw": str(res.get("raw"))[:1000] if res.get("raw") else None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
+        _hata = str(res.get("hata") or "")
+        # E005: MNG'de bu sipariş_no'ya ait kayıt ZATEN VAR (önceki denemede oluştu ama
+        # yanıt bize dönmeden timeout/503 olduğu için DB'ye yazılamadı). Bu bir HATA değil —
+        # mevcut kaydı FaturaSiparisListesi'nden çekip kurtarıyoruz (yeni kayıt oluşturmadan).
+        _recovered = False
+        if ("ZATEN VAR" in _hata.upper()) or ("E005" in _hata.upper()):
+            try:
+                from mng_kargo_client import get_mng_shipment_status as _gss_recover
+                _rec = await _aio_cargo.to_thread(
+                    _gss_recover,
+                    username=settings["username"], password=settings["password"], siparis_no=siparis_no
+                )
+                if _rec.get("ok") and (_rec.get("mng_siparis_no") or _rec.get("gonderi_no")):
+                    res = {
+                        "ok": True,
+                        "barkod": _rec.get("mng_siparis_no") or _rec.get("gonderi_no") or siparis_no,
+                        "gonderi_no": _rec.get("gonderi_no") or "",
+                        "raw": "recovered_from_E005",
+                    }
+                    _recovered = True
+                    logger.info(f"E005 kurtarma başarılı (siparis_no={siparis_no}): barkod={res['barkod']}")
+                else:
+                    logger.warning(f"E005 ama FaturaSiparisListesi kayıt döndürmedi (siparis_no={siparis_no}): {_rec}")
+            except Exception as _re:
+                logger.warning(f"E005 kurtarma denemesi başarısız (siparis_no={siparis_no}): {_re}")
+
+        if not _recovered:
+            # MNG hatasını cargo_logs'a yaz
+            await db.cargo_logs.insert_one({
+                "id": generate_id(),
+                "order_id": order_id,
+                "provider": "MNG",
+                "action": "create_shipment",
+                "status": "error",
+                "request_summary": {"siparis_no": siparis_no, "alici_ad": full_name, "il": il, "ilce": ilce},
+                "error": res.get("hata"),
+                "raw": str(res.get("raw"))[:1000] if res.get("raw") else None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            raise HTTPException(status_code=502, detail=f"MNG Kargo hatası: {res.get('hata') or 'Bilinmeyen hata'}")
 
     barkod = res["barkod"]  # MNG_SIPARIS_NO (MNG Self Barkod) — gerçek kargo takip kodu
     
@@ -2698,7 +2725,7 @@ async def create_mng_shipment(order_id: str, current_user: dict = Depends(requir
 
 
 @router.get("/cargo/mng-test")
-async def mng_connection_test(current_user: dict = Depends(require_admin)):
+async def mng_connection_test(siparis_no: str = None, current_user: dict = Depends(require_admin)):
     """TEŞHİS: MNG/DHL SOAP servisine (service.mngkargo.com.tr) sunucudan erişim testi.
     Barkod OLUŞTURMAZ — sadece Baglanti_Test() ping atar. 200 + JSON döner (CORS güvenli).
     ok=true → erişim var; ok=false → error alanında gerçek sebep (timeout/whitelist/DNS).
@@ -2724,6 +2751,16 @@ async def mng_connection_test(current_user: dict = Depends(require_admin)):
         }
     except Exception as se:
         out["settings_error"] = str(se)[:200]
+    # siparis_no verilirse FaturaSiparisListesi'nden mevcut kaydı da test et (E005 kurtarma kaynağı)
+    if siparis_no:
+        try:
+            from mng_kargo_client import get_mng_shipment_status as _gss_t
+            _s2 = await _get_mng_settings()
+            out["shipment_status"] = await _aio_t.to_thread(
+                _gss_t, username=_s2["username"], password=_s2["password"], siparis_no=siparis_no
+            )
+        except Exception as _e2:
+            out["shipment_status_error"] = str(_e2)[:300]
     return out
 
 
