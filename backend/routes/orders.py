@@ -3801,33 +3801,81 @@ def _round2(x):
         return 0.0
 
 
-async def _compute_refund_breakdown(rec: dict, order: dict, fault: str, return_cargo_fee_override=None):
+async def _storefront_free_shipping():
+    """Vitrinin kullandığı ücretsiz-kargo EŞİĞİ ve kargo ÜCRETİNİ döndürür.
+    /api/settings (settings.py) ile BİREBİR aynı kaynak — böylece iade hesabı
+    müşterinin checkout'ta gördüğü kargo mantığıyla tutarlı olur:
+      - eşik = aktif 'otomatik' free_shipping kuponlarının en düşük min_cart_total'ı
+      - ücret = default kargo firması bedeli (yoksa settings.shipping_fee)
+    Değerler panelden değişebilir; sabit yazılmaz. (threshold, fee) döner."""
+    s = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    cargo_fees = s.get("cargo_fees") or {}
+    default_company = s.get("default_cargo_company") or ""
+    fee = None
+    if default_company and isinstance(cargo_fees, dict) and cargo_fees.get(default_company) not in (None, ""):
+        try:
+            fee = float(cargo_fees.get(default_company))
+        except Exception:
+            fee = None
+    if fee is None:
+        try:
+            fee = float(s.get("shipping_fee"))
+        except Exception:
+            fee = 0.0
+    fee = _round2(fee or 0.0)
+    threshold = None
+    try:
+        async for _c in db.coupons.find(
+            {"is_active": True, "free_shipping": True, "auto_apply": True},
+            {"_id": 0, "min_cart_total": 1},
+        ):
+            mc = _c.get("min_cart_total")
+            if mc in (None, ""):
+                continue
+            mc = float(mc)
+            if threshold is None or mc < threshold:
+                threshold = mc
+    except Exception:
+        threshold = None
+    return threshold, fee
+
+
+async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
+                                    return_cargo_fee_override=None, returned_net_override=None):
     """İade tutarını otomatik hesaplar, şeffaf bir döküm döndürür (Karar #2 + #3).
 
-    fault: 'customer' (müşteri kusuru -> iade kargo bedeli müşteriden düşülür)
-           'store'    (mağaza kusuru  -> iade kargo bedeli mağazadan, düşülmez)
+    fault: 'customer' (müşteri kusuru -> kargo bedeli müşteriden tahsil / iadeden düşülür)
+           'store'    (mağaza kusuru  -> kargo bedeli mağazadan; HİÇBİR kargo düşülmez)
+    returned_net_override: kısmi iadede (panelde seçili kalemler) iade edilen net tutar.
     """
+    fault = (fault or "store").lower()
     items = rec.get("items") or []
-    returned_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
+    if returned_net_override not in (None, ""):
+        returned_net = _round2(returned_net_override)
+    else:
+        returned_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
 
     orig_cart = _round2(order.get("subtotal") or order.get("total") or 0)
     kept_cart = _round2(max(0.0, orig_cart - returned_net))
-    is_partial = kept_cart > 0.01  # tam iadede (kalan 0) kampanya mahsubu uygulanmaz
+    is_partial = kept_cart > 0.01  # tam iadede (kalan 0) kargo mahsubu uygulanmaz
 
-    # --- Dinamik ücretsiz-kargo kampanyası mahsubu (Karar #2 = EVET) ---
+    # --- Ücretsiz-kargo iptali (Karar #2): kısmi iade sonrası KALAN sepet, vitrindeki
+    #     ücretsiz-kargo eşiğinin altına düşerse — ve SADECE müşteri kusurunda —
+    #     vitrindeki kargo ücreti müşteriden tahsil edilir (iadeden düşülür).
+    #     Eşik + ücret vitrinle aynı kaynaktan (settings) okunur, sabit değildir. ---
     campaign_deduction = 0.0
     campaign_note = ""
-    orig_ship = await _resolve_shipping_cost(orig_cart)
-    kept_ship = await _resolve_shipping_cost(kept_cart) if is_partial else None
-    if is_partial and (orig_ship == 0) and (kept_ship is not None and kept_ship > 0):
-        campaign_deduction = _round2(kept_ship)
+    free_threshold, ship_fee = await _storefront_free_shipping()
+    if (fault == "customer" and is_partial and free_threshold is not None
+            and ship_fee > 0 and orig_cart >= free_threshold and kept_cart < free_threshold):
+        campaign_deduction = _round2(ship_fee)
         campaign_note = (
             f"İade sonrası kalan tutar ({kept_cart:.2f} TL) ücretsiz kargo eşiğinin "
-            f"altına düştü; kargo bedeli ({campaign_deduction:.2f} TL) iadeden düşüldü."
+            f"({free_threshold:.0f} TL) altına düştü; kargo bedeli ({campaign_deduction:.2f} TL) "
+            f"müşteriden tahsil edildi (iadeden düşüldü)."
         )
 
     # --- İade kargo bedeli (Karar #3 = kusur seçimine bağlı) ---
-    fault = (fault or "store").lower()
     if return_cargo_fee_override is not None:
         return_cargo_fee = _round2(return_cargo_fee_override)
     elif fault == "customer":
@@ -3838,6 +3886,11 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str, return_c
     else:
         return_cargo_fee = 0.0
 
+    # Çifte kargo tahsilatını önle: ücretsiz-kargo iptali zaten kargo bedelini
+    # düşüyorsa, ayrıca iade kargo bedeli EKLEME (ikisi de aynı kargo ücretidir).
+    if campaign_deduction > 0 and return_cargo_fee > 0:
+        return_cargo_fee = 0.0
+
     auto_refund = _round2(max(0.0, returned_net - campaign_deduction - return_cargo_fee))
 
     return {
@@ -3846,6 +3899,8 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str, return_c
         "kept_cart": kept_cart,
         "is_partial": is_partial,
         "fault": fault,
+        "free_shipping_threshold": free_threshold,
+        "shipping_fee": ship_fee,
         "campaign_deduction": campaign_deduction,
         "campaign_note": campaign_note,
         "return_cargo_fee": return_cargo_fee,
@@ -3855,13 +3910,15 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str, return_c
 
 @router.get("/returns/{return_id}/refund-preview")
 async def refund_preview(return_id: str, fault: str = "store",
+                         returned_net: Optional[float] = None,
                          current_user: dict = Depends(require_permission("returns.approve"))):
-    """Onaydan ÖNCE iade tutarı dökümünü hesaplar (kaydetmez). Frontend bunu gösterir."""
+    """Onaydan ÖNCE iade tutarı dökümünü hesaplar (kaydetmez). Frontend bunu gösterir.
+    returned_net: panelde seçili kalemlerin net toplamı (kısmi iade); verilmezse tüm iade."""
     rec = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=404, detail="İade bulunamadı")
     order = await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0}) or {}
-    bd = await _compute_refund_breakdown(rec, order, fault)
+    bd = await _compute_refund_breakdown(rec, order, fault, returned_net_override=returned_net)
     return {"breakdown": bd}
 
 
@@ -3883,7 +3940,10 @@ async def approve_return(return_id: str, payload: dict,
 
     cargo_override = payload.get("return_cargo_fee")
     cargo_override = None if cargo_override in (None, "") else cargo_override
-    bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override)
+    returned_net_in = payload.get("returned_net")
+    returned_net_in = None if returned_net_in in (None, "") else returned_net_in
+    bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
+                                         returned_net_override=returned_net_in)
 
     # Elle tutar override (Karar #5: otomatik hesap + elle düzeltme, loglanır)
     final_amount = bd["auto_refund"]

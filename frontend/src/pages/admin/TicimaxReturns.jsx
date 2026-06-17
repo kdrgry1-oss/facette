@@ -234,23 +234,26 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       const br = await axios.post(`${API}/admin/ticimax/returns/${row.id}/open`, {}, auth());
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
+      // Açılır detayda seçili kalem(ler) varsa iade tutarını onların NET toplamından
+      // hesapla ve backend'e gönder (kısmi iade → kalan sepet ücretsiz-kargo eşiğinin
+      // altına düşerse, müşteri kusurunda kargo bedeli otomatik düşülür).
+      const selAmount = Math.round((row.items || []).reduce(
+        (a, it, i) => (selItems[`${row.id}::${i}`] ? a + (Number(it.qty) || 1) * (Number(it.price) || 0) : a), 0
+      ) * 100) / 100;
+      const returnedNet = selAmount > 0 ? selAmount : null;
       let preview = null;
       try {
-        const pv = await axios.get(`${API}/orders/returns/${returnId}/refund-preview?fault=customer`, auth());
+        const q = `fault=customer${returnedNet != null ? `&returned_net=${returnedNet}` : ""}`;
+        const pv = await axios.get(`${API}/orders/returns/${returnId}/refund-preview?${q}`, auth());
         preview = pv.data?.breakdown || null;
       } catch { /* önizleme alınamazsa modal yine açılır */ }
-      // Seçili kalem(ler) varsa iade tutarını onların toplamından ön-doldur
-      const selAmount = (row.items || []).reduce(
-        (a, it, i) => (selItems[`${row.id}::${i}`] ? a + (Number(it.qty) || 1) * (Number(it.price) || 0) : a), 0
-      );
-      const hasSel = selAmount > 0;
       setWf({
         row, returnId, status: br.data?.status || "created", fault: "customer",
-        preview,
-        finalAmount: hasSel ? selAmount : (preview?.auto_refund ?? 0),
-        edited: hasSel, note: "",
+        preview, returnedNet,
+        finalAmount: preview ? preview.auto_refund : (returnedNet ?? 0),
+        edited: false, note: "",
         loading: false, rejectReason: "", reship: false,
-        showReject: mode === "reject", hasGider: false,
+        showReject: mode === "reject",
       });
     } catch (e) {
       toast.error(e.response?.data?.detail || "İade işlem akışı açılamadı");
@@ -260,7 +263,8 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
     if (!wf) return;
     setWf((m) => ({ ...m, loading: true }));
     try {
-      const pv = await axios.get(`${API}/orders/returns/${wf.returnId}/refund-preview?fault=${fault}`, auth());
+      const q = `fault=${fault}${wf.returnedNet != null ? `&returned_net=${wf.returnedNet}` : ""}`;
+      const pv = await axios.get(`${API}/orders/returns/${wf.returnId}/refund-preview?${q}`, auth());
       const bd = pv.data?.breakdown || null;
       setWf((m) => ({ ...m, fault, preview: bd, loading: false, finalAmount: m.edited ? m.finalAmount : (bd?.auto_refund ?? 0) }));
     } catch { toast.error("Önizleme alınamadı"); setWf((m) => ({ ...m, loading: false })); }
@@ -270,6 +274,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
     setWf((m) => ({ ...m, loading: true }));
     try {
       const body = { fault: wf.fault, note: wf.note };
+      if (wf.returnedNet != null) body.returned_net = wf.returnedNet;
       if (wf.edited) body.refund_amount = Number(wf.finalAmount);
       const res = await axios.post(`${API}/orders/returns/${wf.returnId}/approve`, body, auth());
       toast.success(`İade onaylandı · ${fmtTL(res.data?.refund_amount)}`);
@@ -288,25 +293,11 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       setWf(null); load();
     } catch (e) { toast.error(e.response?.data?.detail || "Reddedilemedi"); setWf((m) => ({ ...m, loading: false })); }
   };
-  const wfGider = async () => {
-    if (!wf) return;
-    setWf((m) => ({ ...m, loading: true }));
-    try {
-      const res = await axios.post(`${API}/orders/returns/${wf.returnId}/gider-pusulasi`, {}, auth());
-      toast.success(`Gider pusulası: ${res.data?.gider_pusulasi?.display_number || "oluşturuldu"}`);
-      setWf((m) => ({ ...m, hasGider: true, loading: false }));
-    } catch (e) { toast.error(e.response?.data?.detail || "Gider pusulası oluşturulamadı"); setWf((m) => ({ ...m, loading: false })); }
-  };
-  const wfPay = async () => {
-    if (!wf) return;
-    if (!window.confirm(`İade bedeli ödendi olarak işaretlensin mi?${wf.finalAmount ? ` (${fmtTL(wf.finalAmount)})` : ""}`)) return;
-    setWf((m) => ({ ...m, loading: true }));
-    try {
-      await axios.post(`${API}/orders/returns/${wf.returnId}/refund-pay`, {}, auth());
-      toast.success("İade bedeli ödendi olarak işaretlendi");
-      setWf(null); load();
-    } catch (e) { toast.error(e.response?.data?.detail || "İşaretlenemedi"); setWf((m) => ({ ...m, loading: false })); }
-  };
+  // wfGider / wfPay kaldırıldı: modaldaki "Gider Pusulası" ve "İade Bedeli Öde"
+  // butonları kaldırıldı. Gider pusulası satırdaki belge ikonundan (handleSiteGider),
+  // "İade Bedeli Ödendi" işaretlemesi ise Durum açılır menüsünden yapılır.
+
+
 
   // Satır-içi gider pusulası (Trendyol ile ORTAK seri): siparişi köprüle → gider pusulası
   // (tracking_no = ortak başlangıç no gpStart) → parent yazdırma modalını aç + sayacı +1 ilerlet.
@@ -334,6 +325,13 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
   };
 
   const wfCanAct = can("returns.approve") || can("returns.reject") || can("returns.expense_note") || can("returns.refund_pay");
+
+  // Bu iade daha önce karara bağlandı mı? (modal'da Onayla/Reddet'i soluklaştırmak için)
+  const wfDecided = wf
+    ? ((wf.status === "approved" || ["return_approved", "refunded", "partial_refunded"].includes(wf.row.status))
+        ? "approved"
+        : (wf.row.status === "return_rejected" ? "rejected" : null))
+    : null;
 
   return (
     <div className={embedded ? "" : "p-4"}>
@@ -482,18 +480,6 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
-                        {can("returns.approve") && (
-                          <button onClick={() => openWorkflow(r, "approve")} disabled={busyId === r.id}
-                            className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 disabled:opacity-50" title="Onayla">
-                            <CheckCircle size={14} />
-                          </button>
-                        )}
-                        {can("returns.reject") && (
-                          <button onClick={() => openWorkflow(r, "reject")} disabled={busyId === r.id}
-                            className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 disabled:opacity-50" title="Reddet">
-                            <XCircle size={14} />
-                          </button>
-                        )}
                         {can("returns.expense_note") && (
                           <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
                             className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">
@@ -646,7 +632,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                   </div>
                   <div className="space-y-1 text-xs text-gray-600">
                     <div className="flex justify-between"><span>İade edilen ürün tutarı</span><b>{fmtTL(wf.preview.returned_net)}</b></div>
-                    {wf.preview.campaign_deduction > 0 && <div className="flex justify-between text-amber-700"><span>Kargo kampanya mahsubu</span><b>− {fmtTL(wf.preview.campaign_deduction)}</b></div>}
+                    {wf.preview.campaign_deduction > 0 && <div className="flex justify-between text-amber-700"><span>Kargo bedeli (müşteriden tahsil)</span><b>− {fmtTL(wf.preview.campaign_deduction)}</b></div>}
                     {wf.preview.return_cargo_fee > 0 && <div className="flex justify-between text-amber-700"><span>İade kargo bedeli</span><b>− {fmtTL(wf.preview.return_cargo_fee)}</b></div>}
                     <div className="flex justify-between pt-1 border-t mt-1 text-gray-900"><span>Otomatik iade tutarı</span><b>{fmtTL(wf.preview.auto_refund)}</b></div>
                   </div>
@@ -663,26 +649,34 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                 <div className="text-xs text-gray-400">Tutar önizlemesi alınamadı. Onayda tutarı elle girebilirsin.</div>
               )}
 
-              <div className="flex flex-wrap gap-2">
-                {can("returns.approve") && (
-                  <button onClick={wfApprove} disabled={wf.loading}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">Onayla</button>
-                )}
-                {can("returns.reject") && (
-                  <button onClick={() => setWf((m) => ({ ...m, showReject: !m.showReject }))} disabled={wf.loading}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50">Reddet</button>
-                )}
-                {can("returns.expense_note") && (
-                  <button onClick={wfGider} disabled={wf.loading}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-semibold hover:bg-slate-800 disabled:opacity-50">Gider Pusulası</button>
-                )}
-                {can("returns.refund_pay") && (
-                  <button onClick={wfPay} disabled={wf.loading}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-700 text-white text-xs font-semibold hover:bg-green-800 disabled:opacity-50">İade Bedeli Öde</button>
+              <div className="flex flex-wrap items-center gap-2">
+                {wfDecided ? (
+                  <>
+                    <button disabled title="Bu iade karara bağlanmış"
+                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed ${wfDecided === "approved" ? "bg-emerald-600 text-white opacity-80" : "bg-gray-200 text-gray-400 opacity-60"}`}>
+                      {wfDecided === "approved" && <CheckCircle size={14} />} {wfDecided === "approved" ? "Onaylandı" : "Onayla"}
+                    </button>
+                    <button disabled title="Bu iade karara bağlanmış"
+                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-not-allowed ${wfDecided === "rejected" ? "bg-rose-600 text-white opacity-80" : "bg-gray-200 text-gray-400 opacity-60"}`}>
+                      {wfDecided === "rejected" && <XCircle size={14} />} {wfDecided === "rejected" ? "Reddedildi" : "Reddet"}
+                    </button>
+                    <span className="text-[11px] text-gray-500">Bu iade {wfDecided === "approved" ? "onaylanmış" : "reddedilmiş"}; tekrar işlem yapılamaz.</span>
+                  </>
+                ) : (
+                  <>
+                    {can("returns.approve") && (
+                      <button onClick={wfApprove} disabled={wf.loading}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">Onayla</button>
+                    )}
+                    {can("returns.reject") && (
+                      <button onClick={() => setWf((m) => ({ ...m, showReject: !m.showReject }))} disabled={wf.loading}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 disabled:opacity-50">Reddet</button>
+                    )}
+                  </>
                 )}
               </div>
 
-              {wf.showReject && (
+              {wf.showReject && !wfDecided && (
                 <div className="border rounded-xl p-3 bg-rose-50/40">
                   <label className="text-xs text-gray-600">Ret sebebi (müşteriye SMS/mail ile gider)</label>
                   <textarea value={wf.rejectReason} onChange={(e) => setWf((m) => ({ ...m, rejectReason: e.target.value }))}
