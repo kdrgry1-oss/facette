@@ -89,7 +89,7 @@ def get_mng_barcode_immediately(*, username: str, password: str, siparis_no: str
             ReferansNo=siparis_no, IrsaliyeNo=irsaliye_no,
             OutBarkodType=out_barkod_type,
             FlKapidaTahsilat="1" if kapida_tahsilat else "0",
-            UrunBedeli=f"{urun_bedeli:.2f}",
+            UrunBedeli=str(int(round(float(urun_bedeli or 0)))),  # ondaliksiz: E029 onlemi
             ChMesaj="", EkString1="", EkString2="", EkString3="", EkString4="",
             HatadaReferansBarkoduBas=0,
             ParcaBilgi=None,
@@ -228,7 +228,7 @@ def create_shipment(
     try:
         result = c.service.SiparisGirisiDetayliV3(
             pChIrsaliyeNo=tr_safe(irsaliye_no),
-            pPrKiymet=str(kiymet),
+            pPrKiymet=str(int(round(float(kiymet or 0)))),  # ondaliksiz: MNG '2410.0'yi '24100' okuyup E029 vermesini onler
             pChBarkod="",
             pChIcerik=tr_safe(icerik)[:250],
             pGonderiHizmetSekli=hizmet_sekli,

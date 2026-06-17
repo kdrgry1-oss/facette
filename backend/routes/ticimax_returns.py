@@ -62,8 +62,11 @@ async def list_ticimax_return_orders(
     durumla döner; durumu değiştirmek için frontend PUT /api/orders/{id}/status
     çağırır.
     """
+    # "Web Sitesi" iadeleri = pazaryeri (Trendyol/Hepsiburada) DISI tum siparisler.
+    # Eski hali yalnizca platform/source=ticimax idi -> yeni site siparisleri (platform=facette)
+    # iade/iptal edilince hicbir sekmede gorunmuyordu. Pazaryeri disi her kaynak (facette + ticimax + bos) dahil.
     base_filter = {
-        "$or": [{"platform": "ticimax"}, {"source": "ticimax"}],
+        "platform": {"$nin": ["trendyol", "hepsiburada"]},
     }
 
     # Durum filtresi: tek durum verilmişse onu, yoksa tüm iade grubunu kullan
@@ -203,8 +206,8 @@ async def list_ticimax_return_orders(
             r["refund_paid_at"] = _rp or (r.get("updated_at") if r.get("status") in ("refunded", "partial_refunded") else "")
 
     # İstatistik: tüm iade grubunda durum + ödeme dağılımı (mevcut filtreden bağımsız,
-    # sadece ticimax kaynağına bağlı) — sekmedeki rozetler için
-    stat_filter = {"$or": [{"platform": "ticimax"}, {"source": "ticimax"}],
+    # pazaryeri DISI tum site siparisleri) — sekmedeki rozetler için
+    stat_filter = {"platform": {"$nin": ["trendyol", "hepsiburada"]},
                    "status": {"$in": RETURN_STATUSES}}
     status_counts = {}
     payment_counts = {}
