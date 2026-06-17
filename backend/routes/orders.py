@@ -147,9 +147,13 @@ async def get_orders(
     if status:
         _st = [x.strip() for x in str(status).split(",") if x.strip()]
         query["status"] = _st[0] if len(_st) == 1 else {"$in": _st}
-    elif hide_closed and str(hide_closed).lower() not in ("0", "false", ""):
-        # Ana "Tüm Siparişler" görünümü: iptal/iade/iade-ödemesi-bekleyen/yapılan gizlenir
-        # (İptaller ve İade Edilenler sayfalarında ayrıca listelenir).
+    elif str(hide_closed).lower() in ("0", "false"):
+        # Açıkça "kapalı durumları da göster" istendi → durum filtresi uygulanmaz.
+        pass
+    else:
+        # VARSAYILAN: ana "Tüm Siparişler" görünümünde iptal/iade/iade-bedeli kapalı
+        # durumları GİZLE. Böylece iptal edilen sipariş ana listede KALMAZ; yalnızca
+        # İptaller / İade Edilenler sayfalarında (status= ile) listelenir.
         # return_approved = iade onaylandı, "İade Bedeli Öde" aşamasında → buradan da çıkar.
         query["status"] = {"$nin": ["cancelled", "returned", "refunded", "return_approved"]}
     if phone:
@@ -2242,11 +2246,16 @@ async def create_cargo_barcode(
             "Önce siparişin ödemesini 'Ödendi' olarak işaretleyin (havale onayı), sonra barkod alın."
         ))
 
-    # Eğer mevcut barkod varsa direkt dön
-    if order.get("cargo_tracking_number"):
+    # Eğer mevcut barkod/takip no varsa direkt dön — yoksa tekrar MNG'ye gidip
+    # "duplicate siparis_no" hatası alınır (502 → "barkod oluşmuyor" görünümü).
+    # cargo_barcode_number = bizim Self Barkodumuz (her zaman dolu); cargo_tracking_number = gerçek takip no (boş olabilir).
+    _existing_tn = (order.get("cargo_tracking_number") or order.get("cargo_barcode_number")
+                    or (order.get("cargo") or {}).get("mng_siparis_no")
+                    or (order.get("cargo") or {}).get("tracking_number"))
+    if _existing_tn:
         return {
             "success": True,
-            "tracking_number": order["cargo_tracking_number"],
+            "tracking_number": _existing_tn,
             "cargo_provider_name": order.get("cargo_provider_name") or company,
             "message": "Sipariş zaten kargo barkoduna sahip",
         }
@@ -2405,7 +2414,7 @@ async def create_cargo_barcode(
         "cargo": {
             "provider": "MNG",
             "provider_name": "MNG Kargo",
-            "tracking_number": real_tracking,
+            "tracking_number": public_tracking,   # etiket/yazdırma butonu için DOLU (gerçek no yoksa barkod). Gerçek takip no order.cargo_tracking_number'da; kargo sütunu barkodu gerçek saymaz (ctn==barcodeNo).
             "tracking_link": track_link,
             "label_format": "10x15cm",
             "mng_siparis_no": barkod,                      # MNG Self Barkod (her zaman dolu)
