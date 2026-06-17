@@ -402,7 +402,12 @@ export default function AdminOrders({ unpaidView = false }) {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(res.data.message || "Kargo durumu güncellendi");
+      if (res.data.success === false) {
+        // MNG'de kayıt yok / takip no henüz atanmadı → hata değil, bilgilendirme
+        toast(res.data.message || "Kargo durumu güncellenemedi", { icon: "ℹ️" });
+      } else {
+        toast.success(res.data.message || "Kargo durumu güncellendi");
+      }
       fetchOrders();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Kargo durumu yenilenemedi");

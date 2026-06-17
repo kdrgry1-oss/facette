@@ -2659,10 +2659,13 @@ async def create_cargo_barcode(
 
 @router.post("/{order_id}/cargo-refresh")
 async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(require_admin)):
-    """MNG'den güncel kargo durumunu çek ve order'ı güncelle.
-    
-    Sıra: (1) MNGGonderiBarkod (anında NZ barkod) → (2) FaturaSiparisListesi (durum/şube)
-    UI'dan "Yenile" butonu ile çağrılabilir.
+    """Kargo takip durumunu yeniler — anlaşılır mesajla.
+
+    - Pazaryeri (Trendyol/Hepsiburada) siparişi → takip no pazaryeri senkronundan gelir,
+      MNG'de SORGULANMAZ (yanlış 'bulunamadı' hatası önlenir).
+    - Site siparişi → MNG FaturaSiparisListesi'nden gönderi no/durum çekilir.
+    Hiçbir durumda kuru 'yenilenemedi' dönmez: MNG'de kayıt yok / gönderi no henüz atanmadı /
+    yetki-IP whitelist hatası ayrı ayrı, ne yapılacağını söyleyen mesajla döner.
     """
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -2674,24 +2677,60 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
 
     cargo = order.get("cargo") or {}
     siparis_no = str(order.get("order_number") or order_id)
-    settings = await _get_mng_settings()
 
-    info = get_mng_shipment_status(
-        username=settings["username"], password=settings["password"], siparis_no=siparis_no
-    )
+    # ── Pazaryeri siparişi: MNG'de aranmaz (takip no pazaryerinden gelir) ──
+    _platform = str(order.get("platform") or order.get("marketplace") or "").lower()
+    _is_marketplace = (_platform in ("trendyol", "hepsiburada")
+                       or (order.get("payment_method") == "marketplace"))
+    if _is_marketplace:
+        _tn = order.get("cargo_tracking_number") or cargo.get("tracking_number") or ""
+        _label = ("Trendyol" if "trendyol" in _platform else
+                  "Hepsiburada" if "hepsi" in _platform else "Pazaryeri")
+        return {
+            "success": True,
+            "tracking_number": _tn,
+            "message": (
+                f"{_label} siparişi — kargo takip no pazaryeri senkronuyla güncellenir, MNG sorgusu yapılmaz. "
+                + (f"Mevcut takip: {_tn}" if _tn else "Takip no pazaryeri tarafından atandığında senkronla gelecek.")
+            ),
+        }
+
+    # ── Site siparişi: MNG'den durum çek (hata yutulmaz, kategorize edilir) ──
+    settings = await _get_mng_settings()
+    try:
+        info = get_mng_shipment_status(
+            username=settings["username"], password=settings["password"], siparis_no=siparis_no
+        )
+    except Exception as _e:
+        logger.error(f"cargo-refresh MNG exception {siparis_no}: {_e}")
+        info = {"ok": False, "error": str(_e)}
+
     if not info.get("ok"):
-        raise HTTPException(status_code=502, detail=info.get("error") or "MNG durumu alınamadı")
+        _err = str(info.get("error") or "").lower()
+        # MNG'de kayıt yok → genelde MNG kargo barkodu hiç oluşturulmamış (site siparişi elle "Kargoya Verildi")
+        if (not _err) or any(t in _err for t in ("bulunamad", "kayıt", "kayit", "not found", "no record")):
+            return {
+                "success": False,
+                "tracking_number": order.get("cargo_tracking_number") or "",
+                "message": (
+                    f"Bu sipariş ({siparis_no}) MNG'de bulunamadı. Site siparişi MNG ile gönderilmediyse "
+                    "önce 📦 (MNG kargo barkodu) butonuyla oluşturun; barkod oluşunca takip no burada görünür."
+                ),
+            }
+        # Yetki / IP whitelist / bağlantı → gerçek sistem hatası (kırmızı uyarı)
+        raise HTTPException(
+            status_code=502,
+            detail=(f"MNG durumu alınamadı: {info.get('error')}. "
+                    "Yetki/IP whitelist veya bağlantı sorunu olabilir — MNG paneli > API IP izinlerini kontrol edin."),
+        )
 
     gonderi_no = info.get("gonderi_no") or ""
     mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
     public_tracking = gonderi_no or mng_siparis_no
     track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={public_tracking}" if public_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
 
+    # Durum alanlarını her zaman güncelle; takip no'yu yalnız doluysa yaz (mevcut takibi silme)
     update = {
-        "cargo_tracking_number": public_tracking,
-        "cargo_tracking_link": track_link,
-        "cargo.tracking_number": public_tracking,
-        "cargo.tracking_link": track_link,
         "cargo.mng_siparis_no": mng_siparis_no,
         "cargo.mng_gonderi_no": gonderi_no,
         "cargo.mng_kargo_statu": info.get("kargo_statu"),
@@ -2701,7 +2740,20 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
         "cargo.teslim_tarihi": info.get("teslim_tarihi"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if public_tracking:
+        update["cargo_tracking_number"] = public_tracking
+        update["cargo_tracking_link"] = track_link
+        update["cargo.tracking_number"] = public_tracking
+        update["cargo.tracking_link"] = track_link
     await db.orders.update_one({"id": order_id}, {"$set": update})
+
+    if gonderi_no:
+        _msg = f"📦 Gönderi No: {gonderi_no}" + (f" · {info.get('kargo_statu_aciklama')}" if info.get("kargo_statu_aciklama") else "")
+    elif mng_siparis_no:
+        _msg = (f"MNG kaydı bulundu (Sipariş No: {mng_siparis_no}); MNG şubesi henüz takip (gönderi) no atamadı. "
+                "Kargo şubede işleme alınınca takip no otomatik dolacak.")
+    else:
+        _msg = "MNG kaydı bulundu ancak takip no henüz atanmadı."
     return {
         "success": True,
         "tracking_number": public_tracking,
@@ -2710,10 +2762,7 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
         "kargo_statu": info.get("kargo_statu"),
         "kargo_statu_aciklama": info.get("kargo_statu_aciklama"),
         "tracking_link": track_link,
-        "message": (
-            f"📦 Gönderi No: {gonderi_no}" if gonderi_no else
-            f"✅ Güncel takip: {public_tracking} ({info.get('kargo_statu_aciklama') or 'durum güncellendi'})"
-        ),
+        "message": _msg,
     }
 
 
