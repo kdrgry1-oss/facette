@@ -11,6 +11,7 @@ order_statuses.py — Merkezi sipariş durum kataloğu + ayar/bildirim yardımc�
   için eksik bildirim şablonlarını (idempotent) tohumlar.
 """
 from datetime import datetime, timezone
+import re as _re
 
 # key | label(admin) | customer_label | event | color | group | default_active | default_sms | default_email
 ORDER_STATUS_CATALOG = [
@@ -66,9 +67,48 @@ def _default_notify():
             for s in ORDER_STATUS_CATALOG}
 
 
+_TR_MAP = str.maketrans({
+    "ı": "i", "İ": "i", "ğ": "g", "Ğ": "g", "ü": "u", "Ü": "u",
+    "ş": "s", "Ş": "s", "ö": "o", "Ö": "o", "ç": "c", "Ç": "c",
+})
+
+
+def _slug_key(raw):
+    s = str(raw or "").strip().lower().translate(_TR_MAP)
+    return _re.sub(r"[^a-z0-9_]+", "_", s).strip("_")
+
+
+def _norm_custom(raw):
+    """Admin'in eklediği özel durumları doğrula/normalle. Çekirdek key'lerle çakışan
+    veya geçersiz olanları eler. Liste döner."""
+    out, seen = [], set()
+    core = set(all_status_keys())
+    for c in (raw or []):
+        if not isinstance(c, dict):
+            continue
+        # key verilmişse onu, yoksa label'dan türet (Türkçe → ascii slug)
+        key = _slug_key(c.get("key") or c.get("label") or "")
+        if not key or key in core or key in seen:
+            continue
+        seen.add(key)
+        label = (str(c.get("label") or key).strip())[:80]
+        clabel = (str(c.get("customer_label") or label).strip())[:120]
+        event = (str(c.get("event") or "").strip()) or None
+        color = (str(c.get("color") or "#6B7280").strip())[:9]
+        group = (str(c.get("group") or "Özel").strip())[:40]
+        out.append({"key": key, "label": label, "customer_label": clabel,
+                    "event": event, "color": color, "group": group, "is_custom": True})
+    return out
+
+
 def merge_config(saved):
+    """Kayıtlı ayarı varsayılanlarla birleştirir.
+    Dönen: { active:[key], notify:{key:{sms,email}}, custom:[...], labels:{key:{label,customer_label}} }
+    custom = admin'in eklediği özel durumlar; labels = çekirdek/özel durum etiket override'ları.
+    """
     saved = saved or {}
-    valid = set(all_status_keys())
+    custom = _norm_custom(saved.get("custom"))
+    valid = set(all_status_keys()) | {c["key"] for c in custom}
     active = saved.get("active")
     if not isinstance(active, list):
         active = default_active_keys()
@@ -76,10 +116,75 @@ def merge_config(saved):
     if not active:
         active = default_active_keys()
     notify = _default_notify()
+    for c in custom:
+        notify.setdefault(c["key"], {"sms": False, "email": False})
     for k, v in (saved.get("notify") or {}).items():
         if k in valid and isinstance(v, dict):
             notify[k] = {"sms": bool(v.get("sms")), "email": bool(v.get("email"))}
-    return {"active": active, "notify": notify}
+    labels = {}
+    for k, v in (saved.get("labels") or {}).items():
+        if k in valid and isinstance(v, dict):
+            lv = {}
+            if v.get("label"):
+                lv["label"] = (str(v["label"]).strip())[:80]
+            if v.get("customer_label"):
+                lv["customer_label"] = (str(v["customer_label"]).strip())[:120]
+            if lv:
+                labels[k] = lv
+    return {"active": active, "notify": notify, "custom": custom, "labels": labels}
+
+
+def effective_statuses(cfg):
+    """Çekirdek + özel durumları, etiket override'ları uygulanmış halde döner (tek kaynak)."""
+    cfg = cfg or {}
+    labels = cfg.get("labels") or {}
+    out = []
+    for s in ORDER_STATUS_CATALOG:
+        lo = labels.get(s["key"]) or {}
+        out.append({
+            "key": s["key"], "label": lo.get("label", s["label"]),
+            "customer_label": lo.get("customer_label", s["customer_label"]),
+            "event": s["event"], "color": s["color"], "group": s["group"], "is_custom": False,
+        })
+    for c in (cfg.get("custom") or []):
+        lo = labels.get(c["key"]) or {}
+        out.append({
+            "key": c["key"], "label": lo.get("label", c["label"]),
+            "customer_label": lo.get("customer_label", c["customer_label"]),
+            "event": c.get("event"), "color": c.get("color", "#6B7280"),
+            "group": c.get("group", "Özel"), "is_custom": True,
+        })
+    return out
+
+
+def valid_keys(cfg):
+    """get_status_config çıktısı için geçerli (çekirdek + özel) durum key'leri kümesi."""
+    return {s["key"] for s in effective_statuses(cfg)}
+
+
+def event_for_cfg(key, cfg):
+    """Durum → bildirim event'i (çekirdek katalog VEYA özel durumun seçili event'i)."""
+    s = _BY_KEY.get(key)
+    if s:
+        return s["event"]
+    for c in ((cfg or {}).get("custom") or []):
+        if c["key"] == key:
+            return c.get("event")
+    return None
+
+
+def customer_label_for_cfg(key, cfg):
+    """Müşteri etiketi — override / özel durum farkındalıklı."""
+    lo = ((cfg or {}).get("labels") or {}).get(key) or {}
+    if lo.get("customer_label"):
+        return lo["customer_label"]
+    s = _BY_KEY.get(key)
+    if s:
+        return s["customer_label"]
+    for c in ((cfg or {}).get("custom") or []):
+        if c["key"] == key:
+            return c.get("customer_label") or key
+    return key
 
 
 # ---- Varsayılan bildirim şablonları (eksikse tohumlanır; admin düzenleyebilir) ----

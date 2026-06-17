@@ -82,10 +82,27 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
   const [perms, setPerms] = useState([]);
   const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
   const [selItems, setSelItems] = useState({}); // açılır detayda tiklenen kalemler: { "orderId::index": true }
+  // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
+  const [statusOpts, setStatusOpts] = useState(STATUS_OPTS);        // dropdown (yalnız "görünür" olanlar)
+  const [statusLabelMap, setStatusLabelMap] = useState(STATUS_LABEL); // tüm etiketler (pasif olanlar da)
   const toggleItem = (rid, i) => setSelItems((s) => { const k = `${rid}::${i}`; const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; });
   const selCount = (rid) => Object.keys(selItems).filter((k) => k.startsWith(`${rid}::`)).length;
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
+  // Durum kataloğunu tek kaynaktan çek (Ayarlar). Hata olursa hardcoded fallback kalır.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/settings/order-statuses`, auth());
+        const all = r.data?.statuses || [];
+        if (all.length) {
+          setStatusLabelMap(Object.fromEntries(all.map((s) => [s.key, s.label])));
+          setStatusOpts(all.filter((s) => s.active).map((s) => ({ value: s.key, label: s.label })));
+        }
+      } catch { /* hardcoded fallback */ }
+    })();
+  }, []);
+  const lbl = (s) => statusLabelMap[s] || STATUS_LABEL[s] || s;
 
   // Arama debounce (350ms)
   useEffect(() => {
@@ -210,7 +227,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
     try {
       await axios.put(`${API}/orders/${row.id}/status?status=${encodeURIComponent(newStatus)}`, {}, auth());
-      toast.success(`Durum güncellendi: ${STATUS_LABEL[newStatus] || newStatus}`);
+      toast.success(`Durum güncellendi: ${lbl(newStatus)}`);
     } catch (e) {
       setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: prev } : r)));
       toast.error(e.response?.data?.detail || "Durum güncellenemedi");
@@ -475,7 +492,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                         onChange={(e) => changeStatus(r, e.target.value)}
                         className={`text-xs border rounded-md px-2 py-1 font-medium focus:outline-none focus:ring-1 focus:ring-gray-300 ${STATUS_CLS[r.status] || "bg-gray-50 text-gray-700 border-gray-200"}`}
                       >
-                        {STATUS_OPTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        {(statusOpts.some((o) => o.value === r.status) ? statusOpts : [{ value: r.status, label: lbl(r.status) }, ...statusOpts]).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-2.5">
@@ -501,7 +518,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                           {(r.address || r.city || r.district) && (
                             <span className="lg:col-span-3">Adres: <b className="text-gray-900">{[r.address, r.district, r.city].filter(Boolean).join(", ")}</b></span>
                           )}
-                          <span>Durum: <b className="text-gray-900">{STATUS_LABEL[r.status] || r.status}</b></span>
+                          <span>Durum: <b className="text-gray-900">{lbl(r.status)}</b></span>
                           <span>Sipariş tutarı: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
                           <span>Fatura: <b className="text-gray-900">{r.invoice_number || "—"}</b></span>
                           <span>İade Onay Tarihi: <b className="text-gray-900">{r.return_approved_at ? fmtDate(r.return_approved_at) : "—"}</b></span>
@@ -618,7 +635,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
             </div>
             <div className="p-5 space-y-4">
               <div className="text-xs text-gray-500">
-                Mevcut iade durumu: <b className="text-gray-800">{STATUS_LABEL[wf.row.status] || wf.row.status}</b>
+                Mevcut iade durumu: <b className="text-gray-800">{lbl(wf.row.status)}</b>
               </div>
 
               {wf.preview ? (

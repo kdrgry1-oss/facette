@@ -88,6 +88,27 @@ export default function Cancellations() {
   const [detail, setDetail] = useState(null);   // detay modalı için sipariş
   const [savingId, setSavingId] = useState(null); // durum güncellenirken
   const [deletingId, setDeletingId] = useState(null); // silinirken
+  // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan (görünürlük + özel durumlar dahil).
+  const [statusOptions, setStatusOptions] = useState(STATUS_OPTIONS);
+  const [statusLabelAll, setStatusLabelAll] = useState(
+    Object.fromEntries(STATUS_OPTIONS.map((s) => [s.key, s.label]))
+  );
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const r = await axios.get(`${API}/settings/order-statuses`, { headers: { Authorization: `Bearer ${token}` } });
+        const all = r.data?.statuses || [];
+        if (all.length) {
+          setStatusLabelAll(Object.fromEntries(all.map((s) => [s.key, s.label])));
+          setStatusOptions(all.filter((s) => s.active).map((s) => ({ key: s.key, label: s.label })));
+        }
+      } catch { /* hardcoded fallback */ }
+    })();
+  }, []);
+  // Mevcut değer "görünür" listede yoksa, seçili kalsın diye başa eklenir.
+  const optsFor = (cur) =>
+    (statusOptions.some((s) => s.key === cur) ? statusOptions : [{ key: cur, label: statusLabelAll[cur] || cur }, ...statusOptions]);
   const pageSize = 20;
 
   const fetchCancelled = useCallback(async () => {
@@ -243,7 +264,7 @@ export default function Cancellations() {
                       className="border rounded-lg text-xs px-2 py-1 bg-white max-w-[160px] disabled:opacity-50"
                       title="Sipariş durumunu değiştir"
                     >
-                      {STATUS_OPTIONS.map((s) => (
+                      {optsFor(o.status || "cancelled").map((s) => (
                         <option key={s.key} value={s.key}>{s.label}</option>
                       ))}
                     </select>
@@ -386,7 +407,7 @@ export default function Cancellations() {
                     onChange={(e) => changeStatus(detail.id, e.target.value)}
                     className="border rounded-lg text-sm px-3 py-2 bg-white disabled:opacity-50"
                   >
-                    {STATUS_OPTIONS.map((s) => (
+                    {optsFor(detail.status || "cancelled").map((s) => (
                       <option key={s.key} value={s.key}>{s.label}</option>
                     ))}
                   </select>

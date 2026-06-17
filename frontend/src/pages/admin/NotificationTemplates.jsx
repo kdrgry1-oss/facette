@@ -10,7 +10,7 @@
  *   {tracking_number} {otp_code} {cart_url}
  * =============================================================================
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { Save, RefreshCw, Mail, MessageSquare, Phone, Send } from "lucide-react";
@@ -23,9 +23,41 @@ const CHANNEL_META = {
   whatsapp: { label: "WhatsApp", icon: MessageSquare, color: "text-green-600" },
 };
 
-const VARIABLES = [
-  "{customer_name}", "{order_number}", "{amount}", "{tracking_number}", "{tracking_url}",
-  "{otp_code}", "{cart_url}", "{status_label}",
+// Değişken paleti — tıkla-ekle. Her değişken ilgili bildirim türünde dolar
+// (ör. {bank_iban} sadece havale, {return_code} sadece iade bildiriminde).
+// star: en sık ihtiyaç duyulan (kargo takip linki).
+const VAR_GROUPS = [
+  { title: "Müşteri & Sipariş", items: [
+    ["{customer_name}", "Müşteri adı"],
+    ["{order_number}", "Sipariş numarası"],
+    ["{amount}", "Sipariş tutarı (ör. 1.234,00 TL)"],
+    ["{status_label}", "Durumun müşteriye görünen adı"],
+    ["{order_link}", "Müşterinin sipariş takip sayfası"],
+  ]},
+  { title: "Kargo", items: [
+    ["{tracking_link}", "Kargo takip linki — tıklanır (deep-link)", true],
+    ["{tracking_number}", "Kargo takip numarası"],
+    ["{cargo_provider}", "Kargo firması"],
+  ]},
+  { title: "Havale / Ödeme", items: [
+    ["{bank_name}", "Banka adı"],
+    ["{bank_iban}", "IBAN"],
+    ["{bank_account_holder}", "Hesap sahibi"],
+    ["{bank_branch}", "Şube"],
+    ["{payment_url}", "Ödeme bildirimi sayfası linki"],
+  ]},
+  { title: "İade", items: [
+    ["{return_code}", "İade kargo kodu"],
+    ["{return_barcode_img}", "İade barkod görseli"],
+    ["{valid_until}", "Kodun son geçerlilik tarihi"],
+  ]},
+  { title: "Üyelik · Favori · Sepet", items: [
+    ["{product_name}", "Ürün adı (favori tekrar stokta)"],
+    ["{product_link}", "Ürün linki (favori tekrar stokta)"],
+    ["{site_url}", "Site adresi (hoş geldin)"],
+    ["{cart_url}", "Sepet linki (sepet hatırlatma)"],
+    ["{otp_code}", "Doğrulama kodu (OTP)"],
+  ]},
 ];
 
 export default function NotificationTemplates() {
@@ -38,6 +70,9 @@ export default function NotificationTemplates() {
   const [testEvent, setTestEvent] = useState("order_shipped");
   const [testSending, setTestSending] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  // Değişken paleti için: son odaklanılan editör alanı (Konu/Mesaj) takibi.
+  const activeElRef = useRef(null);
+  const activeMetaRef = useRef(null); // { event, channel, field }
 
   const token = localStorage.getItem("token");
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -119,6 +154,19 @@ export default function NotificationTemplates() {
     } finally { setTestSending(null); }
   };
 
+  // Paletten değişkeni, odaklanılan alanda imlecin olduğu yere ekle.
+  const insertVar = (token) => {
+    const meta = activeMetaRef.current;
+    const el = activeElRef.current;
+    if (!meta || !el) { toast.error("Önce bir metin alanına (Konu / Mesaj) tıklayın"); return; }
+    const cur = el.value || "";
+    const start = el.selectionStart ?? cur.length;
+    const end = el.selectionEnd ?? cur.length;
+    const next = cur.slice(0, start) + token + cur.slice(end);
+    update(meta.event, meta.channel, { [meta.field]: next });
+    setTimeout(() => { try { el.focus(); const p = start + token.length; el.setSelectionRange(p, p); } catch (_e) { /* noop */ } }, 0);
+  };
+
   if (loading) return <div className="p-6 text-gray-500">Yükleniyor...</div>;
 
   return (
@@ -138,8 +186,31 @@ export default function NotificationTemplates() {
         </div>
       </div>
 
-      <div className="text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded p-3">
-        <b>Kullanılabilir değişkenler:</b> {VARIABLES.join(" ")}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-sm">Değişkenler</h2>
+          <span className="text-[11px] text-gray-500">Bir <b>Konu/Mesaj</b> alanına tıkla, sonra değişkene tıkla → imlecin olduğu yere eklenir.</span>
+        </div>
+        <div className="space-y-3">
+          {VAR_GROUPS.map((g) => (
+            <div key={g.title}>
+              <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">{g.title}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {g.items.map(([token, desc, star]) => (
+                  <button key={token} type="button" onClick={() => insertVar(token)} title={desc}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-mono transition-colors ${star ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100" : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"}`}>
+                    {star ? "★ " : ""}{token}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-gray-400 mt-3">
+          Her değişken ilgili bildirim türünde dolar (ör. <span className="font-mono">{"{bank_iban}"}</span> sadece havale,
+          {" "}<span className="font-mono">{"{return_code}"}</span> sadece iade, <span className="font-mono">{"{product_name}"}</span> favori-stokta bildiriminde).
+          {" "}<span className="font-mono">{"{tracking_link}"}</span> kargo takip linkidir ve <span className="font-mono">{"{tracking_url}"}</span> ile aynıdır.
+        </p>
       </div>
 
       <div className="space-y-3">
@@ -167,11 +238,13 @@ export default function NotificationTemplates() {
                     </div>
                     {ch === "email" && (
                       <input value={t.subject || ""} onChange={(e) => update(ev.key, ch, { subject: e.target.value })}
+                        onFocus={(e) => { activeElRef.current = e.target; activeMetaRef.current = { event: ev.key, channel: ch, field: "subject" }; }}
                         placeholder="Konu"
                         className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs"
                         data-testid={`tpl-subject-${ev.key}`} />
                     )}
                     <textarea value={t.body || ""} onChange={(e) => update(ev.key, ch, { body: e.target.value })}
+                      onFocus={(e) => { activeElRef.current = e.target; activeMetaRef.current = { event: ev.key, channel: ch, field: "body" }; }}
                       rows={4} placeholder={`${meta.label} mesajı (değişken kullanabilirsiniz)`}
                       className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs font-mono"
                       data-testid={`tpl-body-${ev.key}-${ch}`} />

@@ -239,15 +239,18 @@ async def set_default_bank_account(acc_id: str, current_user: dict = Depends(req
 # =============================================================================
 @router.get("/order-statuses")
 async def get_order_statuses(current_user: dict = Depends(require_admin)):
-    from order_statuses import ORDER_STATUS_CATALOG, get_status_config
+    from order_statuses import get_status_config, effective_statuses
     cfg = await get_status_config(db)
+    active = set(cfg.get("active", []))
+    notify = cfg.get("notify") or {}
     out = []
-    for s in ORDER_STATUS_CATALOG:
-        nz = (cfg.get("notify") or {}).get(s["key"], {})
+    for s in effective_statuses(cfg):
+        nz = notify.get(s["key"], {})
         out.append({
             "key": s["key"], "label": s["label"], "customer_label": s["customer_label"],
-            "event": s["event"], "color": s["color"], "group": s["group"],
-            "active": s["key"] in cfg.get("active", []),
+            "event": s.get("event"), "color": s["color"], "group": s["group"],
+            "is_custom": bool(s.get("is_custom")),
+            "active": s["key"] in active,
             "sms": bool(nz.get("sms")), "email": bool(nz.get("email")),
         })
     return {"statuses": out}
@@ -255,22 +258,25 @@ async def get_order_statuses(current_user: dict = Depends(require_admin)):
 
 @router.post("/order-statuses")
 async def save_order_statuses(payload: Dict[str, Any], current_user: dict = Depends(require_admin)):
-    from order_statuses import all_status_keys, CONFIG_ID
-    valid = set(all_status_keys())
-    active = [k for k in (payload.get("active") or []) if k in valid]
-    notify_in = payload.get("notify") or {}
-    notify = {}
-    for k in valid:
-        v = notify_in.get(k) or {}
-        notify[k] = {"sms": bool(v.get("sms")), "email": bool(v.get("email"))}
+    """active + notify(kanal) + custom(yeni durumlar) + labels(etiket override) kaydeder.
+    merge_config doğrulamayı (geçersiz/çakışan key eleme, slug, kanal bool) yapar."""
+    from order_statuses import merge_config, CONFIG_ID
+    merged = merge_config({
+        "active": payload.get("active"),
+        "notify": payload.get("notify"),
+        "custom": payload.get("custom"),
+        "labels": payload.get("labels"),
+    })
     await db.settings.update_one(
         {"id": CONFIG_ID},
-        {"$set": {"id": CONFIG_ID, "active": active, "notify": notify,
+        {"$set": {"id": CONFIG_ID,
+                  "active": merged["active"], "notify": merged["notify"],
+                  "custom": merged["custom"], "labels": merged["labels"],
                   "templates_seeded": True,
                   "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
-    return {"success": True, "active_count": len(active)}
+    return {"success": True, "active_count": len(merged["active"]), "custom_count": len(merged["custom"])}
 
 
 

@@ -718,10 +718,11 @@ async def update_order_status(
     current_user: dict = Depends(require_admin)
 ):
     """Update order status"""
-    from order_statuses import all_status_keys
-    valid_statuses = all_status_keys()
+    from order_statuses import get_status_config, valid_keys
+    _cfg0 = await get_status_config(db)
+    valid_statuses = valid_keys(_cfg0)
     if status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {valid_statuses}")
+        raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {sorted(valid_statuses)}")
     
     _now = datetime.now(timezone.utc).isoformat()
     _set = {"status": status, "updated_at": _now}
@@ -830,11 +831,11 @@ async def update_order_status(
             import sys, os
             sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
             from notification_service import send_notification
-            from order_statuses import event_for, get_status_config, customer_label_for
-            ev = event_for(status)
+            from order_statuses import event_for_cfg, get_status_config, customer_label_for_cfg
+            _cfg = await get_status_config(db)
+            ev = event_for_cfg(status, _cfg)
             if not ev:
                 return
-            _cfg = await get_status_config(db)
             _nz = (_cfg.get("notify") or {}).get(status) or {}
             _channels = [c for c in ("sms", "email") if _nz.get(c)]
             if not _channels:
@@ -846,13 +847,21 @@ async def update_order_status(
                 _banks = _pay.get("bank_accounts") or []
                 _bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
             _base = os.environ.get("FRONTEND_PUBLIC_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
+            # Kargo takip linki — gerçek deep-link önceliği (cargo_tracking_link),
+            # yoksa eski alanlara düş. {tracking_link} ve {tracking_url} ikisi de bunu alır.
+            _track_link = (order_doc.get("cargo_tracking_link")
+                           or order_doc.get("cargo_tracking_url")
+                           or order_doc.get("tracking_url") or "")
             variables = {
                 "customer_name": addr.get("full_name") or addr.get("first_name") or "Müşterimiz",
                 "order_number": order_doc.get("order_number", ""),
                 "amount": f"{order_doc.get('total', 0):.2f} TL",
-                "tracking_number": order_doc.get("cargo_tracking_number", ""),
-                "tracking_url": order_doc.get("cargo_tracking_url", "") or order_doc.get("tracking_url", ""),
-                "status_label": customer_label_for(status),
+                "tracking_number": order_doc.get("cargo_tracking_number", "") or order_doc.get("tracking_number", ""),
+                "tracking_link": _track_link,
+                "tracking_url": _track_link,
+                "cargo_provider": order_doc.get("cargo_provider_name") or order_doc.get("cargo_provider") or "",
+                "order_link": (f"{_base}/hesabim/siparisler" if _base else ""),
+                "status_label": customer_label_for_cfg(status, _cfg),
                 "bank_name": (_bank or {}).get("bank_name", ""),
                 "bank_branch": (_bank or {}).get("branch", ""),
                 "bank_iban": (_bank or {}).get("iban", ""),
