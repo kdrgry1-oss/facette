@@ -1634,7 +1634,7 @@ async def create_invoice_for_order(
             detail="Aktif e-fatura entegratörü yapılandırılmamış. Ayarlar > E-Arşiv / E-Fatura ekranından seçin."
         )
 
-    # Prefix — e-Arşiv: FCT, e-Fatura: EFC (kullanıcı belirleyebilir; default Doğan standardı)
+    # Prefix — e-Arşiv: FCT, e-Fatura: FCE (kullanıcı belirleyebilir; default Doğan standardı)
     if dogan_active:
         active = "dogan"
     else:
@@ -1692,12 +1692,12 @@ async def create_invoice_for_order(
         prefix = (dogan_settings.get("earchive_prefix") if invoice_type == "e-arsiv"
                   else dogan_settings.get("einvoice_prefix"))
         if not prefix:
-            prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
+            prefix = "FCT" if invoice_type == "e-arsiv" else "FCE"
     else:
         prefix = (pcfg.get("earchive_prefix") if invoice_type == "e-arsiv"
                   else pcfg.get("einvoice_prefix"))
         if not prefix:
-            prefix = "FCT" if invoice_type == "e-arsiv" else "EFC"
+            prefix = "FCT" if invoice_type == "e-arsiv" else "FCE"
 
     # ─── ATOMİK KİLİT (çift tıklama / eşzamanlı istek koruması) ──────────
     # Sayaç artırma + Doğan'a gönderim geri döndürülemez. Aynı sipariş için

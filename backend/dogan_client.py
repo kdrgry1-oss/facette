@@ -1198,7 +1198,7 @@ class DoganClient:
                                 discount: float = 0.0,
                                 order_number: str = "",
                                 order_date: str = "",
-                                profile_id: str = "TEMELFATURA",
+                                profile_id: str = "TICARIFATURA",
                                 customer_id_scheme: str = "",
                                 customer_tax_office: str = "",
                                 customer_first_name: str = "",
