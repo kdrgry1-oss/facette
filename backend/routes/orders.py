@@ -1643,8 +1643,16 @@ async def create_invoice_for_order(
     # ─── AKILLI HİBRİT MOD ─────────────────────────────────────────────
     # invoice_type="auto" (default): VKN/TCKN dolu ise Doğan CheckUser ile
     # mükellef sorgula → mükellef ise e-Fatura, değilse e-Arşiv. Boşsa e-Arşiv.
-    bill = order.get("billing_address") or {}
+    bill = dict(order.get("billing_address") or {})
     ship_addr = order.get("shipping_address") or {}
+    # Site (facette) KURUMSAL fatura talebi bilgileri billing_address'te DEĞİL, billing_info'da
+    # tutulur (is_corporate/company_name/tax_office/tax_number). Marketplace'te billing_address dolu gelir.
+    # billing_address boşsa billing_info'dan tamamla → kurumsal site siparişinde VKN bulunup CheckUser
+    # ile e-Fatura'ya yükseltilebilsin. (Aksi halde VKN boş kalıp yanlışlıkla e-Arşiv kesiliyordu.)
+    _binfo = order.get("billing_info") or {}
+    for _bk in ("tax_number", "tax_office", "company_name"):
+        if not bill.get(_bk) and _binfo.get(_bk):
+            bill[_bk] = _binfo.get(_bk)
     customer_vkn_raw = (bill.get("tax_number") or bill.get("tax_no") or bill.get("vkn") or "").strip().replace(" ", "")
     if not customer_vkn_raw:
         # Bireysel müşteri: Trendyol TCKN'i identityNumber alanında gelir
