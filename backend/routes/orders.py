@@ -2697,6 +2697,36 @@ async def create_mng_shipment(order_id: str, current_user: dict = Depends(requir
     return await create_cargo_barcode(order_id=order_id, cargo_company="MNG", current_user=current_user)
 
 
+@router.get("/cargo/mng-test")
+async def mng_connection_test(current_user: dict = Depends(require_admin)):
+    """TEŞHİS: MNG/DHL SOAP servisine (service.mngkargo.com.tr) sunucudan erişim testi.
+    Barkod OLUŞTURMAZ — sadece Baglanti_Test() ping atar. 200 + JSON döner (CORS güvenli).
+    ok=true → erişim var; ok=false → error alanında gerçek sebep (timeout/whitelist/DNS).
+    """
+    import asyncio as _aio_t, time as _t
+    from mng_kargo_client import baglanti_test
+    t0 = _t.time()
+    try:
+        res = await _aio_t.to_thread(baglanti_test)
+        out = {"ok": bool(res.get("ok")), "result": str(res.get("result"))[:300],
+               "error": str(res.get("error"))[:500] if res.get("error") else None,
+               "ms": int((_t.time() - t0) * 1000)}
+    except Exception as e:
+        out = {"ok": False, "error": str(e)[:500], "ms": int((_t.time() - t0) * 1000)}
+    # MNG ayar özeti (şifre maskeli) — credential dolu mu kontrolü
+    try:
+        s = await _get_mng_settings()
+        out["settings"] = {
+            "username": (s.get("username") or "")[:4] + "***" if s.get("username") else "(boş)",
+            "has_password": bool(s.get("password")),
+            "customer_code": s.get("customer_code") or "(boş)",
+            "enabled": s.get("enabled", True),
+        }
+    except Exception as se:
+        out["settings_error"] = str(se)[:200]
+    return out
+
+
 @router.post("/bulk/cargo-barcode")
 async def bulk_create_cargo_barcode(
     order_ids: List[str],

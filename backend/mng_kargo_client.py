@@ -51,7 +51,7 @@ def _get_client():
         _client_cache = Client(
             WSDL_URL,
             settings=Settings(strict=False, xml_huge_tree=True),
-            transport=Transport(timeout=60, operation_timeout=120),
+            transport=Transport(timeout=15, operation_timeout=25),
         )
     return _client_cache
 
