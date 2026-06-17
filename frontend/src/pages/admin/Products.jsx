@@ -2205,7 +2205,7 @@ export default function AdminProducts() {
                       <p className="text-xs font-bold text-gray-500 uppercase mb-4 tracking-widest text-center">Tahmini Trendyol Satış Fiyatı</p>
                       <div className="text-center">
                         <span className="text-4xl font-black text-orange-600">
-                          {((formData.sale_price || formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
+                          {((formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
                         </span>
                         <span className="text-xl font-bold text-orange-400 ml-1">TL</span>
                       </div>
@@ -2829,14 +2829,14 @@ export default function AdminProducts() {
                             <div className="flex justify-between items-baseline border-b border-gray-800 pb-4">
                               <span className="text-gray-400 text-xs font-bold uppercase">Markup (%{formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate})</span>
                               <span className="text-green-400 font-bold">
-                                +{(((formData.sale_price || formData.price || 0) * (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate)) / 100).toFixed(2)} TL
+                                +{(((formData.price || 0) * (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate)) / 100).toFixed(2)} TL
                               </span>
                             </div>
                             <div className="flex justify-between items-center pt-2">
                               <span className="text-white text-sm font-black uppercase tracking-widest">Trendyol Fiyatı</span>
                               <div className="text-right">
                                 <span className="text-3xl font-black text-orange-500">
-                                  {((formData.sale_price || formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate) / 100)).toFixed(2)}
+                                  {((formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate) / 100)).toFixed(2)}
                                 </span>
                                 <span className="text-orange-300 font-bold ml-1">TL</span>
                               </div>
