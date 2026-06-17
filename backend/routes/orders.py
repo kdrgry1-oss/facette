@@ -2317,32 +2317,51 @@ async def create_cargo_barcode(
     kapida = 1 if payment_method in ("cash_on_delivery", "kapida") else 0
     odeme_sekli = "U" if kapida else "P"  # P=Peşin (Gönderici Öder), U=Ücretli (Alıcı Öder)
 
-    res = mng_create(
-        username=settings["username"],
-        password=settings["password"],
-        siparis_no=siparis_no,
-        irsaliye_no=str(order.get("invoice_number") or "")[:20],
-        kiymet=kiymet,
-        icerik=icerik,
-        hizmet_sekli="NORMAL",  # NORMAL | ONCELIKLI | GUNICI | AKSAM_TESLIMAT
-        teslim_sekli=1,
-        al_sms=0,
-        gn_sms=1 if phone else 0,
-        # MNG format: "Kg:Desi:En:Boy:Yukseklik:;" (her paket ; ile ayrılır)
-        # Varsayılan: 1 paket, 1kg, 1 desi, 20x30x15cm
-        parca_list="1:1:20:30:15:;",
-        alici_ad=full_name,
-        odeme_sekli=odeme_sekli,
-        adres_farkli="0",
-        il=il,
-        ilce=ilce,
-        adres=adres,
-        tel_cep=phone,
-        email=ship.get("email") or order.get("user_email") or "",
-        kapida_odeme=kapida,
-        platform_adi="",  # Pazaryeri değil — boş geç (N11/GG/TRND aksi takdirde)
-        platform_kodu="",
-    )
+    # Senkron SOAP çağrısı event loop'u BLOKE etmesin diye thread'e taşı (aksi halde
+    # MNG WSDL yavaşlığı/erişilemezliği Railway worker'ını kilitleyip 503'e yol açar).
+    import asyncio as _aio_cargo
+    try:
+        res = await _aio_cargo.to_thread(
+            mng_create,
+            username=settings["username"],
+            password=settings["password"],
+            siparis_no=siparis_no,
+            irsaliye_no=str(order.get("invoice_number") or "")[:20],
+            kiymet=kiymet,
+            icerik=icerik,
+            hizmet_sekli="NORMAL",  # NORMAL | ONCELIKLI | GUNICI | AKSAM_TESLIMAT
+            teslim_sekli=1,
+            al_sms=0,
+            gn_sms=1 if phone else 0,
+            # MNG format: "Kg:Desi:En:Boy:Yukseklik:;" (her paket ; ile ayrılır)
+            # Varsayılan: 1 paket, 1kg, 1 desi, 20x30x15cm
+            parca_list="1:1:20:30:15:;",
+            alici_ad=full_name,
+            odeme_sekli=odeme_sekli,
+            adres_farkli="0",
+            il=il,
+            ilce=ilce,
+            adres=adres,
+            tel_cep=phone,
+            email=ship.get("email") or order.get("user_email") or "",
+            kapida_odeme=kapida,
+            platform_adi="",  # Pazaryeri değil — boş geç (N11/GG/TRND aksi takdirde)
+            platform_kodu="",
+        )
+    except Exception as _mng_exc:
+        # MNG bağlantı/SOAP exception'ı: 503 (Railway) yerine okunabilir 502 + gerçek sebep döndür.
+        logger.error(f"MNG create_shipment exception (order={order_id}): {_mng_exc}")
+        try:
+            await db.cargo_logs.insert_one({
+                "id": generate_id(), "order_id": order_id, "provider": "MNG",
+                "action": "create_shipment", "status": "exception",
+                "request_summary": {"siparis_no": siparis_no, "il": il, "ilce": ilce},
+                "error": str(_mng_exc)[:1000],
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"MNG Kargo bağlantı hatası: {str(_mng_exc)[:300]}")
 
     if not res.get("ok"):
         # MNG hatasını orderhist log et
@@ -2368,7 +2387,8 @@ async def create_cargo_barcode(
     try:
         from mng_kargo_client import get_mng_barcode_immediately
         kapida = (order.get("payment_method") or "").lower() in ("cash_on_delivery", "kapida")
-        nz_res = get_mng_barcode_immediately(
+        nz_res = await _aio_cargo.to_thread(
+            get_mng_barcode_immediately,
             username=settings["username"], password=settings["password"],
             siparis_no=siparis_no,
             irsaliye_no=str(order.get("invoice_number") or "")[:20],
@@ -2386,9 +2406,14 @@ async def create_cargo_barcode(
 
     # FaturaSiparisListesi'nden ek kargo durumu çek (şube, kargo statu, varsa GONDERI_NO)
     from mng_kargo_client import get_mng_shipment_status
-    status_info = get_mng_shipment_status(
-        username=settings["username"], password=settings["password"], siparis_no=siparis_no
-    )
+    try:
+        status_info = await _aio_cargo.to_thread(
+            get_mng_shipment_status,
+            username=settings["username"], password=settings["password"], siparis_no=siparis_no
+        )
+    except Exception as _st_exc:
+        logger.warning(f"get_mng_shipment_status exception (graceful fallback): {_st_exc}")
+        status_info = {"ok": False}
     gonderi_no_status = (status_info.get("gonderi_no") or "") if status_info.get("ok") else ""
     kargo_takip_url = (status_info.get("kargo_takip_url") or "") if status_info.get("ok") else ""
     kargo_statu = (status_info.get("kargo_statu") or "0") if status_info.get("ok") else "0"
@@ -2875,8 +2900,9 @@ async def get_cargo_label(order_id: str, token: str = None):
     # bulabilsin diye. Önceden çubuklar kargo takip no'yu (örn. 170553284) kodluyordu ama
     # alttaki yazı sipariş no idi → okutunca sipariş no yerine takip no çıkıyordu.
     main_barcode = siparis_no
-    tracking_line = (f'<div style="font-size:9px;color:#555;margin-top:3px;letter-spacing:.3px;">Kargo Takip: {real_kargo_takip}</div>'
-                     if real_kargo_takip and real_kargo_takip != siparis_no else "")
+    # Kargo Takip yazısı etiket/barkod altından KALDIRILDI (kullanıcı talebi).
+    # Barkod çubukları + altındaki sipariş no zaten yeterli; ayrıca "Kargo Takip: ..." satırı basılmaz.
+    tracking_line = ""
     sender = await _get_sender_info()
     mng = await _get_mng_settings()
     sender_company = mng.get("customer_code") or sender["name"] or "FACETTE"
