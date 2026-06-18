@@ -1180,7 +1180,7 @@ class DoganClient:
         return xml
 
 
-    # ═════════════════ UBL-TR e-Fatura (TEMELFATURA) Üretimi ════════════
+    # ═════════════════ UBL-TR e-Fatura (TICARIFATURA) Üretimi ════════════
     @staticmethod
     def build_efatura_ubl_xml(*,
                                 invoice_uuid: str,
@@ -1211,7 +1211,7 @@ class DoganClient:
                                 discount: float = 0.0,
                                 order_number: str = "",
                                 order_date: str = "",
-                                profile_id: str = "TEMELFATURA",
+                                profile_id: str = "TICARIFATURA",
                                 customer_id_scheme: str = "",
                                 customer_tax_office: str = "",
                                 customer_first_name: str = "",
@@ -1227,10 +1227,10 @@ class DoganClient:
                                 dispatch_date: str = "",
                                 invoice_ref: str = "",
                                 ) -> str:
-        """UBL-TR 1.2 e-Fatura (TEMELFATURA) — kurumsal alıcılar için.
+        """UBL-TR 1.2 e-Fatura (varsayılan TICARIFATURA) — kurumsal alıcılar için.
 
         Örnek EFC2026000000049.xml referansı:
-          • ProfileID=TEMELFATURA
+          • ProfileID=TICARIFATURA (varsayılan; alıcı 8 gün içinde kabul/red edebilir)
           • cac:OrderReference (sipariş no + tarih)
           • cac:BuyerCustomerParty (alıcı ayrı blok)
           • cac:Delivery>DeliveryAddress (CarrierParty yok)

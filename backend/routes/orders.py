@@ -1997,7 +1997,7 @@ async def create_invoice_for_order(
                 detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
             )
 
-    # ─── Doğan e-Fatura (TEMELFATURA) kesimi ─────────────────────────
+    # ─── Doğan e-Fatura (TICARIFATURA / Ticari Fatura) kesimi ─────────
     if dogan_active and invoice_type == "e-fatura":
         from dogan_client import DoganClient
         from fastapi.concurrency import run_in_threadpool
@@ -2119,9 +2119,12 @@ async def create_invoice_for_order(
             payment_method=order.get("payment_method") or "",
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
             dispatch_date=str(order.get("shipped_at") or order.get("dispatch_date") or issue_date)[:10],
-            # Senaryo: Ticari Fatura (alıcı 8 gün içinde kabul/red edebilir). Ayardan
-            # değiştirilebilir (dogan_settings.einvoice_profile); varsayılan TİCARİ.
-            profile_id=(dogan_settings.get("einvoice_profile") or "TICARIFATURA"),
+            # Senaryo: TİCARİ FATURA (alıcı 8 gün içinde kabul/red edebilir).
+            # Kullanıcı talebiyle e-Fatura HER ZAMAN ticari kesilir; eski/artık
+            # bir dogan_settings.einvoice_profile=TEMELFATURA değeri bunu sessizce
+            # temele düşüremesin diye sabitlendi. Yalnızca e-Fatura'yı etkiler;
+            # e-Arşiv ve mikro ihracat akışları değişmedi.
+            profile_id="TICARIFATURA",
         )
         ubl_xml = DoganClient.build_efatura_ubl_xml(**_efatura_kwargs)
 
@@ -3564,39 +3567,6 @@ async def cargo_poll_now(current_user: dict = Depends(require_admin)):
         return {"success": True, "message": "DHL/MNG kargo taraması çalıştırıldı."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tarama hatası: {e}")
-
-
-@router.get("/cargo/poll-health")
-async def cargo_poll_health(current_user: dict = Depends(require_admin)):
-    """Admin: DHL/MNG kargo durum taraması sağlık/izleme bilgisi.
-
-    Ayarlar > Kargo sayfasındaki izleme paneli bu veriyi gösterir: son çalışma
-    zamanı, sonuç (running/ok/skipped/error), sorgulanan/değişen sipariş sayıları,
-    son hata mesajı, ortalama süre ve MNG/DHL ayarlarının aktif olup olmadığı.
-    Senkron hiç çalışmadıysa status='unknown' döner (panel bunu uyarı olarak gösterir).
-    """
-    h = await db.settings.find_one({"id": "dhl_poll_health"}, {"_id": 0}) or {}
-    mng = await _get_mng_settings()
-    hist = list(reversed(h.get("history") or []))[:20]  # yeni → eski
-    return {
-        "ok": True,
-        "interval_min": h.get("interval_min", 5),
-        "status": h.get("status") or "unknown",
-        "last_run_at": h.get("last_run_at"),
-        "last_finish_at": h.get("last_finish_at"),
-        "updated_at": h.get("updated_at"),
-        "processed": h.get("processed", 0),
-        "shipped": h.get("shipped", 0),
-        "delivered": h.get("delivered", 0),
-        "updated": h.get("updated", 0),
-        "errors": h.get("errors", 0),
-        "duration_ms": h.get("duration_ms", 0),
-        "last_error": h.get("last_error", ""),
-        "skipped_reason": h.get("skipped_reason", ""),
-        "mng_active": bool(mng.get("is_active")),
-        "mng_user_set": bool(mng.get("username")),
-        "history": hist,
-    }
 
 
 # =============================================================================
