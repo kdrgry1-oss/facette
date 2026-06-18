@@ -1,23 +1,37 @@
 #!/usr/bin/env python3
 """
-hepsiburada_client.py — Hepsiburada Marketplace (MPOP) API istemcisi.
-Kategori agaci, kategori ozellikleri, ozellik (enum) degerleri.
+hepsiburada_client.py — Hepsiburada Marketplace (MPOP) tam API istemcisi.
 
-Auth : HTTP Basic (merchant_id:secret_key) + User-Agent (developer username).
-Ortam: test=True  -> https://mpop-sit.hepsiburada.com (sandbox)
-       test=False -> https://mpop.hepsiburada.com     (canli)
+Kapsam (resmi dökümana göre):
+  • Katalog (MPOP)    : kategoriler, kategori özellikleri, özellik (enum) değerleri
+  • Ürün (MPOP)       : ürün oluşturma (import / multipart), tracking, statü sorgulama,
+                        statü bazlı ve mağaza bazlı ürün listeleme
+  • Listing (LISTING) : fiyat güncelleme, stok güncelleme, güncelleme durumu sorgulama,
+                        listing çekme, satışa açma/kapatma (activate/deactivate), silme
+  • Sipariş (OMS)     : sipariş listesi/detay, kampanya, paketleme, paket listesi,
+                        kargo firması değiştirme, fatura linki, kargo etiketi,
+                        kalem iptali, teslim bilgisi
+  • İade/Talep (OMS)  : talep listesi, statü bazlı talep, kabul/ret, bekleyen aksiyonlar
+
+Auth :
+  • MPOP + Listing    : HTTP Basic (merchant_id:secret_key) + User-Agent (dev_username)
+  • OMS + Talep       : AYRI Basic kimlik gerekebilir; olası kombinasyonlar sırayla denenir.
+
+Ortam: test=True  -> *-sit.hepsiburada.com (sandbox)
+       test=False -> canlı host
 
 Kütüphane:
   hb = HepsiburadaClient(merchant_id, secret_key, dev_username, test=True)
   cats  = hb.get_categories(leaf=True, active=True, available=True)
-  attrs = hb.get_category_attributes(category_id)   # {'baseAttributes':[], 'attributes':[]}
-  vals  = hb.iter_attribute_values(category_id, attribute_id)  # sadece type=='enum'
+  attrs = hb.get_category_attributes(category_id)
+  res   = hb.update_stocks([{"merchantSku": "ABC", "availableStock": 5}])
 
 Self-test:
   python3 hepsiburada_client.py
 """
 import base64
 import json
+import uuid
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -28,8 +42,15 @@ class HepsiburadaError(Exception):
 
 
 class HepsiburadaClient:
+    # MPOP (katalog + ürün)
     SANDBOX = "https://mpop-sit.hepsiburada.com"
     PROD = "https://mpop.hepsiburada.com"
+    # Listing (fiyat/stok/listeleme)
+    LISTING_SANDBOX = "https://listing-external-sit.hepsiburada.com"
+    LISTING_PROD = "https://listing-external.hepsiburada.com"
+    # OMS (sipariş + talep)
+    OMS_SANDBOX = "https://oms-external-sit.hepsiburada.com"
+    OMS_PROD = "https://oms-external.hepsiburada.com"
 
     def __init__(self, merchant_id, secret_key, dev_username, test=True, timeout=30,
                  oms_username=None, oms_password=None):
@@ -40,32 +61,57 @@ class HepsiburadaClient:
         self.dev_username = str(dev_username).strip()
         self.oms_username = (str(oms_username).strip() if oms_username else "")
         self.oms_password = (str(oms_password).strip() if oms_password else "")
+        self.test = bool(test)
         self.base = self.SANDBOX if test else self.PROD
+        self.listing_base = self.LISTING_SANDBOX if test else self.LISTING_PROD
         self.timeout = timeout
         token = base64.b64encode(f"{self.merchant_id}:{self.secret_key}".encode()).decode()
         self._auth = f"Basic {token}"
 
-    def _get(self, path, params=None, return_headers=False):
-        url = self.base + path
+    # ====================================================================
+    #  Ortak HTTP yardımcıları (MPOP + Listing — standart Basic auth)
+    # ====================================================================
+    def _request(self, base, method, path, params=None, json_body=None,
+                 raw_body=None, content_type=None, return_headers=False, raw_response=False):
+        url = base + path
         if params:
-            url += "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, headers={
+            clean = {k: v for k, v in params.items() if v not in (None, "")}
+            if clean:
+                url += "?" + urllib.parse.urlencode(clean)
+        headers = {
             "Authorization": self._auth,
             "User-Agent": self.dev_username,
             "Accept": "application/json",
-        })
+        }
+        data = None
+        if json_body is not None:
+            data = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        elif raw_body is not None:
+            data = raw_body if isinstance(raw_body, bytes) else str(raw_body).encode("utf-8")
+            if content_type:
+                headers["Content-Type"] = content_type
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                body = r.read().decode("utf-8", "replace")
-                data = json.loads(body) if body else {}
-                return (data, dict(r.headers)) if return_headers else data
+                body = r.read()
+                if raw_response:
+                    return (body, dict(r.headers)) if return_headers else body
+                text = body.decode("utf-8", "replace")
+                parsed = json.loads(text) if text.strip() else {}
+                return (parsed, dict(r.headers)) if return_headers else parsed
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[:500]
-            raise HepsiburadaError(f"HTTP {e.code} {path} -> {detail}")
+            detail = e.read().decode("utf-8", "replace")[:600]
+            raise HepsiburadaError(f"HTTP {e.code} {method} {path} -> {detail}")
         except urllib.error.URLError as e:
             raise HepsiburadaError(f"Baglanti hatasi {path}: {e}")
 
-    # ---------- Kategoriler ----------
+    def _get(self, path, params=None, return_headers=False):
+        return self._request(self.base, "GET", path, params=params, return_headers=return_headers)
+
+    # ====================================================================
+    #  KATEGORİLER (MPOP)
+    # ====================================================================
     def get_categories(self, leaf=None, active=None, available=None, page=0, size=2000):
         params = {"page": page, "size": size}
         if leaf is not None:
@@ -87,18 +133,14 @@ class HepsiburadaClient:
             page += 1
         return out
 
-    # ---------- Ozellikler ----------
     def get_category_attributes(self, category_id):
         """Sadece leaf+available kategorilerde dolu gelir.
-        Doner: {'baseAttributes':[...], 'attributes':[...]}
-        Her ozellik: {name, id, mandatory, type, multiValue}"""
+        Doner: {'baseAttributes':[...], 'attributes':[...]}"""
         d = self._get(f"/product/api/categories/{category_id}/attributes")
         return d.get("data", {}) or {}
 
-    # ---------- Ozellik (enum) degerleri ----------
     def get_attribute_values(self, category_id, attribute_id, page=0, limit=1000):
-        """type=='enum' ozellikler icin gecerli degerler (paginasyonlu).
-        Path 'attribute' TEKIL. Toplam adet header'da (Total-Count)."""
+        """type=='enum' ozellikler icin gecerli degerler (paginasyonlu)."""
         aid = urllib.parse.quote(str(attribute_id), safe="")
         path = f"/product/api/categories/{category_id}/attribute/{aid}/values"
         data, headers = self._get(path, {"page": page, "limit": limit}, return_headers=True)
@@ -124,71 +166,363 @@ class HepsiburadaClient:
             page += 1
         return out
 
-    # ---------- Siparişler (OMS — Order Management System) ----------
-    # NOT: Siparişler MPOP'tan DEĞİL, ayrı OMS host'undan gelir. OMS Basic auth genelde
-    # MPOP'tan FARKLI kimlik ister (merchant_id:secret_key 401 verir). Bu yüzden olası
-    # kombinasyonları sırayla deneriz; 401 olmayan ilk yanıtı kullanırız.
-    OMS_SANDBOX = "https://oms-external-sit.hepsiburada.com"
-    OMS_PROD = "https://oms-external.hepsiburada.com"
+    # ====================================================================
+    #  ÜRÜN (MPOP)  —  oluşturma / tracking / statü
+    # ====================================================================
+    def create_products(self, items):
+        """Ürünleri Hepsiburada kataloğuna gönderir (import).
+        items: HB ürün nesneleri listesi -> her biri {categoryId, merchant, attributes:{...}}.
+        İstek multipart/form-data; 'file' alanında JSON dosyası (integrator.json) gider.
+        Doner: {trackingId|tracking_id|...} (içe aktarma takip numarası)."""
+        if isinstance(items, dict):
+            items = [items]
+        payload = json.dumps(items, ensure_ascii=False).encode("utf-8")
+        boundary = "----HBFacette" + uuid.uuid4().hex
+        body = b""
+        body += ("--" + boundary + "\r\n").encode()
+        body += b'Content-Disposition: form-data; name="file"; filename="integrator.json"\r\n'
+        body += b"Content-Type: application/json\r\n\r\n"
+        body += payload + b"\r\n"
+        body += ("--" + boundary + "--\r\n").encode()
+        return self._request(self.base, "POST", "/product/api/products/import",
+                             raw_body=body,
+                             content_type="multipart/form-data; boundary=" + boundary)
 
+    def get_product_tracking(self, tracking_id):
+        """İçe aktarma (import) takip numarasının durumunu döner."""
+        tid = urllib.parse.quote(str(tracking_id), safe="")
+        return self._get(f"/product/api/products/status/{tid}")
+
+    def check_product_status(self, merchant_sku_list):
+        """merchantSku listesinin ürün/eşleşme durumlarını sorgular.
+        body: [{"merchant": <mid>, "merchantSkuList": [...]}]"""
+        skus = [str(s) for s in (merchant_sku_list or []) if s]
+        body = [{"merchant": self.merchant_id, "merchantSkuList": skus}]
+        return self._request(self.base, "POST", "/product/api/check-product-status", json_body=body)
+
+    def get_products_by_status(self, product_status="WAITING", task_status=False,
+                               page=0, size=100, version=1):
+        """Statü bazlı ürün bilgisi çekme."""
+        params = {"merchantId": self.merchant_id, "productStatus": product_status,
+                  "taskStatus": str(task_status).lower(), "page": page, "size": size,
+                  "version": version}
+        return self._get("/product/api/products/products-by-merchant-and-status", params)
+
+    def get_all_products(self, page=0, size=1000):
+        """Mağaza bazlı tüm ürün bilgilerini listeler."""
+        return self._get(f"/product/api/products/all-products-of-merchant/{self.merchant_id}",
+                         {"page": page, "size": size})
+
+    # ====================================================================
+    #  LISTING  —  fiyat / stok / listeleme  (listing-external host)
+    # ====================================================================
+    def update_prices(self, items):
+        """Listing fiyat güncelleme.
+        items: [{"merchantSku"|"hepsiburadaSku": ..., "price": <float>}]
+        Doner: {"id": <inventoryUploadId>, ...}"""
+        path = f"/listings/merchantid/{self.merchant_id}/price-uploads"
+        return self._request(self.listing_base, "POST", path, json_body=list(items))
+
+    def update_stocks(self, items):
+        """Listing stok güncelleme.
+        items: [{"merchantSku"|"hepsiburadaSku": ..., "availableStock": <int>}]
+        Doner: {"id": <inventoryUploadId>, ...}"""
+        path = f"/listings/merchantid/{self.merchant_id}/stock-uploads"
+        return self._request(self.listing_base, "POST", path, json_body=list(items))
+
+    def get_price_upload_status(self, upload_id):
+        """Fiyat güncelleme işlem kontrolü (MinLock/MaxLock dahil)."""
+        uid = urllib.parse.quote(str(upload_id), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/price-uploads/id/{uid}"
+        return self._request(self.listing_base, "GET", path)
+
+    def get_stock_upload_status(self, upload_id):
+        """Stok güncelleme işlem kontrolü."""
+        uid = urllib.parse.quote(str(upload_id), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/stock-uploads/id/{uid}"
+        return self._request(self.listing_base, "GET", path)
+
+    def get_upload_status(self, kind, upload_id):
+        """kind: 'price' | 'stock' | 'inventory'"""
+        k = {"price": "price-uploads", "stock": "stock-uploads",
+             "inventory": "inventory-uploads"}.get(kind, "stock-uploads")
+        uid = urllib.parse.quote(str(upload_id), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/{k}/id/{uid}"
+        return self._request(self.listing_base, "GET", path)
+
+    def update_listings_xml(self, listings):
+        """Birleşik listing güncelleme (fiyat+stok+kargo+termin) — XML body.
+        listings: [{HepsiburadaSku, MerchantSku, ProductName, Price, AvailableStock,
+                    DispatchTime, MaximumPurchasableQuantity, CargoCompany1..3}]
+        Doner: {"id": <inventoryUploadId>, ...}"""
+        def esc(v):
+            s = "" if v is None else str(v)
+            return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        parts = ['<?xml version="1.0" encoding="utf-8"?>',
+                 '<listings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                 'xmlns:xsd="http://www.w3.org/2001/XMLSchema">']
+        for it in listings:
+            parts.append("<listing>")
+            for k, v in it.items():
+                if v in (None, ""):
+                    continue
+                parts.append(f"<{k}>{esc(v)}</{k}>")
+            parts.append("</listing>")
+        parts.append("</listings>")
+        xml = "".join(parts)
+        path = f"/listings/merchantid/{self.merchant_id}/inventory-uploads"
+        return self._request(self.listing_base, "POST", path,
+                             raw_body=xml, content_type="application/xml")
+
+    def get_listings(self, offset=0, limit=100, merchant_sku_list=None,
+                     hepsiburada_sku_list=None):
+        """Satıcı listing bilgilerini çeker."""
+        params = {"offset": offset, "limit": limit}
+        if merchant_sku_list:
+            params["merchantSkuList"] = ",".join(str(s) for s in merchant_sku_list)
+        if hepsiburada_sku_list:
+            params["hepsiburadaSkuList"] = ",".join(str(s) for s in hepsiburada_sku_list)
+        path = f"/listings/merchantid/{self.merchant_id}"
+        return self._request(self.listing_base, "GET", path, params=params)
+
+    def get_listing_by_sku(self, merchant_sku):
+        """Tek bir merchantSku için listing detayını döner (yoksa None)."""
+        res = self.get_listings(offset=0, limit=1, merchant_sku_list=[merchant_sku])
+        rows = res.get("listings") if isinstance(res, dict) else None
+        if rows:
+            return rows[0]
+        return None
+
+    def activate_listing(self, hepsiburada_sku):
+        """Listingi satışa açar (stok ve fiyat 0'dan farklı olmalı)."""
+        sku = urllib.parse.quote(str(hepsiburada_sku), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/sku/{sku}/activate"
+        return self._request(self.listing_base, "POST", path)
+
+    def deactivate_listing(self, hepsiburada_sku):
+        """Listingi satışa kapatır."""
+        sku = urllib.parse.quote(str(hepsiburada_sku), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/sku/{sku}/deactivate"
+        return self._request(self.listing_base, "POST", path)
+
+    def delete_listing(self, hepsiburada_sku, merchant_sku):
+        """Satışta olmayan bir listingi siler."""
+        hb = urllib.parse.quote(str(hepsiburada_sku), safe="")
+        ms = urllib.parse.quote(str(merchant_sku), safe="")
+        path = f"/listings/merchantid/{self.merchant_id}/sku/{hb}/merchantsku/{ms}"
+        return self._request(self.listing_base, "DELETE", path)
+
+    # ====================================================================
+    #  OMS (sipariş + talep)  —  ayrı Basic kimlik denemeli
+    # ====================================================================
     def _oms_base(self):
-        return self.OMS_SANDBOX if self.base == self.SANDBOX else self.OMS_PROD
+        return self.OMS_SANDBOX if self.test else self.OMS_PROD
 
     def _oms_auth_candidates(self):
-        """OMS için denenecek Basic auth (kullanıcı:şifre) kombinasyonları — en olasıdan başlayarak."""
+        """OMS için denenecek Basic auth kombinasyonları — en olasıdan başlayarak."""
         def b(u, p):
             return "Basic " + base64.b64encode(f"{u}:{p}".encode()).decode()
         cands = []
         if self.oms_username and self.oms_password:
             cands.append(("oms_username:oms_password", b(self.oms_username, self.oms_password)))
         cands += [
-            ("dev_username:secret_key", b(self.dev_username, self.secret_key)),
             ("merchant_id:secret_key", b(self.merchant_id, self.secret_key)),
+            ("dev_username:secret_key", b(self.dev_username, self.secret_key)),
             ("dev_username:merchant_id", b(self.dev_username, self.merchant_id)),
         ]
         return cands
 
-    def _oms_get(self, path, params=None):
+    def _oms_request(self, method, path, params=None, json_body=None, raw_response=False):
         url = self._oms_base() + path
         if params:
             clean = {k: v for k, v in params.items() if v not in (None, "")}
             if clean:
                 url += "?" + urllib.parse.urlencode(clean)
+        data = None
+        extra = {}
+        if json_body is not None:
+            data = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
+            extra["Content-Type"] = "application/json"
         tried = []
+        last_detail = ""
         for label, auth in self._oms_auth_candidates():
-            req = urllib.request.Request(url, headers={
-                "Authorization": auth,
-                "User-Agent": self.dev_username,
-                "Accept": "application/json",
-            })
+            headers = {"Authorization": auth, "User-Agent": self.dev_username,
+                       "Accept": "application/json"}
+            headers.update(extra)
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=min(self.timeout, 15)) as r:
-                    body = r.read().decode("utf-8", "replace")
-                    return json.loads(body) if body else {}
+                with urllib.request.urlopen(req, timeout=min(self.timeout, 20)) as r:
+                    body = r.read()
+                    if raw_response:
+                        return body
+                    text = body.decode("utf-8", "replace")
+                    return json.loads(text) if text.strip() else {}
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "replace")[:300]
-                if e.code == 401:
+                if e.code in (401, 403):
                     tried.append(label)
-                    continue  # bu kimlik reddedildi, sıradakini dene
-                raise HepsiburadaError(f"OMS HTTP {e.code} {path} -> {detail}")
+                    last_detail = detail
+                    continue
+                raise HepsiburadaError(f"OMS HTTP {e.code} {method} {path} -> {detail}")
             except urllib.error.URLError as e:
                 raise HepsiburadaError(f"OMS baglanti hatasi {path}: {e}")
         raise HepsiburadaError(
-            f"OMS 401 — denenen kimlik kombinasyonlarinin hepsi reddedildi ({', '.join(tried)}). "
+            f"OMS 401/403 — denenen kimliklerin hepsi reddedildi ({', '.join(tried)}). "
             f"Hepsiburada OMS icin AYRI Entegrasyon Kullanici Adi/Sifre gerekiyor olabilir "
-            f"(Merchant panel > Entegrasyon Bilgileri)."
+            f"(Merchant panel > Entegrasyon Bilgileri). Son yanit: {last_detail[:120]}"
         )
 
+    def _oms_get(self, path, params=None):
+        return self._oms_request("GET", path, params=params)
+
+    # ---------- Sipariş listesi / detay ----------
     def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100):
-        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler.
-        beginDate/endDate ISO-8601 (ör. 2026-06-01T00:00:00). OMS line-item bazlı döner."""
+        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler (OMS line-item bazlı)."""
         params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
         return self._oms_get(f"/orders/merchantid/{self.merchant_id}", params)
 
     def get_order_by_number(self, order_number):
-        """Tek bir siparişi numarasına göre getirir."""
+        """Tek bir siparişi numarasına göre getirir (özet)."""
         on = urllib.parse.quote(str(order_number), safe="")
         return self._oms_get(f"/orders/merchantid/{self.merchant_id}/ordernumber/{on}")
 
+    def get_order_detail(self, order_number):
+        """Sipariş detayını getirir."""
+        on = urllib.parse.quote(str(order_number), safe="")
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}/ordernumber/{on}")
+
+    def get_order_campaigns(self, order_number):
+        """Sipariş kampanya bilgilerini getirir."""
+        on = urllib.parse.quote(str(order_number), safe="")
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}/ordernumber/{on}/campaigns")
+
+    # ---------- Paketleme ----------
+    def get_packageable_with(self, line_item_id):
+        """Bir kalemin hangi kalemlerle paketlenebileceğini döner."""
+        li = urllib.parse.quote(str(line_item_id), safe="")
+        return self._oms_get(f"/lineitems/merchantid/{self.merchant_id}/packageablewith/lineitemid/{li}")
+
+    def package_items(self, line_items, parcel_quantity=1, deci=None):
+        """Kalemleri paketler.
+        line_items: [{"id": <lineItemId>, "quantity": <int>}]
+        Doner: paket numarası içeren yanıt."""
+        body = {"parcelQuantity": parcel_quantity,
+                "lineItemRequests": [{"id": str(li["id"]), "quantity": int(li.get("quantity", 1))}
+                                     for li in line_items]}
+        if deci is not None:
+            body["deci"] = deci
+        return self._oms_request("POST", f"/packages/merchantid/{self.merchant_id}", json_body=body)
+
+    def unpack_package(self, package_number):
+        """Paketi bozar (unpack)."""
+        pn = urllib.parse.quote(str(package_number), safe="")
+        return self._oms_request("POST", f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/unpack")
+
+    def get_unpacked_items(self, offset=0, limit=100):
+        """Paketlenmemiş kalemleri listeler."""
+        return self._oms_get(f"/packages/merchantid/{self.merchant_id}/status/unpacked",
+                             {"offset": offset, "limit": limit})
+
+    def get_packages(self, offset=0, limit=100, begin_date=None, end_date=None):
+        """Paket listesini döner."""
+        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        return self._oms_get(f"/packages/merchantid/{self.merchant_id}", params)
+
+    def get_package_cargo(self, package_number):
+        """Paketin kargo bilgilerini getirir."""
+        pn = urllib.parse.quote(str(package_number), safe="")
+        return self._oms_get(f"/packages/merchantid/packagenumber/{pn}")
+
+    # ---------- Kargo firması değiştirme ----------
+    def get_package_changeable_cargos(self, package_number):
+        pn = urllib.parse.quote(str(package_number), safe="")
+        return self._oms_get(f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/changablecargocompanies")
+
+    def change_package_cargo(self, package_number, cargo_company_short_name):
+        pn = urllib.parse.quote(str(package_number), safe="")
+        body = {"CargoCompanyShortName": cargo_company_short_name}
+        return self._oms_request("PUT",
+                                 f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/changecargocompany",
+                                 json_body=body)
+
+    # ---------- Fatura / etiket / iptal / teslim ----------
+    def send_invoice(self, package_number, invoice_link):
+        """Fatura linkini Hepsiburada'ya iletir."""
+        pn = urllib.parse.quote(str(package_number), safe="")
+        body = {"invoiceLink": invoice_link}
+        return self._oms_request("PUT",
+                                 f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/invoice",
+                                 json_body=body)
+
+    def get_cargo_label(self, package_number, fmt="base64zpl"):
+        """Hepsiburada kargo etiketi (format: zpl | base64zpl | png)."""
+        pn = urllib.parse.quote(str(package_number), safe="")
+        path = f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/label?format={urllib.parse.quote(fmt)}"
+        return self._oms_request("GET", path)
+
+    def cancel_line_item(self, line_item_id, reason_id="83"):
+        """Kalem iptali (her iptal para cezasına tabidir). reason_id: HB iptal sebep kodu."""
+        li = urllib.parse.quote(str(line_item_id), safe="")
+        body = {"reasonId": str(reason_id)}
+        return self._oms_request("POST",
+                                 f"/lineitems/merchantid/{self.merchant_id}/id/{li}/cancelbymerchant",
+                                 json_body=body)
+
+    def send_delivered(self, package_number, received_by=None, received_date=None, digital_codes=None):
+        """Teslim edildi bilgisi gönderir."""
+        pn = urllib.parse.quote(str(package_number), safe="")
+        body = {}
+        if received_date:
+            body["receivedDate"] = received_date
+        if received_by:
+            body["receivedBy"] = received_by
+        if digital_codes:
+            body["digitalCodes"] = digital_codes
+        return self._oms_request("POST",
+                                 f"/packages/merchantid/{self.merchant_id}/packagenumber/{pn}/deliver",
+                                 json_body=body)
+
+    # ====================================================================
+    #  İADE / TALEP (OMS claim)
+    # ====================================================================
+    def get_claims(self, offset=0, limit=100, begin_date=None, end_date=None):
+        """Tüm talep (iade) detaylarını listeler."""
+        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        return self._oms_get(f"/claims/merchantid/{self.merchant_id}", params)
+
+    def get_claims_by_status(self, status, offset=0, limit=100):
+        """Statü bazlı talep listesi.
+        status: AwaitingAction | InDispute | Accepted | Rejected | Refunded | Cancelled"""
+        st = urllib.parse.quote(str(status), safe="")
+        return self._oms_get(f"/claims/merchantid/{self.merchant_id}/status/{st}",
+                             {"offset": offset, "limit": limit})
+
+    def accept_claim(self, claim_number):
+        """Talebi (iadeyi) kabul eder."""
+        cn = urllib.parse.quote(str(claim_number), safe="")
+        return self._oms_request("POST", f"/claims/number/{cn}/accept")
+
+    def reject_claim(self, claim_number, reason, merchant_statement=""):
+        """Talebi (iadeyi) reddeder. reason: HB ret sebep kodu (int)."""
+        cn = urllib.parse.quote(str(claim_number), safe="")
+        body = {"reason": reason, "merchantStatement": merchant_statement or ""}
+        return self._oms_request("POST", f"/claims/number/{cn}/reject", json_body=body)
 
 
+# ====================================================================
+#  Self-test (manuel) — env'den kimlik okur.
+# ====================================================================
+if __name__ == "__main__":
+    import os
+    mid = os.environ.get("HB_MERCHANT_ID", "")
+    sk = os.environ.get("HB_SECRET_KEY", "")
+    du = os.environ.get("HB_DEV_USERNAME", "")
+    if not (mid and sk and du):
+        print("HB_MERCHANT_ID / HB_SECRET_KEY / HB_DEV_USERNAME env degiskenleri gerekli.")
+        raise SystemExit(1)
+    hb = HepsiburadaClient(mid, sk, du, test=True)
+    try:
+        cats = hb.get_categories(leaf=True, active=True, available=True, size=5)
+        print("Kategori örnek:", json.dumps(cats, ensure_ascii=False)[:300])
+    except HepsiburadaError as e:
+        print("Hata:", e)

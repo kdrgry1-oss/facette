@@ -3056,6 +3056,561 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
     return {"success": True, "imported": imported, "updated": updated, "errors": errors}
 
 
+# ============================ HEPSİBURADA — LISTING / ÜRÜN / PAKET / İADE ============================
+# Resmi MPOP/Listing/OMS API'sine göre tam entegrasyon. Listing (fiyat/stok) standart MPOP
+# kimliğiyle; sipariş & iade OMS kimliğiyle (ayrı Basic auth gerekebilir) çalışır.
+
+class HbBulkListingReq(BaseModel):
+    items: List[dict]                 # [{merchantSku?, hepsiburadaSku?, price?, availableStock?}]
+    update_stock: bool = True
+    update_price: bool = True
+
+class HbPackageReq(BaseModel):
+    line_items: List[dict]            # [{id, quantity}]
+    parcel_quantity: int = 1
+    deci: Optional[int] = None
+
+class HbInvoiceReq(BaseModel):
+    invoice_link: str
+
+class HbCargoReq(BaseModel):
+    cargo_company_short_name: str
+
+class HbCancelReq(BaseModel):
+    reason_id: str = "83"
+
+class HbClaimRejectReq(BaseModel):
+    reason: int
+    merchant_statement: Optional[str] = ""
+
+class HbProductSyncReq(BaseModel):
+    product_ids: Optional[List[str]] = None
+    category_id: Optional[str] = None
+
+
+async def _hb_markup() -> float:
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    try:
+        return float(s.get("default_markup", 0) or 0)
+    except Exception:
+        return 0.0
+
+
+def _hb_merchant_sku(obj: dict) -> str:
+    return str(obj.get("stock_code") or obj.get("barcode") or obj.get("sku") or "").strip()
+
+
+def _hb_listing_items_from_product(product: dict, markup: float = 0.0):
+    """Yerel ürün -> HB listing kalemleri [{merchantSku, price, availableStock}]."""
+    items = []
+    base_price = float(product.get("price", 0) or 0)
+    if markup > 0:
+        base_price = base_price * (1 + markup / 100)
+    variants = product.get("variants", []) or []
+    if variants:
+        for v in variants:
+            sku = str(v.get("stock_code") or v.get("barcode") or "").strip()
+            if not sku:
+                continue
+            p = base_price + float(v.get("price_diff", 0) or 0)
+            items.append({"merchantSku": sku, "price": round(p, 2),
+                          "availableStock": int(v.get("stock", 0) or 0)})
+    else:
+        sku = _hb_merchant_sku(product)
+        if sku:
+            items.append({"merchantSku": sku, "price": round(base_price, 2),
+                          "availableStock": int(product.get("stock", 0) or 0)})
+    return items
+
+
+async def _hb_push_stock_price(client, items, do_price=True, do_stock=True):
+    """price-uploads / stock-uploads çağrılarını yapar, upload id'lerini döner."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    out = {"price_upload_id": None, "stock_upload_id": None, "errors": []}
+    price_items = [{k: it[k] for k in ("merchantSku", "hepsiburadaSku", "price") if k in it and it.get(k) not in (None, "")}
+                   for it in items if it.get("price") is not None]
+    stock_items = [{k: it[k] for k in ("merchantSku", "hepsiburadaSku", "availableStock") if k in it and it.get(k) not in (None, "")}
+                   for it in items if it.get("availableStock") is not None]
+    if do_price and price_items:
+        try:
+            r = await asyncio.to_thread(client.update_prices, price_items)
+            out["price_upload_id"] = (r or {}).get("id") if isinstance(r, dict) else None
+        except HepsiburadaError as e:
+            out["errors"].append(f"Fiyat: {e}")
+    if do_stock and stock_items:
+        try:
+            r = await asyncio.to_thread(client.update_stocks, stock_items)
+            out["stock_upload_id"] = (r or {}).get("id") if isinstance(r, dict) else None
+        except HepsiburadaError as e:
+            out["errors"].append(f"Stok: {e}")
+    return out
+
+
+@router.post("/hepsiburada/products/{product_id}/update-stock-price")
+async def hb_update_product_stock_price(product_id: str, body: HbBulkListingReq = None,
+                                        current_user: dict = Depends(require_admin)):
+    """Tek ürünün stok ve fiyatını Hepsiburada listing'ine gönderir (price/stock-uploads)."""
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    markup = await _hb_markup()
+    items = _hb_listing_items_from_product(product, markup)
+    if not items:
+        raise HTTPException(status_code=400, detail="Ürünün stok kodu/barkodu bulunamadı")
+    do_price = True if (body is None) else body.update_price
+    do_stock = True if (body is None) else body.update_stock
+    res = await _hb_push_stock_price(client, items, do_price, do_stock)
+    await db.products.update_one({"id": product_id}, {"$set": {
+        "hb_listing_updated": datetime.now(timezone.utc).isoformat(),
+        "hb_price_upload_id": res.get("price_upload_id"),
+        "hb_stock_upload_id": res.get("stock_upload_id"),
+    }})
+    status = "success" if not res["errors"] else "error"
+    await log_integration_event("hepsiburada", "update_stock_price", "product", product_id, status,
+                                f"{len(items)} kalem gönderildi" + (f" — {'; '.join(res['errors'])}" if res["errors"] else ""))
+    return {"success": not res["errors"], "items_count": len(items), **res}
+
+
+@router.post("/hepsiburada/categories/{category_id}/update-stock-price")
+async def hb_update_category_stock_price(category_id: str, body: HbBulkListingReq = None,
+                                         current_user: dict = Depends(require_admin)):
+    """Bir kategorideki tüm ürünlerin stok/fiyatını Hepsiburada'ya gönderir."""
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    category = await db.categories.find_one({"id": category_id}, {"_id": 0})
+    if not category:
+        raise HTTPException(status_code=404, detail="Kategori bulunamadı")
+    products = await db.products.find({"category_name": category.get("name"), "is_active": True}, {"_id": 0}).to_list(1000)
+    if not products:
+        products = await db.products.find({"category_id": category_id, "is_active": True}, {"_id": 0}).to_list(1000)
+    if not products:
+        raise HTTPException(status_code=404, detail="Bu kategoride ürün bulunamadı")
+    markup = await _hb_markup()
+    items = []
+    for p in products:
+        items.extend(_hb_listing_items_from_product(p, markup))
+    if not items:
+        raise HTTPException(status_code=400, detail="Ürünlerin stok kodu/barkodu bulunamadı")
+    do_price = True if (body is None) else body.update_price
+    do_stock = True if (body is None) else body.update_stock
+    # HB tek istekte max 4000 sku — parça parça gönder
+    all_res = {"price_upload_ids": [], "stock_upload_ids": [], "errors": []}
+    for i in range(0, len(items), 4000):
+        chunk = items[i:i + 4000]
+        r = await _hb_push_stock_price(client, chunk, do_price, do_stock)
+        if r.get("price_upload_id"):
+            all_res["price_upload_ids"].append(r["price_upload_id"])
+        if r.get("stock_upload_id"):
+            all_res["stock_upload_ids"].append(r["stock_upload_id"])
+        all_res["errors"].extend(r.get("errors", []))
+    await log_integration_event("hepsiburada", "update_stock_price", "category", category_id,
+                                "success" if not all_res["errors"] else "error",
+                                f"{category.get('name')}: {len(items)} kalem")
+    return {"success": not all_res["errors"], "items_count": len(items), **all_res}
+
+
+@router.post("/hepsiburada/listings/update")
+async def hb_update_listings_bulk(req: HbBulkListingReq, current_user: dict = Depends(require_admin)):
+    """Serbest kalem listesiyle toplu fiyat/stok güncelleme.
+    items: [{merchantSku?, hepsiburadaSku?, price?, availableStock?}]"""
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items boş")
+    res = await _hb_push_stock_price(client, req.items, req.update_price, req.update_stock)
+    await log_integration_event("hepsiburada", "update_listings", "bulk", str(len(req.items)),
+                                "success" if not res["errors"] else "error", f"{len(req.items)} kalem")
+    return {"success": not res["errors"], "items_count": len(req.items), **res}
+
+
+@router.get("/hepsiburada/listings/status/{kind}/{upload_id}")
+async def hb_listing_upload_status(kind: str, upload_id: str, current_user: dict = Depends(require_admin)):
+    """Fiyat/stok güncelleme işlem kontrolü. kind: price | stock | inventory."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.get_upload_status, kind, upload_id)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/hepsiburada/listings")
+async def hb_get_listings(offset: int = 0, limit: int = 100, merchant_sku: Optional[str] = None,
+                          current_user: dict = Depends(require_admin)):
+    """Satıcı listing bilgilerini çeker."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        skus = [merchant_sku] if merchant_sku else None
+        data = await asyncio.to_thread(client.get_listings, offset, limit, skus)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/listings/{hbsku}/activate")
+async def hb_activate_listing(hbsku: str, current_user: dict = Depends(require_admin)):
+    """Listingi satışa açar (stok ve fiyat > 0 olmalı)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.activate_listing, hbsku)
+        await log_integration_event("hepsiburada", "activate_listing", "listing", hbsku, "success", "Satışa açıldı")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/listings/{hbsku}/deactivate")
+async def hb_deactivate_listing(hbsku: str, current_user: dict = Depends(require_admin)):
+    """Listingi satışa kapatır."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.deactivate_listing, hbsku)
+        await log_integration_event("hepsiburada", "deactivate_listing", "listing", hbsku, "success", "Satışa kapatıldı")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ---------------------------- ÜRÜN OLUŞTURMA (import) ----------------------------
+async def _build_hb_product_item(product: dict, merchant_id: str):
+    """Yerel ürün -> HB import kalemi {categoryId, merchant, attributes:{...}}.
+    Kategori eşleşmesi + hepsiburada_attributes + temel alanlardan oluşturur (best-effort)."""
+    cm = await db.category_mappings.find_one(
+        {"marketplace": "hepsiburada", "category_id": product.get("category_id")}, {"_id": 0})
+    if not cm:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": product.get("category_name")}, {"_id": 0})
+    hb_cat = (cm or {}).get("marketplace_category_id")
+    if not hb_cat:
+        return None, "HB kategori eşleşmesi yok (Kategori Eşleştirme ekranından eşleyin)"
+    attrs = dict(product.get("hepsiburada_attributes") or {})
+    attrs.setdefault("merchantSku", _hb_merchant_sku(product))
+    attrs.setdefault("Barcode", product.get("barcode") or _hb_merchant_sku(product))
+    attrs.setdefault("UrunAdi", product.get("name") or "")
+    desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
+    attrs.setdefault("UrunAciklamasi", desc or product.get("name") or "")
+    brand = product.get("brand") or product.get("brand_name")
+    if brand:
+        attrs.setdefault("Marka", brand)
+    imgs = product.get("images") or []
+    n = 1
+    for img in imgs[:5]:
+        url = img.get("url") if isinstance(img, dict) else img
+        if url:
+            attrs.setdefault(f"Image{n}", url)
+            n += 1
+    if not any(k.startswith("Image") for k in attrs):
+        if product.get("image"):
+            attrs["Image1"] = product["image"]
+    attrs.setdefault("kg", str(product.get("weight") or product.get("kg") or "1"))
+    for k, v in (cm.get("default_mappings") or {}).items():
+        if v not in (None, ""):
+            attrs.setdefault(k, v)
+    item = {"categoryId": int(hb_cat) if str(hb_cat).isdigit() else hb_cat,
+            "merchant": merchant_id, "attributes": attrs}
+    return item, None
+
+
+@router.post("/hepsiburada/products/sync")
+async def hb_sync_products(req: HbProductSyncReq, current_user: dict = Depends(require_admin)):
+    """Ürünleri Hepsiburada kataloğuna gönderir (import). Tracking ID döner.
+    NOT: Kategori-özellik eşleşmesi eksikse ilgili ürün atlanır; HB sandbox ile doğrulanmalıdır."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    query = {"is_active": True}
+    if req.product_ids:
+        query = {"id": {"$in": req.product_ids}}
+    elif req.category_id:
+        cat = await db.categories.find_one({"id": req.category_id}, {"_id": 0})
+        if cat:
+            query = {"category_name": cat.get("name"), "is_active": True}
+    products = await db.products.find(query, {"_id": 0}).to_list(500)
+    if not products:
+        raise HTTPException(status_code=404, detail="Gönderilecek ürün bulunamadı")
+    items, skipped = [], []
+    for p in products:
+        item, e = await _build_hb_product_item(p, client.merchant_id)
+        if e:
+            skipped.append({"product_id": p.get("id"), "name": p.get("name"), "reason": e})
+        else:
+            items.append(item)
+    if not items:
+        return {"success": False, "message": "Hiçbir ürün gönderilemedi (eşleşme eksik).",
+                "skipped": skipped}
+    try:
+        res = await asyncio.to_thread(client.create_products, items)
+    except HepsiburadaError as e:
+        await log_integration_event("hepsiburada", "product_import", "bulk", str(len(items)), "error", str(e))
+        raise HTTPException(status_code=502, detail=str(e))
+    tracking_id = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("id")
+    await log_integration_event("hepsiburada", "product_import", "bulk", str(tracking_id or len(items)),
+                                "success", f"{len(items)} ürün gönderildi, {len(skipped)} atlandı")
+    return {"success": True, "sent_count": len(items), "skipped_count": len(skipped),
+            "tracking_id": tracking_id, "raw": res, "skipped": skipped}
+
+
+@router.get("/hepsiburada/products/tracking/{tracking_id}")
+async def hb_product_tracking(tracking_id: str, current_user: dict = Depends(require_admin)):
+    """Ürün import (tracking) durumunu döner."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.get_product_tracking, tracking_id)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/hepsiburada/products/by-status")
+async def hb_products_by_status(product_status: str = "WAITING", task_status: bool = False,
+                                page: int = 0, size: int = 100,
+                                current_user: dict = Depends(require_admin)):
+    """Statü bazlı ürün listesi (WAITING, MATCHED, REJECTED, CREATED ...)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.get_products_by_status, product_status, task_status, page, size)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ---------------------------- SİPARİŞ / PAKET (OMS) ----------------------------
+@router.get("/hepsiburada/orders/{order_number}")
+async def hb_order_detail(order_number: str, current_user: dict = Depends(require_admin)):
+    """Sipariş detayını OMS'ten getirir."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    raw_no = order_number[2:] if order_number.upper().startswith("HB") else order_number
+    try:
+        data = await asyncio.to_thread(client.get_order_detail, raw_no)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/hepsiburada/packages")
+async def hb_packages(offset: int = 0, limit: int = 100, current_user: dict = Depends(require_admin)):
+    """Paket listesini döner."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.get_packages, offset, limit)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/packages")
+async def hb_create_package(req: HbPackageReq, current_user: dict = Depends(require_admin)):
+    """Kalemleri paketler (kargoya hazırlar)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if not req.line_items:
+        raise HTTPException(status_code=400, detail="line_items boş")
+    try:
+        data = await asyncio.to_thread(client.package_items, req.line_items, req.parcel_quantity, req.deci)
+        await log_integration_event("hepsiburada", "package", "order", str(len(req.line_items)), "success", "Paketlendi")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.put("/hepsiburada/packages/{package_number}/invoice")
+async def hb_send_invoice(package_number: str, req: HbInvoiceReq, current_user: dict = Depends(require_admin)):
+    """Pakete fatura linki iletir."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.send_invoice, package_number, req.invoice_link)
+        await log_integration_event("hepsiburada", "send_invoice", "package", package_number, "success", "Fatura iletildi")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/hepsiburada/packages/{package_number}/label")
+async def hb_cargo_label(package_number: str, fmt: str = "base64zpl", current_user: dict = Depends(require_admin)):
+    """Hepsiburada kargo etiketini döner (zpl | base64zpl | png)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.get_cargo_label, package_number, fmt)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.put("/hepsiburada/packages/{package_number}/cargo")
+async def hb_change_cargo(package_number: str, req: HbCargoReq, current_user: dict = Depends(require_admin)):
+    """Paketin kargo firmasını değiştirir."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.change_package_cargo, package_number, req.cargo_company_short_name)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/lineitems/{line_item_id}/cancel")
+async def hb_cancel_line(line_item_id: str, req: HbCancelReq = None, current_user: dict = Depends(require_admin)):
+    """Sipariş kalemini iptal eder (para cezasına tabidir)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    reason = (req.reason_id if req else "83")
+    try:
+        data = await asyncio.to_thread(client.cancel_line_item, line_item_id, reason)
+        await log_integration_event("hepsiburada", "cancel_line", "lineitem", line_item_id, "success", f"İptal (sebep {reason})")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/packages/{package_number}/deliver")
+async def hb_mark_delivered(package_number: str, body: dict = Body(default={}),
+                            current_user: dict = Depends(require_admin)):
+    """Teslim edildi bilgisi gönderir."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.send_delivered, package_number,
+                                       body.get("received_by"), body.get("received_date"),
+                                       body.get("digital_codes"))
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ---------------------------- İADE / TALEP (OMS claim) ----------------------------
+@router.get("/hepsiburada/claims")
+async def hb_claims(status: Optional[str] = None, offset: int = 0, limit: int = 100,
+                    current_user: dict = Depends(require_admin)):
+    """Talep (iade) listesini döner. status verilirse statü bazlı."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        if status:
+            data = await asyncio.to_thread(client.get_claims_by_status, status, offset, limit)
+        else:
+            data = await asyncio.to_thread(client.get_claims, offset, limit)
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/claims/{claim_number}/accept")
+async def hb_accept_claim(claim_number: str, current_user: dict = Depends(require_admin)):
+    """Talebi (iadeyi) kabul eder."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.accept_claim, claim_number)
+        await log_integration_event("hepsiburada", "accept_claim", "claim", claim_number, "success", "İade kabul")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/hepsiburada/claims/{claim_number}/reject")
+async def hb_reject_claim(claim_number: str, req: HbClaimRejectReq, current_user: dict = Depends(require_admin)):
+    """Talebi (iadeyi) reddeder. reason: HB ret sebep kodu (int)."""
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        data = await asyncio.to_thread(client.reject_claim, claim_number, req.reason, req.merchant_statement)
+        await log_integration_event("hepsiburada", "reject_claim", "claim", claim_number, "success", f"İade ret (sebep {req.reason})")
+        return {"success": True, "data": data}
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+
 @router.post("/trendyol/orders/import")
 async def import_trendyol_orders(current_user: dict = Depends(require_admin)):
     """Import orders from Trendyol (Last 15 days) auto job"""
