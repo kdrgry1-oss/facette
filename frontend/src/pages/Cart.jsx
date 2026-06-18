@@ -278,7 +278,7 @@ export default function Cart() {
                 <p className="text-[10px] tracking-[0.3em] text-red-700 uppercase mb-2">Sınırlı Süre</p>
                 <h2 className="text-xl sm:text-2xl font-light tracking-tight">Kasa önü fırsatları</h2>
               </div>
-              <Link to="/kategori/sale" className="hidden sm:inline-block text-[11px] tracking-[0.25em] uppercase border-b border-black pb-0.5 hover:opacity-70">
+              <Link to="/sale" className="hidden sm:inline-block text-[11px] tracking-[0.25em] uppercase border-b border-black pb-0.5 hover:opacity-70">
                 Tümü
               </Link>
             </div>

@@ -11,16 +11,16 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Default/Fallback content
 const DEFAULT_HERO_BANNERS = [
-  { id: 1, image: "https://cdn.facette.com.tr/pagedesign/en-yeniler-dc2e-1920.webp", link: "/kategori/en-yeniler" },
-  { id: 2, image: "https://cdn.facette.com.tr/pagedesign/ae79c961-ba0b-49e3-b274-2c6cc78ab700-1920.webp", link: "/kategori/sale" }
+  { id: 1, image: "https://cdn.facette.com.tr/pagedesign/en-yeniler-dc2e-1920.webp", link: "/en-yeniler" },
+  { id: 2, image: "https://cdn.facette.com.tr/pagedesign/ae79c961-ba0b-49e3-b274-2c6cc78ab700-1920.webp", link: "/sale" }
 ];
 
 const DEFAULT_INSTASHOP = [
   { id: 1, image: "https://cdn.facette.com.tr/pagedesign/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9-1920.webp", link: "/basic-atki" },
-  { id: 2, image: "https://cdn.facette.com.tr/pagedesign/orj-114d3d37-9c7f-495c-8bc2-28d32781818d-1920.webp", link: "/kategori/ceket" },
-  { id: 3, image: "https://cdn.facette.com.tr/pagedesign/orj-e18eff06-8597-4f10-92cb-64b11151a74d-1920.webp", link: "/kategori/kaban" },
-  { id: 4, image: "https://cdn.facette.com.tr/pagedesign/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0-1920.webp", link: "/kategori/pantolon" },
-  { id: 5, image: "https://cdn.facette.com.tr/pagedesign/orj-87d15ba0-0081-4b65-acc5-b12328de368b-1920.webp", link: "/kategori/elbise" }
+  { id: 2, image: "https://cdn.facette.com.tr/pagedesign/orj-114d3d37-9c7f-495c-8bc2-28d32781818d-1920.webp", link: "/ceket" },
+  { id: 3, image: "https://cdn.facette.com.tr/pagedesign/orj-e18eff06-8597-4f10-92cb-64b11151a74d-1920.webp", link: "/kaban" },
+  { id: 4, image: "https://cdn.facette.com.tr/pagedesign/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0-1920.webp", link: "/pantolon" },
+  { id: 5, image: "https://cdn.facette.com.tr/pagedesign/orj-87d15ba0-0081-4b65-acc5-b12328de368b-1920.webp", link: "/elbise" }
 ];
 
 // Block Components
@@ -140,7 +140,7 @@ function ProductSlider({ block, products }) {
         ))}
       </div>
       <div className="text-center mt-12">
-        <Link to="/kategori/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
+        <Link to="/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
           Tümünü Gör
         </Link>
       </div>
@@ -385,7 +385,7 @@ export default function Home() {
                 ))}
               </div>
               <div className="text-center mt-12">
-                <Link to="/kategori/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
+                <Link to="/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
                   Kategoriye Git
                 </Link>
               </div>
@@ -404,16 +404,16 @@ export default function Home() {
           <HeroSlider block={{ images: DEFAULT_HERO_BANNERS.map(b => b.image), links: DEFAULT_HERO_BANNERS.map(b => b.link) }} />
 
           {/* Full Width Banner */}
-          <Link to="/kategori/en-yeniler" className="block">
+          <Link to="/en-yeniler" className="block">
             <img src={optimizeImg("https://cdn.facette.com.tr/pagedesign/title-cb23757c-6-1920.webp", 1920)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
           </Link>
 
           {/* Two Half-Width Banners */}
           <div className="grid grid-cols-2">
-            <Link to="/kategori/gomlek" className="block">
+            <Link to="/gomlek" className="block">
               <img src={optimizeImg("https://cdn.facette.com.tr/pagedesign/title-65777bd3-0-1920.webp", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
-            <Link to="/kategori/aksesuar" className="block">
+            <Link to="/aksesuar" className="block">
               <img src={optimizeImg("https://cdn.facette.com.tr/pagedesign/title-7b3e27f9-5-1920.webp", 1000)} alt="" className="w-full h-auto block" loading="lazy" decoding="async" />
             </Link>
           </div>
@@ -438,7 +438,7 @@ export default function Home() {
               </div>
             )}
             <div className="text-center mt-12">
-              <Link to="/kategori/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
+              <Link to="/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
                 Kategoriye Git
               </Link>
             </div>

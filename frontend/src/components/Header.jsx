@@ -7,6 +7,7 @@ import { useFavorites } from "../context/FavoritesContext";
 import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
 import { optimizeImg } from "../lib/img";
+import { slugify } from "../lib/slug";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -214,7 +215,7 @@ export default function Header({ hideMenu = false }) {
                   <nav className="hidden lg:flex items-center gap-5">
                     {/* EN YENİLER */}
                     <Link
-                      to="/kategori/en-yeniler"
+                      to="/en-yeniler"
                       className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
                     >
                       EN YENİLER
@@ -227,7 +228,7 @@ export default function Header({ hideMenu = false }) {
                       onMouseLeave={scheduleClose}
                     >
                       <Link
-                        to="/kategori/giyim"
+                        to="/giyim"
                         className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 flex items-center"
                       >
                         GİYİM
@@ -241,7 +242,7 @@ export default function Header({ hideMenu = false }) {
                       onMouseLeave={scheduleClose}
                     >
                       <Link
-                        to="/kategori/aksesuar"
+                        to="/aksesuar"
                         className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
                       >
                         AKSESUAR
@@ -250,7 +251,7 @@ export default function Header({ hideMenu = false }) {
 
                     {/* SALE */}
                     <Link
-                      to="/kategori/sale"
+                      to="/sale"
                       className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 text-red-700"
                     >
                       SALE
@@ -316,7 +317,7 @@ export default function Header({ hideMenu = false }) {
                         {items.map((item) => (
                           <li key={item.slug}>
                             <Link
-                              to={`/kategori/${item.slug}`}
+                              to={`/${item.slug}`}
                               className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
                               onClick={() => setActiveMenu(null)}
                               onMouseEnter={() => setHoveredCategory(item.slug)}
@@ -327,7 +328,7 @@ export default function Header({ hideMenu = false }) {
                         ))}
                         <li className="pt-1.5">
                           <Link
-                            to={`/kategori/${category.toLowerCase().replace(/\s/g, '-').replace(/ş/g, 's').replace(/ı/g, 'i')}`}
+                            to={`/${slugify(category)}`}
                             className="text-xs font-medium underline hover:no-underline"
                             onClick={() => setActiveMenu(null)}
                           >
@@ -345,7 +346,7 @@ export default function Header({ hideMenu = false }) {
                     products={activeMegaProducts}
                     loading={megaLoading}
                     fallback={MENU_IMAGES.giyim}
-                    fallbackLink="/kategori/giyim"
+                    fallbackLink="/giyim"
                     onNavigate={() => setActiveMenu(null)}
                   />
                 </div>
@@ -370,7 +371,7 @@ export default function Header({ hideMenu = false }) {
                     {AKSESUAR_MENU.map((item) => (
                       <li key={item.slug}>
                         <Link
-                          to={`/kategori/${item.slug}`}
+                          to={`/${item.slug}`}
                           className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
                           onClick={() => setActiveMenu(null)}
                           onMouseEnter={() => setHoveredCategory(item.slug)}
@@ -381,7 +382,7 @@ export default function Header({ hideMenu = false }) {
                     ))}
                   </ul>
                   <Link
-                    to="/kategori/aksesuar"
+                    to="/aksesuar"
                     className="inline-block mt-3 text-xs font-medium underline hover:no-underline"
                     onClick={() => setActiveMenu(null)}
                   >
@@ -411,7 +412,7 @@ export default function Header({ hideMenu = false }) {
                       </Link>
                     ))
                   ) : (
-                    <Link to="/kategori/aksesuar" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
+                    <Link to="/aksesuar" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
                       <img src={MENU_IMAGES.aksesuar[0]} alt="" className="w-full h-full object-cover" />
                     </Link>
                   )}
@@ -437,7 +438,7 @@ export default function Header({ hideMenu = false }) {
             {/* Primary Categories */}
             <div className="px-5 pt-6 pb-4">
               <Link
-                to="/kategori/en-yeniler"
+                to="/en-yeniler"
                 className="block py-3 text-sm tracking-[0.15em] uppercase font-light"
                 onClick={() => setMobileMenuOpen(false)}
               >
@@ -457,7 +458,7 @@ export default function Header({ hideMenu = false }) {
                       {items.map((item) => (
                         <Link
                           key={item.slug}
-                          to={`/kategori/${item.slug}`}
+                          to={`/${item.slug}`}
                           className="block py-1.5 text-[13px] font-light text-black/75"
                           onClick={() => setMobileMenuOpen(false)}
                         >
@@ -479,7 +480,7 @@ export default function Header({ hideMenu = false }) {
                   {AKSESUAR_MENU.map((item) => (
                     <Link
                       key={item.slug}
-                      to={`/kategori/${item.slug}`}
+                      to={`/${item.slug}`}
                       className="block py-1.5 text-[13px] font-light text-black/75"
                       onClick={() => setMobileMenuOpen(false)}
                     >
@@ -490,7 +491,7 @@ export default function Header({ hideMenu = false }) {
               </details>
 
               <Link
-                to="/kategori/sale"
+                to="/sale"
                 className="block py-3 text-sm tracking-[0.15em] uppercase font-light text-red-700 border-t border-black/5"
                 onClick={() => setMobileMenuOpen(false)}
               >

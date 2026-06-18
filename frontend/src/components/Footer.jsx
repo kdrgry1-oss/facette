@@ -14,11 +14,11 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const DEFAULT_COLUMNS = [
   { title: "Alışveriş", links: [
-    { to: "/kategori/en-yeniler", label: "En Yeniler" },
-    { to: "/kategori/elbise", label: "Elbise" },
-    { to: "/kategori/pantolon", label: "Pantolon" },
-    { to: "/kategori/ceket", label: "Ceket" },
-    { to: "/kategori/aksesuar", label: "Aksesuar" },
+    { to: "/en-yeniler", label: "En Yeniler" },
+    { to: "/elbise", label: "Elbise" },
+    { to: "/pantolon", label: "Pantolon" },
+    { to: "/ceket", label: "Ceket" },
+    { to: "/aksesuar", label: "Aksesuar" },
   ]},
   { title: "Müşteri Hizmetleri", links: [
     { to: "/siparis-takip", label: "Sipariş Takibi" },

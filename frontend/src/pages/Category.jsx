@@ -6,6 +6,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { trackViewItemList } from "../lib/dataLayer";
+import { slugify } from "../lib/slug";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -240,7 +241,7 @@ export default function Category() {
                   {categories.map((cat) => (
                     <a
                       key={cat.id}
-                      href={`/kategori/${cat.slug}`}
+                      href={`/${slugify(cat.name || cat.slug || "")}`}
                       className={`block text-sm py-2 px-3 transition-colors ${
                         slug === cat.slug
                           ? 'bg-black text-white'

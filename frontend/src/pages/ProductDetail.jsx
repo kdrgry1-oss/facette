@@ -7,6 +7,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { optimizeImg } from "../lib/img";
+import { slugify } from "../lib/slug";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
@@ -73,7 +74,7 @@ export default function ProductDetail() {
 
     const crumbs = [{ name: "Ana Sayfa", item: origin }];
     if (product.category_name) {
-      crumbs.push({ name: product.category_name, item: `${origin}/kategori/${product.category_slug || ""}` });
+      crumbs.push({ name: product.category_name, item: `${origin}/${slugify(product.category_name || product.category_slug || "")}` });
     }
     crumbs.push({ name: product.name, item: canonical });
     const breadcrumbLd = {
@@ -374,7 +375,7 @@ export default function ProductDetail() {
           <span className="mx-2 text-gray-300">/</span>
           {product.category_name && (
             <>
-              <Link to={`/kategori/${product.category_name.toLowerCase()}`} className="text-gray-500 hover:text-black">
+              <Link to={`/${slugify(product.category_name)}`} className="text-gray-500 hover:text-black">
                 {product.category_name}
               </Link>
               <span className="mx-2 text-gray-300">/</span>

@@ -27,6 +27,7 @@ const ReturnRequest = lazy(() => import("./pages/ReturnRequest"));
 const MiuMiuTheme = lazy(() => import("./pages/storefront/MiuMiuTheme"));
 
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
+import SlugRouter from "./components/SlugRouter";
 import MaintenanceGate from "./components/MaintenanceGate";
 import { trackVisit } from "./lib/attribution";
 
@@ -90,7 +91,7 @@ function App() {
                 {/* Ürün detay — SEO dostu kök URL. Statik rotalar dinamikten önce
                     eşleştiği için /sepet, /giris, /admin vb. her zaman önceliklidir. */}
                 <Route path="/urun/:slug" element={<ProductDetail />} />
-                <Route path="/:slug" element={<ProductDetail />} />
+                <Route path="/:slug" element={<SlugRouter />} />
                 </Routes>
               </Suspense>
             </MaintenanceGate>
