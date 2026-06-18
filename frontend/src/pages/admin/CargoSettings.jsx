@@ -77,6 +77,9 @@ function DhlPollMonitor() {
   const [testing, setTesting] = useState(false);
   const [backfill, setBackfill] = useState(null);
   const [backfilling, setBackfilling] = useState(false);
+  const [qNo, setQNo] = useState("");
+  const [qRes, setQRes] = useState(null);
+  const [querying, setQuerying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -124,6 +127,24 @@ function DhlPollMonitor() {
       toast.error(code === 404 ? "Test endpoint'i bulunamadı (backend güncellenmemiş)." : "Bağlantı testi başarısız.");
     } finally {
       setTesting(false);
+    }
+  };
+
+  const queryOne = async () => {
+    const no = (qNo || "").trim();
+    if (!no) { toast("Sipariş no gir (örn. W10063)"); return; }
+    setQuerying(true);
+    setQRes(null);
+    try {
+      const { data } = await axios.get(
+        `${API}/orders/cargo/mng-test?siparis_no=${encodeURIComponent(no)}`,
+        { headers: authHeaders() }
+      );
+      setQRes(data?.shipment_status || { error: data?.shipment_status_error || "Yanıt yok" });
+    } catch (e) {
+      setQRes({ error: e?.response?.data?.detail || e.message || "İstek başarısız" });
+    } finally {
+      setQuerying(false);
     }
   };
 
@@ -304,6 +325,55 @@ function DhlPollMonitor() {
           )}
         </div>
       )}
+
+      {/* Tek sipariş sorgula — kargo firmasından ham yanıt + bulunan takip no */}
+      <div className="text-sm rounded-lg p-3 border bg-white border-gray-200 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-gray-700 font-medium">Tek sipariş sorgula:</span>
+          <input
+            value={qNo}
+            onChange={(e) => setQNo(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") queryOne(); }}
+            placeholder="W10063"
+            className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm font-mono w-36"
+          />
+          <button
+            onClick={queryOne}
+            disabled={querying}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-sm hover:bg-gray-50 disabled:opacity-60"
+          >
+            <Search className={`w-4 h-4 ${querying ? "animate-pulse" : ""}`} />
+            {querying ? "Sorgulanıyor…" : "Sorgula"}
+          </button>
+          <span className="text-xs text-gray-400">Kargo firmasından canlı yanıtı gösterir (DB'yi değiştirmez).</span>
+        </div>
+        {qRes && (
+          <div className="text-xs space-y-1">
+            {qRes.error ? (
+              <div className="text-red-600 break-all">Hata: {qRes.error}</div>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>Gönderi No: <b className={qRes.gonderi_no ? "text-emerald-700 font-mono" : "text-gray-400"}>{qRes.gonderi_no || "(boş)"}</b></span>
+                  <span>Referans: <span className="font-mono">{qRes.referans_no || "-"}</span></span>
+                  <span>MNG Sip.No: <span className="font-mono">{qRes.mng_siparis_no || "-"}</span></span>
+                  <span>Durum: {qRes.kargo_statu_aciklama || qRes.kargo_statu || "-"}</span>
+                  {qRes.method && <span className="text-gray-400">({qRes.method})</span>}
+                </div>
+                {qRes.gonderi_no
+                  ? <div className="text-emerald-700">✓ Takip no bulundu — "Takip No'ları Topla" ile bu siparişe yazılacak.</div>
+                  : <div className="text-amber-700">Bu yanıtta gönderi no boş. Aşağıdaki ham yanıtta numara görünüyorsa bana ilet, parser'ı ona göre genişleteyim.</div>}
+                {qRes.raw_preview && (
+                  <details>
+                    <summary className="cursor-pointer text-gray-500 select-none">Ham yanıt (kargo firması)</summary>
+                    <pre className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-pre-wrap break-all text-[10px] text-gray-600">{qRes.raw_preview}</pre>
+                  </details>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* MNG/DHL günlük sorgu limiti (kargocu tarafı) — özel uyarı */}
       {h?.daily_limit && (

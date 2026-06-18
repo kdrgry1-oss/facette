@@ -3047,9 +3047,13 @@ async def mng_connection_test(siparis_no: str = None, current_user: dict = Depen
         try:
             from mng_kargo_client import get_mng_shipment_status as _gss_t
             _s2 = await _get_mng_settings()
-            out["shipment_status"] = await _aio_t.to_thread(
+            _ss = await _aio_t.to_thread(
                 _gss_t, username=_s2["username"], password=_s2["password"], siparis_no=siparis_no
             )
+            # Ham yanıtı okunur bir önizlemeye indir (JSON şişmesin, panelde görünür).
+            if isinstance(_ss, dict) and "raw" in _ss:
+                _ss["raw_preview"] = str(_ss.pop("raw"))[:2000]
+            out["shipment_status"] = _ss
         except Exception as _e2:
             out["shipment_status_error"] = str(_e2)[:300]
     return out

@@ -43,6 +43,83 @@ def tr_safe(s) -> str:
     return str(s).translate(_TR_MAP)
 
 
+# FaturaSiparisListesi/KargoTakipByReferans yanıtının iç yapısı MNG/DHL'de sürüme göre
+# değişebiliyor (_value_1 sarmalı, düz dict, liste, vb.). Bu yüzden ASIL alanları
+# (GONDERI_NO gibi) yapıya bağlı KATI bir yoldan okumak yerine, yanıtın HER yerinde
+# özyinelemeli arıyoruz. Böylece numara nerede gömülü olursa olsun yakalanır.
+_FIELD_ALIASES = {
+    # normalize(key) -> kanonik ad   (normalize: lower + '_'/' ' kaldır)
+    "gonderino": "gonderi_no",
+    "mngsiparisno": "mng_siparis_no",
+    "siparisno": "referans_no",       # MNG bunu 'Referans No' olarak gösteriyor (bizim W… no)
+    "referansno": "referans_no",
+    "kargostatu": "kargo_statu",
+    "kargostatuaciklama": "kargo_statu_aciklama",
+    "kargotakipurl": "kargo_takip_url",
+    "teslimtarihi": "teslim_tarihi",
+    "aliciil": "alici_il",
+    "cikissubesi": "cikis_subesi",
+    "teslimsubesi": "teslim_subesi",
+    "faturaserino": "fatura_seri_no",
+    "irsaliyeno": "irsaliye_no",
+}
+
+
+def _norm_key(k) -> str:
+    return str(k).strip().lower().replace("_", "").replace(" ", "")
+
+
+def _deep_find_fields(obj) -> Dict:
+    """Serialize edilmiş yanıtın TÜM dict/list düğümlerini gezip her kanonik alan için
+    İLK boş-olmayan değeri toplar. Yapı ne olursa olsun GONDERI_NO vb. yakalanır."""
+    found: Dict[str, str] = {}
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if not isinstance(v, (dict, list)):
+                    canon = _FIELD_ALIASES.get(_norm_key(k))
+                    if canon and canon not in found and v not in (None, ""):
+                        found[canon] = str(v).strip()
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for it in o:
+                walk(it)
+
+    try:
+        walk(obj)
+    except Exception:
+        pass
+    return found
+
+
+def _deep_pick_any(obj, norm_keys) -> str:
+    """Yanıtın her yerinde, normalize adı norm_keys içinde olan İLK boş-olmayan değeri döndürür."""
+    target = set(norm_keys)
+    result = {"v": ""}
+
+    def walk(o):
+        if result["v"]:
+            return
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if not isinstance(v, (dict, list)) and _norm_key(k) in target and v not in (None, ""):
+                    result["v"] = str(v).strip()
+                    return
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for it in o:
+                walk(it)
+
+    try:
+        walk(obj)
+    except Exception:
+        pass
+    return result["v"]
+
+
 def _get_client():
     global _client_cache
     if _client_cache is None:
@@ -149,27 +226,22 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
             return {"ok": False, "error": "Sipariş bulunamadı"}
         from zeep.helpers import serialize_object
         ser = serialize_object(r)
-        # Navigate: schema → _value_1 → list → FaturaSiparisListesi
-        try:
-            rows = ser.get("_value_1", {}).get("_value_1", [])
-            if rows and isinstance(rows, list):
-                row = rows[0].get("FaturaSiparisListesi", {})
-            else:
-                row = {}
-        except Exception:
-            row = {}
+        # Yapıya bağlı KATI yol yerine: yanıtın her yerinde alanları özyinelemeli bul.
+        f = _deep_find_fields(ser)
         return {
             "ok": True,
-            "mng_siparis_no": str(row.get("MNG_SIPARIS_NO") or "").strip(),
-            "gonderi_no": str(row.get("GONDERI_NO") or "").strip(),
-            "kargo_statu": str(row.get("KARGO_STATU") or "0").strip(),
-            "kargo_statu_aciklama": str(row.get("KARGO_STATU_ACIKLAMA") or "").strip(),
-            "kargo_takip_url": str(row.get("KARGO_TAKIP_URL") or "").strip(),
-            "teslim_tarihi": str(row.get("TESLIM_TARIHI") or "").strip(),
-            "alici_il": str(row.get("ALICI_IL") or "").strip(),
-            "cikis_subesi": str(row.get("CIKIS_SUBESI") or "").strip(),
-            "teslim_subesi": str(row.get("TESLIM_SUBESI") or "").strip(),
-            "raw": row,
+            "method": "FaturaSiparisListesi",
+            "mng_siparis_no": f.get("mng_siparis_no", ""),
+            "gonderi_no": f.get("gonderi_no", ""),         # ASIL TAKİP NO (örn. 411754264494)
+            "referans_no": f.get("referans_no", ""),       # bizim W… sipariş no
+            "kargo_statu": f.get("kargo_statu", "0"),
+            "kargo_statu_aciklama": f.get("kargo_statu_aciklama", ""),
+            "kargo_takip_url": f.get("kargo_takip_url", ""),
+            "teslim_tarihi": f.get("teslim_tarihi", ""),
+            "alici_il": f.get("alici_il", ""),
+            "cikis_subesi": f.get("cikis_subesi", ""),
+            "teslim_subesi": f.get("teslim_subesi", ""),
+            "raw": ser,
         }
     except Exception as e:
         _primary = str(e)
@@ -187,39 +259,23 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
                         "error": f"Takip kaydı yok (KargoTakipByReferans). İlk yöntem: {_primary[:150]}"}
             from zeep.helpers import serialize_object
             d = serialize_object(r2)
-
-            def _pick(dd, *keys):
-                for k in keys:
-                    v = dd.get(k) if isinstance(dd, dict) else None
-                    if v not in (None, ""):
-                        return str(v).strip()
-                return ""
-
-            # KargoTakipByReferans yanıtı tek kayıt ya da _value_1 listesi olabilir;
-            # şema sürümüne dayanıklı biçimde ilk anlamlı düğümü bul.
-            node = d
-            if isinstance(d, dict) and "_value_1" in d:
-                inner = d.get("_value_1")
-                if isinstance(inner, dict) and "_value_1" in inner:
-                    lst = inner.get("_value_1")
-                    if isinstance(lst, list) and lst:
-                        node = lst[0]
-                elif isinstance(inner, list) and inner:
-                    node = inner[0]
-            if not isinstance(node, dict):
-                node = d if isinstance(d, dict) else {}
-
+            f = _deep_find_fields(d)
+            # GONDERI_NO alias listesi bu operasyonda farklı adlarda olabilir; ek tarama:
+            if not f.get("gonderi_no"):
+                _extra = _deep_pick_any(d, ("barkod", "takipno", "kargotakipno", "gonderibarkod"))
+                if _extra:
+                    f["gonderi_no"] = _extra
             return {
                 "ok": True,
                 "method": "KargoTakipByReferans",
-                "mng_siparis_no": _pick(node, "MNG_SIPARIS_NO", "MngSiparisNo", "SiparisNo"),
-                "gonderi_no": _pick(node, "GONDERI_NO", "GonderiNo", "Barkod", "TakipNo", "KargoTakipNo"),
-                "kargo_statu": _pick(node, "KARGO_STATU", "KargoStatu", "Statu", "DurumKodu") or "0",
-                "kargo_statu_aciklama": _pick(node, "KARGO_STATU_ACIKLAMA", "KargoStatuAciklama",
-                                              "Durum", "DurumAciklama", "Aciklama"),
-                "kargo_takip_url": _pick(node, "KARGO_TAKIP_URL", "TakipUrl", "KargoTakipUrl"),
-                "teslim_tarihi": _pick(node, "TESLIM_TARIHI", "TeslimTarihi"),
-                "alici_il": _pick(node, "ALICI_IL", "AliciIl", "Il"),
+                "mng_siparis_no": f.get("mng_siparis_no", ""),
+                "gonderi_no": f.get("gonderi_no", ""),
+                "referans_no": f.get("referans_no", ""),
+                "kargo_statu": f.get("kargo_statu", "0"),
+                "kargo_statu_aciklama": f.get("kargo_statu_aciklama", ""),
+                "kargo_takip_url": f.get("kargo_takip_url", ""),
+                "teslim_tarihi": f.get("teslim_tarihi", ""),
+                "alici_il": f.get("alici_il", ""),
                 "raw": d,
                 "primary_error": _primary[:200],
             }
