@@ -1353,18 +1353,8 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const newProduct = {
-        ...product,
-        name: `${product.name} (Kopya)`,
-        slug: `${product.slug}-kopya-${Date.now()}`,
-        stock_code: product.stock_code ? `${product.stock_code}-COPY` : '',
-        barcode: '',
-      };
-      delete newProduct.id;
-      delete newProduct._id;
-      
-      await axios.post(`${API}/products`, newProduct, { headers });
-      toast.success("Ürün kopyalandı");
+      await axios.post(`${API}/products/${product.id}/duplicate`, {}, { headers });
+      toast.success("Ürün kopyalandı (yeni kart id atandı)");
       fetchProducts();
     } catch (err) {
       toast.error("Kopyalama başarısız");

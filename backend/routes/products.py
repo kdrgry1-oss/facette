@@ -1131,6 +1131,122 @@ async def split_product_by_color(product_id: str):
         "message": f"{len(colors)} renk ayrı ürüne bölündü.",
     }
 
+@router.post("/{product_id}/duplicate", dependencies=[Depends(require_admin)])
+async def duplicate_product(product_id: str):
+    """Bir ürünü BAĞIMSIZ kopya olarak çoğaltır.
+
+    - Her çoğaltmada YENİ ve benzersiz Ürün Kart ID atanır (paylaşılmaz; orijinalle
+      aynı kart id'yi ALMAZ). Böylece "farklı ürün = farklı kart id" sağlanır.
+    - Tüm varyantlara aralıktan YENİ benzersiz barkod üretilir → orijinalin
+      barkodlarıyla çakışmaz (eski 'duplicate'in patlama sebebi buydu).
+    - Varyant id'leri yenilenir; Ticimax varyant id'si (urun_id) temizlenir.
+    - stock_code AYNI bırakılır (aynı modelin başka rengini açmak için pratik;
+      gerekiyorsa kopyada elle değiştirilir).
+    Kopya orijinalin renk-kardeşi DEĞİLDİR (csv_card_id yeni kart id'ye eşitlenir).
+    """
+    p = await db.products.find_one({"id": product_id})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+
+    new_card = await generate_urun_karti_id()
+    new_id = await generate_short_id("products")
+    used = await build_used_barcode_set()
+
+    clone = {k: v for k, v in p.items() if k not in ("_id", "id", "slug", "slug_aliases")}
+    clone["id"] = new_id
+    clone["urun_karti_id"] = new_card
+    clone["csv_card_id"] = new_card          # bağımsız kart (renk-kardeşi değil)
+    clone["urun_id"] = ""
+    _tf = dict(clone.get("ticimax_fields") or {})
+    _tf["URUNKARTIID"] = new_card
+    _tf["URUNID"] = ""
+    clone["ticimax_fields"] = _tf
+
+    base_name = p.get("name") or ""
+    clone["name"] = f"{base_name} (Kopya)"
+    clone["slug"] = slug_with_card_id(clone["name"], new_card)
+
+    # Varyantlar: yeni id + yeni barkod, Ticimax varyant id'si temizlenir
+    new_vars = []
+    for v in (p.get("variants") or []):
+        nv = dict(v)
+        nv["id"] = generate_id()
+        nv["urun_id"] = None
+        nv["barcode"] = (await generate_barcode_from_range(used)) or ""
+        new_vars.append(nv)
+    clone["variants"] = new_vars
+    if new_vars:
+        clone["barcode"] = ""
+    else:
+        clone["barcode"] = (await generate_barcode_from_range(used)) or ""
+
+    now = datetime.now(timezone.utc).isoformat()
+    clone["created_at"] = now
+    clone["updated_at"] = now
+
+    await db.products.insert_one(clone)
+    logger.info(f"Product duplicated: {product_id} -> {new_id} (card {new_card})")
+    return {"id": new_id, "urun_karti_id": new_card, "message": "Ürün kopyalandı"}
+
+
+@router.post("/assign-variant-ids", dependencies=[Depends(require_admin)])
+async def assign_variant_ids(payload: dict):
+    """Varyantlara BEDEN bazında Ticimax varyant id'si (urun_id) atar.
+
+    Beden id'si eksik ürünler için tek seferlik düzeltme (ör. siyah bermuda şort).
+    Body:
+      {"product_id": "...", "map": {"S":"8618","XS":"8620",...}}
+      veya
+      {"name": "bermuda", "color": "siyah", "map": {...}}
+    Yalnızca urun_id'si BOŞ olan varyantlara yazar (dolu olanı ezmez).
+    """
+    size_map = {
+        str(k).strip().upper(): str(v).strip()
+        for k, v in (payload.get("map") or {}).items()
+        if str(v).strip()
+    }
+    if not size_map:
+        raise HTTPException(status_code=400, detail="map (beden->id) zorunlu")
+
+    pid = str(payload.get("product_id") or "").strip()
+    if pid:
+        query = {"id": pid}
+    else:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="product_id veya name gerekli")
+        query = {"name": {"$regex": re.escape(name), "$options": "i"}}
+
+    color = str(payload.get("color") or "").strip().lower()
+    updated_products = 0
+    updated_variants = 0
+    touched = []
+    async for p in db.products.find(query):
+        variants = p.get("variants") or []
+        if color and not any((v.get("color") or "").strip().lower() == color for v in variants):
+            continue
+        changed = False
+        for v in variants:
+            sz = str(v.get("size") or "").strip().upper()
+            if sz in size_map and not str(v.get("urun_id") or "").strip():
+                v["urun_id"] = size_map[sz]
+                updated_variants += 1
+                changed = True
+        if changed:
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {"variants": variants, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            updated_products += 1
+            touched.append({"id": p["id"], "name": p.get("name")})
+    return {
+        "updated_products": updated_products,
+        "updated_variants": updated_variants,
+        "products": touched,
+        "map": size_map,
+    }
+
+
 @router.put("/{product_id}")
 async def update_product(
     product_id: str,
