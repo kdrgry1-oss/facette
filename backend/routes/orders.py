@@ -2768,12 +2768,13 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
                     "Yetki/IP whitelist veya bağlantı sorunu olabilir — MNG paneli > API IP izinlerini kontrol edin."),
         )
 
-    gonderi_no = info.get("gonderi_no") or ""
+    gonderi_no = info.get("gonderi_no") or ""   # GERÇEK kargo takip no (boş olabilir)
     mng_siparis_no = info.get("mng_siparis_no") or cargo.get("mng_siparis_no") or ""
-    public_tracking = gonderi_no or mng_siparis_no
-    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={public_tracking}" if public_tracking else "https://www.dhlecommerce.com.tr/gonderitakip")
+    # ÖNEMLİ: iç sipariş no'yu (mng_siparis_no) ASLA takip no diye yazma. Sadece gerçek gönderi no.
+    track_link = (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={gonderi_no}"
+                  if gonderi_no else "https://www.dhlecommerce.com.tr/gonderitakip")
 
-    # Durum alanlarını her zaman güncelle; takip no'yu yalnız doluysa yaz (mevcut takibi silme)
+    # Durum alanlarını her zaman güncelle; takip no'yu yalnız GERÇEK gönderi no doluysa yaz.
     update = {
         "cargo.mng_siparis_no": mng_siparis_no,
         "cargo.mng_gonderi_no": gonderi_no,
@@ -2782,25 +2783,37 @@ async def refresh_cargo_tracking(order_id: str, current_user: dict = Depends(req
         "cargo.cikis_subesi": info.get("cikis_subesi"),
         "cargo.teslim_subesi": info.get("teslim_subesi"),
         "cargo.teslim_tarihi": info.get("teslim_tarihi"),
+        "cargo_status_text": info.get("kargo_statu_aciklama") or "",
+        "cargo_query_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    if public_tracking:
-        update["cargo_tracking_number"] = public_tracking
+    if gonderi_no:
+        update["cargo_gonderi_no"] = gonderi_no
+        update["cargo_tracking_number"] = gonderi_no
         update["cargo_tracking_link"] = track_link
-        update["cargo.tracking_number"] = public_tracking
+        update["cargo.tracking_number"] = gonderi_no
         update["cargo.tracking_link"] = track_link
+    else:
+        # Gerçek no yok → daha önce YANLIŞLIKLA yazılmış (iç no = takip no) değeri TEMİZLE,
+        # böylece sipariş listesinde yanlış numara yerine "takip bekleniyor" görünür.
+        _wrong = (order.get("cargo_tracking_number") or "")
+        if _wrong and _wrong == mng_siparis_no:
+            update["cargo_tracking_number"] = ""
+            update["cargo_gonderi_no"] = ""
+            update["cargo.tracking_number"] = ""
     await db.orders.update_one({"id": order_id}, {"$set": update})
 
     if gonderi_no:
         _msg = f"📦 Gönderi No: {gonderi_no}" + (f" · {info.get('kargo_statu_aciklama')}" if info.get("kargo_statu_aciklama") else "")
-    elif mng_siparis_no:
-        _msg = (f"MNG kaydı bulundu (Sipariş No: {mng_siparis_no}); MNG şubesi henüz takip (gönderi) no atamadı. "
-                "Kargo şubede işleme alınınca takip no otomatik dolacak.")
     else:
-        _msg = "MNG kaydı bulundu ancak takip no henüz atanmadı."
+        # Gerçek gönderi no yok = kargo henüz teslim alıp işleme almamış.
+        _aci = (info.get("kargo_statu_aciklama") or "").strip()
+        _msg = ("Bu sipariş henüz kargoya verilmedi / kargo firması gönderi no atamadı"
+                + (f" ({_aci})" if _aci else "")
+                + ". Kargo şubede işleme alınınca gönderi no OTOMATİK çekilecek.")
     return {
         "success": True,
-        "tracking_number": public_tracking,
+        "tracking_number": gonderi_no,   # gerçek no yoksa boş
         "mng_siparis_no": mng_siparis_no,
         "mng_gonderi_no": gonderi_no,
         "kargo_statu": info.get("kargo_statu"),
@@ -2871,7 +2884,11 @@ async def backfill_cargo_tracking(
         if _is_site:
             site_taranan += 1
         existing = o.get("cargo_tracking_number") or (o.get("cargo") or {}).get("tracking_number")
-        if existing and not force:
+        _internal_no = (o.get("cargo") or {}).get("mng_siparis_no") or ""
+        # Daha önce YANLIŞLIKLA iç sipariş no'su takip no diye yazılmışsa, "zaten var" sayma —
+        # yeniden sorgula ki ya gerçek no ile düzelt ya da temizle.
+        _existing_wrong = bool(existing) and existing == _internal_no
+        if existing and not _existing_wrong and not force:
             skipped.append(on)
             diagnosis["zaten_takip_no_vardi"] += 1
             continue
@@ -2897,11 +2914,20 @@ async def backfill_cargo_tracking(
             failed.append({"no": siparis_no, "reason": "sorgu_hatasi", "err": _err_txt[:160]})
             diagnosis["sorgu_hatasi"] += 1
             continue
-        gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; barkoda düşme
+        gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; iç no'ya düşme
         if not gonderi:
             has_record = bool((info.get("mng_siparis_no") or "").strip())
             reason = "mngde_kayit_var_takip_no_yok" if has_record else "mngde_kayit_yok_veya_yetki"
             diagnosis[reason] += 1
+            # Yanlış (iç no) yazılmış takip no varsa TEMİZLE → listede "takip bekleniyor" görünsün.
+            if _existing_wrong:
+                await db.orders.update_one(
+                    {"id": o["id"]},
+                    {"$set": {"cargo_tracking_number": "", "cargo_gonderi_no": "",
+                              "cargo.tracking_number": "",
+                              "cargo_status_text": info.get("kargo_statu_aciklama") or "",
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
             failed.append({
                 "no": siparis_no, "reason": reason,
                 "kargo_statu": info.get("kargo_statu"),

@@ -120,6 +120,23 @@ def _deep_pick_any(obj, norm_keys) -> str:
     return result["v"]
 
 
+def _sanitize_fields(f: Dict, siparis_no: str = "") -> Dict:
+    """Gönderi no GERÇEK kargo takip no DEĞİLSE boşalt.
+
+    Kurallar:
+      - gönderi no, iç sipariş no (mng_siparis_no) ile AYNI ise → sahte (iç no), boşalt.
+      - gönderi no, bizim referansımız (siparis_no / referans_no) ile AYNI ise → boşalt.
+    Böylece 'İşlemi Yapılmadı' durumunda MNG'nin iç no'su yanlışlıkla takip no diye yazılmaz.
+    """
+    g = (f.get("gonderi_no") or "").strip()
+    m = (f.get("mng_siparis_no") or "").strip()
+    rf = (f.get("referans_no") or "").strip()
+    sn = str(siparis_no or "").strip()
+    if g and (g == m or (rf and g == rf) or (sn and g == sn)):
+        f["gonderi_no"] = ""
+    return f
+
+
 def _get_client():
     global _client_cache
     if _client_cache is None:
@@ -227,7 +244,7 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
         from zeep.helpers import serialize_object
         ser = serialize_object(r)
         # Yapıya bağlı KATI yol yerine: yanıtın her yerinde alanları özyinelemeli bul.
-        f = _deep_find_fields(ser)
+        f = _sanitize_fields(_deep_find_fields(ser), siparis_no)
         return {
             "ok": True,
             "method": "FaturaSiparisListesi",
@@ -265,6 +282,7 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
                 _extra = _deep_pick_any(d, ("barkod", "takipno", "kargotakipno", "gonderibarkod"))
                 if _extra:
                     f["gonderi_no"] = _extra
+            f = _sanitize_fields(f, siparis_no)
             return {
                 "ok": True,
                 "method": "KargoTakipByReferans",
