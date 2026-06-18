@@ -2097,16 +2097,18 @@ async def create_invoice_for_order(
             is_test=dogan_settings.get("is_test", True),
         )
         cust_email = (ship_addr.get("email") or order.get("user_email") or "").strip()
-        sender_alias = dogan_settings.get("sender_alias") or ""
+        sender_alias = (dogan_settings.get("sender_alias") or "").strip()
         if not sender_alias:
-            # Gönderici (Facette) GİB PK alias'ı ayarda yoksa, kendi VKN'mizi CheckUser ile
-            # sorgulayıp INVOICE alias'ını kullan. Boş bırakılırsa Doğan "account not found" döner.
-            try:
-                _own_vkn = dogan_settings.get("vkn") or "7810816779"
-                _own_chk = await run_in_threadpool(dogan_client.check_user, _own_vkn)
-                sender_alias = _own_chk.get("invoice_alias") or ""
-            except Exception as _se:
-                logger.warning(f"sender_alias CheckUser fallback: {_se}")
+            # GÖNDERİCİ = GÖNDERİCİ BİRİM (GB) etiketi olmalıdır; POSTA KUTUSU (PK) DEĞİL.
+            # Doğan'da iki ayrı etiket vardır:
+            #   • Posta Etiketi (PK)  = urn:mail:defaultpk@facette.com  → ALICI posta kutusu
+            #   • Birim Etiketi (GB)  = urn:mail:defaultgb@facette.com  → GÖNDERİCİ birim
+            # CheckUser invoice_alias PK (defaultpk) döndürür; onu gönderici verince Doğan
+            # "Kullanıcının Gönderici ... işlem yetkisi yoktur!" hatası verir. Bu yüzden
+            # gönderici birim etiketini (GB) kullanırız. Ticimax+Doğan ayar ekranındaki değer:
+            #   E-Fatura Birim Etiketi: urn:mail:defaultgb@facette.com
+            sender_alias = (dogan_settings.get("sender_unit_alias")
+                            or "urn:mail:defaultgb@facette.com")
         logger.info(f"e-Fatura gönderim: receiver_alias={'dolu' if receiver_alias else 'BOŞ'}, sender_alias={'dolu' if sender_alias else 'BOŞ'}")
         dogan_result = await run_in_threadpool(
             dogan_client.send_efatura_invoice,

@@ -1588,6 +1588,43 @@ export default function AdminOrders({ unpaidView = false }) {
                 </div>
               </div>
 
+              {/* Kurumsal Fatura Bilgileri */}
+              {(() => {
+                const bi = selectedOrder.billing_info || {};
+                const ba = selectedOrder.billing_address || {};
+                const company = bi.company_name || ba.company_name || "";
+                const taxOffice = bi.tax_office || ba.tax_office || "";
+                const taxNumber = bi.tax_number || ba.tax_number || ba.tax_no || ba.vkn || "";
+                const isCorp = bi.is_corporate || ba.is_corporate || !!(company || taxNumber || taxOffice);
+                if (!isCorp) return null;
+                const eInv = bi.e_invoice_user === true
+                  ? "Evet (e-Fatura)"
+                  : (String(taxNumber).length === 10 ? "Olası (VKN — kesimde sorgulanır)" : "Hayır (e-Arşiv)");
+                return (
+                  <div className="p-4 border rounded bg-amber-50 border-amber-200">
+                    <h3 className="font-medium mb-2 flex items-center gap-1 text-amber-900">🏢 Kurumsal Fatura Bilgileri</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <div>
+                        <div className="text-xs text-gray-500 uppercase">Ünvan</div>
+                        <div className="font-semibold text-amber-900">{company || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 uppercase">VKN / TCKN</div>
+                        <div className="font-mono font-semibold text-amber-900">{taxNumber || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 uppercase">Vergi Dairesi</div>
+                        <div className="font-semibold text-amber-900">{taxOffice || "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 uppercase">e-Fatura Mükellefi</div>
+                        <div className="font-semibold text-amber-900">{eInv}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Attribution / Order Source */}
               {selectedOrder.attribution && (
                 <div className="p-4 border rounded bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
