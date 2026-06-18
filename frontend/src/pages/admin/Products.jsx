@@ -1878,8 +1878,12 @@ export default function AdminProducts() {
                                   />
                                 </div>
                                 <div className="p-1">
-                                  {categories.filter(c => (c.full_name || c.name).toLowerCase().includes(categorySearchTerm.toLowerCase())).map(c => {
+                                  {categories.filter(c => (c.full_name || c.name).toLowerCase().includes(categorySearchTerm.toLowerCase())).slice().sort((a, b) => (a.full_name || a.name || "").localeCompare(b.full_name || b.name || "", "tr")).map(c => {
                                     const checked = (formData.categories || []).includes(c.id);
+                                    const _fn = c.full_name || c.name || "";
+                                    const _parts = _fn.split(" > ");
+                                    const _depth = Math.max(0, _parts.length - 1);
+                                    const _leaf = _parts[_parts.length - 1] || c.name;
                                     return (
                                       <label
                                         key={c.id}
@@ -1897,7 +1901,7 @@ export default function AdminProducts() {
                                             setFormData({ ...formData, categories: next, category_name: next[0] ? (categories.find(x => x.id === next[0])?.name || c.name) : "" });
                                           }}
                                         />
-                                        <span className="truncate">{c.full_name || c.name}</span>
+                                        <span className="truncate" style={{ paddingLeft: _depth * 14 }}>{_depth > 0 && <span className="text-gray-300 mr-1">›</span>}{_leaf}</span>
                                       </label>
                                     );
                                   })}

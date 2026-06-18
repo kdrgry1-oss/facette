@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, Search, ChevronDown, ChevronUp, CreditCard, Banknote, Truck, Package, Download, CheckCircle, XCircle, FileText } from "lucide-react";
+import MultiSelect from "../../components/admin/MultiSelect";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -40,7 +41,7 @@ const RETURN_TABS = [
   { key: "",                          label: "Tüm İadeler",       statuses: ALL_RETURN_STATUSES },
   { key: "return_requested",          label: "Talep Oluşturulan", statuses: ["return_requested"] },
   { key: "return_in_transit",         label: "İade Kargoda",      statuses: ["return_in_transit"] },
-  { key: "returned",                  label: "Aksiyon Bekleyen",  statuses: ["returned"] },
+  { key: "returned,return_requested", label: "Aksiyon Bekleyen",  statuses: ["returned", "return_requested"] },
   { key: "return_approved",           label: "Onaylananlar",      statuses: ["return_approved"] },
   { key: "refunded,partial_refunded", label: "İade Ödemeleri",    statuses: ["refunded", "partial_refunded"] },
   { key: "return_rejected",           label: "Reddedilenler",     statuses: ["return_rejected"] },
@@ -419,9 +420,8 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
             className="pl-8 pr-3 py-2 text-sm border rounded-lg w-64 focus:outline-none focus:ring-1 focus:ring-gray-300"
           />
         </div>
-        <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="py-2 px-3 text-sm border rounded-lg">
-          {PAYMENT_OPTS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
+        <MultiSelect className="w-44" placeholder="Tüm Ödeme Tipleri" value={paymentFilter} onChange={setPaymentFilter}
+          options={PAYMENT_OPTS.filter((p) => p.value)} />
       </div>
 
       {/* Liste */}

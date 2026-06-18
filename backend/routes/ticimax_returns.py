@@ -78,7 +78,8 @@ async def list_ticimax_return_orders(
         base_filter["status"] = {"$in": RETURN_STATUSES}
 
     if payment:
-        base_filter["payment_method"] = payment
+        _pm = [x.strip() for x in str(payment).split(",") if x.strip()]
+        base_filter["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment)
 
     if search:
         s = re.escape(search.strip())
@@ -333,7 +334,8 @@ async def export_ticimax_return_orders(
     else:
         base_filter["status"] = {"$in": RETURN_STATUSES}
     if payment:
-        base_filter["payment_method"] = payment
+        _pm = [x.strip() for x in str(payment).split(",") if x.strip()]
+        base_filter["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment)
     if search:
         s = re.escape(search.strip())
         rx = {"$regex": s, "$options": "i"}

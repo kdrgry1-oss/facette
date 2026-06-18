@@ -301,15 +301,20 @@ async def get_orders(
     if cargo_tracking:
         query["cargo_tracking"] = {"$regex": cargo_tracking, "$options": "i"}
     if payment_method:
-        query["payment_method"] = payment_method
+        _pm = [x.strip() for x in str(payment_method).split(",") if x.strip()]
+        query["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment_method)
     if platform:
-        query["platform"] = platform
+        _pf = [x.strip() for x in str(platform).split(",") if x.strip()]
+        query["platform"] = {"$in": _pf} if len(_pf) > 1 else (_pf[0] if _pf else platform)
     if invoice_number:
         query["invoice_number"] = {"$regex": invoice_number, "$options": "i"}
     if payment_status:
-        query["payment_status"] = payment_status
+        _ps = [x.strip() for x in str(payment_status).split(",") if x.strip()]
+        query["payment_status"] = {"$in": _ps} if len(_ps) > 1 else (_ps[0] if _ps else payment_status)
     if channel:
-        query["attribution.channel"] = {"$regex": channel, "$options": "i"}
+        # Çoklu seçim: virgülle gelen değerler regex alternation'a çevrilir (organic,ads|paid → organic|ads|paid)
+        _ch = str(channel).replace(",", "|").strip("|")
+        query["attribution.channel"] = {"$regex": _ch, "$options": "i"}
     if source:
         query["attribution.source"] = {"$regex": source, "$options": "i"}
     if coupon_code:

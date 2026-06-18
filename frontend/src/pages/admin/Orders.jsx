@@ -31,6 +31,7 @@ import { useState, useEffect } from "react";
 import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
+import MultiSelect from "../../components/admin/MultiSelect";
 import OrderMarketplaceInfo from "../../components/admin/OrderMarketplaceInfo";
 import OrderPaymentDetail from "../../components/admin/OrderPaymentDetail";
 import { toast } from "sonner";
@@ -828,43 +829,43 @@ export default function AdminOrders({ unpaidView = false }) {
             <input type="text" placeholder="Telefon" className="border px-3 py-1.5 rounded text-sm" value={filters.phone} onChange={e => setFilters({...filters, phone: e.target.value})} onKeyDown={onFilterKey} />
             <input type="text" placeholder="E-posta" className="border px-3 py-1.5 rounded text-sm" value={filters.email} onChange={e => setFilters({...filters, email: e.target.value})} onKeyDown={onFilterKey} />
             <input type="text" placeholder="Kupon Kodu" className="border px-3 py-1.5 rounded text-sm" value={filters.coupon_code} onChange={e => setFilters({...filters, coupon_code: e.target.value})} onKeyDown={onFilterKey} />
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.platform} onChange={e => setFilters({...filters, platform: e.target.value})}>
-              <option value="">Tüm Platformlar</option>
-              <option value="facette">Web Sitesi (Facette)</option>
-              <option value="trendyol">Trendyol</option>
-              <option value="hepsiburada">Hepsiburada</option>
-              <option value="amazon">Amazon</option>
-              <option value="temu">Temu</option>
-              <option value="n11">N11</option>
-              <option value="ciceksepeti">Çiçeksepeti</option>
-              <option value="pttavm">PttAVM</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.channel} onChange={e => setFilters({...filters, channel: e.target.value})} title="Geliş kaynağı (reklam/organik/sosyal/influencer)">
-              <option value="">Tüm Kaynaklar</option>
-              <option value="organic">Organik</option>
-              <option value="ads|paid">Reklam (Tümü)</option>
-              <option value="instagram">Instagram</option>
-              <option value="google">Google</option>
-              <option value="tiktok">TikTok</option>
-              <option value="facebook">Facebook</option>
-              <option value="influencer">Influencer</option>
-              <option value="email">E-posta</option>
-              <option value="referral">Referans</option>
-              <option value="direct">Doğrudan</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_method} onChange={e => setFilters({...filters, payment_method: e.target.value})}>
-              <option value="">Tüm Ödeme Tipleri</option>
-              <option value="credit_card">Kredi Kartı</option>
-              <option value="bank_transfer">Havale/EFT</option>
-              <option value="cash_on_delivery">Kapıda Ödeme</option>
-            </select>
-            <select className="border px-3 py-1.5 rounded text-sm" value={filters.payment_status} onChange={e => setFilters({...filters, payment_status: e.target.value})}>
-              <option value="">Tüm Ödeme Durumları</option>
-              <option value="paid">Ödendi</option>
-              <option value="pending">Bekliyor</option>
-              <option value="failed">Başarısız</option>
-              <option value="refunded">İade Edildi</option>
-            </select>
+            <MultiSelect className="w-44" placeholder="Tüm Platformlar" value={filters.platform} onChange={(v) => setFilters({ ...filters, platform: v })}
+              options={[
+                { value: "facette", label: "Web Sitesi (Facette)" },
+                { value: "trendyol", label: "Trendyol" },
+                { value: "hepsiburada", label: "Hepsiburada" },
+                { value: "amazon", label: "Amazon" },
+                { value: "temu", label: "Temu" },
+                { value: "n11", label: "N11" },
+                { value: "ciceksepeti", label: "Çiçeksepeti" },
+                { value: "pttavm", label: "PttAVM" },
+              ]} />
+            <MultiSelect className="w-44" placeholder="Tüm Kaynaklar" title="Geliş kaynağı (reklam/organik/sosyal/influencer)" value={filters.channel} onChange={(v) => setFilters({ ...filters, channel: v })}
+              options={[
+                { value: "organic", label: "Organik" },
+                { value: "ads|paid", label: "Reklam (Tümü)" },
+                { value: "instagram", label: "Instagram" },
+                { value: "google", label: "Google" },
+                { value: "tiktok", label: "TikTok" },
+                { value: "facebook", label: "Facebook" },
+                { value: "influencer", label: "Influencer" },
+                { value: "email", label: "E-posta" },
+                { value: "referral", label: "Referans" },
+                { value: "direct", label: "Doğrudan" },
+              ]} />
+            <MultiSelect className="w-44" placeholder="Tüm Ödeme Tipleri" value={filters.payment_method} onChange={(v) => setFilters({ ...filters, payment_method: v })}
+              options={[
+                { value: "credit_card", label: "Kredi Kartı" },
+                { value: "bank_transfer", label: "Havale/EFT" },
+                { value: "cash_on_delivery", label: "Kapıda Ödeme" },
+              ]} />
+            <MultiSelect className="w-44" placeholder="Tüm Ödeme Durumları" value={filters.payment_status} onChange={(v) => setFilters({ ...filters, payment_status: v })}
+              options={[
+                { value: "paid", label: "Ödendi" },
+                { value: "pending", label: "Bekliyor" },
+                { value: "failed", label: "Başarısız" },
+                { value: "refunded", label: "İade Edildi" },
+              ]} />
             <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
               <input type="checkbox" className="accent-black" checked={filters.influencer === "1"} onChange={e => setFilters({...filters, influencer: e.target.checked ? "1" : ""})} />
               Influencer ile gelen
