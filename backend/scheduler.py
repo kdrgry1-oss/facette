@@ -794,37 +794,6 @@ def _parse_tr_dt(s: str):
     return None
 
 
-async def _write_dhl_health(db, *, push_history: bool = False, **patch):
-    """DHL/MNG kargo poll sağlık kaydını db.settings(id='dhl_poll_health') altına yazar.
-
-    Ayarlar > Kargo sayfasındaki "DHL/MNG Takip Senkron İzleme" paneli bu kaydı
-    okur. Her tick burada güncellenir: son çalışma zamanı, sonuç (running/ok/
-    skipped/error), sorgulanan/değişen sipariş sayıları, son hata mesajı ve
-    MNG/DHL ayarının aktif olup olmadığı. push_history=True iken son 20 koşunun
-    küçük bir geçmişi de tutulur (capped array) — böylece senkron canlı izlenebilir.
-    """
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        patch = {**patch, "updated_at": now_iso}
-        update = {"$set": patch}
-        if push_history:
-            entry = {
-                "at": patch.get("last_finish_at") or now_iso,
-                "status": patch.get("status"),
-                "processed": patch.get("processed", 0),
-                "shipped": patch.get("shipped", 0),
-                "delivered": patch.get("delivered", 0),
-                "updated": patch.get("updated", 0),
-                "errors": patch.get("errors", 0),
-                "duration_ms": patch.get("duration_ms", 0),
-                "error": patch.get("last_error", "") or patch.get("skipped_reason", ""),
-            }
-            update["$push"] = {"history": {"$each": [entry], "$slice": -20}}
-        await db.settings.update_one({"id": "dhl_poll_health"}, update, upsert=True)
-    except Exception as e:
-        logger.warning(f"[scheduler][dhl] health write failed: {e}")
-
-
 async def _dhl_cargo_poll_tick():
     """Her 5 dk: site (facette) siparislerini MNG/DHL e-Commerce API'sinden sorgula.
       - GONDERI_NO / takip linki olustuysa -> 'shipped' (Kargoya Verildi) + bildirim
@@ -833,8 +802,6 @@ async def _dhl_cargo_poll_tick():
     SOAP cagrilari thread executor'da calisir (event loop bloklanmaz).
     """
     from routes.deps import db  # lazy
-    _t0 = datetime.now(timezone.utc)
-    await _write_dhl_health(db, status="running", last_run_at=_t0.isoformat(), interval_min=5)
     try:
         from routes.orders import _get_mng_settings
         from order_statuses import get_status_config, customer_label_for
@@ -842,22 +809,11 @@ async def _dhl_cargo_poll_tick():
         from mng_kargo_client import get_mng_shipment_status
     except Exception as e:
         logger.warning(f"[scheduler][dhl] import skip: {e}")
-        await _write_dhl_health(
-            db, status="error", last_error=f"import: {str(e)[:200]}",
-            last_finish_at=datetime.now(timezone.utc).isoformat(), push_history=True,
-        )
         return
 
     s = await _get_mng_settings()
     if not s.get("is_active") or not s.get("username"):
         logger.info("[scheduler][dhl] atlandi: MNG/DHL ayarlari aktif degil ya da kullanici adi yok")
-        await _write_dhl_health(
-            db, status="skipped",
-            skipped_reason="MNG/DHL ayarları aktif değil ya da kullanıcı adı boş.",
-            mng_active=bool(s.get("is_active")), mng_user_set=bool(s.get("username")),
-            last_finish_at=datetime.now(timezone.utc).isoformat(),
-            processed=0, shipped=0, delivered=0, updated=0, errors=0, push_history=True,
-        )
         return
     user, pw = s["username"], s["password"]
 
@@ -880,11 +836,6 @@ async def _dhl_cargo_poll_tick():
     notify = cfg.get("notify") or {}
 
     processed = 0
-    shipped_cnt = 0
-    delivered_cnt = 0
-    updated_cnt = 0
-    err_cnt = 0
-    last_err = ""
     try:
         async for order in db.orders.find(q, {"_id": 0}).limit(120):
             siparis_no = str(order.get("order_number") or order.get("id") or "").strip()
@@ -895,8 +846,6 @@ async def _dhl_cargo_poll_tick():
                     get_mng_shipment_status, username=user, password=pw, siparis_no=siparis_no
                 )
             except Exception as e:
-                err_cnt += 1
-                last_err = str(e)[:200]
                 logger.warning(f"[scheduler][dhl] status err {siparis_no}: {e}")
                 await asyncio.sleep(0.2)
                 continue
@@ -945,11 +894,6 @@ async def _dhl_cargo_poll_tick():
             if upd:
                 upd["updated_at"] = now_iso
                 await db.orders.update_one({"id": order["id"]}, {"$set": upd})
-                updated_cnt += 1
-            if new_status == "shipped":
-                shipped_cnt += 1
-            elif new_status == "delivered":
-                delivered_cnt += 1
 
             if new_status in ("shipped", "delivered"):
                 ev = "order_shipped" if new_status == "shipped" else "order_delivered"
@@ -979,26 +923,7 @@ async def _dhl_cargo_poll_tick():
             processed += 1
             await asyncio.sleep(0.25)
     except Exception as e:
-        last_err = str(e)[:200]
         logger.exception(f"[scheduler][dhl] poll tick failed: {e}")
-        _dur = int((datetime.now(timezone.utc) - _t0).total_seconds() * 1000)
-        await _write_dhl_health(
-            db, status="error", last_error=last_err,
-            last_finish_at=datetime.now(timezone.utc).isoformat(),
-            processed=processed, shipped=shipped_cnt, delivered=delivered_cnt,
-            updated=updated_cnt, errors=err_cnt, duration_ms=_dur,
-            mng_active=True, mng_user_set=True, push_history=True,
-        )
-        logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi")
-        return
-    _dur = int((datetime.now(timezone.utc) - _t0).total_seconds() * 1000)
-    await _write_dhl_health(
-        db, status="ok", last_error="", skipped_reason="",
-        last_finish_at=datetime.now(timezone.utc).isoformat(),
-        processed=processed, shipped=shipped_cnt, delivered=delivered_cnt,
-        updated=updated_cnt, errors=err_cnt, duration_ms=_dur,
-        mng_active=True, mng_user_set=True, push_history=True,
-    )
     logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi")
 
 
@@ -1375,12 +1300,11 @@ def start_scheduler():
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1, coalesce=True,
     )
-    # DHL/MNG kargo durum taramasi — HER 5 DK (site siparisleri; ilk okutma -> Kargoya Verildi,
-    # teslim -> Teslim Edildi). Sağlık/izleme: db.settings.dhl_poll_health (Ayarlar > Kargo paneli).
+    # DHL/MNG kargo durum taramasi — her 30 dk (site siparisleri; takip linki -> Kargoya Verildi, teslim -> Teslim Edildi)
     _scheduler.add_job(
         _dhl_cargo_poll_tick,
         "interval",
-        minutes=5,
+        minutes=30,
         id="dhl_cargo_poll",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
         max_instances=1,

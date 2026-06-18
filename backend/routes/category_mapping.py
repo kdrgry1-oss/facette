@@ -154,8 +154,14 @@ async def _get_hb_client():
 
 async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
     """HB kategori ozelliklerini canli ceker, frontend formatina normalize eder, cache'ler.
-    Normalize: {id, name, required, multiValue, type, allowCustom, attributeValues:[{id,name}]}.
-    Enum ozellikler icin gecerli degerleri (iter_attribute_values) da doldurur.
+
+    HB, Renk/Beden gibi VARYANT ozelliklerini ve diger temel ozellikleri `attributes` yerine
+    `baseAttributes` (ve bazen ayri varyant listeleri) icinde dondurur. Bu yuzden:
+      attributes + baseAttributes + variantAttributes BIRLESTIRILIR.
+    Salt-sistem alanlar (merchantSku/VaryantGroupID/Barcode/UrunAdi/UrunAciklamasi/Image*/kg)
+    eslestirme listesine ALINMAZ — bunlar gonderimde urunden otomatik doldurulur.
+    Enum ozellikler icin gecerli degerler (iter_attribute_values) de doldurulur.
+    Siralama: once varyant (Renk/Beden ustte), sonra kategori ozellikleri, sonra baz icerik alanlari.
     Doner: (attrs_list, error)."""
     client, err = await _get_hb_client()
     if err:
@@ -165,41 +171,76 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         data = await asyncio.to_thread(client.get_category_attributes, cid)
     except Exception as e:
         return [], f"HB özellik çekme hatası: {e}"
-    cat_attrs = (data or {}).get("attributes", []) or []
+
+    # Otomatik doldurulan salt-sistem baz alanlar — eslestirme listesine alinmaz.
+    SYS = {"merchantsku", "varyantgroupid", "barcode", "urunadi", "urunaciklamasi",
+           "image1", "image2", "image3", "image4", "image5", "image", "kg"}
+
+    def _sysnorm(s):
+        return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+    cat_attrs = list((data or {}).get("attributes", []) or [])
+    base_attrs = list((data or {}).get("baseAttributes", []) or [])
+    variant_attrs = list((data or {}).get("variantAttributes", [])
+                         or (data or {}).get("variantableAttributes", []) or [])
+
     out = []
     media_attrs = []
-    for a in cat_attrs:
+    seen = set()
+
+    async def _add(a, is_variant=False, is_base=False):
+        aid = a.get("id")
+        aname = a.get("name")
+        if not aname:
+            return
+        nkey = _sysnorm(aname)
+        if is_base and nkey in SYS:
+            return  # salt-sistem alan -> mapping listesine alma
+        dedup = str(aid) if aid is not None else nkey
+        if dedup in seen:
+            return
+        seen.add(dedup)
         atype = (a.get("type") or "").lower()
-        # media (gorsel) tipli alanlar urun gonderiminde urun gorsellerinden doldurulur;
-        # metin/yerel-ozellik eslestirmesi yapilmaz -> mapping listesine alinmaz, ayri saklanir.
         if atype == "media":
-            media_attrs.append({"id": a.get("id"), "name": a.get("name"),
+            media_attrs.append({"id": aid, "name": aname,
                                 "required": bool(a.get("mandatory")), "type": a.get("type")})
-            continue
+            return
+        variant = bool(is_variant or a.get("variantable") or a.get("isVariant")
+                       or a.get("mandatoryVariant") or a.get("variant"))
         norm = {
-            "id": a.get("id"),
-            "name": a.get("name"),
-            "required": bool(a.get("mandatory")),
+            "id": aid,
+            "name": aname,
+            "required": bool(a.get("mandatory") or a.get("mandatoryVariant")),
             "multiValue": bool(a.get("multiValue")),
             "type": a.get("type"),
             "allowCustom": atype != "enum",
+            "variant": variant,
             "attributeValues": [],
         }
-        if with_values and atype == "enum":
+        if with_values and atype == "enum" and aid is not None:
             try:
-                vals = await asyncio.to_thread(client.iter_attribute_values, cid, a.get("id"))
+                vals = await asyncio.to_thread(client.iter_attribute_values, cid, aid)
                 norm["attributeValues"] = [{"id": v.get("id"), "name": v.get("value")}
                                            for v in (vals or []) if isinstance(v, dict)]
             except Exception:
                 norm["attributeValues"] = []
         out.append(norm)
+
+    for a in variant_attrs:
+        await _add(a, is_variant=True)
+    for a in cat_attrs:
+        await _add(a, is_variant=bool(a.get("variantable") or a.get("isVariant")
+                                      or a.get("mandatoryVariant")))
+    for a in base_attrs:
+        await _add(a, is_base=True)
+
     try:
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 2,
+            {"$set": {"category_id": key, "attributes": out, "_v": 3,
                       "media_attributes": media_attrs,
-                      "base_attributes": (data or {}).get("baseAttributes", []),
+                      "base_attributes": base_attrs,
                       "updated_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True,
         )
@@ -1485,7 +1526,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 2:
+        if not attrs or (cached or {}).get("_v") != 3:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {
