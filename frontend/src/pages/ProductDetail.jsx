@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown } from "lucide-react";
+import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -32,10 +32,12 @@ export default function ProductDetail() {
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [mobileImageIdx, setMobileImageIdx] = useState(0);
   const [expandedSections, setExpandedSections] = useState({
-    description: false,
+    description: true,   // Ürün Özellikleri varsayılan açık — bilgi gizli accordion'da kalmasın
     shipping: false,
     returns: false
   });
+  // Sepete eklendi mikro-etkileşimi: buton kısa süre "Eklendi ✓" gösterir
+  const [justAdded, setJustAdded] = useState(false);
   // Size Table (HTML) - fetched via public endpoint. Hooks must live at top level.
   const [sizeTableData, setSizeTableData] = useState(null);
   // "Gelince Haber Ver" — stokta olmayan beden için e-posta toplama
@@ -227,6 +229,8 @@ export default function ProductDetail() {
       ? `${product.name} - ${selectedVariant.size} sepete eklendi` 
       : "Ürün sepete eklendi"
     );
+    setJustAdded(true);
+    setTimeout(() => setJustAdded(false), 1600);
   };
 
   const handleSizeSelect = (variant) => {
@@ -527,10 +531,16 @@ export default function ProductDetail() {
                         className={`flex-1 py-2.5 sm:py-3 text-[11px] sm:text-xs uppercase tracking-normal sm:tracking-wider transition-colors ${
                           product.variants?.length > 0 && !selectedVariant
                             ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                            : "bg-black text-white hover:bg-gray-900"
+                            : justAdded
+                              ? "bg-emerald-600 text-white"
+                              : "bg-black text-white hover:bg-gray-900"
                         }`}
                       >
-                        {product.variants?.length > 0 && !selectedVariant ? "Beden Seçiniz" : "Sepete Ekle"}
+                        {product.variants?.length > 0 && !selectedVariant
+                          ? "Beden Seçiniz"
+                          : justAdded
+                            ? (<span className="inline-flex items-center justify-center gap-1.5"><Check size={15} strokeWidth={2.5} /> Eklendi</span>)
+                            : "Sepete Ekle"}
                       </button>
                     )}
                     <button

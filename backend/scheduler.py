@@ -746,6 +746,7 @@ async def _dhl_cargo_poll_tick():
 
     s = await _get_mng_settings()
     if not s.get("is_active") or not s.get("username"):
+        logger.info("[scheduler][dhl] atlandi: MNG/DHL ayarlari aktif degil ya da kullanici adi yok")
         return
     user, pw = s["username"], s["password"]
 
@@ -856,8 +857,7 @@ async def _dhl_cargo_poll_tick():
             await asyncio.sleep(0.25)
     except Exception as e:
         logger.exception(f"[scheduler][dhl] poll tick failed: {e}")
-    if processed:
-        logger.info(f"[scheduler][dhl] polled {processed} site order(s)")
+    logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi")
 
 
 async def _return_cargo_poll_tick():
@@ -1233,11 +1233,11 @@ def start_scheduler():
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1, coalesce=True,
     )
-    # DHL/MNG kargo durum taramasi — her 5 dk (takip linki -> Kargoya Verildi, teslim -> Teslim Edildi)
+    # DHL/MNG kargo durum taramasi — her 30 dk (site siparisleri; takip linki -> Kargoya Verildi, teslim -> Teslim Edildi)
     _scheduler.add_job(
         _dhl_cargo_poll_tick,
         "interval",
-        minutes=5,
+        minutes=30,
         id="dhl_cargo_poll",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
         max_instances=1,
