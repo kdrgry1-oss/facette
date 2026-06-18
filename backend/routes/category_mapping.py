@@ -199,6 +199,16 @@ _HB_EXTRA_SKIP_NAMES = {
     "tavsiyeedilenperakendesatisfiyati", "psf", "kdvdahilfiyat",
 }
 
+# Deger listesi OLAMAYACAK ozellik tipleri (bunlar icin canli deger cekme denenmez).
+# Bunlarin disindaki TUM tipler icin (enum/dropdown/select/string/gender/list/multiselect/...)
+# deger listesi cekilmeye calisilir -> Cinsiyet gibi ozellikler de deger-eslestirilebilir olur.
+_HB_NOVALUE_TYPES = {
+    "numeric", "number", "integer", "int", "long", "decimal", "float", "double",
+    "boolean", "bool", "date", "datetime", "time", "year",
+    "textarea", "longtext", "html", "richtext",
+    "url", "link", "image", "media", "file", "video", "barcode",
+}
+
 # Ürün kartı kaynak seçenekleri (UI dropdown'u için).
 HB_PRODUCT_SOURCES = [
     {"value": "name", "label": "Ürün Adı"},
@@ -313,7 +323,9 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
             return
         variant = bool(a.get("__var_key") or a.get("variantable") or a.get("isVariant")
                        or a.get("mandatoryVariant") or a.get("variant"))
-        # Inline gelen degerleri kullan; yoksa enum/varyant/bilinmeyen tipte canli cekmeyi dene.
+        # Inline gelen degerleri kullan; yoksa deger-listesi olabilecek HER ozellik icin canli cek.
+        # (Cinsiyet gibi tipi "enum" olmayan ama deger listesi olan ozellikler de dahil; yalnizca
+        #  acikca deger-listesiz tipler -sayisal/tarih/medya/serbest-metin- haric.)
         inline = a.get("attributeValues") or a.get("values") or []
         vals = []
         if inline:
@@ -322,8 +334,7 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
                     vals.append({"id": v.get("id"), "name": v.get("name") or v.get("value")})
                 elif isinstance(v, str):
                     vals.append({"id": None, "name": v})
-        elif with_values and aid is not None and (
-                atype in ("enum", "dropdown", "select", "", "string", "varchar") or variant):
+        elif with_values and aid is not None and atype not in _HB_NOVALUE_TYPES:
             try:
                 got = await asyncio.to_thread(client.iter_attribute_values, cid, aid)
                 vals = [{"id": v.get("id"), "name": v.get("value") or v.get("name")}
@@ -353,7 +364,7 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 6,
+            {"$set": {"category_id": key, "attributes": out, "_v": 7,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -1642,7 +1653,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 6:
+        if not attrs or (cached or {}).get("_v") != 7:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {
