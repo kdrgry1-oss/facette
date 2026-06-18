@@ -319,6 +319,31 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
             "raw_structure": fresh.get("raw_structure", {})}
 
 
+HB_COMMON_ATTRS = [
+    {"key": "cinsiyet", "label": "Cinsiyet"},
+]
+
+
+async def _hb_common_attr_values(norm_name: str):
+    """Önbellekteki HB kategorilerinden, adı norm_name olan özelliğin TÜM değerlerini (uniq) toplar.
+    Örn 'cinsiyet' -> ['Erkek','Kadın','Unisex',...] (kategoriler arası birleşik liste)."""
+    out, seen = [], set()
+    try:
+        cursor = db.hepsiburada_category_attributes.find({}, {"_id": 0, "attributes": 1})
+        async for doc in cursor:
+            for a in (doc.get("attributes") or []):
+                if _hb_norm(a.get("name")) == norm_name:
+                    for v in (a.get("attributeValues") or []):
+                        nm = v.get("name")
+                        k = _hb_norm(nm)
+                        if nm and k not in seen:
+                            seen.add(k)
+                            out.append(nm)
+    except Exception:
+        pass
+    return sorted(out)
+
+
 @router.get("/hepsiburada/base-field-mappings")
 async def hb_get_base_field_mappings(current_user: dict = Depends(require_admin)):
     """HB temel/sistem alanlarının (Satıcı Stok Kodu / Ürün Adı / Barkod / Marka / KDV / Desi /
@@ -343,8 +368,16 @@ async def hb_get_base_field_mappings(current_user: dict = Depends(require_admin)
     price_source = s.get("price_source") or "price"
     if price_source not in _HB_PRICE_SOURCE_KEYS:
         price_source = "price"
+    gad = s.get("global_attr_defaults") or {}
+    common_attrs = []
+    for c in HB_COMMON_ATTRS:
+        nk = _hb_norm(c["key"])
+        vals = await _hb_common_attr_values(nk)
+        common_attrs.append({"key": nk, "label": c["label"], "values": vals,
+                             "selected": gad.get(nk) or gad.get(c["key"]) or ""})
     return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved,
-            "markup": markup, "price_source": price_source, "price_sources": HB_PRICE_SOURCES}
+            "markup": markup, "price_source": price_source, "price_sources": HB_PRICE_SOURCES,
+            "common_attrs": common_attrs, "global_attr_defaults": gad}
 
 
 @router.post("/hepsiburada/base-field-mappings")
@@ -367,9 +400,20 @@ async def hb_save_base_field_mappings(request: Request, current_user: dict = Dep
     if isinstance(payload, dict) and "price_source" in payload:
         ps = str(payload.get("price_source") or "price")
         set_doc["price_source"] = ps if ps in _HB_PRICE_SOURCE_KEYS else "price"
+    if isinstance(payload, dict) and "global_attr_defaults" in payload:
+        gin = payload.get("global_attr_defaults") or {}
+        valid = {_hb_norm(c["key"]) for c in HB_COMMON_ATTRS}
+        gclean = {}
+        if isinstance(gin, dict):
+            for k, v in gin.items():
+                nk = _hb_norm(k)
+                if nk in valid and v not in (None, ""):
+                    gclean[nk] = str(v)
+        set_doc["global_attr_defaults"] = gclean
     await db.settings.update_one({"id": "hepsiburada"}, {"$set": set_doc}, upsert=True)
     return {"success": True, "saved": clean, "count": len(clean),
-            "markup": set_doc.get("default_markup"), "price_source": set_doc.get("price_source")}
+            "markup": set_doc.get("default_markup"), "price_source": set_doc.get("price_source"),
+            "global_attr_defaults": set_doc.get("global_attr_defaults")}
 
 
 @router.post("/trendyol/brands/sync")
@@ -3561,6 +3605,11 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                       for m in saved_maps if (m.get("mp_attr_id") or m.get("trendyol_attr_id"))}
     vmaps = (cm or {}).get("value_mappings") or {}
     defaults = (cm or {}).get("default_mappings") or {}
+    # Global ortak-özellik default'ları (panel: "Ortak Özellikler", ör. Cinsiyet=Kadın).
+    # Her kategoride geçerli; o kategorinin enum'una ada göre çözülür.
+    _hbset = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    gad = {_hb_norm(k): v for k, v in (_hbset.get("global_attr_defaults") or {}).items()
+           if v not in (None, "")}
 
     brand = product.get("brand") or product.get("brand_name")
     desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
@@ -3655,11 +3704,18 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 rv = _hb_resolve_value(a, raw)
                 if rv not in (None, ""):
                     attrs[aname] = rv
-            # 6) şirket default'u
+            # 6) şirket default'u (per-kategori)
             if aname not in attrs:
                 dv = defaults.get(aname) or defaults.get(aid)
                 if dv not in (None, ""):
                     rv = _hb_resolve_value(a, dv)
+                    if rv not in (None, ""):
+                        attrs[aname] = rv
+            # 6b) global ortak-özellik default'u (panel, ör. Cinsiyet=Kadın — tüm kategoriler)
+            if aname not in attrs:
+                gdv = gad.get(_hb_norm(aname))
+                if gdv not in (None, ""):
+                    rv = _hb_resolve_value(a, gdv)
                     if rv not in (None, ""):
                         attrs[aname] = rv
             if a.get("required") and aname not in attrs:

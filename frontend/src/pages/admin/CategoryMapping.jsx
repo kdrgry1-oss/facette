@@ -1053,6 +1053,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
   const [markup, setMarkup] = useState(0);
   const [priceSource, setPriceSource] = useState("price");
   const [priceSources, setPriceSources] = useState([]);
+  const [commonAttrs, setCommonAttrs] = useState([]);
+  const [globalDefaults, setGlobalDefaults] = useState({});
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(true);
@@ -1066,6 +1068,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
         setMarkup(r.data?.markup || 0);
         setPriceSource(r.data?.price_source || "price");
         setPriceSources(r.data?.price_sources || []);
+        setCommonAttrs(r.data?.common_attrs || []);
+        setGlobalDefaults(r.data?.global_attr_defaults || {});
       } catch (e) {
         // sessiz geç
       } finally {
@@ -1087,7 +1091,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
       });
       await axios.post(
         `${API}/integrations/hepsiburada/base-field-mappings`,
-        { mappings, markup: Number(markup) || 0, price_source: priceSource },
+        { mappings, markup: Number(markup) || 0, price_source: priceSource,
+          global_attr_defaults: globalDefaults },
         auth
       );
       toast.success("Varsayılan alan eşleştirmesi + kâr marjı kaydedildi", { id: t });
@@ -1155,6 +1160,40 @@ function HepsiburadaBaseFieldPanel({ auth }) {
               {mk > 0 ? ` (+%${mk})` : " (marj yok)"}
             </div>
           </div>
+          {commonAttrs.length > 0 && (
+            <div className="bg-white rounded-lg p-3 border-2 border-indigo-200">
+              <div className="font-bold text-indigo-900 text-sm mb-1">🚻 Ortak Özellikler (Tüm Kategoriler)</div>
+              <div className="text-xs text-gray-600 mb-2">
+                Burada seçtiğin değer <b>tüm kategorilerde</b> bu HB özelliğine uygulanır (her kategorinin
+                kendi değer listesine göre çözülür). Örn. tüm ürünlerin kadın ürünü ise: Cinsiyet → Kadın.
+                Listede değer yoksa önce ilgili kategoride <b>"hepsiburada Canlı Çek"</b> yap.
+              </div>
+              {commonAttrs.map((c) => (
+                <div key={c.key} className="flex items-center gap-2 flex-wrap mb-2">
+                  <span className="w-28 text-sm font-semibold text-gray-800">{c.label}</span>
+                  <span className="text-gray-400 text-xs">←</span>
+                  {c.values && c.values.length ? (
+                    <select
+                      value={globalDefaults[c.key] || ""}
+                      onChange={(e) => setGlobalDefaults((p) => ({ ...p, [c.key]: e.target.value }))}
+                      className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-[200px] bg-white"
+                    >
+                      <option value="">— Seçilmedi (kategori bazında çözülür) —</option>
+                      {c.values.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={globalDefaults[c.key] || ""}
+                      onChange={(e) => setGlobalDefaults((p) => ({ ...p, [c.key]: e.target.value }))}
+                      placeholder="Değer yaz (ör. Kadın) — Canlı Çek sonrası liste otomatik gelir"
+                      className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-[200px]"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {fields.map((f) => (
             <div key={f.key} className="flex items-center gap-2 flex-wrap bg-white rounded-lg p-2 border border-purple-100">
               <div className="w-44 text-sm font-semibold text-gray-800">{f.label}</div>
