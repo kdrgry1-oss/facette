@@ -19,7 +19,38 @@ import {
   trackAddPaymentInfo as _trackAddPaymentInfo,
   trackRemoveFromCart,
   trackSearch as _trackSearch,
+  trackViewCart as _trackViewCart,
+  trackAddShippingInfo as _trackAddShippingInfo,
 } from "../lib/dataLayer";
+
+/**
+ * Sepet satırlarını GA4 item dizisine çevirir. Hem ham CartContext şekli
+ * (productId, stockCode) hem de zenginleştirilmiş şekli (product_id, list_price,
+ * brand, breadcrumb) tolere eder — çağıran ne verirse versin çalışır.
+ */
+function mapCartItems(items = [], coupon = "") {
+  return (items || []).map((i) => {
+    const price = Number(i.price) || 0;
+    const listPrice = Number(i.list_price ?? i.price) || price;
+    return {
+      item_id: String(i.product_id || i.productId || i.id || ""),
+      item_name: i.name || i.title || "",
+      item_brand: i.brand || "FACETTE",
+      item_category: i.category || i.categoryName || "",
+      item_variant: `${i.size || ""} ${i.color || ""}`.trim(),
+      price,
+      list_price: listPrice,
+      sale_price: Number(i.sale_price ?? i.price) || price,
+      discount: Math.max(0, listPrice - price),
+      sku: i.sku || i.stockCode || "",
+      size: i.size || "",
+      color: i.color || "",
+      barcode: i.barcode || "",
+      quantity: Number(i.quantity) || 1,
+      coupon: coupon || "",
+    };
+  });
+}
 
 /** Ürün detay görüntüleme — eski imza (+ Meta katalog varyant id'si) */
 export function trackViewContent({ product_id, name, category, price, brand, color, variant_id }) {
@@ -109,4 +140,24 @@ export const trackSearch = _trackSearch;
 export function trackAddPaymentInfo(payload) {
   // payload zaten yeni format'ta gelirse direkt forward
   return _trackAddPaymentInfo(payload);
+}
+
+/** Sepet görüntüleme (view_cart) — sepet satırlarını (ham veya zengin) alır. */
+export function trackViewCart({ total, items = [], coupon = "" }) {
+  return _trackViewCart({
+    items: mapCartItems(items, coupon),
+    value: Number(total) || 0,
+    coupon,
+  });
+}
+
+/** Teslimat bilgisi girildi (add_shipping_info) — sepet satırlarını alır. */
+export function trackAddShippingInfo({ total, items = [], coupon = "", shipping_cost = 0, shipping_tier = "" }) {
+  return _trackAddShippingInfo({
+    items: mapCartItems(items, coupon),
+    value: Number(total) || 0,
+    coupon,
+    shipping: shipping_cost,
+    shipping_tier,
+  });
 }

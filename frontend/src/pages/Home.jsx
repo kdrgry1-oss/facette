@@ -6,6 +6,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { optimizeImg, aspectFromDims } from "../lib/img";
+import { trackSelectPromotion } from "../lib/dataLayer";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -52,6 +53,14 @@ function HeroSlider({ block }) {
           <Link
             key={index}
             to={links[index] || "/"}
+            onClick={() => {
+              try {
+                trackSelectPromotion({
+                  promotionId: `hero_${index + 1}`,
+                  promotionName: block?.title || links[index] || `Hero ${index + 1}`,
+                });
+              } catch (_) { /* silent */ }
+            }}
             className={`absolute inset-0 block transition-opacity duration-700 ${index === currentSlide ? "opacity-100 z-10" : "opacity-0"}`}
           >
             <img

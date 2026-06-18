@@ -16,6 +16,17 @@ import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// GA4'e özgü funnel event'leri — bunların Meta/TikTok/Pinterest/Snapchat'te
+// standart karşılığı yok. Native pixel'lere/CAPI'ye custom isimle gönderilirse
+// pazaryeri/reklam verisini kirletir. Bu yüzden SADECE dataLayer'a (GTM→GA4)
+// push edilir; native pixel ve CAPI atlanır.
+const GA4_ONLY_EVENTS = new Set([
+  "select_item",
+  "view_cart",
+  "add_shipping_info",
+  "select_promotion",
+]);
+
 // ---------------------------------------------------------------------------
 //   Helpers
 // ---------------------------------------------------------------------------
@@ -68,6 +79,7 @@ export function collectClickIds() {
 async function pushEvent(eventName, eventData, userInfo = {}) {
   const event_id = eventData.event_id || generateEventId();
   const clickIds = collectClickIds();
+  const isGa4Only = GA4_ONLY_EVENTS.has(eventName);
 
   // 1) GA4 / GTM dataLayer — Enhanced E-commerce schema (kalem kalem ayrı parametre)
   if (typeof window !== "undefined") {
@@ -104,7 +116,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     });
 
     // 2) Meta Pixel (fbq) — eventID parameter for dedup with CAPI
-    if (typeof window.fbq === "function") {
+    if (!isGa4Only && typeof window.fbq === "function") {
       try {
         const fbEventMap = {
           view_item: "ViewContent", view_item_list: "ViewCategory",
@@ -125,7 +137,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 3) TikTok Pixel
-    if (typeof window.ttq === "object" && typeof window.ttq.track === "function") {
+    if (!isGa4Only && typeof window.ttq === "object" && typeof window.ttq.track === "function") {
       try {
         const ttEventMap = {
           view_item: "ViewContent", view_item_list: "ViewContent",
@@ -148,7 +160,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 4) Pinterest
-    if (typeof window.pintrk === "function") {
+    if (!isGa4Only && typeof window.pintrk === "function") {
       try {
         const pinMap = {
           view_item: "pagevisit", add_to_cart: "addtocart",
@@ -171,7 +183,7 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
     }
 
     // 5) Snapchat
-    if (typeof window.snaptr === "function") {
+    if (!isGa4Only && typeof window.snaptr === "function") {
       try {
         const snapMap = {
           view_item: "VIEW_CONTENT", add_to_cart: "ADD_CART",
@@ -189,6 +201,9 @@ async function pushEvent(eventName, eventData, userInfo = {}) {
       } catch (_) { /* silent */ }
     }
   }
+
+  // GA4-only event'ler native pixel + CAPI'ye gitmez; burada biter.
+  if (isGa4Only) return event_id;
 
   // 6) Server-side CAPI mirror (non-blocking) — TÜM ENHANCED E-COMMERCE PARAMETRELERİYLE
   try {
@@ -353,8 +368,43 @@ export const trackPurchase = ({ orderNumber, items, value, currency = "TRY", cou
 export const trackSearch = ({ keyword, user = {} }) =>
   pushEvent("search", { search_term: keyword }, user);
 
+// --- GA4-only funnel event'leri (yalnızca dataLayer; native pixel/CAPI atlanır) ---
+
+/** Ürün kartına tıklama (liste → ürün). product + liste bağlamı. */
+export const trackSelectItem = ({ product, currency = "TRY", listId = "", listName = "", index, user = {} }) =>
+  pushEvent("select_item", {
+    currency,
+    value: 0,
+    items: [productToItem(product, null, { currency, listId, listName, index })],
+    list_id: listId,
+    list_name: listName,
+  }, user);
+
+/** Sepet sayfası görüntüleme. items = sepet satırları (eşlenmiş GA4 item'ları), value = sepet toplamı. */
+export const trackViewCart = ({ items = [], value = 0, currency = "TRY", coupon = "", user = {} }) =>
+  pushEvent("view_cart", { currency, value: Number(value) || 0, items, coupon }, user);
+
+/** Teslimat bilgisi girildi (GA4 funnel: add_shipping_info). */
+export const trackAddShippingInfo = ({ items = [], value = 0, currency = "TRY", coupon = "",
+                                       discount = 0, shipping = 0, shipping_tier = "", user = {} }) =>
+  pushEvent("add_shipping_info", {
+    currency, value: Number(value) || 0, items, coupon, discount, shipping, shipping_tier,
+  }, user);
+
+/** Promosyon/banner tıklama (hero, kampanya bannerı). */
+export const trackSelectPromotion = ({ promotionId = "", promotionName = "", product = null,
+                                       currency = "TRY", user = {} }) =>
+  pushEvent("select_promotion", {
+    currency,
+    value: 0,
+    promotion_id: promotionId,
+    promotion_name: promotionName,
+    items: product ? [productToItem(product, null, { currency, promotionId, promotionName })] : [],
+  }, user);
+
 export default {
   trackViewItem, trackViewItemList, trackAddToCart, trackRemoveFromCart,
   trackBeginCheckout, trackAddPaymentInfo, trackPurchase, trackSearch,
+  trackSelectItem, trackViewCart, trackAddShippingInfo, trackSelectPromotion,
   generateEventId, collectClickIds,
 };

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
@@ -9,7 +9,7 @@ import Footer from "../components/Footer";
 import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
-import { trackInitiateCheckout, trackPurchase, trackAddPaymentInfo } from "../utils/pixelEvents";
+import { trackInitiateCheckout, trackPurchase, trackAddPaymentInfo, trackAddShippingInfo } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -98,6 +98,7 @@ export default function Checkout() {
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
   const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+  const shippingInfoTracked = useRef(false);
 
   // Storefront: hangi ödeme yöntemleri aktif? (admin panelinden yönetilir)
   useEffect(() => {
@@ -215,6 +216,34 @@ export default function Checkout() {
       .catch(() => setAvailableCoupons([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
+
+  // GA4: add_shipping_info — geçerli teslimat adresi ilk kez hazır olduğunda BİR KEZ.
+  // Tek-sayfa checkout olduğu için ayrı "Devam Et" adımı yok; adres geçerli olunca tetiklenir.
+  useEffect(() => {
+    if (shippingInfoTracked.current) return;
+    if (items.length === 0) return;
+    const a = shippingAddress;
+    const hasAddress = a && a.first_name && (a.address || a.city);
+    if (!hasAddress) return;
+    shippingInfoTracked.current = true;
+    trackAddShippingInfo({
+      total: grandTotal,
+      items: items.map((it) => ({
+        product_id: it.productId, name: it.name, price: it.price, quantity: it.quantity,
+        category: it.category || it.categoryName || "",
+        sku: it.sku || it.stockCode || "",
+        size: it.size || "", color: it.color || "",
+        list_price: it.list_price || it.price,
+        sale_price: it.sale_price || it.price,
+        brand: it.brand || "FACETTE",
+        breadcrumb: it.breadcrumb || "",
+      })),
+      coupon: appliedCoupon?.code || "",
+      shipping_cost: shippingCost,
+      shipping_tier: shippingCost > 0 ? "Standart Kargo" : "Ücretsiz",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shippingAddress, items, grandTotal, shippingCost, appliedCoupon?.code]);
 
   // Madde 4 — sepet/kod/ÖDEME YÖNTEMİ/kaldırılanlar degisince motoru calistir (discount DEP DEGIL)
   useEffect(() => {

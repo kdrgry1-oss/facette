@@ -171,8 +171,8 @@ export default function Category() {
             </div>
           ) : (
             <div className={`grid ${gridClass[gridCols]} gap-x-4 gap-y-8`}>
-              {products.map((product) => (
-                <ProductCard key={product.id} product={product} />
+              {products.map((product, idx) => (
+                <ProductCard key={product.id} product={product} listName={slug || "all"} index={idx} />
               ))}
             </div>
           )}

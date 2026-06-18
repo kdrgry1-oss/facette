@@ -7,6 +7,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
 import { optimizeImg } from "../lib/img";
+import { trackViewCart } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const PLACEHOLDER = "/placeholder.jpg";
@@ -43,6 +44,15 @@ export default function Cart() {
     return () => { cancel = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length]);
+
+  // GA4: view_cart — sepet sayfası görüntüleme (mount'ta bir kez)
+  useEffect(() => {
+    if (items.length === 0) return;
+    try {
+      trackViewCart({ total, items });
+    } catch (_) { /* silent */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (items.length === 0) {
     return (

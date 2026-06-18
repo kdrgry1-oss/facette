@@ -4,9 +4,10 @@ import { Heart, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { optimizeImg } from "../lib/img";
+import { trackSelectItem } from "../lib/dataLayer";
 import { toast } from "sonner";
 
-export default function ProductCard({ product }) {
+export default function ProductCard({ product, listId = "", listName = "", index }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
@@ -46,6 +47,14 @@ export default function ProductCard({ product }) {
     toggleFavorite(product);
   };
 
+  // Liste → ürün tıklaması (GA4 select_item). Favori/hızlı-ekle butonları
+  // stopPropagation yaptığı için yalnızca gerçek ürün tıklamasında tetiklenir.
+  const handleSelect = () => {
+    try {
+      trackSelectItem({ product, listId, listName, index });
+    } catch (_) { /* silent */ }
+  };
+
   // Handle mouse move for image hover change
   const handleMouseMove = (e) => {
     if (!hasMultipleImages || !imageContainerRef.current) return;
@@ -67,7 +76,7 @@ export default function ProductCard({ product }) {
 
   return (
     <div className="product-card group" data-testid={`product-card-${product.id}`}>
-      <Link to={`/${product.slug || product.id}`}>
+      <Link to={`/${product.slug || product.id}`} onClick={handleSelect}>
         {/* Image Container */}
         <div 
           ref={imageContainerRef}
