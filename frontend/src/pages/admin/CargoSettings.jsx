@@ -21,7 +21,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Truck, RefreshCw, Play, CheckCircle2, AlertTriangle,
-  PauseCircle, Clock, HelpCircle, Wifi,
+  PauseCircle, Clock, HelpCircle, Wifi, Search,
 } from "lucide-react";
 import ProviderSettings from "../../components/admin/ProviderSettings";
 
@@ -75,6 +75,8 @@ function DhlPollMonitor() {
   const [running, setRunning] = useState(false);
   const [test, setTest] = useState(null);
   const [testing, setTesting] = useState(false);
+  const [backfill, setBackfill] = useState(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -125,6 +127,28 @@ function DhlPollMonitor() {
     }
   };
 
+  const runBackfill = async () => {
+    setBackfilling(true);
+    setBackfill(null);
+    try {
+      // Tüm site siparişlerini (durum farkı gözetmeden) tara, eksik takip no'ları doldur.
+      const { data } = await axios.post(
+        `${API}/orders/cargo/backfill-tracking?all_statuses=true&site_only=true`,
+        {}, { headers: authHeaders() }
+      );
+      setBackfill(data || null);
+      const upd = data?.updated ?? 0;
+      if (upd > 0) toast.success(`${upd} siparişe takip no yazıldı.`);
+      else toast(`Yazılabilecek yeni takip no bulunamadı — döküme bak.`, { icon: "ℹ️" });
+      await load();
+    } catch (e) {
+      const code = e?.response?.status;
+      toast.error(code === 404 ? "Backfill endpoint'i bulunamadı (backend güncellenmemiş)." : (e?.response?.data?.detail || "Toplama başarısız."));
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
   const status = h?.status || (h?._failed ? "error" : "unknown");
   const meta = STATUS_META[status] || STATUS_META.unknown;
   const Icon = meta.Icon;
@@ -159,6 +183,15 @@ function DhlPollMonitor() {
           >
             <Wifi className={`w-4 h-4 ${testing ? "animate-pulse" : ""}`} />
             {testing ? "Test ediliyor…" : "Bağlantı Testi"}
+          </button>
+          <button
+            onClick={runBackfill}
+            disabled={backfilling}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+            title="Takip no'su eksik tüm site siparişlerini kargo firmasından tarayıp doldurur"
+          >
+            <Search className={`w-4 h-4 ${backfilling ? "animate-pulse" : ""}`} />
+            {backfilling ? "Taranıyor…" : "Takip No'ları Topla"}
           </button>
           <button
             onClick={runNow}
@@ -210,6 +243,58 @@ function DhlPollMonitor() {
             <div className="text-xs mt-1 opacity-80">
               Kullanıcı: {test.settings.username} · Şifre: {test.settings.has_password ? "var" : "yok"} · {test.settings.customer_code}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Takip no toplama (backfill) sonucu — neden bulunamadığının sayısal dökümü */}
+      {backfill && (
+        <div className="text-sm rounded-lg p-3 border bg-slate-50 border-slate-200 text-slate-700 space-y-2">
+          <div className="flex items-center gap-2 font-medium text-slate-800">
+            <Search className="w-4 h-4" />
+            Takip no toplama sonucu — {backfill.site_taranan ?? backfill.scanned ?? 0} site siparişi tarandı
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+            <div className="bg-emerald-50 border border-emerald-200 rounded p-2">
+              <div className="text-emerald-700 font-bold text-lg">{backfill.diagnosis?.guncellendi ?? 0}</div>
+              <div className="text-emerald-700">takip no yazıldı</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded p-2">
+              <div className="font-bold text-lg">{backfill.diagnosis?.zaten_takip_no_vardi ?? 0}</div>
+              <div className="text-gray-500">zaten vardı</div>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded p-2">
+              <div className="text-amber-700 font-bold text-lg">{backfill.diagnosis?.mngde_kayit_var_takip_no_yok ?? 0}</div>
+              <div className="text-amber-700">kayıt var, no atanmamış</div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded p-2">
+              <div className="text-red-700 font-bold text-lg">{backfill.diagnosis?.mngde_kayit_yok_veya_yetki ?? 0}</div>
+              <div className="text-red-700">satır dönmedi (bulunamadı / whitelist)</div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded p-2">
+              <div className="text-red-700 font-bold text-lg">{backfill.diagnosis?.sorgu_hatasi ?? 0}</div>
+              <div className="text-red-700">sorgu hatası</div>
+            </div>
+          </div>
+          {/* Yorum: hangi kova baskınsa onun anlamı */}
+          {(() => {
+            const d = backfill.diagnosis || {};
+            if ((d.guncellendi ?? 0) > 0) return <p className="text-xs text-emerald-700">✓ {d.guncellendi} sipariş dolduruldu — Siparişler sayfasında artık takip no görünmeli.</p>;
+            if ((d.mngde_kayit_yok_veya_yetki ?? 0) > 0 || (d.sorgu_hatasi ?? 0) > 0)
+              return <p className="text-xs text-red-700">MNG/DHL'den satır dönmüyor. En olası sebep: <b>IP whitelist / yetki</b> ya da takip no'nun bizim sipariş numaramızla (W…) eşleşmemesi. "Bağlantı Testi"ne bas; başarısızsa MNG paneli &gt; API IP izinlerini kontrol et.</p>;
+            if ((d.mngde_kayit_var_takip_no_yok ?? 0) > 0)
+              return <p className="text-xs text-amber-700">Kayıt var ama kargo firması henüz <b>gönderi no</b> atamamış (paket fiilen şubede okutulunca dolar). Okutma sonrası tekrar topla.</p>;
+            return <p className="text-xs text-slate-500">Yazılabilecek yeni takip no bulunamadı.</p>;
+          })()}
+          {Array.isArray(backfill.failedList) && backfill.failedList.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-slate-600 select-none">Bulunamayanlar ({backfill.failed})</summary>
+              <div className="mt-1 font-mono break-all text-slate-500">
+                {backfill.failedList.slice(0, 40).map((f, i) => (
+                  <div key={i}>{f.no} — {f.reason}{f.kargo_statu_aciklama ? ` (${f.kargo_statu_aciklama})` : f.err ? ` (${f.err})` : ""}</div>
+                ))}
+              </div>
+            </details>
           )}
         </div>
       )}

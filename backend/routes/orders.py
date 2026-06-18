@@ -2815,6 +2815,7 @@ async def backfill_cargo_tracking(
     since: str = "",
     force: bool = False,
     all_statuses: bool = False,
+    site_only: bool = False,
     current_user: dict = Depends(require_admin),
 ):
     """Kargoya verilmiş siparişlerin MNG (DHL eCommerce) takip numaralarını TOPLU çeker.
@@ -2822,6 +2823,8 @@ async def backfill_cargo_tracking(
     - since boş → TÜM ZAMANLAR (tarih sınırı yok). Tarih verilirse (YYYY-MM-DD) o tarihten sonrası.
     - force=False → yalnız takip no'su EKSİK olanları sorgular (verimli); force=True → hepsini yeniden.
     - all_statuses=True → durum filtresi uygulamaz (varsayılan: yalnız kargo durumundaki siparişler).
+    - site_only=True → pazaryeri (TY/HB önekli) siparişleri ATLAR; yalnız site siparişlerini sorgular
+      (MNG/DHL'de zaten pazaryeri siparişi yok → boşuna sorgu/yanlış 'bulunamadı' önlenir).
     - get_mng_shipment_status (SALT OKUMA) → yeni kargo OLUŞTURMAZ, bildirim göndermez.
     - MNG sorgusu thread'de (event loop bloklanmaz); sıralı → MNG'yi hammer'lamaz.
 
@@ -2860,7 +2863,10 @@ async def backfill_cargo_tracking(
     site_taranan = 0
     for o in orders:
         on = str(o.get("order_number") or "")
-        if on and on[:2] not in ("TY", "HB"):
+        _is_mp = bool(on and on[:2] in ("TY", "HB"))
+        if site_only and _is_mp:
+            continue  # pazaryeri siparişini atla (MNG/DHL'de yok)
+        if on and not _is_mp:
             site_taranan += 1
         existing = o.get("cargo_tracking_number") or (o.get("cargo") or {}).get("tracking_number")
         if existing and not force:
