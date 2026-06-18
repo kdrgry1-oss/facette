@@ -13,6 +13,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap, Download } from "lucide-react";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
+import StockPriceUpdatePanel from "../../components/admin/StockPriceUpdatePanel";
 import {
   AdvancedAttributeMatchModal,
   AdvancedValueMatchModal,
@@ -241,6 +242,9 @@ export default function CategoryMapping() {
 
       {/* Filtreli Toplu Aktarım Paneli */}
       <FilteredPushPanel marketplace={active} auth={auth} categories={data.items} />
+
+      {/* Stok / Fiyat Güncelleme Paneli (tüm pazaryeri sekmelerinde görünür) */}
+      <StockPriceUpdatePanel marketplace={active} auth={auth} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="relative max-w-md flex-1">

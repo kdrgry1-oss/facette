@@ -2092,6 +2092,9 @@ async def create_invoice_for_order(
             payment_method=order.get("payment_method") or "",
             payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
             dispatch_date=str(order.get("shipped_at") or order.get("dispatch_date") or issue_date)[:10],
+            # Senaryo: Ticari Fatura (alıcı 8 gün içinde kabul/red edebilir). Ayardan
+            # değiştirilebilir (dogan_settings.einvoice_profile); varsayılan TİCARİ.
+            profile_id=(dogan_settings.get("einvoice_profile") or "TICARIFATURA"),
         )
         ubl_xml = DoganClient.build_efatura_ubl_xml(**_efatura_kwargs)
 

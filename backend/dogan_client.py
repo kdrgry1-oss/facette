@@ -24,6 +24,19 @@ except Exception as _e:  # noqa
     logger.warning(f"Doğan XSLT template not loaded: {_e}")
     DOGAN_XSLT_B64 = ""
 
+# e-Fatura için AYRI görsel şablon: başlık "e-Fatura", e-arşiv altbilgisi
+# ("e-Arşiv izni... / İrsaliye yerine geçer.") kaldırılmış sürüm. Aksi halde
+# e-fatura belgesi e-arşiv şablonuyla render edilip görselde "E-Arşiv Fatura"
+# yazıyordu (veri e-fatura olmasına rağmen). Dosya yoksa e-arşiv şablonuna
+# geri düşülür — böylece her zaman geçerli bir XSLT gömülür (Doğan 10013 önlemi).
+_XSLT_EFATURA_PATH = os.path.join(os.path.dirname(__file__), "dogan_xslt_efatura_template.txt")
+try:
+    with open(_XSLT_EFATURA_PATH, "r", encoding="utf-8") as _f:
+        DOGAN_XSLT_EFATURA_B64 = _f.read().strip()
+except Exception as _e:  # noqa
+    logger.warning(f"Doğan e-Fatura XSLT template not loaded: {_e}")
+    DOGAN_XSLT_EFATURA_B64 = DOGAN_XSLT_B64
+
 
 # --- Performans: zeep istemcileri + WSDL surec boyunca onbelleklenir ---
 # Her cagrida Client(wsdl) kurmak WSDL'i indirip parse ettigi icin cok yavasti
@@ -1492,7 +1505,7 @@ class DoganClient:
     <cbc:IssueDate>{issue_date}</cbc:IssueDate>
     <cbc:DocumentType>XSLT</cbc:DocumentType>
     <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject characterSetCode="UTF-8" encodingCode="Base64" filename="{escape(invoice_number)}.xslt" mimeCode="application/CSTAdata+xml">{DOGAN_XSLT_B64}</cbc:EmbeddedDocumentBinaryObject>
+      <cbc:EmbeddedDocumentBinaryObject characterSetCode="UTF-8" encodingCode="Base64" filename="{escape(invoice_number)}.xslt" mimeCode="application/CSTAdata+xml">{DOGAN_XSLT_EFATURA_B64}</cbc:EmbeddedDocumentBinaryObject>
     </cac:Attachment>
   </cac:AdditionalDocumentReference>
   <cac:Signature>

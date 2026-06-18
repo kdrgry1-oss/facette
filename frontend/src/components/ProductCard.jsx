@@ -53,7 +53,7 @@ export default function ProductCard({ product }) {
     const rect = imageContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const width = rect.width;
-    const segmentWidth = width / Math.min(images.length, 4);
+    const segmentWidth = width / images.length;
     const newIndex = Math.min(Math.floor(x / segmentWidth), images.length - 1);
     
     if (newIndex !== currentImageIndex && newIndex >= 0) {
@@ -108,7 +108,7 @@ export default function ProductCard({ product }) {
           {/* Image Indicators - show which segment is active */}
           {hasMultipleImages && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-              {images.slice(0, 4).map((_, index) => (
+              {images.map((_, index) => (
                 <div
                   key={index}
                   className={`transition-all ${
