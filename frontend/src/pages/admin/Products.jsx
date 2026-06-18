@@ -1622,7 +1622,7 @@ export default function AdminProducts() {
               <SortTH field="stock_code" label="Stok Kodu" />
               <th>Bedenler</th>
               <SortTH field="price" label="Fiyat" />
-              <th className="text-center">Stok</th>
+              <SortTH field="stock" label="Stok" className="text-center" />
               <SortTH field="is_active" label="Durum" firstDir="desc" />
               <th>İşlemler</th>
               <SortTH field="created_at" label="Eklenme Tarihi" firstDir="desc" />

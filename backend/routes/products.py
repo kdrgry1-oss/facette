@@ -704,7 +704,34 @@ async def get_products(
         ]
         products = await db.products.aggregate(pipeline, allowDiskUse=True).to_list(limit)
     else:
-        products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
+        if sort == "stock":
+            # Admin stok sıralaması: gösterilen stok = varyant varsa varyant stokları
+            # toplamı, yoksa ürün stoğu. DB 'stock' alanı varyantlı üründe güncel
+            # olmayabildiği için efektif stoğu hesaplayıp ona göre sıralıyoruz —
+            # böylece sıralama, listede görünen stok değeriyle birebir tutarlı olur.
+            stock_pipeline = [
+                {"$match": query},
+                {"$addFields": {
+                    "_eff_stock": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$variants", []]}}, 0]},
+                            {"$sum": {"$map": {
+                                "input": {"$ifNull": ["$variants", []]},
+                                "as": "v",
+                                "in": {"$ifNull": ["$$v.stock", 0]},
+                            }}},
+                            {"$ifNull": ["$stock", 0]},
+                        ]
+                    }
+                }},
+                {"$sort": {"_eff_stock": sort_order, "_id": 1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                {"$project": {"_id": 0, "_eff_stock": 0}},
+            ]
+            products = await db.products.aggregate(stock_pipeline, allowDiskUse=True).to_list(limit)
+        else:
+            products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
     total = await db.products.count_documents(query)
     
     return {

@@ -3974,6 +3974,7 @@ async def ticimax_test_connection(
 async def import_ticimax_products(
     limit: int = Query(500, ge=1, le=5000),
     aktif: int = Query(1, description="1=aktif, 0=pasif, -1=hepsi"),
+    stok_kodu: str = Query("", description="Verilirse SADECE bu stok koduna sahip urunu ceker (aktif+pasif tum sayfalar taranir, eslesince durur)"),
     current_user: dict = Depends(require_admin)
 ):
     """
@@ -3996,6 +3997,15 @@ async def import_ticimax_products(
     )
 
     aktif_param = None if aktif == -1 else aktif
+
+    # Hedefli mod: belirli stok kodu verilmisse aktif+pasif TUM urunleri tara,
+    # yalnizca eslesen urunu upsert et ve bulununca dur. (limit=500 / aktif=1
+    # yuzunden ilk 500 disinda kalan veya pasif urunleri de yakalar.)
+    target_stok = (stok_kodu or "").strip().upper()
+    target_mode = bool(target_stok)
+    found_target = False
+    if target_mode:
+        aktif_param = None
 
     # Probe service access first — Ticimax silently returns empty when WS
     # key has no UrunServis scope. Surface that as a real error.
@@ -4067,6 +4077,8 @@ async def import_ticimax_products(
             # ── Temel alanlar ──────────────────────────────────────────
             name        = str(raw.get("UrunAdi") or raw.get("Adi") or "")
             stock_code  = str(raw.get("StokKodu") or raw.get("stokkodu") or "")
+            if target_mode and stock_code.strip().upper() != target_stok:
+                continue
             barcode     = str(raw.get("Barkod") or raw.get("barkod") or "")
             description = str(raw.get("Aciklama") or raw.get("UrunAciklama") or raw.get("KisaAciklama") or "")
             is_active   = bool(raw.get("AktifMi") if raw.get("AktifMi") is not None
@@ -4264,10 +4276,15 @@ async def import_ticimax_products(
                 imported += 1
 
             fetched += 1
+            if target_mode:
+                found_target = True
+                break
             if fetched >= limit:
                 break
 
         page += 1
+        if target_mode and found_target:
+            break
         if len(products_raw) < page_size:
             break
 
@@ -4277,13 +4294,21 @@ async def import_ticimax_products(
         upsert=True
     )
 
+    if target_mode:
+        if imported + updated == 0:
+            msg = f"'{target_stok}' stok kodlu ürün Ticimax'ta bulunamadı (aktif+pasif tarandı)."
+        else:
+            msg = f"'{target_stok}' bulundu: {imported} eklendi, {updated} güncellendi."
+    else:
+        msg = f"{imported} yeni ürün eklendi, {updated} ürün güncellendi"
     return {
         "success": True,
         "imported": imported,
         "updated": updated,
         "total": imported + updated,
         "total_remote": total_remote,
-        "message": f"{imported} yeni ürün eklendi, {updated} ürün güncellendi"
+        "target_stok": target_stok or None,
+        "message": msg,
     }
 
 

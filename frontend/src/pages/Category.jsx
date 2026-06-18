@@ -20,7 +20,16 @@ export default function Category() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [gridCols, setGridCols] = useState(4); // 2, 3, or 4 columns
+  // Grid sütun tercihi localStorage'a kaydedilir — kullanıcı 2/3/4 seçince
+  // kategoriler arası gezinmede ve tekrar açılışta korunur (her seferinde 4'e sıfırlanmaz).
+  const [gridCols, setGridColsState] = useState(() => {
+    const saved = parseInt(localStorage.getItem("facette_plp_grid") || "", 10);
+    return [2, 3, 4].includes(saved) ? saved : 4;
+  });
+  const setGridCols = (n) => {
+    setGridColsState(n);
+    try { localStorage.setItem("facette_plp_grid", String(n)); } catch (e) {}
+  };
 
   const sort = searchParams.get("sort") || "created_at";
   const order = searchParams.get("order") || "desc";
@@ -155,7 +164,7 @@ export default function Category() {
         {/* Products Grid */}
         <div className="py-8">
           {loading ? (
-            <div className={`grid ${gridClass[gridCols]} gap-4 gap-y-8`}>
+            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-0 gap-y-8 md:gap-y-10`}>
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="animate-pulse">
                   <div className="aspect-[2/3] bg-gray-100 mb-3" />
@@ -170,7 +179,7 @@ export default function Category() {
               <p className="text-gray-500">Bu kategoride ürün bulunamadı</p>
             </div>
           ) : (
-            <div className={`grid ${gridClass[gridCols]} gap-x-4 gap-y-8`}>
+            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-0 gap-y-8 md:gap-y-10`}>
               {products.map((product, idx) => (
                 <ProductCard key={product.id} product={product} listName={slug || "all"} index={idx} />
               ))}
