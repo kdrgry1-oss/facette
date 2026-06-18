@@ -21,7 +21,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Truck, RefreshCw, Play, CheckCircle2, AlertTriangle,
-  PauseCircle, Clock, HelpCircle,
+  PauseCircle, Clock, HelpCircle, Wifi,
 } from "lucide-react";
 import ProviderSettings from "../../components/admin/ProviderSettings";
 
@@ -73,14 +73,17 @@ function DhlPollMonitor() {
   const [h, setH] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [test, setTest] = useState(null);
+  const [testing, setTesting] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API}/orders/cargo/poll-health`, { headers: authHeaders() });
       setH(data || null);
-    } catch {
-      // sessiz geç — panel "yüklenemedi" gösterir
-      setH((prev) => prev || { _failed: true });
+    } catch (e) {
+      // İzleme verisi alınamadı — HTTP durumunu sakla (404 = backend henüz güncellenmemiş olabilir)
+      const code = e?.response?.status || 0;
+      setH((prev) => (prev && !prev._failed ? prev : { _failed: true, _http: code }));
     } finally {
       setLoading(false);
     }
@@ -102,6 +105,23 @@ function DhlPollMonitor() {
       toast.error(e?.response?.data?.detail || "Tarama çalıştırılamadı.");
     } finally {
       setRunning(false);
+    }
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    setTest(null);
+    try {
+      const { data } = await axios.get(`${API}/orders/cargo/mng-test`, { headers: authHeaders() });
+      setTest(data || { ok: false, error: "Boş yanıt" });
+      if (data?.ok) toast.success("MNG/DHL bağlantısı başarılı.");
+      else toast.error("MNG/DHL bağlantısı başarısız — detay panelde.");
+    } catch (e) {
+      const code = e?.response?.status;
+      setTest({ ok: false, error: e?.response?.data?.detail || e.message || "İstek başarısız", _http: code });
+      toast.error(code === 404 ? "Test endpoint'i bulunamadı (backend güncellenmemiş)." : "Bağlantı testi başarısız.");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -132,6 +152,15 @@ function DhlPollMonitor() {
             <RefreshCw className="w-4 h-4" /> Yenile
           </button>
           <button
+            onClick={runTest}
+            disabled={testing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+            title="MNG/DHL servisine canlı bağlantı testi (Baglanti_Test)"
+          >
+            <Wifi className={`w-4 h-4 ${testing ? "animate-pulse" : ""}`} />
+            {testing ? "Test ediliyor…" : "Bağlantı Testi"}
+          </button>
+          <button
             onClick={runNow}
             disabled={running}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
@@ -154,6 +183,37 @@ function DhlPollMonitor() {
         </span>
       </div>
 
+      {/* Panel verisi alınamadı (büyük olasılıkla backend henüz güncellenmedi) */}
+      {h?._failed && (
+        <div className="flex items-start gap-2 text-sm bg-orange-50 border border-orange-200 text-orange-800 rounded-lg p-3">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <b>İzleme verisi alınamadı{h?._http ? ` (HTTP ${h._http})` : ""}.</b>{" "}
+            {h?._http === 404
+              ? "Backend (Railway) bu sürümle henüz güncellenmemiş olabilir — git push sonrası Railway deploy'unun bitmesini bekle, sonra Yenile'ye bas."
+              : "Backend'e ulaşılamadı. Railway servisinin ayakta olduğunu kontrol et."}
+          </div>
+        </div>
+      )}
+
+      {/* Bağlantı testi sonucu (canlı MNG/DHL ping) */}
+      {test && (
+        <div className={`text-sm rounded-lg p-3 border ${test.ok ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"}`}>
+          <div className="flex items-center gap-2 font-medium">
+            {test.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+            MNG/DHL bağlantı testi: {test.ok ? "BAŞARILI" : "BAŞARISIZ"}
+            {typeof test.ms === "number" && <span className="text-xs opacity-70">({test.ms} ms)</span>}
+          </div>
+          {test.error && <div className="font-mono text-xs mt-1 break-all">{test.error}</div>}
+          {test.result && <div className="text-xs mt-1 opacity-80">Yanıt: {test.result}</div>}
+          {test.settings && (
+            <div className="text-xs mt-1 opacity-80">
+              Kullanıcı: {test.settings.username} · Şifre: {test.settings.has_password ? "var" : "yok"} · {test.settings.customer_code}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Ayar kapalı / hata uyarısı */}
       {status === "skipped" && (
         <div className="flex items-start gap-2 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
@@ -164,23 +224,41 @@ function DhlPollMonitor() {
           </div>
         </div>
       )}
-      {status === "error" && (
+      {status === "error" && !h?._failed && (
         <div className="flex items-start gap-2 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>
-            <b>Son taramada hata oluştu.</b>
+            <b>Son taramada hata oluştu.</b> Aşağıdaki <b>Bağlantı Testi</b> ile MNG/DHL servisine
+            erişimi kontrol et (genelde IP whitelist / WSDL erişimi).
             {h?.last_error ? <div className="font-mono text-xs mt-1 break-all">{h.last_error}</div> : null}
           </div>
         </div>
       )}
+      {status !== "error" && h?.last_note && !h?._failed && (
+        <div className="flex items-start gap-2 text-sm bg-slate-50 border border-slate-200 text-slate-600 rounded-lg p-3">
+          <HelpCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>Son tarama notu: {h.last_note}</div>
+        </div>
+      )}
 
       {/* Sayaçlar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Sorgulanan sipariş" value={h?.processed ?? 0} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <StatCard label="Eşleşen sipariş" value={h?.matched ?? 0} />
+        <StatCard label="MNG'den yanıt" value={h?.processed ?? 0} accent={(h?.matched ?? 0) > 0 && (h?.processed ?? 0) === 0 ? "text-red-600" : "text-gray-900"} />
         <StatCard label="Kargoya verilen" value={h?.shipped ?? 0} accent="text-indigo-600" />
         <StatCard label="Teslim edilen" value={h?.delivered ?? 0} accent="text-emerald-600" />
         <StatCard label="Hatalı sorgu" value={h?.errors ?? 0} accent={(h?.errors ?? 0) > 0 ? "text-red-600" : "text-gray-900"} />
       </div>
+      {(h?.matched ?? 0) > 0 && (h?.processed ?? 0) === 0 && !h?._failed && (
+        <p className="text-xs text-red-600">
+          {h.matched} sipariş eşleşti ama MNG/DHL'den hiçbirine yanıt gelmedi — bağlantı/erişim sorunu güçlü ihtimal. "Bağlantı Testi"ne bas.
+        </p>
+      )}
+      {(h?.matched ?? 0) === 0 && status === "ok" && !h?._failed && (
+        <p className="text-xs text-amber-600">
+          Sorguya uyan site siparişi yok (kargo barkodu oluşturulmuş, son 45 gün, durumu kargo aşamasında olan site siparişi bulunamadı).
+        </p>
+      )}
 
       {/* Ayar/süre özeti */}
       <div className="flex items-center gap-4 flex-wrap text-xs text-gray-500">

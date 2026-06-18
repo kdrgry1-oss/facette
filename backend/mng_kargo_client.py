@@ -172,8 +172,61 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
             "raw": row,
         }
     except Exception as e:
-        logger.error(f"MNG get_shipment_status({siparis_no}): {e}")
-        return {"ok": False, "error": str(e)}
+        _primary = str(e)
+        logger.warning(f"MNG FaturaSiparisListesi({siparis_no}) hata, KargoTakipByReferans deneniyor: {e}")
+        # FALLBACK: WSDL'de doğrulanmış takip operasyonu KargoTakipByReferans.
+        # FaturaSiparisListesi operasyonu serviste yoksa/değiştiyse ya da geçici
+        # hata verirse buraya düşer; iki yöntem de başarısızsa İKİSİNİN de gerçek
+        # hatası geri döner (teşhis paneli bunu gösterir — sessiz yutma yok).
+        try:
+            r2 = c.service.KargoTakipByReferans(
+                pKullanici=username, pSifre=password, pReferansId=siparis_no
+            )
+            if r2 is None:
+                return {"ok": False,
+                        "error": f"Takip kaydı yok (KargoTakipByReferans). İlk yöntem: {_primary[:150]}"}
+            from zeep.helpers import serialize_object
+            d = serialize_object(r2)
+
+            def _pick(dd, *keys):
+                for k in keys:
+                    v = dd.get(k) if isinstance(dd, dict) else None
+                    if v not in (None, ""):
+                        return str(v).strip()
+                return ""
+
+            # KargoTakipByReferans yanıtı tek kayıt ya da _value_1 listesi olabilir;
+            # şema sürümüne dayanıklı biçimde ilk anlamlı düğümü bul.
+            node = d
+            if isinstance(d, dict) and "_value_1" in d:
+                inner = d.get("_value_1")
+                if isinstance(inner, dict) and "_value_1" in inner:
+                    lst = inner.get("_value_1")
+                    if isinstance(lst, list) and lst:
+                        node = lst[0]
+                elif isinstance(inner, list) and inner:
+                    node = inner[0]
+            if not isinstance(node, dict):
+                node = d if isinstance(d, dict) else {}
+
+            return {
+                "ok": True,
+                "method": "KargoTakipByReferans",
+                "mng_siparis_no": _pick(node, "MNG_SIPARIS_NO", "MngSiparisNo", "SiparisNo"),
+                "gonderi_no": _pick(node, "GONDERI_NO", "GonderiNo", "Barkod", "TakipNo", "KargoTakipNo"),
+                "kargo_statu": _pick(node, "KARGO_STATU", "KargoStatu", "Statu", "DurumKodu") or "0",
+                "kargo_statu_aciklama": _pick(node, "KARGO_STATU_ACIKLAMA", "KargoStatuAciklama",
+                                              "Durum", "DurumAciklama", "Aciklama"),
+                "kargo_takip_url": _pick(node, "KARGO_TAKIP_URL", "TakipUrl", "KargoTakipUrl"),
+                "teslim_tarihi": _pick(node, "TESLIM_TARIHI", "TeslimTarihi"),
+                "alici_il": _pick(node, "ALICI_IL", "AliciIl", "Il"),
+                "raw": d,
+                "primary_error": _primary[:200],
+            }
+        except Exception as e2:
+            logger.error(f"MNG get_shipment_status({siparis_no}) iki yöntem de başarısız: F={e}; K={e2}")
+            return {"ok": False,
+                    "error": f"FaturaSiparisListesi: {_primary[:140]} || KargoTakipByReferans: {str(e2)[:140]}"}
 
 
 def get_mng_barcode_by_siparis_no(*, username: str, password: str, siparis_no: str) -> Optional[str]:
