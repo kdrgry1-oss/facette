@@ -1051,6 +1051,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
   const [fields, setFields] = useState([]);
   const [sources, setSources] = useState([]);
   const [markup, setMarkup] = useState(0);
+  const [priceSource, setPriceSource] = useState("price");
+  const [priceSources, setPriceSources] = useState([]);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(true);
@@ -1062,6 +1064,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
         setFields(r.data?.fields || []);
         setSources(r.data?.sources || []);
         setMarkup(r.data?.markup || 0);
+        setPriceSource(r.data?.price_source || "price");
+        setPriceSources(r.data?.price_sources || []);
       } catch (e) {
         // sessiz geç
       } finally {
@@ -1083,7 +1087,7 @@ function HepsiburadaBaseFieldPanel({ auth }) {
       });
       await axios.post(
         `${API}/integrations/hepsiburada/base-field-mappings`,
-        { mappings, markup: Number(markup) || 0 },
+        { mappings, markup: Number(markup) || 0, price_source: priceSource },
         auth
       );
       toast.success("Varsayılan alan eşleştirmesi + kâr marjı kaydedildi", { id: t });
@@ -1116,10 +1120,26 @@ function HepsiburadaBaseFieldPanel({ auth }) {
           <div className="bg-white rounded-lg p-3 border-2 border-green-200">
             <div className="font-bold text-green-900 text-sm mb-1">💰 Fiyat & Kâr Marjı</div>
             <div className="text-xs text-gray-600 mb-2">
-              HB'ye gönderilen fiyat, ürün kartındaki fiyata bu oran kadar eklenir. (Stok/Fiyat gönderiminde uygulanır.)
+              HB'ye gönderilen fiyat, aşağıdaki kaynaktan alınıp bu oran kadar artırılır. (Stok/Fiyat gönderiminde uygulanır.)
+            </div>
+            <div className="flex items-center gap-2 flex-wrap mb-2">
+              <span className="w-28 text-sm font-semibold text-gray-800">Fiyat Kaynağı</span>
+              <span className="text-gray-400 text-xs">←</span>
+              <select
+                value={priceSource}
+                onChange={(e) => setPriceSource(e.target.value)}
+                className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-[220px] bg-white"
+              >
+                {(priceSources.length
+                  ? priceSources
+                  : [{ value: "auto", label: "Otomatik" }]
+                ).map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-gray-700">HB fiyatı = Ürün fiyatı × (1 +</span>
+              <span className="text-sm text-gray-700">HB fiyatı = Fiyat kaynağı × (1 +</span>
               <input
                 type="number"
                 min="0"

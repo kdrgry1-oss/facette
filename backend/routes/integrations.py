@@ -340,7 +340,11 @@ async def hb_get_base_field_mappings(current_user: dict = Depends(require_admin)
         markup = float(s.get("default_markup", 0) or 0)
     except Exception:
         markup = 0.0
-    return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved, "markup": markup}
+    price_source = s.get("price_source") or "price"
+    if price_source not in _HB_PRICE_SOURCE_KEYS:
+        price_source = "price"
+    return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved,
+            "markup": markup, "price_source": price_source, "price_sources": HB_PRICE_SOURCES}
 
 
 @router.post("/hepsiburada/base-field-mappings")
@@ -360,9 +364,12 @@ async def hb_save_base_field_mappings(request: Request, current_user: dict = Dep
             set_doc["default_markup"] = max(0.0, float(payload.get("markup") or 0))
         except Exception:
             pass
+    if isinstance(payload, dict) and "price_source" in payload:
+        ps = str(payload.get("price_source") or "price")
+        set_doc["price_source"] = ps if ps in _HB_PRICE_SOURCE_KEYS else "price"
     await db.settings.update_one({"id": "hepsiburada"}, {"$set": set_doc}, upsert=True)
     return {"success": True, "saved": clean, "count": len(clean),
-            "markup": set_doc.get("default_markup")}
+            "markup": set_doc.get("default_markup"), "price_source": set_doc.get("price_source")}
 
 
 @router.post("/trendyol/brands/sync")
@@ -3148,14 +3155,49 @@ async def _hb_markup() -> float:
         return 0.0
 
 
+# Fiyat kaynağı seçenekleri (UI + çözümleme). Varsayılan: price (mevcut davranış).
+HB_PRICE_SOURCES = [
+    {"value": "price", "label": "Satış Fiyatı (price) — varsayılan"},
+    {"value": "auto", "label": "Otomatik (İndirimli varsa onu kullan, yoksa Satış Fiyatı)"},
+    {"value": "sale_price", "label": "İndirimli Fiyat (sale_price)"},
+]
+_HB_PRICE_SOURCE_KEYS = {x["value"] for x in HB_PRICE_SOURCES}
+
+
+async def _hb_price_source() -> str:
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    ps = (s.get("price_source") or "price")
+    return ps if ps in _HB_PRICE_SOURCE_KEYS else "price"
+
+
+def _hb_pick_base_price(obj: dict, price_source: str = "auto") -> float:
+    """Ürün/varyanttan, seçili kaynağa göre temel fiyatı çöz."""
+    try:
+        price = float(obj.get("price", 0) or 0)
+    except Exception:
+        price = 0.0
+    sale = obj.get("sale_price")
+    try:
+        sale = float(sale) if sale not in (None, "") else 0.0
+    except Exception:
+        sale = 0.0
+    if price_source == "price":
+        return price
+    if price_source == "sale_price":
+        return sale if sale > 0 else price
+    # auto: indirimli (>0) varsa onu kullan, yoksa satış fiyatı
+    return sale if sale > 0 else price
+
+
 def _hb_merchant_sku(obj: dict) -> str:
     return str(obj.get("stock_code") or obj.get("barcode") or obj.get("sku") or "").strip()
 
 
-def _hb_listing_items_from_product(product: dict, markup: float = 0.0):
-    """Yerel ürün -> HB listing kalemleri [{merchantSku, price, availableStock}]."""
+def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_source: str = "auto"):
+    """Yerel ürün -> HB listing kalemleri [{merchantSku, price, availableStock}].
+    Fiyat, price_source'a göre (auto/price/sale_price) seçilir; markup uygulanır."""
     items = []
-    base_price = float(product.get("price", 0) or 0)
+    base_price = _hb_pick_base_price(product, price_source)
     if markup > 0:
         base_price = base_price * (1 + markup / 100)
     variants = product.get("variants", []) or []
@@ -3164,7 +3206,12 @@ def _hb_listing_items_from_product(product: dict, markup: float = 0.0):
             sku = str(v.get("stock_code") or v.get("barcode") or "").strip()
             if not sku:
                 continue
-            p = base_price + float(v.get("price_diff", 0) or 0)
+            # Varyantın kendi fiyatı varsa onu (kaynağa göre) baz al, yoksa ürün fiyatı + price_diff
+            v_price = _hb_pick_base_price(v, price_source) if (v.get("price") or v.get("sale_price")) else 0.0
+            if v_price > 0:
+                p = v_price * (1 + markup / 100) if markup > 0 else v_price
+            else:
+                p = base_price + float(v.get("price_diff", 0) or 0)
             items.append({"merchantSku": sku, "price": round(p, 2),
                           "availableStock": int(v.get("stock", 0) or 0)})
     else:
@@ -3211,7 +3258,8 @@ async def hb_update_product_stock_price(product_id: str, body: HbBulkListingReq 
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     markup = await _hb_markup()
-    items = _hb_listing_items_from_product(product, markup)
+    price_source = await _hb_price_source()
+    items = _hb_listing_items_from_product(product, markup, price_source)
     if not items:
         raise HTTPException(status_code=400, detail="Ürünün stok kodu/barkodu bulunamadı")
     do_price = True if (body is None) else body.update_price
@@ -3245,9 +3293,10 @@ async def hb_update_category_stock_price(category_id: str, body: HbBulkListingRe
     if not products:
         raise HTTPException(status_code=404, detail="Bu kategoride ürün bulunamadı")
     markup = await _hb_markup()
+    price_source = await _hb_price_source()
     items = []
     for p in products:
-        items.extend(_hb_listing_items_from_product(p, markup))
+        items.extend(_hb_listing_items_from_product(p, markup, price_source))
     if not items:
         raise HTTPException(status_code=400, detail="Ürünlerin stok kodu/barkodu bulunamadı")
     do_price = True if (body is None) else body.update_price
@@ -3708,9 +3757,10 @@ async def hb_inventory_sync(current_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail=err)
     products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
     markup = await _hb_markup()
+    price_source = await _hb_price_source()
     items = []
     for p in products:
-        items.extend(_hb_listing_items_from_product(p, markup))
+        items.extend(_hb_listing_items_from_product(p, markup, price_source))
     if not items:
         return {"message": "Gönderilecek stok/fiyat kalemi bulunamadı", "items_count": 0}
     res = await _hb_push_stock_price(client, items, True, True)
