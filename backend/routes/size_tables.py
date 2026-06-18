@@ -116,10 +116,46 @@ def render_size_table_image(
     return out.getvalue()
 
 
+async def _inherited_size_table(product_id: str):
+    """Kendi ölçü tablosu olmayan ürün için, AYNI stok kodlu başka bir üründe
+    kayıtlı (dolu) ölçü tablosunu döndürür. Stok kodu boşsa / kardeş yoksa None.
+    En son güncellenen kardeş tabloyu seçer."""
+    prod = await db.products.find_one({"id": product_id}, {"_id": 0, "id": 1, "stock_code": 1})
+    if not prod:
+        return None
+    sc = (prod.get("stock_code") or "").strip()
+    if not sc:
+        return None
+    sibling_ids = []
+    async for p in db.products.find({"stock_code": sc, "id": {"$ne": product_id}}, {"_id": 0, "id": 1}):
+        if p.get("id"):
+            sibling_ids.append(p["id"])
+    if not sibling_ids:
+        return None
+    return await db.size_tables.find_one(
+        {"product_id": {"$in": sibling_ids}, "sizes": {"$exists": True, "$ne": []}},
+        {"_id": 0},
+        sort=[("updated_at", -1)],
+    )
+
+
 @router.get("/{product_id}")
 async def get_size_table(product_id: str, current_user: dict = Depends(require_admin)):
     st = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
     if not st:
+        # Kalıtım: aynı stok kodlu başka üründe tablo varsa otomatik getir (oto-doldurma).
+        # exists=True döner ki editör doldursun; admin "Kaydet" deyince bu ürüne kalıcı yazılır.
+        inh = await _inherited_size_table(product_id)
+        if inh and inh.get("sizes"):
+            return {
+                "product_id": product_id,
+                "sizes": inh.get("sizes") or [],
+                "columns": inh.get("columns") or [],
+                "values": inh.get("values") or {},
+                "exists": True,
+                "inherited": True,
+                "inherited_from": inh.get("product_id"),
+            }
         return {"product_id": product_id, "sizes": [], "columns": [], "values": {}, "exists": False}
     st["exists"] = True
     return st
@@ -150,6 +186,8 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
     """Render a 1200x1800 PNG, store as base64 in the product's images array
     marked `is_size_table=true`, and return the data URL."""
     st = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
+    if not st:
+        st = await _inherited_size_table(product_id)  # aynı stok kodundan kalıtım
     if not st:
         raise HTTPException(status_code=404, detail="Önce ölçü tablosunu kaydedin")
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
@@ -193,6 +231,8 @@ public_router = APIRouter(prefix="/size-tables-public", tags=["size-tables-publi
 async def get_public_size_table(product_id: str):
     """Storefront reads the HTML-renderable data (NOT the image)."""
     st = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
+    if not st or not st.get("sizes"):
+        st = await _inherited_size_table(product_id)  # aynı stok kodundan kalıtım
     if not st or not st.get("sizes"):
         return {"exists": False}
     return {

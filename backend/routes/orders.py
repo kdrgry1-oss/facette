@@ -3699,8 +3699,11 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     rid = generate_id()
     ref = f"IADE{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
 
-    # --- MNG iade gönderisi (alıcı = depo/mağaza) — best-effort ---
-    return_code = ref
+    # --- İade kodu + MNG iade gönderisi (alıcı = depo/mağaza) — best-effort ---
+    # Varsayılan iade kodu = anlaşmalı MNG sözleşme/müşteri no (settings.username, varsayılan 490059279).
+    # Müşteri HER ZAMAN bu kodla anlaşmalı kargoya teslim edebilir. MNG API per-gönderi barkod
+    # üretirse return_code bununla DEĞİŞTİRİLİR → her müşterinin iadesi ayrı barkodla takip edilir.
+    return_code = "490059279"
     mng_ok = False
     cargo_name = "DHL E-Commerce"
     try:
@@ -3708,6 +3711,7 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
         from mng_kargo_client import create_shipment as mng_create
         s = await _get_mng_settings()
+        return_code = (str(s.get("username") or "").strip() or "490059279")
         snd = await _get_sender_info()
         if s.get("is_active") and snd.get("address") and snd.get("city"):
             res = await _aio.to_thread(
