@@ -1351,6 +1351,12 @@ async def refresh_attributes(
             raise
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Trendyol API hatası: {e}")
+    if marketplace == "hepsiburada":
+        attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
+        if hb_err:
+            raise HTTPException(status_code=502, detail=f"Hepsiburada API hatası: {hb_err}")
+        return {"success": True, "fetched": True, "count": len(attrs),
+                "message": f"Hepsiburada canlı: {len(attrs)} özellik çekildi (değerleriyle)"}
     # Diğer pazaryerleri — canlı entegrasyon yok
     return {
         "success": False,

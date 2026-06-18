@@ -239,6 +239,7 @@ export default function CategoryMapping() {
       </div>
 
       {active === "hepsiburada" && <HepsiburadaOrderPull auth={auth} />}
+      {active === "hepsiburada" && <HepsiburadaAutofillPanel auth={auth} />}
 
       {/* Filtreli Toplu Aktarım Paneli */}
       <FilteredPushPanel marketplace={active} auth={auth} categories={data.items} />
@@ -1045,6 +1046,58 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Hepsiburada Sipariş Çek (OMS) — geçmiş siparişleri tarih/sipariş-no ile içe aktar
 // ──────────────────────────────────────────────────────────────────────────────
+function HepsiburadaAutofillPanel({ auth }) {
+  const [loading, setLoading] = useState(false);
+  const [res, setRes] = useState(null);
+  const run = async () => {
+    if (!window.confirm(
+      "Tüm HB-eşleşmiş kategorilerdeki ürünlerin Hepsiburada özellik alanları, ürün verisinden " +
+      "otomatik doldurulacak. Mevcut (manuel) değerler korunur. Devam edilsin mi?"
+    )) return;
+    setLoading(true);
+    setRes(null);
+    const t = toast.loading("HB özellikleri otomatik dolduruluyor...");
+    try {
+      const r = await axios.post(`${API}/integrations/hepsiburada/products/autofill-attributes`, {}, auth);
+      setRes(r.data);
+      toast.success(r.data?.message || "Dolduruldu", { id: t });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Otomatik doldurma başarısız", { id: t });
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4" data-testid="hb-autofill-panel">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex-1 min-w-[260px]">
+          <div className="font-bold text-blue-900 text-sm flex items-center gap-1">
+            <Zap size={14} /> Ürün HB Özelliklerini Otomatik Doldur
+          </div>
+          <div className="text-xs text-blue-700 mt-0.5">
+            Eşleşmiş kategorilerdeki ürünlerin Hepsiburada özelliklerini (Cinsiyet, Materyal, Marka,
+            Kalıp vb.) ürün verisinden otomatik türetir. Renk/Beden gönderimde varyanttan gelir.
+            <b> Mevcut değerler korunur</b> — yalnız boş alanlar doldurulur.
+          </div>
+        </div>
+        <button
+          onClick={run}
+          disabled={loading}
+          className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60 whitespace-nowrap"
+          data-testid="hb-autofill-btn"
+        >
+          {loading ? "Dolduruluyor..." : "Otomatik Doldur"}
+        </button>
+      </div>
+      {res && (
+        <div className="text-xs text-blue-800 mt-2 font-medium">
+          {res.updated_products} üründe {res.filled_values} özellik dolduruldu · {res.scanned} ürün tarandı
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HepsiburadaOrderPull({ auth }) {
   const iso = (d) => d.toISOString().slice(0, 10);
   const [begin, setBegin] = useState(iso(new Date(Date.now() - 30 * 864e5)));

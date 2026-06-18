@@ -3301,9 +3301,119 @@ async def hb_deactivate_listing(hbsku: str, current_user: dict = Depends(require
 
 
 # ---------------------------- ÜRÜN OLUŞTURMA (import) ----------------------------
+def _hb_norm(s) -> str:
+    """Türkçe-duyarsız normalize (eşleştirme için). HB'ye bağımsız."""
+    import unicodedata as _u
+    s = _u.normalize("NFKD", str(s or ""))
+    s = "".join(c for c in s if not _u.combining(c))
+    s = (s.lower().replace("ı", "i").replace("ş", "s").replace("ç", "c")
+         .replace("ğ", "g").replace("ü", "u").replace("ö", "o"))
+    return " ".join(s.split())
+
+
+def _hb_collect_local(product: dict, variant: dict | None = None) -> dict:
+    """Ürün (+varsa varyant) verisinden {normalize(özellik_adı): değer} toplar.
+    Tamamen yerel — hiçbir pazaryerine bağlı değil."""
+    out: dict = {}
+
+    def put(nm, vv):
+        if not nm or vv in (None, ""):
+            return
+        k = _hb_norm(nm)
+        if k and k not in out:
+            out[k] = str(vv).strip()
+
+    def walk(attrs):
+        if isinstance(attrs, dict):
+            for k, v in attrs.items():
+                if isinstance(v, dict):
+                    put(v.get("label") or v.get("name") or k, v.get("value") or v.get("attribute_value"))
+                else:
+                    put(k, v)
+        elif isinstance(attrs, list):
+            for a in attrs:
+                if isinstance(a, dict):
+                    put(a.get("label") or a.get("name") or a.get("type") or a.get("attribute_name"),
+                        a.get("value") or a.get("attribute_value"))
+
+    walk(product.get("attributes"))
+    walk(product.get("hepsiburada_attributes"))
+    if product.get("brand") or product.get("brand_name"):
+        put("marka", product.get("brand") or product.get("brand_name"))
+    if product.get("gender"):
+        put("cinsiyet", product.get("gender"))
+    if variant:
+        walk(variant.get("attributes"))
+        if variant.get("color"):
+            put("renk", variant["color"]); put("color", variant["color"])
+        if variant.get("size"):
+            put("beden", variant["size"]); put("numara", variant["size"])
+    return out
+
+
+def _hb_local_for_attr(attr_name: str, local: dict) -> str | None:
+    """HB özellik adına göre yerel değeri semantik olarak bulur (Renk/Beden/Cinsiyet/Materyal/Marka)."""
+    n = _hb_norm(attr_name)
+    if local.get(n):
+        return local[n]
+    if any(w in n for w in ("renk", "color")):
+        return local.get("renk") or local.get("color") or local.get("web color")
+    if any(w in n for w in ("beden", "size", "numara", "olcu", "olcusu")):
+        return local.get("beden") or local.get("size") or local.get("numara")
+    if "cinsiyet" in n or "gender" in n:
+        return local.get("cinsiyet") or local.get("gender")
+    if any(w in n for w in ("materyal", "kumas", "icerik", "material", "kumas tipi", "kumas bilgisi")):
+        return (local.get("materyal") or local.get("materyal bilesimi") or local.get("kumas bilgisi")
+                or local.get("kumas icerigi") or local.get("urun icerik bilgisi") or local.get("urun icerigi")
+                or local.get("kumas tipi"))
+    if "marka" in n or "brand" in n:
+        return local.get("marka")
+    return None
+
+
+def _hb_resolve_value(attr: dict, raw):
+    """raw değeri HB özelliğinin izin verdiği değerlerden (enum) birine çözer.
+    enum değilse serbest metin döner. Uyuşmayan ve allowCustom kapalıysa None."""
+    vals = attr.get("attributeValues") or []
+    if not vals:
+        return str(raw)  # serbest metin / varchar
+    nr = _hb_norm(raw)
+    for v in vals:
+        if _hb_norm(v.get("name")) == nr:
+            return v.get("name")
+    for v in vals:
+        vn = _hb_norm(v.get("name"))
+        if nr and (nr in vn or vn in nr):
+            return v.get("name")
+    if attr.get("allowCustom"):
+        return str(raw)
+    return None
+
+
+async def _hb_category_attributes_for(hb_cat):
+    """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
+    key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
+    cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
+    if cad and cad.get("_v") == 2 and cad.get("attributes"):
+        return cad.get("attributes") or [], None
+    from .category_mapping import _fetch_hb_category_attributes
+    attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
+    if not attrs and ferr:
+        return [], ferr
+    return attrs or [], None
+
+
 async def _build_hb_product_item(product: dict, merchant_id: str):
-    """Yerel ürün -> HB import kalemi {categoryId, merchant, attributes:{...}}.
-    Kategori eşleşmesi + hepsiburada_attributes + temel alanlardan oluşturur (best-effort)."""
+    """Yerel ürün -> HB import kalem(ler)i. Liste döner (varyant başına bir kalem).
+
+    HB'ye TAMAMEN BAĞIMSIZ: kategorinin HB API özelliklerini (zorunlu/opsiyonel + izin
+    verilen değerler) alır ve her özelliği ÜRÜN VERİSİNDEN otomatik türetir; enum değerleri
+    HB'nin kabul ettiği değere çözer. Kaydedilmiş attribute_mappings/value_mappings/
+    default_mappings override olarak kullanılır. Çözülemeyen ZORUNLU özellik varsa kalem
+    atlanır ve sebebi (hangi özellikler eksik) raporlanır → kullanıcı yalnız onları doldurur.
+
+    Döner: (items_list, error). items_list boşsa error doludur.
+    """
     cm = await db.category_mappings.find_one(
         {"marketplace": "hepsiburada", "category_id": product.get("category_id")}, {"_id": 0})
     if not cm:
@@ -3311,33 +3421,110 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             {"marketplace": "hepsiburada", "category_name": product.get("category_name")}, {"_id": 0})
     hb_cat = (cm or {}).get("marketplace_category_id")
     if not hb_cat:
-        return None, "HB kategori eşleşmesi yok (Kategori Eşleştirme ekranından eşleyin)"
-    attrs = dict(product.get("hepsiburada_attributes") or {})
-    attrs.setdefault("merchantSku", _hb_merchant_sku(product))
-    attrs.setdefault("Barcode", product.get("barcode") or _hb_merchant_sku(product))
-    attrs.setdefault("UrunAdi", product.get("name") or "")
-    desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
-    attrs.setdefault("UrunAciklamasi", desc or product.get("name") or "")
+        return [], "HB kategori eşleşmesi yok (Kategori Eşleştirme ekranından eşleyin)"
+
+    hb_attrs_list, ferr = await _hb_category_attributes_for(hb_cat)
+    if not hb_attrs_list:
+        return [], f"HB kategori özellikleri çekilemedi: {ferr or 'boş'}"
+
+    saved_maps = (cm or {}).get("attribute_mappings") or []
+    map_by_attr_id = {str(m.get("mp_attr_id") or m.get("trendyol_attr_id")): m
+                      for m in saved_maps if (m.get("mp_attr_id") or m.get("trendyol_attr_id"))}
+    vmaps = (cm or {}).get("value_mappings") or {}
+    defaults = (cm or {}).get("default_mappings") or {}
+
     brand = product.get("brand") or product.get("brand_name")
-    if brand:
-        attrs.setdefault("Marka", brand)
-    imgs = product.get("images") or []
-    n = 1
-    for img in imgs[:5]:
-        url = img.get("url") if isinstance(img, dict) else img
-        if url:
-            attrs.setdefault(f"Image{n}", url)
-            n += 1
-    if not any(k.startswith("Image") for k in attrs):
-        if product.get("image"):
-            attrs["Image1"] = product["image"]
-    attrs.setdefault("kg", str(product.get("weight") or product.get("kg") or "1"))
-    for k, v in (cm.get("default_mappings") or {}).items():
-        if v not in (None, ""):
-            attrs.setdefault(k, v)
-    item = {"categoryId": int(hb_cat) if str(hb_cat).isdigit() else hb_cat,
-            "merchant": merchant_id, "attributes": attrs}
-    return item, None
+    desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
+    imgs = []
+    for img in (product.get("images") or [])[:5]:
+        u = img.get("url") if isinstance(img, dict) else img
+        if u:
+            imgs.append(u)
+    if not imgs and product.get("image"):
+        imgs.append(product["image"])
+
+    variants = product.get("variants") or []
+    targets = variants if variants else [None]
+    vgroup = _hb_merchant_sku(product) or str(product.get("id") or "")
+    cat_val = int(hb_cat) if str(hb_cat).isdigit() else hb_cat
+
+    items, errors = [], set()
+    hb_attrs_for_product = dict(product.get("hepsiburada_attributes") or {})
+
+    for variant in targets:
+        local = _hb_collect_local(product, variant)
+        v_hb = dict((variant or {}).get("hepsiburada_attributes") or {})
+        attrs: dict = {}
+        missing_req = []
+
+        for a in hb_attrs_list:
+            aid = str(a.get("id"))
+            aname = a.get("name")
+            if not aname:
+                continue
+            # 1) Manuel girilmiş HB değeri (varyant > ürün)
+            raw = v_hb.get(aname) or hb_attrs_for_product.get(aname)
+            # 2) Kaydedilmiş attribute_mapping (local_attr → bu HB özelliği)
+            if not raw:
+                m = map_by_attr_id.get(aid)
+                if m and m.get("local_attr"):
+                    raw = local.get(_hb_norm(m["local_attr"]))
+            # 3) Otomatik: HB özellik adından ürün verisini türet
+            if not raw:
+                raw = _hb_local_for_attr(aname, local)
+            # 4) value_mapping çevirisi (Kırmızı↔Red gibi)
+            if raw:
+                mapped = vmaps.get(f"{aid}|{raw}")
+                if not mapped and isinstance(vmaps.get(aid), dict):
+                    mapped = vmaps[aid].get(str(raw))
+                if mapped:
+                    raw = mapped
+            # 5) enum'a/serbest metne çöz
+            if raw not in (None, ""):
+                rv = _hb_resolve_value(a, raw)
+                if rv not in (None, ""):
+                    attrs[aname] = rv
+            # 6) şirket default'u
+            if aname not in attrs:
+                dv = defaults.get(aname) or defaults.get(aid)
+                if dv not in (None, ""):
+                    rv = _hb_resolve_value(a, dv)
+                    if rv not in (None, ""):
+                        attrs[aname] = rv
+            if a.get("required") and aname not in attrs:
+                missing_req.append(aname)
+
+        # Taban zorunlu alanlar
+        sku = (str(variant.get("stock_code") or variant.get("barcode") or "").strip()
+               if variant else _hb_merchant_sku(product))
+        if not sku:
+            errors.add("stok kodu/barkod yok")
+            continue
+        bc = (variant or {}).get("barcode") or product.get("barcode") or sku
+        attrs.setdefault("merchantSku", sku)
+        attrs.setdefault("Barcode", bc)
+        if variants:
+            attrs.setdefault("VaryantGroupID", str(vgroup))
+        attrs.setdefault("UrunAdi", product.get("name") or "")
+        attrs.setdefault("UrunAciklamasi", desc or product.get("name") or "")
+        if brand:
+            attrs.setdefault("Marka", brand)
+        for i, u in enumerate(imgs, 1):
+            attrs.setdefault(f"Image{i}", u)
+        attrs.setdefault("kg", str(product.get("weight") or product.get("kg") or "1"))
+        # Kategori-özelliği olmayan şirket default'larını da ekle (GarantiSüresi vb.)
+        for k, v in defaults.items():
+            if v not in (None, "") and not str(k).isdigit():
+                attrs.setdefault(k, v)
+
+        if missing_req:
+            errors.add("zorunlu HB özellikleri eksik: " + ", ".join(sorted(set(missing_req))))
+            continue
+        items.append({"categoryId": cat_val, "merchant": merchant_id, "attributes": attrs})
+
+    if not items:
+        return [], ("; ".join(sorted(errors)) if errors else "Gönderilebilir varyant yok")
+    return items, None
 
 
 @router.post("/hepsiburada/products/sync")
@@ -3359,11 +3546,11 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
         return {"successful": 0, "failed": 0, "message": "Filtreye uyan ürün bulunamadı"}
     items, skipped = [], []
     for p in products:
-        item, e = await _build_hb_product_item(p, client.merchant_id)
+        built, e = await _build_hb_product_item(p, client.merchant_id)
         if e:
             skipped.append({"product_id": p.get("id"), "name": p.get("name"), "reason": e})
         else:
-            items.append(item)
+            items.extend(built)
     if not items:
         return {"successful": 0, "failed": len(skipped),
                 "message": "Hiçbir ürün gönderilemedi (kategori/özellik eşleşmesi eksik).",
@@ -3391,22 +3578,20 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
     query = await _build_product_query_from_payload(payload)
     products = await db.products.find(query, {"_id": 0}).to_list(length=None)
     products = _dedupe_products_by_stock_code(products)
-    cm_list = await db.category_mappings.find({"marketplace": "hepsiburada"}, {"_id": 0}).to_list(length=3000)
-    cm_by_local = {str(c.get("category_id")): c for c in cm_list}
     results = []
     valid_count = invalid_count = 0
     for p in products:
-        errors = []
-        cm = cm_by_local.get(str(p.get("category_id"))) if p.get("category_id") else None
-        if not cm or not (cm.get("marketplace_category_id") or cm.get("category_id")):
-            errors.append("Hepsiburada kategori eşleşmesi yok")
-        if not _hb_merchant_sku(p) and not (p.get("variants") or []):
-            errors.append("Stok kodu/barkod yok")
-        if errors:
+        # Gerçek gönderim mantığıyla doğrula: motor zorunlu HB özelliklerini ürün
+        # verisinden türetir; türetemediği zorunluları sebep olarak raporlar.
+        built, e = await _build_hb_product_item(p, "")
+        if e:
             invalid_count += 1
-            results.append({"product_id": p.get("id"), "name": p.get("name"), "errors": errors})
+            results.append({"product_id": p.get("id"), "name": p.get("name"),
+                            "errors": [e], "variant_count": 0})
         else:
             valid_count += 1
+            results.append({"product_id": p.get("id"), "name": p.get("name"),
+                            "errors": [], "variant_count": len(built)})
     return {"valid_count": valid_count, "invalid_count": invalid_count, "results": results}
 
 
@@ -3431,6 +3616,74 @@ async def hb_inventory_sync(current_user: dict = Depends(require_admin)):
     return {"message": f"{len(items)} kalem stok/fiyat gönderildi"
                        + (f" — uyarı: {'; '.join(res['errors'])}" if res["errors"] else ""),
             "items_count": len(items), **res}
+
+
+@router.post("/hepsiburada/products/autofill-attributes")
+async def hb_autofill_attributes(request: Request, current_user: dict = Depends(require_admin)):
+    """Filtreye uyan (boş = tüm HB-eşleşmiş kategori) ürünlerin `hepsiburada_attributes`
+    alanını, HB kategori özelliklerinden + ürün verisinden OTOMATİK türetip kalıcı doldurur.
+    Renk/Beden varyant-bazlıdır → ürün-alanına yazılmaz (gönderimde varyanttan türetilir);
+    ürün-seviyesi özellikler (Cinsiyet, Materyal, Marka, Kalıp vb.) doldurulur.
+    Mevcut (manuel) değerler KORUNUR — yalnız boş alanlar doldurulur."""
+    payload = await request.json()
+    query = await _build_product_query_from_payload(payload)
+    products = await db.products.find(query, {"_id": 0}).to_list(length=None)
+    cm_list = await db.category_mappings.find(
+        {"marketplace": "hepsiburada", "marketplace_category_id": {"$nin": [None, ""]}}, {"_id": 0}
+    ).to_list(length=3000)
+    cm_by_id = {str(c.get("category_id")): c for c in cm_list}
+    cm_by_name = {(c.get("category_name") or "").strip(): c for c in cm_list}
+    attr_cache: dict = {}
+    skip_norm = ("renk", "color", "beden", "size", "numara")
+    updated = filled = scanned = 0
+    for p in products:
+        cm = (cm_by_id.get(str(p.get("category_id")))
+              or cm_by_name.get((p.get("category_name") or "").strip()))
+        if not cm or not cm.get("marketplace_category_id"):
+            continue
+        scanned += 1
+        hb_cat = cm["marketplace_category_id"]
+        ck = str(hb_cat)
+        if ck not in attr_cache:
+            alist, _e = await _hb_category_attributes_for(hb_cat)
+            attr_cache[ck] = alist or []
+        attrs_list = attr_cache[ck]
+        if not attrs_list:
+            continue
+        local = _hb_collect_local(p, None)
+        defaults = cm.get("default_mappings") or {}
+        vmaps = cm.get("value_mappings") or {}
+        cur = dict(p.get("hepsiburada_attributes") or {})
+        changed = False
+        for a in attrs_list:
+            aname = a.get("name")
+            if not aname or cur.get(aname):
+                continue
+            if any(w in _hb_norm(aname) for w in skip_norm):
+                continue  # varyant-bazlı → gönderimde türetilir
+            raw = _hb_local_for_attr(aname, local)
+            if raw:
+                aid = str(a.get("id"))
+                mapped = vmaps.get(f"{aid}|{raw}")
+                if not mapped and isinstance(vmaps.get(aid), dict):
+                    mapped = vmaps[aid].get(str(raw))
+                if mapped:
+                    raw = mapped
+            if not raw:
+                raw = defaults.get(aname) or defaults.get(str(a.get("id")))
+            if not raw:
+                continue
+            rv = _hb_resolve_value(a, raw)
+            if rv not in (None, ""):
+                cur[aname] = rv
+                changed = True
+                filled += 1
+        if changed:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"hepsiburada_attributes": cur}})
+            updated += 1
+    return {"success": True, "scanned": scanned, "updated_products": updated, "filled_values": filled,
+            "message": f"{updated} üründe {filled} HB özelliği otomatik dolduruldu"
+                       + (" · Renk/Beden gönderimde varyanttan gelir" if updated else "")}
 
 
 @router.get("/hepsiburada/products/tracking/{tracking_id}")
