@@ -303,7 +303,7 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
     Once cache, yoksa canli cekip cache'ler."""
     key = int(category_id) if str(category_id).isdigit() else str(category_id)
     cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cached and cached.get("_v") == 5 and cached.get("attributes") is not None:
+    if cached and cached.get("_v") == 6 and cached.get("attributes") is not None:
         return {"success": True, "attributes": cached.get("attributes", []),
                 "media_attributes": cached.get("media_attributes", []),
                 "base_attributes": cached.get("base_attributes", []),
@@ -3446,7 +3446,7 @@ async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cad and cad.get("_v") == 5 and cad.get("attributes"):
+    if cad and cad.get("_v") == 6 and cad.get("attributes"):
         return cad.get("attributes") or [], None
     from .category_mapping import _fetch_hb_category_attributes
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)

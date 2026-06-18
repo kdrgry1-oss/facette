@@ -190,6 +190,15 @@ for _f in HB_BASE_FIELDS:
     for _a in _f["aliases"] + [_hb_sysnorm(_f["key"]), _hb_sysnorm(_f["label"])]:
         _HB_BASE_ALIAS[_a] = _f["key"]
 
+# Fiyat-benzeri özellik adları: kategori modalından çıkar, katalog özelliği olarak GÖNDERME.
+# Fiyat, global "Varsayılan Alan Eşleştirme & Fiyat" panelinde kâr marjıyla yönetilir ve
+# Stok/Fiyat gönderiminde uygulanır. Bu adlar "__skip" döner (HB_BASE_FIELDS'te key yok).
+_HB_EXTRA_SKIP_NAMES = {
+    "fiyat", "price", "satisfiyati", "satisfiyat", "satisfiyat",
+    "piyasafiyati", "piyasasatisfiyati", "listefiyati", "listfiyati",
+    "tavsiyeedilenperakendesatisfiyati", "psf", "kdvdahilfiyat",
+}
+
 # Ürün kartı kaynak seçenekleri (UI dropdown'u için).
 HB_PRODUCT_SOURCES = [
     {"value": "name", "label": "Ürün Adı"},
@@ -206,14 +215,19 @@ HB_PRODUCT_SOURCES = [
 
 
 def _hb_base_key(name):
-    """Bir HB özellik adı temel/sistem alana karşılık geliyorsa kanonik key döner, yoksa None."""
+    """Bir HB özellik adı temel/sistem alana karşılık geliyorsa kanonik key döner, yoksa None.
+    Fiyat-benzeri alanlar "__skip" döner (kategori modalından çıkarılır; fiyat global panelde
+    kâr marjıyla yönetilir, katalog özelliği olarak gönderilmez)."""
     n = _hb_sysnorm(name)
     if not n:
         return None
+    if n in _HB_EXTRA_SKIP_NAMES:
+        return "__skip"
     if n in _HB_BASE_ALIAS:
         return _HB_BASE_ALIAS[n]
+    # Uzun alias'larda parçalı eşleşme; kısa alias'lar (kdv/vat/kg) yalnız TAM eşleşir (üstte).
     for alias, key in _HB_BASE_ALIAS.items():
-        if alias and (alias in n or n in alias):
+        if alias and len(alias) >= 4 and (alias in n or n in alias):
             return key
     return None
 
@@ -339,7 +353,7 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 5,
+            {"$set": {"category_id": key, "attributes": out, "_v": 6,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -1628,7 +1642,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 5:
+        if not attrs or (cached or {}).get("_v") != 6:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {

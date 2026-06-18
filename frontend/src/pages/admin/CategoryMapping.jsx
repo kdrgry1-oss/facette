@@ -1053,7 +1053,7 @@ function HepsiburadaBaseFieldPanel({ auth }) {
   const [markup, setMarkup] = useState(0);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   useEffect(() => {
     (async () => {
