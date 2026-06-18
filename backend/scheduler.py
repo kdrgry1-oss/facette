@@ -419,6 +419,71 @@ async def _run_trendyol_claims_deep_backfill_once():
         logger.error(f"[cron] Trendyol claims derin backfill hatası: {e}")
 
 
+async def _run_hepsiburada_auto_orders_pull():
+    """Scheduler tarafından Hepsiburada (OMS) sipariş çekmeyi tetikler.
+    OMS kimliği yoksa _get_hb_client hata döndürür → sessizce no-op olur
+    (Trendyol akışıyla aynı: tarih aralığı tara, upsert, yeni siparişte stok düş)."""
+    from routes.marketplace_hub import log_integration_event
+    try:
+        import asyncio as _aio
+        from datetime import datetime as _dt, timedelta as _td
+        from routes.category_mapping import _get_hb_client
+        from routes.integrations import (
+            _hb_normalize_lines, _hb_group_orders, map_hepsiburada_order,
+            _hb_created_at, _decrement_stock_for_imported_order,
+        )
+        from routes.deps import db as _db, generate_id
+
+        client, err = await _get_hb_client()
+        if err:
+            # Kimlik (özellikle OMS) yoksa gürültü yapma — sessiz geç.
+            return
+
+        now_ = _dt.now()
+        begin = (now_ - _td(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+        end = now_.strftime("%Y-%m-%dT%H:%M:%S")
+        try:
+            resp = await _aio.to_thread(client.get_orders, begin, end, 0, 200)
+        except Exception as e:
+            await log_integration_event(
+                marketplace="hepsiburada", action="order_pull", status="failed",
+                direction="inbound", message=f"[cron] HB sipariş çekme hatası: {e}")
+            return
+
+        lines = _hb_normalize_lines(resp)
+        grouped = _hb_group_orders(lines)
+        imported = updated = 0
+        for g in grouped:
+            try:
+                data = map_hepsiburada_order(g)
+                number = data["order_number"]
+                existing = await _db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
+                if existing:
+                    await _db.orders.update_one(
+                        {"_id": existing["_id"]},
+                        {"$set": {k: v for k, v in data.items() if k != "status"}})
+                    updated += 1
+                else:
+                    data["id"] = generate_id()
+                    data["created_at"] = _hb_created_at(data)
+                    await _db.orders.insert_one(data)
+                    imported += 1
+                    # Zaten iptal/iade gelen YENİ sipariş için stok düşülmez (hiç rezerve edilmemişti).
+                    if data.get("status") not in ("cancelled", "returned"):
+                        await _decrement_stock_for_imported_order(data, "hepsiburada")
+            except Exception as e:
+                await log_integration_event(
+                    marketplace="hepsiburada", action="import_order", status="error",
+                    direction="inbound", message=f"[cron] HB sipariş aktarım hatası: {e}")
+        if imported or updated:
+            await log_integration_event(
+                marketplace="hepsiburada", action="order_pull", status="success",
+                direction="inbound",
+                message=f"[cron] HB otomatik çekim: {imported} yeni, {updated} güncellendi")
+    except Exception as e:
+        logger.exception(f"[scheduler] hepsiburada auto orders pull failed: {e}")
+
+
 async def _marketplace_sync_tick():
     """
     Her dk'da bir çalışır; her marketplace_account'un auto_sync ayarlarına
@@ -483,6 +548,8 @@ async def _marketplace_sync_tick():
                     )
                     if key == "trendyol":
                         asyncio.create_task(_run_trendyol_auto_orders_pull())
+                    elif key == "hepsiburada":
+                        asyncio.create_task(_run_hepsiburada_auto_orders_pull())
                     await db.marketplace_accounts.update_one(
                         {"key": key}, {"$set": {"_last_orders_sync": now.isoformat()}}
                     )
