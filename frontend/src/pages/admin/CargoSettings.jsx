@@ -254,6 +254,12 @@ function DhlPollMonitor() {
             <Search className="w-4 h-4" />
             Takip no toplama sonucu — {backfill.site_taranan ?? backfill.scanned ?? 0} site siparişi tarandı
           </div>
+          {backfill.limit_hit && (
+            <div className="flex items-start gap-2 text-xs bg-orange-50 border border-orange-300 text-orange-800 rounded p-2">
+              <Clock className="w-4 h-4 mt-0.5 shrink-0" />
+              <span><b>MNG/DHL günlük sorgu limitine takıldı</b> — tarama bu noktada durduruldu (limiti uzatmamak için). Bu limit kargo firmasındadır. Yarın otomatik devam eder; eksik kalanları yarın tekrar topla.</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
             <div className="bg-emerald-50 border border-emerald-200 rounded p-2">
               <div className="text-emerald-700 font-bold text-lg">{backfill.diagnosis?.guncellendi ?? 0}</div>
@@ -299,8 +305,21 @@ function DhlPollMonitor() {
         </div>
       )}
 
+      {/* MNG/DHL günlük sorgu limiti (kargocu tarafı) — özel uyarı */}
+      {h?.daily_limit && (
+        <div className="flex items-start gap-2 text-sm bg-orange-50 border border-orange-300 text-orange-800 rounded-lg p-3">
+          <Clock className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <b>MNG/DHL günlük sorgu limitine takıldı.</b> Bu limit <u>kargo firması tarafındadır</u>,
+            bizim kodumuzda limit yoktur. Bugünlük sorgu durduruldu; yarın otomatik devam eder.
+            Limiti aşmamak için artık <b>sadece W/IW site siparişleri</b> ve aynı sipariş için
+            <b> belirli aralıkla</b> sorgu yapılıyor.
+          </div>
+        </div>
+      )}
+
       {/* Ayar kapalı / hata uyarısı */}
-      {status === "skipped" && (
+      {status === "skipped" && !h?.daily_limit && (
         <div className="flex items-start gap-2 text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
           <PauseCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div>

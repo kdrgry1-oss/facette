@@ -2859,14 +2859,16 @@ async def backfill_cargo_tracking(
         "mngde_kayit_var_takip_no_yok": 0,  # MNG kaydı oluşmuş, GONDERI_NO atanmamış (kargo henüz okutulmadı)
         "mngde_kayit_yok_veya_yetki": 0,    # hiç satır dönmedi → bulunamadı VEYA IP whitelist/yetki eksik
         "sorgu_hatasi": 0,                  # exception / SOAP hatası
+        "gunluk_limit": 0,                  # MNG/DHL günlük sorgu limiti mesajı
     }
+    limit_hit = False
     site_taranan = 0
     for o in orders:
         on = str(o.get("order_number") or "")
-        _is_mp = bool(on and on[:2] in ("TY", "HB"))
-        if site_only and _is_mp:
-            continue  # pazaryeri siparişini atla (MNG/DHL'de yok)
-        if on and not _is_mp:
+        _is_site = bool(on and (on.startswith("W") or on.startswith("IW")))
+        if site_only and not _is_site:
+            continue  # SADECE site siparişleri (W / IW); TY/HB ve diğerleri atlanır
+        if _is_site:
             site_taranan += 1
         existing = o.get("cargo_tracking_number") or (o.get("cargo") or {}).get("tracking_number")
         if existing and not force:
@@ -2884,7 +2886,15 @@ async def backfill_cargo_tracking(
             diagnosis["sorgu_hatasi"] += 1
             continue
         if not info.get("ok"):
-            failed.append({"no": siparis_no, "reason": "sorgu_hatasi", "err": (info.get("error") or "")[:160]})
+            _err_txt = (info.get("error") or "")
+            if any(k in _err_txt.lower() for k in ("sorgulama sınır", "sorgulama sinir",
+                                                   "günlük sorgu", "gunluk sorgu", "sorgu limit",
+                                                   "limit aşıl", "limit asil")):
+                diagnosis["gunluk_limit"] += 1
+                limit_hit = True
+                failed.append({"no": siparis_no, "reason": "gunluk_limit", "err": _err_txt[:160]})
+                break  # limiti uzatmamak için taramayı durdur
+            failed.append({"no": siparis_no, "reason": "sorgu_hatasi", "err": _err_txt[:160]})
             diagnosis["sorgu_hatasi"] += 1
             continue
         gonderi = (info.get("gonderi_no") or "").strip()  # SADECE gerçek GONDERI_NO; barkoda düşme
@@ -2915,15 +2925,32 @@ async def backfill_cargo_tracking(
         updated.append({"no": siparis_no, "gonderi_no": gonderi})
         diagnosis["guncellendi"] += 1
 
+    # Günlük limite takıldıysak scheduler poll de bugün geri çekilsin diye bayrağı kaydet.
+    if limit_hit:
+        try:
+            await db.settings.update_one(
+                {"id": "mng_kargo"},
+                {"$set": {"daily_limit_hit_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True,
+            )
+        except Exception:
+            pass
+
     return {
         "since": since or "(tüm zamanlar)", "force": force, "all_statuses": all_statuses,
+        "site_only": site_only, "limit_hit": limit_hit,
         "scanned": len(orders), "site_taranan": site_taranan,
         "updated": len(updated), "skipped": len(skipped), "failed": len(failed),
         "diagnosis": diagnosis,
-        "aciklama": ("DHL'in günlük sorgu limiti YOKTUR. Takip no MNG 'FaturaSiparisListesi'nden gelir; "
-                     "MNG kargoyu okutunca dolar (IP whitelist gerektirir). "
-                     "'mngde_kayit_var_takip_no_yok' = MNG kaydı oluşmuş ama numara henüz atanmamış. "
-                     "'mngde_kayit_yok_veya_yetki' = MNG'den satır dönmedi (bulunamadı VEYA whitelist/yetki eksik)."),
+        "aciklama": (
+            ("⚠️ MNG/DHL GÜNLÜK SORGU LİMİTİNE takıldı — tarama durduruldu, bugün için yeterli sorgu yapıldı; "
+             "yarın otomatik devam eder. Bu limit DHL/MNG tarafındadır, bizim kodumuzda limit yoktur. "
+             if limit_hit else
+             "Bu limit (varsa) DHL/MNG tarafındadır; bizim kodumuzda günlük limit yoktur. ")
+            + "Takip no MNG 'FaturaSiparisListesi'nden gelir; MNG kargoyu okutunca dolar (IP whitelist gerektirir). "
+            "'mngde_kayit_var_takip_no_yok' = MNG kaydı oluşmuş ama numara henüz atanmamış. "
+            "'mngde_kayit_yok_veya_yetki' = MNG'den satır dönmedi (bulunamadı VEYA whitelist/yetki eksik)."
+        ),
         "updatedList": updated[:200], "failedList": failed[:80],
     }
 
@@ -3583,6 +3610,15 @@ async def cargo_poll_health(current_user: dict = Depends(require_admin)):
     """
     h = await db.settings.find_one({"id": "dhl_poll_health"}, {"_id": 0}) or {}
     mng = await _get_mng_settings()
+    # Günlük limit bayrağı mng_kargo ayar dokümanında saklanır (poll + backfill ortak kullanır).
+    _mng_lim = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0, "daily_limit_hit_at": 1}) or {}
+    _lim_at = _mng_lim.get("daily_limit_hit_at") or ""
+    _lim_today = False
+    if _lim_at:
+        try:
+            _lim_today = datetime.fromisoformat(_lim_at).date() == datetime.now(timezone.utc).date()
+        except Exception:
+            _lim_today = False
     hist = list(reversed(h.get("history") or []))[:20]  # yeni → eski
     return {
         "ok": True,
@@ -3601,6 +3637,8 @@ async def cargo_poll_health(current_user: dict = Depends(require_admin)):
         "duration_ms": h.get("duration_ms", 0),
         "last_error": h.get("last_error", ""),
         "skipped_reason": h.get("skipped_reason", ""),
+        "daily_limit": bool(h.get("daily_limit")) or _lim_today,
+        "daily_limit_hit_at": _lim_at,
         "mng_active": bool(mng.get("is_active")),
         "mng_user_set": bool(mng.get("username")),
         "history": hist,
