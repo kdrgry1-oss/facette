@@ -3472,19 +3472,47 @@ def _hb_local_for_attr(attr_name: str, local: dict) -> str | None:
     return None
 
 
+def _hb_value_from_name(product_name, attr: dict):
+    """Ürün adındaki bir KELİME, HB özelliğinin enum değerlerinden biriyle tam eşleşirse onu döner.
+    Örn: 'Mira Dantelli Mini Etek Ekru' + Renk(enum: ...,Ekru,Siyah) -> 'Ekru'. Yapısal renk
+    alanı olmayan, rengi yalnız adında geçen ürünler için. Tam-kelime eşleşme (parça değil) → güvenli."""
+    vals = attr.get("attributeValues") or []
+    if not vals or not product_name:
+        return None
+    words = {_hb_norm(w) for w in re.split(r"[\s/,\.\-_()\[\]]+", str(product_name)) if w}
+    words.discard("")
+    if not words:
+        return None
+    for v in vals:
+        vn = _hb_norm(v.get("name"))
+        if vn and len(vn) >= 2 and vn in words:
+            return v.get("name")
+    return None
+
+
 def _hb_resolve_value(attr: dict, raw):
     """raw değeri HB özelliğinin izin verdiği değerlerden (enum) birine çözer.
+    raw bir değer ADı veya değer ID'si olabilir (Özel Değer dropdown'u id kaydediyor).
     enum değilse serbest metin döner. Uyuşmayan ve allowCustom kapalıysa None."""
     vals = attr.get("attributeValues") or []
     if not vals:
         return str(raw)  # serbest metin / varchar
     nr = _hb_norm(raw)
+    if not nr:
+        return None
+    # 1) Değer ID eşleşmesi (Özel Değer/Listeden Seçin dropdown'u value.id kaydeder)
+    for v in vals:
+        vid = v.get("id")
+        if vid is not None and _hb_norm(str(vid)) == nr:
+            return v.get("name")
+    # 2) Tam ad eşleşmesi
     for v in vals:
         if _hb_norm(v.get("name")) == nr:
             return v.get("name")
+    # 3) Parçalı ad eşleşmesi (yalnız 2+ karakter, kısa-değer yanlış eşleşmesini önle)
     for v in vals:
         vn = _hb_norm(v.get("name"))
-        if nr and (nr in vn or vn in nr):
+        if vn and len(nr) >= 2 and len(vn) >= 2 and (nr in vn or vn in nr):
             return v.get("name")
     if attr.get("allowCustom"):
         return str(raw)
@@ -3611,6 +3639,10 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             # 3) Otomatik: HB özellik adından ürün verisini türet
             if not raw:
                 raw = _hb_local_for_attr(aname, local)
+            # 3b) Hâlâ yoksa, ürün adındaki bir kelime HB enum değeriyle TAM eşleşiyorsa kullan
+            #     (Renk yapısal alanda değil, yalnız adında geçiyorsa: "...Etek Ekru" -> Ekru)
+            if not raw:
+                raw = _hb_value_from_name(product.get("name"), a)
             # 4) value_mapping çevirisi (Kırmızı↔Red gibi)
             if raw:
                 mapped = vmaps.get(f"{aid}|{raw}")
