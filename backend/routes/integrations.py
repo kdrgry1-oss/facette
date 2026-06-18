@@ -336,7 +336,11 @@ async def hb_get_base_field_mappings(current_user: dict = Depends(require_admin)
             "source": cfg.get("source") or f.get("default_source"),
             "default": cfg.get("default", f.get("default_value", "")),
         })
-    return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved}
+    try:
+        markup = float(s.get("default_markup", 0) or 0)
+    except Exception:
+        markup = 0.0
+    return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved, "markup": markup}
 
 
 @router.post("/hepsiburada/base-field-mappings")
@@ -350,10 +354,15 @@ async def hb_save_base_field_mappings(request: Request, current_user: dict = Dep
         if k not in _HB_BASE_BY_KEY or not isinstance(v, dict):
             continue
         clean[k] = {"source": v.get("source") or "", "default": str(v.get("default") or "")}
-    await db.settings.update_one({"id": "hepsiburada"},
-                                 {"$set": {"id": "hepsiburada", "base_field_mappings": clean}},
-                                 upsert=True)
-    return {"success": True, "saved": clean, "count": len(clean)}
+    set_doc = {"id": "hepsiburada", "base_field_mappings": clean}
+    if isinstance(payload, dict) and "markup" in payload:
+        try:
+            set_doc["default_markup"] = max(0.0, float(payload.get("markup") or 0))
+        except Exception:
+            pass
+    await db.settings.update_one({"id": "hepsiburada"}, {"$set": set_doc}, upsert=True)
+    return {"success": True, "saved": clean, "count": len(clean),
+            "markup": set_doc.get("default_markup")}
 
 
 @router.post("/trendyol/brands/sync")

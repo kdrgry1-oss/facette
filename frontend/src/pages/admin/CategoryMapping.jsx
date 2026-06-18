@@ -1050,6 +1050,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
 function HepsiburadaBaseFieldPanel({ auth }) {
   const [fields, setFields] = useState([]);
   const [sources, setSources] = useState([]);
+  const [markup, setMarkup] = useState(0);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
@@ -1060,6 +1061,7 @@ function HepsiburadaBaseFieldPanel({ auth }) {
         const r = await axios.get(`${API}/integrations/hepsiburada/base-field-mappings`, auth);
         setFields(r.data?.fields || []);
         setSources(r.data?.sources || []);
+        setMarkup(r.data?.markup || 0);
       } catch (e) {
         // sessiz geç
       } finally {
@@ -1079,8 +1081,12 @@ function HepsiburadaBaseFieldPanel({ auth }) {
       fields.forEach((f) => {
         mappings[f.key] = { source: f.source || "", default: f.default || "" };
       });
-      await axios.post(`${API}/integrations/hepsiburada/base-field-mappings`, { mappings }, auth);
-      toast.success("Varsayılan alan eşleştirmesi kaydedildi", { id: t });
+      await axios.post(
+        `${API}/integrations/hepsiburada/base-field-mappings`,
+        { mappings, markup: Number(markup) || 0 },
+        auth
+      );
+      toast.success("Varsayılan alan eşleştirmesi + kâr marjı kaydedildi", { id: t });
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Kaydedilemedi", { id: t });
     } finally {
@@ -1089,24 +1095,46 @@ function HepsiburadaBaseFieldPanel({ auth }) {
   };
 
   if (!loaded) return null;
+  const mk = Number(markup) || 0;
+  const previewPrice = (1000 * (1 + mk / 100)).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
   return (
     <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4" data-testid="hb-basefields-panel">
       <div className="flex items-center justify-between gap-2 cursor-pointer" onClick={() => setOpen((o) => !o)}>
         <div>
           <div className="font-bold text-purple-900 text-sm flex items-center gap-1">
-            <Settings size={14} /> Hepsiburada Varsayılan Alan Eşleştirme
+            <Settings size={14} /> Hepsiburada Varsayılan Alan Eşleştirme & Fiyat
           </div>
           <div className="text-xs text-purple-700 mt-0.5">
             Stok kodu, ürün adı, açıklama, barkod, marka, desi, görsel gibi temel alanların hangi ürün-kartı
-            değerinden çekileceğini bir kez burada belirle. <b>Tüm kategorilerde geçerli</b> — kategori
-            ekranında tekrar sorulmaz. Görselde gördüğün "Satıcı Stok Kodu / Ürün Adı / Ürün Açıklaması"
-            satırları artık kategori modalında değil, burada.
+            değerinden çekileceğini ve <b>kâr marjını</b> bir kez burada belirle. <b>Tüm kategorilerde geçerli.</b>
           </div>
         </div>
         <span className="text-purple-600 text-xs whitespace-nowrap">{open ? "Gizle ▲" : "Göster ▼"}</span>
       </div>
       {open && (
         <div className="mt-3 space-y-2">
+          <div className="bg-white rounded-lg p-3 border-2 border-green-200">
+            <div className="font-bold text-green-900 text-sm mb-1">💰 Fiyat & Kâr Marjı</div>
+            <div className="text-xs text-gray-600 mb-2">
+              HB'ye gönderilen fiyat, ürün kartındaki fiyata bu oran kadar eklenir. (Stok/Fiyat gönderiminde uygulanır.)
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm text-gray-700">HB fiyatı = Ürün fiyatı × (1 +</span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={markup}
+                onChange={(e) => setMarkup(e.target.value)}
+                className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 w-24 text-right font-semibold"
+              />
+              <span className="text-sm text-gray-700">% ÷ 100)</span>
+            </div>
+            <div className="text-xs text-green-700 mt-2 font-semibold">
+              Örnek: 1.000 ₺ ürün → HB'ye gönderilen fiyat: {previewPrice} ₺
+              {mk > 0 ? ` (+%${mk})` : " (marj yok)"}
+            </div>
+          </div>
           {fields.map((f) => (
             <div key={f.key} className="flex items-center gap-2 flex-wrap bg-white rounded-lg p-2 border border-purple-100">
               <div className="w-44 text-sm font-semibold text-gray-800">{f.label}</div>
