@@ -173,24 +173,6 @@ export default function AdminCategories() {
     }
   };
 
-  const handleHepsiburadaCategoryStockPrice = async (categoryId, categoryName) => {
-    try {
-      const token = localStorage.getItem('token');
-      toast.info(`${categoryName} kategorisi için Hepsiburada stok/fiyat güncelleniyor...`);
-      const res = await axios.post(`${API}/integrations/hepsiburada/categories/${categoryId}/update-stock-price`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const errs = res.data?.errors || [];
-      if (errs.length) {
-        toast.warning(`Gönderildi (${res.data?.items_count || 0} kalem) — uyarı: ${errs.join('; ')}`);
-      } else {
-        toast.success(`Hepsiburada: ${res.data?.items_count || 0} kalem stok/fiyat gönderildi`);
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Hepsiburada stok/fiyat güncelleme başarısız");
-    }
-  };
-
   const openEditModal = (category) => {
     setEditingCategory(category);
     setFormData({
@@ -305,13 +287,6 @@ export default function AdminCategories() {
                   title="Trendyol Stok/Fiyat Güncelle"
                 >
                   <RefreshCw size={16} />
-                </button>
-                <button 
-                  onClick={() => handleHepsiburadaCategoryStockPrice(node.id, node.name)} 
-                  className="px-1.5 py-0.5 hover:bg-orange-50 rounded text-[10px] font-bold text-[#FF6000] border border-orange-200" 
-                  title="Hepsiburada Stok/Fiyat Güncelle"
-                >
-                  HB
                 </button>
                 <button onClick={() => handleDelete(node.id)} className="p-1 hover:bg-gray-100 rounded text-red-500" title="Sil">
                   <Trash2 size={16} />

@@ -3341,8 +3341,9 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
 
 
 @router.post("/hepsiburada/products/sync")
-async def hb_sync_products(req: HbProductSyncReq, current_user: dict = Depends(require_admin)):
-    """Ürünleri Hepsiburada kataloğuna gönderir (import). Tracking ID döner.
+async def hb_sync_products(request: Request, current_user: dict = Depends(require_admin)):
+    """Seçili ürünleri Hepsiburada kataloğuna gönderir (import). FilteredPushPanel sözleşmesi:
+    body {stock_codes, barcodes, date_from, date_to, category_filters} → {successful, failed, ...}.
     NOT: Kategori-özellik eşleşmesi eksikse ilgili ürün atlanır; HB sandbox ile doğrulanmalıdır."""
     import asyncio
     from hepsiburada_client import HepsiburadaError
@@ -3350,16 +3351,12 @@ async def hb_sync_products(req: HbProductSyncReq, current_user: dict = Depends(r
     client, err = await _get_hb_client()
     if err:
         raise HTTPException(status_code=400, detail=err)
-    query = {"is_active": True}
-    if req.product_ids:
-        query = {"id": {"$in": req.product_ids}}
-    elif req.category_id:
-        cat = await db.categories.find_one({"id": req.category_id}, {"_id": 0})
-        if cat:
-            query = {"category_name": cat.get("name"), "is_active": True}
-    products = await db.products.find(query, {"_id": 0}).to_list(500)
+    payload = await request.json()
+    query = await _build_product_query_from_payload(payload)
+    products = await db.products.find(query, {"_id": 0}).to_list(length=None)
+    products = _dedupe_products_by_stock_code(products)
     if not products:
-        raise HTTPException(status_code=404, detail="Gönderilecek ürün bulunamadı")
+        return {"successful": 0, "failed": 0, "message": "Filtreye uyan ürün bulunamadı"}
     items, skipped = [], []
     for p in products:
         item, e = await _build_hb_product_item(p, client.merchant_id)
@@ -3368,7 +3365,8 @@ async def hb_sync_products(req: HbProductSyncReq, current_user: dict = Depends(r
         else:
             items.append(item)
     if not items:
-        return {"success": False, "message": "Hiçbir ürün gönderilemedi (eşleşme eksik).",
+        return {"successful": 0, "failed": len(skipped),
+                "message": "Hiçbir ürün gönderilemedi (kategori/özellik eşleşmesi eksik).",
                 "skipped": skipped}
     try:
         res = await asyncio.to_thread(client.create_products, items)
@@ -3378,8 +3376,61 @@ async def hb_sync_products(req: HbProductSyncReq, current_user: dict = Depends(r
     tracking_id = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("id")
     await log_integration_event("hepsiburada", "product_import", "bulk", str(tracking_id or len(items)),
                                 "success", f"{len(items)} ürün gönderildi, {len(skipped)} atlandı")
-    return {"success": True, "sent_count": len(items), "skipped_count": len(skipped),
-            "tracking_id": tracking_id, "raw": res, "skipped": skipped}
+    return {"successful": len(items), "failed": len(skipped), "tracking_id": tracking_id,
+            "message": f"{len(items)} ürün gönderildi"
+                       + (f", {len(skipped)} atlandı (eşleşme eksik)" if skipped else "")
+                       + (f" · Takip: {tracking_id}" if tracking_id else ""),
+            "skipped": skipped, "raw": res}
+
+
+@router.post("/hepsiburada/products/validate")
+async def hb_validate_products(request: Request, current_user: dict = Depends(require_admin)):
+    """Aktarım öncesi DOĞRULAMA — ürünlerin HB kategori eşleşmesi + stok kodunu kontrol eder.
+    Body sync ile aynı. Dönüş: {valid_count, invalid_count, results}."""
+    payload = await request.json()
+    query = await _build_product_query_from_payload(payload)
+    products = await db.products.find(query, {"_id": 0}).to_list(length=None)
+    products = _dedupe_products_by_stock_code(products)
+    cm_list = await db.category_mappings.find({"marketplace": "hepsiburada"}, {"_id": 0}).to_list(length=3000)
+    cm_by_local = {str(c.get("category_id")): c for c in cm_list}
+    results = []
+    valid_count = invalid_count = 0
+    for p in products:
+        errors = []
+        cm = cm_by_local.get(str(p.get("category_id"))) if p.get("category_id") else None
+        if not cm or not (cm.get("marketplace_category_id") or cm.get("category_id")):
+            errors.append("Hepsiburada kategori eşleşmesi yok")
+        if not _hb_merchant_sku(p) and not (p.get("variants") or []):
+            errors.append("Stok kodu/barkod yok")
+        if errors:
+            invalid_count += 1
+            results.append({"product_id": p.get("id"), "name": p.get("name"), "errors": errors})
+        else:
+            valid_count += 1
+    return {"valid_count": valid_count, "invalid_count": invalid_count, "results": results}
+
+
+@router.post("/hepsiburada/products/inventory-sync")
+async def hb_inventory_sync(current_user: dict = Depends(require_admin)):
+    """Tüm aktif ürünlerin güncel stok+fiyatını Hepsiburada listing'ine gönderir (StockPriceUpdatePanel)."""
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
+    markup = await _hb_markup()
+    items = []
+    for p in products:
+        items.extend(_hb_listing_items_from_product(p, markup))
+    if not items:
+        return {"message": "Gönderilecek stok/fiyat kalemi bulunamadı", "items_count": 0}
+    res = await _hb_push_stock_price(client, items, True, True)
+    status = "success" if not res["errors"] else "error"
+    await log_integration_event("hepsiburada", "inventory_sync", "bulk", str(len(items)), status,
+                                f"{len(items)} kalem" + (f" — {'; '.join(res['errors'])}" if res["errors"] else ""))
+    return {"message": f"{len(items)} kalem stok/fiyat gönderildi"
+                       + (f" — uyarı: {'; '.join(res['errors'])}" if res["errors"] else ""),
+            "items_count": len(items), **res}
 
 
 @router.get("/hepsiburada/products/tracking/{tracking_id}")

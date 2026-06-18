@@ -68,7 +68,6 @@ import BrandMapping from "./pages/admin/BrandMapping";
 import CategoryMapping from "./pages/admin/CategoryMapping";
 import BulkPriceStock from "./pages/admin/BulkPriceStock";
 import StockAlerts2 from "./pages/admin/StockAlerts";
-import HepsiburadaOrders from "./pages/admin/HepsiburadaOrders";
 import CustomerSegments from "./pages/admin/CustomerSegments";
 import AutomationStatus from "./pages/admin/AutomationStatus";
 import SecurityDashboard from "./pages/admin/SecurityDashboard";
@@ -159,7 +158,6 @@ export default function AdminApp() {
         <Route path="uyeler" element={<Members />} />
         <Route path="kaynak" element={<Attribution />} />
         <Route path="hepsiburada-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
-        <Route path="hepsiburada-siparis" element={<HepsiburadaOrders />} />
         <Route path="temu-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
         <Route path="olcu-tablolari" element={<SizeTablesList />} />
         <Route path="kuponlar" element={<Coupons />} />

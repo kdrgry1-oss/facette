@@ -1015,47 +1015,6 @@ export default function AdminProducts() {
   };
 
   /**
-   * handleHepsiburadaSync — Tek bir ürünü Hepsiburada kataloğuna gönderir (import).
-   *   BACKEND: POST /api/integrations/hepsiburada/products/sync  (body: {product_ids:[id]})
-   *   Kategori-özellik eşleşmesi eksikse ürün atlanır ve sebebi raporlanır.
-   */
-  const handleHepsiburadaSync = async (productId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/hepsiburada/products/sync`, { product_ids: [productId] }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.data.success) {
-        toast.success(`Hepsiburada: ${res.data.sent_count || 0} ürün gönderildi${res.data.tracking_id ? ` (takip: ${res.data.tracking_id})` : ''}`);
-        if (res.data.skipped_count) toast.warning(`${res.data.skipped_count} ürün atlandı (kategori/özellik eşleşmesi eksik)`);
-        fetchProducts();
-      } else {
-        toast.warning(res.data.message || "Ürün gönderilemedi (eşleşme eksik)");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Hepsiburada aktarımı başarısız");
-    }
-  };
-
-  /**
-   * handleHepsiburadaUpdate — Tek bir ürünün stok/fiyatını Hepsiburada listing'ine gönderir.
-   *   BACKEND: POST /api/integrations/hepsiburada/products/{id}/update-stock-price
-   */
-  const handleHepsiburadaUpdate = async (product) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/hepsiburada/products/${product.id}/update-stock-price`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const errs = res.data?.errors || [];
-      if (errs.length) toast.warning(`Gönderildi (${res.data?.items_count || 0} kalem) — uyarı: ${errs.join('; ')}`);
-      else toast.success(`Hepsiburada: ${res.data?.items_count || 0} kalem stok/fiyat gönderildi`);
-    } catch (err) {
-      toast.error("Hepsiburada güncelleme başarısız: " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  /**
    * handleSplitByColor — Bu ürünün farklı RENK varyantlarını AYRI ürünlere böler.
    *   İlk renk ana üründe kalır; diğer renkler yeni ürün olur (aynı kart id → "Diğer Renkler").
    *   Bedenler her renk ürününün altında varyant olarak kalır.
@@ -1797,20 +1756,6 @@ export default function AdminProducts() {
                           title="Trendyol Stok/Fiyat Güncelle"
                         >
                           <RefreshCw size={16} />
-                        </button>
-                        <button
-                          onClick={() => handleHepsiburadaSync(product.id)}
-                          className="p-1.5 hover:bg-orange-50 rounded text-[#FF6000] transition-colors flex items-center gap-0.5"
-                          title="Hepsiburada'ya Aktar (Yeni Ürün)"
-                        >
-                          <Store size={16} /><span className="text-[8px] font-black leading-none">HB</span>
-                        </button>
-                        <button
-                          onClick={() => handleHepsiburadaUpdate(product)}
-                          className="p-1.5 hover:bg-orange-50 rounded text-[#FF6000] transition-colors flex items-center gap-0.5"
-                          title="Hepsiburada Stok/Fiyat Güncelle"
-                        >
-                          <RefreshCw size={16} /><span className="text-[8px] font-black leading-none">HB</span>
                         </button>
                         <button
                           onClick={() => handleSplitByColor(product)}
@@ -2944,17 +2889,6 @@ export default function AdminProducts() {
                         </div>
                         <h4 className="text-sm font-black text-gray-900 uppercase mb-1">Şimdi Trendyol'a Aktar</h4>
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Ürünü anlık olarak Trendyol kataloğuna gönderin</p>
-                      </div>
-
-                      <div 
-                        className="bg-white p-6 rounded-2xl border-2 border-dashed border-gray-100 flex flex-col items-center justify-center text-center group cursor-pointer hover:border-orange-300 transition-all active:scale-95"
-                        onClick={() => editingProduct && handleHepsiburadaSync(editingProduct.id)}
-                      >
-                        <div className="w-16 h-16 rounded-full bg-orange-50 flex items-center justify-center mb-4 group-hover:bg-orange-100 transition-colors">
-                          <Store style={{ color: '#FF6000' }} size={32} />
-                        </div>
-                        <h4 className="text-sm font-black text-gray-900 uppercase mb-1">Şimdi Hepsiburada'ya Aktar</h4>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Ürünü anlık olarak Hepsiburada kataloğuna gönderin</p>
                       </div>
                     </div>
                   </div>

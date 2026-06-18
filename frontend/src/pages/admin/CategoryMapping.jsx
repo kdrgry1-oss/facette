@@ -528,7 +528,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [catFilterOpen, setCatFilterOpen] = useState(false);
 
-  const supportedMarketplaces = ["trendyol"]; // şu an sadece Trendyol için
+  const supportedMarketplaces = ["trendyol", "hepsiburada"]; // Trendyol + Hepsiburada
   if (!supportedMarketplaces.includes(marketplace)) return null;
 
   // Sadece matched kategoriler — boş bırakırsa Tümü demektir

@@ -12,7 +12,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * entegrasyonu gerekiyor" şeffaf durumunda (buton pasif) gösterilir.
  * Yalnız stok adedi ve fiyat gönderilir — ürün açıklaması/görseli değişmez.
  */
-const SUPPORTED = ["trendyol"];
+const SUPPORTED = ["trendyol", "hepsiburada"];
 
 export default function StockPriceUpdatePanel({ marketplace, auth }) {
   const [loading, setLoading] = useState(false);
