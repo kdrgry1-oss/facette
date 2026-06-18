@@ -2379,14 +2379,16 @@ async def _get_mng_settings() -> dict:
 
 
 async def _get_sender_info() -> dict:
-    """Mağaza/Gönderici bilgilerini DB'den çeker (settings.id=store_info veya mng_kargo)."""
+    """Mağaza/Gönderici + İADE ALICI (şirket) bilgilerini DB'den çeker (settings.id=store_info).
+    store_info boşsa FACETTE şirket adresine düşer → iade gönderisinin alıcı adresi HER ZAMAN dolu
+    olur ve MNG/DHL barkodu gerçekten üretilebilir (boş adres yüzünden barkod üretilememe sorunu çözülür)."""
     store = await db.settings.find_one({"id": "store_info"}, {"_id": 0}) or {}
     return {
-        "name": store.get("sender_name") or "FACETTE",
-        "phone": _normalize_phone(store.get("sender_phone") or "5550000000"),
-        "address": store.get("sender_address") or "",
+        "name": store.get("sender_name") or "FACETTE DIŞ TİCARET A.Ş.",
+        "phone": _normalize_phone(store.get("sender_phone") or "5433300310"),
+        "address": store.get("sender_address") or "İkitelli OSB Mah. İMSAN D Blok No: 3",
         "city": store.get("sender_city") or "İstanbul",
-        "district": store.get("sender_district") or "",
+        "district": store.get("sender_district") or "Küçükçekmece",
     }
 
 
@@ -3679,6 +3681,21 @@ async def cargo_poll_health(current_user: dict = Depends(require_admin)):
 # Faz 4 — Müşteri iadesi (14 gün) + DHL/MNG iade barkodu (3 gün geçerli)
 # Veri: db.customer_returns + order.return_request (özet)
 # =============================================================================
+# Anlaşmalı kargo (MNG/DHL E-Commerce) müşteri/sözleşme numarası.
+# Müşteri HER İADEDE bu numarayı yedek olarak görür; per-gönderi barkod tanınmazsa
+# en yakın şubeye bu numarayla teslim edebilir (gönderi bizim sözleşmemize işlenir).
+RETURN_CONTRACT_NO = "490059279"
+
+
+def _company_return_address(warehouse: dict) -> str:
+    """İade paketinin gideceği ŞİRKET (alıcı) adresini tek satır metne çevirir (müşteriye gösterilir)."""
+    w = warehouse or {}
+    parts = [w.get("name") or "FACETTE DIŞ TİCARET A.Ş.",
+             (w.get("address") or "").strip(),
+             "/".join([x for x in [w.get("district"), w.get("city")] if x])]
+    return " · ".join([p for p in parts if p])
+
+
 def _render_return_barcode_png_b64(code: str) -> str:
     """İade kodunu Code128 PNG (base64) barkoda çevirir (e-posta + ekran için)."""
     try:
@@ -3703,6 +3720,10 @@ def _public_return(rec: dict) -> dict:
         "id": rec.get("id"),
         "order_number": rec.get("order_number"),
         "return_code": rec.get("return_code"),
+        "iade_no": rec.get("iade_no") or rec.get("mng_ref") or "",
+        "gonderi_no": rec.get("gonderi_no") or "",
+        "contract_no": rec.get("contract_no") or RETURN_CONTRACT_NO,
+        "company_address": rec.get("company_address") or "",
         "status": rec.get("status"),
         "valid_until": rec.get("valid_until"),
         "cargo_provider_name": rec.get("cargo_provider_name"),
@@ -3719,15 +3740,17 @@ async def _ensure_return_email_template():
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from email_layout import email_shell, info_row
-    SENTINEL = "<!--facette-email-v2-->"
+    SENTINEL = "<!--facette-email-v4-->"
     body = SENTINEL + email_shell(
         icon="↩", eyebrow="İADE", title="İade talebin oluşturuldu",
         intro_html=("Merhaba {customer_name}, {order_number} numaralı siparişin için iade talebin oluşturuldu. "
                     "Ürünü en yakın DHL / MNG şubesine aşağıdaki kodu veya barkodu göstererek teslim edebilirsin."),
         body_html=(info_row("İade Kargo Kodu", "{return_code}")
+                   + info_row("İade No", "{iade_no}")
+                   + info_row("Anlaşmalı No (yedek)", "{contract_no}")
                    + '<div style="text-align:center;margin-top:18px;">{return_barcode_img}</div>'),
         note_title="Bu kod 3 gün geçerlidir.",
-        note_html="Son geçerlilik: {valid_until}",
+        note_html="Son geçerlilik: {valid_until} · Şube barkodu okutamazsa anlaşmalı kargo no'muz ({contract_no}) ile teslim edebilirsin.",
         preheader="İade kargo kodun: {return_code}",
     )
     try:
@@ -3750,7 +3773,7 @@ async def _ensure_return_email_template():
         logger.warning(f"ensure return email tpl failed: {e}")
 
 
-async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: str):
+async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: str, iade_no: str = ""):
     try:
         import sys, os
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -3771,7 +3794,7 @@ async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: 
             db, "order_return_requested",
             to_phone=addr.get("phone") or order.get("phone"),
             to_email=addr.get("email") or order.get("email"),
-            variables=await _order_notify_vars(order, return_code=code, valid_until=vu, return_barcode_img=barcode_img),
+            variables=await _order_notify_vars(order, return_code=code, iade_no=iade_no or code, contract_no=RETURN_CONTRACT_NO, valid_until=vu, return_barcode_img=barcode_img),
             channels=ch,
         )
     except Exception as e:
@@ -3836,40 +3859,18 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     reason = (payload.get("reason") or "").strip()[:500]
 
     rid = generate_id()
-    ref = f"IADE{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
-
-    # --- İade kodu + MNG iade gönderisi (alıcı = depo/mağaza) — best-effort ---
-    # Varsayılan iade kodu = anlaşmalı MNG sözleşme/müşteri no (settings.username, varsayılan 490059279).
-    # Müşteri HER ZAMAN bu kodla anlaşmalı kargoya teslim edebilir. MNG API per-gönderi barkod
-    # üretirse return_code bununla DEĞİŞTİRİLİR → her müşterinin iadesi ayrı barkodla takip edilir.
-    return_code = "490059279"
-    mng_ok = False
+    # Müşteri iadesi = YENİ bir "IW" gönderisi gibi ele alınır; alıcı = ŞİRKET/depo adresi.
+    # iade_no  = IW referansı (ilgili siparişin "İade No"su, iade tablosunda sütun olarak görünür).
+    # gonderi_no = MNG/DHL'in ürettiği GERÇEK takip/barkod no (tüm iadeler bununla takip edilir).
+    # return_code (birincil/gösterilen barkod) = gonderi_no varsa O, yoksa iade_no — ASLA anlaşmalı no DEĞİL.
+    iade_no = f"IW{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
+    icerik = "IADE - " + "; ".join(f"{i['quantity']}x {i['name']}" for i in items)
+    warehouse = await _get_sender_info()              # alıcı = şirket adresi
     cargo_name = "DHL E-Commerce"
-    try:
-        import sys, os, asyncio as _aio
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from mng_kargo_client import create_shipment as mng_create
-        s = await _get_mng_settings()
-        return_code = (str(s.get("username") or "").strip() or "490059279")
-        snd = await _get_sender_info()
-        if s.get("is_active") and snd.get("address") and snd.get("city"):
-            res = await _aio.to_thread(
-                mng_create,
-                username=s["username"], password=s["password"],
-                siparis_no=ref, kiymet=float(order.get("total") or 0),
-                icerik=("IADE - " + "; ".join(f"{i['quantity']}x {i['name']}" for i in items))[:200],
-                hizmet_sekli="NORMAL", teslim_sekli=1, al_sms=0, gn_sms=0,
-                parca_list="1:1:20:30:15:;",
-                alici_ad=snd["name"], odeme_sekli="GO", adres_farkli="0",
-                il=snd["city"], ilce=snd.get("district", ""), adres=snd["address"],
-                tel_cep=snd["phone"], email="", kapida_odeme=0,
-                platform_adi="", platform_kodu="",
-            )
-            if res.get("ok") and res.get("barkod"):
-                return_code = str(res["barkod"]).strip()
-                mng_ok = True
-    except Exception as e:
-        logger.warning(f"return MNG create failed: {e}")
+    gonderi_no, mng_ok = await _create_return_shipment(
+        iade_no, float(order.get("total") or 0), icerik, warehouse
+    )
+    return_code = gonderi_no or iade_no
 
     png_b64 = _render_return_barcode_png_b64(return_code)
     now_iso = now.isoformat()
@@ -3877,7 +3878,10 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     rec = {
         "id": rid, "order_id": order["id"], "order_number": order.get("order_number", ""),
         "user_id": order.get("user_id"), "items": items, "reason": reason,
-        "return_code": return_code, "mng_ref": ref, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
+        "return_code": return_code, "iade_no": iade_no, "gonderi_no": gonderi_no,
+        "contract_no": RETURN_CONTRACT_NO,
+        "company_address": _company_return_address(warehouse),
+        "mng_ref": iade_no, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
         "barcode_png_b64": png_b64, "status": "created",
         "created_at": now_iso, "valid_until": valid_until,
     }
@@ -3887,7 +3891,9 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
                            order_number=order.get("order_number", ""))
     await db.orders.update_one({"id": order["id"]}, {"$set": {
         "return_request": {
-            "return_id": rid, "return_code": return_code, "valid_until": valid_until,
+            "return_id": rid, "return_code": return_code,
+            "iade_no": iade_no, "gonderi_no": gonderi_no,
+            "valid_until": valid_until,
             "created_at": now_iso, "status": "created", "items_count": len(items),
         },
         "status": "return_requested", "updated_at": now_iso,
@@ -3899,7 +3905,7 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         f'<div style="margin:14px 0"><img src="{base}/api/orders/returns/{rid}/barcode.png" '
         f'alt="{return_code}" style="height:90px"/></div>' if base else ""
     )
-    _aio2.create_task(_notify_return(order, return_code, valid_until, barcode_img))
+    _aio2.create_task(_notify_return(order, return_code, valid_until, barcode_img, iade_no=iade_no))
     return {"success": True, "return": _public_return(rec)}
 
 
@@ -4339,9 +4345,11 @@ async def approve_return(return_id: str, payload: dict,
 # ============================================================================
 
 async def _create_return_shipment(ref: str, kiymet: float, icerik: str, recipient: dict):
-    """Parametrik MNG iade gönderisi (best-effort). recipient={name,phone,city,district,address}.
-    MNG kapalı/eksikse veya hata olursa ref'i kod olarak döndürür (mng_ok=False)."""
-    code = ref
+    """Parametrik MNG/DHL iade gönderisi (best-effort). recipient = ŞİRKET (alıcı) adresi.
+    Gönderi MNG'ye 'IW…' sipariş no (iade no) ile kaydedilir → şube barkodu okutunca paket bize gelir.
+    Dönüş: (gonderi_no, mng_ok). gonderi_no = MNG'nin ürettiği GERÇEK (taranabilir) gönderi no/barkod;
+    üretilemezse "" döner (çağıran taraf iade no'ya / anlaşmalı no'ya düşmeye karar verir)."""
+    gonderi_no = ""   # gerçek gönderi no/barkod; MNG üretemezse boş — sahte iç kod ASLA döndürülmez
     mng_ok = False
     try:
         import sys, os, asyncio as _aio
@@ -4362,11 +4370,11 @@ async def _create_return_shipment(ref: str, kiymet: float, icerik: str, recipien
                 platform_adi="", platform_kodu="",
             )
             if res.get("ok") and res.get("barkod"):
-                code = str(res["barkod"]).strip()
+                gonderi_no = str(res["barkod"]).strip()
                 mng_ok = True
     except Exception as e:
         logger.warning(f"return shipment create failed: {e}")
-    return code, mng_ok
+    return gonderi_no, mng_ok
 
 
 async def _within_return_window(order: dict) -> bool:
@@ -4398,20 +4406,25 @@ async def reissue_return_barcode(return_id: str,
         raise HTTPException(status_code=400, detail="İade süresi (teslimden 14 gün) dolmuş; barkod üretilemez.")
 
     items = rec.get("items") or []
-    ref = f"IADE{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
+    iade_no = rec.get("iade_no") or rec.get("mng_ref") or f"IW{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
     icerik = "IADE - " + "; ".join(f"{i.get('quantity',1)}x {i.get('name','Ürün')}" for i in items)
     warehouse = await _get_sender_info()
-    code, mng_ok = await _create_return_shipment(ref, order.get("total") or 0, icerik, warehouse)
+    gonderi_no, mng_ok = await _create_return_shipment(iade_no, order.get("total") or 0, icerik, warehouse)
+    code = gonderi_no or iade_no
     png_b64 = _render_return_barcode_png_b64(code)
     now = datetime.now(timezone.utc)
     valid_until = (now + timedelta(days=3)).isoformat()
     await db.customer_returns.update_one({"id": return_id}, {"$set": {
-        "return_code": code, "mng_ref": ref, "mng_ok": mng_ok, "barcode_png_b64": png_b64,
+        "return_code": code, "iade_no": iade_no, "gonderi_no": gonderi_no,
+        "contract_no": RETURN_CONTRACT_NO,
+        "company_address": _company_return_address(warehouse),
+        "mng_ref": iade_no, "mng_ok": mng_ok, "barcode_png_b64": png_b64,
         "valid_until": valid_until, "updated_at": now.isoformat(),
         "status": "created" if rec.get("status") in (None, "created", "in_transit") else rec.get("status"),
     }})
     await db.orders.update_one({"id": rec.get("order_id")},
-        {"$set": {"return_request.return_code": code, "return_request.valid_until": valid_until,
+        {"$set": {"return_request.return_code": code, "return_request.iade_no": iade_no,
+                  "return_request.gonderi_no": gonderi_no, "return_request.valid_until": valid_until,
                   "updated_at": now.isoformat()}})
 
     # Bildirim: yeni barkod (oluşturma şablonu ile)
@@ -4419,7 +4432,7 @@ async def reissue_return_barcode(return_id: str,
     _base = _os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL") or ""
     barcode_img = (f'<div style="margin:14px 0"><img src="{_base}/api/orders/returns/{return_id}/barcode.png" '
                    f'alt="{code}" style="height:90px"/></div>' if _base else "")
-    _aio.create_task(_notify_return(order, code, valid_until, barcode_img))
+    _aio.create_task(_notify_return(order, code, valid_until, barcode_img, iade_no=iade_no))
 
     return {"success": True, "return_code": code, "mng_ok": mng_ok, "valid_until": valid_until}
 
@@ -4451,7 +4464,8 @@ async def reject_return(return_id: str, payload: dict,
             "district": addr.get("district", ""), "address": addr.get("address", ""),
         }
         ref = f"RET{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
-        reship_code, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+        _rgn, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+        reship_code = _rgn or ref
 
     rejection = {
         "by": current_user.get("email") or current_user.get("id"),
@@ -4679,7 +4693,8 @@ async def reship_return(return_id: str, payload: Optional[dict] = Body(default=N
         "district": addr.get("district", ""), "address": addr.get("address", ""),
     }
     ref = f"RET{rec.get('order_number','')}{generate_id()[:6]}".replace(" ", "")
-    reship_code, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+    _rgn, _mng = await _create_return_shipment(ref, order.get("total") or 0, "IADE RED - geri gonderim", recipient)
+    reship_code = _rgn or ref
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.customer_returns.update_one({"id": return_id}, {"$set": {
         "reship_code": reship_code, "reshipped_at": now_iso,

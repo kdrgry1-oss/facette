@@ -189,6 +189,7 @@ async def list_ticimax_return_orders(
         async for cr in db.customer_returns.find(
             {"order_id": {"$in": _oids}},
             {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
+             "iade_no": 1, "gonderi_no": 1, "mng_ref": 1, "contract_no": 1,
              "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1},
         ):
             _cr_map[cr.get("order_id")] = cr
@@ -197,6 +198,9 @@ async def list_ticimax_return_orders(
         if cr.get("reason"):
             r["reason"] = cr["reason"]
         r["return_code"] = cr.get("return_code") or ""
+        r["iade_no"] = cr.get("iade_no") or cr.get("mng_ref") or ""
+        r["gonderi_no"] = cr.get("gonderi_no") or ""
+        r["contract_no"] = cr.get("contract_no") or "490059279"
         r["return_barcode_url"] = cr.get("barcode_url") or ""
         r["return_cargo_provider"] = cr.get("cargo_provider_name") or r.get("cargo_provider_name") or ""
         r["reship_code"] = cr.get("reship_code") or ""

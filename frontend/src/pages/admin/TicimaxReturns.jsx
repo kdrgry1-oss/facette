@@ -439,6 +439,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
             <thead className="bg-gray-50 border-b text-gray-500 text-left text-xs uppercase">
               <tr>
                 <th className="px-3 py-2.5 font-bold">Sipariş No</th>
+                <th className="px-3 py-2.5 font-bold">İade No</th>
                 <th className="px-3 py-2.5 font-bold">Müşteri</th>
                 <th className="px-3 py-2.5 font-bold">Sebep</th>
                 <th className="px-3 py-2.5 font-bold">Ödeme</th>
@@ -458,6 +459,12 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
                       {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {r.iade_no
+                        ? <div className="font-mono text-xs font-semibold text-gray-800 truncate max-w-[120px]" title={r.iade_no}>{r.iade_no}</div>
+                        : <span className="text-gray-400">—</span>}
+                      {r.gonderi_no && <div className="font-mono text-[10px] text-gray-400 truncate max-w-[120px]" title={`Gönderi No: ${r.gonderi_no}`}>Gönderi: {r.gonderi_no}</div>}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="text-gray-800">{r.customer_name}</div>
@@ -511,7 +518,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
                   </tr>
                   {expandedId === r.id && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={11} className="px-4 py-3">
+                      <td colSpan={12} className="px-4 py-3">
                         {/* Müşteri + sipariş özeti */}
                         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-900 mb-3">
                           <span>Müşteri: <b className="text-gray-900">{r.customer_name}</b></span>
