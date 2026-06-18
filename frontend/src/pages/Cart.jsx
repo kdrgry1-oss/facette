@@ -92,19 +92,30 @@ export default function Cart() {
         <div className="grid lg:grid-cols-3 gap-8 lg:gap-12">
           {/* Cart Items */}
           <div className="lg:col-span-2">
-            {/* Free Shipping Progress */}
-            {remaining > 0 && (
-              <div className="mb-8 p-4 bg-stone-50 border border-black/5">
-                <p className="text-xs text-center mb-2 text-black/70">
-                  Ücretsiz kargo için <span className="font-medium text-black">{remaining.toFixed(2)} TL</span> daha ekleyin
-                </p>
-                <div className="h-[2px] bg-black/10 overflow-hidden">
-                  <div
-                    className="h-full bg-black transition-all duration-700 ease-out"
-                    style={{ width: `${Math.min(100, (total / freeShippingLimit) * 100)}%` }}
-                  />
+            {/* Free Shipping Progress — eşik altı: kalan tutar; eşik üstü: kazandın kutlaması */}
+            {freeShippingThreshold != null && items.length > 0 && (
+              remaining > 0 ? (
+                <div className="mb-8 p-4 bg-stone-50 border border-black/5">
+                  <p className="text-xs text-center mb-2 text-black/70">
+                    Ücretsiz kargo için <span className="font-medium text-black">{remaining.toFixed(2)} TL</span> daha ekleyin
+                  </p>
+                  <div className="h-[2px] bg-black/10 overflow-hidden">
+                    <div
+                      className="h-full bg-black transition-all duration-700 ease-out"
+                      style={{ width: `${Math.min(100, (total / freeShippingLimit) * 100)}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="mb-8 p-4 bg-emerald-50 border border-emerald-200">
+                  <p className="text-xs text-center mb-2 text-emerald-800 font-medium">
+                    🎉 Ücretsiz kargo kazandın!
+                  </p>
+                  <div className="h-[2px] bg-emerald-200 overflow-hidden">
+                    <div className="h-full bg-emerald-600 w-full" />
+                  </div>
+                </div>
+              )
             )}
 
             {/* Items */}

@@ -57,7 +57,6 @@ export default function Checkout() {
   const [couponCode, setCouponCode] = useState("");
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
-  const [availableCoupons, setAvailableCoupons] = useState([]);
   const [appliedPromotions, setAppliedPromotions] = useState([]); // Madde 4 motor sonucu
   const [eligiblePromotions, setEligiblePromotions] = useState([]); // tum uygulanabilirler (musteri secsin)
   const [excludedIds, setExcludedIds] = useState([]); // musterinin X ile kaldirdigi kampanyalar
@@ -191,7 +190,7 @@ export default function Checkout() {
 
   // Available coupons + InitiateCheckout pixel
   useEffect(() => {
-    if (items.length === 0) { setAvailableCoupons([]); return; }
+    if (items.length === 0) return;
     trackInitiateCheckout({
       total: grandTotal,
       items: items.map((it) => ({
@@ -207,13 +206,6 @@ export default function Checkout() {
       discount, shipping_cost: shippingCost,
       coupon: appliedCoupon?.code || "",
     });
-    axios.post(`${API}/coupons/available`, {
-      cart_total: total,
-      user_id: user?.id || null,
-      email: user?.email || "",
-      items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
-    }).then((r) => setAvailableCoupons(r.data?.items || []))
-      .catch(() => setAvailableCoupons([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id, discount, shippingCost, appliedCoupon?.code]);
 
@@ -356,27 +348,12 @@ export default function Checkout() {
 
   const handleApplyCoupon = () => applyCode(couponCode);
 
-  const handlePickCoupon = (c) => {
-    setCouponCode(c.code);
-    applyCode(c.code);
-  };
-
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
     setCouponCode("");
     recalcPromotions(""); // girilen kod kalkar, otomatik kampanyalar uygulanmaya devam eder
   };
 
-  // Madde 4 — Müşteri kontrolü: kampanya seçimi/kaldırma
-  // İki kampanya birleşebilir mi? (backend _pair_ok aynası)
-  const canCombine = (a, b) => {
-    if (!a?.combinable || !b?.combinable) return false;
-    const aw = a.combinable_with || [];
-    const bw = b.combinable_with || [];
-    if (aw.length && !aw.includes(b.coupon_id)) return false;
-    if (bw.length && !bw.includes(a.coupon_id)) return false;
-    return true;
-  };
   // Uygulanan bir kampanyayı X ile kaldır
   const removePromotion = (p) => {
     // Girilen kod kampanyasıysa: kodu temizlemek doğal kaldırmadır
@@ -384,18 +361,6 @@ export default function Checkout() {
     const id = p.coupon_id;
     if (!id) return;
     setExcludedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  };
-  // Alternatif bir kampanyayı seç: çakışan (birleşemeyen) uygulanmışları hariç tut, kendisini geri al
-  const pickAlternative = (alt) => {
-    const altId = alt.coupon_id;
-    const conflicts = appliedPromotions
-      .filter((p) => p.coupon_id && p.coupon_id !== altId && !canCombine(p, alt))
-      .map((p) => p.coupon_id);
-    setExcludedIds((prev) => {
-      const next = new Set(prev.filter((x) => x !== altId));
-      conflicts.forEach((c) => next.add(c));
-      return Array.from(next);
-    });
   };
   const resetExcluded = () => setExcludedIds([]);
 
@@ -1029,29 +994,6 @@ export default function Checkout() {
                   <span className="font-medium">Sipariş Özeti</span>
                 </div>
 
-                {/* Available Coupons */}
-                {availableCoupons.length > 0 && (
-                  <div className="px-5 pt-4" data-testid="available-coupons-block">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Sana Özel Kuponlar</div>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto -mx-1 px-1">
-                      {availableCoupons.slice(0, 5).map((c) => {
-                        const selected = appliedCoupon?.code === c.code;
-                        return (
-                          <button type="button" key={c.id} onClick={() => handlePickCoupon(c)}
-                            className={`w-full text-left border rounded p-2 flex items-center justify-between transition-colors ${selected ? "border-stone-900 bg-stone-900 text-white" : "border-dashed border-gray-300 hover:border-stone-900"}`}
-                            data-testid={`coupon-card-${c.code}`}>
-                            <div className="min-w-0">
-                              <div className={`text-[11px] font-semibold tracking-wide ${selected ? "text-white" : "text-black"}`}>{c.code}</div>
-                              <div className={`text-[10px] truncate ${selected ? "text-white/80" : "text-gray-500"}`}>{c.title || (c.type === "percent" ? `%${c.value} indirim` : `${c.value} TL indirim`)}</div>
-                            </div>
-                            <div className={`text-xs font-bold shrink-0 ml-2 ${selected ? "text-white" : "text-green-600"}`}>-{c.discount.toFixed(2)} ₺</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 {/* Manual coupon */}
                 <div className="px-5 pt-4">
                   <div className="flex gap-2">
@@ -1068,8 +1010,6 @@ export default function Checkout() {
 
                 {/* Madde 4 — uygulanan kampanyalar + müşteri seçimi (X ile kaldır / alternatifi uygula) */}
                 {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (() => {
-                  const appliedIds = appliedPromotions.map((p) => p.coupon_id).filter(Boolean);
-                  const alternatives = eligiblePromotions.filter((e) => !appliedIds.includes(e.coupon_id));
                   return (
                     <div className="px-5 pt-4" data-testid="applied-promotions">
                       {appliedPromotions.length > 0 && (
@@ -1086,21 +1026,6 @@ export default function Checkout() {
                             ))}
                           </div>
                         </>
-                      )}
-                      {alternatives.length > 0 && (
-                        <div className="mt-3">
-                          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Şunları da uygulayabilirsiniz</div>
-                          <div className="space-y-1">
-                            {alternatives.map((a, i) => (
-                              <div key={i} className="flex items-center justify-between text-xs gap-2">
-                                <span className="text-gray-500 truncate flex-1">{a.title || a.code}{a.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
-                                <span className="text-gray-400 shrink-0">-{Number(a.discount).toFixed(2)} ₺</span>
-                                <button type="button" onClick={() => pickAlternative(a)}
-                                  className="shrink-0 text-[11px] px-2 py-0.5 border rounded hover:border-stone-900 hover:bg-stone-50 transition-colors">Uygula</button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                       )}
                       {excludedIds.length > 0 && (
                         <button type="button" onClick={resetExcluded} className="mt-2 text-[11px] text-gray-500 underline hover:text-stone-900">Kaldırılan kampanyaları geri al</button>
