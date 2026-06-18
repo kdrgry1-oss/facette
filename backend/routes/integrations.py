@@ -3742,12 +3742,20 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
         if mk not in (None, ""):
             attrs.setdefault("Marka", str(mk))
         gar = _base_val("GarantiSuresi", variant)
-        if gar not in (None, ""):
-            attrs.setdefault("GarantiSuresi", str(gar))
-        if bfm.get("kdv"):  # KDV yalnız kullanıcı açıkça ayarladıysa gönderilir
-            kdv = _base_val("kdv", variant)
-            if kdv not in (None, ""):
-                attrs.setdefault("kdv", str(kdv))
+        gar_s = str(gar or "").strip()
+        # HB tam sayı (ay) ister, en fazla 2 hane, >0. "Yok"/sayı-değil/0/>99 -> hiç gönderme (opsiyonel alan).
+        if gar_s.isdigit() and 1 <= int(gar_s) <= 99:
+            attrs.setdefault("GarantiSuresi", str(int(gar_s)))
+        # KDV (zorunlu) -> HB anahtarı "tax", tam sayı. Panel/default'tan gelir (varsayılan 10).
+        kdv_raw = _base_val("kdv", variant)
+        kdv_s = str(kdv_raw or "").strip().replace("%", "").replace(",", ".")
+        if kdv_s:
+            try:
+                kdv_i = int(round(float(kdv_s)))
+            except Exception:
+                kdv_i = None
+            if kdv_i and kdv_i > 0:
+                attrs.setdefault("tax", str(kdv_i))
         img_src = (bfm.get("Image") or {}).get("source") or "images"
         if img_src == "images":
             for i, u in enumerate(imgs, 1):
