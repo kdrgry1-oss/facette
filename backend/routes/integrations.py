@@ -3553,11 +3553,31 @@ def _hb_resolve_value(attr: dict, raw):
     for v in vals:
         if _hb_norm(v.get("name")) == nr:
             return v.get("name")
-    # 3) Parçalı ad eşleşmesi (yalnız 2+ karakter, kısa-değer yanlış eşleşmesini önle)
+    # 3) En iyi parçalı/kelime eşleşmesi: tam-kelime içeren ve EN KISA değer tercih edilir.
+    #    Böylece "Ekru" daima "Altın - Ekru"ya tercih edilir (yanlış birebir-olmayan eşleşmeyi önler).
+    nr_words = set(nr.split())
+    nr2 = " ".join(nr.replace("-", " ").split())
+    best = None  # (skor, uzunluk, ad) — küçük skor + kısa ad daha iyi
     for v in vals:
-        vn = _hb_norm(v.get("name"))
-        if vn and len(nr) >= 2 and len(vn) >= 2 and (nr in vn or vn in nr):
-            return v.get("name")
+        nm = v.get("name")
+        vn = _hb_norm(nm)
+        if not vn or len(vn) < 2:
+            continue
+        vn_words = set(vn.split())
+        vn2 = " ".join(vn.replace("-", " ").split())
+        score = None
+        if nr in vn_words:               # raw, değerin bir kelimesi: "ekru" ∈ "Altın - Ekru"
+            score = 10
+        elif vn in nr_words:             # değer, raw'ın bir kelimesi: "Ekru" ∈ "Altın Ekru"
+            score = 20
+        elif len(nr2) >= 3 and (nr2 in vn2 or vn2 in nr2):  # gevşek substring (son çare)
+            score = 100
+        if score is not None:
+            cand = (score, len(vn), nm)
+            if best is None or cand < best:
+                best = cand
+    if best:
+        return best[2]
     if attr.get("allowCustom"):
         return str(raw)
     return None
@@ -3665,9 +3685,10 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
         return v
 
     items, errors = [], set()
+    used_skus: set = set()
     hb_attrs_for_product = dict(product.get("hepsiburada_attributes") or {})
 
-    for variant in targets:
+    for vi, variant in enumerate(targets):
         local = _hb_collect_local(product, variant)
         v_hb = dict((variant or {}).get("hepsiburada_attributes") or {})
         attrs: dict = {}
@@ -3722,13 +3743,26 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 missing_req.append(aname)
 
         # Taban alanlar — global "Varsayılan Alan Eşleştirme" panelinden çözülür
-        sku = str(_base_val("merchantSku", variant) or "").strip()
+        # merchantSku VARYANT BAŞINA BENZERSIZ olmalı; yoksa HB tüm bedenleri tek ürüne indirger.
+        sku = (str((variant or {}).get("stock_code") or "").strip()
+               or str((variant or {}).get("barcode") or "").strip())
         if not sku:
-            sku = (str(variant.get("stock_code") or variant.get("barcode") or "").strip()
-                   if variant else _hb_merchant_sku(product))
+            base_sku = str(_hb_merchant_sku(product) or product.get("stock_code")
+                           or product.get("id") or "").strip()
+            if variant is not None:
+                suffix = (local.get("beden") or local.get("size") or local.get("numara")
+                          or local.get("renk") or local.get("color") or "")
+                suffix = _hb_norm(suffix).replace(" ", "").upper() if suffix else f"V{vi + 1}"
+                sku = f"{base_sku}-{suffix}" if base_sku else (suffix or f"V{vi + 1}")
+            else:
+                sku = base_sku
         if not sku:
             errors.add("stok kodu/barkod yok")
             continue
+        # Aynı ürün içinde çakışan merchantSku'yu benzersizleştir (HB tekilleştirmesin)
+        if sku in used_skus:
+            sku = f"{sku}-V{vi + 1}"
+        used_skus.add(sku)
         bc = (str(_base_val("Barcode", variant) or "").strip()
               or (variant or {}).get("barcode") or product.get("barcode") or sku)
         attrs.setdefault("merchantSku", sku)
