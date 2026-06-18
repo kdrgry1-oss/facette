@@ -152,6 +152,72 @@ async def _get_hb_client():
     return HepsiburadaClient(mid, sk, du, test=test, oms_username=oms_u, oms_password=oms_p), None
 
 
+def _hb_sysnorm(s):
+    """Türkçe-katlamalı alnum normalize (alan adı eşleştirmek için)."""
+    s = (str(s or "").lower().replace("ı", "i").replace("ş", "s").replace("ç", "c")
+         .replace("ğ", "g").replace("ü", "u").replace("ö", "o"))
+    return "".join(ch for ch in s if ch.isalnum())
+
+
+# HB'nin her üründe istediği TEMEL/SİSTEM alanları. Bunlar kategoriye göre değişmez →
+# kategori eşleştirme modalında GÖSTERİLMEZ; "Varsayılan Alan Eşleştirme" panelinden
+# (global) ürün kartı kaynağına veya sabit değere bağlanır. `key` = HB import alan adı.
+HB_BASE_FIELDS = [
+    {"key": "merchantSku", "label": "Satıcı Stok Kodu", "default_source": "stock_code",
+     "aliases": ["saticistokkodu", "stokkodu", "merchantsku", "satistokkodu"]},
+    {"key": "Barcode", "label": "Barkod", "default_source": "barcode",
+     "aliases": ["barkod", "barcode"]},
+    {"key": "UrunAdi", "label": "Ürün Adı", "default_source": "name",
+     "aliases": ["urunadi", "productname", "urunismi"]},
+    {"key": "UrunAciklamasi", "label": "Ürün Açıklaması", "default_source": "description",
+     "aliases": ["urunaciklamasi", "urunaciklama", "aciklama", "productdescription", "onyazi"]},
+    {"key": "Marka", "label": "Marka", "default_source": "brand",
+     "aliases": ["marka", "brand"]},
+    {"key": "GarantiSuresi", "label": "Garanti Süresi (ay)", "default_source": "__default",
+     "default_value": "24", "aliases": ["garantisuresi", "garanti", "warranty"]},
+    {"key": "kg", "label": "Desi / Ağırlık", "default_source": "weight",
+     "default_value": "1", "aliases": ["kg", "desi", "agirlik", "weight", "kargodesi", "kargobilgisi"]},
+    {"key": "kdv", "label": "KDV Oranı", "default_source": "__default",
+     "default_value": "10", "aliases": ["kdv", "kdvorani", "vat", "tax", "taxvatrate", "kdvtutari"]},
+    {"key": "Image", "label": "Görseller", "default_source": "images",
+     "aliases": ["gorsel", "gorseller", "image", "image1", "resim", "urungorseli"]},
+    {"key": "VaryantGroupID", "label": "Varyant Grup ID", "default_source": "__auto",
+     "aliases": ["varyantgroupid", "varyantgrup", "variantgroupid", "varyantgrupid"]},
+]
+_HB_BASE_BY_KEY = {f["key"]: f for f in HB_BASE_FIELDS}
+_HB_BASE_ALIAS = {}
+for _f in HB_BASE_FIELDS:
+    for _a in _f["aliases"] + [_hb_sysnorm(_f["key"]), _hb_sysnorm(_f["label"])]:
+        _HB_BASE_ALIAS[_a] = _f["key"]
+
+# Ürün kartı kaynak seçenekleri (UI dropdown'u için).
+HB_PRODUCT_SOURCES = [
+    {"value": "name", "label": "Ürün Adı"},
+    {"value": "description", "label": "Açıklama / Ön Yazı"},
+    {"value": "stock_code", "label": "Stok Kodu"},
+    {"value": "barcode", "label": "Barkod"},
+    {"value": "brand", "label": "Marka"},
+    {"value": "category_name", "label": "Kategori Adı"},
+    {"value": "price", "label": "Fiyat"},
+    {"value": "weight", "label": "Ağırlık / Desi"},
+    {"value": "images", "label": "Ürün Görselleri"},
+    {"value": "__default", "label": "Sabit Varsayılan Değer"},
+]
+
+
+def _hb_base_key(name):
+    """Bir HB özellik adı temel/sistem alana karşılık geliyorsa kanonik key döner, yoksa None."""
+    n = _hb_sysnorm(name)
+    if not n:
+        return None
+    if n in _HB_BASE_ALIAS:
+        return _HB_BASE_ALIAS[n]
+    for alias, key in _HB_BASE_ALIAS.items():
+        if alias and (alias in n or n in alias):
+            return key
+    return None
+
+
 async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
     """HB kategori ozelliklerini canli ceker, frontend formatina normalize eder, cache'ler.
 
@@ -173,11 +239,8 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
     except Exception as e:
         return [], f"HB özellik çekme hatası: {e}"
 
-    SYS = {"merchantsku", "varyantgroupid", "barcode", "urunadi", "urunaciklamasi",
-           "image1", "image2", "image3", "image4", "image5", "image", "kg"}
-
     def _sysnorm(s):
-        return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+        return _hb_sysnorm(s)
 
     def _is_attr(it):
         """Bir oge 'ozellik' gorunumunde mi? (kategori/breadcrumb listelerini ayikla)"""
@@ -222,9 +285,9 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         aname = a.get("name")
         if not aname:
             return
+        if _hb_base_key(aname):
+            return  # HB temel/sistem alanı → kategori modalında değil, global panelde yönetilir
         nkey = _sysnorm(aname)
-        if a.get("__base_key") and nkey in SYS:
-            return  # salt-sistem alan -> mapping listesine alma
         dedup = str(aid) if aid is not None else nkey
         if dedup in seen:
             return
@@ -276,7 +339,7 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 4,
+            {"$set": {"category_id": key, "attributes": out, "_v": 5,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -1565,7 +1628,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 4:
+        if not attrs or (cached or {}).get("_v") != 5:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {

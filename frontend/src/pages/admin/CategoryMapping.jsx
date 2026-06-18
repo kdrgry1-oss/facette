@@ -238,6 +238,7 @@ export default function CategoryMapping() {
         </div>
       </div>
 
+      {active === "hepsiburada" && <HepsiburadaBaseFieldPanel auth={auth} />}
       {active === "hepsiburada" && <HepsiburadaOrderPull auth={auth} />}
       {active === "hepsiburada" && <HepsiburadaAutofillPanel auth={auth} />}
 
@@ -1046,6 +1047,105 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Hepsiburada Sipariş Çek (OMS) — geçmiş siparişleri tarih/sipariş-no ile içe aktar
 // ──────────────────────────────────────────────────────────────────────────────
+function HepsiburadaBaseFieldPanel({ auth }) {
+  const [fields, setFields] = useState([]);
+  const [sources, setSources] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/integrations/hepsiburada/base-field-mappings`, auth);
+        setFields(r.data?.fields || []);
+        setSources(r.data?.sources || []);
+      } catch (e) {
+        // sessiz geç
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+
+  const update = (key, patch) =>
+    setFields((fs) => fs.map((f) => (f.key === key ? { ...f, ...patch } : f)));
+
+  const save = async () => {
+    setSaving(true);
+    const t = toast.loading("Kaydediliyor...");
+    try {
+      const mappings = {};
+      fields.forEach((f) => {
+        mappings[f.key] = { source: f.source || "", default: f.default || "" };
+      });
+      await axios.post(`${API}/integrations/hepsiburada/base-field-mappings`, { mappings }, auth);
+      toast.success("Varsayılan alan eşleştirmesi kaydedildi", { id: t });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Kaydedilemedi", { id: t });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+  return (
+    <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4" data-testid="hb-basefields-panel">
+      <div className="flex items-center justify-between gap-2 cursor-pointer" onClick={() => setOpen((o) => !o)}>
+        <div>
+          <div className="font-bold text-purple-900 text-sm flex items-center gap-1">
+            <Settings size={14} /> Hepsiburada Varsayılan Alan Eşleştirme
+          </div>
+          <div className="text-xs text-purple-700 mt-0.5">
+            Stok kodu, ürün adı, açıklama, barkod, marka, desi, görsel gibi temel alanların hangi ürün-kartı
+            değerinden çekileceğini bir kez burada belirle. <b>Tüm kategorilerde geçerli</b> — kategori
+            ekranında tekrar sorulmaz. Görselde gördüğün "Satıcı Stok Kodu / Ürün Adı / Ürün Açıklaması"
+            satırları artık kategori modalında değil, burada.
+          </div>
+        </div>
+        <span className="text-purple-600 text-xs whitespace-nowrap">{open ? "Gizle ▲" : "Göster ▼"}</span>
+      </div>
+      {open && (
+        <div className="mt-3 space-y-2">
+          {fields.map((f) => (
+            <div key={f.key} className="flex items-center gap-2 flex-wrap bg-white rounded-lg p-2 border border-purple-100">
+              <div className="w-44 text-sm font-semibold text-gray-800">{f.label}</div>
+              <span className="text-gray-400 text-xs">←</span>
+              <select
+                value={f.source || ""}
+                onChange={(e) => update(f.key, { source: e.target.value })}
+                className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 flex-1 min-w-[160px] bg-white"
+              >
+                {sources.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+              {f.source === "__default" && (
+                <input
+                  type="text"
+                  value={f.default || ""}
+                  onChange={(e) => update(f.key, { default: e.target.value })}
+                  placeholder="Varsayılan değer..."
+                  className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 w-44"
+                />
+              )}
+            </div>
+          ))}
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-sm bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60"
+            >
+              {saving ? "Kaydediliyor..." : "Eşleştirmeyi Kaydet"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HepsiburadaAutofillPanel({ auth }) {
   const [loading, setLoading] = useState(false);
   const [res, setRes] = useState(null);

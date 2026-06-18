@@ -303,7 +303,7 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
     Once cache, yoksa canli cekip cache'ler."""
     key = int(category_id) if str(category_id).isdigit() else str(category_id)
     cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cached and cached.get("_v") == 4 and cached.get("attributes") is not None:
+    if cached and cached.get("_v") == 5 and cached.get("attributes") is not None:
         return {"success": True, "attributes": cached.get("attributes", []),
                 "media_attributes": cached.get("media_attributes", []),
                 "base_attributes": cached.get("base_attributes", []),
@@ -317,6 +317,44 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
             "media_attributes": fresh.get("media_attributes", []),
             "base_attributes": fresh.get("base_attributes", []),
             "raw_structure": fresh.get("raw_structure", {})}
+
+
+@router.get("/hepsiburada/base-field-mappings")
+async def hb_get_base_field_mappings(current_user: dict = Depends(require_admin)):
+    """HB temel/sistem alanlarının (Satıcı Stok Kodu / Ürün Adı / Barkod / Marka / KDV / Desi /
+    Görsel ...) ürün-kartı kaynağına ya da sabit değere GLOBAL eşleştirmesi. Üst panel için
+    alan listesi + kaynak seçenekleri + kayıtlı config döner."""
+    from .category_mapping import HB_BASE_FIELDS, HB_PRODUCT_SOURCES
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    saved = s.get("base_field_mappings") or {}
+    fields = []
+    for f in HB_BASE_FIELDS:
+        cfg = saved.get(f["key"]) or {}
+        fields.append({
+            "key": f["key"], "label": f["label"],
+            "default_source": f.get("default_source"),
+            "source": cfg.get("source") or f.get("default_source"),
+            "default": cfg.get("default", f.get("default_value", "")),
+        })
+    return {"success": True, "fields": fields, "sources": HB_PRODUCT_SOURCES, "saved": saved}
+
+
+@router.post("/hepsiburada/base-field-mappings")
+async def hb_save_base_field_mappings(request: Request, current_user: dict = Depends(require_admin)):
+    """{mappings: {key: {source, default}}} kaydeder (db.settings id=hepsiburada)."""
+    from .category_mapping import _HB_BASE_BY_KEY
+    payload = await request.json()
+    mappings = payload.get("mappings") if isinstance(payload, dict) and "mappings" in payload else payload
+    clean = {}
+    for k, v in (mappings or {}).items():
+        if k not in _HB_BASE_BY_KEY or not isinstance(v, dict):
+            continue
+        clean[k] = {"source": v.get("source") or "", "default": str(v.get("default") or "")}
+    await db.settings.update_one({"id": "hepsiburada"},
+                                 {"$set": {"id": "hepsiburada", "base_field_mappings": clean}},
+                                 upsert=True)
+    return {"success": True, "saved": clean, "count": len(clean)}
+
 
 @router.post("/trendyol/brands/sync")
 async def sync_trendyol_brands(current_user: dict = Depends(require_admin)):
@@ -3399,7 +3437,7 @@ async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cad and cad.get("_v") == 4 and cad.get("attributes"):
+    if cad and cad.get("_v") == 5 and cad.get("attributes"):
         return cad.get("attributes") or [], None
     from .category_mapping import _fetch_hb_category_attributes
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
@@ -3453,6 +3491,44 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
     vgroup = _hb_merchant_sku(product) or str(product.get("id") or "")
     cat_val = int(hb_cat) if str(hb_cat).isdigit() else hb_cat
 
+    # Global "Varsayılan Alan Eşleştirme" — temel HB alanlarının ürün-kartı kaynağı / sabit değeri
+    from .category_mapping import _HB_BASE_BY_KEY
+    bfm = (await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}).get("base_field_mappings") or {}
+
+    def _src_val(src, variant):
+        if src == "name":
+            return product.get("name")
+        if src == "description":
+            return desc
+        if src == "stock_code":
+            return ((variant or {}).get("stock_code") or (variant or {}).get("barcode")
+                    or product.get("stock_code") or _hb_merchant_sku(product))
+        if src == "barcode":
+            return (variant or {}).get("barcode") or product.get("barcode")
+        if src == "brand":
+            return brand
+        if src == "category_name":
+            return product.get("category_name")
+        if src == "price":
+            return product.get("price")
+        if src == "weight":
+            return product.get("weight") or product.get("kg")
+        if src == "images":
+            return imgs
+        return None
+
+    def _base_val(key, variant):
+        meta = _HB_BASE_BY_KEY.get(key, {})
+        cfg = bfm.get(key) or {}
+        src = cfg.get("source") or meta.get("default_source") or "__default"
+        dflt = cfg.get("default") if cfg.get("default") not in (None, "") else meta.get("default_value", "")
+        if src in ("__default", "__auto"):
+            return dflt
+        v = _src_val(src, variant)
+        if v in (None, "", []):
+            v = dflt
+        return v
+
     items, errors = [], set()
     hb_attrs_for_product = dict(product.get("hepsiburada_attributes") or {})
 
@@ -3499,25 +3575,39 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             if a.get("required") and aname not in attrs:
                 missing_req.append(aname)
 
-        # Taban zorunlu alanlar
-        sku = (str(variant.get("stock_code") or variant.get("barcode") or "").strip()
-               if variant else _hb_merchant_sku(product))
+        # Taban alanlar — global "Varsayılan Alan Eşleştirme" panelinden çözülür
+        sku = str(_base_val("merchantSku", variant) or "").strip()
+        if not sku:
+            sku = (str(variant.get("stock_code") or variant.get("barcode") or "").strip()
+                   if variant else _hb_merchant_sku(product))
         if not sku:
             errors.add("stok kodu/barkod yok")
             continue
-        bc = (variant or {}).get("barcode") or product.get("barcode") or sku
+        bc = (str(_base_val("Barcode", variant) or "").strip()
+              or (variant or {}).get("barcode") or product.get("barcode") or sku)
         attrs.setdefault("merchantSku", sku)
         attrs.setdefault("Barcode", bc)
         if variants:
             attrs.setdefault("VaryantGroupID", str(vgroup))
-        attrs.setdefault("UrunAdi", product.get("name") or "")
-        attrs.setdefault("UrunAciklamasi", desc or product.get("name") or "")
-        if brand:
-            attrs.setdefault("Marka", brand)
-        for i, u in enumerate(imgs, 1):
-            attrs.setdefault(f"Image{i}", u)
-        attrs.setdefault("kg", str(product.get("weight") or product.get("kg") or "1"))
-        # Kategori-özelliği olmayan şirket default'larını da ekle (GarantiSüresi vb.)
+        attrs.setdefault("UrunAdi", str(_base_val("UrunAdi", variant) or product.get("name") or ""))
+        attrs.setdefault("UrunAciklamasi",
+                         str(_base_val("UrunAciklamasi", variant) or desc or product.get("name") or ""))
+        mk = _base_val("Marka", variant)
+        if mk not in (None, ""):
+            attrs.setdefault("Marka", str(mk))
+        gar = _base_val("GarantiSuresi", variant)
+        if gar not in (None, ""):
+            attrs.setdefault("GarantiSuresi", str(gar))
+        if bfm.get("kdv"):  # KDV yalnız kullanıcı açıkça ayarladıysa gönderilir
+            kdv = _base_val("kdv", variant)
+            if kdv not in (None, ""):
+                attrs.setdefault("kdv", str(kdv))
+        img_src = (bfm.get("Image") or {}).get("source") or "images"
+        if img_src == "images":
+            for i, u in enumerate(imgs, 1):
+                attrs.setdefault(f"Image{i}", u)
+        attrs.setdefault("kg", str(_base_val("kg", variant) or "1"))
+        # Kategori-özelliği olmayan şirket default'larını da ekle
         for k, v in defaults.items():
             if v not in (None, "") and not str(k).isdigit():
                 attrs.setdefault(k, v)
