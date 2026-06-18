@@ -1353,18 +1353,8 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const newProduct = {
-        ...product,
-        name: `${product.name} (Kopya)`,
-        slug: `${product.slug}-kopya-${Date.now()}`,
-        stock_code: product.stock_code ? `${product.stock_code}-COPY` : '',
-        barcode: '',
-      };
-      delete newProduct.id;
-      delete newProduct._id;
-      
-      await axios.post(`${API}/products`, newProduct, { headers });
-      toast.success("Ürün kopyalandı");
+      await axios.post(`${API}/products/${product.id}/duplicate`, {}, { headers });
+      toast.success("Ürün kopyalandı (yeni kart id atandı)");
       fetchProducts();
     } catch (err) {
       toast.error("Kopyalama başarısız");
@@ -3062,8 +3052,18 @@ export default function AdminProducts() {
                 <tbody className="divide-y divide-gray-100">
                   {selectedProductForVariants.variants?.map((variant, idx) => (
                     <tr key={variant.id || idx} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap" data-testid={`variant-urunid-${idx}`}>
-                        {variant.urun_id || '-'}
+                      <td className="px-4 py-3" data-testid={`variant-urunid-${idx}`}>
+                        <input
+                          type="text"
+                          value={variant.urun_id || ""}
+                          onChange={(e) => {
+                           const newVariants = [...selectedProductForVariants.variants];
+                           newVariants[idx] = { ...variant, urun_id: e.target.value };
+                           setSelectedProductForVariants({ ...selectedProductForVariants, variants: newVariants });
+                          }}
+                          className="w-24 border-gray-200 border px-2 py-1.5 rounded bg-white focus:border-black outline-none font-mono text-xs"
+                          placeholder="-"
+                        />
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col">

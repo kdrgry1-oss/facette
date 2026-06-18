@@ -1,45 +1,32 @@
-# FACETTE — Çoğalt (Duplicate) Paketi
+# FACETTE — Ürün ID + Çoğalt Paketi (cumulative)
+
+Bu paket önceki "çoğalt" paketini de içerir → **sadece bunu deploy et**, yeter.
 
 ## Değişen dosyalar
-- `backend/routes/products.py`  → 2 yeni endpoint
-- `frontend/src/pages/admin/Products.jsx`  → "Kopyala" butonu artık yeni endpoint'i çağırıyor
+- `backend/routes/deps.py`            → urun_id üreticisi (build_used_urun_id_set, next_urun_id)
+- `backend/routes/products.py`        → duplicate + assign-variant-ids + create'te urun_id otomatik atama
+- `frontend/src/pages/admin/Products.jsx` → "Kopyala" düzeltildi + modalda "Ürün ID" düzenlenebilir
 
-## Ne düzeltildi
-Eski `handleDuplicate` ürünü TÜM varyantlarıyla (eski barkodlar) ve AYNI kart id ile
-kopyalıyordu → barkod çakışması + aynı kart id ("çoğaltamadın" sebebi buydu).
-
-Artık çoğaltma backend'de yapılıyor:
-- Her kopyaya **YENİ ve benzersiz Ürün Kart ID** atanır (her seferinde farklı; paylaşılmaz).
-- Tüm varyantlara **aralıktan yeni benzersiz barkod** üretilir (orijinalle çakışmaz).
-- Varyant id'leri yenilenir, Ticimax varyant id'si (urun_id) temizlenir.
-- `stock_code` aynı bırakılır (aynı modelin başka rengini açmak pratik olsun diye;
-  kopyada elle değiştirebilirsin).
-- Kopya orijinalin renk-kardeşi DEĞİLDİR (csv_card_id = yeni kart id).
+## Yeni davranışlar
+1. **Ürün ID (beden) düzenlenebilir** — "Beden Varyantları" modalında Ürün ID artık input.
+   Değiştirip KAYDET'e basınca kaydolur.
+2. **Yeni üründe otomatik Ürün ID** — ürün oluşturulurken (create) urun_id'si BOŞ olan her
+   bedene, sistemdeki EN YÜKSEK urun_id + 1'den başlayıp +1 ilerleyerek (mevcut olanları
+   atlayarak) değer atanır. Barkod mantığının aynısı.
+3. **Çoğalt (Kopyala)** — backend'de düzgün çalışıyor: her kopyaya yeni benzersiz Ürün Kart ID,
+   yeni benzersiz barkodlar ve yeni urun_id'ler atanır (orijinalle çakışmaz). stock_code aynı kalır.
 
 ## Deploy
 ```
-cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/facette_cogalt_paket.zip -d . \
-  && git add -A && git commit -m "feat(products): duplicate endpoint (yeni kart id + yeni barkod) + assign-variant-ids" && git push
+cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/facette_urunid_paket.zip -d . \
+  && git add -A && git commit -m "feat(products): urun_id düzenlenebilir + create'te otomatik atama; duplicate düzeltme" && git push
 ```
 
-## Deploy sonrası — Siyah bermuda şort beden id'leri (tek seferlik)
-Beden → urun_id eşlemesi: S=8618, XS=8620, XL=8619, M=8617, L=8616
-Sadece urun_id'si BOŞ olan varyantlara yazar (doluyu ezmez).
-
-İsimle (en kolay):
+## Tek seferlik — Siyah bermuda şort beden id'leri (istersen)
+(assign-variant-ids endpoint'i bu pakette de var.)
 ```
 curl -X POST https://api.facette.com.tr/api/products/assign-variant-ids \
   -H "Authorization: Bearer <ADMIN_TOKEN>" -H "Content-Type: application/json" \
   -d '{"name":"bermuda","color":"siyah","map":{"S":"8618","XS":"8620","XL":"8619","M":"8617","L":"8616"}}'
 ```
-Veya kesin olsun istersen ürün id'siyle:
-```
-  -d '{"product_id":"<URUN_ID>","map":{"S":"8618","XS":"8620","XL":"8619","M":"8617","L":"8616"}}'
-```
-Dönen `updated_variants` sayısını kontrol et (5 olmalı).
-
-## Henüz YAPILMADI (senin onayını bekliyor)
-- **FCSS0600012 — Ticimax'ten çekme:** Ticimax çıkış planı gereği yeni Ticimax
-  bağlantısı/coupling eklemiyorum ve canlı çekimi ben tetikleyemem (senin Ticimax
-  anahtarın + sunucu tarafı). Mevcut `ticimax_product_pull` aracını bu stok koduna
-  yönlendirmemi istersen söyle, stok-kodu filtresi var mı bakıp tek çağrıyı vereyim.
+Not: Artık modalda elle de girebilirsin; bu endpoint sadece toplu/hızlı çözüm.

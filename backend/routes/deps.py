@@ -479,6 +479,41 @@ async def generate_urun_karti_id() -> str:
     return str(nxt)
 
 
+async def build_used_urun_id_set() -> set:
+    """Sistemdeki tum varyant urun_id (ve urun-seviyesi urun_id) degerlerini toplar."""
+    used = set()
+    async for p in db.products.find({}, {"_id": 0, "urun_id": 1, "variants": 1}):
+        pu = str(p.get("urun_id") or "").strip()
+        if pu.isdigit():
+            used.add(pu)
+        for v in (p.get("variants") or []):
+            vu = str(v.get("urun_id") or "").strip()
+            if vu.isdigit():
+                used.add(vu)
+    return used
+
+
+def next_urun_id(used_set) -> str:
+    """Sistemdeki EN BUYUK sayisal urun_id + 1; kullanilmis degerleri atlar.
+    used_set yerinde guncellenir; ardisik her cagri bir sonraki BOS id'yi dondurur
+    (her beden icin +1 ilerler).
+    """
+    if used_set is None:
+        used_set = set()
+    mx = 0
+    for u in used_set:
+        s = str(u).strip()
+        if s.isdigit():
+            iv = int(s)
+            if iv > mx:
+                mx = iv
+    nid = mx + 1
+    while str(nid) in used_set:
+        nid += 1
+    used_set.add(str(nid))
+    return str(nid)
+
+
 # =============================================================================
 # Şifre Politikası (Amazon DPP uyumu — personel/admin hesapları)
 # Amazon, Amazon verisine erişen personel için min 12 karakter + karmaşıklık ister.

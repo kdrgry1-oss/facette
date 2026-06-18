@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id
 from ticimax_schema import BOOL_COLS as TICIMAX_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
@@ -964,7 +964,14 @@ async def create_product(
             barcode = await generate_barcode_from_range(used_barcodes_set)
             if barcode:
                 v["barcode"] = barcode
-    
+
+    # Auto-generate urun_id (beden ID) for variants if missing:
+    # sistemdeki EN YUKSEK urun_id + 1'den baslayip her bos bedene +1 ilerler.
+    used_uid_set = await build_used_urun_id_set()
+    for v in variants:
+        if not str(v.get("urun_id") or "").strip():
+            v["urun_id"] = next_urun_id(used_uid_set)
+
     # Also generate for main product if no variants and barcode is empty
     if not variants and not product_data.get("barcode"):
         barcode = await generate_barcode_from_range(used_barcodes_set)
@@ -1151,6 +1158,7 @@ async def duplicate_product(product_id: str):
     new_card = await generate_urun_karti_id()
     new_id = await generate_short_id("products")
     used = await build_used_barcode_set()
+    used_uid = await build_used_urun_id_set()
 
     clone = {k: v for k, v in p.items() if k not in ("_id", "id", "slug", "slug_aliases")}
     clone["id"] = new_id
@@ -1171,7 +1179,7 @@ async def duplicate_product(product_id: str):
     for v in (p.get("variants") or []):
         nv = dict(v)
         nv["id"] = generate_id()
-        nv["urun_id"] = None
+        nv["urun_id"] = next_urun_id(used_uid)
         nv["barcode"] = (await generate_barcode_from_range(used)) or ""
         new_vars.append(nv)
     clone["variants"] = new_vars
