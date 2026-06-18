@@ -312,7 +312,13 @@ export default function Header({ hideMenu = false }) {
                 <div className="flex-1 grid grid-cols-3 gap-8">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
-                      <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">{category}</h3>
+                      <Link
+                        to={`/${slugify(category)}`}
+                        className="block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer"
+                        onClick={() => setActiveMenu(null)}
+                      >
+                        {category}
+                      </Link>
                       <ul className="space-y-1">
                         {items.map((item) => (
                           <li key={item.slug}>
@@ -454,7 +460,13 @@ export default function Header({ hideMenu = false }) {
                 <div className="pb-3 pl-1 space-y-3">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
-                      <p className="text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5">{category}</p>
+                      <Link
+                        to={`/${slugify(category)}`}
+                        className="block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        {category}
+                      </Link>
                       {items.map((item) => (
                         <Link
                           key={item.slug}
