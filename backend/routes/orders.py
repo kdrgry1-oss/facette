@@ -3566,6 +3566,39 @@ async def cargo_poll_now(current_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"Tarama hatası: {e}")
 
 
+@router.get("/cargo/poll-health")
+async def cargo_poll_health(current_user: dict = Depends(require_admin)):
+    """Admin: DHL/MNG kargo durum taraması sağlık/izleme bilgisi.
+
+    Ayarlar > Kargo sayfasındaki izleme paneli bu veriyi gösterir: son çalışma
+    zamanı, sonuç (running/ok/skipped/error), sorgulanan/değişen sipariş sayıları,
+    son hata mesajı, ortalama süre ve MNG/DHL ayarlarının aktif olup olmadığı.
+    Senkron hiç çalışmadıysa status='unknown' döner (panel bunu uyarı olarak gösterir).
+    """
+    h = await db.settings.find_one({"id": "dhl_poll_health"}, {"_id": 0}) or {}
+    mng = await _get_mng_settings()
+    hist = list(reversed(h.get("history") or []))[:20]  # yeni → eski
+    return {
+        "ok": True,
+        "interval_min": h.get("interval_min", 5),
+        "status": h.get("status") or "unknown",
+        "last_run_at": h.get("last_run_at"),
+        "last_finish_at": h.get("last_finish_at"),
+        "updated_at": h.get("updated_at"),
+        "processed": h.get("processed", 0),
+        "shipped": h.get("shipped", 0),
+        "delivered": h.get("delivered", 0),
+        "updated": h.get("updated", 0),
+        "errors": h.get("errors", 0),
+        "duration_ms": h.get("duration_ms", 0),
+        "last_error": h.get("last_error", ""),
+        "skipped_reason": h.get("skipped_reason", ""),
+        "mng_active": bool(mng.get("is_active")),
+        "mng_user_set": bool(mng.get("username")),
+        "history": hist,
+    }
+
+
 # =============================================================================
 # Faz 4 — Müşteri iadesi (14 gün) + DHL/MNG iade barkodu (3 gün geçerli)
 # Veri: db.customer_returns + order.return_request (özet)
