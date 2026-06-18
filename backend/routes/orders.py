@@ -1778,25 +1778,52 @@ async def create_invoice_for_order(
 
         # Site sipariş kalemlerinde barkod boş olabilir → ürün varyantından tamamla
         # (fatura "Barkod" sütunu için). Marketplace kalemlerinde barkod zaten dolu gelir.
-        _bc_pids = list({it.get("product_id") for it in (order.get("items") or [])
+        # NOT: kalemin product_id'si ürünün id'sine DEĞİL kart id'sine (urun_karti_id /
+        # csv_card_id) denk gelebilir → ürün bulunamayıp barkod boş kalırdı. Artık üç
+        # anahtarla da eşleştiriliyor, ayrıca SKU/beden/tek-varyant fallback'leri var.
+        _bc_keys = list({str(it.get("product_id")) for it in (order.get("items") or [])
                          if it.get("product_id") and not it.get("barcode")})
         _bc_pmap = {}
-        if _bc_pids:
-            async for _p in db.products.find({"id": {"$in": _bc_pids}},
-                                             {"_id": 0, "id": 1, "variants": 1, "barcode": 1}):
-                _bc_pmap[_p["id"]] = _p
+        if _bc_keys:
+            async for _p in db.products.find(
+                {"$or": [{"id": {"$in": _bc_keys}},
+                         {"urun_karti_id": {"$in": _bc_keys}},
+                         {"csv_card_id": {"$in": _bc_keys}}]},
+                {"_id": 0, "id": 1, "urun_karti_id": 1, "csv_card_id": 1,
+                 "variants": 1, "barcode": 1}):
+                for _k in (_p.get("id"), _p.get("urun_karti_id"), _p.get("csv_card_id")):
+                    if _k:
+                        _bc_pmap[str(_k)] = _p
 
         def _item_barcode(it):
             if it.get("barcode"):
                 return it["barcode"]
-            _p = _bc_pmap.get(it.get("product_id")) or {}
+            _p = _bc_pmap.get(str(it.get("product_id"))) or {}
+            _vs = _p.get("variants") or []
             _sz = (it.get("size") or "").strip().lower()
             _cl = (it.get("color") or "").strip().lower()
-            for _v in (_p.get("variants") or []):
+            _sku = (it.get("sku") or it.get("product_code") or "").strip().lower()
+            # 1) SKU eşleşmesi
+            if _sku:
+                for _v in _vs:
+                    if str(_v.get("sku") or "").strip().lower() == _sku and _v.get("barcode"):
+                        return _v["barcode"]
+            # 2) beden + renk
+            for _v in _vs:
                 if (str(_v.get("size") or "").strip().lower() == _sz
                         and (not _cl or str(_v.get("color") or "").strip().lower() == _cl)
                         and _v.get("barcode")):
                     return _v["barcode"]
+            # 3) sadece beden
+            if _sz:
+                for _v in _vs:
+                    if str(_v.get("size") or "").strip().lower() == _sz and _v.get("barcode"):
+                        return _v["barcode"]
+            # 4) tek barkodlu varyant → onu kullan
+            _withbc = [_v for _v in _vs if _v.get("barcode")]
+            if len(_withbc) == 1:
+                return _withbc[0]["barcode"]
+            # 5) ürün-seviye barkod
             return _p.get("barcode") or ""
 
         _vat_map = await _product_vat_map(order)

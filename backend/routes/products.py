@@ -900,6 +900,22 @@ async def _expand_category_ids(selected_ids):
     return result
 
 
+def _distinct_variant_colors(variants):
+    """Varyant listesindeki BENZERSIZ renkleri (ilk görülme sırasıyla) döndürür."""
+    seen = []
+    for v in (variants or []):
+        c = (v.get("color") or "").strip()
+        if c and c.lower() not in [s.lower() for s in seen]:
+            seen.append(c)
+    return seen
+
+
+def _variants_for_color(variants, color):
+    """Verilen renge ait varyantları (beden vb.) döndürür."""
+    cl = (color or "").strip().lower()
+    return [v for v in (variants or []) if (v.get("color") or "").strip().lower() == cl]
+
+
 @router.post("")
 async def create_product(
     product_data: dict,
@@ -992,10 +1008,101 @@ async def create_product(
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
     
-    await db.products.insert_one(product)
-    logger.info(f"Product created: {product['id']}")
-    
-    return {"id": product["id"], "message": "Ürün oluşturuldu"}
+    # FARKLI RENK = AYRI ÜRÜN kuralı:
+    # Varyantlarda birden fazla renk varsa her renk AYRI ürün olarak açılır.
+    # Hepsi aynı csv_card_id + urun_karti_id'yi paylaşır → storefront "Diğer Renkler"
+    # swatch'ında renk kardeşi olarak bağlanır. Bedenler her renk altında varyant kalır.
+    _all_variants = product.get("variants") or []
+    _colors = _distinct_variant_colors(_all_variants)
+    # Renk-kardeşi gruplama anahtarı HER ZAMAN yazılır (manuel ürünler de bağlansın)
+    product["csv_card_id"] = urun_karti_id
+
+    if len(_colors) <= 1:
+        if _colors and not product.get("color"):
+            product["color"] = _colors[0]
+        await db.products.insert_one(product)
+        logger.info(f"Product created: {product['id']}")
+        return {"id": product["id"], "message": "Ürün oluşturuldu"}
+
+    # Çok renkli → her renk ayrı ürün (ilk renk ana üründe, diğerleri yeni id)
+    _base_name = product.get("name") or ""
+    _created_ids = []
+    for _idx, _col in enumerate(_colors):
+        _doc = {k: v for k, v in product.items()}
+        _doc["id"] = product["id"] if _idx == 0 else await generate_short_id("products")
+        _doc["csv_card_id"] = urun_karti_id
+        _doc["urun_karti_id"] = urun_karti_id
+        _doc["color"] = _col
+        _doc["variants"] = _variants_for_color(_all_variants, _col)
+        _doc["slug"] = slug_with_card_id(f"{_base_name} {_col}", urun_karti_id)
+        _now = datetime.now(timezone.utc).isoformat()
+        _doc["created_at"] = _doc.get("created_at") or _now
+        _doc["updated_at"] = _now
+        await db.products.insert_one(_doc)
+        _created_ids.append(_doc["id"])
+    logger.info(f"Product created with color split: {_created_ids} (card {urun_karti_id})")
+    return {
+        "id": _created_ids[0],
+        "split": True,
+        "color_count": len(_colors),
+        "product_ids": _created_ids,
+        "message": f"{len(_colors)} renk ayrı ürün olarak oluşturuldu",
+    }
+
+
+@router.post("/{product_id}/split-by-color", dependencies=[Depends(require_admin)])
+async def split_product_by_color(product_id: str):
+    """Mevcut bir ürünün farklı RENK varyantlarını AYRI ürünlere böler.
+    İlk renk ana üründe kalır; diğer renkler yeni ürün olur. Hepsi aynı
+    csv_card_id + urun_karti_id'yi paylaşır → "Diğer Renkler" swatch'ında bağlı kalır.
+    Bedenler her renk ürününün altında varyant olarak kalır.
+    """
+    p = await db.products.find_one({"id": product_id})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    variants = p.get("variants") or []
+    colors = _distinct_variant_colors(variants)
+    if len(colors) <= 1:
+        return {
+            "success": False,
+            "color_count": len(colors),
+            "message": "Bu üründe birden fazla renk yok; ayırma gerekmedi.",
+        }
+    card = str(p.get("csv_card_id") or p.get("urun_karti_id") or p.get("id"))
+    base_name = p.get("name") or ""
+    now = datetime.now(timezone.utc).isoformat()
+    created_ids = [product_id]
+    # İlk renk → ana üründe kalır
+    first = colors[0]
+    await db.products.update_one({"id": product_id}, {"$set": {
+        "variants": _variants_for_color(variants, first),
+        "color": first,
+        "csv_card_id": card,
+        "urun_karti_id": p.get("urun_karti_id") or card,
+        "slug": slug_with_card_id(f"{base_name} {first}", card),
+        "updated_at": now,
+    }})
+    # Diğer renkler → yeni ürün
+    for col in colors[1:]:
+        nid = await generate_short_id("products")
+        clone = {k: v for k, v in p.items() if k not in ("_id", "id", "slug")}
+        clone["id"] = nid
+        clone["csv_card_id"] = card
+        clone["urun_karti_id"] = p.get("urun_karti_id") or card
+        clone["color"] = col
+        clone["variants"] = _variants_for_color(variants, col)
+        clone["slug"] = slug_with_card_id(f"{base_name} {col}", card)
+        clone["created_at"] = now
+        clone["updated_at"] = now
+        await db.products.insert_one(clone)
+        created_ids.append(nid)
+    logger.info(f"Product split by color: {product_id} -> {created_ids} (card {card})")
+    return {
+        "success": True,
+        "color_count": len(colors),
+        "product_ids": created_ids,
+        "message": f"{len(colors)} renk ayrı ürüne bölündü.",
+    }
 
 @router.put("/{product_id}")
 async def update_product(

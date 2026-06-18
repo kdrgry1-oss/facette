@@ -1015,6 +1015,30 @@ export default function AdminProducts() {
   };
 
   /**
+   * handleSplitByColor — Bu ürünün farklı RENK varyantlarını AYRI ürünlere böler.
+   *   İlk renk ana üründe kalır; diğer renkler yeni ürün olur (aynı kart id → "Diğer Renkler").
+   *   Bedenler her renk ürününün altında varyant olarak kalır.
+   *   BACKEND: POST /api/products/{id}/split-by-color
+   */
+  const handleSplitByColor = async (product) => {
+    if (!window.confirm(`"${product.name}" ürününün farklı renkleri AYRI ürünlere bölünecek. Devam edilsin mi?`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`${API}/products/${product.id}/split-by-color`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data?.success) {
+        toast.success(res.data.message || "Renkler ayrıldı");
+        fetchProducts();
+      } else {
+        toast.info(res.data?.message || "Ayırma gerekmedi");
+      }
+    } catch (err) {
+      toast.error("Ayırma başarısız: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  /**
    * handlePrintBarcode — TEK ürünün barkod/ürün kartını yeni sekmede açar ve
    *   yazdırma diyalogunu tetikler.
    *   Backend endpoint'i her varyant için ayrı bir barkod kartı döner
@@ -1732,6 +1756,13 @@ export default function AdminProducts() {
                           title="Trendyol Stok/Fiyat Güncelle"
                         >
                           <RefreshCw size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleSplitByColor(product)}
+                          className="p-1.5 hover:bg-teal-50 rounded text-teal-600 transition-colors"
+                          title="Renge Göre Ayır (her renk ayrı ürün)"
+                        >
+                          <Layers size={16} />
                         </button>
                         <button
                           onClick={() => handlePrintBarcode(product.id)}
