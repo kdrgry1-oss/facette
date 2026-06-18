@@ -61,6 +61,14 @@ export default function HepsiburadaOrders() {
   const [rejectReason, setRejectReason] = useState(11);
   const [rejectStatement, setRejectStatement] = useState("");
 
+  // --- Listing & Durum (MPOP auth ile canlı çalışır) ---
+  const [listings, setListings] = useState([]);
+  const [loadingListings, setLoadingListings] = useState(false);
+  const [listingSku, setListingSku] = useState("");
+  const [uploadKind, setUploadKind] = useState("price");
+  const [uploadId, setUploadId] = useState("");
+  const [trackingId, setTrackingId] = useState("");
+
   // Son ham yanıt — creds gelince gerçek şemayı görmek için
   const [rawResult, setRawResult] = useState(null);
 
@@ -219,10 +227,62 @@ export default function HepsiburadaOrders() {
     }
   };
 
+  const loadListings = useCallback(async () => {
+    setLoadingListings(true);
+    try {
+      const q = listingSku.trim()
+        ? `?offset=0&limit=100&merchant_sku=${encodeURIComponent(listingSku.trim())}`
+        : `?offset=0&limit=100`;
+      const res = await axios.get(`${HB}/listings${q}`, authCfg());
+      const arr = asArray(res.data?.data);
+      setListings(arr);
+      showRaw("listings", res.data?.data);
+      if (!arr.length) toast.info("Listing bulunamadı (ya da yanıt şeması farklı)");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Listing alınamadı");
+    } finally {
+      setLoadingListings(false);
+    }
+  }, [listingSku]);
+
+  const toggleListing = async (hbSku, activate) => {
+    try {
+      const res = await axios.post(`${HB}/listings/${encodeURIComponent(hbSku)}/${activate ? "activate" : "deactivate"}`, {}, authCfg());
+      toast.success(activate ? "Satışa açıldı" : "Satışa kapatıldı");
+      showRaw(`${activate ? "activate" : "deactivate"} ${hbSku}`, res.data?.data);
+      loadListings();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "İşlem başarısız");
+    }
+  };
+
+  const checkUpload = async () => {
+    if (!uploadId.trim()) { toast.warning("Yükleme ID girin"); return; }
+    try {
+      const res = await axios.get(`${HB}/listings/status/${uploadKind}/${encodeURIComponent(uploadId.trim())}`, authCfg());
+      showRaw(`${uploadKind} upload ${uploadId}`, res.data?.data);
+      toast.success("Durum getirildi — ham yanıta bakın");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Durum alınamadı");
+    }
+  };
+
+  const checkTracking = async () => {
+    if (!trackingId.trim()) { toast.warning("Tracking ID girin"); return; }
+    try {
+      const res = await axios.get(`${HB}/products/tracking/${encodeURIComponent(trackingId.trim())}`, authCfg());
+      showRaw(`tracking ${trackingId}`, res.data?.data);
+      toast.success("Takip durumu getirildi — ham yanıta bakın");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Takip alınamadı");
+    }
+  };
+
   useEffect(() => {
     if (tab === "packages") loadPackages();
     if (tab === "claims") loadClaims();
-  }, [tab, loadPackages, loadClaims]);
+    if (tab === "listings") loadListings();
+  }, [tab, loadPackages, loadClaims, loadListings]);
 
   // Sipariş kalemlerini esnek çıkar (şema OMS'e göre değişebilir)
   const orderLines = orderDetail ? asArray(orderDetail.items || orderDetail.lineItems || orderDetail) : [];
@@ -233,10 +293,10 @@ export default function HepsiburadaOrders() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
-          <Package className="text-[#FF6000]" size={26} /> Hepsiburada Sipariş & İade
+          <Package className="text-[#FF6000]" size={26} /> Hepsiburada Yönetim
         </h1>
         <button
-          onClick={() => (tab === "packages" ? loadPackages() : loadClaims())}
+          onClick={() => (tab === "packages" ? loadPackages() : tab === "claims" ? loadClaims() : loadListings())}
           className="flex items-center gap-2 px-4 py-2 bg-[#FF6000] text-white rounded-lg text-sm font-bold hover:bg-[#e05600]"
         >
           <RefreshCw size={16} /> Yenile
@@ -244,12 +304,13 @@ export default function HepsiburadaOrders() {
       </div>
 
       <div className="bg-orange-50 border border-orange-200 text-orange-800 text-xs rounded-lg p-3 mb-5">
-        OMS uçları üretim kimlik bilgisi (ceyjewelry merchant) gerektirir. Kimlik gelmeden istekler net hata döndürür.
-        Yanıt şeması OMS'e göre değişebildiğinden, her işlemin <b>ham yanıtı</b> aşağıda gösterilir.
+        <b>Listing &amp; Durum</b> sekmesi mevcut MPOP kimliğiyle <b>canlı çalışır</b> (fiyat/stok yükleme durumu, listing aç/kapat, ürün import takibi).
+        <b> Paketler</b> ve <b>İadeler</b> ise OMS üretim kimliği (ceyjewelry merchant) gerektirir; kimlik gelmeden net hata döner.
+        Yanıt şeması OMS'e göre değişebildiğinden her işlemin <b>ham yanıtı</b> aşağıda gösterilir.
       </div>
 
       <div className="flex gap-2 mb-5 border-b">
-        {[["packages", "Paketler / Siparişler"], ["claims", "İadeler (Talepler)"]].map(([k, lbl]) => (
+        {[["packages", "Paketler / Siparişler"], ["claims", "İadeler (Talepler)"], ["listings", "Listing & Durum"]].map(([k, lbl]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -389,6 +450,81 @@ export default function HepsiburadaOrders() {
             ) : (
               <div className="p-8 text-center text-sm text-gray-400">{loadingClaims ? "Yükleniyor..." : "Talep yok"}</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {tab === "listings" && (
+        <div className="space-y-6">
+          {/* Listing listesi */}
+          <div className="bg-white rounded-xl border p-4">
+            <div className="flex gap-2 mb-3">
+              <input value={listingSku} onChange={(e) => setListingSku(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && loadListings()}
+                placeholder="Merchant SKU ile filtrele (boş = tümü)"
+                className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={loadListings} disabled={loadingListings}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+                <Search size={16} /> {loadingListings ? "Yükleniyor..." : "Getir"}
+              </button>
+            </div>
+            {listings.length ? (
+              <div className="divide-y border-t">
+                {listings.map((l, i) => {
+                  const hbSku = l.hepsiburadaSku || l.hbSku || l.HepsiburadaSku || "";
+                  const mSku = l.merchantSku || l.MerchantSku || "";
+                  return (
+                    <div key={hbSku || mSku || i} className="py-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+                      <div>
+                        <div className="font-bold text-gray-900">{mSku || hbSku || `Kalem ${i + 1}`}</div>
+                        <div className="text-gray-500 text-xs">HB SKU: {hbSku || "-"} · Fiyat: {l.price ?? l.Price ?? "-"} · Stok: {l.availableStock ?? l.AvailableStock ?? "-"} · {l.status || l.Status || ""}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => toggleListing(hbSku, true)} disabled={!hbSku}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-bold disabled:opacity-40"><CheckCircle2 size={14} /> Aç</button>
+                        <button onClick={() => toggleListing(hbSku, false)} disabled={!hbSku}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded text-xs font-bold disabled:opacity-40"><XCircle size={14} /> Kapat</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-6 text-center text-sm text-gray-400">{loadingListings ? "Yükleniyor..." : "Listing yok"}</div>
+            )}
+          </div>
+
+          {/* Yükleme durumu sorgula */}
+          <div className="bg-white rounded-xl border p-4">
+            <div className="text-sm font-bold text-gray-700 mb-2">Fiyat/Stok Yükleme Durumu</div>
+            <p className="text-xs text-gray-400 mb-3">Kategori/ürün stok-fiyat gönderiminden dönen yükleme ID'siyle sonucu (MinLock/MaxLock vb. reddedilen SKU'lar) sorgulayın.</p>
+            <div className="flex flex-wrap gap-2">
+              <select value={uploadKind} onChange={(e) => setUploadKind(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+                <option value="price">price (fiyat)</option>
+                <option value="stock">stock (stok)</option>
+                <option value="inventory">inventory (birleşik)</option>
+              </select>
+              <input value={uploadId} onChange={(e) => setUploadId(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && checkUpload()}
+                placeholder="Yükleme ID" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={checkUpload} className="flex items-center gap-2 px-4 py-2 bg-[#FF6000] text-white rounded-lg text-sm font-bold hover:bg-[#e05600]">
+                <Search size={16} /> Sorgula
+              </button>
+            </div>
+          </div>
+
+          {/* Ürün import takibi */}
+          <div className="bg-white rounded-xl border p-4">
+            <div className="text-sm font-bold text-gray-700 mb-2">Ürün Import Takibi</div>
+            <p className="text-xs text-gray-400 mb-3">Ürün gönderiminden dönen tracking ID ile import durumunu (eşleşti/reddedildi/oluşturuldu) sorgulayın.</p>
+            <div className="flex gap-2">
+              <input value={trackingId} onChange={(e) => setTrackingId(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && checkTracking()}
+                placeholder="Tracking ID" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={checkTracking} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold">
+                <Search size={16} /> Sorgula
+              </button>
+            </div>
           </div>
         </div>
       )}
