@@ -2021,13 +2021,12 @@ async def create_invoice_for_order(
                 "kdv_rate": _item_kdv(it, _vat_map),
                 "sku": it.get("sku") or it.get("product_code") or "",
                 "buyer_sku": it.get("sku") or it.get("product_code") or "",
-                "barcode": it.get("barcode") or "",
-                # Doğan şablonu Barkod/Renk/Beden sütunlarını satır notundan parse eder.
-                "note": ((
-                    f"Renk:{(it.get('color') or '').strip()};"
-                    f"Beden:{(it.get('size') or '').strip()}:"
-                    f"Barcode:{(it.get('barcode') or '').strip()}"
-                ) if (it.get('color') or it.get('size') or it.get('barcode')) else ""),
+                "barcode": (it.get("barcode") or "").strip(),
+                "color": (it.get("color") or "").strip(),
+                "size": (it.get("size") or "").strip(),
+                # Barkod/Renk/Beden/Stok Kodu satır notuna DEĞİL, builder'da header Note[0]'a
+                # yazılır (gerçek çalışan e-Faturadaki format FCE...016). Satır notu boş kalır.
+                "note": "",
             })
 
         # Taşıyan (kargo firması) — Trendyol'da beyan edilen kargodan DİNAMİK (e-Arşiv ile aynı eşleme)

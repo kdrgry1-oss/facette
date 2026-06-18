@@ -1392,7 +1392,40 @@ class DoganClient:
       </cac:TaxCategory>
     </cac:TaxSubtotal>""")
 
+        def _tr_money_words(n):
+            n = int(round(float(n or 0)))
+            birler = ["", "Bir", "İki", "Üç", "Dört", "Beş", "Altı", "Yedi", "Sekiz", "Dokuz"]
+            onlar = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
+            def _uc(x):
+                s = ""; y = x // 100; k = (x % 100) // 10; b = x % 10
+                if y: s += ("" if y == 1 else birler[y]) + "Yüz"
+                if k: s += onlar[k]
+                if b: s += birler[b]
+                return s
+            if n == 0: return "Sıfır"
+            out = ""; mr = n // 10**9; mn = (n % 10**9) // 10**6; bn = (n % 10**6) // 1000; kl = n % 1000
+            if mr: out += _uc(mr) + "Milyar"
+            if mn: out += _uc(mn) + "Milyon"
+            if bn: out += (("" if bn == 1 else _uc(bn)) + "Bin")
+            if kl: out += _uc(kl)
+            return out
+
         notes_xml = []
+        # Ürün özellikleri (Stok Kodu / Renk / Barkod / Beden) — Doğan şablonu BU header
+        # Note'undan parse eder. Gerçek çalışan e-Faturada (FCE...016) barkod Note[0]'daydı,
+        # satır notunda DEĞİL. Bu nedenle her kalem için EN BAŞA ekliyoruz; böylece faturadaki
+        # Barkod alanı ürünün barkod no'su ile dolar.
+        for _bit in (line_items or []):
+            _bsku = _clean(_bit.get("sku") or _bit.get("product_code"))
+            _bbar = _clean(_bit.get("barcode"))
+            _bcol = _clean(_bit.get("color"))
+            _bsz = _clean(_bit.get("size"))
+            if _bbar or _bcol or _bsz or _bsku:
+                notes_xml.append(
+                    "<cbc:Note>"
+                    + escape(f"Stok Kodu:{_bsku}\n\nRenk:{_bcol}\n\nBarkod:{_bbar}\n\nBeden:{_bsz}")
+                    + "</cbc:Note>"
+                )
         _ext = _clean(order_ext_id) or _clean(order_number)
         _cargo = _clean(cargo_tracking)
         if _ext:
@@ -1405,12 +1438,14 @@ class DoganClient:
             notes_xml.append(f"<cbc:Note>Fatura Ref:{escape(_clean(invoice_ref))}</cbc:Note>")
         if _clean(store_name):
             notes_xml.append(f"<cbc:Note>Mağaza Adı : {escape(_clean(store_name))}</cbc:Note>")
+        notes_xml.append(f"<cbc:Note>Yalnız {_tr_money_words(tax_inclusive_total)} Lira</cbc:Note>")
         if _clean(payment_method) or _clean(platform_label):
             _lbl = (_clean(platform_label) or _clean(payment_method)).strip()
             _pay_amt = payment_amount if (payment_amount and payment_amount > 0) else tax_inclusive_total
             _amt_str = f"{_pay_amt:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             notes_xml.append(f"<cbc:Note>Ödeme : {escape(_lbl)} {_amt_str} TL</cbc:Note>")
         notes_xml.append("<cbc:Note>Bu Satış İnternet Üzerinden Yapılmıştır</cbc:Note>")
+        notes_xml.append(f"<cbc:Note>Ödeme Tarihi: {escape((_clean(order_date) or issue_date)[:10])}</cbc:Note>")
         notes_xml.append("<cbc:Note>Ödeme Şekli: Elektronik</cbc:Note>")
         notes_xml.append(f"<cbc:Note>Web Adresi: {escape(supplier_website)}</cbc:Note>")
         if _clean(dispatch_date):
