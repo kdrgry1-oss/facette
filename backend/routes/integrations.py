@@ -3135,7 +3135,8 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
 @router.post("/hepsiburada/orders/create-test")
 async def create_hepsiburada_test_order(payload: dict = None, current_user: dict = Depends(require_admin)):
     """SADECE TEST (SIT): oms-stub üzerinden bir test siparişi oluşturur; sonra 'Çek' ile panele alınır.
-    Body opsiyonel ({body:{...}}); verilmezse standart test gövdesi kullanılır (merchant id otomatik bu hesabın)."""
+    SKU olarak senin gerçek SIT listing'lerinden bir HBSKU otomatik kullanılır (stub listing arar).
+    Override: {sku:"HBV..."} / {skus:[...]} / {body:{...tam gövde...}}."""
     import asyncio
     from .category_mapping import _get_hb_client
     client, err = await _get_hb_client()
@@ -3144,8 +3145,41 @@ async def create_hepsiburada_test_order(payload: dict = None, current_user: dict
     if not getattr(client, "test", True):
         return {"success": False,
                 "error": "Test siparişi yalnızca SANDBOX/TEST modunda oluşturulur. Hepsiburada modunu 'Sandbox' yapın."}
-    body = (payload or {}).get("body") if isinstance(payload, dict) else None
+    payload = payload or {}
+    body = payload.get("body")
+    skus = payload.get("skus") or ([payload["sku"]] if payload.get("sku") else [])
+
+    # Tam gövde de SKU da verilmediyse: gerçek listing'lerden HBSKU çek
+    if not body and not skus:
+        try:
+            lst = await asyncio.to_thread(client.get_listings, 0, 50)
+        except Exception as e:
+            return {"success": False, "error": f"Listing çekilemedi: {e}"}
+        rows = lst.get("listings") if isinstance(lst, dict) else (lst if isinstance(lst, list) else [])
+
+        def _hbsku(r):
+            for k in ("hepsiburadaSku", "HepsiburadaSku", "hbSku", "hepsiburada_sku", "sku", "Sku"):
+                v = (r or {}).get(k)
+                if v:
+                    return str(v)
+            return None
+        for r in (rows or []):
+            s = _hbsku(r)
+            if s and s not in skus:
+                skus.append(s)
+            if len(skus) >= 2:
+                break
+        if not skus:
+            return {"success": False,
+                    "error": "SIT kataloğunda HBSKU'lu listing bulunamadı. Önce ürünü gönderip listing oluştur "
+                             "(gerekirse satışa aç) ya da gövdeye gerçek HBSKU gir.",
+                    "listings_sample": (rows or [])[:1]}
+
     if not body:
+        def _li(sku):
+            return {"Sku": sku, "Quantity": 1, "Price": {"Amount": 301.4, "Currency": "TRY"},
+                    "Vat": 0, "TotalPrice": {"Amount": 301.4, "Currency": "TRY"},
+                    "CargoCompanyId": 1, "DeliveryOptionId": 1}
         body = {
             "Customer": {"CustomerId": "dfc8a27f-faae-4cb2-859c-8a7d50ee77be", "Name": "Test User"},
             "DeliveryAddress": {
@@ -3153,22 +3187,15 @@ async def create_hepsiburada_test_order(payload: dict = None, current_user: dict
                 "AddressDetail": "Trump Towers", "Email": "customer@hepsiburada.com.tr",
                 "CountryCode": "TR", "PhoneNumber": "902822613231", "AlternatePhoneNumber": "045321538212",
                 "Town": "Sisli", "District": "Kustepe", "City": "İstanbul"},
-            "LineItems": [
-                {"Sku": "HBV0000106NM0", "Quantity": 1, "Price": {"Amount": 301.4, "Currency": "TRY"},
-                 "Vat": 0, "TotalPrice": {"Amount": 301.4, "Currency": "TRY"},
-                 "CargoCompanyId": 1, "DeliveryOptionId": 1},
-                {"Sku": "HBV0000106NLG", "Quantity": 1, "Price": {"Amount": 301.4, "Currency": "TRY"},
-                 "Vat": 0, "TotalPrice": {"Amount": 301.4, "Currency": "TRY"},
-                 "CargoCompanyId": 1, "DeliveryOptionId": 1},
-            ],
+            "LineItems": [_li(s) for s in skus[:2]] or [_li(skus[0])],
         }
     attempted = f"{client.OMS_STUB_SANDBOX}/orders/merchantId/{client.merchant_id}"
     try:
         resp = await asyncio.to_thread(client.create_test_order, body)
     except Exception as e:
-        return {"success": False, "error": str(e), "attempted_url": attempted}
+        return {"success": False, "error": str(e), "attempted_url": attempted, "used_skus": skus}
     return {"success": True, "order_number": (resp or {}).get("_orderNumber"),
-            "attempted_url": attempted, "response": resp}
+            "used_skus": skus, "attempted_url": attempted, "response": resp}
 
 
 @router.post("/hepsiburada/orders/import-selected")

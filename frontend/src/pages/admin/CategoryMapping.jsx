@@ -1338,7 +1338,7 @@ function HepsiburadaOrderPull({ auth }) {
       const d = new Date();
       const b2 = iso(new Date(d.getTime() - 2 * 864e5)), e2 = iso(new Date(d.getTime() + 1 * 864e5));
       setBegin(b2); setEnd(e2); setOrderNo("");
-      setResult({ created: r.data.order_number });
+      setResult({ created: r.data.order_number, skus: r.data.used_skus });
       await new Promise((res) => setTimeout(res, 1500));
       await pull({ b: b2, e: e2 });
     } catch (e) {
@@ -1395,7 +1395,7 @@ function HepsiburadaOrderPull({ auth }) {
             {result.error
               ? result.error
               : (result.created
-                  ? `Test siparişi oluşturuldu: ${result.created} · listeden çekiliyor…`
+                  ? `Test siparişi oluşturuldu: ${result.created}${(result.skus && result.skus.length) ? ` (SKU: ${result.skus.join(", ")})` : ""} · listeden çekiliyor…`
                   : `Aktarıldı: ${result.imported} · Güncellendi: ${result.updated}${(result.errors && result.errors.length) ? ` · Hata: ${result.errors.length}` : ""}`)}
           </div>
         )}
