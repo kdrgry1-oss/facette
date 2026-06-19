@@ -9,16 +9,21 @@
 - DOKUNULMAYAN (rapor kuralı): g:id, item_group_id, color, diğer alanlar; feature-flag; facebook varyant-feed.
   Boş <g:size></g:size> basılmıyor (satır tamamen kaldırıldı).
 
-## YENİ (bu pakette): Anasayfa arama — Zara görünümü (fonksiyon korundu)
+## YENİ (bu pakette): Anasayfa arama — Zara BİREBİR (zara.com/tr tarayıcıdan incelendi)
 - frontend/src/components/Header.jsx:
-  • Tetikleyici: lupa + altı çizili "ARA" (tracking geniş, uppercase) — Zara tarzı.
-  • Overlay (tam ekran beyaz): üst bar (Arama etiketi + "Kapat ✕"), büyük merkezi input (text-2xl→4xl,
-    alt çizgi siyah, lupa sağda, placeholder "Ara"), "En Çok Arananlar" altı çizili link listesi,
-    canlı ürün grid (mobil 2 / desktop 4, hover zoom) + "Tüm sonuçları gör" linki.
-  • Fonksiyon AYNEN korundu: searchOpen state, GET /products?search (canlı), GET /search/popular,
-    submitSearch → /arama?q=. Sadece görünüm Zara'ya getirildi.
-  • Masaüstü tetikleyici çizgisi uzatıldı (md:w-16, yazıdan taşar; mobilde yazı kadar).
-  • Zara davranışı: ESC ile kapanır + overlay açıkken arka plan scroll kilidi + yumuşak açılış (fade+iniş).
+  • Tetikleyici: lupa + altı çizili "ARA" (md:w-16 uzun çizgi, uppercase) — Zara tarzı.
+  • Overlay artık Zara'nın gerçek arama ekranını (/search/home) birebir taklit ediyor:
+    - Üst bar: sol "FACETTE" logo (anasayfaya link) + sağ "Kapat ✕".
+    - 3 kolon grid (md+): SOL dikey kategori menüsü (Giyim/Aksesuar/Sale/Ana Sayfa) |
+      ORTA büyük input ("Ne arıyorsunuz?", alt çizgi, yazınca X temizle / boşken lupa) |
+      SAĞ hesap nav (Sepet(n) → drawer / Hesabım|Giriş Yap / Favoriler(n)).
+    - Mobil (md altı): kategori+hesap linkleri input altında yatay wrap.
+    - ALT: boş aramada "İlginizi çekebilecek diğer ürünler" + ürün grid (GET /products?sort=popular&limit=8);
+      yazınca "Ürünler" canlı sonuç grid + "Tüm sonuçları gör". Zara'da boş aramada da ürün gösteriliyor — birebir.
+  • Fonksiyon korundu: searchOpen, GET /products?search (canlı), GET /search/popular, submitSearch → /arama?q=,
+    setIsOpen (sepet drawer), user (Hesabım/Giriş), favCount/itemCount sayaçları.
+  • Yeni state suggestedProducts; overlay açılınca popüler ürünler çekilir. closeSearch helper (DRY).
+  • Zara davranışı: ESC + scroll kilidi + yumuşak açılış (fade+iniş) korundu.
 
 ## YENİ (bu pakette): Duplike kategori birleştirme HAZIRLIĞI (script + slug_aliases link koruması)
 - backend/scripts/merge_duplicate_categories.py (YENİ): clean_categories.py raporunun UYGULAMA adımı.

@@ -103,6 +103,7 @@ export default function Header({ hideMenu = false }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [popularSearches, setPopularSearches] = useState([]);
+  const [suggestedProducts, setSuggestedProducts] = useState([]);
   const [activeMenu, setActiveMenu] = useState(null);
   const [hoveredCategory, setHoveredCategory] = useState(null); // alt kategori slug (ceket, sort, ...)
   const [megaProducts, setMegaProducts] = useState({}); // {slug: [products]}
@@ -148,6 +149,11 @@ export default function Header({ hideMenu = false }) {
   useEffect(() => {
     if (searchOpen && popularSearches.length === 0) {
       fetchPopularSearches();
+    }
+    if (searchOpen && suggestedProducts.length === 0) {
+      axios.get(`${API}/products?limit=8&sort=popular`)
+        .then((r) => setSuggestedProducts(r.data?.products || []))
+        .catch(() => {});
     }
   }, [searchOpen]);
 
@@ -204,6 +210,8 @@ export default function Header({ hideMenu = false }) {
       setSearchQuery("");
     }
   };
+
+  const closeSearch = () => { setSearchOpen(false); setSearchQuery(""); };
 
   return (
     <>
@@ -553,56 +561,69 @@ export default function Header({ hideMenu = false }) {
       {searchOpen && (
         <div className="fixed inset-0 bg-white z-[60] overflow-y-auto" style={{ animation: "facetteSearchIn .2s ease-out" }}>
           <style>{`@keyframes facetteSearchIn{from{opacity:0}to{opacity:1}}@keyframes facetteSearchUp{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}`}</style>
-          <div className="max-w-5xl mx-auto px-6 md:px-8 pt-6 pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
-            {/* Üst bar: etiket + kapat */}
-            <div className="flex items-center justify-between mb-10 md:mb-14">
-              <span className="text-[11px] tracking-[0.25em] uppercase text-gray-400">Arama</span>
-              <button
-                onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
-                className="inline-flex items-center gap-1.5 text-[11px] tracking-[0.18em] uppercase hover:opacity-60 transition-opacity"
-                aria-label="Kapat"
-              >
+          <div className="px-5 md:px-10 pt-5 pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
+            {/* Üst bar: logo + kapat */}
+            <div className="flex items-center justify-between mb-8 md:mb-12">
+              <Link to="/" onClick={closeSearch} className="text-[13px] tracking-[0.4em] font-light">FACETTE</Link>
+              <button onClick={closeSearch} className="inline-flex items-center gap-1.5 text-[11px] tracking-[0.18em] uppercase hover:opacity-60 transition-opacity" aria-label="Kapat">
                 Kapat <X size={18} strokeWidth={1.4} />
               </button>
             </div>
 
-            {/* Büyük arama girişi (Zara tarzı) */}
-            <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="mb-12 md:mb-16">
-              <div className="relative border-b border-black">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Ara"
-                  className="w-full text-2xl md:text-4xl font-light py-3 pr-12 bg-transparent focus:outline-none placeholder:text-gray-300"
-                  autoFocus
-                />
-                <Search size={24} strokeWidth={1.2} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400" />
-              </div>
-            </form>
+            {/* 3 kolon: sol kategori | orta arama | sağ hesap (Zara düzeni) */}
+            <div className="grid grid-cols-1 md:grid-cols-[170px_1fr_170px] gap-8 md:gap-12 items-start mb-12 md:mb-16">
+              {/* SOL: kategoriler (desktop) */}
+              <nav className="hidden md:flex flex-col gap-3.5 text-[11px] tracking-[0.18em] uppercase">
+                <Link to="/giyim" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Giyim</Link>
+                <Link to="/aksesuar" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Aksesuar</Link>
+                <Link to="/sale" onClick={closeSearch} className="text-red-700 hover:opacity-60 transition-opacity">Sale</Link>
+                <Link to="/" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Ana Sayfa</Link>
+              </nav>
 
-            <div>
-              {searchQuery.length === 0 ? (
-                <div>
-                  <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">En Çok Arananlar</h3>
-                  <div className="flex flex-wrap gap-x-6 gap-y-3">
-                    {popularSearches.map((item, i) => (
-                      <button
-                        key={i}
-                        onClick={() => { navigate(`/arama?q=${encodeURIComponent(item.term)}`); setSearchOpen(false); }}
-                        className="text-sm font-light text-gray-700 hover:text-black border-b border-transparent hover:border-black pb-0.5 transition-colors"
-                      >
-                        {item.term}
-                      </button>
-                    ))}
-                  </div>
+              {/* ORTA: büyük arama girişi */}
+              <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="w-full">
+                <div className="relative border-b border-black max-w-xl mx-auto">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Ne arıyorsunuz?"
+                    className="w-full text-xl md:text-3xl font-light py-2.5 pr-10 bg-transparent focus:outline-none placeholder:text-gray-300 text-center md:text-left"
+                    autoFocus
+                  />
+                  {searchQuery ? (
+                    <button type="button" onClick={() => setSearchQuery("")} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black transition-colors" aria-label="Temizle"><X size={20} strokeWidth={1.3} /></button>
+                  ) : (
+                    <Search size={22} strokeWidth={1.2} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400" />
+                  )}
                 </div>
-              ) : searchResults.length > 0 ? (
+              </form>
+
+              {/* SAĞ: hesap / sepet (desktop) */}
+              <nav className="hidden md:flex flex-col gap-3.5 text-[11px] tracking-[0.18em] uppercase md:items-end">
+                <button onClick={() => { closeSearch(); setIsOpen(true); }} className="hover:opacity-60 transition-opacity">Sepet{itemCount > 0 ? ` (${itemCount})` : ""}</button>
+                <Link to={user ? "/hesabim" : "/giris"} onClick={closeSearch} className="hover:opacity-60 transition-opacity">{user ? "Hesabım" : "Giriş Yap"}</Link>
+                <Link to="/hesabim?tab=favorites" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Favoriler{favCount > 0 ? ` (${favCount})` : ""}</Link>
+              </nav>
+
+              {/* Mobil: kategori + hesap linkleri yatay (md'de gizli) */}
+              <div className="md:hidden flex flex-wrap justify-center gap-x-5 gap-y-2.5 text-[11px] tracking-[0.15em] uppercase pt-1">
+                <Link to="/giyim" onClick={closeSearch}>Giyim</Link>
+                <Link to="/aksesuar" onClick={closeSearch}>Aksesuar</Link>
+                <Link to="/sale" onClick={closeSearch} className="text-red-700">Sale</Link>
+                <Link to={user ? "/hesabim" : "/giris"} onClick={closeSearch}>{user ? "Hesabım" : "Giriş"}</Link>
+                <Link to="/hesabim?tab=favorites" onClick={closeSearch}>Favoriler</Link>
+              </div>
+            </div>
+
+            {/* ALT: ürünler — boş aramada öneri, yazınca canlı sonuç */}
+            {searchQuery.length === 0 ? (
+              suggestedProducts.length > 0 && (
                 <div>
-                  <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">Ürünler</h3>
+                  <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">İlginizi çekebilecek diğer ürünler</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
-                    {searchResults.map((p) => (
-                      <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left group">
+                    {suggestedProducts.map((p) => (
+                      <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
                         <div className="aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
                           <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
@@ -611,17 +632,29 @@ export default function Header({ hideMenu = false }) {
                       </button>
                     ))}
                   </div>
-                  <button
-                    onClick={() => submitSearch()}
-                    className="mt-10 text-[11px] tracking-[0.18em] uppercase border-b border-black pb-1 hover:opacity-60 transition-opacity"
-                  >
-                    Tüm sonuçları gör
-                  </button>
                 </div>
-              ) : (
-                <p className="text-sm font-light text-gray-400">"{searchQuery}" için sonuç bulunamadı.</p>
-              )}
-            </div>
+              )
+            ) : searchResults.length > 0 ? (
+              <div>
+                <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">Ürünler</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+                  {searchResults.map((p) => (
+                    <button key={p.id} onClick={() => { navigate(`/${p.slug}`); closeSearch(); }} className="text-left group">
+                      <div className="aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                        <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
+                      </div>
+                      <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
+                      <p className="text-xs font-light text-gray-600">{p.price?.toFixed(2).replace('.', ',')} TL</p>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => submitSearch()} className="mt-10 text-[11px] tracking-[0.18em] uppercase border-b border-black pb-1 hover:opacity-60 transition-opacity">
+                  Tüm sonuçları gör
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm font-light text-gray-400">"{searchQuery}" için sonuç bulunamadı.</p>
+            )}
           </div>
         </div>
       )}
