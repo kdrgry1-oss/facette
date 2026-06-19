@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check } from "lucide-react";
+import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check, Truck } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -14,6 +14,23 @@ import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
 import { sortLikeSize } from "../utils/sizeSort";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Tahmini teslimat aralığı (kargoya verilme + iş günü; hafta sonu atlanır)
+function estimateDelivery(minDays = 2, maxDays = 4) {
+  const addBiz = (base, n) => {
+    const r = new Date(base);
+    let added = 0;
+    while (added < n) {
+      r.setDate(r.getDate() + 1);
+      const wd = r.getDay();
+      if (wd !== 0 && wd !== 6) added++;
+    }
+    return r;
+  };
+  const fmt = (d) => d.toLocaleDateString("tr-TR", { day: "numeric", month: "long" });
+  const now = new Date();
+  return `${fmt(addBiz(now, minDays))} - ${fmt(addBiz(now, maxDays))}`;
+}
 
 export default function ProductDetail() {
   const { slug } = useParams();
@@ -564,6 +581,12 @@ export default function ProductDetail() {
                       <Heart size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-red-500 text-red-500" : ""} />
                     </button>
                   </div>
+
+                  {/* Tahmini teslimat — görünür dönüşüm sinyali */}
+                  <p className="mt-3 text-xs text-gray-600 flex items-center gap-1.5" data-testid="pdp-delivery-estimate">
+                    <Truck size={14} strokeWidth={1.6} className="text-gray-500" />
+                    Tahmini teslimat: <span className="font-medium text-black">{estimateDelivery()}</span>
+                  </p>
 
                   {/* Stok bildirim formu */}
                   {oosSelected && notifyOpen && (

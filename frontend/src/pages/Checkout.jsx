@@ -33,6 +33,23 @@ const sanitizePhone = (v) => {
   return plus + digits;
 };
 
+// Tahmini teslimat aralığı (iş günü bazlı; hafta sonu atlanır) — TR pazarı dönüşüm sinyali
+function estimateDelivery(minDays = 2, maxDays = 4) {
+  const addBiz = (base, n) => {
+    const r = new Date(base);
+    let added = 0;
+    while (added < n) {
+      r.setDate(r.getDate() + 1);
+      const wd = r.getDay();
+      if (wd !== 0 && wd !== 6) added++;
+    }
+    return r;
+  };
+  const fmt = (d) => d.toLocaleDateString("tr-TR", { day: "numeric", month: "long" });
+  const now = new Date();
+  return `${fmt(addBiz(now, minDays))} - ${fmt(addBiz(now, maxDays))}`;
+}
+
 export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -662,6 +679,13 @@ export default function Checkout() {
           </div>
         </div>
 
+        {/* Güven şeridi — tüm sayfa boyunca güven çıpası (SHEIN mantığı) */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 -mt-4 mb-7 text-[11px] text-black/60" data-testid="trust-bar">
+          <span className="inline-flex items-center gap-1"><Lock size={12} strokeWidth={1.8} /> Güvenli ödeme · 3D Secure</span>
+          <span className="inline-flex items-center gap-1"><ShieldCheck size={12} strokeWidth={1.8} /> 14 gün kolay iade</span>
+          <span className="inline-flex items-center gap-1"><Truck size={12} strokeWidth={1.8} /> Gizli ücret yok</span>
+        </div>
+
         <form onSubmit={handleSubmit}>
           <div className="grid lg:grid-cols-12 gap-6">
             {/* SOL — %75 */}
@@ -1050,6 +1074,10 @@ export default function Checkout() {
                     {shippingCost === 0
                       ? <span><s className="text-gray-400">59,99 TL</s> <span className="ml-1 inline-block bg-green-50 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold rounded">Bedava</span></span>
                       : <span>{shippingCost.toFixed(2)} TL</span>}
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500" data-testid="delivery-estimate">
+                    <span>Tahmini teslimat</span>
+                    <span>{estimateDelivery()} <span className="text-gray-400">· 2-4 iş günü</span></span>
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
