@@ -208,6 +208,11 @@ export default function Cart() {
                   <span className="font-medium">Toplam</span>
                   <span className="font-medium tabular-nums">{grandTotal.toFixed(2)} TL</span>
                 </div>
+                {grandTotal > 0 && (
+                  <p className="text-[11px] text-black/50 pt-1" data-testid="cart-installment-hint">
+                    💳 9 taksite kadar · {(grandTotal / 9).toFixed(2)} TL/ay'dan başlayan taksitlerle
+                  </p>
+                )}
               </div>
 
               <Link

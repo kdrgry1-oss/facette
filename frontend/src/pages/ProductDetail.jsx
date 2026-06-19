@@ -50,6 +50,9 @@ export default function ProductDetail() {
   // "rich results" (fiyat, stok, marka) göstermesini sağlar.
   useEffect(() => {
     if (!product) return;
+    // Edge SEO middleware (functions/_middleware.js) zaten JSON-LD bastıysa
+    // client tarafında tekrar ekleme — Google'da duplicate Product/Breadcrumb olmasın.
+    if (typeof document !== "undefined" && document.querySelector('script[data-seo="edge"]')) return;
     const origin = (typeof window !== "undefined" && window.location && window.location.origin) || "https://facette.com.tr";
     const canonical = `${origin}/urun/${product.slug || product.id}`;
     const price = product.sale_price || product.price;
@@ -449,12 +452,19 @@ export default function ProductDetail() {
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}
-            <div className="flex items-center gap-3 mb-6">
-              <span className={`text-lg ${hasDiscount ? "text-red-600" : ""}`}>
-                {displayPrice.toFixed(2).replace('.', ',')} TL
-              </span>
-              {hasDiscount && (
-                <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+            <div className="mb-6">
+              <div className="flex items-center gap-3">
+                <span className={`text-lg ${hasDiscount ? "text-red-600" : ""}`}>
+                  {displayPrice.toFixed(2).replace('.', ',')} TL
+                </span>
+                {hasDiscount && (
+                  <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+                )}
+              </div>
+              {displayPrice > 0 && (
+                <p className="text-xs text-gray-500 mt-1.5" data-testid="installment-hint">
+                  💳 9 taksite kadar · <span className="font-medium text-gray-700">{(displayPrice / 9).toFixed(2).replace('.', ',')} TL</span>/ay'dan başlayan taksitlerle
+                </p>
               )}
             </div>
 

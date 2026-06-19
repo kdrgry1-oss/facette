@@ -1,23 +1,27 @@
-# Paket: Meta Feed item_group_id + Checkout Kupon Görünüm Sadeleştirme
+# Paket 2 (KÜMÜLATİF) — Meta Feed + Kupon + SEO duplicate fix + Taksit
 
-## 1. backend/routes/products.py — Meta varyasyon gruplaması
-- `_build_merchant_xml(..., group_variants=False)` parametresi eklendi.
-- Google/generic ürün-seviyesi feed'e her item için EKLENEN alanlar:
-  `<g:item_group_id>` (parent = mpn, fallback csv_card_id/urun_karti_id) + `<g:color>` + (tek bedenliyse) `<g:size>`.
-- `<g:id>` ve tüm mevcut alanlar AYNEN korunur — sadece ekleme.
-- Feature-flag / rollback:
-  - settings.main.feed_variant_grouping = false  → kapat (DB)
-  - Acil: `?group=off` query param  (ör. .../google-merchant.xml?group=off)
-  - Varsayılan: AÇIK
-- Kanıtlanan davranış (simülasyon): aynı parent renkler aynı item_group_id'de gruplanıyor,
-  çok-bedenli üründe yanlış size basılmıyor, XML well-formed, g:id'ler birebir sabit.
+> Bu paket önceki paketi de içerir. Tek başına deploy edilebilir.
 
-## 2. frontend/src/pages/Checkout.jsx — Kupon görünüm
-- "En avantajlı indirim otomatik uygulandı" ✓ yeşil onay başlığı (uygulanan kampanya listesinin üstünde).
-- Manuel promosyon alanı KATLANIR yapıldı (Mango usulü): "Promosyon kodun var mı?" linki → tıklayınca açılır.
-  Kod zaten uygulanmışsa açık gelir. Kullanıcıyı "kod avına" itmez.
-- Kupon motoru (recalcPromotions / removePromotion / handleApplyCoupon) mantığına DOKUNULMADI — sadece görünüm.
+## backend/routes/products.py  (önceki pakettekiyle aynı)
+- Google feed'e item_group_id + color + size (flag arkasında, ?group=off / settings.feed_variant_grouping=false ile geri al). g:id sabit.
+
+## frontend/src/pages/Checkout.jsx  (önceki pakettekiyle aynı)
+- "En avantajlı indirim otomatik uygulandı" onayı + katlanır promosyon alanı (Mango usulü).
+
+## frontend/src/pages/ProductDetail.jsx  (YENİ)
+- JSON-LD duplicate fix: edge middleware (functions/_middleware.js) zaten JSON-LD bastıysa
+  client tarafında tekrar EKLEMEZ → Google'da çift Product/Breadcrumb riski kalktı.
+- Taksit bilgisi: fiyatın altına "💳 9 taksite kadar · ₺X/ay'dan başlayan taksitlerle" (TR pazarı dönüşüm, P1-8).
+
+## frontend/src/pages/Cart.jsx  (YENİ)
+- Sepet özeti Toplam satırının altına taksit bilgisi satırı (P1-8).
 
 ## Doğrulama
-- products.py: ast.parse OK + feed çıktısı gerçek veriyle simüle edildi (g:id sabit, gruplama doğru, XML geçerli).
-- Checkout.jsx: esbuild (jsx=automatic) exit 0, hata yok.
+- products.py: ast.parse OK + feed simülasyonu (g:id sabit, gruplama doğru, well-formed).
+- Checkout/ProductDetail/Cart: esbuild (jsx=automatic) exit 0, hata yok.
+
+## Not — zaten mevcut (dokümanın istediği, halihazırda yapılmış)
+- index.html: OG/Twitter/canonical + Organization & WebSite JSON-LD ✅
+- functions/_middleware.js: ürün/kategori edge OG + Product/Offer/BreadcrumbList JSON-LD ✅
+- PDP: beden seçimi, beden tablosu modalı, sticky bar, "Eklendi ✓", "Gelince Haber Ver" ✅
+- Sepet: ücretsiz kargo eşiği progress bar ✅
