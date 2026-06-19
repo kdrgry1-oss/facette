@@ -2,6 +2,11 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): P3-19 çift success route → tek canonical + 301
+- frontend/public/_redirects (YENİ): /siparis-tamamlandi/* → /order-success/:splat 301 (Cloudflare gerçek 301, SEO tek canonical).
+- frontend/src/App.js: Navigate+useParams import; /siparis-tamamlandi/:orderNumber artık OrderSuccess yerine
+  <LegacyOrderRedirect> (SPA-içi client redirect, _redirects'in SPA fallback'i). /order-success canonical kalır.
+
 ## YENİ (bu pakette): backend/scripts/clean_categories.py — kategori temizlik scripti
 - DRY-RUN varsayılan (hiçbir şey değişmez): test/placeholder kategori + bağlı ürün sayısı,
   duplike gruplar (aksesuar + aksesuar-aksesuar) + önerilen ANA + 301 önerisi, bozuk slug'lar raporlanır.

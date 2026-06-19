@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
@@ -37,6 +37,13 @@ import "./App.css";
 // sadece /admin'e girilince yüklenir. Storefront ziyaretçileri bunu indirmez.
 const AdminApp = lazy(() => import("./AdminApp"));
 
+// Eski /siparis-tamamlandi/:orderNumber linkleri (SPA-içi navigasyon) için client redirect.
+// Doğrudan URL/bot istekleri zaten public/_redirects ile gerçek 301 alır; bu, SPA fallback'tir.
+function LegacyOrderRedirect() {
+  const { orderNumber } = useParams();
+  return <Navigate to={`/order-success/${orderNumber}`} replace />;
+}
+
 function App() {
   useEffect(() => {
     // UTM/referrer yakalama — render'ı bloklamaması için mount sonrası.
@@ -73,7 +80,7 @@ function App() {
                 <Route path="/siparis-takip" element={<TrackOrder />} />
                 <Route path="/siparis-takip/:trackingCode" element={<TrackOrder />} />
                 <Route path="/order-success/:orderNumber" element={<OrderSuccess />} />
-                <Route path="/siparis-tamamlandi/:orderNumber" element={<OrderSuccess />} />
+                <Route path="/siparis-tamamlandi/:orderNumber" element={<LegacyOrderRedirect />} />
                 <Route path="/odeme-bildirimi/:orderNumber" element={<PaymentNotification />} />
                 <Route path="/iade/:orderNumber" element={<ReturnRequest />} />
 
