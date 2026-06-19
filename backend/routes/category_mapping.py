@@ -364,7 +364,7 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 7,
+            {"$set": {"category_id": key, "attributes": out, "_v": 8,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -973,38 +973,53 @@ def _match_size_value(lv: str, mp_values: list):
 
 
 def _match_general_value(lv: str, mp_values: list, aliases: dict):
-    """Beden DIŞINDAKİ attribute'lar için. Daha güvenli substring kuralları."""
+    """Beden DIŞINDAKİ attribute'lar için. Birebir > alias > EN KISA tam-kelime/substring.
+    Türkçe-duyarsız. Çok aday varsa en kısa (en spesifik) seçilir: "Ekru" > "Altın - Ekru"."""
     if not lv or not mp_values:
         return None
-    lv_lower = str(lv).lower().strip()
-    if not lv_lower:
+
+    def _n(s):
+        import unicodedata as _u
+        s = _u.normalize("NFKD", str(s or ""))
+        s = "".join(c for c in s if not _u.combining(c))
+        return " ".join((s.lower().replace("ı", "i").replace("ş", "s").replace("ç", "c")
+                         .replace("ğ", "g").replace("ü", "u").replace("ö", "o")).split())
+
+    lvn = _n(lv)
+    if not lvn:
         return None
-    ali = aliases.get(lv_lower, [])
+    ali = aliases.get(str(lv).lower().strip(), [])
 
-    # 1) Birebir
+    # 1) Birebir (Türkçe-duyarsız)
     for mv in mp_values:
-        if (mv.get("name") or "").lower().strip() == lv_lower:
+        if _n(mv.get("name")) == lvn:
             return mv
-
     # 2) Alias birebir
     for a in ali:
+        an = _n(a)
         for mv in mp_values:
-            if (mv.get("name") or "").lower().strip() == a.lower():
+            if _n(mv.get("name")) == an:
                 return mv
-
-    # 3) Substring — yalnızca uzun (>=4 karakter) string'lerde, kısa karışmasın
-    if len(lv_lower) >= 4:
+    # 3) Tam-kelime/substring — EN KISA aday tercih (ör. "Ekru", asla "Altın - Ekru")
+    if len(lvn) >= 4:
+        lv_words = set(lvn.split())
+        best = None  # (skor, uzunluk, mv)
         for mv in mp_values:
-            mvn = (mv.get("name") or "").lower().strip()
-            if mvn and (mvn in lv_lower or lv_lower in mvn):
-                return mv
-        for a in ali:
-            if len(a) >= 4:
-                for mv in mp_values:
-                    mvn = (mv.get("name") or "").lower().strip()
-                    if mvn and (mvn in a or a in mvn):
-                        return mv
-
+            mvn = _n(mv.get("name"))
+            if not mvn:
+                continue
+            mv_words = set(mvn.split())
+            score = None
+            if lvn in mv_words:            # lv, değerin bir kelimesi: "ekru" ∈ "altin - ekru"
+                score = 10
+            elif mvn in lv_words:          # değer, lv'nin bir kelimesi
+                score = 20
+            elif mvn in lvn or lvn in mvn:  # gevşek substring (son çare)
+                score = 100
+            if score is not None and (best is None or (score, len(mvn)) < (best[0], best[1])):
+                best = (score, len(mvn), mv)
+        if best:
+            return best[2]
     return None
 
 
@@ -1653,7 +1668,7 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 7:
+        if not attrs or (cached or {}).get("_v") != 8:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
             if hb_err:
                 return {

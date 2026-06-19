@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap, Download } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, Save, Search, Trash2, Settings, Sliders, Zap, Download, Plus } from "lucide-react";
 import SearchableMapSelect from "../../components/admin/SearchableMapSelect";
 import StockPriceUpdatePanel from "../../components/admin/StockPriceUpdatePanel";
 import {
@@ -1295,18 +1295,20 @@ function HepsiburadaOrderPull({ auth }) {
   const [raws, setRaws] = useState([]);
   const [sel, setSel] = useState(new Set());
   const [importing, setImporting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [result, setResult] = useState(null);
   const [rawSample, setRawSample] = useState(null);
   const [err, setErr] = useState("");
 
   const fmtTL = (n) => `${(Number(n) || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
 
-  const pull = async () => {
+  const pull = async (ov) => {
     setLoading(true); setErr(""); setResult(null); setRows(null); setSel(new Set());
     try {
-      const body = orderNo.trim()
+      const bb = (ov && ov.b) || begin, ee = (ov && ov.e) || end;
+      const body = (orderNo.trim() && !ov)
         ? { order_number: orderNo.trim() }
-        : { begin_date: `${begin}T00:00:00`, end_date: `${end}T23:59:59` };
+        : { begin_date: `${bb}T00:00:00`, end_date: `${ee}T23:59:59` };
       const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, auth);
       if (r.data && r.data.success === false) {
         setErr((r.data.error || "Çekme başarısız") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
@@ -1324,6 +1326,25 @@ function HepsiburadaOrderPull({ auth }) {
   const toggle = (i) => { const s = new Set(sel); s.has(i) ? s.delete(i) : s.add(i); setSel(s); };
   const allOn = rows && rows.length > 0 && sel.size === rows.length;
   const toggleAll = () => setSel(allOn ? new Set() : new Set((rows || []).map((_, i) => i)));
+
+  const createTest = async () => {
+    setCreating(true); setErr(""); setResult(null);
+    try {
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/create-test`, {}, auth);
+      if (r.data && r.data.success === false) {
+        setErr((r.data.error || "Test siparişi oluşturulamadı") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
+        return;
+      }
+      const d = new Date();
+      const b2 = iso(new Date(d.getTime() - 2 * 864e5)), e2 = iso(new Date(d.getTime() + 1 * 864e5));
+      setBegin(b2); setEnd(e2); setOrderNo("");
+      setResult({ created: r.data.order_number });
+      await new Promise((res) => setTimeout(res, 1500));
+      await pull({ b: b2, e: e2 });
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e?.message || "Test siparişi oluşturulamadı");
+    } finally { setCreating(false); }
+  };
 
   const doImport = async () => {
     if (sel.size === 0) return;
@@ -1362,13 +1383,20 @@ function HepsiburadaOrderPull({ auth }) {
           <button onClick={pull} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-60">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> {loading ? "Çekiliyor…" : "Çek"}
           </button>
+          <button onClick={createTest} disabled={creating || loading} title="SIT/Sandbox modunda HB stub üzerinde test siparişi oluşturur ve panele çeker" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-orange-400 text-orange-700 bg-white text-sm font-semibold hover:bg-orange-50 disabled:opacity-60">
+            <Plus size={14} /> {creating ? "Oluşturuluyor…" : "Test Sipariş Oluştur (SIT)"}
+          </button>
         </div>
 
         {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 whitespace-pre-line">{err}</div>}
 
         {result && (
           <div className={`text-sm rounded-lg px-3 py-2 border ${result.error ? "text-red-700 bg-red-50 border-red-200" : "text-green-800 bg-green-50 border-green-200"}`}>
-            {result.error ? result.error : `Aktarıldı: ${result.imported} · Güncellendi: ${result.updated}${(result.errors && result.errors.length) ? ` · Hata: ${result.errors.length}` : ""}`}
+            {result.error
+              ? result.error
+              : (result.created
+                  ? `Test siparişi oluşturuldu: ${result.created} · listeden çekiliyor…`
+                  : `Aktarıldı: ${result.imported} · Güncellendi: ${result.updated}${(result.errors && result.errors.length) ? ` · Hata: ${result.errors.length}` : ""}`)}
           </div>
         )}
 

@@ -52,6 +52,9 @@ class HepsiburadaClient:
     OMS_SANDBOX = "https://oms-external-sit.hepsiburada.com"
     OMS_PROD = "https://oms-external.hepsiburada.com"
 
+    # SADECE TEST: test siparişi oluşturma ayrı bir "stub" host'unda yayınlanır (prod yok).
+    OMS_STUB_SANDBOX = "https://oms-stub-external-sit.hepsiburada.com"
+
     def __init__(self, merchant_id, secret_key, dev_username, test=True, timeout=30,
                  oms_username=None, oms_password=None):
         if not (merchant_id and secret_key and dev_username):
@@ -151,17 +154,30 @@ class HepsiburadaClient:
                 "total": int(total) if total and str(total).isdigit() else None,
                 "page": page, "limit": limit}
 
-    def iter_attribute_values(self, category_id, attribute_id, limit=1000):
-        page, out = 0, []
-        while True:
+    def iter_attribute_values(self, category_id, attribute_id, limit=1000, max_pages=100):
+        """Bir özelliğin TÜM değerlerini çeker. HB sayfa boyutunu (limit'i yok sayıp)
+        100'de sınırlayabildiğinden, 'len(chunk) < limit' ile DURMAYIZ; boş sayfa,
+        Total-Count'a ulaşma ya da yeni-kayıt-gelmemesi olana dek sayfalamaya devam ederiz."""
+        page, out, seen = 0, [], set()
+        while page < max_pages:
             res = self.get_attribute_values(category_id, attribute_id, page=page, limit=limit)
-            chunk = res["data"] or []
-            out.extend(chunk)
+            chunk = res.get("data") or []
+            if not chunk:
+                break
+            new = 0
+            for v in chunk:
+                k = (v.get("id") if isinstance(v, dict) else v)
+                if k is None:
+                    k = (v.get("value") or v.get("name")) if isinstance(v, dict) else v
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(v)
+                new += 1
             total = res.get("total")
-            if total is not None:
-                if len(out) >= total or not chunk:
-                    break
-            elif not chunk or len(chunk) < limit:
+            if total is not None and len(out) >= total:
+                break
+            if new == 0:  # ilerleme yok (HB aynı sayfayı tekrar döndürüyor) → sonsuz döngüyü önle
                 break
             page += 1
         return out
@@ -332,8 +348,8 @@ class HepsiburadaClient:
         ]
         return cands
 
-    def _oms_request(self, method, path, params=None, json_body=None, raw_response=False):
-        url = self._oms_base() + path
+    def _oms_request(self, method, path, params=None, json_body=None, raw_response=False, base=None):
+        url = (base or self._oms_base()) + path
         if params:
             clean = {k: v for k, v in params.items() if v not in (None, "")}
             if clean:
@@ -374,6 +390,30 @@ class HepsiburadaClient:
 
     def _oms_get(self, path, params=None):
         return self._oms_request("GET", path, params=params)
+
+    def create_test_order(self, body=None):
+        """SADECE TEST ortamı: oms-stub-external-sit üzerinden test siparişi oluşturur.
+        Endpoint: POST /orders/merchantId/{merchantId}. Kural: URL'deki ve LineItems içindeki
+        MerchantId bu hesabın merchant_id'si olmalıdır. OrderNumber benzersiz olmalı (boşsa üretilir).
+        Auth: OMS ile aynı (Basic merchant_id:secret_key + User-Agent dev_username)."""
+        import random
+        from datetime import datetime, timezone
+        b = dict(body or {})
+        if not str(b.get("OrderNumber") or "").strip():
+            b["OrderNumber"] = str(random.randint(10**11, 10**12 - 1))
+        if not str(b.get("OrderDate") or "").strip():
+            b["OrderDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        items = b.get("LineItems") or []
+        for it in items:
+            if isinstance(it, dict):
+                it["MerchantId"] = self.merchant_id  # URL merchantId ile birebir aynı olmak ZORUNDA
+        b["LineItems"] = items
+        resp = self._oms_request("POST", f"/orders/merchantId/{self.merchant_id}",
+                                 json_body=b, base=self.OMS_STUB_SANDBOX)
+        if isinstance(resp, dict):
+            resp.setdefault("_orderNumber", b["OrderNumber"])
+            return resp
+        return {"_orderNumber": b["OrderNumber"], "raw": resp}
 
     # ---------- Sipariş listesi / detay ----------
     def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100):
