@@ -348,6 +348,40 @@ async def payment_callback(request: Request, token: str = Form(default=None)):
 #   POST /payment/card/pay       → 3DS'siz doğrudan tahsilat (use3DSecure kapalıysa)
 # NOT: Kart verisi YALNIZCA istek gövdesinde taşınır, asla loglanmaz/saklanmaz.
 # =============================================================================
+async def _installment_total_price(settings: dict, bin_number: str, base_price: float, installment: int):
+    """Seçilen taksit için iyzico'dan GERÇEK totalPrice'i (vade farkı dahil) sorgular.
+
+    Taksitli işlemde iyzico'ya gönderilecek `paidPrice` bu tutar olmalıdır; aksi
+    halde (paidPrice = tek çekim tutarı + installment>1) banka/iyzico işlemi reddeder.
+    Frontend'den gelen tutara GÜVENİLMEZ — değer iyzico'dan doğrulanır.
+    Bulunamazsa None döner (çağıran tek çekim tutarına düşer).
+    """
+    bin6 = "".join(ch for ch in str(bin_number or "") if ch.isdigit())[:8]
+    if len(bin6) < 6 or base_price <= 0 or installment <= 1:
+        return None
+    body = {"locale": "tr", "conversationId": "installment", "binNumber": bin6, "price": _fmt(base_price)}
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    headers = _v2_headers(settings["api_key"], settings["api_secret"], INSTALLMENT_PATH, body_str)
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            resp = await c.post(f"{settings['base_url']}{INSTALLMENT_PATH}", content=body_str.encode("utf-8"), headers=headers)
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception as e:
+        logger.error(f"iyzico installment paidPrice resolve error: {e}")
+        return None
+    if data.get("status") != "success":
+        return None
+    for det in (data.get("installmentDetails") or []):
+        for ip in (det.get("installmentPrices") or []):
+            try:
+                if int(ip.get("installmentNumber") or 0) == int(installment):
+                    tp = round(float(ip.get("totalPrice") or 0), 2)
+                    return tp if tp > 0 else None
+            except Exception:
+                pass
+    return None
+
+
 def _build_card_payment_payload(order: dict, card: dict, installment: int,
                                 callback_url: str, is_3ds: bool) -> dict:
     """Checkout-form payload'ını doğrudan-kart isteğine uyarlar (paymentCard ekler)."""
@@ -408,6 +442,11 @@ async def initialize_3ds_payment(payload: dict):
 
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, callback_url, is_3ds=True)
+    # Taksit seçildiyse paidPrice'i o taksitin gerçek toplamına (vade farkı dahil) eşitle
+    if installment > 1:
+        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("price") or 0), installment)
+        if _tp and _tp > 0:
+            body["paidPrice"] = _fmt(_tp)
     body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     headers = _v2_headers(settings["api_key"], settings["api_secret"], THREEDS_INIT_PATH, body_str)
 
@@ -492,6 +531,10 @@ async def card_pay_non3ds(payload: dict):
 
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, "", is_3ds=False)
+    if installment > 1:
+        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("price") or 0), installment)
+        if _tp and _tp > 0:
+            body["paidPrice"] = _fmt(_tp)
     body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     headers = _v2_headers(settings["api_key"], settings["api_secret"], NON3DS_PATH, body_str)
 
