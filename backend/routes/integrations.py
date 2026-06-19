@@ -3024,6 +3024,23 @@ def _hb_group_orders(lines):
         g["lines"].append(ln)
     return list(groups.values())
 
+def _hb_money(v, default=0.0):
+    """HB OMS fiyatı düz sayı VEYA {amount/value/grossAmount/...} dict olabilir → güvenle float'a indirger."""
+    if isinstance(v, dict):
+        for k in ("amount", "value", "grossAmount", "totalPrice", "unitPrice", "price", "paidPrice"):
+            iv = v.get(k)
+            if iv is not None and not isinstance(iv, dict):
+                try:
+                    return float(iv)
+                except Exception:
+                    pass
+        return float(default)
+    try:
+        return float(v if v not in (None, "") else default)
+    except Exception:
+        return float(default)
+
+
 def map_hepsiburada_order(o: dict) -> dict:
     from datetime import datetime, timezone
     raw_no = str(_hb_g(o, "orderNumber", "orderId", "id"))
@@ -3032,10 +3049,10 @@ def map_hepsiburada_order(o: dict) -> dict:
     items, subtotal = [], 0.0
     for ln in lines:
         try:
-            qty = int(float(_hb_g(ln, "quantity", "qty", default=1) or 1))
+            qty = int(_hb_money(_hb_g(ln, "quantity", "qty", default=1), 1)) or 1
         except Exception:
             qty = 1
-        unit = float(_hb_g(ln, "price", "unitPrice", "totalPrice", "amount", default=0) or 0)
+        unit = _hb_money(_hb_g(ln, "price", "unitPrice", "totalPrice", "amount", default=0))
         items.append({
             "product_id": _hb_g(ln, "merchantSku", "sku", "hbSku", "productBarcode"),
             "product_name": _hb_g(ln, "productName", "name", "lineItemName"),
@@ -3045,7 +3062,7 @@ def map_hepsiburada_order(o: dict) -> dict:
             "currency": "TRY",
         })
         subtotal += unit * qty
-    total = float(_hb_g(o, "totalPrice", "totalAmount", default=subtotal) or subtotal)
+    total = _hb_money(_hb_g(o, "totalPrice", "totalAmount", default=subtotal), subtotal)
     ship = o.get("shippingAddress") or o.get("shippingAddressDetail") or {}
     inv = o.get("invoiceAddress") or {}
     cust = o.get("customer") or {}
