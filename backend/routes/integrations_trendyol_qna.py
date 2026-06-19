@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 import os
 import re
+import socket
 import httpx
 
 from .deps import db, logger, require_admin, generate_id
@@ -458,8 +459,49 @@ async def scrape_trendyol_reviews_bulk(
 # TOPLU YORUM SENKRONU — tüm aktif site ürünleri için Trendyol 4-5★ yorumları
 # ============================================================================
 
+_PUBLIC_HOST = "public.trendyol.com"
+_pin_state = {"done": False, "ip": None}
+
+
+def _pin_public_trendyol_if_needed():
+    """
+    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor — apigw.trendyol.com
+    çözülüyor (Cloudflare 104.16.x). İkisi de Cloudflare arkasında olduğundan, çözülebilen
+    bir Trendyol/Cloudflare host'unun IP'sine pinleriz: SNI ve Host header public.trendyol.com
+    kalır, Cloudflare anycast doğru origin'e yönlendirir. socket.getaddrinfo monkeypatch'i
+    yalnızca _PUBLIC_HOST için devreye girer; idempotent.
+    """
+    if _pin_state["done"]:
+        return
+    _pin_state["done"] = True
+    try:
+        socket.gethostbyname(_PUBLIC_HOST)
+        return  # zaten çözülüyor, pin gereksiz
+    except Exception:
+        pass
+    pin_ip = None
+    for alt in ("apigw.trendyol.com", "api.trendyol.com", "www.trendyol.com"):
+        try:
+            pin_ip = socket.gethostbyname(alt)
+            break
+        except Exception:
+            continue
+    if not pin_ip:
+        return  # çözülebilen alternatif yok; normal akış (hata loglanır)
+    _pin_state["ip"] = pin_ip
+    _orig_getaddrinfo = socket.getaddrinfo
+
+    def _patched(host, *args, **kwargs):
+        if host == _PUBLIC_HOST:
+            host = pin_ip
+        return _orig_getaddrinfo(host, *args, **kwargs)
+
+    socket.getaddrinfo = _patched
+
+
 async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
     """Trendyol public storefront API'sinden bir contentId'nin yorumlarını çeker (sayfalı)."""
+    _pin_public_trendyol_if_needed()
     api_url = (
         "https://public.trendyol.com/discovery-web-websfxsocialreviewrating-santral/"
         f"api/v1/reviews/{content_id}"
@@ -568,9 +610,11 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
 
     # 1) barcode -> contentId haritası (Trendyol ürünleri; approved filtresi yok = en geniş)
     client = TrendyolClient(supplier_id=str(supplier_id), api_key=api_key, api_secret=api_secret, mode=mode)
+    _pin_public_trendyol_if_needed()
     bc_to_cid: dict = {}
     debug = {"mode": mode, "ty_total_elements": None, "ty_total_pages": None,
-             "ty_first_page_count": 0, "ty_sample_keys": None, "ty_with_contentid": 0}
+             "ty_first_page_count": 0, "ty_sample_keys": None, "ty_with_contentid": 0,
+             "public_pin_ip": _pin_state["ip"]}
     page = 0
     while page < 300:
         try:

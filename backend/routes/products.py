@@ -350,111 +350,6 @@ def _search_tr_regex(s: str) -> str:
     }
     return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
 
-# ============================================================
-# RENK KARTLARI (storefront ürün kartı swatch'leri) — Mango usulü
-# Aynı modelin farklı renkleri AYRI ürün dokümanı. Bunları grup anahtarıyla
-# (csv_card_id → stock_code → sku) toplayıp her ürüne `color_siblings` ekler.
-# Frontend ProductCard bu listeyle renk kutucuğu (swatch) çizer + aynı modelin
-# bir rengini TEK kart olarak göstermek için `color_group` ile tekilleştirir.
-# ============================================================
-def _pc_color(p: dict) -> str:
-    """Ürünün rengini çözer: variants[].color → attributes(Web Color/Renk) → color."""
-    for v in (p.get("variants") or []):
-        c = (v.get("color") or "").strip()
-        if c:
-            return c
-    if isinstance(p.get("attributes"), list):
-        for a in p["attributes"]:
-            if (a.get("name") or "").strip().lower() in ("web color", "renk", "color"):
-                val = (a.get("value") or "").strip()
-                if val:
-                    return val
-    return (p.get("color") or "").strip()
-
-
-def _pc_group_key(p: dict):
-    """Renk grubu anahtarı: önce csv_card_id, yoksa stock_code, yoksa sku."""
-    cc = (p.get("csv_card_id") or "").strip()
-    if cc:
-        return ("card", cc)
-    sc = (p.get("stock_code") or "").strip()
-    if sc:
-        return ("sc", sc.lower())
-    sk = (p.get("sku") or "").strip()
-    if sk:
-        return ("sku", sk.lower())
-    return None
-
-
-async def _attach_color_siblings(products: list):
-    """Her ürüne `color_siblings` (aynı modelin diğer renkleri) + `color_group` ekler.
-    Tek toplu sorgu ile çalışır; yalnızca storefront listelerinde çağrılır.
-    color_siblings: [{id, slug, color, image}] — kendisi dâhil, benzersiz renkler.
-    Tek renkli modelde boş döner (swatch gösterilmez)."""
-    if not products:
-        return
-    card_ids, stock_codes, skus = set(), set(), set()
-    for p in products:
-        cc = (p.get("csv_card_id") or "").strip()
-        sc = (p.get("stock_code") or "").strip()
-        sk = (p.get("sku") or "").strip()
-        if cc:
-            card_ids.add(cc)
-        elif sc:
-            stock_codes.add(sc)
-        elif sk:
-            skus.add(sk)
-    ors = []
-    if card_ids:
-        ors.append({"csv_card_id": {"$in": list(card_ids)}})
-    if stock_codes:
-        ors.append({"stock_code": {"$in": list(stock_codes)}})
-    if skus:
-        ors.append({"sku": {"$in": list(skus)}})
-    if not ors:
-        for p in products:
-            p["color_siblings"] = []
-            p["color_group"] = p.get("id") or ""
-        return
-    by_key: dict = {}
-    try:
-        cursor = db.products.find(
-            {"$and": [{"$or": ors}, {"is_active": True},
-                      {"images.0": {"$exists": True}}, {"is_deleted": {"$ne": True}}]},
-            {"_id": 0, "id": 1, "slug": 1, "name": 1, "images": 1, "thumbnail": 1,
-             "variants": 1, "attributes": 1, "color": 1,
-             "csv_card_id": 1, "stock_code": 1, "sku": 1, "created_at": 1},
-        )
-        async for s in cursor:
-            k = _pc_group_key(s)
-            if not k:
-                continue
-            by_key.setdefault(k, []).append(s)
-    except Exception:
-        by_key = {}
-    # Her grubu created_at'a göre sırala (kararlı temsilci)
-    for k in by_key:
-        by_key[k].sort(key=lambda x: str(x.get("created_at") or ""))
-    for p in products:
-        k = _pc_group_key(p)
-        group = by_key.get(k, []) if k else []
-        seen, sib = set(), []
-        for s in group:
-            col = _pc_color(s)
-            cl = col.lower()
-            if not col or cl in seen:
-                continue
-            seen.add(cl)
-            sib.append({
-                "id": s["id"],
-                "slug": s.get("slug") or s["id"],
-                "color": col,
-                "image": (s.get("images") or [s.get("thumbnail")] or [None])[0],
-            })
-        p["color_siblings"] = sib if len(sib) > 1 else []
-        p["color_group"] = (k[0] + ":" + k[1]) if k else (p.get("id") or "")
-
-
 @router.get("")
 async def get_products(
     request: Request,
@@ -884,14 +779,7 @@ async def get_products(
         else:
             products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
     total = await db.products.count_documents(query)
-
-    # Storefront ürün kartı renk swatch'leri — admin panelde gerekmez (ekstra sorgu yapma).
-    if not _admin_view:
-        try:
-            await _attach_color_siblings(products)
-        except Exception as _cs_err:
-            logger.warning(f"color_siblings ekleme hatasi (liste etkilenmedi): {_cs_err}")
-
+    
     return {
         "products": products,
         "total": total,
