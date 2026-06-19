@@ -444,7 +444,7 @@ async def initialize_3ds_payment(payload: dict):
     body = _build_card_payment_payload(order, card, installment, callback_url, is_3ds=True)
     # Taksit seçildiyse paidPrice'i o taksitin gerçek toplamına (vade farkı dahil) eşitle
     if installment > 1:
-        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("price") or 0), installment)
+        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("paidPrice") or 0), installment)
         if _tp and _tp > 0:
             body["paidPrice"] = _fmt(_tp)
     body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
@@ -532,7 +532,7 @@ async def card_pay_non3ds(payload: dict):
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, "", is_3ds=False)
     if installment > 1:
-        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("price") or 0), installment)
+        _tp = await _installment_total_price(settings, card.get("cardNumber"), float(body.get("paidPrice") or 0), installment)
         if _tp and _tp > 0:
             body["paidPrice"] = _fmt(_tp)
     body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
