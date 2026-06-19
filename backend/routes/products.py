@@ -30,7 +30,7 @@ def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False,
 
     group_variants=True iken (google/generic modunda) her ürün satırına
     Meta varyasyon gruplaması için EK alanlar yazılır:
-      <g:item_group_id> (parent kod) + <g:color> + (tek bedenliyse) <g:size>.
+      <g:item_group_id> (parent kod) + <g:color>. (g:size BASILMAZ — renk-düzeyi feed.)
     g:id ve mevcut alanlar AYNEN korunur — sadece ekleme yapılır.
     Tek hamlede geri alınabilir (feature-flag / ?group=off)."""
     target = (target or "google").lower()
@@ -179,10 +179,8 @@ def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False,
             gcolor = (pcolor or "").strip() or (vcolors[0] if len(vcolors) == 1 else "")
             if gcolor:
                 extra.append(f"<g:color>{esc(gcolor)}</g:color>")
-            # size: yalnızca ürün tek bedenliyse yaz (çok bedenliyse atla — yanlış veri basma).
-            vsizes = [(_v.get("size") or "").strip() for _v in variants if (_v.get("size") or "").strip()]
-            if len(vsizes) == 1:
-                extra.append(f"<g:size>{esc(vsizes[0])}</g:size>")
+            # size: BASILMAZ. Renk-düzeyi feed → varyantları item_group_id grupluyor; size'a gerek yok.
+            # (Meta kontrol raporu 2026-06-18: tutarsız "STD" etiketlerini temizle, hiç size yazma.)
         rows = common_rows(pid, avail, gtin, mpn, extra)
         rows.extend(price_rows(price, sale))
         items.append("<item>" + "".join(rows) + "</item>")

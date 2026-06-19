@@ -2,6 +2,13 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): Meta feed — g:size kaldırıldı (kontrol raporu 2026-06-18)
+- backend/routes/products.py grouped feed (google/generic): <g:size> BASIMI KALDIRILDI.
+  Eski feed 66 üründe tutarsız "STD" size basıyordu; rapor "hiç size yazma, renk-düzeyi temiz feed" dedi.
+  Doğrulama (yedek XML): 309 item / 309 item_group_id / 309 color KORUNDU, 66 STD size → 0.
+- DOKUNULMAYAN (rapor kuralı): g:id, item_group_id, color, diğer alanlar; feature-flag; facebook varyant-feed.
+  Boş <g:size></g:size> basılmıyor (satır tamamen kaldırıldı).
+
 ## YENİ (bu pakette): Anasayfa arama — Zara görünümü (fonksiyon korundu)
 - frontend/src/components/Header.jsx:
   • Tetikleyici: lupa + altı çizili "ARA" (tracking geniş, uppercase) — Zara tarzı.
