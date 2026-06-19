@@ -552,10 +552,11 @@ async def get_products(
             # Ürün ana kategoride olmasa bile (ör. ana "Pantolon") admin'de ekstra eklendiği
             # "Şort" kategorisinde de müşteriye görünür.
             _slug_cat_ids = []
-            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1}):
+            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1, "slug_aliases": 1}):
                 _csl = (_c.get("slug") or "").strip().lower()
                 _cnm = (_c.get("name") or "").strip()
-                if _csl == cat_slug or (_cnm and generate_slug(_cnm) == cat_slug):
+                _als = [str(a).strip().lower() for a in (_c.get("slug_aliases") or [])]
+                if _csl == cat_slug or cat_slug in _als or (_cnm and generate_slug(_cnm) == cat_slug):
                     if _c.get("id"):
                         _slug_cat_ids.append(_c["id"])
             if _slug_cat_ids:

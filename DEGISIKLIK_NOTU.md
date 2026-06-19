@@ -2,6 +2,17 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): Duplike kategori birleştirme HAZIRLIĞI (script + slug_aliases link koruması)
+- backend/scripts/merge_duplicate_categories.py (YENİ): clean_categories.py raporunun UYGULAMA adımı.
+  DRY-RUN varsayılan; --apply yalnızca GÜVENLİ duplike'leri (aynı isim + aynı parent) birleştirir.
+  Farklı parent'taki aynı isimliler ATLANIR. --apply önce /tmp/category_merge_backup_<ts>.json geri-dönüş
+  log'u yazar (etkilenen ürünlerin eski category_ids/slug/name'i), sonra ürünleri ana'ya taşır
+  (category_ids dedup'lı), duplike slug'ı ana'nın slug_aliases'ına ekler, duplike kategoriyi siler.
+  Akış: clean_categories (rapor) → merge DRY-RUN → merge --apply.
+- backend/routes/categories.py get_category: slug_aliases ile de arar → birleştirilen eski kategori linki kırılmaz.
+- backend/routes/products.py slug→category_ids çevirisi: slug_aliases eşleşmesi eklendi → eski kategori URL'i
+  ana kategorinin ürünlerini gösterir (tam link koruması).
+
 ## YENİ (bu pakette): P2-13 yorum/puan — storefront PDP entegrasyonu
 - Backend reviews API (extras.py: POST /reviews, GET /reviews/product/:id, admin moderasyon) ZATEN vardı;
   admin sayfası (ProductReviews.jsx → /admin/yorumlar) ZATEN bağlıydı. EKSİK olan storefront UI eklendi.

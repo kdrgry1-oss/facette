@@ -70,7 +70,7 @@ async def get_categories(
 async def get_category(category_id: str):
     """Get single category"""
     category = await db.categories.find_one(
-        {"$or": [{"id": category_id}, {"slug": category_id}]},
+        {"$or": [{"id": category_id}, {"slug": category_id}, {"slug_aliases": category_id}]},
         {"_id": 0}
     )
     if not category:
