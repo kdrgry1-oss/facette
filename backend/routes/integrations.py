@@ -3113,7 +3113,10 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
             attempted = f"{oms_base}/orders/merchantid/{mid}/ordernumber/{on}"
             resp = await asyncio.to_thread(client.get_order_by_number, on)
         else:
-            attempted += f"?beginDate={req.begin_date}&endDate={req.end_date}&offset=0&limit=200"
+            if req.begin_date or req.end_date:
+                attempted += f"?beginDate={req.begin_date}&endDate={req.end_date}&offset=0&limit=200"
+            else:
+                attempted += "?offset=0&limit=200"  # tarihsiz: ödemesi tamamlanmış (Open) listesi
             resp = await asyncio.to_thread(client.get_orders, req.begin_date, req.end_date, 0, 200)
     except Exception as e:
         return {"success": False, "error": str(e), "attempted_url": attempted}

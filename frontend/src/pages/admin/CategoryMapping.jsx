@@ -1305,10 +1305,15 @@ function HepsiburadaOrderPull({ auth }) {
   const pull = async (ov) => {
     setLoading(true); setErr(""); setResult(null); setRows(null); setSel(new Set());
     try {
-      const bb = (ov && ov.b) || begin, ee = (ov && ov.e) || end;
-      const body = (orderNo.trim() && !ov)
-        ? { order_number: orderNo.trim() }
-        : { begin_date: `${bb}T00:00:00`, end_date: `${ee}T23:59:59` };
+      let body;
+      if (ov && ov.noDate) {
+        body = {}; // tarihsiz: HB "ödemesi tamamlanmış" (Open) listesi — offset+limit ile
+      } else {
+        const bb = (ov && ov.b) || begin, ee = (ov && ov.e) || end;
+        body = (orderNo.trim() && !ov)
+          ? { order_number: orderNo.trim() }
+          : { begin_date: `${bb}T00:00:00`, end_date: `${ee}T23:59:59` };
+      }
       const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, auth);
       if (r.data && r.data.success === false) {
         setErr((r.data.error || "Çekme başarısız") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
@@ -1335,12 +1340,10 @@ function HepsiburadaOrderPull({ auth }) {
         setErr((r.data.error || "Test siparişi oluşturulamadı") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
         return;
       }
-      const d = new Date();
-      const b2 = iso(new Date(d.getTime() - 2 * 864e5)), e2 = iso(new Date(d.getTime() + 1 * 864e5));
-      setBegin(b2); setEnd(e2); setOrderNo("");
-      setResult({ created: r.data.order_number, skus: r.data.used_skus });
+      setOrderNo("");
       await new Promise((res) => setTimeout(res, 1500));
-      await pull({ b: b2, e: e2 });
+      await pull({ noDate: true }); // tarihsiz: yeni Open (ödemesi tamamlanmış) siparişi listeler
+      setResult({ created: r.data.order_number, skus: r.data.used_skus });
     } catch (e) {
       setErr(e?.response?.data?.detail || e?.message || "Test siparişi oluşturulamadı");
     } finally { setCreating(false); }
