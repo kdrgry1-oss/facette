@@ -3142,6 +3142,43 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
             "attempted_url": attempted,
             "raw_sample": (lines[:2] if isinstance(lines, list) else lines)}
 
+@router.get("/hepsiburada/oms-diag")
+async def hepsiburada_oms_diag(on: str = "", key: str = ""):
+    """GEÇİCİ TEŞHİS UCU: Railway backend'inden HB OMS-SIT'e bağlantıyı ölçer. HER ZAMAN 200 döner.
+    Tarayıcı adres çubuğundan aç:  /api/integrations/hepsiburada/oms-diag?key=facette_oms_diag&on=<sipariş_no>
+    Yorum: list_1.ok=true+düşük ms => OMS erişilebilir (sorun frontend/cache);
+           error 'timeout' => oms-external-sit Railway ağından erişilemez/yavaş (HB SIT tarafı, ticket);
+           '401/403' => OMS auth; '400' => erişim var, istek formatı."""
+    if key != "facette_oms_diag":
+        return {"ok": False, "error": "?key=facette_oms_diag gerekli (gecici teshis ucu)"}
+    import asyncio, time
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        return {"ok": False, "stage": "client", "error": err}
+    info = {"test_mode": getattr(client, "test", None)}
+    try:
+        info["base"] = client._oms_base(); info["mid"] = client.merchant_id
+    except Exception as e:
+        info["base_err"] = str(e)
+
+    async def timed(fn, timeout):
+        t0 = time.time()
+        try:
+            r = await asyncio.wait_for(asyncio.to_thread(fn), timeout=timeout)
+            return {"ok": True, "ms": int((time.time() - t0) * 1000), "sample": str(r)[:300]}
+        except asyncio.TimeoutError:
+            return {"ok": False, "ms": int((time.time() - t0) * 1000),
+                    "error": f"timeout>{timeout}s (OMS yanit vermedi — Railway agindan erisilemez/yavas)"}
+        except Exception as e:
+            return {"ok": False, "ms": int((time.time() - t0) * 1000), "error": str(e)[:300]}
+
+    results = {"list_1": await timed(lambda: client.get_orders(None, None, 0, 1, read_timeout=10), 11)}
+    on = (on or "").strip()
+    if on:
+        results["by_number"] = await timed(lambda: client.get_order_by_number(on), 10)
+    return {"ok": True, "info": info, "results": results}
+
 @router.post("/hepsiburada/orders/create-test")
 async def create_hepsiburada_test_order(payload: dict = None, current_user: dict = Depends(require_admin)):
     """SADECE TEST (SIT): oms-stub üzerinden bir test siparişi oluşturur; sonra 'Çek' ile panele alınır.
