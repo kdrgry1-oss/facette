@@ -7,6 +7,7 @@ import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { optimizeImg, aspectFromDims } from "../lib/img";
 import { trackSelectPromotion } from "../lib/dataLayer";
+import { dedupeColorGroups } from "../lib/colorGroups";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -133,17 +134,18 @@ function ProductSlider({ block, products }) {
       .map(id => products?.find(p => p._id === id || p.id === id))
       .filter(Boolean);
   } else {
-    displayProducts = products?.slice(0, block?.settings?.limit || 8) || [];
+    displayProducts = dedupeColorGroups(products?.slice(0, (block?.settings?.limit || 8) * 2) || [])
+      .slice(0, block?.settings?.limit || 8);
   }
   
   if (displayProducts.length === 0) return null;
 
   return (
-    <section className="max-w-screen-2xl mx-auto px-4 py-12" data-testid="product-slider">
+    <section className="w-full px-2 md:px-4 py-10" data-testid="product-slider">
       {block?.title && (
         <h2 className="text-center text-lg font-medium tracking-wide mb-8">{block.title}</h2>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
         {displayProducts.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}
@@ -286,8 +288,8 @@ function HomeSkeleton() {
   return (
     <div data-testid="home-skeleton">
       <div className="w-full aspect-[16/7] bg-stone-100 animate-pulse" />
-      <section className="max-w-screen-2xl mx-auto px-4 py-12">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
+      <section className="w-full px-2 md:px-4 py-10">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="animate-pulse">
               <div className="aspect-[2/3] bg-stone-100 mb-3" />
@@ -387,9 +389,9 @@ export default function Home() {
           
           {/* Add default product grid if no product_slider block */}
           {!hasProductSlider && products.length > 0 && (
-            <section className="max-w-screen-2xl mx-auto px-4 py-12">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
-                {products.slice(0, 8).map((product) => (
+            <section className="w-full px-2 md:px-4 py-10">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+                {dedupeColorGroups(products).slice(0, 8).map((product) => (
                   <ProductCard key={product.id} product={product} />
                 ))}
               </div>
@@ -428,7 +430,7 @@ export default function Home() {
           </div>
 
           {/* Products Grid */}
-          <section className="max-w-screen-2xl mx-auto px-4 py-12">
+          <section className="w-full px-2 md:px-4 py-10">
             {loading ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 gap-y-8">
                 {[...Array(8)].map((_, i) => (
@@ -440,8 +442,8 @@ export default function Home() {
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
-                {products.map((product) => (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+                {dedupeColorGroups(products).map((product) => (
                   <ProductCard key={product.id} product={product} />
                 ))}
               </div>

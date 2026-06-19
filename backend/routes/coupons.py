@@ -516,8 +516,18 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
 
     # 1) Adaylar: aktif auto_apply kampanyalar + girilen kod
     candidates = {}
-    async for c in db.coupons.find({"is_active": True, "auto_apply": True}, {"_id": 0}):
-        candidates[c["id"]] = c
+    # OTO-UYGULAMA VARSAYILAN KAPALI: müşteri kupon kodunu KENDİSİ girer.
+    # Eski davranışı geri açmak için settings.promo_auto_apply_enabled = True.
+    _auto_on = False
+    try:
+        _s = await db.settings.find_one({"id": "main"},
+                                        {"_id": 0, "promo_auto_apply_enabled": 1}) or {}
+        _auto_on = bool(_s.get("promo_auto_apply_enabled", False))
+    except Exception:
+        _auto_on = False
+    if _auto_on:
+        async for c in db.coupons.find({"is_active": True, "auto_apply": True}, {"_id": 0}):
+            candidates[c["id"]] = c
     entered_id = None
     if entered:
         ec = await db.coupons.find_one({"code": entered}, {"_id": 0})

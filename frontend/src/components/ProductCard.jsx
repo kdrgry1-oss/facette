@@ -1,14 +1,16 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Heart, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { optimizeImg } from "../lib/img";
+import { sortLikeSize } from "../utils/sizeSort";
 import { trackSelectItem } from "../lib/dataLayer";
 import { toast } from "sonner";
 
 export default function ProductCard({ product, listId = "", listName = "", index }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [activeSib, setActiveSib] = useState(null); // hover edilen renk kardeşi
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const isFav = isFavorite(product.id);
@@ -16,19 +18,43 @@ export default function ProductCard({ product, listId = "", listName = "", index
 
   // Remove duplicate first image
   const allImages = product.images || [];
-  const images = allImages.length > 1 && allImages[0] === allImages[1] 
-    ? allImages.slice(1) 
+  const images = allImages.length > 1 && allImages[0] === allImages[1]
+    ? allImages.slice(1)
     : allImages;
-  
+
   const hasMultipleImages = images.length > 1;
   const hasDiscount = Boolean(product.sale_price && product.sale_price < product.price);
   const displayPrice = product.sale_price || product.price;
+
+  // Renk kardeşleri (aynı modelin diğer renkleri) — backend `color_siblings` döndürür.
+  const siblings = Array.isArray(product.color_siblings) ? product.color_siblings : [];
+  const hasColors = siblings.length > 1;
+  const activeId = activeSib?.id || product.id;
+  const targetSlug = activeSib?.slug || product.slug || product.id;
+
+  // Bedenler (hover'da görsel altında) — varyantlardan benzersiz beden + stok.
+  const sizeList = useMemo(() => {
+    const vs = product.variants || [];
+    const map = new Map();
+    for (const v of vs) {
+      const s = (v.size || "").toString().trim();
+      if (!s) continue;
+      if (!map.has(s)) map.set(s, { size: s, variant: v, stock: Number(v.stock) || 0 });
+      else map.get(s).stock += Number(v.stock) || 0;
+    }
+    const arr = [...map.values()];
+    try { return sortLikeSize(arr, (x) => x.size); } catch { return arr; }
+  }, [product.variants]);
 
   // Efektif stok: varyant varsa varyant stokları toplamı, yoksa ürün stoğu.
   const variants = product.variants || [];
   const variantStock = variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
   const effectiveStock = variants.length > 0 ? variantStock : (Number(product.stock) || 0);
   const isSoldOut = effectiveStock <= 0;
+
+  const displayedImage = activeSib?.image
+    ? activeSib.image
+    : (images[currentImageIndex] || images[0] || "/placeholder.jpg");
 
   const handleQuickAdd = (e) => {
     e.preventDefault();
@@ -41,30 +67,35 @@ export default function ProductCard({ product, listId = "", listName = "", index
     toast.success("Ürün sepete eklendi");
   };
 
+  // Hover'da bedene tıklayınca o beden varyantını sepete ekle.
+  const handleSizeAdd = (e, s) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!s || s.stock <= 0) return;
+    addItem(product, s.variant);
+    toast.success(`Sepete eklendi · Beden ${s.size}`);
+  };
+
   const handleFavorite = (e) => {
     e.preventDefault();
     e.stopPropagation();
     toggleFavorite(product);
   };
 
-  // Liste → ürün tıklaması (GA4 select_item). Favori/hızlı-ekle butonları
-  // stopPropagation yaptığı için yalnızca gerçek ürün tıklamasında tetiklenir.
   const handleSelect = () => {
     try {
       trackSelectItem({ product, listId, listName, index });
     } catch (_) { /* silent */ }
   };
 
-  // Handle mouse move for image hover change
+  // Görseller yatay kaydırma: fare sağa gittikçe sonraki görsel (Mango usulü).
   const handleMouseMove = (e) => {
-    if (!hasMultipleImages || !imageContainerRef.current) return;
-    
+    if (activeSib || !hasMultipleImages || !imageContainerRef.current) return;
     const rect = imageContainerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const width = rect.width;
     const segmentWidth = width / images.length;
     const newIndex = Math.min(Math.floor(x / segmentWidth), images.length - 1);
-    
     if (newIndex !== currentImageIndex && newIndex >= 0) {
       setCurrentImageIndex(newIndex);
     }
@@ -76,30 +107,30 @@ export default function ProductCard({ product, listId = "", listName = "", index
 
   return (
     <div className="product-card group" data-testid={`product-card-${product.id}`}>
-      <Link to={`/${product.slug || product.id}`} onClick={handleSelect}>
-        {/* Image Container */}
-        <div 
+      {/* Image (Link) */}
+      <Link to={`/${targetSlug}`} onClick={handleSelect} aria-label={product.name}>
+        <div
           ref={imageContainerRef}
           className="relative aspect-[2/3] bg-white overflow-hidden"
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >
           <img
-            src={optimizeImg(images[currentImageIndex] || "/placeholder.jpg", 700)}
+            src={optimizeImg(displayedImage, 700)}
             alt={product.name}
             className="w-full h-full object-cover object-top transition-opacity duration-200"
             loading="lazy"
             decoding="async"
           />
 
-          {/* Tükendi rozeti — efektif stok yoksa (görsel net kalır) */}
+          {/* Tükendi rozeti */}
           {isSoldOut && (
             <div className="absolute top-3 left-3 z-10 bg-black/80 text-white text-[10px] uppercase tracking-wider px-2 py-1">
               Tükendi
             </div>
           )}
 
-          {/* Favorite Button - Top Right */}
+          {/* Favorite Button */}
           <button
             onClick={handleFavorite}
             className="absolute top-3 right-3 z-10"
@@ -107,22 +138,43 @@ export default function ProductCard({ product, listId = "", listName = "", index
             aria-label={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
             title={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
           >
-            <Heart 
-              size={20} 
+            <Heart
+              size={20}
               strokeWidth={1.5}
-              className={`transition-colors ${isFav ? "fill-red-500 text-red-500" : "text-gray-400 hover:text-black"}`} 
+              className={`transition-colors ${isFav ? "fill-red-500 text-red-500" : "text-gray-400 hover:text-black"}`}
             />
           </button>
 
-          {/* Image Indicators - show which segment is active */}
-          {hasMultipleImages && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-              {images.map((_, index) => (
+          {/* Bedenler — hover'da görsel altında (Mango usulü) */}
+          {sizeList.length > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 z-10 hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-3 bg-gradient-to-t from-white/95 via-white/85 to-transparent pt-6 pb-2.5 px-2">
+              {sizeList.map((s) => (
+                <button
+                  key={s.size}
+                  onClick={(e) => handleSizeAdd(e, s)}
+                  disabled={s.stock <= 0}
+                  className={`text-[12px] tracking-wide transition-colors ${
+                    s.stock <= 0
+                      ? "text-gray-300 line-through cursor-not-allowed"
+                      : "text-gray-800 hover:text-black hover:underline underline-offset-4"
+                  }`}
+                  title={s.stock <= 0 ? `${s.size} · Tükendi` : `${s.size} · Sepete ekle`}
+                >
+                  {s.size}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Görsel göstergeleri — hover'da bedenlere yer açmak için gizlenir */}
+          {hasMultipleImages && !activeSib && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-0 md:group-hover:opacity-0 transition-opacity">
+              {images.map((_, i) => (
                 <div
-                  key={index}
+                  key={i}
                   className={`transition-all ${
-                    index === currentImageIndex 
-                      ? "w-5 h-1.5 bg-black rounded-full" 
+                    i === currentImageIndex
+                      ? "w-5 h-1.5 bg-black rounded-full"
                       : "w-1.5 h-1.5 bg-gray-300 rounded-full"
                   }`}
                 />
@@ -130,15 +182,13 @@ export default function ProductCard({ product, listId = "", listName = "", index
             </div>
           )}
         </div>
+      </Link>
 
-        {/* Product Info - facette.com.tr style */}
-        <div className="mt-3">
-          {/* Name and Add to Cart in same row */}
+      {/* Product Info */}
+      <div className="mt-3">
+        <Link to={`/${targetSlug}`} onClick={handleSelect}>
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-sm leading-snug flex-1 line-clamp-2">
-              {product.name}
-            </h3>
-            {/* Add to cart icon next to name */}
+            <h3 className="text-sm leading-snug flex-1 line-clamp-2">{product.name}</h3>
             <button
               onClick={handleQuickAdd}
               disabled={isSoldOut}
@@ -150,7 +200,7 @@ export default function ProductCard({ product, listId = "", listName = "", index
               <ShoppingBag size={18} strokeWidth={1.5} />
             </button>
           </div>
-          
+
           {/* Price */}
           <div className="mt-1.5 flex items-center gap-2">
             {hasDiscount ? (
@@ -162,8 +212,42 @@ export default function ProductCard({ product, listId = "", listName = "", index
               <span className="text-sm">{(displayPrice || 0).toFixed(2).replace('.', ',')} TL</span>
             )}
           </div>
-        </div>
-      </Link>
+        </Link>
+
+        {/* Renk kutucukları (swatch) — aynı modelin diğer renkleri */}
+        {hasColors && (
+          <div
+            className="mt-2 flex flex-wrap items-center gap-1.5"
+            onMouseLeave={() => setActiveSib(null)}
+            data-testid={`color-swatches-${product.id}`}
+          >
+            {siblings.slice(0, 6).map((sib) => {
+              const isActive = sib.id === activeId;
+              const isSelf = sib.id === product.id;
+              return (
+                <Link
+                  key={sib.id}
+                  to={`/${sib.slug || sib.id}`}
+                  onMouseEnter={() => setActiveSib(isSelf ? null : sib)}
+                  onClick={(e) => { if (isSelf) e.preventDefault(); }}
+                  className={`w-6 h-6 overflow-hidden border transition-colors flex-shrink-0 ${
+                    isActive ? "border-black ring-1 ring-black" : "border-gray-300 hover:border-black"
+                  }`}
+                  title={sib.color || ""}
+                  aria-label={sib.color || "Renk"}
+                >
+                  {sib.image
+                    ? <img src={optimizeImg(sib.image, 80)} alt={sib.color || ""} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    : <span className="block w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
+                </Link>
+              );
+            })}
+            {siblings.length > 6 && (
+              <span className="text-[11px] text-gray-400">+{siblings.length - 6}</span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

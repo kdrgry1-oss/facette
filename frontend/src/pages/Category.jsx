@@ -7,6 +7,7 @@ import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { trackViewItemList } from "../lib/dataLayer";
 import { slugify } from "../lib/slug";
+import { dedupeColorGroups } from "../lib/colorGroups";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -91,7 +92,7 @@ export default function Category() {
   };
 
   const currentCategory = categories.find(c => c.slug === slug);
-  const categoryName = currentCategory?.name || slug?.replace(/-/g, ' ').toUpperCase() || 'TÜM ÜRÜNLER';
+  const categoryName = currentCategory?.name || slug?.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'Tüm Ürünler';
 
   const sortOptions = [
     { label: "En Yeniler", sort: "created_at", order: "desc" },
@@ -110,10 +111,10 @@ export default function Category() {
     <div className="min-h-screen bg-white" data-testid="category-page">
       <Header />
 
-      <div className="container-main">
-        {/* Category Title */}
-        <div className="py-8 text-center border-b">
-          <h1 className="text-2xl md:text-3xl tracking-wider uppercase font-light">
+      <div className="w-full px-2 md:px-4">
+        {/* Category Title — Mango usulü sade başlık (sola yaslı, ince) */}
+        <div className="pt-8 pb-4 md:pt-10">
+          <h1 className="text-xl md:text-2xl font-normal tracking-tight text-stone-900">
             {categoryName}
           </h1>
         </div>
@@ -164,7 +165,7 @@ export default function Category() {
         {/* Products Grid */}
         <div className="py-8">
           {loading ? (
-            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-0 gap-y-8 md:gap-y-10`}>
+            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-3 gap-y-8 md:gap-y-10`}>
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="animate-pulse">
                   <div className="aspect-[2/3] bg-gray-100 mb-3" />
@@ -179,8 +180,8 @@ export default function Category() {
               <p className="text-gray-500">Bu kategoride ürün bulunamadı</p>
             </div>
           ) : (
-            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-0 gap-y-8 md:gap-y-10`}>
-              {products.map((product, idx) => (
+            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-3 gap-y-8 md:gap-y-10`}>
+              {dedupeColorGroups(products).map((product, idx) => (
                 <ProductCard key={product.id} product={product} listName={slug || "all"} index={idx} />
               ))}
             </div>

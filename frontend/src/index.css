@@ -146,7 +146,7 @@ button { font-weight: 400; }
 }
 
 .product-card:hover img {
-  @apply scale-105;
+  @apply scale-100;
 }
 
 /* Search overlay */
