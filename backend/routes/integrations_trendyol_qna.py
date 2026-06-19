@@ -19,6 +19,7 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
+import os
 import re
 import httpx
 
@@ -552,29 +553,37 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
       3) Bulunan her contentId için public yorumlar çekilip product_reviews'a yazılır,
          ürünün rating/review_count alanları yeniden hesaplanır.
     """
-    from .integrations import get_trendyol_config
     from trendyol_client import TrendyolClient
 
-    config = await get_trendyol_config()
-    if not config.get("is_active"):
-        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
-    supplier_id = config.get("supplier_id")
-    api_key = config.get("api_key")
-    api_secret = config.get("api_secret")
-    mode = config.get("mode", "live")
+    # Config: çalışan fiyat script'iyle birebir aynı kaynak (db.settings id=trendyol).
+    # NOT: get_trendyol_config() mode varsayılanı "sandbox" — bu stage API'ye düşüp
+    # boş ürün listesi döndürüyordu (indexed=0). Burada mode varsayılanı "live".
+    settings = await db.settings.find_one({"id": "trendyol"}) or {}
+    supplier_id = settings.get("supplier_id") or os.environ.get("TRENDYOL_SUPPLIER_ID", "")
+    api_key = settings.get("api_key") or os.environ.get("TRENDYOL_API_KEY", "")
+    api_secret = settings.get("api_secret") or os.environ.get("TRENDYOL_API_SECRET", "")
+    mode = settings.get("mode") or os.environ.get("TRENDYOL_MODE") or "live"
     if not (supplier_id and api_key and api_secret):
         raise HTTPException(status_code=400, detail="Trendyol kimlik bilgileri eksik")
 
-    # 1) barcode -> contentId haritası (tüm onaylı Trendyol ürünleri)
+    # 1) barcode -> contentId haritası (Trendyol ürünleri; approved filtresi yok = en geniş)
     client = TrendyolClient(supplier_id=str(supplier_id), api_key=api_key, api_secret=api_secret, mode=mode)
     bc_to_cid: dict = {}
+    debug = {"mode": mode, "ty_total_elements": None, "ty_total_pages": None,
+             "ty_first_page_count": 0, "ty_sample_keys": None, "ty_with_contentid": 0}
     page = 0
     while page < 300:
         try:
-            data = await client.get_filtered_products(approved=True, page=page, size=200)
+            data = await client.get_filtered_products(page=page, size=200)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Trendyol ürün listesi hatası: {e}")
         content = (data or {}).get("content", []) or []
+        if page == 0:
+            debug["ty_total_elements"] = (data or {}).get("totalElements")
+            debug["ty_total_pages"] = (data or {}).get("totalPages")
+            debug["ty_first_page_count"] = len(content)
+            if content:
+                debug["ty_sample_keys"] = sorted(list(content[0].keys()))
         if not content:
             break
         for p in content:
@@ -582,6 +591,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
             cid = p.get("contentId")
             if bc and cid:
                 bc_to_cid[bc] = str(cid)
+                debug["ty_with_contentid"] += 1
         total_pages = (data or {}).get("totalPages", 1) or 1
         page += 1
         if page >= total_pages:
@@ -608,6 +618,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
         "errors": [],
         "dry_run": dry_run,
         "min_rating": min_rating,
+        "_debug": debug,
     }
 
     # 3) her ürün için contentId'leri bul, yorumları çek
