@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check, Truck } from "lucide-react";
+import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -61,6 +61,45 @@ export default function ProductDetail() {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifySubmitting, setNotifySubmitting] = useState(false);
+
+  // Ürün değerlendirmeleri (yorum + puan). Backend: GET /reviews/product/:id (onaylı),
+  // POST /reviews (auth, moderasyon → pending). Admin onayı sonrası listede görünür.
+  const [reviews, setReviews] = useState([]);
+  const [reviewAvg, setReviewAvg] = useState(0);
+  const [reviewTotal, setReviewTotal] = useState(0);
+  const [rvRating, setRvRating] = useState(0);
+  const [rvTitle, setRvTitle] = useState("");
+  const [rvComment, setRvComment] = useState("");
+  const [rvSubmitting, setRvSubmitting] = useState(false);
+  const rvLoggedIn = !!localStorage.getItem("token");
+
+  useEffect(() => {
+    if (!product?.id) return;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${API}/reviews/product/${product.id}`);
+        setReviews(data.items || []);
+        setReviewAvg(data.average_rating || 0);
+        setReviewTotal(data.total || 0);
+      } catch { /* yorum yoksa sessiz geç */ }
+    })();
+  }, [product?.id]);
+
+  const submitReview = async () => {
+    if (rvRating < 1) { toast.error("Lütfen 1-5 yıldız seçin"); return; }
+    setRvSubmitting(true);
+    try {
+      await axios.post(`${API}/reviews`,
+        { product_id: product.id, rating: rvRating, title: rvTitle, comment: rvComment },
+        { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
+      toast.success("Yorumunuz alındı, moderasyon sonrası yayınlanacak");
+      setRvRating(0); setRvTitle(""); setRvComment("");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Yorum gönderilemedi");
+    } finally {
+      setRvSubmitting(false);
+    }
+  };
 
   // SEO — JSON-LD yapısal veri (Product + BreadcrumbList). react-helmet yok,
   // bu yüzden <head>'e script'i elle enjekte edip temizliyoruz. Google'ın
@@ -781,6 +820,87 @@ export default function ProductDetail() {
             </div>
           </section>
         )}
+
+        {/* Değerlendirmeler (yorum + puan) */}
+        <section className="mt-12 pt-12 border-t" data-testid="product-reviews">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-base font-light">Değerlendirmeler{reviewTotal > 0 ? ` (${reviewTotal})` : ""}</h2>
+            {reviewTotal > 0 && (
+              <div className="flex items-center gap-1.5 text-sm">
+                <div className="flex">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Star key={i} size={16} className={i <= Math.round(reviewAvg) ? "fill-black text-black" : "text-gray-300"} />
+                  ))}
+                </div>
+                <span className="text-gray-600">{reviewAvg.toFixed(1)} / 5</span>
+              </div>
+            )}
+          </div>
+
+          {reviews.length > 0 ? (
+            <div className="space-y-5 mb-10">
+              {reviews.map((r) => (
+                <div key={r.id} className="border-b border-black/5 pb-5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="flex">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <Star key={i} size={13} className={i <= r.rating ? "fill-black text-black" : "text-gray-300"} />
+                      ))}
+                    </div>
+                    <span className="text-xs font-medium">{r.user_name || "Müşteri"}</span>
+                    <span className="text-[11px] text-gray-400">
+                      {r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" }) : ""}
+                    </span>
+                  </div>
+                  {r.title && <p className="text-sm font-medium mb-0.5">{r.title}</p>}
+                  {r.comment && <p className="text-sm text-gray-600 leading-relaxed">{r.comment}</p>}
+                  {r.admin_reply && (
+                    <div className="mt-2 ml-3 pl-3 border-l-2 border-black/10">
+                      <p className="text-[11px] font-medium text-gray-500 mb-0.5">FACETTE</p>
+                      <p className="text-xs text-gray-600">{r.admin_reply}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400 mb-10">Bu ürün için henüz değerlendirme yok. İlk yorumu siz yapın.</p>
+          )}
+
+          {rvLoggedIn ? (
+            <div className="max-w-xl">
+              <h3 className="text-sm font-medium mb-3">Değerlendirme yaz</h3>
+              <div className="flex items-center gap-1 mb-3">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <button key={i} type="button" onClick={() => setRvRating(i)} className="p-0.5" aria-label={`${i} yıldız`}>
+                    <Star size={24} className={i <= rvRating ? "fill-black text-black" : "text-gray-300"} />
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text" value={rvTitle} onChange={(e) => setRvTitle(e.target.value)}
+                placeholder="Başlık (opsiyonel)" maxLength={120}
+                className="w-full border border-black/15 px-3 py-2 text-sm mb-3 focus:outline-none focus:border-black"
+              />
+              <textarea
+                value={rvComment} onChange={(e) => setRvComment(e.target.value)}
+                placeholder="Deneyiminizi paylaşın…" rows={4} maxLength={2000}
+                className="w-full border border-black/15 px-3 py-2 text-sm mb-3 focus:outline-none focus:border-black resize-none"
+              />
+              <button
+                type="button" onClick={submitReview} disabled={rvSubmitting}
+                className="bg-black text-white text-sm px-6 py-2.5 hover:bg-gray-800 transition disabled:opacity-50"
+              >
+                {rvSubmitting ? "Gönderiliyor…" : "Gönder"}
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2">Yorumunuz moderasyon sonrası yayınlanır.</p>
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500">
+              Değerlendirme yapmak için <Link to="/giris" className="underline hover:text-black">giriş yapın</Link>.
+            </div>
+          )}
+        </section>
 
         {/* Similar Products */}
         {similarProducts.length > 0 && (

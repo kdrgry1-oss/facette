@@ -2,6 +2,14 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): P2-13 yorum/puan — storefront PDP entegrasyonu
+- Backend reviews API (extras.py: POST /reviews, GET /reviews/product/:id, admin moderasyon) ZATEN vardı;
+  admin sayfası (ProductReviews.jsx → /admin/yorumlar) ZATEN bağlıydı. EKSİK olan storefront UI eklendi.
+- frontend/src/pages/ProductDetail.jsx: "Değerlendirmeler" bölümü — ortalama yıldız + onaylı yorum listesi
+  (kullanıcı adı, yıldız, başlık, yorum, tarih, FACETTE admin yanıtı) + giriş yapan kullanıcıya yorum formu
+  (1-5 yıldız + başlık + yorum). POST sonrası "moderasyon sonrası yayınlanır" bilgisi. Giriş yoksa /giris linki.
+- Backend modeline birebir uyumlu (rating 1-5, title≤120, comment≤2000, status pending→approved).
+
 ## YENİ (bu pakette): P3-19 çift success route → tek canonical + 301
 - frontend/public/_redirects (YENİ): /siparis-tamamlandi/* → /order-success/:splat 301 (Cloudflare gerçek 301, SEO tek canonical).
 - frontend/src/App.js: Navigate+useParams import; /siparis-tamamlandi/:orderNumber artık OrderSuccess yerine
