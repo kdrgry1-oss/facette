@@ -463,13 +463,34 @@ _PUBLIC_HOST = "public.trendyol.com"
 _pin_state = {"done": False, "ip": None}
 
 
+def _resolve_public_ip_via_doh():
+    """public.trendyol.com'un GERÇEK A kaydını DNS-over-HTTPS ile çözer.
+    Cloudflare DoH (1.1.1.1) sabit IP — Railway DNS'e bağımlı değil. SNI cloudflare-dns.com."""
+    for doh_ip, sni in (("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")):
+        try:
+            with httpx.Client(timeout=10) as c:
+                req = c.build_request(
+                    "GET", f"https://{doh_ip}/dns-query",
+                    params={"name": _PUBLIC_HOST, "type": "A"},
+                    headers={"accept": "application/dns-json"},
+                )
+                req.extensions["sni_hostname"] = sni.encode("ascii")
+                resp = c.send(req)
+                resp.raise_for_status()
+                for ans in resp.json().get("Answer", []):
+                    if ans.get("type") == 1 and ans.get("data"):  # A record
+                        return ans["data"]
+        except Exception:
+            continue
+    return None
+
+
 def _pin_public_trendyol_if_needed():
     """
-    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor; apigw.trendyol.com
-    çözülüyor (Cloudflare). Çözülebilen bir Trendyol/Cloudflare host'unun IP'sini tespit
-    eder (_pin_state["ip"]). Fetch bu IP'ye bağlanır; TLS SNI + cert + Host header
-    public.trendyol.com kalır (httpx sni_hostname extension), Cloudflare anycast doğru
-    origin'e yönlendirir. DNS'e dokunmaz. Idempotent.
+    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor. Önce DoH ile GERÇEK
+    public.trendyol.com IP'sini çözeriz (apigw anycast IP'si farklı Cloudflare origin —
+    530 veriyordu). Fetch bu IP'ye bağlanır; TLS SNI + cert + Host header public.trendyol.com
+    kalır (httpx sni_hostname extension). DNS'e dokunmaz. Idempotent.
     """
     if _pin_state["done"]:
         return
@@ -479,6 +500,12 @@ def _pin_public_trendyol_if_needed():
         return  # zaten çözülüyor — pin gereksiz, ip None kalır (normal URL kullanılır)
     except Exception:
         pass
+    # 1) DoH ile gerçek IP (en doğru — doğru origin'e gider)
+    ip = _resolve_public_ip_via_doh()
+    if ip:
+        _pin_state["ip"] = ip
+        return
+    # 2) fallback: çözülebilen Trendyol/Cloudflare host IP'si (anycast denemesi)
     for alt in ("apigw.trendyol.com", "api.trendyol.com", "www.trendyol.com"):
         try:
             _pin_state["ip"] = socket.gethostbyname(alt)

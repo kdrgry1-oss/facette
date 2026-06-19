@@ -382,13 +382,6 @@ export default function Checkout() {
   };
   const resetExcluded = () => setExcludedIds([]);
 
-  // OTO-UYGULAMA KAPALI: girilen kupon "otomatik uygulandı" bloğunda gösterilmez
-  // (yalnızca Totals'taki "Kupon" satırında çıkar). Gelecekte oto-kampanya açılırsa
-  // sadece OTOMATİK olanlar bu blokta görünür — girilen kod değil.
-  const autoApplied = appliedPromotions.filter(
-    (p) => !(appliedCoupon?.code && (p.code || "").toUpperCase() === appliedCoupon.code.toUpperCase())
-  );
-
   // ----- Address Modal -----
   const openAddressModal = (which) => {
     setAddressModal(which);
@@ -1026,17 +1019,17 @@ export default function Checkout() {
                   <span className="font-medium">Sipariş Özeti</span>
                 </div>
 
-                {/* Otomatik kampanyalar (varsa) — girilen kupon burada GÖSTERİLMEZ */}
-                {(autoApplied.length > 0 || eligiblePromotions.length > 0) && (
+                {/* En avantajlı indirim otomatik uygulandı + uygulanan kampanyalar (X ile kaldır) */}
+                {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (
                   <div className="px-5 pt-4" data-testid="applied-promotions">
-                    {autoApplied.length > 0 && (
+                    {appliedPromotions.length > 0 && (
                       <>
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700 mb-2">
                           <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3 3 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
-                          Kampanya uygulandı
+                          En avantajlı indirim otomatik uygulandı
                         </div>
                         <div className="space-y-1">
-                          {autoApplied.map((p, i) => (
+                          {appliedPromotions.map((p, i) => (
                             <div key={i} className="flex items-center justify-between text-xs gap-2">
                               <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
                               <span className="text-green-600 font-semibold shrink-0">-{Number(p.discount).toFixed(2)} ₺</span>

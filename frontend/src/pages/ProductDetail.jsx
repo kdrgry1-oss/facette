@@ -7,7 +7,6 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { optimizeImg } from "../lib/img";
-import { resolveColor, needsBorder, MULTI_GRADIENT } from "../lib/colorMap";
 import { slugify } from "../lib/slug";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
@@ -190,8 +189,6 @@ export default function ProductDetail() {
       try {
         const res = await axios.get(`${API}/products/${slug}`);
         setProduct(res.data);
-        setSelectedImage(0);
-        setMobileImageIdx(0);
 
         // Canonical URL: ürün id/eski slug ile açıldıysa doğru slug'a yönlendir (SEO + tutarlı URL)
         if (res.data?.slug && res.data.slug !== slug) {
@@ -453,8 +450,8 @@ export default function ProductDetail() {
 
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-          {/* Image Gallery — mobile: swipe carousel, desktop: thumbnail strip + büyük görsel */}
-          <div className="lg:col-span-6 space-y-2 min-w-0">
+          {/* Image Gallery — mobile: swipe carousel, desktop: 2-col grid */}
+          <div className="lg:col-span-8 space-y-2 min-w-0">
             {/* Mobile: full-width snap carousel with dots */}
             <div className="lg:hidden -mx-4">
               <div
@@ -489,49 +486,25 @@ export default function ProductDetail() {
               )}
             </div>
 
-            {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü) */}
-            <div className="hidden lg:flex gap-4">
-              {displayImages.length > 1 && (
-                <div className="flex flex-col gap-2 w-[70px] shrink-0">
-                  {displayImages.map((img, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setSelectedImage(index)}
-                      onMouseEnter={() => setSelectedImage(index)}
-                      className={`relative aspect-[2/3] bg-stone-50 overflow-hidden border transition-colors ${
-                        index === selectedImage ? "border-black" : "border-transparent hover:border-gray-300"
-                      }`}
-                      aria-label={`Görsel ${index + 1}`}
-                      data-testid={`pdp-thumb-${index}`}
-                    >
-                      <img
-                        src={optimizeImg(img, 200)}
-                        alt=""
-                        className="w-full h-full object-cover object-top"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="relative aspect-[2/3] bg-stone-50">
+            {/* Desktop: 2-col grid */}
+            <div className="hidden lg:grid grid-cols-2 gap-2">
+              {displayImages.map((img, index) => (
+                <div key={index} className="relative aspect-[2/3] bg-stone-50">
                   <img
-                    src={optimizeImg(displayImages[selectedImage] || displayImages[0], 1400)}
-                    alt={product.name}
+                    src={optimizeImg(img, 1200)}
+                    alt={`${product.name} ${index + 1}`}
                     className="w-full h-full object-cover object-top"
-                    loading="eager"
-                    fetchPriority="high"
+                    loading={index === 0 ? "eager" : "lazy"}
+                    fetchPriority={index === 0 ? "high" : "auto"}
                     decoding="async"
                   />
                 </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Product Info — Simon Miller usulü ferah sağ kolon */}
-          <div className="lg:col-span-5 lg:col-start-8 lg:sticky lg:top-24 min-w-0">
+          {/* Product Info */}
+          <div className="lg:col-span-4 lg:max-w-md lg:sticky lg:top-24 min-w-0">
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}
@@ -558,11 +531,9 @@ export default function ProductDetail() {
             {/* Size Selection */}
             <div className="mb-5">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs">Beden Seçiniz{selectedVariant && selectedVariant.stock === 0 && (<span className="text-red-600 ml-2">· Tükendi</span>)}</span>
-                {sizeTableData && (
-                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline" data-testid="size-guide-link">
-                    Beden Rehberi
-                  </button>
+                <span className="text-xs">Beden Seçiniz</span>
+                {selectedVariant && selectedVariant.stock === 0 && (
+                  <span className="text-xs text-red-600">Tükendi</span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -592,6 +563,15 @@ export default function ProductDetail() {
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
+
+            {/* Size Chart Link – only shown when HTML table exists */}
+            {sizeTableData && (
+              <div className="mb-3">
+                <button onClick={() => setShowSizeChart(true)} className="text-xs underline hover:no-underline" data-testid="show-size-table-btn">
+                  Beden Tablosu
+                </button>
+              </div>
+            )}
 
             {/* Add to Cart */}
             {(() => {
@@ -992,48 +972,31 @@ function ColorSiblings({ productId, currentColor }) {
     return () => { cancel = true; };
   }, [productId]);
   if (!siblings.length) return null;
-  const selfCol = resolveColor(currentColor);
-  const selfStyle = selfCol?.type === "solid"
-    ? { backgroundColor: selfCol.value }
-    : selfCol?.type === "multi"
-      ? { background: MULTI_GRADIENT }
-      : { background: "linear-gradient(135deg,#f3f4f6,#d1d5db)" };
   return (
     <div className="mb-5" data-testid="color-siblings">
       <p className="text-xs uppercase tracking-[0.18em] text-gray-700 mb-2">
         Renk: <span className="text-black font-medium">{currentColor || "—"}</span>
         <span className="text-gray-400 ml-2">+ {siblings.length} renk daha</span>
       </p>
-      <div className="flex flex-wrap gap-2.5">
-        {/* Mevcut ürün — seçili swatch (renginden dolu) */}
-        <div
-          className="w-9 h-9 rounded-full ring-2 ring-offset-2 ring-black border border-black/10 flex-shrink-0"
-          style={selfStyle}
-          title={currentColor || ""}
-        />
-        {siblings.map((s) => {
-          const col = resolveColor(s.color);
-          let style, fallback = false;
-          if (col?.type === "solid") style = { backgroundColor: col.value };
-          else if (col?.type === "multi") style = { background: MULTI_GRADIENT };
-          else fallback = true;
-          const lightBorder = col?.type === "solid" && needsBorder(col.value);
-          return (
-            <a
-              key={s.id}
-              href={`/${s.slug || s.id}`}
-              className={`w-9 h-9 rounded-full overflow-hidden flex-shrink-0 transition-all hover:ring-2 hover:ring-offset-2 hover:ring-black ${
-                lightBorder ? "border border-gray-300" : "border border-black/10"
-              }`}
-              title={`${s.color || s.name || ""}`}
-              data-testid={`color-sibling-${s.id}`}
-            >
-              {fallback
-                ? <span className="block w-full h-full bg-gradient-to-br from-gray-200 to-gray-400" />
-                : <span className="block w-full h-full" style={style} />}
-            </a>
-          );
-        })}
+      <div className="flex flex-wrap gap-2">
+        {/* Mevcut ürün ilk swatch — siyah border */}
+        <div className="w-12 h-12 border-2 border-black bg-gray-50 overflow-hidden flex-shrink-0" title={currentColor || ""}>
+          {/* Boş — bu mevcut ürün */}
+          <div className="w-full h-full flex items-center justify-center text-[10px] text-black font-bold">●</div>
+        </div>
+        {siblings.map((s) => (
+          <a
+            key={s.id}
+            href={`/${s.slug || s.id}`}
+            className="w-12 h-12 border border-gray-300 hover:border-black bg-white overflow-hidden flex-shrink-0 transition-colors"
+            title={`${s.color || s.name || ""}`}
+            data-testid={`color-sibling-${s.id}`}
+          >
+            {s.image
+              ? <img src={optimizeImg(s.image, 150)} alt={s.color || ""} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+              : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
+          </a>
+        ))}
       </div>
     </div>
   );
