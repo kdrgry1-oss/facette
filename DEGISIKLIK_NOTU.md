@@ -2,6 +2,23 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): Trendyol TOPLU yorum çekme — 4-5 yıldız, tüm ürünler
+- backend/routes/integrations_trendyol_qna.py:
+  • Mevcut tekil scrape altyapısı korundu; ÜZERİNE toplu otomatik akış eklendi.
+  • sync_all_trendyol_reviews_core(min_rating=4, limit, dry_run): Trendyol getProducts
+    (approved) ile barcode→contentId haritası kurar → her site ürününün barcode'ları
+    (ana + varyant) eşlenir → bulunan contentId'ler için public yorum API'sinden
+    >= min_rating yorumlar çekilir → product_reviews'a yazılır (external_id ile dedup,
+    idempotent) → ürün rating/review_count güncellenir.
+  • Yeni endpoint: POST /api/integrations/trendyol/reviews/sync-all (admin)
+    Body: { "min_rating": 4, "limit": 0, "dry_run": false }
+  • Trendyol alan adı: getProducts response'unda contentId (productContentId DEĞİL) — doğrulandı.
+- backend/scripts/sync_trendyol_reviews.py (YENİ): container CLI.
+    DRY-RUN: python -m scripts.sync_trendyol_reviews --min-rating 4 --dry-run
+    CANLI  : python -m scripts.sync_trendyol_reviews --min-rating 4
+    Test   : python -m scripts.sync_trendyol_reviews --min-rating 4 --limit 20
+  • Çekilen yorumlar approved:True (storefront'ta görünür); source=trendyol_public.
+
 ## YENİ (bu pakette): Meta feed — g:size kaldırıldı (kontrol raporu 2026-06-18)
 - backend/routes/products.py grouped feed (google/generic): <g:size> BASIMI KALDIRILDI.
   Eski feed 66 üründe tutarsız "STD" size basıyordu; rapor "hiç size yazma, renk-düzeyi temiz feed" dedi.

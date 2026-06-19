@@ -451,3 +451,230 @@ async def scrape_trendyol_reviews_bulk(
         except Exception as e:
             results.append({"product_id": it.get("product_id"), "ok": False, "error": str(e)})
     return {"success": True, "total_inserted": total_inserted, "items": results}
+
+
+# ============================================================================
+# TOPLU YORUM SENKRONU — tüm aktif site ürünleri için Trendyol 4-5★ yorumları
+# ============================================================================
+
+async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
+    """Trendyol public storefront API'sinden bir contentId'nin yorumlarını çeker (sayfalı)."""
+    api_url = (
+        "https://public.trendyol.com/discovery-web-websfxsocialreviewrating-santral/"
+        f"api/v1/reviews/{content_id}"
+    )
+    fetched: List[dict] = []
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        page = 0
+        while page < max_pages:
+            params = {"page": page, "size": 30, "order": "DESC", "orderBy": "Score"}
+            resp = await client.get(
+                api_url, params=params,
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            )
+            if resp.status_code == 404:
+                break
+            resp.raise_for_status()
+            data = resp.json()
+            reviews = (data.get("result") or {}).get("productReviews", {}).get("content", [])
+            if not reviews:
+                break
+            fetched.extend(reviews)
+            total_pages = (data.get("result") or {}).get("productReviews", {}).get("totalPages", 1)
+            page += 1
+            if page >= total_pages:
+                break
+    return fetched
+
+
+async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_id: str, min_rating: int) -> dict:
+    """Çekilen ham yorumlardan >= min_rating olanları product_reviews'a yazar (external_id ile dedup)."""
+    inserted = skipped_low = skipped_existing = 0
+    for r in fetched:
+        rating = int(r.get("rate") or 0)
+        if rating < min_rating:
+            skipped_low += 1
+            continue
+        review_id = str(r.get("id") or "")
+        if not review_id:
+            continue
+        existing = await db.product_reviews.find_one(
+            {"source": "trendyol_public", "external_id": review_id}, {"_id": 1}
+        )
+        if existing:
+            skipped_existing += 1
+            continue
+        doc = {
+            "id": generate_id(),
+            "external_id": review_id,
+            "source": "trendyol_public",
+            "product_id": local_pid or None,
+            "trendyol_content_id": content_id,
+            "rating": rating,
+            "title": r.get("commentTitle") or "",
+            "comment": r.get("comment") or "",
+            "user_name": r.get("userFullName") or "Trendyol Müşterisi",
+            "is_verified": bool(r.get("verifiedPurchase")),
+            "is_seller_verified": bool(r.get("sellerVerified")),
+            "approved": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "comment_date": r.get("commentDateISOtype") or r.get("lastModifiedDate") or "",
+        }
+        await db.product_reviews.insert_one(doc)
+        inserted += 1
+    return {"inserted": inserted, "skipped_low_rating": skipped_low, "skipped_existing": skipped_existing}
+
+
+async def _recalc_product_rating(local_pid: str) -> None:
+    """Bir ürünün onaylı yorumlarından ortalama puan + adet hesaplayıp products dokümanına yazar."""
+    agg = await db.product_reviews.aggregate([
+        {"$match": {"product_id": local_pid, "approved": True}},
+        {"$group": {"_id": None, "avg": {"$avg": "$rating"}, "cnt": {"$sum": 1}}},
+    ]).to_list(1)
+    if agg:
+        await db.products.update_one(
+            {"id": local_pid},
+            {"$set": {
+                "rating": round(agg[0]["avg"], 2),
+                "review_count": agg[0]["cnt"],
+                "reviews_synced_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
+
+async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dry_run: bool = False) -> dict:
+    """
+    TÜM aktif site ürünleri için Trendyol public yorumlarını (>= min_rating) çeker.
+
+    Eşleştirme akışı:
+      1) Trendyol getProducts (approved) → barcode→contentId haritası kurulur.
+      2) Her site ürününün barcode'ları (ana + varyant) bu haritada aranır.
+      3) Bulunan her contentId için public yorumlar çekilip product_reviews'a yazılır,
+         ürünün rating/review_count alanları yeniden hesaplanır.
+    """
+    from .integrations import get_trendyol_config
+    from trendyol_client import TrendyolClient
+
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    supplier_id = config.get("supplier_id")
+    api_key = config.get("api_key")
+    api_secret = config.get("api_secret")
+    mode = config.get("mode", "live")
+    if not (supplier_id and api_key and api_secret):
+        raise HTTPException(status_code=400, detail="Trendyol kimlik bilgileri eksik")
+
+    # 1) barcode -> contentId haritası (tüm onaylı Trendyol ürünleri)
+    client = TrendyolClient(supplier_id=str(supplier_id), api_key=api_key, api_secret=api_secret, mode=mode)
+    bc_to_cid: dict = {}
+    page = 0
+    while page < 300:
+        try:
+            data = await client.get_filtered_products(approved=True, page=page, size=200)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Trendyol ürün listesi hatası: {e}")
+        content = (data or {}).get("content", []) or []
+        if not content:
+            break
+        for p in content:
+            bc = (p.get("barcode") or "").strip()
+            cid = p.get("contentId")
+            if bc and cid:
+                bc_to_cid[bc] = str(cid)
+        total_pages = (data or {}).get("totalPages", 1) or 1
+        page += 1
+        if page >= total_pages:
+            break
+
+    # 2) aktif site ürünleri
+    products = await db.products.find(
+        {"is_active": True, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "barcode": 1, "variants": 1},
+    ).to_list(100000)
+    if limit and limit > 0:
+        products = products[:limit]
+
+    summary = {
+        "trendyol_products_indexed": len(bc_to_cid),
+        "site_products": len(products),
+        "matched_products": 0,
+        "unmatched_products": 0,
+        "content_ids_scraped": 0,
+        "total_fetched": 0,
+        "total_inserted": 0,
+        "skipped_low_rating": 0,
+        "skipped_existing": 0,
+        "errors": [],
+        "dry_run": dry_run,
+        "min_rating": min_rating,
+    }
+
+    # 3) her ürün için contentId'leri bul, yorumları çek
+    for p in products:
+        pid = p.get("id")
+        barcodes = set()
+        if (p.get("barcode") or "").strip():
+            barcodes.add(p["barcode"].strip())
+        for v in (p.get("variants") or []):
+            if (v.get("barcode") or "").strip():
+                barcodes.add(v["barcode"].strip())
+        cids = []
+        for bc in barcodes:
+            cid = bc_to_cid.get(bc)
+            if cid and cid not in cids:
+                cids.append(cid)
+        if not cids:
+            summary["unmatched_products"] += 1
+            continue
+        summary["matched_products"] += 1
+        for cid in cids:
+            try:
+                fetched = await _fetch_reviews_for_content_id(cid, min_rating)
+            except Exception as e:
+                summary["errors"].append({"product_id": pid, "content_id": cid, "error": str(e)[:160]})
+                continue
+            summary["content_ids_scraped"] += 1
+            summary["total_fetched"] += len(fetched)
+            if dry_run:
+                summary["total_inserted"] += sum(1 for r in fetched if int(r.get("rate") or 0) >= min_rating)
+                continue
+            res = await _store_reviews(fetched, pid, cid, min_rating)
+            summary["total_inserted"] += res["inserted"]
+            summary["skipped_low_rating"] += res["skipped_low_rating"]
+            summary["skipped_existing"] += res["skipped_existing"]
+        if not dry_run:
+            await _recalc_product_rating(pid)
+
+    return summary
+
+
+@router.post("/trendyol/reviews/sync-all")
+async def sync_all_trendyol_reviews(
+    payload: dict,
+    current_user: dict = Depends(require_admin),
+):
+    """
+    TÜM aktif site ürünleri için Trendyol 4-5 yıldız yorumlarını toplu çeker.
+
+    Body: { "min_rating": 4, "limit": 0, "dry_run": false }
+      - min_rating: alt yıldız sınırı (varsayılan 4 → 4 ve 5 yıldız)
+      - limit: yalnızca ilk N ürün (0 = hepsi)
+      - dry_run: true → yalnızca sayım, DB'ye yazmaz
+    """
+    from .integrations import log_integration_event
+
+    payload = payload or {}
+    min_rating = int(payload.get("min_rating", 4))
+    limit = int(payload.get("limit", 0) or 0)
+    dry_run = bool(payload.get("dry_run", False))
+
+    summary = await sync_all_trendyol_reviews_core(min_rating=min_rating, limit=limit, dry_run=dry_run)
+    try:
+        await log_integration_event(
+            "trendyol", "review_sync_all", "bulk", "all", "success",
+            f"matched={summary['matched_products']} inserted={summary['total_inserted']} dry_run={dry_run}",
+        )
+    except Exception:
+        pass
+    return {"success": True, **summary}
