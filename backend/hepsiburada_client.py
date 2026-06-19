@@ -361,13 +361,18 @@ class HepsiburadaClient:
             extra["Content-Type"] = "application/json"
         tried = []
         last_detail = ""
-        for label, auth in self._oms_auth_candidates():
+        cands = list(self._oms_auth_candidates())
+        ok = getattr(self, "_oms_auth_ok", None)
+        if ok:  # daha önce tutan auth'u en başa al (çoklu yavaş deneme turunu önler)
+            cands.sort(key=lambda c: 0 if c[1] == ok else 1)
+        for label, auth in cands:
             headers = {"Authorization": auth, "User-Agent": self.dev_username,
                        "Accept": "application/json"}
             headers.update(extra)
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(req, timeout=min(self.timeout, 20)) as r:
+                    self._oms_auth_ok = auth  # başarılı kimliği sakla
                     body = r.read()
                     if raw_response:
                         return body

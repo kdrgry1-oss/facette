@@ -1314,7 +1314,7 @@ function HepsiburadaOrderPull({ auth }) {
           ? { order_number: orderNo.trim() }
           : { begin_date: `${bb}T00:00:00`, end_date: `${ee}T23:59:59` };
       }
-      const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, auth);
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/preview`, body, { ...auth, timeout: 60000 });
       if (r.data && r.data.success === false) {
         setErr((r.data.error || "Çekme başarısız") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
         setRows(null); setRawSample(r.data.raw_sample || null);
@@ -1335,7 +1335,7 @@ function HepsiburadaOrderPull({ auth }) {
   const createTest = async () => {
     setCreating(true); setErr(""); setResult(null);
     try {
-      const r = await axios.post(`${API}/integrations/hepsiburada/orders/create-test`, {}, auth);
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/create-test`, {}, { ...auth, timeout: 60000 });
       if (r.data && r.data.success === false) {
         setErr((r.data.error || "Test siparişi oluşturulamadı") + (r.data.attempted_url ? `\n↳ ${r.data.attempted_url}` : ""));
         return;
@@ -1354,7 +1354,7 @@ function HepsiburadaOrderPull({ auth }) {
     setImporting(true); setResult(null);
     try {
       const orders = [...sel].map((i) => raws[i]).filter(Boolean);
-      const r = await axios.post(`${API}/integrations/hepsiburada/orders/import-selected`, { orders }, auth);
+      const r = await axios.post(`${API}/integrations/hepsiburada/orders/import-selected`, { orders }, { ...auth, timeout: 60000 });
       setResult(r.data);
       await pull();
     } catch (e) {

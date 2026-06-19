@@ -3111,13 +3111,19 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
         if req.order_number and req.order_number.strip():
             on = req.order_number.strip()
             attempted = f"{oms_base}/orders/merchantid/{mid}/ordernumber/{on}"
-            resp = await asyncio.to_thread(client.get_order_by_number, on)
+            resp = await asyncio.wait_for(asyncio.to_thread(client.get_order_by_number, on), timeout=40)
         else:
             if req.begin_date or req.end_date:
-                attempted += f"?beginDate={req.begin_date}&endDate={req.end_date}&offset=0&limit=200"
+                attempted += f"?beginDate={req.begin_date}&endDate={req.end_date}&offset=0&limit=50"
             else:
-                attempted += "?offset=0&limit=200"  # tarihsiz: ödemesi tamamlanmış (Open) listesi
-            resp = await asyncio.to_thread(client.get_orders, req.begin_date, req.end_date, 0, 200)
+                attempted += "?offset=0&limit=50"  # tarihsiz: ödemesi tamamlanmış (Open) listesi
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(client.get_orders, req.begin_date, req.end_date, 0, 50), timeout=40)
+    except asyncio.TimeoutError:
+        return {"success": False,
+                "error": "HB OMS 40 sn icinde yanit vermedi (oms-external-sit yavas/erisilemez olabilir). "
+                         "Tekrar deneyin; surekli olursa SIT OMS tarafini HB ile teyit edin.",
+                "attempted_url": attempted}
     except Exception as e:
         return {"success": False, "error": str(e), "attempted_url": attempted}
     lines = _hb_normalize_lines(resp)
