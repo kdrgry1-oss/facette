@@ -4,6 +4,7 @@ import { Heart, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { optimizeImg } from "../lib/img";
+import { resolveColor, needsBorder, MULTI_GRADIENT } from "../lib/colorMap";
 import { sortLikeSize } from "../utils/sizeSort";
 import { trackSelectItem } from "../lib/dataLayer";
 import { toast } from "sonner";
@@ -145,25 +146,29 @@ export default function ProductCard({ product, listId = "", listName = "", index
             />
           </button>
 
-          {/* Bedenler — hover'da görsel altında (Mango usulü) */}
+          {/* Bedenler — hover'da görselin en altında, Mango usulü (ortalı, ferah aralık) */}
           {sizeList.length > 0 && (
-            <div className="absolute bottom-0 left-0 right-0 z-10 hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-3 bg-gradient-to-t from-white/95 via-white/85 to-transparent pt-6 pb-2.5 px-2">
-              {sizeList.map((s) => (
-                <button
-                  key={s.size}
-                  onClick={(e) => handleSizeAdd(e, s)}
-                  disabled={s.stock <= 0}
-                  className={`text-[12px] tracking-wide transition-colors ${
-                    s.stock <= 0
-                      ? "text-gray-300 line-through cursor-not-allowed"
-                      : "text-gray-800 hover:text-black hover:underline underline-offset-4"
-                  }`}
-                  title={s.stock <= 0 ? `${s.size} · Tükendi` : `${s.size} · Sepete ekle`}
-                >
-                  {s.size}
-                </button>
-              ))}
-            </div>
+            <>
+              {/* Okunabilirlik için alttan beyaz gradyan (hover'da) */}
+              <div className="absolute inset-x-0 bottom-0 h-16 z-[5] hidden md:block opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-t from-white/85 via-white/40 to-transparent pointer-events-none" />
+              <div className="absolute inset-x-0 bottom-3 z-10 hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-end justify-center gap-5 px-4">
+                {sizeList.map((s) => (
+                  <button
+                    key={s.size}
+                    onClick={(e) => handleSizeAdd(e, s)}
+                    disabled={s.stock <= 0}
+                    className={`text-[13px] leading-none tracking-wide transition-colors ${
+                      s.stock <= 0
+                        ? "text-black/25 line-through cursor-not-allowed"
+                        : "text-black/80 hover:text-black"
+                    }`}
+                    title={s.stock <= 0 ? `${s.size} · Tükendi` : `${s.size} · Sepete ekle`}
+                  >
+                    {s.size}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
 
           {/* Görsel göstergeleri — hover'da bedenlere yer açmak için gizlenir */}
@@ -224,21 +229,31 @@ export default function ProductCard({ product, listId = "", listName = "", index
             {siblings.slice(0, 6).map((sib) => {
               const isActive = sib.id === activeId;
               const isSelf = sib.id === product.id;
+              const col = resolveColor(sib.color);
+              let bgStyle, fallback = false;
+              if (col?.type === "solid") bgStyle = { backgroundColor: col.value };
+              else if (col?.type === "multi") bgStyle = { background: MULTI_GRADIENT };
+              else fallback = true; // renk adı çözülemedi → görsele düş (varsa)
+              const lightBorder = col?.type === "solid" && needsBorder(col.value);
               return (
                 <Link
                   key={sib.id}
                   to={`/${sib.slug || sib.id}`}
                   onMouseEnter={() => setActiveSib(isSelf ? null : sib)}
                   onClick={(e) => { if (isSelf) e.preventDefault(); }}
-                  className={`w-6 h-6 overflow-hidden border transition-colors flex-shrink-0 ${
-                    isActive ? "border-black ring-1 ring-black" : "border-gray-300 hover:border-black"
+                  className={`w-5 h-5 overflow-hidden flex-shrink-0 transition-all ${
+                    isActive
+                      ? "ring-1 ring-offset-1 ring-black border border-black"
+                      : lightBorder
+                        ? "border border-gray-300 hover:border-black"
+                        : "border border-transparent hover:ring-1 hover:ring-offset-1 hover:ring-black"
                   }`}
                   title={sib.color || ""}
                   aria-label={sib.color || "Renk"}
                 >
-                  {sib.image
-                    ? <img src={optimizeImg(sib.image, 80)} alt={sib.color || ""} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                    : <span className="block w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
+                  {fallback
+                    ? <span className="block w-full h-full bg-gradient-to-br from-gray-200 to-gray-400" />
+                    : <span className="block w-full h-full" style={bgStyle} />}
                 </Link>
               );
             })}
