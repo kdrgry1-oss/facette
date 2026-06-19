@@ -77,7 +77,7 @@ export default function Category() {
 
   const fetchCategories = async () => {
     try {
-      const res = await axios.get(`${API}/categories`);
+      const res = await axios.get(`${API}/categories?visible_only=true`);
       setCategories(res.data || []);
     } catch (err) {
       console.error(err);

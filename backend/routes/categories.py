@@ -22,17 +22,32 @@ def generate_slug(name: str) -> str:
 @router.get("")
 async def get_categories(
     parent_id: Optional[str] = None,
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = None,
+    visible_only: bool = False
 ):
-    """Get categories"""
+    """Get categories.
+
+    visible_only=True (storefront): pasif ve test/placeholder kategorileri gizler.
+    Varsayılan False (admin): tüm kategoriler döner — mevcut davranış korunur.
+    """
     query = {}
     if parent_id is not None:
         query["parent_id"] = parent_id
     if is_active is not None:
         query["is_active"] = is_active
-    
+    if visible_only and "is_active" not in query:
+        query["is_active"] = {"$ne": False}
+
     categories = await db.categories.find(query, {"_id": 0}).to_list(500)
-    
+
+    if visible_only:
+        # Sızan test/placeholder kategorileri (ör. HB_CAT_TEST_123) storefront'tan gizle.
+        _test_pat = re.compile(r"hb_cat_test|cat_test|_test_|test_\d|^test[_\-]|[_\-]test$", re.I)
+        categories = [
+            c for c in categories
+            if not any(_test_pat.search(str(c.get(f) or "")) for f in ("id", "slug", "name"))
+        ]
+
     # Build hierarchical full_name
     cat_dict = {c["id"]: c for c in categories}
     for c in categories:

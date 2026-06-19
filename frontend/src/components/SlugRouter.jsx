@@ -23,7 +23,7 @@ let _catSlugsPromise = null;
 function loadCategorySlugs() {
   if (!_catSlugsPromise) {
     _catSlugsPromise = axios
-      .get(`${API}/categories`)
+      .get(`${API}/categories?visible_only=true`)
       .then((res) => {
         const raw = res?.data;
         const cats = Array.isArray(raw) ? raw : raw?.categories || [];

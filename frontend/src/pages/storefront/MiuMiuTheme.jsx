@@ -30,7 +30,7 @@ export default function MiuMiuTheme() {
         const url = slug ? `${API}/storefront/themes/${slug}` : `${API}/storefront/themes/active`;
         const [themeRes, catRes] = await Promise.all([
           axios.get(url),
-          axios.get(`${API}/categories`).catch(() => ({ data: [] })),
+          axios.get(`${API}/categories?visible_only=true`).catch(() => ({ data: [] })),
         ]);
         if (cancel) return;
         setTheme(themeRes.data);
