@@ -465,45 +465,38 @@ _pin_state = {"done": False, "ip": None}
 
 def _pin_public_trendyol_if_needed():
     """
-    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor — apigw.trendyol.com
-    çözülüyor (Cloudflare 104.16.x). İkisi de Cloudflare arkasında olduğundan, çözülebilen
-    bir Trendyol/Cloudflare host'unun IP'sine pinleriz: SNI ve Host header public.trendyol.com
-    kalır, Cloudflare anycast doğru origin'e yönlendirir. socket.getaddrinfo monkeypatch'i
-    yalnızca _PUBLIC_HOST için devreye girer; idempotent.
+    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor; apigw.trendyol.com
+    çözülüyor (Cloudflare). Çözülebilen bir Trendyol/Cloudflare host'unun IP'sini tespit
+    eder (_pin_state["ip"]). Fetch bu IP'ye bağlanır; TLS SNI + cert + Host header
+    public.trendyol.com kalır (httpx sni_hostname extension), Cloudflare anycast doğru
+    origin'e yönlendirir. DNS'e dokunmaz. Idempotent.
     """
     if _pin_state["done"]:
         return
     _pin_state["done"] = True
     try:
         socket.gethostbyname(_PUBLIC_HOST)
-        return  # zaten çözülüyor, pin gereksiz
+        return  # zaten çözülüyor — pin gereksiz, ip None kalır (normal URL kullanılır)
     except Exception:
         pass
-    pin_ip = None
     for alt in ("apigw.trendyol.com", "api.trendyol.com", "www.trendyol.com"):
         try:
-            pin_ip = socket.gethostbyname(alt)
-            break
+            _pin_state["ip"] = socket.gethostbyname(alt)
+            return
         except Exception:
             continue
-    if not pin_ip:
-        return  # çözülebilen alternatif yok; normal akış (hata loglanır)
-    _pin_state["ip"] = pin_ip
-    _orig_getaddrinfo = socket.getaddrinfo
-
-    def _patched(host, *args, **kwargs):
-        if host == _PUBLIC_HOST:
-            host = pin_ip
-        return _orig_getaddrinfo(host, *args, **kwargs)
-
-    socket.getaddrinfo = _patched
 
 
 async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
-    """Trendyol public storefront API'sinden bir contentId'nin yorumlarını çeker (sayfalı)."""
+    """Trendyol public storefront API'sinden bir contentId'nin yorumlarını çeker (sayfalı).
+    Railway DNS public.trendyol.com'u çözemezse, çözülebilen Cloudflare IP'sine bağlanır;
+    TLS SNI + cert doğrulama + HTTP Host header public.trendyol.com kalır (httpx sni_hostname
+    extension), Cloudflare anycast doğru origin'e yönlendirir."""
     _pin_public_trendyol_if_needed()
+    pin_ip = _pin_state["ip"]
+    base = f"https://{pin_ip}" if pin_ip else f"https://{_PUBLIC_HOST}"
     api_url = (
-        "https://public.trendyol.com/discovery-web-websfxsocialreviewrating-santral/"
+        f"{base}/discovery-web-websfxsocialreviewrating-santral/"
         f"api/v1/reviews/{content_id}"
     )
     fetched: List[dict] = []
@@ -511,10 +504,14 @@ async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pa
         page = 0
         while page < max_pages:
             params = {"page": page, "size": 30, "order": "DESC", "orderBy": "Score"}
-            resp = await client.get(
-                api_url, params=params,
-                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-            )
+            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            if pin_ip:
+                headers["Host"] = _PUBLIC_HOST
+            req = client.build_request("GET", api_url, params=params, headers=headers)
+            if pin_ip:
+                # TLS SNI + cert verification hostname'i public.trendyol.com olur
+                req.extensions["sni_hostname"] = _PUBLIC_HOST.encode("ascii")
+            resp = await client.send(req)
             if resp.status_code == 404:
                 break
             resp.raise_for_status()
