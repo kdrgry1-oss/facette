@@ -3188,25 +3188,22 @@ async def hepsiburada_import_by_number(on: str = "", key: str = ""):
     on = (on or "").strip()
     if not on:
         return {"ok": False, "error": "on (siparis no) gerekli"}
-    import asyncio
+    import asyncio, traceback
     from .category_mapping import _get_hb_client
     client, err = await _get_hb_client()
     if err:
         return {"ok": False, "error": err}
     try:
         resp = await asyncio.wait_for(asyncio.to_thread(client.get_order_by_number, on), timeout=12)
-    except Exception as e:
-        return {"ok": False, "stage": "fetch", "error": str(e)[:300]}
-    lines = _hb_normalize_lines(resp)
-    grouped = _hb_group_orders(lines)
-    if not grouped:
-        return {"ok": False, "error": "siparis bulunamadi/bos", "raw": str(resp)[:300]}
-    imported = updated = 0
-    out = []
-    for g in grouped:
-        order_data = map_hepsiburada_order(g)
-        onum = order_data["order_number"]
-        try:
+        lines = _hb_normalize_lines(resp)
+        grouped = _hb_group_orders(lines)
+        if not grouped:
+            return {"ok": False, "error": "siparis bulunamadi/bos", "raw": str(resp)[:400]}
+        imported = updated = 0
+        out = []
+        for g in grouped:
+            order_data = map_hepsiburada_order(g)
+            onum = order_data["order_number"]
             existing = await db.orders.find_one({"order_number": onum, "platform": "hepsiburada"})
             if existing:
                 await db.orders.update_one({"_id": existing["_id"]},
@@ -3217,12 +3214,16 @@ async def hepsiburada_import_by_number(on: str = "", key: str = ""):
                 order_data["created_at"] = _hb_created_at(order_data)
                 await db.orders.insert_one(order_data)
                 imported += 1
-                await _decrement_stock_for_imported_order(order_data, "hepsiburada")
+                try:
+                    await _decrement_stock_for_imported_order(order_data, "hepsiburada")
+                except Exception:
+                    pass  # ürün FACETTE'de yoksa stok düşmez — sipariş yine kaydedildi
             out.append({"order_number": onum, "items": len(order_data.get("items", []))})
-        except Exception as e:
-            out.append({"order_number": onum, "error": str(e)[:200]})
-    return {"ok": True, "imported": imported, "updated": updated, "orders": out,
-            "mesaj": "Siparis(ler) panele aktarildi — Siparisler sayfasinda gorunur."}
+        return {"ok": True, "imported": imported, "updated": updated, "orders": out,
+                "mesaj": "Siparis(ler) panele aktarildi — Siparisler sayfasinda gorunur."}
+    except Exception as e:
+        return {"ok": False, "stage": "import", "error": str(e)[:400],
+                "trace": traceback.format_exc()[-900:]}
 
 @router.post("/hepsiburada/orders/create-test")
 async def create_hepsiburada_test_order(payload: dict = None, current_user: dict = Depends(require_admin)):
