@@ -1385,7 +1385,7 @@ function HepsiburadaOrderPull({ auth }) {
             <label className="block text-xs text-gray-600 mb-1">veya Sipariş No (opsiyonel)</label>
             <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} placeholder="Tek sipariş için no gir" className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
           </div>
-          <button onClick={pull} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-60">
+          <button onClick={() => pull()} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-60">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> {loading ? "Çekiliyor…" : "Çek"}
           </button>
           <button onClick={createTest} disabled={creating || loading} title="SIT/Sandbox modunda HB stub üzerinde test siparişi oluşturur ve panele çeker" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-orange-400 text-orange-700 bg-white text-sm font-semibold hover:bg-orange-50 disabled:opacity-60">
