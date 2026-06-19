@@ -1,38 +1,22 @@
-# Paket 4 (KÜMÜLATİF) — Meta Feed + Kupon + SEO + Taksit + Güven/Teslimat + Taksonomi
+# Paket 5 (KÜMÜLATİF) — Meta Feed + Kupon + SEO + Taksit + Güven/Teslimat + Taksonomi
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
-## backend/routes/products.py
-- Google feed: item_group_id + color + size (flag; ?group=off / settings.feed_variant_grouping=false). g:id sabit.
+## YENİ (bu pakette): backend/scripts/clean_categories.py — kategori temizlik scripti
+- DRY-RUN varsayılan (hiçbir şey değişmez): test/placeholder kategori + bağlı ürün sayısı,
+  duplike gruplar (aksesuar + aksesuar-aksesuar) + önerilen ANA + 301 önerisi, bozuk slug'lar raporlanır.
+- `--apply` SADECE güvenli işler: ürünsüz test kategorisini siler + bozuk slug'ı düzeltir (eski slug slug_aliases'a).
+- Duplike BİRLEŞTİRME (ürün taşıma) OTOMATİK YAPILMAZ — geri alınamaz; rapora göre onayla.
+- Çalıştırma (backend container): `python -m scripts.clean_categories`  (uygula: `--apply`)
 
-## backend/routes/categories.py  (YENİ — P3-18)
-- get_categories'e geriye-uyumlu `visible_only` parametresi.
-  - Varsayılan False = ADMIN davranışı korunur (tüm kategoriler).
-  - True (storefront) = pasif (is_active=False) + test/placeholder kategorileri (HB_CAT_TEST_123 vb.) gizler.
-- Test pattern doğrulandı: HB_CAT_TEST_123/CAT_TEST/_test_/test_N gizlenir; Giyim/kontes/fideltest korunur.
-
-## frontend  (YENİ — P3-18)
-- SlugRouter.jsx, MiuMiuTheme.jsx (anasayfa), Category.jsx (PLP): /categories çağrılarına ?visible_only=true eklendi.
-  → Storefront artık test/pasif kategorileri çekmiyor. Admin paneli etkilenmez.
-
-## frontend/src/pages/Checkout.jsx
-- Kupon: otomatik en iyi indirim onayı + katlanır promosyon alanı.
-- Güven şeridi (Güvenli ödeme · 3D Secure · 14 gün iade · Gizli ücret yok) + özet panelinde Tahmini teslimat.
-
-## frontend/src/pages/ProductDetail.jsx
-- JSON-LD duplicate fix + taksit bilgisi + Sepete Ekle altında görünür Tahmini teslimat.
-
-## frontend/src/pages/Cart.jsx
-- Sepet özetinde taksit bilgisi.
+## backend/routes/products.py — Meta feed item_group_id + color + size (flag; ?group=off ile geri al). g:id sabit.
+## backend/routes/categories.py — get_categories visible_only param (storefront pasif+test gizle; admin korunur).
+## frontend SlugRouter/MiuMiuTheme/Category — /categories?visible_only=true.
+## frontend Checkout — kupon otomatik indirim onayı + katlanır alan + güven şeridi + tahmini teslimat.
+## frontend ProductDetail — JSON-LD duplicate fix + taksit + görünür tahmini teslimat.
+## frontend Cart — taksit bilgisi.
 
 ## Doğrulama
-- products.py + categories.py: ast.parse OK; feed simülasyonu + test pattern doğrulandı.
-- Checkout/ProductDetail/Cart/Category/SlugRouter/MiuMiuTheme: esbuild (jsx=automatic) exit 0.
-
-## NOT — slug bug'ı (gi-yi-m) ZATEN düzeltilmiş ✅ (lib/slug.js Türkçe→ASCII map, backend generate_slug ile uyumlu).
-
-## KAPSAM DIŞI (canlı DB, geri alınamaz — körlemesine yapılmadı):
-- Duplike kategori (aksesuar + aksesuar-aksesuar) BİRLEŞTİRME + 301: kategori delete HARD-delete olduğu için
-  geri alınamaz. İstenirse önce DRY-RUN (sadece raporlayan) bir temizlik scripti hazırlanmalı, onay sonrası uygulanmalı.
-- Test kategorisi DB'den fiziksel silme: yukarıdaki filtre storefront'tan gizliyor; kalıcı silme admin panelinden
-  veya dry-run script ile yapılabilir.
+- products.py / categories.py / clean_categories.py: ast.parse OK; feed sim + slug/test/duplike mantığı doğrulandı
+  (İç Giyim→ic-giyim, Şort→sort; HB_CAT_TEST yakalanıyor; Giyim/kontes korunuyor).
+- 6 frontend dosyası: esbuild (jsx=automatic) exit 0.
