@@ -348,7 +348,7 @@ class HepsiburadaClient:
         ]
         return cands
 
-    def _oms_request(self, method, path, params=None, json_body=None, raw_response=False, base=None):
+    def _oms_request(self, method, path, params=None, json_body=None, raw_response=False, base=None, read_timeout=None):
         url = (base or self._oms_base()) + path
         if params:
             clean = {k: v for k, v in params.items() if v not in (None, "")}
@@ -371,7 +371,7 @@ class HepsiburadaClient:
             headers.update(extra)
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=min(self.timeout, 20)) as r:
+                with urllib.request.urlopen(req, timeout=(read_timeout or min(self.timeout, 20))) as r:
                     self._oms_auth_ok = auth  # başarılı kimliği sakla
                     body = r.read()
                     if raw_response:
@@ -393,8 +393,8 @@ class HepsiburadaClient:
             f"(Merchant panel > Entegrasyon Bilgileri). Son yanit: {last_detail[:120]}"
         )
 
-    def _oms_get(self, path, params=None):
-        return self._oms_request("GET", path, params=params)
+    def _oms_get(self, path, params=None, read_timeout=None):
+        return self._oms_request("GET", path, params=params, read_timeout=read_timeout)
 
     def create_test_order(self, body=None):
         """SADECE TEST ortamı: oms-stub-external-sit üzerinden test siparişi oluşturur.
@@ -421,10 +421,11 @@ class HepsiburadaClient:
         return {"_orderNumber": b["OrderNumber"], "raw": resp}
 
     # ---------- Sipariş listesi / detay ----------
-    def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100):
-        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler (OMS line-item bazlı)."""
+    def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100, read_timeout=12):
+        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler (OMS line-item bazlı).
+        read_timeout: gateway 503 eşiğinin (≈20s) ALTINDA kalmak için kısa tutulur."""
         params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
-        return self._oms_get(f"/orders/merchantid/{self.merchant_id}", params)
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}", params, read_timeout=read_timeout)
 
     def get_order_by_number(self, order_number):
         """Tek bir siparişi numarasına göre getirir (özet)."""

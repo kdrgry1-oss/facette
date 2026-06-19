@@ -1306,7 +1306,9 @@ function HepsiburadaOrderPull({ auth }) {
     setLoading(true); setErr(""); setResult(null); setRows(null); setSel(new Set());
     try {
       let body;
-      if (ov && ov.noDate) {
+      if (ov && ov.orderNumber) {
+        body = { order_number: ov.orderNumber }; // tek sipariş no ile (en hızlı, kesin)
+      } else if (ov && ov.noDate) {
         body = {}; // tarihsiz: HB "ödemesi tamamlanmış" (Open) listesi — offset+limit ile
       } else {
         const bb = (ov && ov.b) || begin, ee = (ov && ov.e) || end;
@@ -1342,7 +1344,7 @@ function HepsiburadaOrderPull({ auth }) {
       }
       setOrderNo("");
       await new Promise((res) => setTimeout(res, 1500));
-      await pull({ noDate: true }); // tarihsiz: yeni Open (ödemesi tamamlanmış) siparişi listeler
+      await pull({ orderNumber: r.data.order_number }); // siparişi numarasıyla çek (hızlı, kesin)
       setResult({ created: r.data.order_number, skus: r.data.used_skus });
     } catch (e) {
       setErr(e?.response?.data?.detail || e?.message || "Test siparişi oluşturulamadı");
