@@ -10,6 +10,8 @@
     canlı ürün grid (mobil 2 / desktop 4, hover zoom) + "Tüm sonuçları gör" linki.
   • Fonksiyon AYNEN korundu: searchOpen state, GET /products?search (canlı), GET /search/popular,
     submitSearch → /arama?q=. Sadece görünüm Zara'ya getirildi.
+  • Masaüstü tetikleyici çizgisi uzatıldı (md:w-16, yazıdan taşar; mobilde yazı kadar).
+  • Zara davranışı: ESC ile kapanır + overlay açıkken arka plan scroll kilidi + yumuşak açılış (fade+iniş).
 
 ## YENİ (bu pakette): Duplike kategori birleştirme HAZIRLIĞI (script + slug_aliases link koruması)
 - backend/scripts/merge_duplicate_categories.py (YENİ): clean_categories.py raporunun UYGULAMA adımı.

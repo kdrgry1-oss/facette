@@ -151,6 +151,21 @@ export default function Header({ hideMenu = false }) {
     }
   }, [searchOpen]);
 
+  // Zara davranışı: overlay açıkken arka plan scroll kilidi + ESC ile kapat
+  useEffect(() => {
+    if (!searchOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [searchOpen]);
+
   useEffect(() => {
     const q = searchQuery;
     const timer = setTimeout(async () => {
@@ -273,7 +288,10 @@ export default function Header({ hideMenu = false }) {
                 <>
                   <button onClick={() => setSearchOpen(true)} className="inline-flex items-center gap-1.5 px-2 py-2 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
                     <Search size={15} strokeWidth={1.4} />
-                    <span className="text-[11px] tracking-[0.18em] uppercase leading-none border-b border-current pb-1">Ara</span>
+                    <span className="relative inline-block text-[11px] tracking-[0.18em] uppercase leading-none pb-1.5">
+                      Ara
+                      <span className="absolute left-0 bottom-0 h-px bg-current w-full md:w-16"></span>
+                    </span>
                   </button>
                   <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Favoriler" data-testid="favorites-btn">
                     <Heart size={17} strokeWidth={1.4} />
@@ -533,8 +551,9 @@ export default function Header({ hideMenu = false }) {
 
       {/* Search Overlay */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-white z-[60] overflow-y-auto">
-          <div className="max-w-5xl mx-auto px-6 md:px-8 pt-6 pb-16">
+        <div className="fixed inset-0 bg-white z-[60] overflow-y-auto" style={{ animation: "facetteSearchIn .2s ease-out" }}>
+          <style>{`@keyframes facetteSearchIn{from{opacity:0}to{opacity:1}}@keyframes facetteSearchUp{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}`}</style>
+          <div className="max-w-5xl mx-auto px-6 md:px-8 pt-6 pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
             {/* Üst bar: etiket + kapat */}
             <div className="flex items-center justify-between mb-10 md:mb-14">
               <span className="text-[11px] tracking-[0.25em] uppercase text-gray-400">Arama</span>
