@@ -271,8 +271,9 @@ export default function Header({ hideMenu = false }) {
             <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-2">
               {!isCheckout && (
                 <>
-                  <button onClick={() => setSearchOpen(true)} className="p-2 hover:opacity-60" aria-label="Ara" data-testid="search-btn">
-                    <Search size={17} strokeWidth={1.4} />
+                  <button onClick={() => setSearchOpen(true)} className="inline-flex items-center gap-1.5 px-2 py-2 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
+                    <Search size={15} strokeWidth={1.4} />
+                    <span className="text-[11px] tracking-[0.18em] uppercase leading-none border-b border-current pb-1">Ara</span>
                   </button>
                   <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Favoriler" data-testid="favorites-btn">
                     <Heart size={17} strokeWidth={1.4} />
@@ -532,34 +533,45 @@ export default function Header({ hideMenu = false }) {
 
       {/* Search Overlay */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-          <div className="max-w-4xl mx-auto px-4 py-6">
-            <div className="flex justify-end mb-6">
-              <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }}><X size={22} /></button>
+        <div className="fixed inset-0 bg-white z-[60] overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 md:px-8 pt-6 pb-16">
+            {/* Üst bar: etiket + kapat */}
+            <div className="flex items-center justify-between mb-10 md:mb-14">
+              <span className="text-[11px] tracking-[0.25em] uppercase text-gray-400">Arama</span>
+              <button
+                onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                className="inline-flex items-center gap-1.5 text-[11px] tracking-[0.18em] uppercase hover:opacity-60 transition-opacity"
+                aria-label="Kapat"
+              >
+                Kapat <X size={18} strokeWidth={1.4} />
+              </button>
             </div>
-            <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="mb-10">
-              <div className="relative">
-                <Search size={18} className="absolute left-0 top-1/2 -translate-y-1/2 text-gray-400" />
+
+            {/* Büyük arama girişi (Zara tarzı) */}
+            <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="mb-12 md:mb-16">
+              <div className="relative border-b border-black">
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Ara..."
-                  className="w-full text-xl font-light pl-7 py-3 border-0 border-b border-gray-200 bg-transparent focus:outline-none focus:border-black"
+                  placeholder="Ara"
+                  className="w-full text-2xl md:text-4xl font-light py-3 pr-12 bg-transparent focus:outline-none placeholder:text-gray-300"
                   autoFocus
                 />
+                <Search size={24} strokeWidth={1.2} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400" />
               </div>
             </form>
+
             <div>
               {searchQuery.length === 0 ? (
                 <div>
-                  <h3 className="text-[10px] tracking-widest uppercase text-gray-500 mb-4">EN ÇOK ARANANLAR</h3>
-                  <div className="flex flex-wrap gap-2">
+                  <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">En Çok Arananlar</h3>
+                  <div className="flex flex-wrap gap-x-6 gap-y-3">
                     {popularSearches.map((item, i) => (
                       <button
                         key={i}
                         onClick={() => { navigate(`/arama?q=${encodeURIComponent(item.term)}`); setSearchOpen(false); }}
-                        className="px-3 py-1.5 border text-xs hover:border-black hover:bg-black hover:text-white transition-all"
+                        className="text-sm font-light text-gray-700 hover:text-black border-b border-transparent hover:border-black pb-0.5 transition-colors"
                       >
                         {item.term}
                       </button>
@@ -568,21 +580,27 @@ export default function Header({ hideMenu = false }) {
                 </div>
               ) : searchResults.length > 0 ? (
                 <div>
-                  <h3 className="text-[10px] tracking-widest uppercase text-gray-500 mb-4">ÜRÜNLER</h3>
-                  <div className="grid grid-cols-3 gap-3">
+                  <h3 className="text-[10px] tracking-widest uppercase text-gray-400 mb-5">Ürünler</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-8">
                     {searchResults.map((p) => (
-                      <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left">
-                        <div className="aspect-[2/3] bg-gray-50 mb-2 overflow-hidden">
-                          <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                      <button key={p.id} onClick={() => { navigate(`/${p.slug}`); setSearchOpen(false); }} className="text-left group">
+                        <div className="aspect-[2/3] bg-gray-50 mb-2.5 overflow-hidden">
+                          <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
-                        <p className="text-xs line-clamp-1">{p.name}</p>
-                        <p className="text-xs">{p.price?.toFixed(2).replace('.', ',')} TL</p>
+                        <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
+                        <p className="text-xs font-light text-gray-600">{p.price?.toFixed(2).replace('.', ',')} TL</p>
                       </button>
                     ))}
                   </div>
+                  <button
+                    onClick={() => submitSearch()}
+                    className="mt-10 text-[11px] tracking-[0.18em] uppercase border-b border-black pb-1 hover:opacity-60 transition-opacity"
+                  >
+                    Tüm sonuçları gör
+                  </button>
                 </div>
               ) : (
-                <p className="text-center text-gray-500 text-sm">Sonuç bulunamadı</p>
+                <p className="text-sm font-light text-gray-400">"{searchQuery}" için sonuç bulunamadı.</p>
               )}
             </div>
           </div>

@@ -2,6 +2,15 @@
 
 > Önceki tüm paketleri içerir. Tek başına deploy edilebilir.
 
+## YENİ (bu pakette): Anasayfa arama — Zara görünümü (fonksiyon korundu)
+- frontend/src/components/Header.jsx:
+  • Tetikleyici: lupa + altı çizili "ARA" (tracking geniş, uppercase) — Zara tarzı.
+  • Overlay (tam ekran beyaz): üst bar (Arama etiketi + "Kapat ✕"), büyük merkezi input (text-2xl→4xl,
+    alt çizgi siyah, lupa sağda, placeholder "Ara"), "En Çok Arananlar" altı çizili link listesi,
+    canlı ürün grid (mobil 2 / desktop 4, hover zoom) + "Tüm sonuçları gör" linki.
+  • Fonksiyon AYNEN korundu: searchOpen state, GET /products?search (canlı), GET /search/popular,
+    submitSearch → /arama?q=. Sadece görünüm Zara'ya getirildi.
+
 ## YENİ (bu pakette): Duplike kategori birleştirme HAZIRLIĞI (script + slug_aliases link koruması)
 - backend/scripts/merge_duplicate_categories.py (YENİ): clean_categories.py raporunun UYGULAMA adımı.
   DRY-RUN varsayılan; --apply yalnızca GÜVENLİ duplike'leri (aynı isim + aynı parent) birleştirir.
