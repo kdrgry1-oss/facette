@@ -25,8 +25,14 @@ router = APIRouter(prefix="/products", tags=["Products"])
 import html as _html
 
 
-def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False):
-    """Ürün listesinden Google/Facebook uyumlu RSS 2.0 (g:) XML üretir."""
+def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False, group_variants=False):
+    """Ürün listesinden Google/Facebook uyumlu RSS 2.0 (g:) XML üretir.
+
+    group_variants=True iken (google/generic modunda) her ürün satırına
+    Meta varyasyon gruplaması için EK alanlar yazılır:
+      <g:item_group_id> (parent kod) + <g:color> + (tek bedenliyse) <g:size>.
+    g:id ve mevcut alanlar AYNEN korunur — sadece ekleme yapılır.
+    Tek hamlede geri alınabilir (feature-flag / ?group=off)."""
     target = (target or "google").lower()
 
     def esc(x):
@@ -155,7 +161,29 @@ def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False)
         avail = "in stock" if (stock and stock > 0) else "out of stock"
         gtin = (pr.get("barcode") or "").strip()
         mpn = (pr.get("stock_code") or pr.get("sku") or "").strip()
-        rows = common_rows(pid, avail, gtin, mpn)
+        # ---- Meta varyasyon gruplaması (flag arkasında, sadece EKLEME) ----
+        extra = None
+        if group_variants:
+            extra = []
+            # item_group_id: aynı ana ürünün renkleri aynı değeri paylaşır.
+            # Öncelik mpn (renkler aynı stok kodunu paylaşıyor) → fallback parent kart.
+            grp_id = mpn or str(pr.get("csv_card_id") or pr.get("urun_karti_id") or "").strip()
+            if grp_id:
+                extra.append(f"<g:item_group_id>{esc(grp_id)}</g:item_group_id>")
+            # color: ürün rengi (split sonrası dolu); yoksa tek distinct varyant rengi.
+            vcolors = []
+            for _v in variants:
+                _c = (_v.get("color") or "").strip()
+                if _c and _c.lower() not in [x.lower() for x in vcolors]:
+                    vcolors.append(_c)
+            gcolor = (pcolor or "").strip() or (vcolors[0] if len(vcolors) == 1 else "")
+            if gcolor:
+                extra.append(f"<g:color>{esc(gcolor)}</g:color>")
+            # size: yalnızca ürün tek bedenliyse yaz (çok bedenliyse atla — yanlış veri basma).
+            vsizes = [(_v.get("size") or "").strip() for _v in variants if (_v.get("size") or "").strip()]
+            if len(vsizes) == 1:
+                extra.append(f"<g:size>{esc(vsizes[0])}</g:size>")
+        rows = common_rows(pid, avail, gtin, mpn, extra)
         rows.extend(price_rows(price, sale))
         items.append("<item>" + "".join(rows) + "</item>")
 
@@ -177,23 +205,42 @@ async def _feed_site_shop_prods():
     return site, shop, prods
 
 
+async def _feed_grouping_enabled(request=None):
+    """Meta varyasyon gruplaması açık mı? (item_group_id/color/size üretimi)
+    Geri alma: settings.main.feed_variant_grouping=False  VEYA  ?group=off query.
+    Varsayılan: AÇIK (alanlar sadece eklenir, g:id sabit kalır)."""
+    if request is not None:
+        q = (request.query_params.get("group") or "").strip().lower()
+        if q in ("0", "off", "false", "no", "kapali"):
+            return False
+        if q in ("1", "on", "true", "yes", "acik"):
+            return True
+    main = await db.settings.find_one({"id": "main"}, {"_id": 0}) or {}
+    if main.get("feed_variant_grouping") is False:
+        return False
+    return True
+
+
 @router.get("/google-merchant-feed.xml")
-async def google_merchant_feed():
+async def google_merchant_feed(request: Request):
     """Geriye-uyumlu varsayilan feed (tum aktif urunler, urun-seviyesi)."""
     site, shop, prods = await _feed_site_shop_prods()
-    xml = _build_merchant_xml(prods, site, shop, "google", False)
+    grp = await _feed_grouping_enabled(request)
+    xml = _build_merchant_xml(prods, site, shop, "google", False, group_variants=grp)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
 @router.get("/feed/{slug}.xml")
-async def dynamic_feed(slug: str):
+async def dynamic_feed(slug: str, request: Request):
     """Yapilandirilmis XML feed (slug ile). target'a gore urun/varyant seviyesi."""
     feed = await db.xml_feeds.find_one({"slug": slug}, {"_id": 0})
     if not feed or not feed.get("enabled", True):
         return Response(content='<?xml version="1.0"?><error>feed not found</error>',
                         media_type="application/xml", status_code=404)
     site, shop, prods = await _feed_site_shop_prods()
-    xml = _build_merchant_xml(prods, site, shop, feed.get("target", "google"), bool(feed.get("in_stock_only")))
+    grp = await _feed_grouping_enabled(request)
+    xml = _build_merchant_xml(prods, site, shop, feed.get("target", "google"),
+                              bool(feed.get("in_stock_only")), group_variants=grp)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
