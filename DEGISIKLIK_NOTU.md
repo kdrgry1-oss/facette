@@ -11,7 +11,8 @@
 
 ## YENİ (bu pakette): Anasayfa arama — Zara BİREBİR (zara.com/tr tarayıcıdan incelendi)
 - frontend/src/components/Header.jsx:
-  • Tetikleyici: lupa + altı çizili "ARA" (md:w-16 uzun çizgi, uppercase) — Zara tarzı.
+  • Tetikleyici (Zara birebir): lupa + "ARA" sola yaslı, altında ~2x uzun ince çizgi (w-24 / md:w-32).
+    Çizgi butonun KENDİ genişliğinde (absolute değil) → kalp/favori ikonuna asla değmez. Mobilde de aynı.
   • Overlay artık Zara'nın gerçek arama ekranını (/search/home) birebir taklit ediyor:
     - Üst bar: sol "FACETTE" logo (anasayfaya link) + sağ "Kapat ✕".
     - 3 kolon grid (md+): SOL dikey kategori menüsü (Giyim/Aksesuar/Sale/Ana Sayfa) |

@@ -294,12 +294,12 @@ export default function Header({ hideMenu = false }) {
             <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-2">
               {!isCheckout && (
                 <>
-                  <button onClick={() => setSearchOpen(true)} className="inline-flex items-center gap-1.5 px-2 py-2 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
-                    <Search size={15} strokeWidth={1.4} />
-                    <span className="relative inline-block text-[11px] tracking-[0.18em] uppercase leading-none pb-1.5">
-                      Ara
-                      <span className="absolute left-0 bottom-0 h-px bg-current w-full md:w-16"></span>
+                  <button onClick={() => setSearchOpen(true)} className="inline-flex flex-col items-start justify-center py-1.5 pr-1 md:pr-4 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Search size={15} strokeWidth={1.4} />
+                      <span className="text-[11px] tracking-[0.2em] uppercase leading-none">Ara</span>
                     </span>
+                    <span className="mt-1.5 h-px bg-current w-24 md:w-32"></span>
                   </button>
                   <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Favoriler" data-testid="favorites-btn">
                     <Heart size={17} strokeWidth={1.4} />
