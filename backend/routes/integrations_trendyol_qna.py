@@ -588,7 +588,11 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
             break
         for p in content:
             bc = (p.get("barcode") or "").strip()
-            cid = p.get("contentId")
+            cid = p.get("productContentId") or p.get("contentId")
+            if not cid:
+                m = re.search(r"-p-(\d+)", p.get("productUrl") or "")
+                if m:
+                    cid = m.group(1)
             if bc and cid:
                 bc_to_cid[bc] = str(cid)
                 debug["ty_with_contentid"] += 1
