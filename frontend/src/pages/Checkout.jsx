@@ -55,7 +55,6 @@ export default function Checkout() {
 
   // Coupons
   const [couponCode, setCouponCode] = useState("");
-  const [showCoupon, setShowCoupon] = useState(false); // Mango usulü katlanır promosyon alanı
   const [discount, setDiscount] = useState(0);
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [appliedPromotions, setAppliedPromotions] = useState([]); // Madde 4 motor sonucu
@@ -98,6 +97,10 @@ export default function Checkout() {
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
   const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+  // Seçili taksitin gerçek toplamı (vade farkı dahil) — sağ özetteki Toplam'a yansır
+  const selectedInstallmentOpt = installments.find((o) => o.number === selectedInstallment) || null;
+  const installmentTotal = (selectedInstallment > 1 && selectedInstallmentOpt?.totalPrice) ? selectedInstallmentOpt.totalPrice : grandTotal;
+  const installmentDiff = Math.max(0, installmentTotal - grandTotal);
   const shippingInfoTracked = useRef(false);
 
   // Storefront: hangi ödeme yöntemleri aktif? (admin panelinden yönetilir)
@@ -995,52 +998,45 @@ export default function Checkout() {
                   <span className="font-medium">Sipariş Özeti</span>
                 </div>
 
-                {/* En avantajlı indirim otomatik uygulandı + uygulanan kampanyalar (X ile kaldır) */}
-                {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (
-                  <div className="px-5 pt-4" data-testid="applied-promotions">
-                    {appliedPromotions.length > 0 && (
-                      <>
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700 mb-2">
-                          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3 3 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
-                          En avantajlı indirim otomatik uygulandı
-                        </div>
-                        <div className="space-y-1">
-                          {appliedPromotions.map((p, i) => (
-                            <div key={i} className="flex items-center justify-between text-xs gap-2">
-                              <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
-                              <span className="text-green-600 font-semibold shrink-0">-{Number(p.discount).toFixed(2)} ₺</span>
-                              <button type="button" onClick={() => removePromotion(p)} title="Kampanyayı kaldır" aria-label="Kaldır"
-                                className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">×</button>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                    {excludedIds.length > 0 && (
-                      <button type="button" onClick={resetExcluded} className="mt-2 text-[11px] text-gray-500 underline hover:text-stone-900">Kaldırılan kampanyaları geri al</button>
-                    )}
-                  </div>
-                )}
-
-                {/* Promosyon kodu — katlanır (Mango usulü; kullanıcıyı kod avına itmez) */}
+                {/* Manual coupon */}
                 <div className="px-5 pt-4">
-                  {(showCoupon || appliedCoupon) ? (
-                    <div className="flex gap-2">
-                      <input type="text" value={couponCode}
-                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        placeholder="Promosyon kodu"
-                        className="flex-1 border rounded px-3 py-2 text-sm"
-                        data-testid="manual-coupon-input" />
-                      {appliedCoupon
-                        ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
-                        : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="apply-coupon-btn">Uygula</button>}
-                    </div>
-                  ) : (
-                    <button type="button" onClick={() => setShowCoupon(true)}
-                      className="text-xs text-gray-500 underline hover:text-stone-900"
-                      data-testid="show-coupon-btn">Promosyon kodun var mı?</button>
-                  )}
+                  <div className="flex gap-2">
+                    <input type="text" value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                      placeholder="Kupon Kodu"
+                      className="flex-1 border rounded px-3 py-2 text-xs"
+                      data-testid="manual-coupon-input" />
+                    {appliedCoupon
+                      ? <button type="button" onClick={handleRemoveCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="remove-coupon-btn">Kaldır</button>
+                      : <button type="button" onClick={handleApplyCoupon} className="text-xs px-3 border rounded hover:bg-stone-50" data-testid="apply-coupon-btn">Uygula</button>}
+                  </div>
                 </div>
+
+                {/* Madde 4 — uygulanan kampanyalar + müşteri seçimi (X ile kaldır / alternatifi uygula) */}
+                {(appliedPromotions.length > 0 || eligiblePromotions.length > 0) && (() => {
+                  return (
+                    <div className="px-5 pt-4" data-testid="applied-promotions">
+                      {appliedPromotions.length > 0 && (
+                        <>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-600 mb-2">Uygulanan Kampanyalar</div>
+                          <div className="space-y-1">
+                            {appliedPromotions.map((p, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs gap-2">
+                                <span className="text-gray-700 truncate flex-1">{p.title || p.code}{p.free_shipping ? " · Ücretsiz Kargo" : ""}</span>
+                                <span className="text-green-600 font-semibold shrink-0">-{Number(p.discount).toFixed(2)} ₺</span>
+                                <button type="button" onClick={() => removePromotion(p)} title="Kampanyayı kaldır" aria-label="Kaldır"
+                                  className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">×</button>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {excludedIds.length > 0 && (
+                        <button type="button" onClick={resetExcluded} className="mt-2 text-[11px] text-gray-500 underline hover:text-stone-900">Kaldırılan kampanyaları geri al</button>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Totals */}
                 <div className="px-5 py-4 mt-3 border-t space-y-2 text-sm">
@@ -1055,9 +1051,13 @@ export default function Checkout() {
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
+                  {installmentDiff > 0 && <div className="flex justify-between text-gray-600"><span>Vade Farkı ({selectedInstallment} Taksit)</span><span>+{installmentDiff.toFixed(2)} TL</span></div>}
                   <div className="flex justify-between text-base font-semibold pt-2 border-t">
-                    <span>Toplam</span><span className="text-black">{grandTotal.toFixed(2)} TL</span>
+                    <span>Toplam</span><span className="text-black">{installmentTotal.toFixed(2)} TL</span>
                   </div>
+                  {selectedInstallment > 1 && selectedInstallmentOpt?.installmentPrice ? (
+                    <div className="text-[11px] text-gray-500 text-right">{selectedInstallment} × {selectedInstallmentOpt.installmentPrice.toFixed(2)} TL</div>
+                  ) : null}
                 </div>
 
                 {/* Submit */}
