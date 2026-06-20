@@ -89,7 +89,6 @@ export default function AutomationStatus() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ManualSyncButtons reload={load} />
           <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
             30sn'de bir yenile
@@ -250,59 +249,3 @@ function IntegrationCard({ label, ok, hint }) {
   );
 }
 
-/**
- * ManualSyncButtons — admin'in elle tetiklediği senkron butonları.
- * Şu an: Ticimax Stok Senkronu. Çoğaltılabilir.
- */
-function ManualSyncButtons({ reload }) {
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
-  const token = localStorage.getItem("token");
-
-  const runStockSync = async () => {
-    setBusy(true);
-    setResult(null);
-    try {
-      const r = await axios.post(
-        `${API}/admin/ticimax/sync-stock?max_products=2000&page_size=50`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
-      );
-      setResult(r.data);
-      toast.success(r.data.message || "Stok senkronu tamamlandı");
-      reload?.();
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Stok senkronu başarısız");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <button onClick={runStockSync} disabled={busy}
-        data-testid="ticimax-stock-sync-btn"
-        className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
-        title="Ticimax Web Servis ile canlı stok değerlerini çekip ürünleri günceller">
-        <Database size={14} />
-        {busy ? "Senkron çalışıyor..." : "Ticimax Stok Senkronla"}
-      </button>
-      {result && (
-        <div className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-20 w-80 text-xs" data-testid="stock-sync-result">
-          <p className="font-bold mb-1.5">📦 Stok Senkronu Sonucu</p>
-          <ul className="space-y-0.5 text-gray-700">
-            <li>Ticimax Toplam: <strong>{result.ticimax_total}</strong></li>
-            <li>Çekilen: <strong>{result.fetched}</strong></li>
-            <li className="text-green-700">Eşleşen: <strong>{result.matched_products}</strong></li>
-            <li className="text-blue-700">Güncellenen Varyasyon: <strong>{result.updated_variants}</strong></li>
-            {result.not_found_in_db > 0 && (
-              <li className="text-orange-700">DB'de bulunamayan: <strong>{result.not_found_in_db}</strong> (ID: {result.not_found_sample?.slice(0, 5).join(", ")}...)</li>
-            )}
-            <li className="text-gray-500">Süre: {result.duration_sec}s</li>
-          </ul>
-          <button onClick={() => setResult(null)} className="mt-2 text-[10px] text-gray-500 hover:text-black">Kapat</button>
-        </div>
-      )}
-    </div>
-  );
-}
