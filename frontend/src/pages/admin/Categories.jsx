@@ -312,7 +312,7 @@ export default function AdminCategories() {
             onClick={async () => {
               try {
                 const r = await axios.post(
-                  `${API}/integrations/ticimax/categories/sync-missing-from-products`,
+                  `${API}/integrations/site/categories/sync-missing-from-products`,
                   {},
                   { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
                 );

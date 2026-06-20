@@ -101,7 +101,10 @@ Ticimax çekirdek modülleri **aktif koda bağlı**, hemen silinemez:
 **Kalan silinemez:** `ticimax_stock_sync.py` (scheduler.py:619 lazy ref — önce o satır temizlenmeli), çekirdek 3 modül, integrations.py uçları, `models.py: ticimax_fields` (ÜRÜN VERİSİ — DOKUNMA).
 
 ### TAM ÇIKIŞ İÇİN GÜVENLİ SIRA (büyük iş, ayrı ayrı paketler)
-1. **Aktif uçları kopar/yeniden adlandır:** Categories `sync-missing-from-products`, Products `teknik-detay/sync` — bu işlevler Ticimax'tan bağımsız hale getirilmeli veya kaldırılmalı (kullanılıyorlarsa kaldırma ürün/kategori akışını bozar — önce ne yaptıkları doğrulanmalı).
+1. **Aktif uçları yeniden adlandır — Aşama 5b: TAMAM (doğrulandı + sed).** İki uç INCELENDI, ikisi de **YEREL** (Ticimax API'sine gitmiyor):
+   - `/ticimax/categories/sync-missing-from-products` → ürünlerin `category_name`'inden eksik kategorileri yerel DB'ye ekler (docstring: "Ticimax API'sini tekrar çağırmadan"). **→ `/site/categories/sync-missing-from-products`**
+   - `/ticimax/teknik-detay/sync?use_cache=true` → yerel `ticimax_attribute_master` cache'inden ürün özelliklerini metin eşleştirir (buton hep use_cache=true; SOAP yalnız use_cache=false'ta, kullanılmıyor). **→ `/site/teknik-detay/sync`**
+   - Yeniden adlandırma sed ile (backend decorator + tek frontend çağıran birlikte). Her uç tek çağıranlı (doğrulandı), çakışma yok, ast.parse+esbuild geçti. **NOT:** `db.ticimax_attribute_master` koleksiyonu ve `scripts/enrich_attrs_from_ticimax_master.py` adı hâlâ "ticimax" — bunlar VERİ/script, sonraki kozmetik pas.
 2. **Returns akışını yeniden adlandır:** `/admin/ticimax/*` → `/admin/site-iade/*` + `/ticimax/orders/import` bağımlılığını çöz (tek atomik backend+frontend paket).
 3. **Integrations.jsx ölü handler/effect temizliği** (frontend, güvenli).
 4. **scheduler.py** ölü `_ticimax_sync_orders` / `_ticimax_sync_stock` fonksiyonlarını kaldır → `ticimax_stock_sync.py` silinebilir hale gelir.

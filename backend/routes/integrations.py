@@ -4908,7 +4908,7 @@ async def import_ticimax_categories(
     }
 
 
-@router.post("/ticimax/categories/sync-missing-from-products")
+@router.post("/site/categories/sync-missing-from-products")
 async def sync_missing_categories_from_products(current_user: dict = Depends(require_admin)):
     """
     Ticimax kategori senkronizasyonunda kaçırılmış (örn. çok derin alt-kategori veya
@@ -5123,7 +5123,7 @@ async def sync_ticimax_variants(
     return {"ok": True, "message": "Varyantlar senkronize edildi"}
 
 
-@router.post("/ticimax/teknik-detay/sync")
+@router.post("/site/teknik-detay/sync")
 async def sync_ticimax_teknik_detay(
     use_cache: bool = Query(True, description="Cache (DB) varsa kullan, yoksa SOAP'tan çek"),
     current_user: dict = Depends(require_admin),

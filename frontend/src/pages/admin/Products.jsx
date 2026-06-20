@@ -1451,7 +1451,7 @@ export default function AdminProducts() {
               try {
                 const token = localStorage.getItem('token');
                 const res = await axios.post(
-                  `${API}/integrations/ticimax/teknik-detay/sync?use_cache=true`,
+                  `${API}/integrations/site/teknik-detay/sync?use_cache=true`,
                   null,
                   { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
                 );
