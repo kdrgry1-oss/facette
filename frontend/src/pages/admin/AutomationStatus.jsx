@@ -107,7 +107,6 @@ export default function AutomationStatus() {
         <>
           {/* Integrations row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" data-testid="integration-status-cards">
-            <IntegrationCard label="Ticimax" ok={data.integrations.ticimax_configured} hint="Üye + sipariş senkronu" />
             <IntegrationCard label="Doğan e-Dönüşüm" ok={data.integrations.dogan_configured} hint="e-Fatura / e-Arşiv" />
             <IntegrationCard label="Resend" ok={data.integrations.resend_configured} hint="E-posta gönderimi (kampanyalar)" />
             <IntegrationCard label="Trendyol" ok={(data.marketplaces.find((m) => m.key === "trendyol") || {}).orders_enabled}

@@ -137,7 +137,6 @@ export const navigationGroups = [
       { label: "Pazaryerleri Hub", path: "/admin/pazaryerleri", icon: Store },
       { label: "Amazon SP-API", path: "/admin/amazon", icon: Store },
       { label: "Amazon DPP Uyum", path: "/admin/dpp-uyum", icon: Store },
-      { label: "Ticimax Excel Yükle", path: "/admin/ticimax-excel", icon: FileText },
       { label: "Detaylı Aktarım & Eşleştirme", path: "/admin/entegrasyonlar", icon: Cable },
       { label: "Entegrasyon Logları", path: "/admin/entegrasyon-loglari", icon: FileText },
       { label: "Aktarılamayanlar", path: "/admin/aktarilamayanlar", icon: FileText },
