@@ -393,6 +393,9 @@ async def get_products(
     attr_value: Optional[str] = None,
     pub_date_from: Optional[str] = None,
     pub_date_to: Optional[str] = None,
+    # --- Storefront facet filtreleri (Mango usulü beden/renk) ---
+    sizes: Optional[str] = None,   # virgülle ayrık beden listesi (ör. "S,M,L")
+    colors: Optional[str] = None,  # virgülle ayrık renk adı listesi (ör. "Siyah,Mavi")
 ):
     """Get products with filtering and pagination.
 
@@ -708,6 +711,30 @@ async def get_products(
                 and_clauses.append({field: {"$regex": re.escape(str(pval).strip()), "$options": "i"}})
     for col, rng in range_acc.items():
         and_clauses.append({f"ticimax_fields.{col}": rng})
+
+    # --- Storefront beden filtresi (variants.size; çoklu seçim = OR) ---
+    if sizes:
+        size_list = [s.strip() for s in sizes.split(",") if s.strip()]
+        if size_list:
+            and_clauses.append({"$or": [
+                {"variants.size": {"$regex": f"^{re.escape(s)}$", "$options": "i"}}
+                for s in size_list
+            ]})
+
+    # --- Storefront renk filtresi (variants.color / color / attributes; çoklu = OR) ---
+    if colors:
+        color_list = [c.strip() for c in colors.split(",") if c.strip()]
+        if color_list:
+            col_ors: list = []
+            for c in color_list:
+                rx = {"$regex": re.escape(c), "$options": "i"}
+                col_ors.append({"variants.color": rx})
+                col_ors.append({"color": rx})
+                col_ors.append({"attributes": {"$elemMatch": {
+                    "name": {"$regex": "^(web color|renk|color)$", "$options": "i"},
+                    "value": rx,
+                }}})
+            and_clauses.append({"$or": col_ors})
 
     if and_clauses:
         query.setdefault("$and", []).extend(and_clauses)

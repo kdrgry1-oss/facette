@@ -150,17 +150,17 @@ export default function ProductCard({ product, listId = "", listName = "", index
           {sizeList.length > 0 && (
             <>
               {/* Okunabilirlik için alttan beyaz gradyan (hover'da) */}
-              <div className="absolute inset-x-0 bottom-0 h-16 z-[5] hidden md:block opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-t from-white/85 via-white/40 to-transparent pointer-events-none" />
-              <div className="absolute inset-x-0 bottom-3 z-10 hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-end justify-center gap-5 px-4">
+              <div className="absolute inset-x-0 bottom-0 h-14 z-[5] hidden md:block opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-t from-white via-white/70 to-transparent pointer-events-none" />
+              <div className={`absolute inset-x-0 bottom-3 z-10 hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-end ${sizeList.length <= 3 ? "justify-center gap-6" : "justify-between"} px-5`}>
                 {sizeList.map((s) => (
                   <button
                     key={s.size}
                     onClick={(e) => handleSizeAdd(e, s)}
                     disabled={s.stock <= 0}
-                    className={`text-[13px] leading-none tracking-wide transition-colors ${
+                    className={`text-[12px] leading-none tracking-[0.06em] transition-colors ${
                       s.stock <= 0
-                        ? "text-black/25 line-through cursor-not-allowed"
-                        : "text-black/80 hover:text-black"
+                        ? "text-black/30 line-through decoration-1 cursor-not-allowed"
+                        : "text-black/80 hover:text-black hover:underline underline-offset-4"
                     }`}
                     title={s.stock <= 0 ? `${s.size} · Tükendi` : `${s.size} · Sepete ekle`}
                   >
