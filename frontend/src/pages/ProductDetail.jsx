@@ -713,7 +713,7 @@ export default function ProductDetail() {
                 </button>
                 {expandedSections.shipping && (
                   <ul className="pb-3 text-xs text-gray-600 space-y-1.5">
-                    <li>• 500 TL ve üzeri siparişlerde ücretsiz kargo</li>
+                    <li>• 3.000 TL ve üzeri siparişlerde ücretsiz kargo</li>
                     <li>• 1-3 iş günü içinde kargoya verilir</li>
                   </ul>
                 )}
