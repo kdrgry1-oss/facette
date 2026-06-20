@@ -2309,6 +2309,7 @@ export default function AdminProducts() {
                       name: a.name,
                       values: (a.attributeValues || []).map(v => v.name),
                       required: !!a.required,
+                      allowCustom: !!a.allowCustom,
                     }));
 
                     // TRENDYOL: kendi kategori özelliklerinin TÜM izin verilen değerlerini
@@ -2379,6 +2380,8 @@ export default function AdminProducts() {
                         attr={attr}
                         value={valuesMap[attr.name]}
                         isRequired={isRequired}
+                        channelLabel={logo}
+                        allowCustom={marketplace === 'hepsiburada' ? !!attr.allowCustom : marketplace === 'temu'}
                         onChange={(val) => handleChange(attr, val)}
                       />
                     );
@@ -2487,9 +2490,9 @@ export default function AdminProducts() {
                         details={technicalDetails}
                         onChange={(updated) => setTechnicalDetails(updated)}
                       />
-                      {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#F27A1A', bg: '#F27A1A', text: '#9A3412' }, 'TRENDYOL')}
-                      {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#FF6000', bg: '#FF6000', text: '#7F1D1D' }, 'HEPSIBURADA')}
-                      {renderSection('temu', 'Temu için Özellikler', { border: '#111827', bg: '#111827', text: '#111827' }, 'TEMU')}
+                      {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TRENDYOL')}
+                      {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'HEPSIBURADA')}
+                      {renderSection('temu', 'Temu için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TEMU')}
                     </div>
                   );
                 })()}

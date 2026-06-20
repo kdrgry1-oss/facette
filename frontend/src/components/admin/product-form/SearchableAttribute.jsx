@@ -1,173 +1,158 @@
 /**
  * =============================================================================
- * SearchableAttribute.jsx — Aranabilir özellik seçici
+ * SearchableAttribute.jsx — Aranabilir özellik seçici (minimalist, kanal-bilinçli)
  * =============================================================================
  *
  * AMAÇ:
- *   Products.jsx ürün modalının "Özellikler" sekmesinde, pazaryerlerinin
- *   (özellikle Trendyol) zorunlu tuttuğu özelliklerin (Kumaş Tipi, Yaka, Boy,
- *   Desen vb.) kütüphaneden aranarak hızlıca seçilmesini sağlar. Kütüphanede
- *   tanımlı değeri olmayan (serbest metin) özellikler için düz input'a düşer.
+ *   Ürün modalının "Özellikler" sekmesinde, her PAZARYERİNİN kendi zorunlu
+ *   tuttuğu özelliklerin kütüphaneden aranarak seçilmesini sağlar. Kütüphanede
+ *   değeri olmayan ya da manuel'e açık (allowCustom) alanlarda serbest değer girilir.
  *
  * PROPS:
- *   - attr       : { id, name, values: string[] } — /api/attributes'tan gelir.
- *   - value      : Mevcut seçili değer.
- *   - onChange   : (v) => void — Üst formun setFormData'sına bağlanır.
- *   - isRequired : Trendyol zorunlu mu? → kırmızı "ZORUNLU" rozetiyle vurgulanır.
+ *   - attr         : { id, name, values: string[] }
+ *   - value        : Mevcut seçili değer.
+ *   - onChange     : (v) => void
+ *   - isRequired   : Bu KANAL için zorunlu mu? → "ZORUNLU (<KANAL>)" rozeti.
+ *   - channelLabel : Rozet etiketi ("TRENDYOL" | "HEPSIBURADA" | "TEMU"). Sabit değil!
+ *   - allowCustom  : true ise izinli değer listesi olsa bile manuel değer eklenebilir.
  *
- * KULLANIM YERİ:
- *   Products.jsx > ürün modalı > "Özellikler" (attributes) sekmesi içindeki map.
- *
- * NEDEN AYRI DOSYA?
- *   Products.jsx 2500+ satıra ulaştığı için bağımsız küçük parçalar
- *   dış dosyalara taşınıyor (P2 refactor). Bu bileşen tek başına taşınabilir
- *   çünkü yalnızca props'a bağımlı, hiçbir parent-only closure içermiyor.
+ * TASARIM: minimalist — tek vurgu (kırmızı yalnız zorunlu-boş), gri tonlar,
+ *   gradient/animate/pulse/shadow YOK.
  * =============================================================================
  */
 import { useState, useEffect, useRef } from "react";
-import { Search, Check, ChevronDown } from "lucide-react";
+import { Search, Check, ChevronDown, Plus } from "lucide-react";
 
-const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
+const SearchableAttribute = ({
+  attr,
+  value,
+  onChange,
+  isRequired,
+  channelLabel = "TRENDYOL",
+  allowCustom = false,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const dropdownRef = useRef(null);
 
   const hasValue = !!value;
-  const filteredValues =
-    attr.values?.filter((v) =>
-      v.toLowerCase().includes(searchTerm.toLowerCase())
-    ) || [];
+  const opts = attr.values || [];
+  const filteredValues = opts.filter((v) =>
+    v.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  const exactExists = opts.some(
+    (v) => v.toLowerCase() === searchTerm.toLowerCase()
+  );
+  // İzinli değer yoksa ya da alan manuel'e açıksa serbest metne izin ver
+  const freeText = opts.length === 0;
 
-  // Dışarı tıklayınca kapat
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const onOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         setIsOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
   }, []);
 
-  // Kütüphanede değer yoksa düz input'a düş
-  if (!attr.values || attr.values.length === 0) {
+  const reqEmpty = isRequired && !hasValue;
+
+  const Header = () => (
+    <div className="flex justify-between items-center">
+      <div className="flex items-center gap-1.5">
+        <label
+          className={`block text-[11px] font-semibold tracking-wide ${
+            reqEmpty ? "text-red-600" : "text-gray-600"
+          }`}
+        >
+          {attr.name}
+          {isRequired && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+        {hasValue && <Check size={12} className="text-emerald-600" strokeWidth={3} />}
+      </div>
+      {reqEmpty && (
+        <span className="text-[10px] font-medium text-red-600 border border-red-200 px-1.5 py-0.5 rounded">
+          ZORUNLU ({channelLabel})
+        </span>
+      )}
+    </div>
+  );
+
+  const fieldBorder = hasValue
+    ? "border-emerald-300"
+    : reqEmpty
+    ? "border-red-300"
+    : "border-gray-200";
+
+  // Serbest metin alanı (izinli değer yok)
+  if (freeText) {
     return (
-      <div
-        className={`space-y-2 ${
-          isRequired && !hasValue ? "p-3 bg-red-50 rounded-xl border-2 border-red-200" : ""
-        }`}
-      >
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-1">
-            <label
-              className={`block text-[10px] font-black uppercase tracking-widest ${
-                isRequired ? "text-white bg-red-600 px-1 rounded" : "text-gray-400"
-              }`}
-            >
-              {attr.name}
-            </label>
-            {hasValue && <Check size={12} className="text-green-500 font-bold" strokeWidth={4} />}
-            {isRequired && !hasValue && <span className="text-red-600 font-bold animate-pulse">*</span>}
-          </div>
-          {isRequired && !hasValue && (
-            <span className="text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full uppercase animate-pulse shadow-lg shadow-red-200 ring-2 ring-red-300">
-              ZORUNLU (TRENDYOL)
-            </span>
-          )}
-        </div>
+      <div className={`space-y-1.5 ${reqEmpty ? "p-2.5 rounded-lg border border-red-100 bg-red-50/40" : ""}`}>
+        <Header />
         <input
           type="text"
           value={value || ""}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Serbest değer yazın..."
-          className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 focus:bg-white outline-none transition-all text-sm font-medium ${
-            hasValue
-              ? "border-green-500 focus:border-green-500"
-              : isRequired
-              ? "border-red-400 focus:border-red-500"
-              : "border-gray-100 focus:border-orange-300"
-          }`}
+          placeholder="Değer yazın…"
+          className={`w-full border ${fieldBorder} px-3 py-2 rounded-lg bg-white outline-none transition-colors text-sm focus:border-gray-400`}
         />
       </div>
     );
   }
 
+  // İzinli değer listesi (dropdown) + opsiyonel manuel ekleme
   return (
     <div
-      className={`space-y-2 relative ${
-        isRequired && !hasValue
-          ? "p-3 bg-red-50 rounded-xl border-2 border-red-200"
-          : ""
-      }`}
+      className={`space-y-1.5 relative ${reqEmpty ? "p-2.5 rounded-lg border border-red-100 bg-red-50/40" : ""}`}
       ref={dropdownRef}
     >
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-1">
-          <label
-            className={`block text-[10px] font-black uppercase tracking-widest ${
-              isRequired ? "text-white bg-red-600 px-1 rounded" : "text-gray-900"
-            }`}
-          >
-            {attr.name}
-          </label>
-          {hasValue && (
-            <Check size={12} className="text-green-500 font-bold" strokeWidth={4} />
-          )}
-          {isRequired && !hasValue && (
-            <span className="text-red-600 font-bold animate-pulse">*</span>
-          )}
-        </div>
-        {isRequired && !hasValue && (
-          <span className="text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full uppercase animate-pulse shadow-lg shadow-red-200 ring-2 ring-red-300">
-            ZORUNLU (TRENDYOL)
-          </span>
-        )}
-      </div>
-
+      <Header />
       <div
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full border-2 px-4 py-3 rounded-lg bg-gray-50 cursor-pointer flex justify-between items-center transition-all ${
-          hasValue
-            ? "border-green-500"
-            : isRequired
-            ? "border-red-300"
-            : "border-gray-100"
-        }`}
+        className={`w-full border ${fieldBorder} px-3 py-2 rounded-lg bg-white cursor-pointer flex justify-between items-center transition-colors`}
       >
         <div className="flex items-center gap-2 overflow-hidden flex-1">
-          <Search size={14} className="text-gray-400 shrink-0" />
-          <span
-            className={`text-sm truncate ${
-              hasValue ? "text-black font-bold" : "text-gray-400 font-medium"
-            }`}
-          >
-            {value || "Seçiniz..."}
+          <Search size={13} className="text-gray-300 shrink-0" />
+          <span className={`text-sm truncate ${hasValue ? "text-gray-900" : "text-gray-400"}`}>
+            {value || (allowCustom ? "Seç ya da yaz…" : "Seçiniz…")}
           </span>
         </div>
-        <ChevronDown
-          size={14}
-          className={`transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`}
-        />
+        <ChevronDown size={13} className={`text-gray-400 transition-transform shrink-0 ${isOpen ? "rotate-180" : ""}`} />
       </div>
 
       {isOpen && (
-        <div className="absolute z-[100] top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200">
-          <div className="p-2 border-b bg-gray-50 flex items-center gap-2">
-            <Search size={14} className="text-gray-400" />
+        <div className="absolute z-[100] top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-100 flex items-center gap-2">
+            <Search size={13} className="text-gray-300" />
             <input
               autoFocus
-              className="bg-transparent border-none outline-none text-xs w-full py-1 font-bold"
-              placeholder="Kütüphanede ara..."
+              className="bg-transparent border-none outline-none text-xs w-full py-0.5"
+              placeholder={allowCustom ? "Ara ya da yeni değer yaz…" : "Ara…"}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onClick={(e) => e.stopPropagation()}
             />
           </div>
           <div className="max-h-60 overflow-y-auto">
+            {/* allowCustom: listede olmayan değeri ekleme satırı */}
+            {allowCustom && searchTerm.trim() && !exactExists && (
+              <div
+                className="px-3 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 text-gray-700"
+                onClick={() => {
+                  onChange(searchTerm.trim());
+                  setIsOpen(false);
+                  setSearchTerm("");
+                }}
+              >
+                <Plus size={13} className="text-gray-400" />
+                <span>"<b>{searchTerm.trim()}</b>" değerini ekle</span>
+              </div>
+            )}
             {filteredValues.map((v, idx) => (
               <div
                 key={idx}
-                className="px-4 py-3 text-sm hover:bg-orange-50 cursor-pointer border-b last:border-0 border-gray-50 transition-colors font-medium text-gray-700"
+                className="px-3 py-2.5 text-sm hover:bg-gray-50 cursor-pointer border-b last:border-0 border-gray-50 text-gray-700"
                 onClick={() => {
                   onChange(v);
                   setIsOpen(false);
@@ -176,10 +161,8 @@ const SearchableAttribute = ({ attr, value, onChange, isRequired }) => {
                 {v}
               </div>
             ))}
-            {filteredValues.length === 0 && (
-              <div className="px-4 py-8 text-center text-xs text-gray-400 uppercase font-bold tracking-widest">
-                Sonuç bulunamadı
-              </div>
+            {filteredValues.length === 0 && !(allowCustom && searchTerm.trim()) && (
+              <div className="px-3 py-6 text-center text-xs text-gray-400">Sonuç yok</div>
             )}
           </div>
         </div>
