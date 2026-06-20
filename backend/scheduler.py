@@ -855,6 +855,9 @@ async def _dhl_cargo_poll_tick():
 
             gonderi = (info.get("gonderi_no") or "").strip()
             url = (info.get("kargo_takip_url") or "").strip()
+            # DHL eCommerce: takip no varsa müşteri direkt takip deep-link'i (genel /gonderitakip yerine)
+            _track_no = gonderi or order.get("cargo_tracking_number", "")
+            track_link = f"https://kargotakip.dhlecommerce.com.tr/?takipNo={_track_no}" if _track_no else url
             teslim = (info.get("teslim_tarihi") or "").strip()
             statu = (info.get("kargo_statu") or "0").strip()
             aciklama = (info.get("kargo_statu_aciklama") or "")
@@ -884,9 +887,9 @@ async def _dhl_cargo_poll_tick():
             if gonderi:
                 upd["cargo_gonderi_no"] = gonderi
                 upd["cargo_tracking_number"] = gonderi
-            if url:
-                upd["cargo_tracking_url"] = url
-                upd["cargo_tracking_link"] = url
+            if track_link:
+                upd["cargo_tracking_url"] = track_link
+                upd["cargo_tracking_link"] = track_link
             if aciklama:
                 upd["cargo_status_text"] = aciklama
             if new_status:
@@ -911,7 +914,7 @@ async def _dhl_cargo_poll_tick():
                                 "order_number": siparis_no,
                                 "amount": f"{order.get('total', 0):.2f} TL",
                                 "tracking_number": gonderi or order.get("cargo_tracking_number", ""),
-                                "tracking_url": url or order.get("cargo_tracking_url", ""),
+                                "tracking_url": track_link or order.get("cargo_tracking_url", ""),
                                 "status_label": customer_label_for(new_status),
                             },
                             channels=ch,

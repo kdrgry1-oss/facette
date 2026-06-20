@@ -65,6 +65,14 @@ _FIELD_ALIASES = {
 }
 
 
+def _dhl_takip_url(no) -> str:
+    """Takip no'dan DHL eCommerce müşteri takip deep-link'ini kurar.
+    Genel https://www.dhlecommerce.com.tr/gonderitakip (no'suz) yerine
+    https://kargotakip.dhlecommerce.com.tr/?takipNo=<no> — müşteri direkt veriyi görür."""
+    no = str(no or "").strip()
+    return f"https://kargotakip.dhlecommerce.com.tr/?takipNo={no}" if no else ""
+
+
 def _norm_key(k) -> str:
     return str(k).strip().lower().replace("_", "").replace(" ", "")
 
@@ -253,7 +261,7 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
             "referans_no": f.get("referans_no", ""),       # bizim W… sipariş no
             "kargo_statu": f.get("kargo_statu", "0"),
             "kargo_statu_aciklama": f.get("kargo_statu_aciklama", ""),
-            "kargo_takip_url": f.get("kargo_takip_url", ""),
+            "kargo_takip_url": _dhl_takip_url(f.get("gonderi_no", "")) or f.get("kargo_takip_url", ""),
             "teslim_tarihi": f.get("teslim_tarihi", ""),
             "alici_il": f.get("alici_il", ""),
             "cikis_subesi": f.get("cikis_subesi", ""),
@@ -291,7 +299,7 @@ def get_mng_shipment_status(*, username: str, password: str, siparis_no: str) ->
                 "referans_no": f.get("referans_no", ""),
                 "kargo_statu": f.get("kargo_statu", "0"),
                 "kargo_statu_aciklama": f.get("kargo_statu_aciklama", ""),
-                "kargo_takip_url": f.get("kargo_takip_url", ""),
+                "kargo_takip_url": _dhl_takip_url(f.get("gonderi_no", "")) or f.get("kargo_takip_url", ""),
                 "teslim_tarihi": f.get("teslim_tarihi", ""),
                 "alici_il": f.get("alici_il", ""),
                 "raw": d,

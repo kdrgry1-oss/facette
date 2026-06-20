@@ -486,20 +486,44 @@ export default function ProductDetail() {
               )}
             </div>
 
-            {/* Desktop: 2-col grid */}
-            <div className="hidden lg:grid grid-cols-2 gap-2">
-              {displayImages.map((img, index) => (
-                <div key={index} className="relative aspect-[2/3] bg-stone-50">
+            {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü) */}
+            <div className="hidden lg:flex gap-4">
+              {displayImages.length > 1 && (
+                <div className="flex flex-col gap-2 w-[70px] shrink-0">
+                  {displayImages.map((img, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedImage(index)}
+                      onMouseEnter={() => setSelectedImage(index)}
+                      className={`relative aspect-[2/3] bg-stone-50 overflow-hidden border transition-colors ${
+                        index === selectedImage ? "border-black" : "border-transparent hover:border-gray-300"
+                      }`}
+                      aria-label={`Görsel ${index + 1}`}
+                      data-testid={`pdp-thumb-${index}`}
+                    >
+                      <img
+                        src={optimizeImg(img, 200)}
+                        alt=""
+                        className="w-full h-full object-cover object-top"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="relative aspect-[2/3] bg-stone-50">
                   <img
-                    src={optimizeImg(img, 1200)}
-                    alt={`${product.name} ${index + 1}`}
+                    src={optimizeImg(displayImages[selectedImage] || displayImages[0], 1400)}
+                    alt={product.name}
                     className="w-full h-full object-cover object-top"
-                    loading={index === 0 ? "eager" : "lazy"}
-                    fetchPriority={index === 0 ? "high" : "auto"}
+                    loading="eager"
+                    fetchPriority="high"
                     decoding="async"
                   />
                 </div>
-              ))}
+              </div>
             </div>
           </div>
 
