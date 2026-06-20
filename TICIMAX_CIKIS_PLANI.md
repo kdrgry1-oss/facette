@@ -82,4 +82,30 @@ Bir Ticimax dosyasını **silersen**, bu import satırı `ImportError` verir →
 - **Aşama 4 (kısmi): TAMAM** (ilk backend dokunuşu — `server.py`'de `ticimax_category_sync` / `ticimax_member_sync` / `ticimax_product_pull` router'larının **import + include** satırları `# [A4-ticimax-off]` ile yorumlandı. Bu 3 değişken yalnız server.py'de kullanılıyor + uçlarının aktif frontend çağıranı yok → boot patlamaz. **stock_sync KORUNDU** (AutomationStatus'taki "Ticimax Stok Senkronla" butonu hâlâ `/admin/ticimax/sync-stock` çağırıyor). **returns KORUNDU** (aktif "Web Sitesi" iade akışı `/admin/ticimax/return-orders`, `/orders/refresh-dates`, `/returns/{id}/open`, `/return-orders/export` kullanıyor). Boot gate: Railway logunda `[scheduler] Background scheduler started`.)
 - **Aşama 4b: TAMAM** (AutomationStatus'tan `ManualSyncButtons` ("Ticimax Stok Senkronla") render+fonksiyonu kaldırıldı **+** `ticimax_stock_sync` router'ı (import+include) `# [A4b-ticimax-off]` ile kapatıldı. Frontend+backend aynı paket, **kümülatif** (server.py Aşama 4 değişikliklerini de içerir). Artık **yalnız `ticimax_returns_router` aktif** (site iade akışı). esbuild + ast.parse geçti. Boot gate: Railway `[scheduler] Background scheduler started`.)
 - **Aşama 4c:** `integrations.py` içindeki ~15 `/ticimax/*` ucu — **AMA** returns akışının kullandığı `/integrations/ticimax/orders/import` HARİÇ. Dikkatli, ayrı adım.
-- **Aşama 5:** dosyaları sil (EN SON; returns + stock_sync + integrations bağları çözülünce, referans sıfırsa, her silmede boot testi).
+- **Aşama 5a: TAMAM (kısmi silme)** — referanssız 3 route dosyası silindi: `routes/ticimax_category_sync.py`, `routes/ticimax_member_sync.py`, `routes/ticimax_product_pull.py`. (server.py importları Aşama 4'te yorumlu olduğu için boot'a etkisi yok. `git rm` ile; önce `grep ^[^#]*ticimax_(category_sync|member_sync|product_pull) server.py` boş çıktığı doğrulandı.)
+
+---
+
+## 5. READ-ONLY ANALİZ — TAM ÇIKIŞ NEDEN TEK HAMLE DEĞİL
+
+Ticimax çekirdek modülleri **aktif koda bağlı**, hemen silinemez:
+- `ticimax_schema.py` → `routes/products.py` **boot'ta top-level** `from ticimax_schema import BOOL_COLS` yapıyor. Silersen ImportError → site açılmaz. (önce products.py'den koparılmalı)
+- `ticimax_client.py`, `ticimax_order_parser.py` → aktif sipariş import + iade akışı (lazy import) kullanıyor.
+
+`integrations.py`'deki 15 `/ticimax/*` ucundan bazıları **hâlâ aktif sayfalardan çağrılıyor:**
+- `Categories.jsx` → `/ticimax/categories/sync-missing-from-products`
+- `Products.jsx` → `/ticimax/teknik-detay/sync`
+- `TicimaxReturns` (site iade) → `/ticimax/orders/import`, `/admin/ticimax/return-orders`
+- `Integrations.jsx` → `/ticimax/status` (sayfa açılışında hâlâ GET; kart kaldırıldı ama handler/effect kaldı — kozmetik)
+
+**Kalan silinemez:** `ticimax_stock_sync.py` (scheduler.py:619 lazy ref — önce o satır temizlenmeli), çekirdek 3 modül, integrations.py uçları, `models.py: ticimax_fields` (ÜRÜN VERİSİ — DOKUNMA).
+
+### TAM ÇIKIŞ İÇİN GÜVENLİ SIRA (büyük iş, ayrı ayrı paketler)
+1. **Aktif uçları kopar/yeniden adlandır:** Categories `sync-missing-from-products`, Products `teknik-detay/sync` — bu işlevler Ticimax'tan bağımsız hale getirilmeli veya kaldırılmalı (kullanılıyorlarsa kaldırma ürün/kategori akışını bozar — önce ne yaptıkları doğrulanmalı).
+2. **Returns akışını yeniden adlandır:** `/admin/ticimax/*` → `/admin/site-iade/*` + `/ticimax/orders/import` bağımlılığını çöz (tek atomik backend+frontend paket).
+3. **Integrations.jsx ölü handler/effect temizliği** (frontend, güvenli).
+4. **scheduler.py** ölü `_ticimax_sync_orders` / `_ticimax_sync_stock` fonksiyonlarını kaldır → `ticimax_stock_sync.py` silinebilir hale gelir.
+5. **Çekirdek koparma:** products.py'den `ticimax_schema` importunu çöz → schema/client/parser silinebilir.
+6. **EN SON:** `models.py: ticimax_fields` yalnız veri taşıma teyitliyse ve yedekle.
+
+> Her adım: ast.parse + (frontend) esbuild + push sonrası Railway `[scheduler] Background scheduler started` + ilgili sayfa açılış testi.
