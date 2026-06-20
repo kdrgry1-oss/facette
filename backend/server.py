@@ -80,9 +80,9 @@ from routes.category_mapping import router as category_mapping_router
 from routes.automation_status import router as automation_status_router
 from routes.footer_template import public_router as footer_public_router, admin_router as footer_admin_router
 from routes.ticimax_stock_sync import router as ticimax_stock_sync_router
-from routes.ticimax_category_sync import router as ticimax_category_sync_router
-from routes.ticimax_member_sync import router as ticimax_member_sync_router
-from routes.ticimax_product_pull import router as ticimax_product_pull_router
+# [A4-ticimax-off] from routes.ticimax_category_sync import router as ticimax_category_sync_router
+# [A4-ticimax-off] from routes.ticimax_member_sync import router as ticimax_member_sync_router
+# [A4-ticimax-off] from routes.ticimax_product_pull import router as ticimax_product_pull_router
 from routes.ticimax_returns import router as ticimax_returns_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
@@ -611,11 +611,11 @@ api_router.include_router(footer_admin_router)
 # Ticimax canlı stok senkronu (admin)
 api_router.include_router(ticimax_stock_sync_router)
 # Ticimax kategori senkronu — "En Yeniler" tam ayna + tüm kategoriler (admin)
-api_router.include_router(ticimax_category_sync_router)
+# [A4-ticimax-off] api_router.include_router(ticimax_category_sync_router)
 # Ticimax üye içe aktarma — e-posta eşleştirme + geçmiş sipariş bağlama (admin)
-api_router.include_router(ticimax_member_sync_router)
+# [A4-ticimax-off] api_router.include_router(ticimax_member_sync_router)
 # Ticimax belirli kart ID ürün çekme — kaynak→hedef kart ID ile yeni ürün (admin)
-api_router.include_router(ticimax_product_pull_router)
+# [A4-ticimax-off] api_router.include_router(ticimax_product_pull_router)
 
 api_router.include_router(ticimax_returns_router)
 # Toplu fiyat/stok Excel ops + stok uyarı + yeniden sipariş önerisi
