@@ -528,7 +528,7 @@ export default function ProductDetail() {
           </div>
 
           {/* Product Info */}
-          <div className="lg:col-span-5 lg:col-start-8 lg:sticky lg:top-24 min-w-0">
+          <div className="lg:col-span-6 lg:sticky lg:top-24 min-w-0">
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}

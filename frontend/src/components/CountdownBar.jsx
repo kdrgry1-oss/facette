@@ -109,8 +109,8 @@ export default function CountdownBar() {
   const s = block?.settings || {};
   const startAt = _parseLocal(s.start_at);
   const endAt   = _parseLocal(s.end_at);
-  const bg      = s.bg_color   || "#000000";
-  const fg      = s.text_color || "#ffffff";
+  const bg      = "#000000"; // kampanya barı: her zaman siyah arka plan
+  const fg      = "#ffffff"; // kampanya barı: her zaman beyaz metin
   const inWindow =
     (!startAt || now >= startAt.getTime()) &&
     (!endAt   || now <= endAt.getTime());
