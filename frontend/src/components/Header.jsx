@@ -239,7 +239,7 @@ export default function Header({ hideMenu = false }) {
                     {/* EN YENİLER */}
                     <Link
                       to="/en-yeniler"
-                      className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
+                      className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
                     >
                       EN YENİLER
                     </Link>
@@ -252,7 +252,7 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/giyim"
-                        className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 flex items-center"
+                        className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
                       >
                         GİYİM
                       </Link>
@@ -266,7 +266,7 @@ export default function Header({ hideMenu = false }) {
                     >
                       <Link
                         to="/aksesuar"
-                        className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60"
+                        className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
                       >
                         AKSESUAR
                       </Link>
@@ -275,7 +275,7 @@ export default function Header({ hideMenu = false }) {
                     {/* SALE */}
                     <Link
                       to="/sale"
-                      className="text-xs font-light tracking-[0.2em] uppercase py-4 hover:opacity-60 text-red-700"
+                      className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60 text-red-700"
                     >
                       SALE
                     </Link>
@@ -582,7 +582,7 @@ export default function Header({ hideMenu = false }) {
 
               {/* ORTA: büyük arama girişi */}
               <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="w-full">
-                <div className="relative border-b border-black max-w-xl mx-auto">
+                <div className="relative border-b border-black max-w-xl mx-auto md:max-w-2xl md:mx-0">
                   <input
                     type="text"
                     value={searchQuery}

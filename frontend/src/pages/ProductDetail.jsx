@@ -451,7 +451,7 @@ export default function ProductDetail() {
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
           {/* Image Gallery — mobile: swipe carousel, desktop: 2-col grid */}
-          <div className="lg:col-span-8 space-y-2 min-w-0">
+          <div className="lg:col-span-6 space-y-2 min-w-0">
             {/* Mobile: full-width snap carousel with dots */}
             <div className="lg:hidden -mx-4">
               <div
@@ -504,7 +504,7 @@ export default function ProductDetail() {
           </div>
 
           {/* Product Info */}
-          <div className="lg:col-span-4 lg:max-w-md lg:sticky lg:top-24 min-w-0">
+          <div className="lg:col-span-5 lg:col-start-8 lg:sticky lg:top-24 min-w-0">
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}
