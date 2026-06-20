@@ -810,77 +810,6 @@ export default function Integrations() {
         ))}
       </div>
 
-      {/* Ticimax Integration */}
-      <div className="mt-6 bg-white rounded-lg border-2 border-indigo-200 p-6">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-lg bg-indigo-100 text-indigo-600">
-            <Database className="w-8 h-8" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-semibold text-lg">Ticimax</h3>
-              <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                <Check size={12} /> Aktif – facette.com.tr
-              </span>
-              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">🟢 Canlı Mod</span>
-            </div>
-            <p className="text-sm text-gray-600 mb-2">Ticimax e-ticaret platformundan ürünler, kategoriler ve siparişleri içe aktar</p>
-            {ticimaxStatus.last_sync && (
-              <p className="text-xs text-gray-400 mb-2">Son senkronizasyon: {new Date(ticimaxStatus.last_sync).toLocaleString("tr-TR")}</p>
-            )}
-            <div className="text-xs text-gray-500 bg-gray-50 rounded p-2 mb-4">
-              API Key: <code className="font-mono bg-gray-100 px-1 rounded">HANXFWINXLDBY**</code> · Domain: <code className="font-mono bg-gray-100 px-1 rounded">www.facette.com.tr</code>
-            </div>
-            <div className="flex flex-wrap gap-3 pt-3 border-t">
-              <button
-                onClick={handleTicimaxTestConnection}
-                data-testid="ticimax-test-connection-btn"
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-zinc-900 text-zinc-900 hover:bg-zinc-900 hover:text-white transition-colors"
-              >
-                <RefreshCw size={14} /> Bağlantı Testi
-              </button>
-              <button
-                onClick={handleTicimaxImportCategories}
-                disabled={ticimaxImportingCategories}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              >
-                {ticimaxImportingCategories ? <RefreshCw size={14} className="animate-spin" /> : <Database size={14} />}
-                {ticimaxImportingCategories ? "Kategoriler Yükleniyor..." : "Kategorileri Aktar"}
-              </button>
-              <button
-                onClick={handleTicimaxImportProducts}
-                disabled={ticimaxImportingProducts}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
-              >
-                {ticimaxImportingProducts ? <RefreshCw size={14} className="animate-spin" /> : <Package size={14} />}
-                {ticimaxImportingProducts ? "Ürünler Yükleniyor..." : "Ürünleri Aktar (500)"}
-              </button>
-              <button
-                onClick={handleTicimaxImportOrders}
-                disabled={ticimaxImportingOrders}
-                data-testid="ticimax-import-orders-btn"
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-600 disabled:opacity-50 transition-colors"
-              >
-                {ticimaxImportingOrders ? <RefreshCw size={14} className="animate-spin" /> : <ShoppingBag size={14} />}
-                {ticimaxImportingOrders ? "Siparişler Yükleniyor..." : "Tüm Siparişleri Aktar (2 yıl)"}
-              </button>
-              <button
-                onClick={handleTicimaxImportMembers}
-                disabled={ticimaxImportingMembers}
-                data-testid="ticimax-import-members-btn"
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
-              >
-                {ticimaxImportingMembers ? <RefreshCw size={14} className="animate-spin" /> : <Users size={14} />}
-                {ticimaxImportingMembers ? "Üyeler Yükleniyor..." : "Tüm Üyeleri Aktar"}
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-3 px-1">
-              <strong>Tüm veri:</strong> Site + pazaryeri siparişleri + tüm üyeler dahil. Filtrelemek için API parametrelerini kullanabilirsiniz.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* XML Feed Import */}
       <div className="mt-6 bg-white rounded-lg border-2 border-emerald-200 p-6">
         <div className="flex items-start gap-4">
@@ -1287,7 +1216,6 @@ export default function Integrations() {
                 >
                   <option value="">Tümü</option>
                   <option value="trendyol">Trendyol</option>
-                  <option value="ticimax">Ticimax</option>
                 </select>
               </div>
               <div className="flex flex-col gap-1 w-1/3">

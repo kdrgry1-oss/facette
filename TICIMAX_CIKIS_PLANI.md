@@ -78,4 +78,5 @@ Bir Ticimax dosyasını **silersen**, bu import satırı `ImportError` verir →
 ## 4. DURUM
 - **Aşama 1: TAMAM** (otomatik çekme kapalı, site güvende).
 - **Aşama 2: TAMAM** (UI'dan gizlendi — adminNav "Ticimax Excel Yükle" girişi + AutomationStatus "Ticimax" kartı kaldırıldı. **Yalnız frontend**, backend boot'una dokunulmadı, esbuild geçti. Dosyalar ve `/admin/ticimax-excel` route'u duruyor; menüde görünmüyor.)
-- Aşama 3-5: onayınla sırayla, her biri ayrı küçük paket + boot testi.
+- **Aşama 3: TAMAM** (UI temizliği — Entegrasyonlar sayfasındaki "Ticimax" kartı (API key + "Canlı Mod") ve Entegrasyon Logları filtresindeki `ticimax` seçeneği kaldırıldı. Sipariş kaynak etiketi zaten "Web" gösteriyordu (Orders rozeti `Web`; kaynak filtresinde ticimax yok) → DB `source` değerlerine ve sorgu mantığına **dokunulmadı**. `TicimaxReturns` bileşeni "Web Sitesi" iade akışını çalıştıran **aktif** bileşendir → DOKUNULMADI. Yalnız frontend, esbuild geçti.)
+- Aşama 4-5: onayınla sırayla, her biri ayrı küçük paket + boot testi.
