@@ -136,7 +136,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
   // Ticimax'tan siparişleri çek (iade olanlar orders'a düşer, sonra listeyi yenile)
   const pullFromTicimax = async () => {
     setPulling(true);
-    toast.info("Ticimax'tan siparişler çekiliyor — bu işlem birkaç dakika sürebilir…");
+    toast.info("Rooftr'dan siparişler çekiliyor — bu işlem birkaç dakika sürebilir…");
     try {
       const res = await axios.post(
         `${API}/integrations/ticimax/orders/import?days=365&pages=20&limit=100`,
@@ -145,13 +145,13 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       );
       if (res.data?.success === false) {
         // Backend gerçek WS hatasını message + error_detail ile döndürür
-        toast.error(res.data.message || "Ticimax'tan sipariş çekilemedi.");
+        toast.error(res.data.message || "Rooftr'dan sipariş çekilemedi.");
       } else {
-        toast.success(res.data.message || "Ticimax siparişleri çekildi");
+        toast.success(res.data.message || "Rooftr siparişleri çekildi");
       }
       await load();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Ticimax'tan çekme başarısız. WS yetki kodu / Sipariş Servisi iznini kontrol edin.");
+      toast.error(e.response?.data?.detail || "Rooftr'dan çekme başarısız. WS yetki kodu / Sipariş Servisi iznini kontrol edin.");
     } finally {
       setPulling(false);
     }
@@ -370,7 +370,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
         <button
           onClick={refreshDates}
           disabled={redating || pulling}
-          title="Tüm siparişlerin tarihini Ticimax'taki gerçek sipariş tarihine günceller"
+          title="Tüm siparişlerin tarihini Rooftr'daki gerçek sipariş tarihine günceller"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-bold hover:bg-slate-700 disabled:opacity-60"
         >
           <RefreshCw size={15} className={redating ? "animate-spin" : ""} />
@@ -430,8 +430,8 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       ) : rows.length === 0 ? (
         <div className="text-center py-16 border rounded-xl text-gray-400">
           <Package className="mx-auto mb-2 opacity-40" size={28} />
-          Ticimax iade siparişi bulunamadı.
-          <div className="text-xs mt-1">Yukarıdaki "Ticimax'tan Çek" ile siparişleri içeri aktarın.</div>
+          Rooftr iade siparişi bulunamadı.
+          <div className="text-xs mt-1">Yukarıdaki "Siparişleri Çek" ile siparişleri içeri aktarın.</div>
         </div>
       ) : (
         <div className="border rounded-xl overflow-hidden">

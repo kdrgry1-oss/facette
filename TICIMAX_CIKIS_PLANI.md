@@ -112,3 +112,28 @@ Ticimax çekirdek modülleri **aktif koda bağlı**, hemen silinemez:
 6. **EN SON:** `models.py: ticimax_fields` yalnız veri taşıma teyitliyse ve yedekle.
 
 > Her adım: ast.parse + (frontend) esbuild + push sonrası Railway `[scheduler] Background scheduler started` + ilgili sayfa açılış testi.
+
+---
+
+## 6. REBRAND İZİ — "ticimax" → "Rooftr" (de-branding)
+
+[KARAR] Sahip: *"adı ticimax olan herşeyi rooftr yap."* "rooftr" yazımı teyitli.
+Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticimax" adlarını **Rooftr** yapar. Aşamalı + çökme-güvenli.
+
+### A/B AYRIMI (zorunlu — körlemesine global rename YASAK)
+**🟢 Grup A — KOD (Rooftr yapılır, aşamalı):** dosya adları (`ticimax_*.py`, `Ticimax*.jsx`), fonksiyon/değişken adları, route yolları, yorumlar, **UI metinleri**, log mesajları.
+**🔴 Grup B — VERİ (kodda DOKUNULMAZ; rename = veri uyumsuzluğu → "veriyi koruma" kuralını bozar):**
+- `ticimax_fields` → ürün dökümanı alanı, AKTİF (URUNKARTIID, filtre `tf_/tfmin_`, arama; products.py 403-1379).
+- `db.ticimax_attribute_master` → koleksiyon adı (category_mapping.py 1162/1817, integrations.py 5148).
+- `source:"ticimax"`, `imported_from:"ticimax_cron"`, `ticimax_order_id` → mevcut siparişlerde kayıtlı (integrations.py 4871/5173/5561/5833/5901+).
+> Grup B yalnız ileride **yedekli, ayrı, riskli DB migration** ile çevrilir. Kodda asla.
+
+### R-AŞAMALARI (güvenliden riskliye)
+- **R1 — Görünür UI metinleri → Rooftr: TAMAM (esbuild geçti).**
+  - `TicimaxReturns.jsx` (Returns "Web Sitesi" sekmesinde aktif): 5 toast/tooltip/empty-state metni `Ticimax'tan…` → `Rooftr'dan…`; empty-state buton referansı gerçek etiketle eşitlendi ("Siparişleri Çek").
+  - `TicimaxExcelUpload.jsx`: başlık "Ticimax Excel Ürün Aktarımı" → "Rooftr Excel Ürün Aktarımı"; "TicimaxExport" → "RooftrExport".
+  - Kapsam DIŞI (bilerek): Integrations.jsx 344-445 toast'ları = ölü handler (kart Aşama 3'te kaldırıldı, tetiklenmez) → R3'te komple silinecek. Identifier/yorum/route → sonraki R-aşamaları.
+- **R2 — route yolları** `/ticimax/*` → `/rooftr/*` (aktif: returns + integrations) + frontend çağıranları, koordineli, boot-testli.
+- **R3 — fonksiyon/değişken adları** (dict-key DEĞİL) + Integrations.jsx ölü handler temizliği.
+- **R4 (en riskli, en son) — dosya adları** `ticimax_*.py`/`Ticimax*.jsx` → rename + tüm import zinciri birlikte, boot-testli.
+> Grup B (veri) tüm R-aşamalarında ELLENMEZ.

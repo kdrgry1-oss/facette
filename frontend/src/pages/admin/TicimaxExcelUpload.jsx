@@ -52,10 +52,10 @@ export default function TicimaxExcelUpload() {
     <div className="p-6 max-w-4xl mx-auto" data-testid="ticimax-excel-upload-page">
       <div className="mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <FileSpreadsheet className="text-green-600" size={26} /> Ticimax Excel Ürün Aktarımı
+          <FileSpreadsheet className="text-green-600" size={26} /> Rooftr Excel Ürün Aktarımı
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          TicimaxExport (.xls/.xlsx) dosyasını sürükleyip bırakın. URUNKARTIID bazında ürünler
+          RooftrExport (.xls/.xlsx) dosyasını sürükleyip bırakın. URUNKARTIID bazında ürünler
           barkod, stok kodu, fiyat, indirimli fiyat, üye fiyatı, KDV, varyant ve kategori bilgileriyle
           tam senkronize edilir (eşleşen güncellenir, yeni olan eklenir).
         </p>
