@@ -360,21 +360,6 @@ export default function Integrations() {
       ]
     },
     {
-      id: "hepsiburada",
-      name: "Hepsiburada Marketplace",
-      description: "Hepsiburada pazaryeri entegrasyonu - ürün, stok, sipariş, müşteri soruları",
-      icon: <ShoppingBag className="w-8 h-8" />,
-      status: statuses.hepsiburada,
-      color: "red",
-      instructions: "Hepsiburada Merchant panelinden API Key, API Secret ve Merchant ID alınız.",
-      envKeys: [],
-      actions: [
-        { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('hepsiburada', setHbSettings, setHbModalOpen), loading: false },
-        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('hepsiburada', setHbTesting), loading: hbTesting, disabled: !statuses.hepsiburada?.configured },
-        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/kategori-eslestir" }
-      ]
-    },
-    {
       id: "mng",
       name: "DHL E-Commerce",
       description: "Kargo takip, etiket basımı, gönderi oluşturma",
@@ -805,69 +790,6 @@ export default function Integrations() {
       </Dialog>
 
       {/* Hepsiburada Settings Modal */}
-      <Dialog open={hbModalOpen} onOpenChange={setHbModalOpen}>
-        <DialogContent data-testid="hepsiburada-settings-modal">
-          <DialogHeader>
-            <DialogTitle>Hepsiburada API Ayarları</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('hepsiburada', hbSettings, setHbModalOpen); }} className="space-y-4">
-            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-xs text-blue-800">
-              Hepsiburada <strong>Basic Auth</strong> kullanır: kullanıcı adı = <strong>Merchant ID</strong>, şifre = <strong>Secret Key</strong>.
-              İsteklerde ayrıca <strong>Developer Username</strong> (User-Agent) gönderilir. Bilgileri HB Geliştirici/Merchant Panel → <em>API Bilgileri</em> ekranından alırsınız.
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Merchant ID *</label>
-              <input data-testid="hb-merchant-id" type="text" required value={hbSettings.merchant_id}
-                onChange={(e) => setHbSettings({ ...hbSettings, merchant_id: e.target.value })}
-                placeholder="örn: e88383f6-478d-4b36-9d44-..."
-                className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Basic Auth kullanıcı adı olarak da bu değer kullanılır.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Secret Key *</label>
-              <input data-testid="hb-secret-key" type="password" value={hbSettings.secret_key || ''}
-                onChange={(e) => setHbSettings({ ...hbSettings, secret_key: e.target.value })}
-                placeholder={hbSettings.secret_key === "********" ? "********" : "Hepsiburada API parolası"}
-                className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Basic Auth şifresi. Mevcut değer maskelenir; değiştirmek için yeni girin.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Developer Username *</label>
-              <input data-testid="hb-dev-username" type="text" required value={hbSettings.dev_username || ''}
-                onChange={(e) => setHbSettings({ ...hbSettings, dev_username: e.target.value })}
-                placeholder="örn: ceyjewelry_dev"
-                className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">API isteklerinde User-Agent başlığı olarak gönderilir.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Ortam</label>
-              <select value={hbSettings.mode || "sandbox"}
-                onChange={e => setHbSettings({ ...hbSettings, mode: e.target.value })}
-                className="w-full border px-3 py-2 rounded text-sm bg-white">
-                <option value="sandbox">Sandbox (SIT Test)</option>
-                <option value="production">Production (Canlı)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Varsayılan Fiyat Farkı (%)</label>
-              <input type="number" value={hbSettings.default_markup}
-                onChange={(e) => setHbSettings({ ...hbSettings, default_markup: e.target.value })}
-                className="w-full border px-3 py-2 rounded text-sm" placeholder="Örn: 15" />
-            </div>
-            <label className="flex items-center gap-2 mt-2">
-              <input data-testid="hb-is-active" type="checkbox" checked={!!hbSettings.is_active}
-                onChange={(e) => setHbSettings({ ...hbSettings, is_active: e.target.checked })} />
-              <span className="text-sm">Entegrasyon Aktif</span>
-            </label>
-            <div className="flex justify-end gap-2 pt-4 border-t">
-              <button type="button" onClick={() => setHbModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
-              <button data-testid="hb-save-btn" type="submit" disabled={savingSettings} className="px-4 py-2 bg-[#FF6000] text-white rounded hover:bg-[#cc4e00] disabled:opacity-50">
-                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       {/* Temu Settings Modal */}
 

@@ -108,6 +108,10 @@ export default function MarketplaceHub() {
   const [tyOp, setTyOp] = useState(null);
   const [tyOpSaving, setTyOpSaving] = useState(false);
   const [tyBusy, setTyBusy] = useState("");
+  // Hepsiburada operatif (db.settings id=hepsiburada — status + client bunu okur)
+  const [hbOp, setHbOp] = useState(null);
+  const [hbOpSaving, setHbOpSaving] = useState(false);
+  const [hbTesting, setHbTesting] = useState(false);
 
   // İlk yükleme: pazaryeri listesi
   useEffect(() => {
@@ -145,6 +149,16 @@ export default function MarketplaceHub() {
       { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => setTyOp(r.data || {}))
       .catch(() => setTyOp({}));
+  }, [active]);
+
+  // Hepsiburada seçiliyse operatif ayarları db.settings'ten çek
+  useEffect(() => {
+    if (active !== "hepsiburada") { setHbOp(null); return; }
+    const token = localStorage.getItem("token");
+    axios.get(`${API}/integrations/hepsiburada/settings?t=${Date.now()}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setHbOp(r.data || {}))
+      .catch(() => setHbOp({}));
   }, [active]);
 
   const filtered = useMemo(() => {
@@ -197,6 +211,34 @@ export default function MarketplaceHub() {
     } catch (err) {
       toast.error(`${label} hatası: ` + (err.response?.data?.detail || err.message));
     } finally { setTyBusy(""); }
+  };
+
+  // ----- Hepsiburada operatif: güncelle / kaydet / test -----
+  const hbUpd = (k, v) => setHbOp((p) => ({ ...(p || {}), [k]: v }));
+
+  const saveHbOp = async () => {
+    setHbOpSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/integrations/hepsiburada/settings`, hbOp,
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Hepsiburada ayarları kaydedildi");
+    } catch (err) {
+      toast.error("Kayıt başarısız: " + (err.response?.data?.detail || err.message));
+    } finally { setHbOpSaving(false); }
+  };
+
+  const testHb = async () => {
+    setHbTesting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.post(`${API}/integrations/hepsiburada/test-connection`, {},
+        { headers: { Authorization: `Bearer ${token}` } });
+      if (r.data?.success) toast.success(r.data?.message || "Bağlantı başarılı");
+      else toast.error(r.data?.message || "Bağlantı başarısız");
+    } catch (err) {
+      toast.error("Test başarısız: " + (err.response?.data?.detail || err.message));
+    } finally { setHbTesting(false); }
   };
 
   if (loading) return <div className="py-10 text-center text-sm text-gray-500">Yükleniyor…</div>;
@@ -320,7 +362,7 @@ export default function MarketplaceHub() {
                 </div>
                 {/* Quick Links: Detaylı sayfalar */}
                 <div className="mt-4 pt-4 border-t flex flex-wrap gap-2">
-                  {active !== "trendyol" && (
+                  {!["trendyol", "hepsiburada"].includes(active) && (
                   <Link
                     to="/admin/entegrasyonlar"
                     data-testid="quick-link-integrations"
@@ -473,8 +515,84 @@ export default function MarketplaceHub() {
                 </div>
               )}
 
-              {/* API CREDENTIALS — Trendyol'da gizli (operatif ayarlar yukarıda) */}
-              {active !== "trendyol" && (
+              {/* ===== HEPSİBURADA OPERATİF AYARLAR (db.settings — status & client bunu okur) ===== */}
+              {active === "hepsiburada" && (
+                <div className="bg-white border rounded-xl p-5 mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider">
+                      Hepsiburada API Ayarları
+                    </h3>
+                    <div className="flex gap-2">
+                      <button onClick={testHb} disabled={hbTesting || !hbOp}
+                        className="flex items-center gap-1 border border-stone-300 hover:bg-stone-100 text-stone-800 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50"
+                        data-testid="hb-op-test">
+                        <Cable size={13} /> {hbTesting ? "Test ediliyor..." : "Bağlantı Test Et"}
+                      </button>
+                      <button onClick={saveHbOp} disabled={hbOpSaving || !hbOp}
+                        className="flex items-center gap-1 bg-stone-900 text-white px-3 py-1.5 rounded-lg text-xs hover:bg-stone-800 disabled:opacity-50"
+                        data-testid="hb-op-save">
+                        <Save size={13} /> {hbOpSaving ? "Kaydediliyor..." : "Kaydet"}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-500 mb-4">
+                    Sipariş/ürün işlemleri ve durum rozeti <strong>bu</strong> bilgileri kullanır. (Operatif kaynak)
+                  </p>
+                  {!hbOp ? (
+                    <div className="text-sm text-gray-400 py-4">Yükleniyor…</div>
+                  ) : (
+                    <>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            Merchant ID <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input value={hbOp.merchant_id ?? ""} onChange={(e) => hbUpd("merchant_id", e.target.value)}
+                                 placeholder="e88383f6-478d-..."
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="hb-op-merchant" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Ortam</label>
+                          <select value={hbOp.mode ?? "sandbox"} onChange={(e) => hbUpd("mode", e.target.value)}
+                                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" data-testid="hb-op-mode">
+                            <option value="sandbox">Sandbox (SIT Test)</option>
+                            <option value="production">Production (Canlı)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            Secret Key <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input type="password" value={hbOp.secret_key ?? ""} onChange={(e) => hbUpd("secret_key", e.target.value)}
+                                 placeholder={hbOp.secret_key === "********" ? "********" : "Hepsiburada API parolası"}
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="hb-op-secret" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            Developer Username <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input value={hbOp.dev_username ?? ""} onChange={(e) => hbUpd("dev_username", e.target.value)}
+                                 placeholder="ceyjewelry_dev"
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="hb-op-dev" />
+                        </div>
+                      </div>
+                      <div className="mt-4 pt-4 border-t flex items-center gap-6">
+                        <label className="flex items-center gap-2 cursor-pointer" data-testid="hb-op-active">
+                          <input type="checkbox" checked={!!hbOp.is_active}
+                                 onChange={(e) => hbUpd("is_active", e.target.checked)}
+                                 className="w-4 h-4 accent-green-600" />
+                          <span className={`text-sm font-semibold ${hbOp.is_active ? "text-[#3F7A52]" : "text-gray-400"}`}>
+                            Entegrasyon Aktif
+                          </span>
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* API CREDENTIALS — operatif store'lu pazaryerlerinde gizli (operatif ayarlar yukarıda) */}
+              {!["trendyol", "hepsiburada"].includes(active) && (
               <div className="bg-white border rounded-xl p-5 mb-4">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4">
                   {schema.name} API Bilgileriniz
