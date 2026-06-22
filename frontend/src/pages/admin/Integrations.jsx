@@ -375,21 +375,6 @@ export default function Integrations() {
       ]
     },
     {
-      id: "temu",
-      name: "Temu Marketplace",
-      description: "Temu pazaryeri entegrasyonu - ürün, stok, sipariş, müşteri soruları",
-      icon: <Store className="w-8 h-8" />,
-      status: statuses.temu,
-      color: "orange",
-      instructions: "Temu Seller Center'dan API Key, API Secret ve Merchant ID alınız.",
-      envKeys: [],
-      actions: [
-        { label: "Ayarları Yapılandır", icon: <Store size={16} />, onClick: () => fetchMarketplaceSettings('temu', setTemuSettings, setTemuModalOpen), loading: false },
-        { label: "Bağlantı Test Et", icon: <RefreshCw size={16} />, onClick: () => testMarketplaceConnection('temu', setTemuTesting), loading: temuTesting, disabled: !statuses.temu?.configured },
-        { label: "Gelişmiş Eşleştirme", icon: <Store size={16} />, href: "/admin/kategori-eslestir" }
-      ]
-    },
-    {
       id: "mng",
       name: "DHL E-Commerce",
       description: "Kargo takip, etiket basımı, gönderi oluşturma",
@@ -885,66 +870,6 @@ export default function Integrations() {
       </Dialog>
 
       {/* Temu Settings Modal */}
-      <Dialog open={temuModalOpen} onOpenChange={setTemuModalOpen}>
-        <DialogContent data-testid="temu-settings-modal">
-          <DialogHeader>
-            <DialogTitle>Temu API Ayarları</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={(e) => { e.preventDefault(); saveMarketplaceSettings('temu', temuSettings, setTemuModalOpen); }} className="space-y-4">
-            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-900">
-              Temu Seller Central → Developer → App menüsünden <strong>Shop ID, App Key, App Secret</strong> bilgilerinizi alın.
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Shop ID *</label>
-              <input data-testid="temu-merchant-id" type="text" required value={temuSettings.merchant_id}
-                onChange={(e) => setTemuSettings({ ...temuSettings, merchant_id: e.target.value })}
-                placeholder="110000123456"
-                className="w-full border px-3 py-2 rounded text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">App Key *</label>
-              <input data-testid="temu-api-key" type="text" required value={temuSettings.api_key}
-                onChange={(e) => setTemuSettings({ ...temuSettings, api_key: e.target.value })}
-                placeholder="temu_app_xxxxx"
-                className="w-full border px-3 py-2 rounded text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">App Secret *</label>
-              <input data-testid="temu-api-secret" type="password" value={temuSettings.api_secret || ''}
-                onChange={(e) => setTemuSettings({ ...temuSettings, api_secret: e.target.value })}
-                placeholder={temuSettings.api_secret === "********" ? "********" : "App Secret"}
-                className="w-full border px-3 py-2 rounded text-sm" />
-              <p className="text-xs text-gray-500 mt-1">Güncellemek için yenisini girin.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Ortam</label>
-              <select value={temuSettings.mode || "sandbox"}
-                onChange={e => setTemuSettings({ ...temuSettings, mode: e.target.value })}
-                className="w-full border px-3 py-2 rounded text-sm bg-white">
-                <option value="sandbox">Sandbox</option>
-                <option value="production">Production</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Varsayılan Fiyat Farkı (%)</label>
-              <input type="number" value={temuSettings.default_markup}
-                onChange={(e) => setTemuSettings({ ...temuSettings, default_markup: e.target.value })}
-                className="w-full border px-3 py-2 rounded text-sm" placeholder="Örn: 20" />
-            </div>
-            <label className="flex items-center gap-2 mt-2">
-              <input data-testid="temu-is-active" type="checkbox" checked={!!temuSettings.is_active}
-                onChange={(e) => setTemuSettings({ ...temuSettings, is_active: e.target.checked })} />
-              <span className="text-sm">Entegrasyon Aktif</span>
-            </label>
-            <div className="flex justify-end gap-2 pt-4 border-t">
-              <button type="button" onClick={() => setTemuModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">İptal</button>
-              <button data-testid="temu-save-btn" type="submit" disabled={savingSettings} className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50">
-                {savingSettings ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
 
 
       {/* Help Section */}
