@@ -115,6 +115,17 @@ export default function Checkout() {
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
   const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+
+  // Seçili taksitin GERÇEK ödeme değerleri — özet "Toplam" ve "Ödeme Yap" butonu
+  // peşin grandTotal'ı değil, seçilen taksitin totalPrice/installmentPrice'ını yansıtır.
+  const ccInstallmentOpt = paymentMethod === "credit_card"
+    ? (installments.find((o) => o.number === selectedInstallment) || null)
+    : null;
+  const isInstallmentSelected = !!ccInstallmentOpt && ccInstallmentOpt.number > 1;
+  const chargeTotal = (ccInstallmentOpt && ccInstallmentOpt.totalPrice) ? ccInstallmentOpt.totalPrice : grandTotal;
+  const perInstallmentAmount = (ccInstallmentOpt && ccInstallmentOpt.installmentPrice) ? ccInstallmentOpt.installmentPrice : grandTotal;
+  const installmentDiff = Math.max(0, chargeTotal - grandTotal);
+
   const shippingInfoTracked = useRef(false);
 
   // Storefront: hangi ödeme yöntemleri aktif? (admin panelinden yönetilir)
@@ -1084,8 +1095,21 @@ export default function Checkout() {
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
                   <div className="flex justify-between text-base font-semibold pt-2 border-t">
-                    <span>Toplam</span><span className="text-black">{grandTotal.toFixed(2)} TL</span>
+                    <span>{isInstallmentSelected ? `Toplam (${selectedInstallment} Taksit)` : "Toplam"}</span>
+                    <span className="text-black">{chargeTotal.toFixed(2)} TL</span>
                   </div>
+                  {isInstallmentSelected && (
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Aylık ödeme</span>
+                      <span>{selectedInstallment} × {perInstallmentAmount.toFixed(2)} TL</span>
+                    </div>
+                  )}
+                  {isInstallmentSelected && installmentDiff > 0 && (
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>Vade farkı</span>
+                      <span>+{installmentDiff.toFixed(2)} TL</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Submit */}
@@ -1093,7 +1117,7 @@ export default function Checkout() {
                   <button type="submit" disabled={loading || !acceptTerms}
                     className={`w-full py-3 rounded font-semibold text-sm transition-colors ${(loading || !acceptTerms) ? "bg-gray-300 text-white cursor-not-allowed" : "bg-stone-900 hover:bg-stone-800 text-white"}`}
                     data-testid="place-order-btn">
-                    {loading ? "İşleniyor..." : "Ödeme Yap"}
+                    {loading ? "İşleniyor..." : `Ödeme Yap · ${chargeTotal.toFixed(2)} TL`}
                   </button>
 
                   {/* Sözleşme — Trendyol style: Ödeme Yap'ın altında */}
