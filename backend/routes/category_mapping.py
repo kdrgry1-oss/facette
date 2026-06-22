@@ -1519,7 +1519,14 @@ async def refresh_attributes(
                 api_secret=cfg["api_secret"], mode=cfg.get("mode", "sandbox"),
             )
             data = await client.get_category_attributes(int(mp_cat_id))
-            attrs = data.get("categoryAttributes") or data.get("attributes") or []
+            # Trendyol client LIST döndürür (categoryAttributes). Eski kod liste üzerinde .get
+            # çağırıp "canlı çek"i hataya düşürüyordu. List/dict ikisini de güvenle ele al.
+            if isinstance(data, list):
+                attrs = data
+            elif isinstance(data, dict):
+                attrs = data.get("categoryAttributes") or data.get("attributes") or []
+            else:
+                attrs = []
             await db.trendyol_category_attributes.update_one(
                 {"category_id": int(mp_cat_id)},
                 {"$set": {
@@ -1636,7 +1643,13 @@ async def get_advanced_attributes(
                     mode=cfg.get("mode", "sandbox"),
                 )
                 data = await client.get_category_attributes(int(mp_cat_id))
-                attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                # Trendyol client LIST döndürür; list/dict ikisini de güvenle ele al (canlı çek fix).
+                if isinstance(data, list):
+                    attrs = data
+                elif isinstance(data, dict):
+                    attrs = data.get("categoryAttributes") or data.get("attributes") or []
+                else:
+                    attrs = []
                 # Cache'le
                 await db.trendyol_category_attributes.update_one(
                     {"category_id": int(mp_cat_id)},
