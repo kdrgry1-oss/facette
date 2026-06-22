@@ -32,27 +32,35 @@ function DateBar({ from, setFrom, to, setTo, onRefresh }) {
 export function SalesReport() {
   const { from, setFrom, to, setTo } = useDateRange();
   const [groupBy, setGroupBy] = useState("day");
+  const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
 
   const load = async () => {
     const [s, p] = await Promise.all([
-      axios.get(`${API}/admin/reports/sales`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group_by: groupBy } }),
-      axios.get(`${API}/admin/reports/payments`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } }),
+      axios.get(`${API}/admin/reports/sales`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group_by: groupBy, source } }),
+      axios.get(`${API}/admin/reports/payments`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } }),
     ]);
     setData(s.data);
     setPayData(p.data.items || []);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy, source]);
 
   return (
     <div className="space-y-5" data-testid="sales-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Satış Raporları</h1>
-          <p className="text-sm text-gray-500 mt-1">Tarih aralığına göre satış performansı.</p>
+          <p className="text-sm text-gray-500 mt-1">Tarih aralığına göre satış performansı. <span className="text-gray-400">(İptal ve iade siparişleri tutarlara dahil edilmez.)</span></p>
         </div>
         <div className="flex gap-2 items-center">
+          <select value={source} onChange={(e) => setSource(e.target.value)} className="px-3 py-1.5 border rounded text-sm" data-testid="sales-source-select">
+            <option value="all">Tüm Kaynaklar</option>
+            <option value="site">Site (Kendi)</option>
+            <option value="trendyol">Trendyol</option>
+            <option value="hepsiburada">Hepsiburada</option>
+            <option value="temu">Temu</option>
+          </select>
           <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="px-3 py-1.5 border rounded text-sm">
             <option value="day">Günlük</option>
             <option value="week">Haftalık</option>
