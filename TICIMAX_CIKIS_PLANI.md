@@ -149,7 +149,11 @@ Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticim
     - Repo'da `TicimaxReturns`/`TicimaxExcelUpload` referansı **0**. Kalan ticimax (boot/import DEĞİL → sonraki): `pullFromTicimax` fonksiyon adı + yorumlar + `/ticimax/products/upload-excel` API çağrısı + `data-testid="ticimax-excel-*"`.
   - **R4b — `/ticimax/products/upload-excel` → `/rooftr`: TAMAM (ast.parse + esbuild geçti, boot-safe).** Decorator + fonksiyon adı `upload_ticimax_products_excel`→`upload_rooftr_products_excel` + `RooftrExcelUpload.jsx:29` caller. Classifier güvenli (`server.py:453` `/products/` substring → product_push korunur). **`/ticimax/orders/backfill` DOKUNULMADI:** frontend/scheduler caller YOK (scheduler'daki backfill'ler hep Trendyol), işlevsel olarak Ticimax-SOAP çıkış-izi endpoint'i → rename = churn; ÇIKIŞ izinde silinecek.
   - **R4c (BOOT-KRİTİK, en son, AYRI) — backend dosya adları** `ticimax_returns.py`/`ticimax_schema.py`/`ticimax_client.py`/`ticimax_order_parser.py` → rename. **DİKKAT:** `products.py:10` top-level `from ticimax_schema import BOOL_COLS` + `server.py:86` `from routes.ticimax_returns import` → dosya adı AYNI commit'te import zinciriyle düzelmezse **BOOT PATLAR**. NOT: schema/client/parser çıkış izinde silinecek adaylar → rename yerine çıkışta silmek daha mantıklı olabilir (churn'den kaçın).
-  - **R4d — yorum/scripts/data-testid kalıntıları** (kozmetik, boot riski yok).
+  - **R4d — sahibi-biz olan dosyaların kozmetik temizliği: TAMAM (esbuild geçti, boot riski yok).** `RooftrReturns.jsx` (`pullFromTicimax`→`pullFromRooftr` + 3 yorum) + `RooftrExcelUpload.jsx` (`data-testid="ticimax-excel-*"`→`rooftr-excel-*`). Bu 2 dosya artık **%100 ticimax-free**.
+  - **R4d-KALAN — KASITLI BIRAKILDI (körlemesine rename YASAK kuralı / A-B ayrımı):**
+    - `lib/img.js: static.ticimax.cloud` = Ticimax'ın **gerçek görsel CDN host'u** → değiştirmek Ticimax-barındırılan TÜM ürün görsellerini kırar. **DOKUNULMAZ.** *(Exit notu: görseller hâlâ kısmen Ticimax altyapısında; R2 `cdn.facette.com.tr` taşıması AYRI iş — Ticimax hesabı kapanırsa o görseller ölür.)*
+    - `Products.jsx: ticimax_fields / ticimaxSchema / /products/meta/ticimax-schema` + `Categories.jsx: ticimax_id` = **Grup B veri/şema** (ürün formu buna bağlı). **DOKUNULMAZ.**
+    - "Ticimax tarzı/aynası/benzeri" yorumları (ProductFilters/BrandMapping/FailedTransfers/MarketplaceHub/Orders vb.) = UI'ların Ticimax panellerinden örneklendiğini anlatan **tarihsel-doğru** yorumlar → "Rooftr" yapmak yanlış olur. Bırakıldı.
 > Grup B (veri) tüm R-aşamalarında ELLENMEZ.
 
 ---

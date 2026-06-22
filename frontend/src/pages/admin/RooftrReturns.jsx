@@ -133,8 +133,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
 
   useEffect(() => { load(); }, [load]);
 
-  // Ticimax'tan siparişleri çek (iade olanlar orders'a düşer, sonra listeyi yenile)
-  const pullFromTicimax = async () => {
+  // Rooftr'dan siparişleri çek (iade olanlar orders'a düşer, sonra listeyi yenile)
+  const pullFromRooftr = async () => {
     setPulling(true);
     toast.info("Rooftr'dan siparişler çekiliyor — bu işlem birkaç dakika sürebilir…");
     try {
@@ -157,7 +157,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     }
   };
 
-  // Tüm siparişlerin TARİHİ'ni Ticimax'taki gerçek SiparisTarihi'ne çek.
+  // Tüm siparişlerin TARİHİ'ni Rooftr'daki gerçek SiparisTarihi'ne çek.
   // Zaman aşımına takılmamak için backend'i parça parça (5 sayfa) döngüyle çağırır.
   const refreshDates = async () => {
     if (redating || pulling) return;
@@ -245,7 +245,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   }, []);
   const can = (k) => perms.includes("*") || perms.includes(k);
 
-  // İade işlem akışı: Ticimax siparişini köprüle (customer_returns üret) → tutar önizleme → modal
+  // İade işlem akışı: Rooftr siparişini köprüle (customer_returns üret) → tutar önizleme → modal
   const openWorkflow = async (row, mode = "approve") => {
     try {
       setBusyId(row.id);
@@ -360,7 +360,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
           {totalReturns > 0 && <span className="ml-1 font-medium text-gray-800">Toplam {totalReturns} iade siparişi.</span>}
         </div>
         <button
-          onClick={pullFromTicimax}
+          onClick={pullFromRooftr}
           disabled={pulling}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-60"
         >

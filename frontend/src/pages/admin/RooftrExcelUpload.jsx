@@ -49,7 +49,7 @@ export default function RooftrExcelUpload() {
   const stats = result?.stats || {};
 
   return (
-    <div className="p-6 max-w-4xl mx-auto" data-testid="ticimax-excel-upload-page">
+    <div className="p-6 max-w-4xl mx-auto" data-testid="rooftr-excel-upload-page">
       <div className="mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <FileSpreadsheet className="text-green-600" size={26} /> Rooftr Excel Ürün Aktarımı
@@ -63,7 +63,7 @@ export default function RooftrExcelUpload() {
 
       {/* Upload Area */}
       <div
-        data-testid="ticimax-excel-dropzone"
+        data-testid="rooftr-excel-dropzone"
         onClick={() => fileRef.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -88,13 +88,13 @@ export default function RooftrExcelUpload() {
           type="file"
           accept=".xls,.xlsx"
           className="hidden"
-          data-testid="ticimax-excel-file-input"
+          data-testid="rooftr-excel-file-input"
           onChange={handleFileChange}
         />
       </div>
 
       {result && (
-        <div className="bg-white rounded-xl border p-6" data-testid="ticimax-excel-result">
+        <div className="bg-white rounded-xl border p-6" data-testid="rooftr-excel-result">
           <div className="flex items-center gap-2 mb-4 text-green-700 font-semibold">
             <CheckCircle size={20} /> {result.message}
           </div>
