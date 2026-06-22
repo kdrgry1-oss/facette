@@ -104,6 +104,10 @@ export default function MarketplaceHub() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  // Trendyol operatif ayarları (db.settings id=trendyol — push & scheduler BUNU okur)
+  const [tyOp, setTyOp] = useState(null);
+  const [tyOpSaving, setTyOpSaving] = useState(false);
+  const [tyBusy, setTyBusy] = useState("");
 
   // İlk yükleme: pazaryeri listesi
   useEffect(() => {
@@ -133,6 +137,16 @@ export default function MarketplaceHub() {
     }).catch(() => toast.error("Ayarlar yüklenemedi"));
   }, [active]);
 
+  // Trendyol seçiliyse operatif ayarları ayrı store'dan (db.settings) çek
+  useEffect(() => {
+    if (active !== "trendyol") { setTyOp(null); return; }
+    const token = localStorage.getItem("token");
+    axios.get(`${API}/integrations/trendyol/settings?t=${Date.now()}`,
+      { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => setTyOp(r.data || {}))
+      .catch(() => setTyOp({}));
+  }, [active]);
+
   const filtered = useMemo(() => {
     if (!search) return marketplaces;
     const s = search.toLocaleLowerCase("tr");
@@ -156,6 +170,33 @@ export default function MarketplaceHub() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // ----- Trendyol operatif: alan güncelle / kaydet / işlem tetikle -----
+  const tyUpd = (k, v) => setTyOp((p) => ({ ...(p || {}), [k]: v }));
+
+  const saveTyOp = async () => {
+    setTyOpSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/integrations/trendyol/settings`, tyOp,
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Trendyol ayarları kaydedildi (push & scheduler bunu kullanır)");
+    } catch (err) {
+      toast.error("Kayıt başarısız: " + (err.response?.data?.detail || err.message));
+    } finally { setTyOpSaving(false); }
+  };
+
+  const runTyOp = async (label, url, busyKey) => {
+    setTyBusy(busyKey);
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.post(`${API}${url}`, null,
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(r.data?.message || `${label} tamam`);
+    } catch (err) {
+      toast.error(`${label} hatası: ` + (err.response?.data?.detail || err.message));
+    } finally { setTyBusy(""); }
   };
 
   if (loading) return <div className="py-10 text-center text-sm text-gray-500">Yükleniyor…</div>;
@@ -279,6 +320,7 @@ export default function MarketplaceHub() {
                 </div>
                 {/* Quick Links: Detaylı sayfalar */}
                 <div className="mt-4 pt-4 border-t flex flex-wrap gap-2">
+                  {active !== "trendyol" && (
                   <Link
                     to="/admin/entegrasyonlar"
                     data-testid="quick-link-integrations"
@@ -286,6 +328,7 @@ export default function MarketplaceHub() {
                   >
                     <Cable size={13} /> Aktarım İşlemleri (Ürün Gönder / Sipariş Al)
                   </Link>
+                  )}
                   <Link
                     to="/admin/urunler?aktar=barkod"
                     data-testid="quick-link-barcode-push"
@@ -323,7 +366,115 @@ export default function MarketplaceHub() {
                 auth={{ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }}
               />
 
-              {/* API CREDENTIALS */}
+              {/* ===== TRENDYOL OPERATİF AYARLAR (db.settings — push & scheduler bunu okur) ===== */}
+              {active === "trendyol" && (
+                <div className="bg-white border rounded-xl p-5 mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider">
+                      Trendyol API & Varsayılanları
+                    </h3>
+                    <button
+                      onClick={saveTyOp}
+                      disabled={tyOpSaving || !tyOp}
+                      className="flex items-center gap-1 bg-stone-900 text-white px-3 py-1.5 rounded-lg text-xs hover:bg-stone-800 disabled:opacity-50"
+                      data-testid="ty-op-save"
+                    >
+                      <Save size={13} /> {tyOpSaving ? "Kaydediliyor..." : "Kaydet"}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-stone-500 mb-4">
+                    Ürün gönderimi ve otomatik senkron <strong>bu</strong> bilgileri kullanır. (Operatif kaynak)
+                  </p>
+                  {!tyOp ? (
+                    <div className="text-sm text-gray-400 py-4">Yükleniyor…</div>
+                  ) : (
+                    <>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            Tedarikçi No (Supplier ID) <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input value={tyOp.supplier_id ?? ""} onChange={(e) => tyUpd("supplier_id", e.target.value)}
+                                 placeholder="157840"
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="ty-op-supplier" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Ortam</label>
+                          <select value={tyOp.mode ?? "prod"} onChange={(e) => tyUpd("mode", e.target.value)}
+                                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" data-testid="ty-op-mode">
+                            <option value="prod">Canlı</option>
+                            <option value="test">Test</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            API Key <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input value={tyOp.api_key ?? ""} onChange={(e) => tyUpd("api_key", e.target.value)}
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="ty-op-key" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">
+                            API Secret <span className="text-[#B0413A]">*</span>
+                          </label>
+                          <input type="password" value={tyOp.api_secret ?? ""} onChange={(e) => tyUpd("api_secret", e.target.value)}
+                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="ty-op-secret" />
+                        </div>
+                      </div>
+                      <div className="mt-4 pt-4 border-t">
+                        <p className="text-xs font-semibold text-stone-600 mb-3">Gönderim Varsayılanları</p>
+                        <div className="grid md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Varsayılan Marka ID</label>
+                            <input value={tyOp.default_brand_id ?? ""} onChange={(e) => tyUpd("default_brand_id", e.target.value)}
+                                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Varsayılan Kargo Firma ID</label>
+                            <input value={tyOp.default_cargo_company_id ?? ""} onChange={(e) => tyUpd("default_cargo_company_id", e.target.value)}
+                                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Varsayılan KDV (%)</label>
+                            <input type="number" value={tyOp.default_vat_rate ?? ""}
+                                   onChange={(e) => tyUpd("default_vat_rate", e.target.value === "" ? "" : parseFloat(e.target.value))}
+                                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ===== TRENDYOL İŞLEMLERİ ===== */}
+              {active === "trendyol" && (
+                <div className="bg-white border rounded-xl p-5 mb-4">
+                  <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-1">İşlemler</h3>
+                  <p className="text-[11px] text-stone-500 mb-4">Manuel tetikleme. (Fiyat/stok için üstteki panel)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: "Ürün Gönder", url: "/integrations/trendyol/products/sync", key: "push" },
+                      { label: "Sipariş Al", url: "/integrations/trendyol/orders/import", key: "orders" },
+                      { label: "Kategori İndir", url: "/integrations/trendyol/categories/sync", key: "cats" },
+                      { label: "Marka İndir", url: "/integrations/trendyol/brands/sync", key: "brands" },
+                    ].map((op) => (
+                      <button
+                        key={op.key}
+                        onClick={() => runTyOp(op.label, op.url, op.key)}
+                        disabled={!!tyBusy}
+                        className="inline-flex items-center gap-1.5 text-xs border border-stone-300 hover:bg-stone-100 text-stone-800 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
+                        data-testid={`ty-op-${op.key}`}
+                      >
+                        <Cable size={13} /> {tyBusy === op.key ? "Çalışıyor..." : op.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* API CREDENTIALS — Trendyol'da gizli (operatif ayarlar yukarıda) */}
+              {active !== "trendyol" && (
               <div className="bg-white border rounded-xl p-5 mb-4">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4">
                   {schema.name} API Bilgileriniz
@@ -339,8 +490,10 @@ export default function MarketplaceHub() {
                   ))}
                 </div>
               </div>
+              )}
 
-              {/* TRANSFER RULES */}
+              {/* TRANSFER RULES — yalnız tanımlı alan varsa */}
+              {(schema.transfer_rule_fields || []).length > 0 && (
               <div className="bg-white border rounded-xl p-5 mb-4">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4">
                   Aktarım Kuralları
@@ -356,6 +509,7 @@ export default function MarketplaceHub() {
                   ))}
                 </div>
               </div>
+              )}
 
               {/* AUTO-SYNC */}
               <div className="bg-white border rounded-xl p-5">
