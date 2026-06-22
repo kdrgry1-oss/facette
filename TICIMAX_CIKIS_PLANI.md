@@ -193,3 +193,34 @@ Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticim
 4. **Hero/ilk ürün görselleri:** WebP/AVIF + LCP görseline `fetchpriority="high"` + `srcset` + alt-fold `loading="lazy"`.
 > Storefront değişiklikleri boot riski taşımaz; ama her deploy sonrası **hard-refresh + gerekirse Cloudflare cache purge** (CSS/cache yarışı = "görünüm bozuldu" belirtisinin kök nedeni, kod değil).
 
+
+---
+
+## 8. ERTELENENLER — bilerek bırakılan işler (22 Haz 2026)
+
+Ticimax çıkışı **fonksiyonel olarak tamamlandı** (otomatik SOAP bağı kesik + guard'lı, ölü SOAP uçları stub, ölü dosyalar silindi/rename). Aşağıdakiler bilinçli ertelendi: her biri ya risk/getiri kötü, ya canlı veriye dokunur, ya ayrı projedir. Hiçbiri siteyi/çıkışı etkilemez.
+
+### 8.1 `ticimax_client.py` (dormant SOAP client) — SİLİNMEDİ
+- **Durum:** `TICIMAX_LIVE=off` + factory guard → hiçbir SOAP çağrısı yapamaz (dormant, zararsız).
+- **Neden duruyor:** hâlâ `/site/teknik-detay/sync` ucunun `use_cache=False` (SOAP-refresh) yolu + `scripts/enrich_attrs_from_ticimax_master.py` (+ birkaç script) import ediyor. O ucun `use_cache=True` yolu `db.ticimax_attribute_master` cache'inden ürün teknik alanı doldurur → **ÇALIŞIR, bozulmamalı.**
+- **Silmek için:** enrich script'inden SOAP'ı (`fetch_master`) ayıkla + `use_cache=False` dalını stub'la + 2 saf script'i sil → cerrahi, düşük getiri. Acil değil.
+
+### 8.2 `ticimax_fields` ve ticimax-isimli VERİ alanları — DOKUNULMADI ⚠️ (önemli)
+**Bu bir SYNC kalıntısı DEĞİL — ürünün KENDİ veri modeli.** Sync öldü ama ürün özellikleri (tedarikçi, kategori breadcrumb, GTIP, indirimli fiyat, ürün-kartı-ID, renk/beden/varyant bağı…) hâlâ her ürün dökümanında `ticimax_fields` objesi içinde **bizim MongoDB'mizde** yaşıyor.
+- Storefront filtreleri (tedarikçi/para birimi facet'leri), admin ürün formu, renk-kardeş gruplama, indirimli fiyat → hepsi `ticimax_fields.*` okur.
+- **"ticimax_fields okuması" = Ticimax'a bağlanmak DEĞİL; kendi ürün verimizi okumak.** Veri %100 yerel, Ticimax'a sıfır bağımlı. Tek "ticimax" olan: **anahtar adı** (yanıltıcı; orijinal import Ticimax şemasını taklit ettiği için öyle isimlendirilmiş).
+- İlgili veri değerleri (kodda asla elle değişmez): `source:"ticimax"` (sipariş kaynak etiketi), `ticimax_order_id` (tarihsel sipariş ID), `db.ticimax_attribute_master` (öznitelik cache).
+- **Tamamen ticimax-free kod istenirse:** `ticimax_fields` → `product_fields` rename = **VERİ MIGRATION'u** (31.845 dökümanda anahtar rename + tüm okuma/yazma noktalarını güncelle). Saf kozmetik ama **canlı veriye dokunur** → yedekli + atomik + test edilmiş ayrı migration gerekir. Aceleye gelmez; o yüzden ertelendi.
+
+### 8.3 SSR / homepage prerender (perf §7-3) — AYRI MİMARİ PROJE
+- Site client-render SPA; gerçek mobil FCP/LCP sıçraması **SSR** ister (Next.js / Node SSR katmanı).
+- **react-snap uygun değil:** veri-çekmeli homepage'de build anında stale/loading yakalar + Cloudflare Pages build'inde puppeteer/Chrome ister → **prod build'i kırma riski.**
+- Quick-win'ler bitti (PostHog recording off + PostHog/GTM idle-defer, görsel WebP/fetchpriority, lazy route, API preconnect). Bundan sonrası mimari proje. Gerçekçi mevcut hedef: mobil ~75-85, masaüstü 95-100.
+
+### 8.4 Saf KOZMETİK (atlanabilir, sıfır fonksiyonel değer)
+- `backend/scripts/*ticimax*` — eski tek-seferlik CLI araçları (boot-yüklü DEĞİL; `enrich_attrs_from_ticimax_master.py` aktif ucta kullanılıyor, diğerleri ölü ama zararsız).
+- Frontend: `ticimaxSchema` state adı (Products.jsx), `lib/img.js`'deki ölü `static.ticimax.cloud` fallback, `/meta/ticimax-schema` endpoint URL'i.
+- (Frontend'de görünen diğer "ticimax"lerin çoğu `ticimax_fields` **verisini** okuyan kod → 8.2 gereği değişmez.)
+
+### Özet karar
+Çıkış **kapandı.** Yukarıdakiler "kalan iş" değil; **bilinçli kapsam-dışı.** Sıradaki tek anlamlı tetikleyici: (a) kod tabanını harfiyen ticimax-free istemek → 8.2 veri migration'u (ayrı, yedekli oturum), veya (b) mobil perf hedefi iş-kritik olursa → 8.3 SSR projesi.
