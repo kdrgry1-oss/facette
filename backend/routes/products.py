@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import re
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id
-from ticimax_schema import BOOL_COLS as TICIMAX_BOOL_COLS
+from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
 import io
@@ -702,7 +702,7 @@ async def get_products(
                 and_clauses.append({field: {"$nin": ["", None, 0]}})
             elif pval == "__empty__":
                 and_clauses.append({"$or": [{field: {"$in": ["", None, 0]}}, {field: {"$exists": False}}]})
-            elif col in TICIMAX_BOOL_COLS:
+            elif col in PRODUCT_BOOL_COLS:
                 try:
                     and_clauses.append({field: int(float(pval))})
                 except ValueError:
@@ -817,7 +817,7 @@ async def get_products(
 @router.get("/meta/ticimax-schema")
 async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
     """Ürün kartında tüm Ticimax (113) alanını gruplu render etmek için şema."""
-    from ticimax_schema import build_schema
+    from product_schema import build_schema
     return {"groups": build_schema()}
 
 @router.get("/meta/next-card-id")

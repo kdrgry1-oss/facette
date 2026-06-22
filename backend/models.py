@@ -85,7 +85,7 @@ class ProductBase(BaseModel):
     meta_description: Optional[str] = None
     technical_details: Dict[str, str] = {}
     # Ticimax 113-sütun export'unun ham (düzenlenebilir) tüm alanları.
-    # Anahtarlar orijinal Ticimax kolon adlarıdır (bkz. ticimax_schema.py).
+    # Anahtarlar orijinal Ticimax kolon adlarıdır (bkz. product_schema.py).
     ticimax_fields: Dict[str, Any] = {}
     size_chart_images: List[str] = []
     combo_product_ids: List[str] = []

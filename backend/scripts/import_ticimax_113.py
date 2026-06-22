@@ -25,7 +25,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 import pandas as pd  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
-from ticimax_schema import ORDERED_COLUMNS, normalize_value, parse_price  # noqa: E402
+from product_schema import ORDERED_COLUMNS, normalize_value, parse_price  # noqa: E402
 
 
 def _bc(v):

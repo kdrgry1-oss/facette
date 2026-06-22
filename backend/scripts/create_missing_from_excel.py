@@ -21,7 +21,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 import pandas as pd  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
-from ticimax_schema import ORDERED_COLUMNS, normalize_value, parse_price  # noqa: E402
+from product_schema import ORDERED_COLUMNS, normalize_value, parse_price  # noqa: E402
 from import_ticimax_113 import parse_varyasyon, build_typed_fields, _bc, _i  # noqa: E402
 
 NON_PRODUCT = {"KARGO", "BANKA KOMİSYONU", "BANKA KOMISYONU", "ACIKLAMA", "AÇIKLAMA"}
