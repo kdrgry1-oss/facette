@@ -283,15 +283,27 @@ async def get_trendyol_category_attributes(category_id: int, refresh: bool = Que
         )
         attributes = await client.get_category_attributes(category_id)
         
-        # Save to local DB for future use
+        # Save to local DB for future use.
+        # T1 (TEK KAYNAK): editör "özellikleri yenile" dediğinde, GÖNDERİMİN (push)
+        # okuduğu kanonik cache'i (`trendyol_category_attributes`) de aynı veriyle tazele
+        # ki iki cache ayrışmasın ve push eksik şemayla göndermesin. Eklemeli + geri alınabilir.
         if attributes:
+            from datetime import datetime, timezone
+            _now = datetime.now(timezone.utc).isoformat()
             await db.trendyol_attributes.update_one(
                 {"category_id": category_id},
-                {"$set": {"category_id": category_id, "attributes": attributes}},
+                {"$set": {"category_id": category_id, "attributes": attributes, "updated_at": _now}},
                 upsert=True
             )
-            
-        return {"success": True, "attributes": attributes}
+            await db.trendyol_category_attributes.update_one(
+                {"category_id": category_id},
+                {"$set": {"category_id": category_id, "attributes": attributes, "updated_at": _now}},
+                upsert=True
+            )
+
+        _val_count = sum(len(a.get("attributeValues") or []) for a in (attributes or []))
+        return {"success": True, "attributes": attributes,
+                "count": len(attributes or []), "value_count": _val_count}
     except Exception as e:
         logger.error(f"Error fetching trendyol attributes for category {category_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="Özellikler (attributes) alınamadı")
@@ -1316,6 +1328,20 @@ async def sync_products_to_trendyol(
             )
         except Exception:
             cache = None
+        # T1 EMNİYET: kanonik cache boşsa (ör. kategori yalnız ürün editöründen yenilenmiş
+        # ya da kategori-eşleme tazelemesi hata vermişse), editörün yazdığı
+        # `trendyol_attributes` koleksiyonuna düş. Böylece push hiçbir zaman boş/eksik
+        # şemayla kalmaz; aynı ham `categoryAttributes` listesi okunur (şekil birebir uyumlu).
+        if not (cache or {}).get("attributes"):
+            try:
+                _legacy = await db.trendyol_attributes.find_one(
+                    {"category_id": int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)},
+                    {"_id": 0},
+                )
+                if _legacy and _legacy.get("attributes"):
+                    cache = _legacy
+            except Exception:
+                pass
         for a in (cache or {}).get("attributes", []) or []:
             aid = a.get("id") or a.get("attribute", {}).get("id")
             if aid is None:
