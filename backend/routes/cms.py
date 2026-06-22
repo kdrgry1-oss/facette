@@ -128,14 +128,14 @@ async def seed_default_home_blocks(
         }
 
     now = datetime.now(timezone.utc).isoformat()
-    base = "https://static.ticimax.cloud/cdn-cgi/image/width=-,quality=99/37439/uploads/sayfatasarim/sayfa7"
+    base = "https://cdn.facette.com.tr/pagedesign"
     default_blocks = [
         {
             "type": "hero_slider",
             "title": "Ana Slider",
             "images": [
-                f"{base}/en-yeniler-dc2e.jpg",
-                f"{base}/ae79c961-ba0b-49e3-b274-2c6cc78ab700.jpg",
+                f"{base}/en-yeniler-dc2e-800.webp",
+                f"{base}/ae79c961-ba0b-49e3-b274-2c6cc78ab700-800.webp",
             ],
             "links": ["/kategori/en-yeniler", "/kategori/sale"],
             "settings": {"autoplay": True, "interval_ms": 5000},
@@ -144,7 +144,7 @@ async def seed_default_home_blocks(
         {
             "type": "full_banner",
             "title": "Tek Banner",
-            "images": [f"{base}/title-cb23757c-6.jpg"],
+            "images": [f"{base}/title-cb23757c-6-800.webp"],
             "links": ["/kategori/en-yeniler"],
             "sort_order": 2,
         },
@@ -152,8 +152,8 @@ async def seed_default_home_blocks(
             "type": "half_banners",
             "title": "İki Banner",
             "images": [
-                f"{base}/title-65777bd3-0.jpg",
-                f"{base}/title-7b3e27f9-5.jpg",
+                f"{base}/title-65777bd3-0-800.webp",
+                f"{base}/title-7b3e27f9-5-800.webp",
             ],
             "links": ["/kategori/gomlek", "/kategori/aksesuar"],
             "sort_order": 3,
@@ -170,11 +170,11 @@ async def seed_default_home_blocks(
             "type": "instashop",
             "title": "Stilini Yarat",
             "images": [
-                f"{base}/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9.jpg",
-                f"{base}/orj-114d3d37-9c7f-495c-8bc2-28d32781818d.jpg",
-                f"{base}/orj-e18eff06-8597-4f10-92cb-64b11151a74d.jpg",
-                f"{base}/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0.jpg",
-                f"{base}/orj-87d15ba0-0081-4b65-acc5-b12328de368b.jpg",
+                f"{base}/orj-ce09fd5d-c580-40eb-87f2-e4637265bad9-800.webp",
+                f"{base}/orj-114d3d37-9c7f-495c-8bc2-28d32781818d-800.webp",
+                f"{base}/orj-e18eff06-8597-4f10-92cb-64b11151a74d-800.webp",
+                f"{base}/orj-fa071a71-bcaf-452b-90d5-e8cb0c352fe0-800.webp",
+                f"{base}/orj-87d15ba0-0081-4b65-acc5-b12328de368b-800.webp",
             ],
             "links": [
                 "/urun/basic-atki",
