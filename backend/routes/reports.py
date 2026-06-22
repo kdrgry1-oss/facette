@@ -27,17 +27,61 @@ def _iso_range(start: Optional[str], end: Optional[str], days_default: int = 30)
     return (now - timedelta(days=days_default)).isoformat(), now.isoformat()
 
 
+# Pazaryeri kaynakları — Site dışı her şey. (platform VEYA marketplace alanında durabilir;
+# örn. Temu siparişleri yalnız marketplace="temu" taşır, platform boş olabilir.)
+_MARKETPLACES = ["trendyol", "hepsiburada", "temu"]
+
+# Ciro/sipariş tutarlarına DAHİL EDİLMEYECEK durumlar: iptal + iade grubu.
+# return_rejected (iade reddedildi) HARİÇ — satış geçerli sayıldığı için ciroda kalır.
+_EXCLUDED_STATUSES = [
+    "cancelled",
+    "return_requested", "return_approved", "return_in_transit",
+    "returned", "refunded", "partial_refunded",
+]
+
+
+def _source_cond(source: Optional[str]) -> dict:
+    """Rapor kaynak filtresi → Mongo koşulu.
+    'all'/boş = toplu (filtre yok). 'site' = pazaryeri olmayan tüm siparişler.
+    'trendyol'/'hepsiburada'/'temu' = ilgili pazaryeri (platform VEYA marketplace).
+    """
+    s = (source or "all").strip().lower()
+    if s in ("", "all", "toplu", "hepsi", "tum", "tümü"):
+        return {}
+    if s in ("site", "facette", "web", "kendi"):
+        # Site = pazaryeri olmayan: platform da marketplace da pazaryeri listesinde DEĞİL
+        # (alan hiç yoksa $nin yine eşleşir → boş platform site sayılır).
+        return {"platform": {"$nin": _MARKETPLACES}, "marketplace": {"$nin": _MARKETPLACES}}
+    if s in ("trendyol", "ty"):
+        return {"$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}]}
+    if s in ("hepsiburada", "hb"):
+        return {"$or": [{"platform": "hepsiburada"}, {"marketplace": "hepsiburada"}]}
+    if s == "temu":
+        return {"$or": [{"platform": "temu"}, {"marketplace": "temu"}]}
+    return {}  # bilinmeyen kaynak → toplu
+
+
+def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
+    """Tüm satış raporlarının ortak $match'i: tarih aralığı + iptal/iade hariç + kaynak."""
+    m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
+    sc = _source_cond(source)
+    if sc:
+        m.update(sc)
+    return m
+
+
 @router.get("/sales")
 async def sales(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     group_by: str = Query("day", regex="^(day|week|month)$"),
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date)
     fmt = {"day": "%Y-%m-%d", "week": "%Y-%V", "month": "%Y-%m"}[group_by]
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
+        {"$match": _base_match(s, e, source)},
         {
             "$group": {
                 "_id": {"$dateToString": {"format": fmt, "date": {"$dateFromString": {"dateString": "$created_at"}}}},
@@ -63,11 +107,12 @@ async def top_products(
     limit: int = Query(20, ge=1, le=100),
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date, days_default=90)
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
+        {"$match": _base_match(s, e, source)},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
         {
             "$group": {
@@ -90,12 +135,13 @@ async def top_products(
 async def category_report(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date, days_default=90)
     # Join items -> products -> category
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
+        {"$match": _base_match(s, e, source)},
         {"$unwind": "$items"},
         {"$lookup": {"from": "products", "localField": "items.product_id", "foreignField": "id", "as": "p"}},
         {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
@@ -138,11 +184,12 @@ async def stock_report(current_user: dict = Depends(require_admin)):
 async def payment_report(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date)
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
+        {"$match": _base_match(s, e, source)},
         {"$group": {"_id": "$payment_method", "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"revenue": -1}},
     ]
