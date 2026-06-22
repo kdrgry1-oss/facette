@@ -372,7 +372,7 @@ export default function CategoryMapping() {
                             <>
                               <button
                                 onClick={() => setAttrMatchFor(row)}
-                                className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
+                                className="text-xs text-stone-600 hover:underline flex items-center gap-0.5"
                                 title="Özellik Eşle (Zorunlu Trendyol özellikleri ile sistem özelliklerinin bağlanması)"
                                 data-testid={`cat-attr-${row.category_id}`}
                               >
@@ -451,7 +451,7 @@ export default function CategoryMapping() {
                 </div>
               </div>
 
-              <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+              <div className="mt-3 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs text-stone-600">
                 {bulkAttrReport.message}
               </div>
 
@@ -938,14 +938,14 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             <div className="px-3 py-2 text-xs text-gray-700 border-b">{lastResult.message}</div>
           )}
           {lastResult.batchRequestId && (
-            <div className="px-3 py-2 border-b flex items-center justify-between bg-blue-50">
-              <div className="text-xs text-blue-900">
+            <div className="px-3 py-2 border-b flex items-center justify-between bg-stone-50">
+              <div className="text-xs text-stone-700">
                 <b>Trendyol Batch'i ardışık işliyor</b> — gerçek SUCCESS/FAILED durumu için detayları çekin.
               </div>
               <button
                 onClick={() => loadBatchDetail(lastResult.batchRequestId)}
                 disabled={batchLoading}
-                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-semibold disabled:opacity-50"
+                className="text-xs bg-stone-900 hover:bg-stone-800 text-white px-3 py-1 rounded font-semibold disabled:opacity-50"
                 data-testid="load-batch-detail-btn"
               >
                 {batchLoading ? "Yükleniyor..." : "Batch Detayını Yükle"}
@@ -1161,8 +1161,8 @@ function HepsiburadaBaseFieldPanel({ auth }) {
             </div>
           </div>
           {commonAttrs.length > 0 && (
-            <div className="bg-white rounded-lg p-3 border-2 border-indigo-200">
-              <div className="font-bold text-indigo-900 text-sm mb-1">🚻 Ortak Özellikler (Tüm Kategoriler)</div>
+            <div className="bg-white rounded-lg p-3 border border-stone-200">
+              <div className="font-bold text-stone-800 text-sm mb-1">🚻 Ortak Özellikler (Tüm Kategoriler)</div>
               <div className="text-xs text-gray-600 mb-2">
                 Burada seçtiğin değer <b>tüm kategorilerde</b> bu HB özelliğine uygulanır (her kategorinin
                 kendi değer listesine göre çözülür). Örn. tüm ürünlerin kadın ürünü ise: Cinsiyet → Kadın.
@@ -1255,13 +1255,13 @@ function HepsiburadaAutofillPanel({ auth }) {
     }
   };
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4" data-testid="hb-autofill-panel">
+    <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 mb-4" data-testid="hb-autofill-panel">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex-1 min-w-[260px]">
-          <div className="font-bold text-blue-900 text-sm flex items-center gap-1">
+          <div className="font-bold text-stone-800 text-sm flex items-center gap-1">
             <Zap size={14} /> Ürün HB Özelliklerini Otomatik Doldur
           </div>
-          <div className="text-xs text-blue-700 mt-0.5">
+          <div className="text-xs text-stone-600 mt-0.5">
             Eşleşmiş kategorilerdeki ürünlerin Hepsiburada özelliklerini (Cinsiyet, Materyal, Marka,
             Kalıp vb.) ürün verisinden otomatik türetir. Renk/Beden gönderimde varyanttan gelir.
             <b> Mevcut değerler korunur</b> — yalnız boş alanlar doldurulur.
@@ -1270,14 +1270,14 @@ function HepsiburadaAutofillPanel({ auth }) {
         <button
           onClick={run}
           disabled={loading}
-          className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60 whitespace-nowrap"
+          className="text-sm bg-stone-900 hover:bg-stone-800 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60 whitespace-nowrap"
           data-testid="hb-autofill-btn"
         >
           {loading ? "Dolduruluyor..." : "Otomatik Doldur"}
         </button>
       </div>
       {res && (
-        <div className="text-xs text-blue-800 mt-2 font-medium">
+        <div className="text-xs text-stone-600 mt-2 font-medium">
           {res.updated_products} üründe {res.filled_values} özellik dolduruldu · {res.scanned} ürün tarandı
         </div>
       )}
