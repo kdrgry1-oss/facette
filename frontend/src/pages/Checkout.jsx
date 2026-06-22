@@ -158,7 +158,7 @@ export default function Checkout() {
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem("token");
-    axios.get(`${API}/customer/my-addresses`, { headers: { Authorization: `Bearer ${token}` } })
+    axios.get(`${API}/my-addresses`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => {
         const list = r.data?.addresses || [];
         setSavedAddresses(list);
@@ -415,13 +415,13 @@ export default function Checkout() {
       const token = localStorage.getItem("token");
       try {
         if (addressForm.id) {
-          await axios.put(`${API}/customer/addresses/${addressForm.id}`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
+          await axios.put(`${API}/addresses/${addressForm.id}`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
         } else {
-          const r = await axios.post(`${API}/customer/addresses`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
+          const r = await axios.post(`${API}/addresses`, addressForm, { headers: { Authorization: `Bearer ${token}` } });
           addressForm.id = r.data?.address_id;
         }
         // Refresh list
-        const list = await axios.get(`${API}/customer/my-addresses`, { headers: { Authorization: `Bearer ${token}` } });
+        const list = await axios.get(`${API}/my-addresses`, { headers: { Authorization: `Bearer ${token}` } });
         setSavedAddresses(list.data?.addresses || []);
       } catch (e) {
         // Hatayı kullanıcıya bildir (önceden silently catch ediliyordu)
