@@ -703,6 +703,50 @@ async def create_order(
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 
+    # ÜYE ADRES DEFTERİ — Üye, sipariş sırasında adresi satır-içi yazıp adres modalını
+    # hiç açmadan sipariş verirse adres adres defterine HİÇ düşmüyordu (Account > Adreslerim
+    # boş kalıyordu). Burada, giriş yapmış üyenin teslimat adresini idempotent (mükerrer
+    # değil) olarak adres defterine kaydederiz. Hata olsa bile sipariş ASLA bozulmaz.
+    try:
+        if current_user and current_user.get("id"):
+            _uid = current_user.get("id")
+            _sa = order.get("shipping_address") or {}
+            _addr_line = (_sa.get("address") or "").strip()
+            if _addr_line:
+                def _norm(s):
+                    return " ".join(str(s or "").lower().split())
+                _existing = await db.addresses.find(
+                    {"user_id": _uid}, {"_id": 0, "address": 1, "city": 1, "district": 1}
+                ).to_list(50)
+                _key = (_norm(_addr_line), _norm(_sa.get("city")), _norm(_sa.get("district")))
+                _dup = any(
+                    (_norm(e.get("address")), _norm(e.get("city")), _norm(e.get("district"))) == _key
+                    for e in _existing
+                )
+                if not _dup:
+                    _is_first = len(_existing) == 0
+                    await db.addresses.insert_one({
+                        "id": generate_id(),
+                        "user_id": _uid,
+                        "title": (_sa.get("title") or "Teslimat Adresi"),
+                        "first_name": _sa.get("first_name", ""),
+                        "last_name": _sa.get("last_name", ""),
+                        "phone": _sa.get("phone", ""),
+                        "address": _addr_line,
+                        "city": _sa.get("city", ""),
+                        "district": _sa.get("district", ""),
+                        "postal_code": _sa.get("postal_code", ""),
+                        "is_default": _is_first,  # ilk adres ise varsayılan yap
+                        "is_corporate": False,
+                        "company_name": "",
+                        "tax_no": "",
+                        "tax_office": "",
+                        "source": "checkout_auto",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+    except Exception as _addr_err:
+        logger.warning(f"[order auto-save address] {order.get('order_number')}: {_addr_err}")
+
     # Madde 4 — Promosyon kullanım kaydı (usage_limit / usage_limit_per_user'ın ÇALIŞMASI için).
     # FIYATA DOKUNMAZ; sadece coupon_redemptions'a yazar. Hata olsa bile sipariş bozulmaz.
     try:

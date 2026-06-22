@@ -8,24 +8,198 @@ from .deps import db, logger, get_current_user, require_auth, generate_id
 
 router = APIRouter(tags=["Customer Account"])
 
+def _orders_match_query(current_user: dict) -> dict:
+    """Üyenin siparişlerini bulmak için eşleştirme sorgusu.
+
+    SADECE user_id ile eşleştirmek yetmiyor: müşteri siparişi MİSAFİR olarak
+    verdiyse (ya da hesabını sonradan açtıysa) siparişin user_id'si boştur ve
+    üye panelinde HİÇ görünmez (örn. W10053). Bu yüzden user_id'ye ek olarak
+    üyenin KENDİ e-postası ve telefonu ile de eşleştiriyoruz:
+      - shipping_address.email  (büyük/küçük harf duyarsız, tam eşleşme)
+      - shipping_address.phone  (ayraçlara duyarsız, son 10 hane)
+    Böylece misafir verilen siparişler de üyenin panelinde listelenir.
+    """
+    import re as _re
+    uid = current_user.get("id")
+    email = (current_user.get("email") or "").strip()
+    ors = []
+    if uid:
+        ors.append({"user_id": uid})
+    if email:
+        _esc = _re.escape(email)
+        ors.append({"shipping_address.email": {"$regex": f"^{_esc}$", "$options": "i"}})
+        ors.append({"billing_address.email": {"$regex": f"^{_esc}$", "$options": "i"}})
+    # Telefon: kayıttaki numara 905xxxxxxxxx; sipariş adresindeki numara
+    # "0 555 123 45 67" gibi ayraçlı olabilir → her hane arasına \D* koyup eşleştir.
+    try:
+        from notification_service import normalize_phone_tr
+        last10 = normalize_phone_tr(current_user.get("phone") or "")[-10:]
+        if len(last10) == 10 and last10.isdigit():
+            tol = r"\D*".join(list(last10))
+            ors.append({"shipping_address.phone": {"$regex": tol}})
+    except Exception:
+        pass
+    if not ors:
+        # Güvenlik: hiçbir eşleştirme alanı yoksa yalnız user_id (boş sonuç dönsün,
+        # asla tüm siparişleri açma)
+        return {"user_id": uid or "__none__"}
+    return {"$or": ors} if len(ors) > 1 else ors[0]
+
+
+async def _link_guest_orders(current_user: dict):
+    """Üyenin e-postasıyla MİSAFİR verilmiş (user_id boş) siparişleri kalıcı olarak
+    bu üyeye bağla. Yalnız E-POSTA eşleşmesinde yapılır (güçlü kimlik); yalnız
+    telefonla eşleşenler bağlanmaz. İdempotent ve best-effort — okuma akışını
+    asla kırmaz."""
+    try:
+        uid = current_user.get("id")
+        email = (current_user.get("email") or "").strip()
+        if not (uid and email):
+            return
+        import re as _re
+        _esc = _re.escape(email)
+        rgx = {"$regex": f"^{_esc}$", "$options": "i"}
+        await db.orders.update_many(
+            {
+                "user_id": {"$in": [None, ""]},
+                "$or": [
+                    {"shipping_address.email": rgx},
+                    {"billing_address.email": rgx},
+                ],
+            },
+            {"$set": {"user_id": uid, "linked_to_member_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    except Exception as _e:
+        logger.warning(f"[my-orders link guest] {_e}")
+
+
 @router.get("/my-orders")
 async def get_my_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=50),
     current_user: dict = Depends(require_auth)
 ):
-    """Get current user's orders"""
+    """Get current user's orders — user_id VEYA üyenin e-posta/telefonu ile eşleşenler."""
+    # Misafir siparişleri (aynı e-posta) bu üyeye bağla — sonraki sorgular user_id ile de bulur.
+    await _link_guest_orders(current_user)
+
     skip = (page - 1) * limit
-    query = {"user_id": current_user.get("id")}
-    
+    query = _orders_match_query(current_user)
+
     orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.orders.count_documents(query)
-    
+
     return {
         "orders": orders,
         "total": total,
         "page": page,
         "pages": (total + limit - 1) // limit
+    }
+
+
+@router.get("/track/{code}")
+async def track_order_public(code: str):
+    """Herkese açık sipariş/kargo takibi.
+
+    Müşteri footer'daki 'Sipariş Takibi' kutusuna SİPARİŞ NUMARASI (W10053) veya
+    KARGO TAKİP NUMARASI yazar. İkisini de destekler. TrackOrder.jsx'in beklediği
+    şekli döner: order_number, status, status_text, timeline[], shipping_address,
+    item_count, total.
+    """
+    code = (code or "").strip()
+    if not code:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    import re as _re
+    _esc = _re.escape(code)
+    ci = {"$regex": f"^{_esc}$", "$options": "i"}
+    order = await db.orders.find_one(
+        {"$or": [
+            {"order_number": ci},
+            {"cargo_tracking_number": ci},
+            {"cargo_gonderi_no": ci},
+            {"cargo.tracking_number": ci},
+            {"cargo.mng_gonderi_no": ci},
+        ]},
+        {"_id": 0},
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    try:
+        from order_statuses import customer_label_for as _clf
+    except Exception:
+        def _clf(k):  # type: ignore
+            return k
+
+    raw_status = (order.get("status") or "pending")
+    cargo = order.get("cargo") or {}
+    tn = (str(order.get("cargo_tracking_number") or "").strip()
+          or str(cargo.get("tracking_number") or "").strip()
+          or str(order.get("cargo_gonderi_no") or "").strip())
+    track_link = (order.get("cargo_tracking_link") or cargo.get("tracking_link")
+                  or (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={tn}" if tn else ""))
+    carrier = (order.get("cargo_provider_name") or cargo.get("provider_name")
+               or order.get("cargo_company") or "Kargo")
+
+    # Sipariş durumunu 5 aşamalı görünür çizelgeye indir.
+    stage_map = {
+        "pending": 0, "awaiting_payment": 0, "payment_notified": 0,
+        "confirmed": 1,
+        "preparing": 2, "processing": 2, "ready_to_ship": 2,
+        "shipped": 3, "in_transit": 3, "out_for_delivery": 3, "undelivered": 3,
+        "delivered": 4,
+    }
+    is_cancelled = raw_status in ("cancelled",)
+    is_returnish = raw_status in (
+        "return_requested", "return_approved", "return_rejected",
+        "return_in_transit", "returned", "refunded", "partial_refunded",
+    )
+    stage = 4 if is_returnish else stage_map.get(raw_status, 0)
+
+    created = order.get("created_at")
+    shipped_at = order.get("shipped_at") or order.get("cargo_query_at")
+    delivered_at = (cargo.get("teslim_tarihi") or order.get("delivered_at"))
+
+    timeline = [
+        {"status": "placed", "title": "Siparişiniz Alındı", "date": created, "completed": True},
+        {"status": "confirmed", "title": "Siparişiniz Onaylandı", "date": None, "completed": stage >= 1},
+        {"status": "processing", "title": "Hazırlanıyor", "date": None, "completed": stage >= 2},
+        {"status": "shipped", "title": "Kargoya Verildi", "date": shipped_at if stage >= 3 else None,
+         "completed": stage >= 3,
+         **({"tracking_number": tn, "carrier": carrier, "tracking_url": track_link} if (stage >= 3 and tn) else {})},
+        {"status": "delivered", "title": "Teslim Edildi", "date": delivered_at if stage >= 4 and not is_returnish else None,
+         "completed": stage >= 4 and not is_returnish},
+    ]
+
+    if is_cancelled:
+        timeline = [
+            {"status": "placed", "title": "Siparişiniz Alındı", "date": created, "completed": True},
+            {"status": "cancelled", "title": "İptal Edildi",
+             "date": order.get("cancelled_at"), "completed": True},
+        ]
+        top_status = "cancelled"
+    elif raw_status == "delivered":
+        top_status = "delivered"
+    elif stage >= 3:
+        top_status = "shipped"
+    else:
+        top_status = raw_status  # frontend sarı rozet
+
+    ship = order.get("shipping_address") or {}
+    return {
+        "order_number": order.get("order_number", ""),
+        "status": top_status,
+        "status_text": _clf(raw_status),
+        "timeline": timeline,
+        "shipping_address": {
+            "first_name": ship.get("first_name", ""),
+            "last_name": ship.get("last_name", ""),
+            "district": ship.get("district", ""),
+            "city": ship.get("city", ""),
+        },
+        "item_count": sum(int(it.get("quantity", it.get("qty", 1)) or 1) for it in (order.get("items") or [])),
+        "total": float(order.get("total") or 0),
     }
 
 

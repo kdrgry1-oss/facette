@@ -548,6 +548,11 @@ api_router.include_router(trendyol_retry_queue_router)
 api_router.include_router(capi_router)
 api_router.include_router(admin_router)
 api_router.include_router(customer_router)
+# ALIAS — Checkout.jsx, üye adreslerini /api/customer/... yolundan çağırıyor; router
+# ön eksiz mount edildiği için bu yol 404 dönüyordu (üye checkout'ta kayıtlı adreslerini
+# göremiyor, modaldan adres kaydedemiyordu). Aynı router'ı /customer önekiyle de mount
+# ederek her iki yolu da çalışır kılıyoruz (Account.jsx ön eksiz yolu kullanmaya devam eder).
+api_router.include_router(customer_router, prefix="/customer")
 api_router.include_router(variants_router)
 api_router.include_router(webhooks_router)
 api_router.include_router(attributes_router)
