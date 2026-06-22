@@ -178,7 +178,7 @@ export default function CategoryMapping() {
         <div className="flex gap-2">
           <button onClick={bulkAutoMatchAttributes}
             disabled={bulkAttrLoading || data.matched === 0}
-            className="flex items-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg text-sm font-semibold hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-3 py-2 bg-stone-900 text-white rounded-lg text-sm font-semibold hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Matched tüm kategorilerdeki özellikleri sistem özellikleriyle otomatik eşleştir"
             data-testid="cat-bulk-auto-match">
             {bulkAttrLoading ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
@@ -186,18 +186,18 @@ export default function CategoryMapping() {
           </button>
           <button onClick={bulkFillCompanyDefaults}
             disabled={data.matched === 0}
-            className="flex items-center gap-1 px-3 py-2 border border-purple-300 text-purple-700 bg-purple-50 rounded-lg text-sm font-semibold hover:bg-purple-100 disabled:opacity-50"
+            className="flex items-center gap-1 px-3 py-2 border border-stone-300 text-stone-700 bg-white rounded-lg text-sm font-semibold hover:bg-stone-50 disabled:opacity-50"
             title="Tüm matched kategorilerin Üretici/İthalatçı alanlarını şirket bilgilerinden doldur"
             data-testid="cat-bulk-fill-company">
             <Settings size={14} /> Tümüne Şirket Doldur
           </button>
           <button onClick={resetAll}
-            className="flex items-center gap-1 px-3 py-2 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50"
+            className="flex items-center gap-1 px-3 py-2 border border-stone-300 text-[#B0413A] rounded-lg text-sm hover:bg-stone-50"
             data-testid="cat-reset-all">
             <Trash2 size={14} /> Hepsini Sıfırla
           </button>
           <button onClick={load}
-            className="flex items-center gap-1 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
+            className="flex items-center gap-1 px-3 py-2 border border-stone-300 rounded-lg text-sm hover:bg-stone-50">
             <RefreshCw size={14} /> Yenile
           </button>
         </div>
@@ -209,7 +209,7 @@ export default function CategoryMapping() {
           return (
             <button key={m.key} onClick={() => setActive(m.key)}
               className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                isActive ? "border-orange-500 text-orange-600" : "border-transparent text-gray-600 hover:text-black"
+                isActive ? "border-stone-900 text-stone-900" : "border-transparent text-stone-500 hover:text-stone-900"
               }`} data-testid={`cat-mp-tab-${m.key}`}>
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-black"
@@ -224,17 +224,17 @@ export default function CategoryMapping() {
       </div>
 
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="bg-white border rounded-xl p-4">
-          <div className="text-xs text-gray-500 uppercase">Toplam Kategori</div>
-          <div className="text-2xl font-black mt-1">{data.total}</div>
+        <div className="bg-white border border-stone-200 rounded-xl p-4">
+          <div className="text-xs text-stone-500 uppercase tracking-wide">Toplam Kategori</div>
+          <div className="text-2xl font-black mt-1 text-stone-900">{data.total}</div>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-          <div className="text-xs text-green-700 uppercase">Eşleşti</div>
-          <div className="text-2xl font-black text-green-800 mt-1">{data.matched}</div>
+        <div className="bg-white border border-stone-200 rounded-xl p-4">
+          <div className="text-xs text-stone-500 uppercase tracking-wide">Eşleşti</div>
+          <div className="text-2xl font-black mt-1 text-[#3F7A52]">{data.matched}</div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <div className="text-xs text-red-700 uppercase">Eşleşmedi</div>
-          <div className="text-2xl font-black text-red-800 mt-1">{data.unmatched}</div>
+        <div className="bg-white border border-stone-200 rounded-xl p-4">
+          <div className="text-xs text-stone-500 uppercase tracking-wide">Eşleşmedi</div>
+          <div className="text-2xl font-black mt-1 text-[#B0413A]">{data.unmatched}</div>
         </div>
       </div>
 
@@ -639,11 +639,11 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   };
 
   return (
-    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4" data-testid="filtered-push-panel">
+    <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 mb-4" data-testid="filtered-push-panel">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="font-bold text-orange-900 text-sm">Filtreli Aktarım — {marketplace.toUpperCase()}</div>
-          <div className="text-xs text-orange-700 mt-0.5">
+          <div className="font-bold text-stone-800 text-sm">Filtreli Aktarım — {marketplace.toUpperCase()}</div>
+          <div className="text-xs text-stone-500 mt-0.5">
             Tarih aralığı veya stok kodu yazıp seçili pazaryerine aktarın. <b>Önce "Doğrula" ile zorunlu alanları kontrol edin.</b>
           </div>
         </div>
@@ -652,7 +652,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             href="/admin/barkod-sorunlari"
             target="_blank"
             rel="noreferrer"
-            className="text-xs bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+            className="text-xs bg-white border border-stone-300 text-stone-700 hover:bg-stone-50 px-3 py-1.5 rounded font-semibold whitespace-nowrap"
             data-testid="open-barcode-issues-btn"
           >
             ⚠️ Barkod Sorunları
@@ -663,7 +663,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                 href="/admin/trendyol-hayalet"
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+                className="text-xs bg-white border border-stone-300 text-stone-700 hover:bg-stone-50 px-3 py-1.5 rounded font-semibold whitespace-nowrap"
                 data-testid="open-ghost-scanner-btn"
               >
                 👻 Hayalet Tarayıcı
@@ -672,7 +672,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                 href="/admin/trendyol-loglar"
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs bg-white border border-orange-300 text-orange-700 hover:bg-orange-100 px-3 py-1.5 rounded shadow-sm font-semibold whitespace-nowrap"
+                className="text-xs bg-white border border-stone-300 text-stone-700 hover:bg-stone-50 px-3 py-1.5 rounded font-semibold whitespace-nowrap"
                 data-testid="open-sync-history-btn"
               >
                 📋 Aktarım Geçmişi
@@ -721,7 +721,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             onClick={onValidate}
             disabled={validating || loading}
             data-testid="push-validate-btn"
-            className="bg-white border border-orange-500 text-orange-700 hover:bg-orange-100 text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50"
+            className="bg-white border border-stone-300 text-stone-700 hover:bg-stone-50 text-sm font-medium px-4 py-2 rounded disabled:opacity-50"
           >
             {validating ? "Doğrulanıyor..." : "1. Doğrula"}
           </button>
@@ -729,11 +729,11 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             onClick={onSubmit}
             disabled={loading || validating}
             data-testid="push-submit-btn"
-            className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded shadow-sm disabled:opacity-50"
+            className="bg-stone-900 hover:bg-stone-800 text-white text-sm font-medium px-4 py-2 rounded disabled:opacity-50"
           >
             {loading ? "Gönderiliyor..." : `2. ${marketplace.toUpperCase()}'a Gönder`}
           </button>
-          {(stockCodes || dateFrom || dateTo || selectedCatIds.length) && (
+          {(stockCodes || dateFrom || dateTo || selectedCatIds.length > 0) && (
             <button
               onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); setSelectedCatIds([]); }}
               className="text-xs text-gray-500 hover:underline"
