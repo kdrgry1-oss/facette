@@ -36,6 +36,16 @@ _siparis_client_cache = None
 _uye_client_cache = None
 
 
+# [ticimax-off 2026-06-22] Ticimax SOAP baglantisi KAPATILDI (canli bag kesildi).
+#   Otomatik siparis cron'u (scheduler) zaten kapali; kalan on-demand cagrilari
+#   (returns /orders/refresh-dates + manuel order import/repair) da artik Ticimax'a
+#   GITMEZ. Zeep client factory'leri RuntimeError firlatir; TUM cagiranlar SOAP'u
+#   try/except ile sardigindan 500 olusmaz (sadece "Ticimax kapali" doner / bos kalir).
+#   VERI DB'de; canli pull'a gerek yok. Acil yeniden acmak icin: env TICIMAX_LIVE=1.
+TICIMAX_LIVE = (os.environ.get("TICIMAX_LIVE", "").strip().lower() in ("1", "true", "yes"))
+_TICIMAX_OFF_MSG = "Ticimax SOAP baglantisi kapali (2026-06-22). Acmak icin env TICIMAX_LIVE=1."
+
+
 def set_domain(domain: str):
     """Runtime'da Ticimax domain'ini değiştir. WSDL URL'lerini yeniden kurar ve
     client cache'lerini sıfırlar ki bir sonraki çağrı yeni domain'e gitsin.
@@ -62,6 +72,8 @@ def set_domain(domain: str):
 
 
 def _urun_client():
+    if not TICIMAX_LIVE:
+        raise RuntimeError(_TICIMAX_OFF_MSG)
     global _urun_client_cache
     if _urun_client_cache is None:
         from zeep import Client, Settings
@@ -75,6 +87,8 @@ def _urun_client():
 
 
 def _siparis_client():
+    if not TICIMAX_LIVE:
+        raise RuntimeError(_TICIMAX_OFF_MSG)
     global _siparis_client_cache
     if _siparis_client_cache is None:
         from zeep import Client, Settings
@@ -88,6 +102,8 @@ def _siparis_client():
 
 
 def _uye_client():
+    if not TICIMAX_LIVE:
+        raise RuntimeError(_TICIMAX_OFF_MSG)
     global _uye_client_cache
     if _uye_client_cache is None:
         from zeep import Client, Settings

@@ -1258,16 +1258,20 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
-    _scheduler.add_job(
-        _ticimax_sync_orders,
-        "interval",
-        hours=6,
-        id="ticimax_orders_sync",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
-        max_instances=1,
-        coalesce=True,
-    )
+    # [ticimax-off 2026-06-22] Ticimax site siparis cron'u KAPATILDI.
+    #   Son gercek ticimax_cron siparisi 2026-06-05 (17 gun once); site siparisleri
+    #   artik React/iyzico checkout'tan geliyor. Otomatik Ticimax SOAP bagi kesildi.
+    #   VERI DOKUNULMADI (28.569 gecmis siparis + source:"ticimax" etiketi korunur).
+    #   _ticimax_sync_orders fonksiyonu tanimli kalir (cagrilmaz).
+    # _scheduler.add_job(
+    #     _ticimax_sync_orders,
+    #     "interval",
+    #     hours=6,
+    #     id="ticimax_orders_sync",
+    #     next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
     # Ticimax canlı stok senkronu — KAPALI (Facette stok master'ı; Ticimax stoğu
     # bu sistemi EZMESİN). Kullanıcı kararı: stok yalnızca sipariş/iptal/iade ile
     # Facette içinde yönetilir. Gerekirse settings.ticimax_stock_sync_enabled=true
