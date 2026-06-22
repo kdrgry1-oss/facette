@@ -607,110 +607,6 @@ async def _send_abandoned_cart_reminders():
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
 
 
-
-
-async def _ticimax_sync_stock():
-    """Ticimax SelectUrun ile canlı stok senkronu — 2 saatte bir tetiklenir.
-    routes/ticimax_stock_sync içindeki gerçek implementasyonu çağırır.
-    """
-    try:
-        import sys, os
-        sys.path.insert(0, os.path.dirname(__file__))
-        from routes.ticimax_stock_sync import sync_ticimax_stock  # type: ignore
-        result = await sync_ticimax_stock(
-            max_products=2000, aktif=None, page_size=50,
-            current_user={"role": "admin", "id": "scheduler"},
-        )
-        logger.info(f"[scheduler][ticimax_stock] {result.get('message','done')}")
-    except Exception as e:
-        logger.exception(f"[scheduler] ticimax_stock_sync failed: {e}")
-
-
-async def _ticimax_sync_orders():
-    """Periyodik olarak Ticimax'tan site siparişlerini çek (idempotent).
-    Son 30 günün siparişleri, 5 sayfa × 100. Yeni site siparişlerini DB'ye yazar.
-    """
-    try:
-        import sys, os, uuid
-        sys.path.insert(0, os.path.dirname(__file__))
-        from ticimax_client import get_orders as tc_get_orders
-        from routes.deps import db  # lazy import
-        from routes.marketplace_hub import log_integration_event  # lazy import
-        s = await db.settings.find_one({"id": "ticimax"}) or {}
-        api_key = s.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
-        end_dt = datetime.now(timezone.utc)
-        start_dt = end_dt - timedelta(days=30)
-        start_str = start_dt.strftime("%d.%m.%Y")
-        end_str = end_dt.strftime("%d.%m.%Y")
-        new_count = 0
-        skipped_mp = 0
-        seen_pages = 0
-
-        # Ortak parser (KargoAdresi/FaturaAdresi nested + UrunListesi item)
-        from ticimax_order_parser import parse_ticimax_order, is_marketplace_order
-
-        updated_count = 0
-        for page in range(1, 6):
-            try:
-                orders = tc_get_orders(
-                    page=page, page_size=100, wscode=api_key,
-                    start_date=start_str, end_date=end_str,
-                    exclude_marketplace=False, only_with_phone=False,
-                )
-            except Exception as e:
-                logger.warning(f"[cron][ticimax] page {page} error: {e}")
-                break
-            if not orders:
-                break
-            seen_pages += 1
-            for o in orders:
-                if not o:
-                    continue
-                if is_marketplace_order(o):
-                    skipped_mp += 1
-                    continue
-                doc = parse_ticimax_order(o, api_key=api_key)
-                if not doc:
-                    continue
-                tc_id = doc["ticimax_order_id"]
-                tc_no = doc["order_number"]
-                # Idempotent: varsa update, yoksa insert
-                exist = await db.orders.find_one(
-                    {"$or": [{"order_number": tc_no}, {"ticimax_order_id": tc_id}]},
-                    {"_id": 0, "id": 1}
-                )
-                try:
-                    if exist:
-                        # Sadece güncelleme (created_at korunur, id korunur, user_id korunur)
-                        await db.orders.update_one(
-                            {"id": exist["id"]},
-                            {"$set": {**{k: v for k, v in doc.items() if k != "created_at"},
-                                      "updated_at": datetime.now(timezone.utc).isoformat()}}
-                        )
-                        updated_count += 1
-                    else:
-                        doc["id"] = str(uuid.uuid4())[:8]
-                        doc["user_id"] = None
-                        doc["imported_from"] = "ticimax_cron"
-                        doc["imported_at"] = datetime.now(timezone.utc).isoformat()
-                        await db.orders.insert_one(doc)
-                        new_count += 1
-                        from routes.integrations import _decrement_stock_for_imported_order
-                        await _decrement_stock_for_imported_order(doc, "ticimax")
-                except Exception as ie:
-                    logger.warning(f"[cron][ticimax] upsert err: {ie}")
-        if new_count > 0 or updated_count > 0:
-            logger.info(f"[cron][ticimax] +{new_count} yeni / ~{updated_count} güncellendi (skipped MP={skipped_mp}, pages={seen_pages})")
-            await log_integration_event(
-                marketplace="ticimax", action="order_pull", status="success",
-                direction="inbound",
-                message=f"[cron] {new_count} yeni + {updated_count} güncellendi"
-            )
-    except Exception as e:
-        logger.exception(f"[cron][ticimax] sync fatal: {e}")
-
-
-
 DEFAULT_PII_RETENTION_DAYS = 30
 PII_RETENTION_PLATFORMS = ["amazon"]  # varsayılan kapsam: Amazon SP-API kaynaklı siparişler
 
@@ -880,10 +776,7 @@ async def _dhl_cargo_poll_tick():
             if delivered and cur != "delivered":
                 new_status = "delivered"
                 upd["delivered_at"] = _parse_tr_dt(teslim) or now_iso
-            elif shipped and _track_no and cur in ("confirmed", "processing", "preparing", "ready_to_ship"):
-                # Takip no oluşmadan "Kargoya Verildi" YAPMA — yoksa müşteriye giden SMS'teki
-                # {tracking_url} no'suz genel /gonderitakip sayfasını açar. No gelene kadar bekle;
-                # sonraki taramada gönderi no dolunca durum çevrilir + deep-link'li SMS gider.
+            elif shipped and cur in ("confirmed", "processing", "preparing", "ready_to_ship"):
                 new_status = "shipped"
                 upd["shipped_at"] = now_iso
 
@@ -918,7 +811,6 @@ async def _dhl_cargo_poll_tick():
                                 "amount": f"{order.get('total', 0):.2f} TL",
                                 "tracking_number": gonderi or order.get("cargo_tracking_number", ""),
                                 "tracking_url": track_link or order.get("cargo_tracking_url", ""),
-                                "tracking_link": track_link or order.get("cargo_tracking_url", ""),
                                 "status_label": customer_label_for(new_status),
                             },
                             channels=ch,
@@ -1262,25 +1154,9 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
-    _scheduler.add_job(
-        _ticimax_sync_orders,
-        "interval",
-        hours=6,
-        id="ticimax_orders_sync",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
-        max_instances=1,
-        coalesce=True,
-    )
-    # Ticimax canlı stok senkronu — KAPALI (Facette stok master'ı; Ticimax stoğu
-    # bu sistemi EZMESİN). Kullanıcı kararı: stok yalnızca sipariş/iptal/iade ile
-    # Facette içinde yönetilir. Gerekirse settings.ticimax_stock_sync_enabled=true
-    # yapıp elle tetiklenebilir, ama otomatik job artık çalışmaz.
-    # _scheduler.add_job(
-    #     _ticimax_sync_stock, "interval", hours=2, id="ticimax_stock_sync",
-    #     next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
-    #     max_instances=1, coalesce=True,
-    # )
+    # [ticimax-off 2026-06-22] Ticimax otomatik job'lari (siparis cron + stok)
+    #   ve ilgili scheduler fonksiyonlari tamamen kaldirildi. Site siparisleri
+    #   React/iyzico'dan; stok Facette master. Veri korundu.
     # Iter 43 — Günlük stok tükenme uyarısı (her gün sabah 9:00 UTC, ~12:00 TR)
     async def _daily_stockout_alert():
         try:
@@ -1327,7 +1203,7 @@ def start_scheduler():
         coalesce=True,
     )
     _scheduler.start()
-    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily + Ticimax orders every 6h)")
+    logger.info("[scheduler] Background scheduler started (auto-cancel every 30 min + marketplace auto-sync every 1 min + abandoned cart reminders daily)")
     return _scheduler
 
 
