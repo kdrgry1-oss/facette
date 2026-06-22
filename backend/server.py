@@ -83,7 +83,7 @@ from routes.footer_template import public_router as footer_public_router, admin_
 # [A4-ticimax-off] from routes.ticimax_category_sync import router as ticimax_category_sync_router
 # [A4-ticimax-off] from routes.ticimax_member_sync import router as ticimax_member_sync_router
 # [A4-ticimax-off] from routes.ticimax_product_pull import router as ticimax_product_pull_router
-from routes.ticimax_returns import router as ticimax_returns_router
+from routes.rooftr_returns import router as rooftr_returns_router
 from routes.bulk_ops import router as bulk_ops_router
 from routes.analytics_extra import router as analytics_extra_router
 from routes.notifications import router as notifications_router
@@ -617,7 +617,7 @@ api_router.include_router(footer_admin_router)
 # Ticimax belirli kart ID ürün çekme — kaynak→hedef kart ID ile yeni ürün (admin)
 # [A4-ticimax-off] api_router.include_router(ticimax_product_pull_router)
 
-api_router.include_router(ticimax_returns_router)
+api_router.include_router(rooftr_returns_router)
 # Toplu fiyat/stok Excel ops + stok uyarı + yeniden sipariş önerisi
 api_router.include_router(bulk_ops_router)
 # RFM müşteri segmentasyonu + marketplace karlılık + Google Merchant feed
