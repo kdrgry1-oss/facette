@@ -11,23 +11,35 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * Trendyol için mevcut olduğundan, diğer pazaryerlerinde panel "backend
  * entegrasyonu gerekiyor" şeffaf durumunda (buton pasif) gösterilir.
  * Yalnız stok adedi ve fiyat gönderilir — ürün açıklaması/görseli değişmez.
+ *
+ * Faz T2: Trendyol'da "stok kodu / barkod ile" hedefli güncelleme eklendi.
+ * Backend inventory-sync artık barcodes/stock_codes payload'unu kabul ediyor;
+ * payload boşken davranış eskisiyle aynı (tüm aktif).
  */
 const SUPPORTED = ["trendyol", "hepsiburada"];
 
 export default function StockPriceUpdatePanel({ marketplace, auth }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [mode, setMode] = useState("all");           // "all" | "codes"
+  const [codeType, setCodeType] = useState("barcode"); // "barcode" | "stock_code"
+  const [codesText, setCodesText] = useState("");
 
   const mp = (marketplace || "").toUpperCase();
   const supported = SUPPORTED.includes(marketplace);
+  // Kod-bazlı hedefleme şimdilik yalnız Trendyol backend'inde var (önce Trendyol).
+  const codeTargeting = marketplace === "trendyol";
 
-  const syncAll = async () => {
-    if (!window.confirm(`Tüm aktif ürünlerin güncel stok ve fiyatı ${mp}'a gönderilecek. Devam edilsin mi?`)) return;
+  const parseCodes = () =>
+    codesText.split(/[\n,;\s]+/).map((s) => s.trim()).filter(Boolean);
+
+  const send = async (payload, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
     setLoading(true);
     setResult(null);
     const t = toast.loading(`Stok/fiyat ${mp}'a gönderiliyor...`);
     try {
-      const r = await axios.post(`${API}/integrations/${marketplace}/products/inventory-sync`, {}, auth);
+      const r = await axios.post(`${API}/integrations/${marketplace}/products/inventory-sync`, payload, auth);
       setResult(r.data);
       toast.success(r.data?.message || "Stok/fiyat gönderildi", { id: t });
     } catch (e) {
@@ -35,6 +47,19 @@ export default function StockPriceUpdatePanel({ marketplace, auth }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const syncAll = () =>
+    send({}, `Tüm aktif ürünlerin güncel stok ve fiyatı ${mp}'a gönderilecek. Devam edilsin mi?`);
+
+  const syncCodes = () => {
+    const codes = parseCodes();
+    if (codes.length === 0) {
+      toast.error("Önce barkod / stok kodu girin");
+      return;
+    }
+    const payload = codeType === "barcode" ? { barcodes: codes } : { stock_codes: codes };
+    send(payload, `${codes.length} ürünün stok ve fiyatı ${mp}'a gönderilecek. Devam edilsin mi?`);
   };
 
   if (!supported) {
@@ -53,6 +78,9 @@ export default function StockPriceUpdatePanel({ marketplace, auth }) {
     );
   }
 
+  const segBtn = (active) =>
+    `px-3 py-1.5 text-xs ${active ? "bg-emerald-700 text-white" : "bg-white text-emerald-800"}`;
+
   return (
     <div className="mb-4 border border-emerald-200 bg-emerald-50/60 rounded-xl p-4">
       <div className="flex items-center gap-2 mb-1">
@@ -60,17 +88,53 @@ export default function StockPriceUpdatePanel({ marketplace, auth }) {
         <div className="font-bold text-emerald-900 text-sm">Stok / Fiyat Güncelle — {mp}</div>
       </div>
       <p className="text-xs text-emerald-800/80 mb-3">
-        Tüm aktif ürünlerin güncel <b>stok adedi ve fiyatını</b> {mp}'a gönderir (barkod eşleşmesiyle).
+        Güncel <b>stok adedi ve fiyatını</b> {mp}'a gönderir (barkod eşleşmesiyle).
         Ürün açıklaması/görseli değişmez — yalnızca stok ve fiyat güncellenir.
       </p>
+
+      {codeTargeting && (
+        <div className="inline-flex rounded-lg border border-emerald-300 overflow-hidden mb-3">
+          <button onClick={() => setMode("all")} className={segBtn(mode === "all")}>Tüm aktif</button>
+          <button onClick={() => setMode("codes")} className={`border-l border-emerald-300 ${segBtn(mode === "codes")}`}>
+            Stok kodu / barkod ile
+          </button>
+        </div>
+      )}
+
+      {codeTargeting && mode === "codes" && (
+        <div className="mb-3">
+          <div className="inline-flex rounded-lg border border-emerald-300 overflow-hidden mb-2">
+            <button onClick={() => setCodeType("barcode")} className={segBtn(codeType === "barcode")}>Barkod</button>
+            <button onClick={() => setCodeType("stock_code")} className={`border-l border-emerald-300 ${segBtn(codeType === "stock_code")}`}>
+              Stok kodu
+            </button>
+          </div>
+          <textarea
+            value={codesText}
+            onChange={(e) => setCodesText(e.target.value)}
+            rows={4}
+            placeholder={codeType === "barcode" ? "8680000000001\n8680000000002" : "FCT-1021-S\nFCT-1021-M"}
+            className="w-full text-xs font-mono border border-emerald-200 rounded-lg p-2 bg-white"
+          />
+          <div className="text-[11px] text-emerald-700 mt-1">
+            {parseCodes().length} kod girildi (satır, virgül veya boşlukla ayırabilirsiniz)
+          </div>
+        </div>
+      )}
+
       <button
-        onClick={syncAll}
+        onClick={codeTargeting && mode === "codes" ? syncCodes : syncAll}
         disabled={loading}
         className="inline-flex items-center gap-2 bg-emerald-700 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50"
       >
         <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-        {loading ? "Gönderiliyor..." : "Tüm Stok + Fiyatı Gönder"}
+        {loading
+          ? "Gönderiliyor..."
+          : codeTargeting && mode === "codes"
+          ? "Seçili Kodları Gönder"
+          : "Tüm Stok + Fiyatı Gönder"}
       </button>
+
       {result && (
         <div className="mt-3 text-xs text-emerald-900 bg-white border border-emerald-200 rounded-lg p-2">
           {result.message || (result.success ? "Gönderildi" : JSON.stringify(result))}

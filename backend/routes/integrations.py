@@ -2384,9 +2384,21 @@ async def get_trendyol_sync_logs(
     return {"logs": logs, "total": total, "page": page}
 
 @router.post("/trendyol/products/inventory-sync")
-async def sync_trendyol_inventory(current_user: dict = Depends(require_admin)):
-    """Bulk sync stock and prices to Trendyol"""
-    products = await db.products.find({"is_active": True}).to_list(length=None)
+async def sync_trendyol_inventory(payload: dict = Body(default={}), current_user: dict = Depends(require_admin)):
+    """Bulk sync stock and prices to Trendyol.
+
+    payload BOŞSA  -> tüm aktif ürünler (eski davranış, byte-aynı).
+    payload barcodes/stock_codes/product_ids/category_filters İÇERİYORSA
+                   -> yalnız hedeflenen ürünler (kod-bazlı stok/fiyat güncelleme, Faz T2).
+    Aktarmadaki _build_product_query_from_payload aynen yeniden kullanılır.
+    """
+    has_filter = any(payload.get(k) for k in ("barcodes", "stock_codes", "product_ids", "category_filters"))
+    if has_filter:
+        query = await _build_product_query_from_payload(payload)
+        # query boş kalırsa (örn. eşleşmeyen kategori) HER ŞEYİ değil, hiçbir şeyi güncelle -> güvenli.
+        products = await db.products.find(query).to_list(length=None) if query else []
+    else:
+        products = await db.products.find({"is_active": True}).to_list(length=None)
     return await _sync_inventory_to_trendyol(products)
 
 @router.post("/trendyol/products/{product_id}/sync-inventory")
