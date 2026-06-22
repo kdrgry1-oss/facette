@@ -133,7 +133,11 @@ Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticim
   - `TicimaxReturns.jsx` (Returns "Web Sitesi" sekmesinde aktif): 5 toast/tooltip/empty-state metni `Ticimax'tan…` → `Rooftr'dan…`; empty-state buton referansı gerçek etiketle eşitlendi ("Siparişleri Çek").
   - `TicimaxExcelUpload.jsx`: başlık "Ticimax Excel Ürün Aktarımı" → "Rooftr Excel Ürün Aktarımı"; "TicimaxExport" → "RooftrExport".
   - Kapsam DIŞI (bilerek): Integrations.jsx 344-445 toast'ları = ölü handler (kart Aşama 3'te kaldırıldı, tetiklenmez) → R3'te komple silinecek. Identifier/yorum/route → sonraki R-aşamaları.
-- **R2 — route yolları** `/ticimax/*` → `/rooftr/*` (aktif: returns + integrations) + frontend çağıranları, koordineli, boot-testli.
-- **R3 — fonksiyon/değişken adları** (dict-key DEĞİL) + Integrations.jsx ölü handler temizliği.
+- **R2 — route yolları `/ticimax/*` → `/rooftr/*` (returns alt-sistemi): TAMAM (ast.parse+esbuild geçti).**
+  - `ticimax_returns.py` prefix `/admin/ticimax` → `/admin/rooftr` (stock_sync 4b'de kapalı → çakışma yok).
+  - `integrations.py` `/ticimax/orders/import` → `/rooftr/orders/import` (path-classifier `/orders/import` substring'iyle korunur).
+  - Çağıranlar: `TicimaxReturns.jsx` 6 yol (return-orders, orders/import, refresh-dates, export, returns/open ×2) + `Integrations.jsx:410` (ölü, tutarlılık).
+  - **Kalan `/integrations/ticimax/*` route'ları (status, categories/import, products/import, test-connection, members/import vb.) DOKUNULMADI** → hepsi ölü Integrations handler'larından çağrılıyor, R3'te handler'larıyla silinecek.
+- **R3 — fonksiyon/değişken adları** (dict-key DEĞİL) + Integrations.jsx ölü handler/effect temizliği (ölü `/ticimax/*` route'lar + handler'lar birlikte silinir).
 - **R4 (en riskli, en son) — dosya adları** `ticimax_*.py`/`Ticimax*.jsx` → rename + tüm import zinciri birlikte, boot-testli.
 > Grup B (veri) tüm R-aşamalarında ELLENMEZ.

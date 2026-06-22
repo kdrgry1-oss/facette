@@ -5632,7 +5632,7 @@ async def import_ticimax_products(
     }
 
 
-@router.post("/ticimax/orders/import")
+@router.post("/rooftr/orders/import")
 async def import_ticimax_orders(
     limit: int = Query(200, ge=1, le=2000),
     days: int = Query(365, ge=1, le=3650, description="Son kaç günün siparişleri çekilsin"),

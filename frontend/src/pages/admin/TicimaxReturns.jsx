@@ -118,7 +118,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       if (statusFilter) params.append("status", statusFilter);
       if (paymentFilter) params.append("payment", paymentFilter);
       if (debounced) params.append("search", debounced);
-      const res = await axios.get(`${API}/admin/ticimax/return-orders?${params}`, auth());
+      const res = await axios.get(`${API}/admin/rooftr/return-orders?${params}`, auth());
       setRows(res.data.orders || []);
       setStatusCounts(res.data.status_counts || {});
       setPaymentCounts(res.data.payment_counts || {});
@@ -139,7 +139,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
     toast.info("Rooftr'dan siparişler çekiliyor — bu işlem birkaç dakika sürebilir…");
     try {
       const res = await axios.post(
-        `${API}/integrations/ticimax/orders/import?days=365&pages=20&limit=100`,
+        `${API}/integrations/rooftr/orders/import?days=365&pages=20&limit=100`,
         {},
         auth()
       );
@@ -166,7 +166,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
     try {
       for (let guard = 0; guard < 60; guard++) {
         const res = await axios.post(
-          `${API}/admin/ticimax/orders/refresh-dates?page=${page}&per_pages=5`,
+          `${API}/admin/rooftr/orders/refresh-dates?page=${page}&per_pages=5`,
           {},
           auth()
         );
@@ -199,7 +199,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
       if (statusFilter) params.append("status", statusFilter);
       if (paymentFilter) params.append("payment", paymentFilter);
       if (debounced) params.append("search", debounced);
-      const res = await fetch(`${API}/admin/ticimax/return-orders/export?${params.toString()}`, {
+      const res = await fetch(`${API}/admin/rooftr/return-orders/export?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
       if (!res.ok) throw new Error("export failed");
@@ -249,7 +249,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
   const openWorkflow = async (row, mode = "approve") => {
     try {
       setBusyId(row.id);
-      const br = await axios.post(`${API}/admin/ticimax/returns/${row.id}/open`, {}, auth());
+      const br = await axios.post(`${API}/admin/rooftr/returns/${row.id}/open`, {}, auth());
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
       // Açılır detayda seçili kalem(ler) varsa iade tutarını onların NET toplamından
@@ -322,7 +322,7 @@ export default function TicimaxReturns({ embedded = false, gpStart = "085490", o
   const handleSiteGider = async (r) => {
     try {
       setBusyId(r.id);
-      const br = await axios.post(`${API}/admin/ticimax/returns/${r.id}/open`, {}, auth());
+      const br = await axios.post(`${API}/admin/rooftr/returns/${r.id}/open`, {}, auth());
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
       const trackingNo = String(gpStart || "").trim();

@@ -20,7 +20,7 @@ import re
 
 from .deps import db, logger, require_admin, generate_id
 
-router = APIRouter(prefix="/admin/ticimax", tags=["ticimax-returns"])
+router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
 
 # İade sürecindeki tüm sipariş durumları (order_statuses.py "İade" grubu)
 RETURN_STATUSES = [

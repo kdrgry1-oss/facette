@@ -407,7 +407,7 @@ export default function Integrations() {
     toast.info("Tüm Ticimax siparişleri çekiliyor (pazaryeri + site)...");
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/orders/import?days=730&limit=200&pages=20&exclude_marketplace=false&only_with_phone=false`, null, {
+      const res = await axios.post(`${API}/integrations/rooftr/orders/import?days=730&limit=200&pages=20&exclude_marketplace=false&only_with_phone=false`, null, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 600000
       });
