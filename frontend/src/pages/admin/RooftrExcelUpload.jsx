@@ -26,7 +26,7 @@ export default function RooftrExcelUpload() {
       const token = localStorage.getItem("token");
       const fd = new FormData();
       fd.append("file", file);
-      const res = await axios.post(`${API}/integrations/ticimax/products/upload-excel`, fd, {
+      const res = await axios.post(`${API}/integrations/rooftr/products/upload-excel`, fd, {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
         timeout: 180000,
       });

@@ -5426,8 +5426,8 @@ async def backfill_broken_ticimax_orders(
 
 
 
-@router.post("/ticimax/products/upload-excel")
-async def upload_ticimax_products_excel(
+@router.post("/rooftr/products/upload-excel")
+async def upload_rooftr_products_excel(
     file: UploadFile = File(..., description="TicimaxExport .xls/.xlsx dosyası"),
     default_stock: int = Query(5, description="Excel'de stok yoksa varsayılan stok adedi"),
     current_user: dict = Depends(require_admin),
