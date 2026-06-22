@@ -42,7 +42,7 @@ function FieldRenderer({ field, value, onChange }) {
           type="checkbox"
           checked={!!value}
           onChange={(e) => onChange(e.target.checked)}
-          className="w-4 h-4 accent-orange-600"
+          className="w-4 h-4 accent-stone-800"
         />
         <span className="text-sm text-gray-700">{field.label}</span>
         {field.help && <span className="text-[10px] text-gray-400">({field.help})</span>}
@@ -53,7 +53,7 @@ function FieldRenderer({ field, value, onChange }) {
     return (
       <div>
         <label className="block text-xs font-semibold text-gray-600 mb-1">
-          {field.label} {field.required && <span className="text-red-500">*</span>}
+          {field.label} {field.required && <span className="text-[#B0413A]">*</span>}
         </label>
         <select
           value={value ?? field.default ?? ""}
@@ -73,7 +73,7 @@ function FieldRenderer({ field, value, onChange }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-gray-600 mb-1">
-        {field.label} {field.required && <span className="text-red-500">*</span>}
+        {field.label} {field.required && <span className="text-[#B0413A]">*</span>}
       </label>
       <div className="relative">
         <input
@@ -183,7 +183,7 @@ export default function MarketplaceHub() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* SOL: PAZARYERİ LİSTESİ */}
-        <div className="lg:col-span-3 bg-white border rounded-xl shadow-sm overflow-hidden">
+        <div className="lg:col-span-3 bg-white border rounded-xl overflow-hidden">
           <div className="p-3 border-b bg-gray-50">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -204,7 +204,7 @@ export default function MarketplaceHub() {
                   key={m.key}
                   onClick={() => setActive(m.key)}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b transition-colors ${
-                    isActive ? "bg-orange-50 border-l-4 border-l-orange-500" : "hover:bg-gray-50"
+                    isActive ? "bg-stone-100 border-l-4 border-l-stone-900" : "hover:bg-stone-50"
                   }`}
                   data-testid={`marketplace-row-${m.key}`}
                 >
@@ -233,7 +233,7 @@ export default function MarketplaceHub() {
           ) : (
             <>
               {/* Header kart */}
-              <div className="bg-white border rounded-xl shadow-sm p-5 mb-4">
+              <div className="bg-white border rounded-xl p-5 mb-4">
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-3">
@@ -270,7 +270,7 @@ export default function MarketplaceHub() {
                         onChange={(e) => setAccount((p) => ({ ...p, enabled: e.target.checked }))}
                         className="w-4 h-4 accent-green-600"
                       />
-                      <span className={`text-sm font-semibold ${account.enabled ? "text-green-700" : "text-gray-400"}`}>
+                      <span className={`text-sm font-semibold ${account.enabled ? "text-[#3F7A52]" : "text-gray-400"}`}>
                         <Power size={12} className="inline mr-1" />
                         {account.enabled ? "Aktif" : "Pasif"}
                       </span>
@@ -324,7 +324,7 @@ export default function MarketplaceHub() {
               />
 
               {/* API CREDENTIALS */}
-              <div className="bg-white border rounded-xl shadow-sm p-5 mb-4">
+              <div className="bg-white border rounded-xl p-5 mb-4">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4">
                   {schema.name} API Bilgileriniz
                 </h3>
@@ -341,7 +341,7 @@ export default function MarketplaceHub() {
               </div>
 
               {/* TRANSFER RULES */}
-              <div className="bg-white border rounded-xl shadow-sm p-5 mb-4">
+              <div className="bg-white border rounded-xl p-5 mb-4">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4">
                   Aktarım Kuralları
                 </h3>
@@ -358,7 +358,7 @@ export default function MarketplaceHub() {
               </div>
 
               {/* AUTO-SYNC */}
-              <div className="bg-white border rounded-xl shadow-sm p-5">
+              <div className="bg-white border rounded-xl p-5">
                 <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
                   <Zap size={14} /> Otomatik Güncelleme
                 </h3>
@@ -369,7 +369,7 @@ export default function MarketplaceHub() {
                         type="checkbox"
                         checked={!!account.auto_sync?.products_enabled}
                         onChange={(e) => updateSync("products_enabled", e.target.checked)}
-                        className="w-4 h-4 accent-orange-600"
+                        className="w-4 h-4 accent-stone-800"
                       />
                       <span className="font-semibold text-sm">Ürünler Otomatik Güncellensin</span>
                     </label>
@@ -391,7 +391,7 @@ export default function MarketplaceHub() {
                         type="checkbox"
                         checked={!!account.auto_sync?.orders_enabled}
                         onChange={(e) => updateSync("orders_enabled", e.target.checked)}
-                        className="w-4 h-4 accent-orange-600"
+                        className="w-4 h-4 accent-stone-800"
                       />
                       <span className="font-semibold text-sm">Siparişler Otomatik Çekilsin</span>
                     </label>
