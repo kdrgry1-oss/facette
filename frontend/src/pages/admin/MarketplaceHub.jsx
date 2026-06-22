@@ -29,6 +29,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { Save, ExternalLink, Search, Power, Zap, Eye, EyeOff, Cable, SlidersHorizontal } from "lucide-react";
+import StockPriceUpdatePanel from "../../components/admin/StockPriceUpdatePanel";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -286,6 +287,13 @@ export default function MarketplaceHub() {
                     <Cable size={13} /> Aktarım İşlemleri (Ürün Gönder / Sipariş Al)
                   </Link>
                   <Link
+                    to="/admin/urunler?aktar=barkod"
+                    data-testid="quick-link-barcode-push"
+                    className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
+                  >
+                    <Zap size={13} /> Barkod / Stok Kodu ile Aktar
+                  </Link>
+                  <Link
                     to="/admin/marka-eslestir"
                     data-testid="quick-link-brand-map"
                     className="inline-flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg font-medium"
@@ -308,6 +316,12 @@ export default function MarketplaceHub() {
                   </Link>
                 </div>
               </div>
+
+              {/* STOK / FİYAT GÜNCELLE — hub içinde doğrudan (Faz T2: barkod/stok kodu ile hedefli) */}
+              <StockPriceUpdatePanel
+                marketplace={active}
+                auth={{ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }}
+              />
 
               {/* API CREDENTIALS */}
               <div className="bg-white border rounded-xl shadow-sm p-5 mb-4">

@@ -392,6 +392,18 @@ export default function AdminProducts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen]);
 
+  // Deep-link: /admin/urunler?aktar=barkod → "Barkod ile Trendyol'a Aktar" pop-up'ını otomatik aç.
+  // (Pazaryeri Hub'ından hızlı erişim için.)
+  useEffect(() => {
+    if (searchParams.get("aktar") === "barkod") {
+      setBarcodePushOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("aktar");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();
