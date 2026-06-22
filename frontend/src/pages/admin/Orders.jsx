@@ -1161,7 +1161,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         if (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft') label = 'Havale/EFT';
                         else if (pm === 'credit_card' || pm === 'card' || pm === 'iyzico' || pm === 'cc') label = 'Kredi Kartı';
                         else if (pm === 'cod' || pm === 'kapida') label = 'Kapıda';
-                        else if (order.platform === 'trendyol') label = 'Marketplace';
+                        else if (order.platform === 'trendyol' || order.platform === 'hepsiburada' || order.platform === 'temu' || pm === 'marketplace') label = 'Marketplace';
                         if (!label) return <span className="text-sm text-gray-400">—</span>;
                         const isHavale = (pm === 'transfer' || pm === 'havale' || pm === 'bank_transfer' || pm === 'eft');
                         return (
@@ -1173,11 +1173,16 @@ export default function AdminOrders({ unpaidView = false }) {
                       })()}
                     </td>
                     <td>
-                      {order.platform === 'trendyol' ? (
-                        <span className="inline-block px-2 py-0.5 bg-[#F27A1A] text-white text-[10px] uppercase font-bold tracking-wider rounded">Trendyol</span>
-                      ) : (
-                        <span className="inline-block px-2 py-0.5 bg-gray-800 text-white text-[10px] uppercase font-bold tracking-wider rounded">Web</span>
-                      )}
+                      {(() => {
+                        const p = (order.platform || '').toLowerCase();
+                        const map = {
+                          trendyol: { label: 'Trendyol', bg: 'bg-[#F27A1A]' },
+                          hepsiburada: { label: 'Hepsiburada', bg: 'bg-[#FF6000]' },
+                          temu: { label: 'Temu', bg: 'bg-[#FB7701]' },
+                        };
+                        const m = map[p] || { label: 'Web', bg: 'bg-gray-800' };
+                        return <span className={`inline-block px-2 py-0.5 ${m.bg} text-white text-[10px] uppercase font-bold tracking-wider rounded`}>{m.label}</span>;
+                      })()}
                     </td>
                     <td>
                       <Select

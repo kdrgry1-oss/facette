@@ -3105,6 +3105,58 @@ def _hb_group_orders(lines):
         g["lines"].append(ln)
     return list(groups.values())
 
+def _hb_is_full_order(d):
+    """Tam sipariş objesi mi? (orderNumber/orderId VE içinde kalem dizisi olan)."""
+    if not isinstance(d, dict):
+        return False
+    if not (d.get("orderNumber") or d.get("orderId")):
+        return False
+    return any(isinstance(d.get(k), list) and d.get(k)
+               for k in ("items", "lineItems", "details", "lines", "orderLines"))
+
+
+def _hb_order_group_from_full(o):
+    """Tam sipariş objesinden (by_number / nested) grup üretir:
+    order-level alanları (customer, invoice, shippingAddress, totalPrice...) KORUR,
+    içindeki kalem dizisini lines olarak çıkarır."""
+    if not isinstance(o, dict):
+        return {"orderNumber": "?", "lines": []}
+    lines = (o.get("items") or o.get("lineItems") or o.get("details")
+             or o.get("lines") or o.get("orderLines") or [])
+    g = dict(o)
+    g["lines"] = lines if isinstance(lines, list) else []
+    g["orderNumber"] = str(o.get("orderNumber") or o.get("orderId") or o.get("id") or "?")
+    return g
+
+
+def _hb_orders_from_response(resp):
+    """OMS yanıtını sipariş-grubu listesine çevirir; İKİ şekli de ele alır:
+      - by_number : tek tam sipariş objesi (kalemler nested) -> order-level KORUNUR
+      - get_orders: düz kalem listesi {items:[lineItem,...]} -> orderNumber'a göre gruplanır
+    Böylece numarayla çekilen sipariş, müşteri/fatura/kalem bilgisiyle birlikte içe aktarılır."""
+    # 1) Tek tam sipariş objesi
+    if _hb_is_full_order(resp):
+        return [_hb_order_group_from_full(resp)]
+    # 2) Liste: tam siparişler mi yoksa düz kalemler mi?
+    if isinstance(resp, list):
+        if resp and _hb_is_full_order(resp[0]):
+            return [_hb_order_group_from_full(o) for o in resp if isinstance(o, dict)]
+        return _hb_group_orders(_hb_normalize_lines(resp))
+    # 3) Sarmalayıcı dict {items|data|orders|content:[...]}
+    if isinstance(resp, dict):
+        for k in ("items", "data", "orders", "content"):
+            v = resp.get(k)
+            if isinstance(v, list) and v:
+                if _hb_is_full_order(v[0]):
+                    return [_hb_order_group_from_full(o) for o in v if isinstance(o, dict)]
+                return _hb_group_orders(v)
+        # 4) orderNumber var ama nested kalem yok/boş -> yine de tam sipariş gibi al
+        if resp.get("orderNumber") or resp.get("orderId"):
+            return [_hb_order_group_from_full(resp)]
+    # 5) Fallback (eski davranış)
+    return _hb_group_orders(_hb_normalize_lines(resp))
+
+
 def _hb_money(v, default=0.0):
     """HB OMS fiyatı düz sayı VEYA {amount/value/grossAmount/...} dict olabilir → güvenle float'a indirger."""
     if isinstance(v, dict):
@@ -3144,8 +3196,9 @@ def map_hepsiburada_order(o: dict) -> dict:
         })
         subtotal += unit * qty
     total = _hb_money(_hb_g(o, "totalPrice", "totalAmount", default=subtotal), subtotal)
-    ship = o.get("shippingAddress") or o.get("shippingAddressDetail") or {}
-    inv = o.get("invoiceAddress") or {}
+    ship = (o.get("shippingAddress") or o.get("shippingAddressDetail")
+            or o.get("deliveryAddress") or {})
+    inv = o.get("invoiceAddress") or o.get("invoice") or {}
     cust = o.get("customer") or {}
     cust_name = (_hb_g(o, "customerName") or _hb_g(cust, "name")
                  or _hb_g(ship, "name", "firstName") or "Hepsiburada Müşterisi")
@@ -3190,6 +3243,80 @@ def _hb_created_at(o):
         return d
     return datetime.now(timezone.utc).isoformat()
 
+
+def _facette_product_image(prod):
+    for im in (prod.get("images") or []):
+        if isinstance(im, str) and im:
+            return im
+        if isinstance(im, dict):
+            u = im.get("url") or im.get("src") or im.get("image")
+            if u:
+                return u
+    return prod.get("image") or prod.get("main_image") or ""
+
+
+async def _facette_match_for_codes(codes):
+    """Kod adaylarıyla (barkod / stok kodu / sku) FACETTE ürün+varyant eşler. -> (product, kod, yontem) | None"""
+    seen, clean = set(), []
+    for c in codes:
+        c = str(c).strip() if c is not None else ""
+        if c and c not in seen:
+            seen.add(c); clean.append(c)
+    if not clean:
+        return None
+    for c in clean:
+        prod = await db.products.find_one({"variants.barcode": c}, {"_id": 0})
+        if prod:
+            return (prod, c, "variant_barcode")
+    for c in clean:
+        prod = await db.products.find_one({"barcode": c}, {"_id": 0})
+        if prod:
+            return (prod, c, "product_barcode")
+    for c in clean:
+        prod = await db.products.find_one({"variants.stock_code": c}, {"_id": 0})
+        if prod:
+            return (prod, c, "variant_stock_code")
+    for c in clean:
+        prod = await db.products.find_one({"$or": [{"stock_code": c}, {"sku": c}]}, {"_id": 0})
+        if prod:
+            return (prod, c, "product_stock_code")
+    return None
+
+
+async def _hb_enrich_items(order_data):
+    """HB kalemlerini FACETTE ürünleriyle eşler: görsel + FACETTE product_id + barkod (stok düşümü için) + ad/varyant.
+    Eşleşmeyen kalem dokunulmadan kalır (matched=False işaretlenir)."""
+    for it in (order_data.get("items") or []):
+        codes = [it.get("barcode"), it.get("sku"), it.get("product_id"),
+                 it.get("merchant_sku"), it.get("merchantSku"),
+                 it.get("hb_sku"), it.get("productBarcode")]
+        m = await _facette_match_for_codes(codes)
+        if not m:
+            it["matched"] = False
+            continue
+        prod, matched_code, how = m
+        vbar = ""
+        for v in (prod.get("variants") or []):
+            if matched_code in (v.get("barcode"), v.get("stock_code")):
+                vbar = v.get("barcode") or vbar
+                if v.get("size") and not it.get("size"):
+                    it["size"] = v.get("size")
+                if v.get("color") and not it.get("color"):
+                    it["color"] = v.get("color")
+                break
+        it["marketplace_sku"] = it.get("product_id")
+        it["product_id"] = prod.get("id")
+        it["facette_product_id"] = prod.get("id")
+        it["barcode"] = vbar or prod.get("barcode") or it.get("barcode")
+        img = _facette_product_image(prod)
+        if img:
+            it["image"] = img
+        if prod.get("name"):
+            it["product_name"] = prod["name"]
+        it["matched"] = True
+        it["match_method"] = how
+    return order_data
+
 @router.post("/hepsiburada/orders/preview")
 async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict = Depends(require_admin)):
     """Hepsiburada OMS'ten geçmiş siparişleri tarih aralığı veya sipariş no ile listeler (içe aktarmadan).
@@ -3225,9 +3352,10 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
                 "attempted_url": attempted}
     except Exception as e:
         return {"success": False, "error": str(e), "attempted_url": attempted}
-    lines = _hb_normalize_lines(resp)
-    grouped = _hb_group_orders(lines)
-    preview = [map_hepsiburada_order(g) for g in grouped]
+    grouped = _hb_orders_from_response(resp)
+    preview = []
+    for g in grouped:
+        preview.append(await _hb_enrich_items(map_hepsiburada_order(g)))
     nums = [p["order_number"] for p in preview]
     existing = set()
     if nums:
@@ -3272,6 +3400,13 @@ async def hepsiburada_oms_diag(on: str = "", key: str = ""):
             return {"ok": False, "ms": int((time.time() - t0) * 1000), "error": str(e)[:300]}
 
     results = {"list_1": await timed(lambda: client.get_orders(None, None, 0, 1, read_timeout=10), 11)}
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        _bd = (_dt.now() - _td(days=14)).strftime("%Y-%m-%dT%H:%M:%S")
+        _ed = _dt.now().strftime("%Y-%m-%dT%H:%M:%S")
+        results["list_dated_14d"] = await timed(lambda: client.get_orders(_bd, _ed, 0, 5, read_timeout=10), 11)
+    except Exception as _de:
+        results["list_dated_14d"] = {"ok": False, "error": str(_de)[:200]}
     on = (on or "").strip()
     if on:
         results["by_number"] = await timed(lambda: client.get_order_by_number(on), 10)
@@ -3293,14 +3428,13 @@ async def hepsiburada_import_by_number(on: str = "", key: str = ""):
         return {"ok": False, "error": err}
     try:
         resp = await asyncio.wait_for(asyncio.to_thread(client.get_order_by_number, on), timeout=12)
-        lines = _hb_normalize_lines(resp)
-        grouped = _hb_group_orders(lines)
+        grouped = _hb_orders_from_response(resp)
         if not grouped:
-            return {"ok": False, "error": "siparis bulunamadi/bos", "raw": str(resp)[:400]}
+            return {"ok": False, "error": "siparis bulunamadi/bos", "raw_full": resp, "raw": str(resp)[:400]}
         imported = updated = 0
         out = []
         for g in grouped:
-            order_data = map_hepsiburada_order(g)
+            order_data = await _hb_enrich_items(map_hepsiburada_order(g))
             onum = order_data["order_number"]
             existing = await db.orders.find_one({"order_number": onum, "platform": "hepsiburada"})
             if existing:
@@ -3316,8 +3450,10 @@ async def hepsiburada_import_by_number(on: str = "", key: str = ""):
                     await _decrement_stock_for_imported_order(order_data, "hepsiburada")
                 except Exception:
                     pass  # ürün FACETTE'de yoksa stok düşmez — sipariş yine kaydedildi
-            out.append({"order_number": onum, "items": len(order_data.get("items", []))})
+            matched = sum(1 for it in order_data.get("items", []) if it.get("matched"))
+            out.append({"order_number": onum, "items": len(order_data.get("items", [])), "eslesen": matched})
         return {"ok": True, "imported": imported, "updated": updated, "orders": out,
+                "_raw": resp,
                 "mesaj": "Siparis(ler) panele aktarildi — Siparisler sayfasinda gorunur."}
     except Exception as e:
         return {"ok": False, "stage": "import", "error": str(e)[:400],
@@ -3395,7 +3531,7 @@ async def import_selected_hepsiburada_orders(req: HbOrderImportReq, current_user
     imported = updated = 0
     errors = []
     for raw in req.orders:
-        order_data = map_hepsiburada_order(raw)
+        order_data = await _hb_enrich_items(map_hepsiburada_order(raw))
         on = order_data["order_number"]
         try:
             existing = await db.orders.find_one({"order_number": on, "platform": "hepsiburada"})

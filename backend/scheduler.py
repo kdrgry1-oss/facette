@@ -429,7 +429,7 @@ async def _run_hepsiburada_auto_orders_pull():
         from datetime import datetime as _dt, timedelta as _td
         from routes.category_mapping import _get_hb_client
         from routes.integrations import (
-            _hb_normalize_lines, _hb_group_orders, map_hepsiburada_order,
+            _hb_orders_from_response, _hb_enrich_items, map_hepsiburada_order,
             _hb_created_at, _decrement_stock_for_imported_order,
         )
         from routes.deps import db as _db, generate_id
@@ -450,12 +450,11 @@ async def _run_hepsiburada_auto_orders_pull():
                 direction="inbound", message=f"[cron] HB sipariş çekme hatası: {e}")
             return
 
-        lines = _hb_normalize_lines(resp)
-        grouped = _hb_group_orders(lines)
+        grouped = _hb_orders_from_response(resp)
         imported = updated = 0
         for g in grouped:
             try:
-                data = map_hepsiburada_order(g)
+                data = await _hb_enrich_items(map_hepsiburada_order(g))
                 number = data["order_number"]
                 existing = await _db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
                 if existing:
@@ -482,6 +481,44 @@ async def _run_hepsiburada_auto_orders_pull():
                 message=f"[cron] HB otomatik çekim: {imported} yeni, {updated} güncellendi")
     except Exception as e:
         logger.exception(f"[scheduler] hepsiburada auto orders pull failed: {e}")
+
+
+async def _run_hepsiburada_auto_stock_sync():
+    """Scheduler — Hepsiburada stok/fiyat senkronu (Trendyol akışıyla simetrik).
+    Tüm aktif ürünlerin güncel stok+fiyatını HB listing'ine gönderir.
+    HB kimliği yoksa _get_hb_client hata döndürür → sessizce no-op."""
+    from routes.deps import db
+    from routes.marketplace_hub import log_integration_event
+    try:
+        from routes.category_mapping import _get_hb_client
+        from routes.integrations import (
+            _hb_markup, _hb_price_source, _hb_listing_items_from_product, _hb_push_stock_price,
+        )
+        client, err = await _get_hb_client()
+        if err:
+            return  # kimlik yoksa sessiz geç
+        products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
+        markup = await _hb_markup()
+        price_source = await _hb_price_source()
+        items = []
+        for prod in products:
+            items.extend(_hb_listing_items_from_product(prod, markup, price_source))
+        if not items:
+            return
+        res = await _hb_push_stock_price(client, items, True, True)
+        errs = res.get("errors") if isinstance(res, dict) else None
+        await log_integration_event(
+            marketplace="hepsiburada", action="stock_update",
+            status=("success" if not errs else "failed"), direction="outbound",
+            message=f"[cron] HB stok/fiyat senkronu: {len(items)} kalem"
+                    + (f" — {'; '.join(errs)}" if errs else ""))
+    except Exception as e:
+        try:
+            await log_integration_event(
+                marketplace="hepsiburada", action="stock_update", status="failed",
+                direction="outbound", message=f"[cron] HB stok senkron hatasi: {e}")
+        except Exception:
+            pass
 
 
 async def _marketplace_sync_tick():
@@ -526,6 +563,8 @@ async def _marketplace_sync_tick():
                     # Trendyol için gerçek push'u arka planda kuyruğa al
                     if key == "trendyol":
                         asyncio.create_task(_run_trendyol_auto_products_sync())
+                    elif key == "hepsiburada":
+                        asyncio.create_task(_run_hepsiburada_auto_stock_sync())
                     await db.marketplace_accounts.update_one(
                         {"key": key}, {"$set": {"_last_products_sync": now.isoformat()}}
                     )
