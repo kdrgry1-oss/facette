@@ -1138,6 +1138,53 @@ async def update_order_status(
 
     return {"message": f"Sipariş durumu '{status}' olarak güncellendi"}
 
+
+@router.post("/bulk/status")
+async def bulk_update_status(
+    order_ids: List[str] = Body(..., embed=False),
+    status: str = Query(...),
+    current_user: dict = Depends(require_admin),
+):
+    """Seçili siparişlerin TOPLU durum değişimi.
+
+    Frontend gövdede ham bir id listesi (["id1","id2",...]) ve query'de `status`
+    gönderir. Her sipariş için tekil durum güncelleme akışını (validasyon,
+    havale→ödeme onayı, fatura iptali, bildirim, CAPI, stok) AYNEN çalıştırır.
+    Bir sipariş hata verirse diğerleri etkilenmez; sonunda özet döner.
+    """
+    if not isinstance(order_ids, list) or not order_ids:
+        raise HTTPException(status_code=400, detail="Sipariş listesi (order_ids) gerekli")
+
+    # Durumu bir kez doğrula — geçersizse hiçbir siparişe dokunma.
+    from order_statuses import get_status_config, valid_keys
+    _cfg = await get_status_config(db)
+    if status not in valid_keys(_cfg):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Geçersiz durum: {status}. Geçerli değerler: {sorted(valid_keys(_cfg))}",
+        )
+
+    updated, failed, errors = 0, 0, []
+    for oid in order_ids:
+        try:
+            await update_order_status(oid, status=status, current_user=current_user)
+            updated += 1
+        except HTTPException as he:
+            failed += 1
+            errors.append({"order_id": oid, "error": str(he.detail)})
+        except Exception as e:
+            failed += 1
+            errors.append({"order_id": oid, "error": str(e)})
+            logger.error(f"[bulk status {oid}] {e}")
+
+    return {
+        "success": failed == 0,
+        "updated": updated,
+        "failed": failed,
+        "total": len(order_ids),
+        "errors": errors[:50],
+    }
+
 @router.put("/{order_id}/mark-paid")
 async def mark_order_paid(
     order_id: str,
