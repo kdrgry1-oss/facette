@@ -138,6 +138,9 @@ Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticim
   - `integrations.py` `/ticimax/orders/import` → `/rooftr/orders/import` (path-classifier `/orders/import` substring'iyle korunur).
   - Çağıranlar: `TicimaxReturns.jsx` 6 yol (return-orders, orders/import, refresh-dates, export, returns/open ×2) + `Integrations.jsx:410` (ölü, tutarlılık).
   - **Kalan `/integrations/ticimax/*` route'ları (status, categories/import, products/import, test-connection, members/import vb.) DOKUNULMADI** → hepsi ölü Integrations handler'larından çağrılıyor, R3'te handler'larıyla silinecek.
-- **R3 — fonksiyon/değişken adları** (dict-key DEĞİL) + Integrations.jsx ölü handler/effect temizliği (ölü `/ticimax/*` route'lar + handler'lar birlikte silinir).
-- **R4 (en riskli, en son) — dosya adları** `ticimax_*.py`/`Ticimax*.jsx` → rename + tüm import zinciri birlikte, boot-testli.
+- **R3 — Ölü kod temizliği: TAMAM (ast.parse + esbuild geçti).**
+  - Backend: `integrations.py`'den 10 ölü `/ticimax` route silindi (status, settings, categories/import, variants/sync, test-connection, products/import, members/import, link-orders-to-users, members/import-excel, members) — ast tabanlı, hepsinin iç çağrısı yok doğrulandı (9087→7990 satır).
+  - Frontend: `Integrations.jsx` tamamen ticimax'tan arındı (0 referans) — 5 ölü handler (Categories/Products/TestConnection/Orders/Members) + state (`ticimaxImporting*`, `ticimaxStatus`) + status-effect'teki `/ticimax/status` fetch + `statuses.ticimax` anahtarı kaldırıldı. Promise.all 7→6, destructuring hizalı, Trendyol/HB/Temu/iyzico/xml/doğan'a dokunulmadı.
+  - Korunanlar: `/rooftr/orders/import` (returns), `/ticimax/products/upload-excel` (Excel sayfası — R-sonra), `/ticimax/orders/backfill` (caller belirsiz — R-sonra).
+- **R4 (en riskli, en son) — fonksiyon/değişken + dosya adları** `ticimax_*.py`/`Ticimax*.jsx`/`pullFromTicimax`/`TicimaxReturns` → rename + tüm import zinciri birlikte, boot-testli. Ayrıca kalan `/ticimax/products/upload-excel` + `orders/backfill` + scripts/yorum kalıntıları.
 > Grup B (veri) tüm R-aşamalarında ELLENMEZ.

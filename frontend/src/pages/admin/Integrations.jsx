@@ -23,8 +23,7 @@ export default function Integrations() {
     temu: { configured: false, mode: "sandbox" },
     mng: { configured: true, mode: "live" },
     netgsm: { configured: false, mode: "sandbox" },
-    gib: { configured: false, mode: "test" },
-    ticimax: { configured: true, mode: "live" }
+    gib: { configured: false, mode: "test" }
   });
   const [trendyolOrders, setTrendyolOrders] = useState([]);
   const [trendyolModalOpen, setTrendyolModalOpen] = useState(false);
@@ -68,12 +67,6 @@ export default function Integrations() {
     username: "", password: "", api_key: "", customer_code: "",
     api_secret: "", mode: "sandbox", is_active: false
   });
-
-  // Ticimax state
-  const [ticimaxImportingProducts, setTicimaxImportingProducts] = useState(false);
-  const [ticimaxImportingCategories, setTicimaxImportingCategories] = useState(false);
-  const [ticimaxImportingOrders, setTicimaxImportingOrders] = useState(false);
-  const [ticimaxStatus, setTicimaxStatus] = useState({ configured: true, mode: "live", last_sync: null });
 
   // XML Feed state
   const [xmlImporting, setXmlImporting] = useState(false);
@@ -124,11 +117,10 @@ export default function Integrations() {
       const headers = { Authorization: `Bearer ${token}` };
 
       // Fetch integration statuses
-      const [paymentRes, trendyolRes, gibRes, ticimaxRes, xmlRes, hbRes, temuRes] = await Promise.all([
+      const [paymentRes, trendyolRes, gibRes, xmlRes, hbRes, temuRes] = await Promise.all([
         axios.get(`${API}/integrations/payment/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/trendyol/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/dogan/settings`, { headers }).catch(() => ({ data: { enabled: false } })),
-        axios.get(`${API}/integrations/ticimax/status`, { headers }).catch(() => ({ data: { configured: true, mode: "live", last_sync: null } })),
         axios.get(`${API}/integrations/xml/status`, { headers }).catch(() => ({ data: { last_sync: null } })),
         axios.get(`${API}/integrations/hepsiburada/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } })),
         axios.get(`${API}/integrations/temu/status`, { headers }).catch(() => ({ data: { configured: false, mode: "sandbox" } }))
@@ -142,7 +134,6 @@ export default function Integrations() {
         temu: temuRes.data,
         gib: { configured: gibRes.data?.enabled || false, mode: gibRes.data?.is_test ? "test" : "live" }
       }));
-      setTicimaxStatus(ticimaxRes.data);
       setXmlLastSync(xmlRes.data?.last_sync || null);
     } catch (err) {
       console.error("Status fetch error:", err);
@@ -325,128 +316,6 @@ export default function Integrations() {
     }
   };
 
-  // ---- Ticimax Handlers ----
-  const handleTicimaxImportCategories = async () => {
-    setTicimaxImportingCategories(true);
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/categories/import`, null, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 120000
-      });
-      if (res.data.success) {
-        toast.success(res.data.message || `${res.data.imported} kategori içe aktarıldı`);
-        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString() }));
-      } else {
-        toast.error("Kategori aktarımı başarısız");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Ticimax kategori hatası");
-    } finally {
-      setTicimaxImportingCategories(false);
-    }
-  };
-
-  const handleTicimaxImportProducts = async () => {
-    setTicimaxImportingProducts(true);
-    toast.info("Ürünler çekiliyor, bu işlem birkaç dakika sürebilir...");
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/products/import?limit=500`, null, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 300000
-      });
-      if (res.data.success) {
-        toast.success(res.data.message || `${res.data.total} ürün aktarıldı`);
-        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString() }));
-      } else {
-        toast.error("Ürün aktarımı başarısız");
-      }
-    } catch (err) {
-      const d = err.response?.data?.detail;
-      if (d && typeof d === "object") {
-        toast.error(d.message || d.error || "Ticimax hatası", {
-          description: d.remedy,
-          duration: 12000,
-        });
-      } else {
-        toast.error(typeof d === "string" ? d : "Ticimax ürün hatası");
-      }
-    } finally {
-      setTicimaxImportingProducts(false);
-    }
-  };
-
-  const handleTicimaxTestConnection = async () => {
-    toast.info("Ticimax servislerine erişim kontrol ediliyor...");
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`${API}/integrations/ticimax/test-connection`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 30000,
-      });
-      const r = res.data || {};
-      const us = r.urun_service || {};
-      const uy = r.uye_service || {};
-      const lines = [];
-      lines.push(`Ürün Servisi: ${us.ok ? "✓ ERİŞİM VAR" : "✗ " + (us.error || "erişim yok")}`);
-      lines.push(`Üye Servisi: ${uy.ok ? "✓ ERİŞİM VAR" : "✗ " + (uy.error || "erişim yok")}`);
-      if (us.ok && r.product_count != null) lines.push(`Toplam ürün: ${r.product_count}`);
-      if (us.ok) {
-        toast.success("Bağlantı OK", { description: lines.join(" · "), duration: 10000 });
-      } else {
-        toast.error("Ürün servisi erişim yok", { description: (us.detail || lines.join(" · ")), duration: 14000 });
-      }
-    } catch (err) {
-      toast.error("Bağlantı testi başarısız: " + (err.response?.data?.detail || err.message || ""));
-    }
-  };
-
-  const handleTicimaxImportOrders = async () => {
-    setTicimaxImportingOrders(true);
-    toast.info("Tüm Ticimax siparişleri çekiliyor (pazaryeri + site)...");
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/rooftr/orders/import?days=730&limit=200&pages=20&exclude_marketplace=false&only_with_phone=false`, null, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 600000
-      });
-      if (res.data.success) {
-        toast.success(res.data.message || `${res.data.total} sipariş aktarıldı`);
-        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString(), orders_last_sync: new Date().toISOString() }));
-      } else {
-        toast.error("Sipariş aktarımı başarısız");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Ticimax sipariş hatası");
-    } finally {
-      setTicimaxImportingOrders(false);
-    }
-  };
-
-  // Ticimax üye importu
-  const [ticimaxImportingMembers, setTicimaxImportingMembers] = useState(false);
-  const handleTicimaxImportMembers = async () => {
-    setTicimaxImportingMembers(true);
-    toast.info("Tüm Ticimax üyeleri çekiliyor (ayrım yok)...");
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/integrations/ticimax/members/import?page_size=200&max_pages=100&only_with_phone=false&only_active=false&fetch_addresses=false`, null, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 900000
-      });
-      if (res.data.success) {
-        toast.success(res.data.message || `${res.data.total} üye aktarıldı`);
-        setTicimaxStatus(prev => ({ ...prev, last_sync: new Date().toISOString(), members_last_sync: new Date().toISOString() }));
-      } else {
-        toast.error("Üye aktarımı başarısız");
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Ticimax üye hatası");
-    } finally {
-      setTicimaxImportingMembers(false);
-    }
-  };
 
 
   // ---- XML Feed Handler ----
