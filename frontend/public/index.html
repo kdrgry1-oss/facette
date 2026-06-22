@@ -156,14 +156,19 @@
                     }),
                     (e.__SV = 1));
             })(document, window.posthog || []);
-            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
-                session_recording: {
-                    recordCrossOriginIframes: true,
-                    capturePerformance: false,
-                },
-            });
+            var _phInit = function () {
+                posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
+                    api_host: "https://us.i.posthog.com",
+                    person_profiles: "identified_only",
+                    disable_session_recording: true, // [perf 2026-06-22] session replay kapali -> recorder.js yuklenmez (mobil TBT/ag kazanci)
+                });
+            };
+            // [perf 2026-06-22] PostHog init idle'a ertelendi -> ilk render ana is parcacigini blokemesin
+            if ("requestIdleCallback" in window) {
+                requestIdleCallback(_phInit, { timeout: 4000 });
+            } else {
+                setTimeout(_phInit, 2500);
+            }
         </script>
     </body>
 </html>
