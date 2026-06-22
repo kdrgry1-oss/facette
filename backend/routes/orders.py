@@ -87,6 +87,24 @@ async def _enrich_items_with_products(items):
         return items
 
 
+# ---------------------------------------------------------------------------
+# Fire-and-forget arka plan görevleri için GÜÇLÜ referans havuzu.
+# asyncio.create_task'ın referansı tutulmazsa, event loop yalnızca ZAYIF referans
+# tuttuğundan görev bitmeden GC tarafından silinebilir → bildirim "bazen gidiyor
+# bazen gitmiyor" olur (dokümante asyncio tuzağı). _spawn referansı tutar; bittiğinde
+# done-callback ile havuzdan düşürür. TÜM bildirim/CAPI create_task'ları bunu kullanır.
+# ---------------------------------------------------------------------------
+_BG_TASKS: set = set()
+
+
+def _spawn(coro):
+    import asyncio as __a
+    _t = __a.create_task(coro)
+    _BG_TASKS.add(_t)
+    _t.add_done_callback(_BG_TASKS.discard)
+    return _t
+
+
 async def _order_notify_vars(order: dict, **extra) -> dict:
     """Bir sipariş dokümanından TÜM bildirim değişkenlerini (email + SMS şablonlarının
     kullandığı her placeholder) tek elden üretir. Amaç: hiçbir ma/sms'te {order_date},
@@ -794,7 +812,7 @@ async def create_order(
         except Exception as e:
             logger.warning(f"order_confirmed notification dispatch failed: {e}")
 
-    _asyncio.create_task(_notify_order_created())
+    _spawn(_notify_order_created())
 
     # FAZ 1 - C1: otomatik stok düşümü
     try:
@@ -986,7 +1004,7 @@ async def update_order_status(
         except Exception as _notif_err:
             logger.warning(f"notification dispatch failed for order {order_id}: {_notif_err}")
 
-    _asyncio.create_task(_dispatch_notif())
+    _spawn(_dispatch_notif())
 
     # ---- CAPI Server-Side Tracking Hooks ----
     # Status değişimleri reklam platformlarına da bildirilir.
@@ -1050,7 +1068,7 @@ async def update_order_status(
         except Exception as _capi_err:
             logger.warning(f"CAPI dispatch failed for order {order_id}: {_capi_err}")
 
-    _asyncio.create_task(_dispatch_capi())
+    _spawn(_dispatch_capi())
 
     # FAZ 1 - C1: Status değişikliğinde stok düzenlemesi
     try:
@@ -1132,7 +1150,7 @@ async def mark_order_paid(
                 )
             except Exception as e:
                 logger.warning(f"confirmed notif failed: {e}")
-        _aio2.create_task(_notify_confirmed())
+        _spawn(_notify_confirmed())
 
     # CAPI offline conversion (purchase event) — fire-and-forget
     import asyncio as _asyncio
@@ -1181,7 +1199,7 @@ async def mark_order_paid(
         except Exception as e:
             logger.warning(f"CAPI offline-purchase failed: {e}")
 
-    _asyncio.create_task(_capi_offline_purchase())
+    _spawn(_capi_offline_purchase())
 
     return {"message": "Ödeme onaylandı, CAPI offline conversion tetiklendi.",
             "order_id": order_id, "payment_status": "paid"}
@@ -1472,7 +1490,7 @@ async def ship_order(
             )
         except Exception as _e:
             logger.warning(f"order_shipped notification failed: {_e}")
-    _asyncio.create_task(_notify_ship())
+    _spawn(_notify_ship())
 
     return {
         "success": True,
@@ -1520,7 +1538,7 @@ async def mark_order_undelivered(
             )
         except Exception as _e:
             logger.warning(f"order_undelivered notification failed: {_e}")
-    _asyncio.create_task(_notify_undeliver())
+    _spawn(_notify_undeliver())
 
     return {"success": True, "message": "Teslim edilemedi olarak işaretlendi"}
 
@@ -3611,7 +3629,7 @@ async def submit_payment_notification(
             )
         except Exception as e:
             logger.warning(f"payment_notified notif failed: {e}")
-    _aio.create_task(_notif())
+    _spawn(_notif())
     return {"success": True, "message": "Ödeme bildiriminiz alındı, en kısa sürede kontrol edilecek."}
 
 
@@ -3918,7 +3936,7 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         f'<div style="margin:14px 0"><img src="{base}/api/orders/returns/{rid}/barcode.png" '
         f'alt="{return_code}" style="height:90px"/></div>' if base else ""
     )
-    _aio2.create_task(_notify_return(order, return_code, valid_until, barcode_img, iade_no=iade_no))
+    _spawn(_notify_return(order, return_code, valid_until, barcode_img, iade_no=iade_no))
     return {"success": True, "return": _public_return(rec)}
 
 
@@ -4117,7 +4135,7 @@ async def update_return_status(return_id: str, payload: dict, current_user: dict
                 )
             except Exception as e:
                 logger.warning(f"return status notif failed: {e}")
-        _aio.create_task(_n())
+        _spawn(_n())
     return {"success": True, "status": new}
 
 
@@ -4344,7 +4362,7 @@ async def approve_return(return_id: str, payload: dict,
             )
         except Exception as e:
             logger.warning(f"return approve notif failed: {e}")
-    _aio.create_task(_n())
+    _spawn(_n())
 
     await _log_order_event(rec.get("order_id"), "return", f"İade onaylandı (₺{final_amount})", current_user,
                            {"return_id": return_id, "refund_amount": final_amount, "fault": fault},
@@ -4445,7 +4463,7 @@ async def reissue_return_barcode(return_id: str,
     _base = _os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL") or ""
     barcode_img = (f'<div style="margin:14px 0"><img src="{_base}/api/orders/returns/{return_id}/barcode.png" '
                    f'alt="{code}" style="height:90px"/></div>' if _base else "")
-    _aio.create_task(_notify_return(order, code, valid_until, barcode_img, iade_no=iade_no))
+    _spawn(_notify_return(order, code, valid_until, barcode_img, iade_no=iade_no))
 
     return {"success": True, "return_code": code, "mng_ok": mng_ok, "valid_until": valid_until}
 
@@ -4515,7 +4533,7 @@ async def reject_return(return_id: str, payload: dict,
             )
         except Exception as e:
             logger.warning(f"return reject notif failed: {e}")
-    _aio.create_task(_n())
+    _spawn(_n())
 
     await _log_order_event(rec.get("order_id"), "return", f"İade reddedildi: {reason}", current_user,
                            {"return_id": return_id, "reason": reason},
@@ -4679,7 +4697,7 @@ async def refund_pay_return(return_id: str, payload: Optional[dict] = Body(defau
             )
         except Exception as e:
             logger.warning(f"refund-pay notif failed: {e}")
-    _aio.create_task(_n())
+    _spawn(_n())
 
     return {"success": True, "status": "refunded", "amount": amount}
 
