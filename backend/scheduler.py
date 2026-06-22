@@ -880,7 +880,10 @@ async def _dhl_cargo_poll_tick():
             if delivered and cur != "delivered":
                 new_status = "delivered"
                 upd["delivered_at"] = _parse_tr_dt(teslim) or now_iso
-            elif shipped and cur in ("confirmed", "processing", "preparing", "ready_to_ship"):
+            elif shipped and _track_no and cur in ("confirmed", "processing", "preparing", "ready_to_ship"):
+                # Takip no oluşmadan "Kargoya Verildi" YAPMA — yoksa müşteriye giden SMS'teki
+                # {tracking_url} no'suz genel /gonderitakip sayfasını açar. No gelene kadar bekle;
+                # sonraki taramada gönderi no dolunca durum çevrilir + deep-link'li SMS gider.
                 new_status = "shipped"
                 upd["shipped_at"] = now_iso
 
@@ -915,6 +918,7 @@ async def _dhl_cargo_poll_tick():
                                 "amount": f"{order.get('total', 0):.2f} TL",
                                 "tracking_number": gonderi or order.get("cargo_tracking_number", ""),
                                 "tracking_url": track_link or order.get("cargo_tracking_url", ""),
+                                "tracking_link": track_link or order.get("cargo_tracking_url", ""),
                                 "status_label": customer_label_for(new_status),
                             },
                             channels=ch,
@@ -1258,20 +1262,16 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # [ticimax-off 2026-06-22] Ticimax site siparis cron'u KAPATILDI.
-    #   Son gercek ticimax_cron siparisi 2026-06-05 (17 gun once); site siparisleri
-    #   artik React/iyzico checkout'tan geliyor. Otomatik Ticimax SOAP bagi kesildi.
-    #   VERI DOKUNULMADI (28.569 gecmis siparis + source:"ticimax" etiketi korunur).
-    #   _ticimax_sync_orders fonksiyonu tanimli kalir (cagrilmaz).
-    # _scheduler.add_job(
-    #     _ticimax_sync_orders,
-    #     "interval",
-    #     hours=6,
-    #     id="ticimax_orders_sync",
-    #     next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
-    #     max_instances=1,
-    #     coalesce=True,
-    # )
+    # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
+    _scheduler.add_job(
+        _ticimax_sync_orders,
+        "interval",
+        hours=6,
+        id="ticimax_orders_sync",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+        max_instances=1,
+        coalesce=True,
+    )
     # Ticimax canlı stok senkronu — KAPALI (Facette stok master'ı; Ticimax stoğu
     # bu sistemi EZMESİN). Kullanıcı kararı: stok yalnızca sipariş/iptal/iade ile
     # Facette içinde yönetilir. Gerekirse settings.ticimax_stock_sync_enabled=true

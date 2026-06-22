@@ -135,7 +135,11 @@ async def _order_notify_vars(order: dict, **extra) -> dict:
     total = float(order.get("total") or 0)
 
     cargo = order.get("cargo") or {}
-    real_tn = (order.get("cargo_tracking_number") or cargo.get("tracking_number") or "")
+    # Takip no: önce çağrının extra ile geçtiği değer (manuel "Kargoya Ver" anında DB
+    # güncellense de buraya gelen 'order' belgesi eski/boş olabilir), sonra order/cargo.
+    real_tn = (str(extra.get("tracking_number") or "").strip()
+               or str(order.get("cargo_tracking_number") or "").strip()
+               or str(cargo.get("tracking_number") or "").strip())
     track_link = (order.get("cargo_tracking_link") or cargo.get("tracking_link")
                   or (f"https://kargotakip.dhlecommerce.com.tr/?takipNo={real_tn}" if real_tn
                       else "https://www.dhlecommerce.com.tr/gonderitakip"))
