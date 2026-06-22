@@ -81,7 +81,7 @@ import AIAssistant from "./pages/admin/AIAssistant";
 import FooterDesign from "./pages/admin/FooterDesign";
 import MarketplaceProfit from "./pages/admin/MarketplaceProfit";
 import Themes from "./pages/admin/Themes";
-import TicimaxExcelUpload from "./pages/admin/TicimaxExcelUpload";
+import RooftrExcelUpload from "./pages/admin/RooftrExcelUpload";
 
 // Bu Routes, App.js'te "/admin/*" altına mount edilir; bu yüzden yollar
 // /admin'e göreceli yazılır (örn. "urunler" => /admin/urunler).
@@ -98,7 +98,7 @@ export default function AdminApp() {
         <Route path="kategoriler" element={<AdminCategories />} />
         <Route path="varyantlar" element={<AdminVariants />} />
         <Route path="xml-feedler" element={<XmlFeeds />} />
-        <Route path="ticimax-excel" element={<TicimaxExcelUpload />} />
+        <Route path="rooftr-excel" element={<RooftrExcelUpload />} />
         <Route path="sorular" element={<AdminQuestions />} />
         <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
         <Route path="bannerlar" element={<AdminBanners />} />

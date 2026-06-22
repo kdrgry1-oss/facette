@@ -65,7 +65,7 @@ const fmtDate = (s) => {
   catch { return String(s).slice(0, 10); }
 };
 
-export default function TicimaxReturns({ embedded = false, gpStart = "085490", onGiderCreated }) {
+export default function RooftrReturns({ embedded = false, gpStart = "085490", onGiderCreated }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);

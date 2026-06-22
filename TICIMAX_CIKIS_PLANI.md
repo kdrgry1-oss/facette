@@ -142,5 +142,38 @@ Bu iz, ÇIKIŞ izinden ayrı: çıkış = işlevi söker; rebrand = kalan "ticim
   - Backend: `integrations.py`'den 10 ölü `/ticimax` route silindi (status, settings, categories/import, variants/sync, test-connection, products/import, members/import, link-orders-to-users, members/import-excel, members) — ast tabanlı, hepsinin iç çağrısı yok doğrulandı (9087→7990 satır).
   - Frontend: `Integrations.jsx` tamamen ticimax'tan arındı (0 referans) — 5 ölü handler (Categories/Products/TestConnection/Orders/Members) + state (`ticimaxImporting*`, `ticimaxStatus`) + status-effect'teki `/ticimax/status` fetch + `statuses.ticimax` anahtarı kaldırıldı. Promise.all 7→6, destructuring hizalı, Trendyol/HB/Temu/iyzico/xml/doğan'a dokunulmadı.
   - Korunanlar: `/rooftr/orders/import` (returns), `/ticimax/products/upload-excel` (Excel sayfası — R-sonra), `/ticimax/orders/backfill` (caller belirsiz — R-sonra).
-- **R4 (en riskli, en son) — fonksiyon/değişken + dosya adları** `ticimax_*.py`/`Ticimax*.jsx`/`pullFromTicimax`/`TicimaxReturns` → rename + tüm import zinciri birlikte, boot-testli. Ayrıca kalan `/ticimax/products/upload-excel` + `orders/backfill` + scripts/yorum kalıntıları.
+- **R4 — fonksiyon/değişken + dosya adları (alt-aşamalara bölündü, güvenliden riskliye):**
+  - **R4a — frontend dosya adları: TAMAM (esbuild geçti, boot riski YOK).**
+    - `git mv`: `TicimaxReturns.jsx`→`RooftrReturns.jsx`, `TicimaxExcelUpload.jsx`→`RooftrExcelUpload.jsx` (frontend/src/pages/admin/).
+    - Internal `export default function` adları + import'lar: `Returns.jsx:7,108,450` (import+yorum+JSX) + `AdminApp.jsx:84,101` (import+JSX+route `path="ticimax-excel"`→`"rooftr-excel"`).
+    - Repo'da `TicimaxReturns`/`TicimaxExcelUpload` referansı **0**. Kalan ticimax (boot/import DEĞİL → sonraki): `pullFromTicimax` fonksiyon adı + yorumlar + `/ticimax/products/upload-excel` API çağrısı + `data-testid="ticimax-excel-*"`.
+  - **R4b — kalan route'lar** `/ticimax/products/upload-excel` + `/ticimax/orders/backfill` → `/rooftr` (decorator + RooftrExcelUpload.jsx caller). `orders/backfill` frontend caller'ı YOK → dead mi scheduler mı önce araştır.
+  - **R4c (BOOT-KRİTİK, en son, AYRI) — backend dosya adları** `ticimax_returns.py`/`ticimax_schema.py`/`ticimax_client.py`/`ticimax_order_parser.py` → rename. **DİKKAT:** `products.py:10` top-level `from ticimax_schema import BOOL_COLS` + `server.py:86` `from routes.ticimax_returns import` → dosya adı AYNI commit'te import zinciriyle düzelmezse **BOOT PATLAR**. NOT: schema/client/parser çıkış izinde silinecek adaylar → rename yerine çıkışta silmek daha mantıklı olabilir (churn'den kaçın).
+  - **R4d — yorum/scripts/data-testid kalıntıları** (kozmetik, boot riski yok).
 > Grup B (veri) tüm R-aşamalarında ELLENMEZ.
+
+---
+
+## 7. PERFORMANS (PageSpeed) İYİLEŞTİRME — EN SON (rebrand + stabilite bitince)
+
+[KARAR] Sahip: *"page speed'i 100 yap ya da plana al, en son yapalım."* → **Plana alındı, en son.**
+
+### Gerçekçi hedef (dürüst beyan)
+**Mobil 100 bu mimaride GERÇEKÇİ DEĞİL.** Site CRA **client-render SPA** (`<div id="root">` boş geliyor) — mobil önce JS indirip parse edip render ediyor, içerik ondan sonra. Mobil 100 ancak SSR/prerender ile olur (mimari değişim).
+- Gerçekçi: **mobil 43 → 75-85**; **masaüstü 95-100**.
+- 90+ mobil: homepage prerender/SSR (büyük iş, ayrı proje).
+
+### Mevcut ölçüm (22 Haz 2026, curl)
+- `<div id="root">` boş → client-render SPA (asıl darboğaz).
+- `main.js` = **412 KB ham / 128 KB gzip, tek parça** (homepage'de ayrı chunk yok) → mobil CPU parse'ı ana iş parçacığını bloke eder (yüksek TBT).
+- `main.css` = 23 KB gzip (render-blocking, normal).
+- 3rd-party: **GTM** (`GTM-THJQQDL`, head) + **PostHog `session_recording` AÇIK** (pahalı) + muhtemelen Meta Pixel (GTM üzerinden).
+- **İyi olanlar — DOKUNMA:** Inter fontu async (preload+onload+noscript), preconnect/dns-prefetch (cdn/fonts/gtm/posthog), JS `defer`, lazy route'lar, SEO 100 / Best Practices 96.
+
+### Öncelikli düzeltmeler (etki/risk — sırayla, tek tek test)
+1. **3rd-party hafiflet (en kolay, en yüksek getiri, düşük risk):** PostHog `session_recording` kapat veya örnekle (örn %10); GTM+PostHog'u ilk etkileşim/idle sonrası geç-yükle → TBT düşer.
+2. **JS bundle küçült/böl (412 KB):** içindeki ağır lib'leri tespit + route/komponent lazy → parse süresi.
+3. **Homepage prerender (react-snap):** boş `#root` yerine anında içerik → LCP/FCP en büyük kazanım (en çok iş).
+4. **Hero/ilk ürün görselleri:** WebP/AVIF + LCP görseline `fetchpriority="high"` + `srcset` + alt-fold `loading="lazy"`.
+> Storefront değişiklikleri boot riski taşımaz; ama her deploy sonrası **hard-refresh + gerekirse Cloudflare cache purge** (CSS/cache yarışı = "görünüm bozuldu" belirtisinin kök nedeni, kod değil).
+
