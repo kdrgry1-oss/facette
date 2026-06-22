@@ -10,6 +10,7 @@ import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
+import { useShipping } from "../lib/shipping";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
 import { sortLikeSize } from "../utils/sizeSort";
 
@@ -37,6 +38,7 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const { freeShippingThreshold } = useShipping();
   const [product, setProduct] = useState(null);
   const [similarProducts, setSimilarProducts] = useState([]);
   const [comboProducts, setComboProducts] = useState([]);
@@ -737,7 +739,7 @@ export default function ProductDetail() {
                 </button>
                 {expandedSections.shipping && (
                   <ul className="pb-3 text-xs text-gray-600 space-y-1.5">
-                    <li>• 3.000 TL ve üzeri siparişlerde ücretsiz kargo</li>
+                    <li>• {(freeShippingThreshold != null ? Number(freeShippingThreshold) : 4000).toLocaleString("tr-TR")} TL ve üzeri siparişlerde ücretsiz kargo</li>
                     <li>• 1-3 iş günü içinde kargoya verilir</li>
                   </ul>
                 )}
