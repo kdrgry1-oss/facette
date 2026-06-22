@@ -34,7 +34,10 @@ export default function Integrations() {
     api_secret: "",
     mode: "sandbox",
     is_active: false,
-    default_markup: 0
+    default_markup: 0,
+    default_brand_id: "",
+    default_cargo_company_id: "",
+    default_vat_rate: ""
   });
 
   // Hepsiburada state
@@ -1024,6 +1027,46 @@ export default function Integrations() {
                 <span className="text-sm font-medium text-gray-500">%</span>
               </div>
               <p className="text-xs text-gray-500 mt-1">Trendyol'a aktarırken ürün fiyatlarının üzerine eklenecek varsayılan oran.</p>
+            </div>
+            {/* Faz T3 — Trendyol Varsayılanları (white-label: kod yazmadan ayarlanır) */}
+            <div className="border-t pt-3 mt-1">
+              <div className="text-sm font-semibold text-gray-800 mb-1">Trendyol Varsayılanları</div>
+              <p className="text-xs text-gray-500 mb-3">
+                Üründe değer yoksa bunlar kullanılır. Boş bırakılırsa sistem varsayılanı geçerlidir
+                (Marka 975755 · Kargo 10/MNG · KDV %20).
+              </p>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Varsayılan Marka ID</label>
+                  <input
+                    type="number"
+                    value={trendyolSettings.default_brand_id ?? ""}
+                    onChange={(e) => setTrendyolSettings({ ...trendyolSettings, default_brand_id: e.target.value })}
+                    className="w-full border px-3 py-2 rounded text-sm"
+                    placeholder="975755"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Kargo Firması ID</label>
+                  <input
+                    type="number"
+                    value={trendyolSettings.default_cargo_company_id ?? ""}
+                    onChange={(e) => setTrendyolSettings({ ...trendyolSettings, default_cargo_company_id: e.target.value })}
+                    className="w-full border px-3 py-2 rounded text-sm"
+                    placeholder="10 (MNG)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Varsayılan KDV (%)</label>
+                  <input
+                    type="number"
+                    value={trendyolSettings.default_vat_rate ?? ""}
+                    onChange={(e) => setTrendyolSettings({ ...trendyolSettings, default_vat_rate: e.target.value })}
+                    className="w-full border px-3 py-2 rounded text-sm"
+                    placeholder="20"
+                  />
+                </div>
+              </div>
             </div>
             <label className="flex items-center gap-2 mt-2">
               <input
