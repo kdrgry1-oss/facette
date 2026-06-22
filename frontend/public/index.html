@@ -31,6 +31,10 @@
              erkenden kur (preconnect), ilk görsel daha hızlı boyansın. -->
         <link rel="preconnect" href="https://cdn.facette.com.tr" crossorigin />
         <link rel="dns-prefetch" href="https://cdn.facette.com.tr" />
+        <!-- [perf 2026-06-22] API host: homepage urun + page-blocks fetch'i buradan gelir
+             (client-render SPA'da kritik yol). Baglanti onceden isinsin -> icerik daha hizli. -->
+        <link rel="preconnect" href="https://api.facette.com.tr" crossorigin />
+        <link rel="dns-prefetch" href="https://api.facette.com.tr" />
         <!-- Analitik/piksel host'ları için dns-prefetch (bağlantı ısınması) -->
         <link rel="dns-prefetch" href="https://us.i.posthog.com" />
         <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
