@@ -2295,17 +2295,25 @@ export default function AdminProducts() {
                   // Auto-sync: when Trendyol attribute changes, if value matches an allowed value
                   // in that attribute's value library, auto-apply to HB + Temu maps (only if those
                   // are currently empty for that attr, to respect manual overrides).
-                  const setTrendyolAttr = (attr, val) => {
-                    const newAttrs = { ...(formData.attributes || {}), [attr.name]: val };
-                    const newHb = { ...(formData.hepsiburada_attributes || {}) };
-                    const newTemu = { ...(formData.temu_attributes || {}) };
+                  // Çift yönlü çapraz doldurma: HERHANGİ bir pazaryerinde özellik seçilince,
+                  // DİĞER pazaryerlerinin AYNI isimli alanı BOŞSA aynı değer otomatik yazılır.
+                  // Manuel her zaman kazanır (dolu alan ASLA ezilmez). Tek yönlü Trendyol→X yerine simetrik.
+                  const MP_ATTR_KEY = { trendyol: "attributes", hepsiburada: "hepsiburada_attributes", temu: "temu_attributes" };
+                  const setMarketplaceAttr = (srcMp, attr, val) => {
+                    const next = { ...formData };
+                    const srcKey = MP_ATTR_KEY[srcMp] || "attributes";
+                    next[srcKey] = { ...(formData[srcKey] || {}), [attr.name]: val };
                     const valuesLower = (attr.values || []).map(v => (v || "").toLowerCase());
                     const valOk = !val || !attr.values?.length || valuesLower.includes((val || "").toLowerCase());
                     if (valOk) {
-                      if (!newHb[attr.name]) newHb[attr.name] = val;
-                      if (!newTemu[attr.name]) newTemu[attr.name] = val;
+                      for (const mp of ["trendyol", "hepsiburada", "temu"]) {
+                        if (mp === srcMp) continue;
+                        const k = MP_ATTR_KEY[mp];
+                        const cur = { ...(next[k] || formData[k] || {}) };
+                        if (!cur[attr.name]) { cur[attr.name] = val; next[k] = cur; }
+                      }
                     }
-                    setFormData({ ...formData, attributes: newAttrs, hepsiburada_attributes: newHb, temu_attributes: newTemu });
+                    setFormData(next);
                   };
 
                   const renderSection = (marketplace, title, accent, logo) => {
@@ -2376,14 +2384,7 @@ export default function AdminProducts() {
                     const isSearching = attributeSearchTerm.length > 0;
 
                     const handleChange = (attr, val) => {
-                      if (marketplace === 'trendyol') {
-                        setTrendyolAttr(attr, val);
-                      } else {
-                        setFormData({
-                          ...formData,
-                          [mapKey]: { ...(formData[mapKey] || {}), [attr.name]: val }
-                        });
-                      }
+                      setMarketplaceAttr(marketplace, attr, val);
                     };
 
                     const renderAttr = ({ attr, isRequired }) => (
