@@ -514,7 +514,10 @@ export default function Checkout() {
           (typeof window !== "undefined" && (window.__FACETTE_SID__ || localStorage.getItem("facette_sid"))) || null,
       };
 
-      const orderRes = await axios.post(`${API}/orders`, orderData);
+      // Üye girişliyse token'ı gönder ki sipariş user_id'ye bağlansın (misafirde token yok → eskisi gibi).
+      const _authToken = localStorage.getItem("token");
+      const orderRes = await axios.post(`${API}/orders`, orderData,
+        _authToken ? { headers: { Authorization: `Bearer ${_authToken}` } } : undefined);
       const newOrderId = orderRes.data.order_id;
       setOrderId(newOrderId);
 
