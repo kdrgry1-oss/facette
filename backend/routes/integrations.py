@@ -2808,6 +2808,21 @@ def map_trendyol_order(t_order: dict) -> dict:
     shipment_address = t_order.get("shipmentAddress", {})
     invoice_address = t_order.get("invoiceAddress", {})
 
+    # --- Kurumsal fatura alanları (VKN / vergi dairesi / ünvan) ---
+    # Trendyol bu alanları invoiceAddress İÇİNDE de, sipariş ÜST SEVİYESİNDE de
+    # (taxNumber / taxOffice) verebilir. Eskiden yalnızca invoiceAddress.* okunduğu
+    # için müşteri kurumsal fatura talebinde VKN girse bile (üst seviye taxNumber)
+    # billing'e düşmüyor → e-Arşiv VKN'siz/vergi-dairesiz kalıp Doğan reddediyordu.
+    # Artık ikisi de okunur, dolu olan kullanılır.
+    _cust_tax_number = (str(invoice_address.get("taxNumber") or "").strip()
+                        or str(t_order.get("taxNumber") or "").strip())
+    _cust_tax_office = (str(invoice_address.get("taxOffice") or "").strip()
+                        or str(t_order.get("taxOffice") or "").strip())
+    _cust_company = (str(invoice_address.get("company") or "").strip()
+                     or str(invoice_address.get("companyName") or "").strip()
+                     or str(invoice_address.get("companyTitle") or "").strip())
+    _is_corporate = (len(_cust_tax_number) == 10) or bool(_cust_company)
+
     # --- Mikro İhracat Tespiti ---
     # KESİN gösterge: Trendyol paketindeki `micro` bayrağı (ve ETGB no/tarihi).
     # Adres ülkesine güvenilmez: mikro ihracatta kargo Türkiye içi aktarım
@@ -2859,9 +2874,19 @@ def map_trendyol_order(t_order: dict) -> dict:
             "city": invoice_address.get("city", ""),
             "district": invoice_address.get("district", ""),
             "country": invoice_address.get("country", ""),
-            "company_name": invoice_address.get("company") or invoice_address.get("companyName") or "",
-            "tax_number": invoice_address.get("taxNumber", ""),
-            "tax_office": invoice_address.get("taxOffice", "")
+            "company_name": _cust_company,
+            "tax_number": _cust_tax_number,
+            "tax_office": _cust_tax_office,
+            "is_corporate": _is_corporate
+        },
+        "billing_info": {
+            "is_corporate": _is_corporate,
+            "company_name": _cust_company,
+            "tax_number": _cust_tax_number,
+            "tax_office": _cust_tax_office,
+            # Müşteri self-deklarasyonu burada yok; e-Fatura mükellefiyeti kesimde
+            # Doğan CheckUser ile sorgulanır → mükellefse e-Fatura, değilse e-Arşiv.
+            "e_invoice_user": False,
         },
         "subtotal": gross_amount if gross_amount else total_price,
         "shipping_cost": 0,

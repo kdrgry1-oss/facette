@@ -1991,7 +1991,11 @@ async def create_invoice_for_order(
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET earsiv: {dogan_result}")
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
-            await db.orders.update_one({"id": order_id}, {"$set": {"invoice_in_progress": False}})
+            await db.orders.update_one({"id": order_id}, {"$set": {
+                "invoice_in_progress": False,
+                "invoice_last_error": f"e-Arşiv: {dogan_result.get('message')}",
+                "invoice_last_error_at": datetime.now(timezone.utc).isoformat(),
+            }})
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Arşiv hatası: {dogan_result.get('message')}"
@@ -2169,7 +2173,11 @@ async def create_invoice_for_order(
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET efatura: {dogan_result}")
-            await db.orders.update_one({"id": order_id}, {"$set": {"invoice_in_progress": False}})
+            await db.orders.update_one({"id": order_id}, {"$set": {
+                "invoice_in_progress": False,
+                "invoice_last_error": f"e-Fatura: {dogan_result.get('message')}",
+                "invoice_last_error_at": datetime.now(timezone.utc).isoformat(),
+            }})
             raise HTTPException(
                 status_code=502,
                 detail=f"Doğan e-Fatura hatası: {dogan_result.get('message')}"
@@ -2180,6 +2188,7 @@ async def create_invoice_for_order(
         {"$set": {
             "invoice_issued": True,
             "invoice_in_progress": False,
+            "invoice_last_error": "",
             "invoice_number": invoice_number,
             "invoice_uuid": invoice_uuid,
             "invoice_type": invoice_type,

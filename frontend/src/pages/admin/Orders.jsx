@@ -700,6 +700,13 @@ export default function AdminOrders({ unpaidView = false }) {
     setEditData({
       itemsKey,
       shipping_address: { ...(o.shipping_address || {}) },
+      billing_info: {
+        is_corporate: !!(o.billing_info?.is_corporate || o.billing_address?.is_corporate),
+        company_name: o.billing_info?.company_name || o.billing_address?.company_name || "",
+        tax_number: o.billing_info?.tax_number || o.billing_address?.tax_number || o.billing_address?.tax_no || o.billing_address?.vkn || "",
+        tax_office: o.billing_info?.tax_office || o.billing_address?.tax_office || "",
+        e_invoice_user: !!o.billing_info?.e_invoice_user,
+      },
       items: JSON.parse(JSON.stringify(o[itemsKey] || [])),
       subtotal: o.subtotal ?? 0,
       shipping_cost: o.shipping_cost ?? 0,
@@ -710,6 +717,7 @@ export default function AdminOrders({ unpaidView = false }) {
   };
 
   const setSA = (k, v) => setEditData((d) => ({ ...d, shipping_address: { ...d.shipping_address, [k]: v } }));
+  const setBI = (k, v) => setEditData((d) => ({ ...d, billing_info: { ...(d.billing_info || {}), [k]: v } }));
   const setField = (k, v) => setEditData((d) => ({ ...d, [k]: v }));
   const setItem = (idx, k, v) => setEditData((d) => {
     const items = [...d.items];
@@ -729,8 +737,26 @@ export default function AdminOrders({ unpaidView = false }) {
         });
         return o;
       });
+      const _bi = editData.billing_info || {};
+      const _tn = String(_bi.tax_number || "").trim();
+      const billing_info = {
+        is_corporate: !!_bi.is_corporate || _tn.length === 10 || !!String(_bi.company_name || "").trim(),
+        company_name: String(_bi.company_name || "").trim(),
+        tax_number: _tn,
+        tax_office: String(_bi.tax_office || "").trim(),
+        e_invoice_user: !!_bi.e_invoice_user,
+      };
       const payload = {
         shipping_address: editData.shipping_address,
+        billing_info,
+        // Fatura kesimi öncelikle billing_address'i okur → kurumsal alanları oraya da yansıt
+        billing_address: {
+          ...(selectedOrder.billing_address || {}),
+          company_name: billing_info.company_name,
+          tax_number: billing_info.tax_number,
+          tax_office: billing_info.tax_office,
+          is_corporate: billing_info.is_corporate,
+        },
         [editData.itemsKey]: items,
         subtotal: Number(editData.subtotal) || 0,
         shipping_cost: Number(editData.shipping_cost) || 0,
@@ -1590,7 +1616,23 @@ export default function AdminOrders({ unpaidView = false }) {
               </div>
 
               {/* Kurumsal Fatura Bilgileri */}
-              {(() => {
+              {editMode ? (
+                <div className="p-4 border rounded bg-amber-50 border-amber-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-medium flex items-center gap-1 text-amber-900">🏢 Kurumsal Fatura Bilgileri</h3>
+                    <label className="flex items-center gap-1 text-xs text-amber-900 select-none cursor-pointer">
+                      <input type="checkbox" checked={!!editData.billing_info?.is_corporate} onChange={(e) => setBI("is_corporate", e.target.checked)} />
+                      Kurumsal fatura talebi
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Ünvan (firma adı)" value={editData.billing_info?.company_name || ""} onChange={(e) => setBI("company_name", e.target.value)} />
+                    <input className="border rounded px-2 py-1 text-sm w-full" placeholder="VKN (10) / TCKN (11)" inputMode="numeric" value={editData.billing_info?.tax_number || ""} onChange={(e) => setBI("tax_number", e.target.value.replace(/\D/g, ""))} />
+                    <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Vergi Dairesi" value={editData.billing_info?.tax_office || ""} onChange={(e) => setBI("tax_office", e.target.value)} />
+                  </div>
+                  <p className="text-[11px] text-amber-800 mt-1">VKN 10 hane ise kesimde Doğan'a e-Fatura mükellefiyeti sorulur; mükellef değilse e-Arşiv kesilir. (Bu siparişte VKN'yi girip Kaydet → sonra Fatura Kes.)</p>
+                </div>
+              ) : (() => {
                 const bi = selectedOrder.billing_info || {};
                 const ba = selectedOrder.billing_address || {};
                 const company = bi.company_name || ba.company_name || "";
@@ -1625,6 +1667,16 @@ export default function AdminOrders({ unpaidView = false }) {
                   </div>
                 );
               })()}
+
+              {/* Son fatura hatası (kesim başarısızsa) */}
+              {!editMode && selectedOrder.invoice_last_error && !selectedOrder.invoice_issued && (
+                <div className="p-3 border rounded bg-red-50 border-red-200 text-sm text-red-800">
+                  <span className="font-medium">Son fatura hatası:</span> {selectedOrder.invoice_last_error}
+                  {selectedOrder.invoice_last_error_at && (
+                    <span className="text-xs text-red-500"> ({formatDate(selectedOrder.invoice_last_error_at)})</span>
+                  )}
+                </div>
+              )}
 
               {/* Attribution / Order Source */}
               {selectedOrder.attribution && (
