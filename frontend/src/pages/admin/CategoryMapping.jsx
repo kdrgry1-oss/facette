@@ -270,8 +270,8 @@ export default function CategoryMapping() {
 
       {/* Toplu seçim bar */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-3">
-          <span className="text-sm font-semibold text-orange-900">{selected.size} seçili</span>
+        <div className="flex items-center gap-3 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 mb-3">
+          <span className="text-sm font-semibold text-stone-700">{selected.size} seçili</span>
           <button onClick={bulkDelete}
             className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-medium"
             data-testid="cat-bulk-delete">
@@ -365,7 +365,7 @@ export default function CategoryMapping() {
                           <button onClick={() => {
                             setEditRow(row.category_id);
                             setEditVal({ id: row.marketplace_category_id || "", name: row.marketplace_category_name || "" });
-                          }} className="text-xs text-orange-600 hover:underline"
+                          }} className="text-xs text-stone-500 hover:underline"
                             data-testid={`cat-edit-${row.category_id}`}>Düzenle</button>
 
                           {row.status === "matched" && row.marketplace_category_id && (
@@ -380,7 +380,7 @@ export default function CategoryMapping() {
                               </button>
                               <button
                                 onClick={() => setValueMatchFor(row)}
-                                className="text-xs text-purple-600 hover:underline flex items-center gap-0.5"
+                                className="text-xs text-stone-500 hover:underline flex items-center gap-0.5"
                                 title="Değer Eşle (Kırmızı ↔ Red gibi)"
                                 data-testid={`cat-val-${row.category_id}`}
                               >
@@ -429,7 +429,7 @@ export default function CategoryMapping() {
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <Zap size={18} className="text-orange-500" />
+              <Zap size={18} className="text-stone-700" />
               Otomatik Özellik Eşleştirme Raporu — {bulkAttrReport?.marketplace}
             </DialogTitle>
           </DialogHeader>
@@ -780,7 +780,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
               <button
                 type="button"
                 onClick={() => setSelectedCatIds(matchedCats.map((c) => c.category_id))}
-                className="text-[11px] text-orange-700 hover:underline font-semibold"
+                className="text-[11px] text-stone-600 hover:underline font-semibold"
               >
                 Hepsini seç
               </button>
@@ -790,7 +790,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
             ) : matchedCats.map((c) => {
               const checked = selectedCatIds.includes(c.category_id);
               return (
-                <label key={c.category_id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-orange-50 cursor-pointer border-b last:border-b-0">
+                <label key={c.category_id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-stone-50 cursor-pointer border-b last:border-b-0">
                   <input
                     type="checkbox"
                     checked={checked}
@@ -1107,18 +1107,18 @@ function HepsiburadaBaseFieldPanel({ auth }) {
   const mk = Number(markup) || 0;
   const previewPrice = (1000 * (1 + mk / 100)).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
   return (
-    <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4" data-testid="hb-basefields-panel">
+    <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 mb-4" data-testid="hb-basefields-panel">
       <div className="flex items-center justify-between gap-2 cursor-pointer" onClick={() => setOpen((o) => !o)}>
         <div>
-          <div className="font-bold text-purple-900 text-sm flex items-center gap-1">
+          <div className="font-bold text-stone-800 text-sm flex items-center gap-1">
             <Settings size={14} /> Hepsiburada Varsayılan Alan Eşleştirme & Fiyat
           </div>
-          <div className="text-xs text-purple-700 mt-0.5">
+          <div className="text-xs text-stone-500 mt-0.5">
             Stok kodu, ürün adı, açıklama, barkod, marka, desi, görsel gibi temel alanların hangi ürün-kartı
             değerinden çekileceğini ve <b>kâr marjını</b> bir kez burada belirle. <b>Tüm kategorilerde geçerli.</b>
           </div>
         </div>
-        <span className="text-purple-600 text-xs whitespace-nowrap">{open ? "Gizle ▲" : "Göster ▼"}</span>
+        <span className="text-stone-500 text-xs whitespace-nowrap">{open ? "Gizle ▲" : "Göster ▼"}</span>
       </div>
       {open && (
         <div className="mt-3 space-y-2">
@@ -1195,7 +1195,7 @@ function HepsiburadaBaseFieldPanel({ auth }) {
             </div>
           )}
           {fields.map((f) => (
-            <div key={f.key} className="flex items-center gap-2 flex-wrap bg-white rounded-lg p-2 border border-purple-100">
+            <div key={f.key} className="flex items-center gap-2 flex-wrap bg-white rounded-lg p-2 border border-stone-200">
               <div className="w-44 text-sm font-semibold text-gray-800">{f.label}</div>
               <span className="text-gray-400 text-xs">←</span>
               <select
@@ -1222,7 +1222,7 @@ function HepsiburadaBaseFieldPanel({ auth }) {
             <button
               onClick={save}
               disabled={saving}
-              className="text-sm bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60"
+              className="text-sm bg-stone-900 hover:bg-stone-800 text-white px-4 py-2 rounded-lg font-semibold disabled:opacity-60"
             >
               {saving ? "Kaydediliyor..." : "Eşleştirmeyi Kaydet"}
             </button>
@@ -1365,11 +1365,11 @@ function HepsiburadaOrderPull({ auth }) {
   };
 
   return (
-    <div className="border border-orange-200 rounded-xl mb-4 overflow-hidden">
-      <div className="px-4 py-2.5 bg-orange-50 border-b border-orange-200 flex items-center gap-2">
-        <Download size={16} className="text-orange-600" />
-        <span className="text-sm font-semibold text-orange-800">Hepsiburada Sipariş Çek</span>
-        <span className="text-xs text-orange-700">— geçmiş siparişleri tarih veya sipariş no ile sisteme aktar</span>
+    <div className="border border-stone-200 rounded-xl mb-4 overflow-hidden">
+      <div className="px-4 py-2.5 bg-stone-50 border-b border-stone-200 flex items-center gap-2">
+        <Download size={16} className="text-stone-500" />
+        <span className="text-sm font-semibold text-stone-700">Hepsiburada Sipariş Çek</span>
+        <span className="text-xs text-stone-600">— geçmiş siparişleri tarih veya sipariş no ile sisteme aktar</span>
       </div>
       <div className="p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
@@ -1385,10 +1385,10 @@ function HepsiburadaOrderPull({ auth }) {
             <label className="block text-xs text-gray-600 mb-1">veya Sipariş No (opsiyonel)</label>
             <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} placeholder="Tek sipariş için no gir" className="w-full border rounded-lg px-2.5 py-1.5 text-sm" />
           </div>
-          <button onClick={() => pull()} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-60">
+          <button onClick={() => pull()} disabled={loading} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-stone-900 text-white text-sm font-semibold hover:bg-stone-800 disabled:opacity-60">
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> {loading ? "Çekiliyor…" : "Çek"}
           </button>
-          <button onClick={createTest} disabled={creating || loading} title="SIT/Sandbox modunda HB stub üzerinde test siparişi oluşturur ve panele çeker" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-orange-400 text-orange-700 bg-white text-sm font-semibold hover:bg-orange-50 disabled:opacity-60">
+          <button onClick={createTest} disabled={creating || loading} title="SIT/Sandbox modunda HB stub üzerinde test siparişi oluşturur ve panele çeker" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-stone-300 text-stone-600 bg-white text-sm font-semibold hover:bg-stone-50 disabled:opacity-60">
             <Plus size={14} /> {creating ? "Oluşturuluyor…" : "Test Sipariş Oluştur (SIT)"}
           </button>
         </div>
@@ -1411,7 +1411,7 @@ function HepsiburadaOrderPull({ auth }) {
           <>
             <div className="flex items-center justify-between">
               <div className="text-xs text-gray-600">{rows.length} sipariş · {sel.size} seçili</div>
-              <button onClick={doImport} disabled={importing || sel.size === 0} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60">
+              <button onClick={doImport} disabled={importing || sel.size === 0} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-stone-900 text-white text-sm font-semibold hover:bg-stone-800 disabled:opacity-60">
                 <Download size={14} /> {importing ? "Aktarılıyor…" : `Seçili ${sel.size} Siparişi Aktar`}
               </button>
             </div>
