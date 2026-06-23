@@ -5264,6 +5264,8 @@ async def recover_teknik_detay_from_snapshot(
     no_match = 0
     ambiguous = 0
     to_fill_total = 0
+    hb_total = 0
+    temu_total = 0
     updated = 0
     sample: list = []
 
@@ -5287,6 +5289,7 @@ async def recover_teknik_detay_from_snapshot(
         p = prods[0]
         cur = p.get("attributes")
         existing_names: set = set()
+        existing_vals: dict = {}     # orijinal_ad -> deger (üründe ZATEN dolu genel/Trendyol özellikleri)
         cur_list: list = []
         if isinstance(cur, list):
             for a in cur:
@@ -5296,6 +5299,7 @@ async def recover_teknik_detay_from_snapshot(
                     vv = a.get("value") or a.get("attribute_value")
                     if nm and str(vv or "").strip():
                         existing_names.add(_hb_norm(nm))
+                        existing_vals.setdefault(str(nm), str(vv).strip())
         elif isinstance(cur, dict):
             for k, v in cur.items():
                 if isinstance(v, dict):
@@ -5305,6 +5309,9 @@ async def recover_teknik_detay_from_snapshot(
                     nm, vv = k, v
                 if nm and str(vv or "").strip():
                     existing_names.add(_hb_norm(nm))
+                    existing_vals.setdefault(str(nm), str(vv).strip())
+
+        # 1) Snapshot'tan GENEL (attributes/Trendyol) BOŞ özellikleri doldur.
         adds = []
         for oz, dg in ozet.items():
             if not str(dg or "").strip():
@@ -5312,22 +5319,51 @@ async def recover_teknik_detay_from_snapshot(
             if _hb_norm(oz) in existing_names:
                 continue   # zaten DOLU → dokunma
             adds.append({"name": oz, "value": str(dg).strip()})
-        if not adds:
-            continue
+
+        # 2) HB + Temu'ya AKTAR: ürünün TÜM genel özellikleri (mevcut dolu + kurtarılan) →
+        #    hepsiburada_attributes / temu_attributes'ta BOŞ olanı doldur (manuel değer ezilmez).
+        #    Push, bu ham değerleri gönderim anında HB enum'una çözer.
+        hb = dict(p.get("hepsiburada_attributes") or {})
+        temu = dict(p.get("temu_attributes") or {})
+        propagate: dict = {}
+        for nm, vv in existing_vals.items():
+            propagate[nm] = vv
+        for a in adds:
+            propagate.setdefault(a["name"], a["value"])
+        hb_keys_norm = {_hb_norm(k) for k, v in hb.items() if str(v or "").strip()}
+        temu_keys_norm = {_hb_norm(k) for k, v in temu.items() if str(v or "").strip()}
+        hb_fill = 0
+        temu_fill = 0
+        for nm, vv in propagate.items():
+            nn = _hb_norm(nm)
+            if nn and nn not in hb_keys_norm:
+                hb[nm] = vv; hb_fill += 1; hb_keys_norm.add(nn)
+            if nn and nn not in temu_keys_norm:
+                temu[nm] = vv; temu_fill += 1; temu_keys_norm.add(nn)
+
+        if not adds and hb_fill == 0 and temu_fill == 0:
+            continue   # bu üründe yapılacak bir şey yok
         matched += 1
         to_fill_total += len(adds)
+        hb_total += hb_fill
+        temu_total += temu_fill
         if len(sample) < 12:
             sample.append({"urun_karti_id": str(uk),
                            "urun": (p.get("name") or info.get("urun_adi") or "")[:50],
-                           "eklenecek": {a["name"]: a["value"] for a in adds}})
+                           "genel_eklenecek": {a["name"]: a["value"] for a in adds},
+                           "hb_dolan": hb_fill, "temu_dolan": temu_fill})
         if apply:
-            if isinstance(cur, dict):
-                new_attrs = dict(cur)
-                for a in adds:
-                    new_attrs[a["name"]] = a["value"]
-            else:
-                new_attrs = (cur_list if isinstance(cur, list) else []) + adds
-            await db.products.update_one({"id": p["id"]}, {"$set": {"attributes": new_attrs}})
+            setdoc = {"hepsiburada_attributes": hb, "temu_attributes": temu}
+            if adds:
+                # attributes FORMATINI KORU (Trendyol'u bozma): list ise list'e ekle, dict ise dict'e.
+                if isinstance(cur, dict):
+                    new_attrs = dict(cur)
+                    for a in adds:
+                        new_attrs[a["name"]] = a["value"]
+                else:
+                    new_attrs = (cur_list if isinstance(cur, list) else []) + adds
+                setdoc["attributes"] = new_attrs
+            await db.products.update_one({"id": p["id"]}, {"$set": setdoc})
             updated += 1
 
     return {
@@ -5337,9 +5373,12 @@ async def recover_teknik_detay_from_snapshot(
         "eslesmeyen_urun_karti": no_match,
         "belirsiz_urun_karti": ambiguous,
         "doldurulacak_ozellik_toplam": to_fill_total,
+        "hb_dolan_toplam": hb_total,
+        "temu_dolan_toplam": temu_total,
         "guncellenen_urun": updated,
         "ornek": sample,
-        "not": ("Yalnız BOŞ özellikler dolduruldu; manuel değerler korundu. "
+        "not": ("Yalnız BOŞ özellikler dolduruldu (genel + Hepsiburada + Temu); manuel değerler "
+                "korundu. attributes formatına dokunulmadı (Trendyol güvende). "
                 "Fiyat/KDV/stok/barkoda dokunulmadı."
                 + ("" if apply else " — ÖNİZLEME: hiçbir şey yazılmadı.")),
     }
