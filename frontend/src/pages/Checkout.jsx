@@ -57,7 +57,7 @@ export default function Checkout() {
   const { user } = useAuth();
 
   // Cart collapse + payment flow
-  const [cartCollapsed, setCartCollapsed] = useState(false);
+  const [cartCollapsed, setCartCollapsed] = useState(true);
   const [loading, setLoading] = useState(false);
   const [paymentStep, setPaymentStep] = useState("form"); // form | processing | iframe | success | error
   const [orderId, setOrderId] = useState(null);
@@ -69,6 +69,11 @@ export default function Checkout() {
   const [billingSameAsShipping, setBillingSameAsShipping] = useState(true);
   const [addressModal, setAddressModal] = useState(null); // null | 'shipping' | 'billing'
   const [addressForm, setAddressForm] = useState({ ...emptyAddress });
+
+  // Üye girişliyse e-posta alanı GİZLENİR; siparişte gerekli olduğundan otomatik doldurulur.
+  useEffect(() => {
+    if (user?.email) setShippingAddress((p) => (p.email ? p : { ...p, email: user.email }));
+  }, [user?.email]);
 
   // Coupons
   const [couponCode, setCouponCode] = useState("");
@@ -138,7 +143,7 @@ export default function Checkout() {
         setEnabledPM({
           credit_card: pm.credit_card !== false,          // varsayılan AÇIK
           bank_transfer: pm.bank_transfer !== false,      // varsayılan AÇIK
-          cash_on_delivery: pm.cash_on_delivery === true, // varsayılan KAPALI
+          cash_on_delivery: false, // Kapıda ödeme tamamen kapalı
         });
       })
       .catch(() => { /* sessiz: varsayılan değerlerde kal */ });
@@ -147,7 +152,7 @@ export default function Checkout() {
 
   // Seçili ödeme yöntemi kapatılmışsa ilk aktif yönteme düş
   useEffect(() => {
-    const order = ["credit_card", "bank_transfer", "cash_on_delivery"];
+    const order = ["credit_card", "bank_transfer"];
     if (!enabledPM[paymentMethod]) {
       const first = order.find((k) => enabledPM[k]);
       if (first) setPaymentMethod(first);
@@ -659,6 +664,18 @@ export default function Checkout() {
   }
 
   // ───────── Render ─────────
+  // Konsept A — numaralı, kutusuz akış başlığı
+  const Step = ({ n, title, hint, icon: Icon }) => (
+    <div className="flex items-center gap-3 mb-4">
+      <span className="w-7 h-7 rounded-full bg-black text-white text-[12px] font-extrabold grid place-items-center shrink-0">{n}</span>
+      <span className="text-[15px] font-semibold tracking-tight text-black">{title}</span>
+      {Icon && <Icon size={15} className="text-black/40" />}
+      {hint && <span className="text-[11px] text-black/45 ml-auto">{hint}</span>}
+    </div>
+  );
+  // Adım numaraları — üye girişliyse "İletişim" adımı olmadığından kayar
+  const sBase = user ? 0 : 1;
+
   const addressCardContent = (a, label) => (
     <div className="text-xs text-gray-700 leading-relaxed">
       <div className="font-semibold text-sm">{a.title || label}</div>
@@ -701,11 +718,11 @@ export default function Checkout() {
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="grid lg:grid-cols-12 gap-6">
-            {/* SOL — %75 */}
-            <div className="lg:col-span-9 space-y-4">
-              {/* 1) Sepetimdeki Ürünler — collapsible */}
-              <div className="bg-white border border-black/10" data-testid="cart-summary-block">
+          <div className="grid lg:grid-cols-12 gap-8">
+            {/* SOL — numaralı akış */}
+            <div className="lg:col-span-8 space-y-7">
+              {/* Sepetimdeki Ürünler — collapsible (varsayılan kapalı; özet sağda) */}
+              <div className="border border-stone-200 rounded-lg" data-testid="cart-summary-block">
                 <button type="button" onClick={() => setCartCollapsed((v) => !v)}
                   className="w-full flex items-center justify-between px-4 md:px-5 py-3.5 md:py-4 hover:bg-stone-50 transition-colors">
                   <div className="flex items-center gap-3">
@@ -745,46 +762,36 @@ export default function Checkout() {
                 )}
               </div>
 
-              {/* 1.5) İletişim — e-posta (üyeliksiz alışveriş için zorunlu) */}
-              <div className="bg-white border border-black/10" data-testid="contact-block">
-                <div className="px-5 py-4 border-b flex items-center gap-3">
-                  <Mail size={18} className="text-black" />
-                  <span className="font-medium">İletişim Bilgileri</span>
-                </div>
-                <div className="p-5">
-                  <label className="block text-xs text-gray-700 mb-1">E-posta *</label>
-                  <input
-                    type="email"
-                    value={shippingAddress.email || ""}
-                    onChange={(e) => setShippingAddress((p) => ({ ...p, email: e.target.value }))}
-                    placeholder="ornek@eposta.com"
-                    autoComplete="email"
-                    data-testid="contact-email"
-                    className="w-full border rounded px-3 py-2 text-sm"
-                    required
-                  />
-                  <p className="text-[11px] text-gray-500 mt-1.5">
-                    Sipariş onayı ve faturanız bu adrese gönderilir. Üyelik gerekmez.
-                  </p>
-                  {!user && (
-                    <p className="text-[11px] text-gray-600 mt-2">
-                      Hesabın var mı?{" "}
-                      <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Giriş yap</a>
-                      {" · "}
-                      <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Üye ol</a>
-                      {" — ya da üyeliksiz devam et."}
-                    </p>
-                  )}
-                </div>
-              </div>
+              {/* 1) İletişim — yalnızca misafir (üye girişliyse gizli; mail otomatik) */}
+              {!user && (
+              <section data-testid="contact-block">
+                <Step n={1} title="İletişim" icon={Mail} hint="üyeliksiz devam et" />
+                <input
+                  type="email"
+                  value={shippingAddress.email || ""}
+                  onChange={(e) => setShippingAddress((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="ornek@eposta.com"
+                  autoComplete="email"
+                  data-testid="contact-email"
+                  className="w-full border-1.5 border border-stone-300 rounded-lg px-3.5 py-2.5 text-sm focus:border-black outline-none transition-colors"
+                  required
+                />
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Sipariş onayı ve faturanız bu adrese gönderilir. <span className="text-black/70 font-medium">Üyelik gerekmez.</span>
+                </p>
+                <p className="text-[11px] text-gray-600 mt-2">
+                  Hesabın var mı?{" "}
+                  <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Giriş yap</a>
+                  {" · "}
+                  <a href="/giris?redirect=/odeme" className="underline hover:text-black font-medium">Üye ol</a>
+                </p>
+              </section>
+              )}
 
-              {/* 2) Adres */}
-              <div className="bg-white border border-black/10" data-testid="address-block">
-                <div className="px-5 py-4 border-b flex items-center gap-3">
-                  <MapPin size={18} className="text-black" />
-                  <span className="font-medium">Teslimat Adresi</span>
-                </div>
-                <div className="grid md:grid-cols-2 gap-4 p-5">
+              {/* 2) Teslimat & Fatura */}
+              <section data-testid="address-block">
+                <Step n={sBase + 1} title="Teslimat & Fatura Adresi" icon={MapPin} />
+                <div className="grid md:grid-cols-2 gap-4">
                   {/* Teslimat */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -822,7 +829,7 @@ export default function Checkout() {
                     </div>
                   </div>
                 </div>
-                <div className="px-5 pb-4">
+                <div className="pt-1">
                   <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={billingSameAsShipping}
                       onChange={(e) => {
@@ -834,10 +841,10 @@ export default function Checkout() {
                     <span>Faturamı Aynı Adrese Gönder</span>
                   </label>
                 </div>
-              </div>
+              </section>
 
               {/* 2.b) Kurumsal Fatura */}
-              <div className="bg-white border border-black/10" data-testid="corporate-invoice-block">
+              <div className="border border-stone-200 rounded-lg" data-testid="corporate-invoice-block">
                 <label className="flex items-center gap-3 px-5 py-4 cursor-pointer hover:bg-stone-50 transition-colors">
                   <input type="checkbox" checked={corporateInvoice}
                     onChange={(e) => setCorporateInvoice(e.target.checked)}
@@ -886,18 +893,15 @@ export default function Checkout() {
                 )}
               </div>
 
-              {/* 3) Ödeme Seçenekleri */}
-              <div className="bg-white border border-black/10" data-testid="payment-block">
-                <div className="px-5 py-4 border-b">
-                  <span className="font-medium">Ödeme Seçenekleri</span>
-                </div>
-                <div className="p-5 space-y-3">
+              {/* 3) Ödeme */}
+              <section data-testid="payment-block">
+                <Step n={sBase + 2} title="Ödeme" icon={CreditCard} />
+                <div className="space-y-3">
                   {/* Method radios */}
-                  <div className="grid sm:grid-cols-3 gap-2">
+                  <div className="grid sm:grid-cols-2 gap-2">
                     {[
                       { key: "credit_card", label: "Banka & Kredi Kartı ile Öde", icon: CreditCard },
                       { key: "bank_transfer", label: "Havale / EFT", icon: Building },
-                      { key: "cash_on_delivery", label: "Kapıda Ödeme (+10₺)", icon: Truck },
                     ].filter(({ key }) => enabledPM[key]).map(({ key, label, icon: Icon }) => (
                       <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                         <input type="radio" name="payment" value={key}
@@ -1001,12 +1005,12 @@ export default function Checkout() {
                     </div>
                   )}
                 </div>
-              </div>
+              </section>
 
               {/* 4) Hediye */}
-              <div className="bg-white border border-black/10" data-testid="gift-options-section">
-                <div className="px-5 py-4 border-b"><span className="font-medium">Hediye Seçenekleri</span></div>
-                <div className="p-5 space-y-3">
+              <section data-testid="gift-options-section">
+                <Step n={sBase + 3} title="Hediye Seçenekleri" hint="opsiyonel" />
+                <div className="space-y-3">
                   <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
                     <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
                       className="mt-1 accent-black" data-testid="gift-wrap-toggle" />
@@ -1023,12 +1027,12 @@ export default function Checkout() {
                     className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
                     data-testid="gift-note-input" />
                 </div>
-              </div>
+              </section>
             </div>
 
-            {/* SAĞ — %25 — Sticky Order Summary */}
-            <div className="lg:col-span-3">
-              <div className="bg-white border border-black/10 sticky top-24">
+            {/* SAĞ — Sticky Sipariş Özeti */}
+            <div className="lg:col-span-4">
+              <div className="bg-white border border-stone-200 rounded-xl sticky top-24">
                 <div className="px-5 py-4 border-b">
                   <span className="font-medium">Sipariş Özeti</span>
                 </div>
