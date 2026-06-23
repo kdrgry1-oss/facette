@@ -6,12 +6,66 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import time
 import uuid
+import re
 
 from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
+
+def _search_tr_regex(s: str) -> str:
+    """Serbest metin arama için Türkçe duyarsız, regex-güvenli desen.
+    MongoDB $options:'i' Türkçe İ↔i / ı↔I eşlemesini yapmadığından her Türkçe
+    harf ailesini kapsayan karakter sınıfına çeviririz; diğer karakterler
+    re.escape ile kaçırılır (kullanıcı +, (, . girince regex bozulmaz)."""
+    cls = {
+        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
+        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
+        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
+        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
+        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
+        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
+    }
+    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
+
+
+def _order_search_or(search: str) -> list:
+    """Sipariş genel araması: tek kutu → akla gelen HER alanda eşleşir.
+    Türkçe duyarsız + kısmi + telefon-rakam + çok kelimeli ad-soyad."""
+    s = (search or "").strip()
+    if not s:
+        return []
+    rx = {"$regex": _search_tr_regex(s), "$options": "i"}
+    fields = [
+        "order_number", "invoice_number", "cargo_tracking", "id",
+        "shipping_address.first_name", "shipping_address.last_name",
+        "shipping_address.email", "shipping_address.phone",
+        "shipping_address.city", "shipping_address.district",
+        "shipping_address.address",
+        "billing_info.company_name", "billing_info.tax_number",
+        "billing_info.tckn", "billing_info.tc_no",
+        "coupon_code",
+        "items.product_name", "items.name", "items.barcode",
+        "items.stock_code", "items.sku",
+        "lines.product_name", "lines.name", "lines.barcode",
+    ]
+    ors = [{f: rx} for f in fields]
+    # Telefon: sadece rakamları al, son 10 haneyi ara (formatten bağımsız)
+    digits = re.sub(r"\D", "", s)
+    if len(digits) >= 7:
+        ors.append({"shipping_address.phone": {"$regex": re.escape(digits[-10:])}})
+    # Çok kelimeli tam ad: her kelime ad VEYA soyadda geçsin (sıra önemsiz)
+    words = [w for w in s.split() if len(w) >= 2]
+    if len(words) >= 2:
+        nf = ["shipping_address.first_name", "shipping_address.last_name"]
+        ors.append({"$and": [
+            {"$or": [{f: {"$regex": _search_tr_regex(w), "$options": "i"}} for f in nf]}
+            for w in words
+        ]})
+    return ors
+
 
 def _platform_display(order) -> str:
     p = (str(order.get("platform") or order.get("marketplace") or "")).strip().lower()
@@ -355,15 +409,14 @@ async def get_orders(
         query["created_at"] = date_query
     
     if search:
-        query["$or"] = [
-            {"order_number": {"$regex": search, "$options": "i"}},
-            {"invoice_number": {"$regex": search, "$options": "i"}},
-            {"cargo_tracking": {"$regex": search, "$options": "i"}},
-            {"shipping_address.first_name": {"$regex": search, "$options": "i"}},
-            {"shipping_address.last_name": {"$regex": search, "$options": "i"}},
-            {"shipping_address.phone": {"$regex": search, "$options": "i"}},
-            {"shipping_address.email": {"$regex": search, "$options": "i"}}
-        ]
+        _ors = _order_search_or(search)
+        if _ors:
+            if "$or" in query:
+                # Mevcut $or'u ezme: $and altında birleştir (ikisi de geçerli olmalı)
+                query.setdefault("$and", []).append({"$or": query.pop("$or")})
+                query["$and"].append({"$or": _ors})
+            else:
+                query["$or"] = _ors
     
     # Ödeme kaydı bulunmayan (web kart denemesi, hiç ödenmemiş) ayrımı
     _web_cond = {"$or": [{"platform": "facette"}, {"platform": {"$in": [None, ""]}}, {"platform": {"$exists": False}}]}

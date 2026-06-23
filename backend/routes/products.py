@@ -579,6 +579,10 @@ async def get_products(
             {"variants.stock_code": {"$regex": esc, "$options": "i"}},
             {"urun_karti_id": {"$regex": esc, "$options": "i"}},
             {"variants.urun_id": {"$regex": esc, "$options": "i"}},
+            {"id": {"$regex": esc, "$options": "i"}},
+            {"brand": {"$regex": esc, "$options": "i"}},
+            {"variants.color": {"$regex": esc, "$options": "i"}},
+            {"variants.size": {"$regex": esc, "$options": "i"}},
         ]
     
     if is_featured is not None:

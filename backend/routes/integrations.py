@@ -6462,6 +6462,19 @@ def _claim_is_site_order(claim: dict) -> bool:
     return True
 
 
+def _search_tr_regex(s: str) -> str:
+    """İade aramasında Türkçe duyarsız, regex-güvenli desen (İ/ı/ş/ç/ğ/ö/ü dahil)."""
+    cls = {
+        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
+        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
+        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
+        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
+        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
+        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
+    }
+    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
+
+
 @router.get("/trendyol/claims")
 async def get_trendyol_claims(
     page: int = 1,
@@ -6487,13 +6500,33 @@ async def get_trendyol_claims(
     if claim_type:
         base_query["claim_type"] = claim_type
     if search:
-        base_query["$or"] = [
-            {"order_number": {"$regex": search, "$options": "i"}},
-            {"customer_name": {"$regex": search, "$options": "i"}},
-            {"claim_id": {"$regex": search, "$options": "i"}},
-            {"invoice_number": {"$regex": search, "$options": "i"}},
-            {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
+        _s = search.strip()
+        _rx = {"$regex": _search_tr_regex(_s), "$options": "i"}
+        _ors = [
+            {"order_number": _rx},
+            {"customer_name": _rx},
+            {"claim_id": _rx},
+            {"invoice_number": _rx},
+            {"cargo_tracking_number": _rx},
+            {"cargo_provider_name": _rx},
+            {"claim_reason": _rx},
+            {"items.productName": _rx},
+            {"items.product_name": _rx},
+            {"items.barcode": _rx},
+            {"items.merchantSku": _rx},
         ]
+        # Telefon: sadece rakam → son 10 hane (kayıtta varsa)
+        _digits = re.sub(r"\D", "", _s)
+        if len(_digits) >= 7:
+            _ors.append({"customer_phone": {"$regex": re.escape(_digits[-10:])}})
+        # Çok kelimeli ad: tüm kelimeler customer_name içinde geçsin (sıra önemsiz)
+        _words = [w for w in _s.split() if len(w) >= 2]
+        if len(_words) >= 2:
+            _ors.append({"$and": [
+                {"customer_name": {"$regex": _search_tr_regex(w), "$options": "i"}}
+                for w in _words
+            ]})
+        base_query["$or"] = _ors
 
     want_tab = status if (status and status != "all" and status in _VALID_TABS) else None
 
@@ -6598,11 +6631,17 @@ async def export_trendyol_claims(
     _VALID_TABS = {"talep_olusturulan", "kargoya_verilen", "acik_iade", "aksiyon_bekleyen", "onaylanan", "reddedilen"}
     base_query = {}
     if search:
+        _rx = {"$regex": _search_tr_regex(search.strip()), "$options": "i"}
         base_query["$or"] = [
-            {"order_number": {"$regex": search, "$options": "i"}},
-            {"customer_name": {"$regex": search, "$options": "i"}},
-            {"claim_id": {"$regex": search, "$options": "i"}},
-            {"cargo_tracking_number": {"$regex": search, "$options": "i"}},
+            {"order_number": _rx},
+            {"customer_name": _rx},
+            {"claim_id": _rx},
+            {"invoice_number": _rx},
+            {"cargo_tracking_number": _rx},
+            {"cargo_provider_name": _rx},
+            {"items.productName": _rx},
+            {"items.product_name": _rx},
+            {"items.barcode": _rx},
         ]
     want_tab = status if (status and status != "all" and status in _VALID_TABS) else None
 
