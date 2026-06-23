@@ -120,30 +120,33 @@ _hb_sync_lock = asyncio.Lock()
 
 
 async def _get_hb_client():
-    """Hepsiburada kimligini once db.settings (Pazaryerleri/Entegrasyonlar operatif form),
-    yoksa marketplace_accounts'tan okur. Ortam: env/mode 'prod/production/canli' degilse sandbox.
-    NOT: Tek duzenleme noktasi Pazaryerleri > Hepsiburada (db.settings). marketplace_accounts
-    sadece eski girisler icin yedek olarak okunur."""
-    # 1) Birincil: db.settings (Pazaryerleri Yonetimi HB operatif bolumu yazar)
-    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
-    mid = (s.get("merchant_id") or "").strip()
-    sk = (s.get("secret_key") or s.get("password") or "").strip()
-    du = (s.get("dev_username") or "").strip()
-    env = (s.get("mode") or s.get("env") or "").strip().lower()
-    oms_u = (s.get("oms_username") or "").strip()
-    oms_p = (s.get("oms_password") or "").strip()
-    # 2) Yedek: marketplace_accounts.credentials (eski Pazaryerleri girisleri). Eksikleri tamamlar.
-    if not (mid and sk and du) or not env or not (oms_u and oms_p):
-        acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0})
-        cr = (acc or {}).get("credentials") or {}
-        mid = mid or (cr.get("merchant_id") or "").strip()
-        sk = sk or (cr.get("secret_key") or cr.get("password") or "").strip()
-        du = du or (cr.get("dev_username") or "").strip()
-        env = env or (cr.get("env") or cr.get("mode") or "").strip().lower()
-        oms_u = oms_u or (cr.get("oms_username") or "").strip()
-        oms_p = oms_p or (cr.get("oms_password") or "").strip()
+    """Hepsiburada kimligini once Pazaryerleri Yonetimi (marketplace_accounts),
+    yoksa eski db.settings'ten okur. Ortam: env/mode 'prod/production/canli' degilse sandbox."""
+    # 1) Birincil: marketplace_accounts.credentials (Pazaryerleri Yonetimi ekrani)
+    acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0})
+    cr = (acc or {}).get("credentials") or {}
+    mid = (cr.get("merchant_id") or "").strip()
+    sk = (cr.get("secret_key") or cr.get("password") or "").strip()
+    du = (cr.get("dev_username") or "").strip()
+    env = (cr.get("env") or cr.get("mode") or "").strip().lower()
+    # 2) Yedek: eski db.settings (Entegrasyonlar modali). Kimlik VE ortam icin tamamlayici.
+    s = None
+    if not (mid and sk and du) or not env:
+        s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+        mid = mid or (s.get("merchant_id") or "").strip()
+        sk = sk or (s.get("secret_key") or s.get("password") or "").strip()
+        du = du or (s.get("dev_username") or "").strip()
+        env = env or (s.get("mode") or "").strip().lower()
     if not (mid and sk and du):
-        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Pazaryerleri → Hepsiburada altından kaydedin."
+        return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Entegrasyonlar → Hepsiburada altından kaydedin."
+    # Opsiyonel: OMS (siparis) icin AYRI Basic auth kimligi (varsa). Once marketplace_accounts, sonra db.settings.
+    oms_u = (cr.get("oms_username") or "").strip()
+    oms_p = (cr.get("oms_password") or "").strip()
+    if (not oms_u or not oms_p):
+        if s is None:
+            s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+        oms_u = oms_u or (s.get("oms_username") or "").strip()
+        oms_p = oms_p or (s.get("oms_password") or "").strip()
     test = env not in ("prod", "production", "live", "canli", "canlı")
     from hepsiburada_client import HepsiburadaClient
     return HepsiburadaClient(mid, sk, du, test=test, oms_username=oms_u, oms_password=oms_p), None
@@ -171,7 +174,7 @@ HB_BASE_FIELDS = [
     {"key": "Marka", "label": "Marka", "default_source": "brand",
      "aliases": ["marka", "brand"]},
     {"key": "GarantiSuresi", "label": "Garanti Süresi (ay)", "default_source": "__default",
-     "default_value": "24", "aliases": ["garantisuresi", "garanti", "warranty"]},
+     "default_value": "", "aliases": ["garantisuresi", "garanti", "warranty"]},
     {"key": "kg", "label": "Desi / Ağırlık", "default_source": "weight",
      "default_value": "1", "aliases": ["kg", "desi", "agirlik", "weight", "kargodesi", "kargobilgisi"]},
     {"key": "kdv", "label": "KDV Oranı", "default_source": "__default",

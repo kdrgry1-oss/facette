@@ -3904,6 +3904,10 @@ def _hb_local_for_attr(attr_name: str, local: dict) -> str | None:
         return (local.get("materyal") or local.get("materyal bilesimi") or local.get("kumas bilgisi")
                 or local.get("kumas icerigi") or local.get("urun icerik bilgisi") or local.get("urun icerigi")
                 or local.get("kumas tipi"))
+    if any(w in n for w in ("ilikleme", "kapama")):
+        # HB "İlikleme Türü" ↔ bizim "Kapama Şekli" (Düğmeli/Fermuarlı/Çıtçıtlı...)
+        return (local.get("ilikleme turu") or local.get("ilikleme")
+                or local.get("kapama sekli") or local.get("kapama"))
     if "marka" in n or "brand" in n:
         return local.get("marka")
     return None
@@ -3974,6 +3978,31 @@ def _hb_resolve_value(attr: dict, raw):
     if attr.get("allowCustom"):
         return str(raw)
     return None
+
+
+def _hb_resolve_with_fallback(a, raw, orig=None):
+    """raw'ı HB değerine çöz; enum'da ham/sayısal bir ID gibi ÇÖZÜLMEDEN kalırsa
+    (örn. başka kategoriden gelmiş value_mapping ID'si → Cinsiyet'in '17530' basması)
+    orijinal etikete ('Kadın') geri düşer. SALT-ADDİTİF: sağlam isim eşleşmesi varsa
+    sonucu hiç değiştirmez; yalnız 'çözülemeyen sayısal ID' durumunu düzeltir."""
+    rv = _hb_resolve_value(a, raw)
+    vals = a.get("attributeValues") or []
+
+    def _unresolved(val):
+        if val in (None, ""):
+            return True
+        if not vals:
+            return False  # serbest metin alanı → her şey geçerli
+        nv = _hb_norm(val)
+        if any(_hb_norm(v.get("name")) == nv for v in vals):
+            return False  # gerçek bir değer ADı → çözülmüş
+        return str(val).strip().isdigit()  # isim değil + saf sayı → çözülmemiş ID
+
+    if orig not in (None, "") and str(orig) != str(raw) and _unresolved(rv):
+        rv2 = _hb_resolve_value(a, orig)
+        if not _unresolved(rv2):
+            return rv2
+    return rv
 
 
 async def _hb_category_attributes_for(hb_cat):
@@ -4106,16 +4135,18 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             #     (Renk yapısal alanda değil, yalnız adında geçiyorsa: "...Etek Ekru" -> Ekru)
             if not raw:
                 raw = _hb_value_from_name(product.get("name"), a)
-            # 4) value_mapping çevirisi (Kırmızı↔Red gibi)
+            # 4) value_mapping çevirisi (Kırmızı↔Red gibi). Orijinal etiket saklanır →
+            #    map'lenen ID bu kategoride çözülemezse etikete geri düşeriz (Cinsiyet=17530 fix).
+            orig_raw = raw
             if raw:
                 mapped = vmaps.get(f"{aid}|{raw}")
                 if not mapped and isinstance(vmaps.get(aid), dict):
                     mapped = vmaps[aid].get(str(raw))
                 if mapped:
                     raw = mapped
-            # 5) enum'a/serbest metne çöz
+            # 5) enum'a/serbest metne çöz (çözülemeyen sayısal ID → orijinal etikete düş)
             if raw not in (None, ""):
-                rv = _hb_resolve_value(a, raw)
+                rv = _hb_resolve_with_fallback(a, raw, orig_raw)
                 if rv not in (None, ""):
                     attrs[aname] = rv
             # 6) şirket default'u (per-kategori)
@@ -4170,10 +4201,11 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             attrs.setdefault("Marka", str(mk))
         gar = _base_val("GarantiSuresi", variant)
         gar_s = str(gar or "").strip()
-        # HB tam sayı (ay) ister, en fazla 2 hane, >0. Geçerli sayı -> onu; "Yok"/boş/geçersiz
-        # -> "24" (HB bazı kategorilerde zorunlu kılıyor; istemeyen kategoride zararsızca yok sayılır).
-        attrs.setdefault("GarantiSuresi",
-                         str(int(gar_s)) if (gar_s.isdigit() and 1 <= int(gar_s) <= 99) else "24")
+        # HB tam sayı (ay) ister. Geçerli sayı VARSA onu gönder; YOKSA HİÇ GÖNDERME.
+        # (Eski davranış sabit "24" basıyordu → kullanıcının girmediği hayalet garanti.)
+        # Garanti zorunlu olan kategoride: "Varsayılan Alan Eşleştirme"den GarantiSuresi default'u gir.
+        if gar_s.isdigit() and 1 <= int(gar_s) <= 99:
+            attrs.setdefault("GarantiSuresi", str(int(gar_s)))
         # KDV (zorunlu) -> HB anahtarı "tax", tam sayı. Panel/default'tan gelir (varsayılan 10).
         kdv_raw = _base_val("kdv", variant)
         kdv_s = str(kdv_raw or "").strip().replace("%", "").replace(",", ".")
@@ -4340,6 +4372,7 @@ async def hb_autofill_attributes(request: Request, current_user: dict = Depends(
             if any(w in _hb_norm(aname) for w in skip_norm):
                 continue  # varyant-bazlı → gönderimde türetilir
             raw = _hb_local_for_attr(aname, local)
+            orig_raw = raw
             if raw:
                 aid = str(a.get("id"))
                 mapped = vmaps.get(f"{aid}|{raw}")
@@ -4351,7 +4384,7 @@ async def hb_autofill_attributes(request: Request, current_user: dict = Depends(
                 raw = defaults.get(aname) or defaults.get(str(a.get("id")))
             if not raw:
                 continue
-            rv = _hb_resolve_value(a, raw)
+            rv = _hb_resolve_with_fallback(a, raw, orig_raw)
             if rv not in (None, ""):
                 cur[aname] = rv
                 changed = True
@@ -5198,6 +5231,117 @@ async def sync_ticimax_teknik_detay(
         "added_by_attribute": added_keys,
         "ozellik_count": len(ozellik_map),
         "message": f"{enriched}/{total} ürüne otomatik teknik detay eşlendi.",
+    }
+
+
+@router.post("/site/teknik-detay/recover")
+async def recover_teknik_detay_from_snapshot(
+    apply: bool = Query(False, description="false=ÖNİZLEME (yazma yok) · true=UYGULA"),
+    current_user: dict = Depends(require_admin),
+):
+    """Silinen ürün-kartı teknik detaylarını, doğrulanmış Ticimax export snapshot'ından
+    (backend/data/teknik_detay_kurtarma.json) GERİ YÜKLER.
+
+    GÜVENLİK GARANTİLERİ:
+      • Eşleştirme YALNIZCA `urun_karti_id` üzerinden (benzersiz). StokKodu/barkod ASLA.
+      • Bir kart-ID birden çok ürüne denk gelirse (belirsiz) → ATLANIR, asla yazılmaz.
+      • Sadece BOŞ/eksik özellik doldurulur; mevcut (manuel) değer ASLA ezilmez.
+      • Fiyat/KDV/stok/barkod/varyantlara DOKUNULMAZ (yalnız `attributes`).
+      • apply=false → ne değişeceğini döner, HİÇBİR ŞEY yazmaz.
+    """
+    import json as _json
+    import os as _os
+    snap_path = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)),
+                              "data", "teknik_detay_kurtarma.json")
+    try:
+        with open(snap_path, "r", encoding="utf-8") as f:
+            snap = _json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Kurtarma verisi okunamadı: {e}")
+    urunler = snap.get("urunler") or {}
+
+    matched = 0
+    no_match = 0
+    ambiguous = 0
+    to_fill_total = 0
+    updated = 0
+    sample: list = []
+
+    for uk, info in urunler.items():
+        ozet = (info or {}).get("ozellikler") or {}
+        if not ozet:
+            continue
+        ukq = [str(uk)]
+        if str(uk).isdigit():
+            ukq.append(int(uk))
+        prods = await db.products.find(
+            {"urun_karti_id": {"$in": ukq}},
+            {"_id": 0, "id": 1, "attributes": 1, "name": 1},
+        ).to_list(length=5)
+        if len(prods) == 0:
+            no_match += 1
+            continue
+        if len(prods) > 1:
+            ambiguous += 1   # GÜVENLİK: belirsiz → asla yazma
+            continue
+        p = prods[0]
+        cur = p.get("attributes")
+        existing_names: set = set()
+        cur_list: list = []
+        if isinstance(cur, list):
+            for a in cur:
+                if isinstance(a, dict):
+                    cur_list.append(a)
+                    nm = a.get("name") or a.get("label") or a.get("type")
+                    vv = a.get("value") or a.get("attribute_value")
+                    if nm and str(vv or "").strip():
+                        existing_names.add(_hb_norm(nm))
+        elif isinstance(cur, dict):
+            for k, v in cur.items():
+                if isinstance(v, dict):
+                    nm = v.get("label") or v.get("name") or k
+                    vv = v.get("value") or v.get("attribute_value")
+                else:
+                    nm, vv = k, v
+                if nm and str(vv or "").strip():
+                    existing_names.add(_hb_norm(nm))
+        adds = []
+        for oz, dg in ozet.items():
+            if not str(dg or "").strip():
+                continue
+            if _hb_norm(oz) in existing_names:
+                continue   # zaten DOLU → dokunma
+            adds.append({"name": oz, "value": str(dg).strip()})
+        if not adds:
+            continue
+        matched += 1
+        to_fill_total += len(adds)
+        if len(sample) < 12:
+            sample.append({"urun_karti_id": str(uk),
+                           "urun": (p.get("name") or info.get("urun_adi") or "")[:50],
+                           "eklenecek": {a["name"]: a["value"] for a in adds}})
+        if apply:
+            if isinstance(cur, dict):
+                new_attrs = dict(cur)
+                for a in adds:
+                    new_attrs[a["name"]] = a["value"]
+            else:
+                new_attrs = (cur_list if isinstance(cur, list) else []) + adds
+            await db.products.update_one({"id": p["id"]}, {"$set": {"attributes": new_attrs}})
+            updated += 1
+
+    return {
+        "mode": "apply" if apply else "preview",
+        "snapshot_urun": len(urunler),
+        "eslesen_urun": matched,
+        "eslesmeyen_urun_karti": no_match,
+        "belirsiz_urun_karti": ambiguous,
+        "doldurulacak_ozellik_toplam": to_fill_total,
+        "guncellenen_urun": updated,
+        "ornek": sample,
+        "not": ("Yalnız BOŞ özellikler dolduruldu; manuel değerler korundu. "
+                "Fiyat/KDV/stok/barkoda dokunulmadı."
+                + ("" if apply else " — ÖNİZLEME: hiçbir şey yazılmadı.")),
     }
 
 
