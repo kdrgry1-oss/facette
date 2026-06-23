@@ -1536,6 +1536,48 @@ export default function AdminProducts() {
             Silinen Özellik Kurtar
           </button>
           <button
+            onClick={async () => {
+              const token = localStorage.getItem('token');
+              const t = toast.loading("Açıklama önizlemesi hazırlanıyor...");
+              try {
+                const pre = await axios.post(
+                  `${API}/integrations/site/aciklama/recover?apply=false`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+                );
+                toast.dismiss(t);
+                const d = pre.data || {};
+                const ok = window.confirm(
+                  "EKSİK AÇIKLAMA KURTARMA — ÖNİZLEME\n\n" +
+                  `• Açıklaması doldurulacak ürün: ${d.doldurulacak_urun}\n` +
+                  `• Zaten dolu (atlanan): ${d.zaten_dolu}\n` +
+                  `• Eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Belirsiz: ${d.belirsiz_urun_karti}\n\n` +
+                  "Eşleştirme YALNIZCA urun_karti_id ile.\n" +
+                  "Yalnız BOŞ açıklama doldurulur, mevcut açıklama KORUNUR.\n" +
+                  "Fiyat / KDV / stok / başlık / özelliklere DOKUNULMAZ.\n\n" +
+                  "Uygulansın mı?"
+                );
+                if (!ok) { toast("İptal edildi"); return; }
+                const t2 = toast.loading("Açıklamalar yazılıyor...");
+                const res = await axios.post(
+                  `${API}/integrations/site/aciklama/recover?apply=true`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+                );
+                toast.dismiss(t2);
+                toast.success(`${res.data.guncellenen_urun} ürünün açıklaması dolduruldu`);
+                fetchProducts();
+              } catch (e) {
+                toast.dismiss(t);
+                toast.error(e.response?.data?.detail || "Açıklama kurtarma başarısız");
+              }
+            }}
+            data-testid="aciklama-recover-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded hover:bg-cyan-700 transition-all font-medium text-sm shadow-sm"
+            title="Eksik ürün açıklamalarını doğrulanmış Ticimax export'tan (urun_karti_id ile) güvenle doldurur — önce önizleme"
+          >
+            <RefreshCw size={16} />
+            Eksik Açıklama Kurtar
+          </button>
+          <button
             onClick={() => setBarcodePushOpen(true)}
             data-testid="trendyol-push-barcodes-btn"
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-all font-medium text-sm shadow-sm"
