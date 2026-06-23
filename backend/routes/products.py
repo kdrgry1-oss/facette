@@ -386,7 +386,7 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
     settings = await get_ai_settings()
     api_key = _api_key_for(settings)
     if not api_key:
-        raise HTTPException(400, "AI anahtarı tanımlı değil. Admin → Sorular → AI ayarlarından API anahtarınızı (custom_api_key) girin.")
+        raise HTTPException(400, "AI anahtarı tanımlı değil. Admin → AI Asistan → 'API Anahtarı' bölümünden anahtarınızı girin.")
 
     name = (payload.get("name") or "").strip()
     if not name:

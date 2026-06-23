@@ -63,6 +63,16 @@ def _api_key_for(settings: dict) -> str:
       1) Ayarlardaki kendi anahtarın (custom_api_key)
       2) Sağlayıcıya göre ortam değişkeni (OPENAI/ANTHROPIC/GEMINI_API_KEY)
       3) Geriye dönük: Emergent (EMERGENT_LLM_KEY) — Emergent'ten çıkınca devre dışı."""
+    # 1) Kendi anahtarın — şifreli (custom_api_key_enc) öncelikli, eski düz metin yedek
+    enc = settings.get("custom_api_key_enc")
+    if enc:
+        try:
+            from security.crypto import decrypt
+            dec = decrypt(enc)
+            if dec:
+                return dec
+        except Exception:
+            pass
     if settings.get("custom_api_key"):
         return settings["custom_api_key"]
     prov = (settings.get("provider") or "openai").strip().lower()
@@ -129,9 +139,11 @@ async def llm_chat(api_key: str, provider: str, model: str,
 @router.get("/settings")
 async def get_ai_chatbot_settings(current_user: dict = Depends(require_admin)):
     s = await get_ai_settings()
-    # Mask sensitive
-    if s.get("custom_api_key"):
-        s["custom_api_key"] = "********"
+    # Hassas anahtar ASLA düz dönmez: şifreli blob gizlenir; sadece "tanımlı mı" bilgisi maske olarak verilir.
+    has_key = bool(s.get("custom_api_key_enc") or s.get("custom_api_key"))
+    s.pop("custom_api_key_enc", None)
+    s["custom_api_key"] = "********" if has_key else ""
+    s["has_api_key"] = has_key
     return s
 
 
@@ -147,9 +159,14 @@ async def save_ai_chatbot_settings(payload: dict, current_user: dict = Depends(r
     ):
         if f in payload:
             update[f] = payload[f]
-    if payload.get("custom_api_key") and payload["custom_api_key"] != "********":
-        update["custom_api_key"] = payload["custom_api_key"]
-    await db.settings.update_one({"id": "ai_chatbot"}, {"$set": update}, upsert=True)
+    newk = (payload.get("custom_api_key") or "").strip()
+    set_ops = {"$set": update}
+    if newk and newk != "********":
+        # Yeni anahtar — AES-256-GCM ile şifrele; eski düz metin alanını temizle.
+        from security.crypto import encrypt
+        update["custom_api_key_enc"] = encrypt(newk)
+        set_ops["$unset"] = {"custom_api_key": ""}
+    await db.settings.update_one({"id": "ai_chatbot"}, set_ops, upsert=True)
     return {"success": True}
 
 

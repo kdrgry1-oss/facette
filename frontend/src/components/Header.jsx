@@ -116,13 +116,21 @@ export default function Header({ hideMenu = false }) {
 
   const isCheckout = location.pathname.includes('/odeme') || location.pathname.includes('/checkout');
 
-  // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün)
+  // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
+  // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
   useEffect(() => {
     const slug = hoveredCategory || activeMenu;
-    if (slug && !megaProducts[slug]) {
+    if (slug && megaProducts[slug] === undefined) {
       axios.get(`${API}/products?category=${slug}&limit=3&sort=popular`)
-        .then(r => setMegaProducts(prev => ({ ...prev, [slug]: r.data?.products || [] })))
-        .catch(() => setMegaProducts(prev => ({ ...prev, [slug]: [] })));
+        .then(async (r) => {
+          let list = r.data?.products || [];
+          if (list.length === 0) {
+            const r2 = await axios.get(`${API}/products?limit=3&sort=popular`).catch(() => null);
+            list = r2?.data?.products || [];
+          }
+          setMegaProducts((prev) => ({ ...prev, [slug]: list }));
+        })
+        .catch(() => setMegaProducts((prev) => ({ ...prev, [slug]: [] })));
     }
   }, [hoveredCategory, activeMenu]);
 

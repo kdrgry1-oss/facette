@@ -11,7 +11,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Brain, Send, Database, Zap, MessageCircle, Trash2, RefreshCw,
-  CheckCircle, AlertTriangle, Sparkles, Search, Bot, ShieldCheck
+  CheckCircle, AlertTriangle, Sparkles, Search, Bot, ShieldCheck, Key, Save, Lock
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -80,12 +80,14 @@ export default function AIAssistant() {
         <Tab id="kb" label="Bilgi Bankası" icon={Database} activeId={tab} onClick={setTab} badge={trainStatus?.kb_total} />
         <Tab id="train" label="Toplu Eğitim" icon={Sparkles} activeId={tab} onClick={setTab} />
         <Tab id="auto" label="Otomatik Yanıt" icon={Zap} activeId={tab} onClick={setTab} badge={stats?.pending_trendyol} />
+        <Tab id="key" label="API Anahtarı" icon={Key} activeId={tab} onClick={setTab} />
       </div>
 
       {tab === "chat" && <ChatTab onUpdate={loadStats} />}
       {tab === "kb" && <KbTab />}
       {tab === "train" && <TrainTab status={trainStatus} onUpdate={loadStats} />}
       {tab === "auto" && <AutoTab stats={stats} onUpdate={loadStats} />}
+      {tab === "key" && <KeyTab />}
     </div>
   );
 }
@@ -555,6 +557,132 @@ function AutoTab({ stats, onUpdate }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ============================================================
+   API KEY TAB — LLM token (AES-256 şifreli, asla düz gösterilmez)
+   ============================================================ */
+const _KEY_DEFAULTS = {
+  anthropic: { model: "claude-sonnet-4-6", fast: "claude-haiku-4-5", hint: "console.anthropic.com → API Keys (sk-ant-…)" },
+  openai:    { model: "gpt-4o",            fast: "gpt-4o-mini",      hint: "platform.openai.com → API Keys (sk-…)" },
+  gemini:    { model: "gemini-2.0-flash",  fast: "gemini-2.0-flash", hint: "aistudio.google.com → API Key" },
+};
+
+function KeyTab() {
+  const [loaded, setLoaded] = useState(false);
+  const [base, setBase] = useState({});
+  const [hasKey, setHasKey] = useState(false);
+  const [provider, setProvider] = useState("anthropic");
+  const [model, setModel] = useState("");
+  const [fastModel, setFastModel] = useState("");
+  const [keyVal, setKeyVal] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/ai/settings`, auth());
+        const d = res.data || {};
+        setBase(d);
+        setHasKey(!!d.has_api_key || d.custom_api_key === "********");
+        if (d.provider) setProvider(d.provider);
+        setModel(d.model || "");
+        setFastModel(d.fast_model || "");
+      } catch (e) { /* ignore */ }
+      finally { setLoaded(true); }
+    })();
+  }, []);
+
+  const save = async () => {
+    if (!keyVal.trim() && !hasKey) { toast.error("Önce API anahtarını girin"); return; }
+    setSaving(true);
+    try {
+      const def = _KEY_DEFAULTS[provider] || _KEY_DEFAULTS.anthropic;
+      const payload = {
+        ...base,
+        provider,
+        model: model || def.model,
+        fast_model: fastModel || def.fast,
+        use_emergent_key: false,
+      };
+      delete payload.has_api_key;
+      if (keyVal.trim()) payload.custom_api_key = keyVal.trim();
+      else delete payload.custom_api_key; // maskeyi geri gönderme
+      await axios.post(`${API}/ai/settings`, payload, auth());
+      if (keyVal.trim()) setHasKey(true);
+      setKeyVal("");
+      setShow(false);
+      toast.success("API anahtarı kaydedildi (şifreli saklandı)");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Kaydedilemedi");
+    } finally { setSaving(false); }
+  };
+
+  if (!loaded) return <div className="text-sm text-gray-400 p-6">Yükleniyor…</div>;
+  const def = _KEY_DEFAULTS[provider] || _KEY_DEFAULTS.anthropic;
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold flex items-center gap-2"><Key className="w-4 h-4 text-violet-600"/> LLM API Anahtarı</h3>
+          {hasKey
+            ? <span className="text-[11px] font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full inline-flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Tanımlı</span>
+            : <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">Tanımlı değil</span>}
+        </div>
+
+        <p className="text-xs text-gray-500 leading-relaxed flex items-start gap-1.5">
+          <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0 text-gray-400"/>
+          Anahtar <b>AES-256 ile şifrelenerek</b> saklanır; hiçbir ekranda, API yanıtında veya günlükte düz metin olarak görünmez. Sohbet, otomatik yanıt ve ürün açıklaması üretimi bu tek anahtarı ortak kullanır.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1">Sağlayıcı</label>
+            <select value={provider} onChange={(e)=>setProvider(e.target.value)}
+              className="w-full border border-gray-300 rounded px-2 py-2 text-sm bg-white">
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1">Model</label>
+            <input value={model} onChange={(e)=>setModel(e.target.value)} placeholder={def.model}
+              className="w-full border border-gray-300 rounded px-2 py-2 text-sm"/>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-gray-600 block mb-1">Hızlı Model</label>
+            <input value={fastModel} onChange={(e)=>setFastModel(e.target.value)} placeholder={def.fast}
+              className="w-full border border-gray-300 rounded px-2 py-2 text-sm"/>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold text-gray-600 block mb-1">API Anahtarı</label>
+          <div className="flex gap-2">
+            <input type={show ? "text" : "password"} value={keyVal} onChange={(e)=>setKeyVal(e.target.value)}
+              placeholder={hasKey ? "•••••••• — değiştirmek için yeni anahtar yapıştırın" : "API anahtarınızı yapıştırın"}
+              autoComplete="new-password" data-testid="ai-api-key-input"
+              className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono"/>
+            <button type="button" onClick={()=>setShow(s=>!s)}
+              className="px-3 py-2 border border-gray-300 rounded text-xs hover:bg-gray-50 shrink-0">
+              {show ? "Gizle" : "Göster"}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">{def.hint}</p>
+        </div>
+
+        <button onClick={save} disabled={saving} data-testid="ai-api-key-save"
+          className="w-full bg-black hover:bg-gray-800 text-white rounded px-4 py-2.5 text-sm font-medium disabled:opacity-50 inline-flex items-center justify-center gap-2">
+          {saving ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
+          {saving ? "Kaydediliyor…" : "Kaydet"}
+        </button>
+      </div>
     </div>
   );
 }
