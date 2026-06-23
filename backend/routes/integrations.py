@@ -5384,6 +5384,91 @@ async def recover_teknik_detay_from_snapshot(
     }
 
 
+@router.post("/site/aciklama/recover")
+async def recover_aciklama_from_snapshot(
+    apply: bool = Query(False, description="false=ÖNİZLEME (yazma yok) · true=UYGULA"),
+    current_user: dict = Depends(require_admin),
+):
+    """Eksik ürün AÇIKLAMALARINI (description) doğrulanmış Ticimax export snapshot'ından
+    (backend/data/aciklama_kurtarma.json) doldurur.
+
+    GÜVENLİK GARANTİLERİ:
+      • Eşleştirme YALNIZCA `urun_karti_id` (benzersiz). StokKodu/barkod ASLA.
+      • Bir kart-ID birden çok ürüne denk gelirse → ATLANIR.
+      • Yalnız BOŞ açıklama doldurulur (içi boş "<p></p>" gibi HTML de boş sayılır);
+        dolu açıklama ASLA ezilmez.
+      • Yalnız `description` alanı; fiyat/KDV/stok/barkod/başlık/özelliklere DOKUNULMAZ.
+      • apply=false → önizleme, hiçbir şey yazmaz.
+    """
+    import json as _json
+    import os as _os
+    import re as _re
+    snap_path = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)),
+                              "data", "aciklama_kurtarma.json")
+    try:
+        with open(snap_path, "r", encoding="utf-8") as f:
+            snap = _json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Açıklama verisi okunamadı: {e}")
+    urunler = snap.get("urunler") or {}
+
+    def _blank_html(s):
+        t = _re.sub(r"<[^>]+>", " ", str(s or ""))
+        t = t.replace("&nbsp;", " ").replace("\xa0", " ")
+        return not t.strip()
+
+    matched = 0
+    no_match = 0
+    ambiguous = 0
+    already_full = 0
+    updated = 0
+    sample: list = []
+
+    for uk, info in urunler.items():
+        desc = (info or {}).get("description") or ""
+        if not str(desc).strip():
+            continue
+        ukq = [str(uk)]
+        if str(uk).isdigit():
+            ukq.append(int(uk))
+        prods = await db.products.find(
+            {"urun_karti_id": {"$in": ukq}},
+            {"_id": 0, "id": 1, "description": 1, "name": 1},
+        ).to_list(length=5)
+        if len(prods) == 0:
+            no_match += 1
+            continue
+        if len(prods) > 1:
+            ambiguous += 1   # GÜVENLİK: belirsiz → asla yazma
+            continue
+        p = prods[0]
+        if not _blank_html(p.get("description")):
+            already_full += 1
+            continue   # zaten dolu → DOKUNMA
+        matched += 1
+        if len(sample) < 12:
+            sample.append({"urun_karti_id": str(uk),
+                           "urun": (p.get("name") or info.get("urun_adi") or "")[:50],
+                           "aciklama_onizleme": _re.sub(r"<[^>]+>", " ", desc)[:120].strip()})
+        if apply:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"description": str(desc)}})
+            updated += 1
+
+    return {
+        "mode": "apply" if apply else "preview",
+        "snapshot_urun": len(urunler),
+        "doldurulacak_urun": matched,
+        "zaten_dolu": already_full,
+        "eslesmeyen_urun_karti": no_match,
+        "belirsiz_urun_karti": ambiguous,
+        "guncellenen_urun": updated,
+        "ornek": sample,
+        "not": ("Yalnız BOŞ açıklamalar dolduruldu (içi boş HTML dahil); dolu açıklamalar korundu. "
+                "Sadece description; fiyat/KDV/stok/başlık/özelliklere dokunulmadı."
+                + ("" if apply else " — ÖNİZLEME: hiçbir şey yazılmadı.")),
+    }
+
+
 
 
 
