@@ -78,7 +78,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * - "Bölünmüş": iki yan yana panel (kaynak + canlı).
  * Trendyol'a aktarımda HTML temizleme backend tarafında yapılır.
  */
-function DescriptionEditor({ value, onChange }) {
+function DescriptionEditor({ value, onChange, onGenerate, generating }) {
   const [mode, setMode] = useState("split"); // "source" | "preview" | "split"
   const tabBtn = (m, label) => (
     <button
@@ -103,10 +103,22 @@ function DescriptionEditor({ value, onChange }) {
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center">
           {tabBtn("source", "Kaynak")}
           {tabBtn("preview", "Önizleme")}
           {tabBtn("split", "Bölünmüş")}
+          {onGenerate && (
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={generating}
+              data-testid="desc-ai-generate"
+              title="Ürün adı, kategori ve özelliklerden yapay zekâ ile açıklama üretir"
+              className="ml-2 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-colors bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+            >
+              {generating ? "Üretiliyor…" : "✦ AI ile Oluştur"}
+            </button>
+          )}
         </div>
         <div className="text-[10px] text-gray-500 font-mono">
           HTML: {charsHtml} kr · Metin: {charsPlain} kr
@@ -282,6 +294,8 @@ export default function AdminProducts() {
   const [showFilters, setShowFilters] = useState(false);
   // Tablo sıralaması (3 durumlu: yön -> ters -> varsayılan)
   const [sortBy, setSortBy] = useState(() => _loadProductsView().sortBy || { field: null, dir: null });
+
+  const [aiDescLoading, setAiDescLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "", slug: "", description: "", short_description: "",
@@ -2152,6 +2166,37 @@ export default function AdminProducts() {
                         <DescriptionEditor
                           value={formData.description}
                           onChange={(val) => setFormData({ ...formData, description: val })}
+                          generating={aiDescLoading}
+                          onGenerate={async () => {
+                            if (!formData.name?.trim()) { toast.error("Önce ürün adını girin"); return; }
+                            if (formData.description?.trim() && !window.confirm("Mevcut açıklamanın üzerine AI ile üretilen yazılsın mı?")) return;
+                            setAiDescLoading(true);
+                            try {
+                              const attrsList = [];
+                              const A = formData.attributes || {};
+                              Object.entries(A).forEach(([k, v]) => {
+                                const val = typeof v === "string" ? v : (v && v.value) ? v.value : (Array.isArray(v) ? v.join(", ") : "");
+                                if (k && val) attrsList.push({ name: k, value: String(val) });
+                              });
+                              if (formData.color) attrsList.push({ name: "Renk", value: formData.color });
+                              if (formData.collection) attrsList.push({ name: "Koleksiyon", value: formData.collection });
+                              const token = localStorage.getItem("token");
+                              const res = await axios.post(`${API}/products/ai-description`, {
+                                name: formData.name,
+                                category_name: formData.category_name,
+                                brand: formData.brand,
+                                attributes: attrsList,
+                              }, { headers: { Authorization: `Bearer ${token}` } });
+                              if (res.data?.description) {
+                                setFormData((prev) => ({ ...prev, description: res.data.description }));
+                                toast.success("Açıklama AI ile oluşturuldu");
+                              }
+                            } catch (e) {
+                              toast.error(e?.response?.data?.detail || "AI açıklama üretilemedi");
+                            } finally {
+                              setAiDescLoading(false);
+                            }
+                          }}
                         />
                       </div>
                     </div>

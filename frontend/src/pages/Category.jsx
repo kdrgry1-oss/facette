@@ -39,7 +39,7 @@ export default function Category() {
   // Grid sütun tercihi localStorage'a kaydedilir. Seçenekler: 1 / 2 / 4
   const [gridCols, setGridColsState] = useState(() => {
     const saved = parseInt(localStorage.getItem("facette_plp_grid") || "", 10);
-    return [1, 2, 4].includes(saved) ? saved : 2;
+    return [1, 2, 4].includes(saved) ? saved : 4;
   });
   const setGridCols = (n) => {
     setGridColsState(n);

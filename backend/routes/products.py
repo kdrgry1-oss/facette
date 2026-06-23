@@ -350,6 +350,97 @@ def _search_tr_regex(s: str) -> str:
     }
     return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
 
+def _fuzzy_tr_regex(s: str) -> str:
+    """Typo toleranslı (subsequence) Türkçe-duyarsız arama deseni.
+
+    Kullanıcı harf düşürdüğünde (örn. 'gmlek', 'ptolon') exact regex eşleşmez.
+    Bu desen, yazılan her harfi sırasıyla arar ve harfler arasında en çok 2
+    karakterlik boşluğa izin verir → 'gmlek' = gömlek, 'ptolon' = pantolon.
+    En az 3 karakterli sorgularda çalışır (kısa sorgularda aşırı geniş eşleşmeyi
+    önlemek için). Boşluklar yok sayılır (çok kelimeli sorgular tek dizi olur).
+    """
+    cls = {
+        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
+        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
+        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
+        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
+        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
+        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
+    }
+    chars = [ch for ch in (s or '').strip() if not ch.isspace()]
+    if len(chars) < 3:
+        return ''
+    parts = [cls.get(ch, re.escape(ch)) for ch in chars]
+    return '.{0,2}'.join(parts)
+
+@router.post("/ai-description")
+async def ai_generate_description(payload: dict, current_user: dict = Depends(require_admin)):
+    """Ürün için yapay zekâ ile Türkçe HTML açıklama üretir.
+
+    AI anahtarı ve sağlayıcı, mevcut AI ayarlarından (Admin → Sorular → AI ayarları,
+    `ai_chatbot.custom_api_key`) alınır — ürün açıklama üretici de aynı anahtarı
+    kullanır, ayrı token gerekmez. Ürün formundan ad/kategori/marka/özellikler
+    gönderilir; dönen HTML doğrudan açıklama alanına yazılır.
+    """
+    from .ai_chatbot import get_ai_settings, _api_key_for, llm_chat
+    settings = await get_ai_settings()
+    api_key = _api_key_for(settings)
+    if not api_key:
+        raise HTTPException(400, "AI anahtarı tanımlı değil. Admin → Sorular → AI ayarlarından API anahtarınızı (custom_api_key) girin.")
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Ürün adı gerekli (açıklama üretmek için).")
+    category = (payload.get("category_name") or "").strip()
+    brand = (payload.get("brand") or "").strip()
+    attrs = payload.get("attributes") or []
+
+    attr_lines = []
+    for a in attrs:
+        if isinstance(a, dict):
+            n = (a.get("name") or "").strip()
+            v = (a.get("value") or "").strip()
+            if n and v:
+                attr_lines.append(f"- {n}: {v}")
+    attr_txt = "\n".join(attr_lines[:25])
+
+    sys = (
+        "Sen Türk bir kadın giyim e-ticaret markası (FACETTE) için ürün açıklaması yazan "
+        "profesyonel bir metin yazarısın. SADECE temiz HTML döndür: 2-3 kısa <p> paragraf, "
+        "gerekiyorsa bir <ul><li>…</li></ul> özellik listesi. <a>, <script>, <style>, inline "
+        "style KULLANMA. Şık, akıcı, satışa yönelik ama abartısız Türkçe yaz. Fiyat, indirim, "
+        "kargo, iade bilgisi yazma. Verilmeyen marka/materyal bilgisi uydurma."
+    )
+    user = f"Ürün adı: {name}\n"
+    if category:
+        user += f"Kategori: {category}\n"
+    if brand:
+        user += f"Marka: {brand}\n"
+    if attr_txt:
+        user += f"Ürün özellikleri:\n{attr_txt}\n"
+    user += "\nBu ürün için yukarıdaki bilgilere dayanarak HTML açıklama üret."
+
+    try:
+        html_out = await llm_chat(
+            api_key=api_key,
+            provider=settings.get("provider", "anthropic"),
+            model=settings.get("model") or "claude-sonnet-4-6",
+            system_message=sys,
+            user_text=user,
+            max_tokens=900,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"AI açıklama üretimi başarısız: {e}")
+
+    html_out = (html_out or "").strip()
+    if html_out.startswith("```"):
+        html_out = re.sub(r"^```[a-zA-Z]*\n?", "", html_out)
+        html_out = re.sub(r"\n?```$", "", html_out).strip()
+    if not html_out:
+        raise HTTPException(502, "AI boş yanıt döndürdü, tekrar deneyin.")
+    return {"description": html_out}
+
+
 @router.get("")
 async def get_products(
     request: Request,
@@ -742,6 +833,27 @@ async def get_products(
 
     if and_clauses:
         query.setdefault("$and", []).extend(and_clauses)
+
+    # ------------------------------------------------------------------
+    # Typo toleransı: "gmlek"/"ptolon" gibi harf düşürülen aramalarda exact
+    # regex 0 sonuç verir. Bu durumda yakın (subsequence) eşleşmeye düşeriz →
+    # müşteri "gmlek" yazsa bile gömlekler listelenir. Yalnızca exact 0 ise
+    # devreye girer; normal aramaların kesinliğini bozmaz.
+    # ------------------------------------------------------------------
+    if search and isinstance(query.get("$or"), list):
+        try:
+            _exact_n = await db.products.count_documents(query)
+        except Exception:
+            _exact_n = -1
+        if _exact_n == 0:
+            _fz = _fuzzy_tr_regex(search)
+            if _fz:
+                query["$or"] = [
+                    {"name": {"$regex": _fz, "$options": "i"}},
+                    {"keywords": {"$regex": _fz, "$options": "i"}},
+                    {"brand": {"$regex": _fz, "$options": "i"}},
+                    {"description": {"$regex": _fz, "$options": "i"}},
+                ]
 
     sort_order = -1 if order == "desc" else 1
     # Kategori sayfasında kullanıcı özel sıralama seçmediyse (default created_at):

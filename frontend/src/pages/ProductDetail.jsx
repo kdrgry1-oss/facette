@@ -1031,26 +1031,24 @@ export default function ProductDetail() {
           </section>
         )}
 
-        {/* Son Gezdiklerin — localStorage snapshot'larından dinamik */}
+        {/* Son Gezdiklerin — Benzer Ürünler ile aynı 4'lü grid (tek üründe sayfayı kaplamaz) */}
         {recentItems.length > 0 && (
           <section className="mt-12 pt-12 border-t" data-testid="recently-viewed">
             <h2 className="text-base font-light mb-6">Son Gezdiklerin</h2>
-            <div className="-mx-4 px-4 overflow-x-auto scrollbar-hide md:mx-0 md:px-0 md:overflow-visible">
-              <div className="flex gap-3 md:grid md:grid-cols-6 md:gap-4" style={{ minWidth: "max-content" }}>
-                {recentItems.slice(0, 6).map((p) => {
-                  const disc = (p.discount_price && p.discount_price > 0) ? p.discount_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
-                  const shown = disc || p.price || 0;
-                  return (
-                    <Link key={p.id} to={`/${p.slug || p.id}`} className="shrink-0 w-[40vw] md:w-auto group" data-testid={`recent-${p.id}`}>
-                      <div className="aspect-[2/3] bg-stone-100 overflow-hidden">
-                        <img src={optimizeImg(p.image, 500)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500" loading="lazy" decoding="async" />
-                      </div>
-                      <p className="text-[12px] font-light text-black/85 line-clamp-1 mt-2">{p.name}</p>
-                      <p className="text-[12px] tabular-nums mt-0.5">{(shown).toFixed(2).replace('.', ',')} TL</p>
-                    </Link>
-                  );
-                })}
-              </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {recentItems.slice(0, 4).map((p) => {
+                const disc = (p.discount_price && p.discount_price > 0) ? p.discount_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
+                const shown = disc || p.price || 0;
+                return (
+                  <Link key={p.id} to={`/${p.slug || p.id}`} className="group" data-testid={`recent-${p.id}`}>
+                    <div className="aspect-[2/3] bg-stone-100 overflow-hidden">
+                      <img src={optimizeImg(p.image, 500)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500" loading="lazy" decoding="async" />
+                    </div>
+                    <p className="text-[12px] md:text-sm font-light text-black/85 line-clamp-1 mt-2">{p.name}</p>
+                    <p className="text-[12px] md:text-sm tabular-nums mt-0.5">{(shown).toFixed(2).replace('.', ',')} TL</p>
+                  </Link>
+                );
+              })}
             </div>
           </section>
         )}
