@@ -580,8 +580,26 @@ export default function ProductDetail() {
 
           {/* Product Info */}
           <div className="lg:col-span-5 lg:sticky lg:top-24 min-w-0 lg:max-w-[420px] lg:mx-auto w-full">
-            <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
-            
+            <h1 className="text-xl md:text-2xl font-light mb-2">{product.name}</h1>
+
+            {/* Yıldız derecelendirme — ürün adı ile fiyat arasında; tıkla → yorumlara git */}
+            <button
+              type="button"
+              onClick={() => document.getElementById("reviews")?.scrollIntoView({ behavior: "smooth" })}
+              className="mb-3 flex items-center gap-1.5 group"
+              data-testid="pdp-rating-jump"
+              aria-label="Değerlendirmeleri gör"
+            >
+              <span className="flex">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <Star key={i} size={14} className={i <= Math.round(reviewAvg || 0) ? "fill-black text-black" : "text-gray-300"} />
+                ))}
+              </span>
+              <span className="text-xs text-gray-500 group-hover:text-black transition-colors underline-offset-2 group-hover:underline">
+                {reviewTotal > 0 ? `${(reviewAvg || 0).toFixed(1)} · ${reviewTotal} değerlendirme` : "İlk değerlendirmeyi yap"}
+              </span>
+            </button>
+
             {/* Price */}
             <div className="mb-6">
               <div className="flex items-center gap-3">
@@ -592,24 +610,6 @@ export default function ProductDetail() {
                   <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
                 )}
               </div>
-
-              {/* Yıldız derecelendirme — fiyatın hemen altında, tıkla → yorumlara git */}
-              <button
-                type="button"
-                onClick={() => document.getElementById("reviews")?.scrollIntoView({ behavior: "smooth" })}
-                className="mt-2 flex items-center gap-1.5 group"
-                data-testid="pdp-rating-jump"
-                aria-label="Değerlendirmeleri gör"
-              >
-                <span className="flex">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <Star key={i} size={14} className={i <= Math.round(reviewAvg || 0) ? "fill-black text-black" : "text-gray-300"} />
-                  ))}
-                </span>
-                <span className="text-xs text-gray-500 group-hover:text-black transition-colors underline-offset-2 group-hover:underline">
-                  {reviewTotal > 0 ? `${(reviewAvg || 0).toFixed(1)} · ${reviewTotal} değerlendirme` : "İlk değerlendirmeyi yap"}
-                </span>
-              </button>
 
               {displayPrice > 0 && (
                 <p className="text-xs text-gray-500 mt-2" data-testid="installment-hint">
@@ -632,7 +632,8 @@ export default function ProductDetail() {
                   )}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex items-end justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
                   const isSelected = selectedSize === variant.size;
                   const isOOS = variant.stock === 0;
@@ -655,15 +656,14 @@ export default function ProductDetail() {
                     </button>
                   );
                 })}
-              </div>
-              {/* Beden Tablosu — bedenlerin alt hizasında, sağa dayalı */}
-              {sizeTableData && (
-                <div className="flex justify-end mt-2">
-                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline" data-testid="show-size-table-btn">
+                </div>
+                {/* Beden Tablosu — bedenlerin alt hizasında, sağda */}
+                {sizeTableData && (
+                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid="show-size-table-btn">
                     Beden Tablosu
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
