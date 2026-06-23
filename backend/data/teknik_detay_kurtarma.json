@@ -10,14 +10,20 @@
    "urun_adi": "Bej Kuşaklı Mevsimlik İnce Trençkot Bej",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "202277111232"
+   ]
   },
   "1072": {
    "stok_kodu": "2022114453",
    "urun_adi": "Haki Kuşaklı Mevsimlik İnce Trençkot Haki",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "2022114453"
+   ]
   },
   "1073": {
    "stok_kodu": "2022889443",
@@ -25,14 +31,20 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "2022889443"
+   ]
   },
   "1143": {
    "stok_kodu": "8683851511264",
    "urun_adi": "Camel Kuşaklı Mevsimlik İnce Trençkot Camel",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8683851511264"
+   ]
   },
   "1221": {
    "stok_kodu": "8683851513299",
@@ -42,133 +54,249 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8683851513299",
+    "8683851513282",
+    "8683851513275",
+    "8683851513268"
+   ]
   },
   "1222": {
    "stok_kodu": "8683851513336",
    "urun_adi": "Kahverengi Düğmeli Blazer Ceket Kahverengi",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8683851513336",
+    "8683851513329",
+    "8683851513312",
+    "8683851513305"
+   ]
   },
   "1314": {
    "stok_kodu": "8683851515798",
    "urun_adi": "Siyah Düğmeli Blazer Ceket Siyah",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8683851515798",
+    "8683851515781",
+    "8683851515774",
+    "8683851515767",
+    "86838515157980"
+   ]
   },
   "1505": {
    "stok_kodu": "8684483500114",
    "urun_adi": "Lacivert Yüksek Bel Carrot Pantolon Lacivert",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500114",
+    "8684483500121",
+    "8684483500138",
+    "8684483500145",
+    "8684483509582"
+   ]
   },
   "1507": {
    "stok_kodu": "8684483500190",
    "urun_adi": "Lacivert Pile Detay Çıtçıtlı Ceket Lacivert",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500190",
+    "8684483500183",
+    "8684483500206",
+    "8684483500213"
+   ]
   },
   "1508": {
    "stok_kodu": "8684483500404",
    "urun_adi": "Bej Yüksek Bel Carrot Pantolon Bej",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500404",
+    "8684483500411",
+    "8684483500428",
+    "8684483500435",
+    "8684483509599"
+   ]
   },
   "1510": {
    "stok_kodu": "8684483500343",
    "urun_adi": "Bej Pile Detay Çıtçıtlı Ceket Bej",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500343",
+    "8684483500336",
+    "8684483500350",
+    "8684483500367"
+   ]
   },
   "1511": {
    "stok_kodu": "8684483500329",
    "urun_adi": "Antrasit Yüksek Bel Carrot Pantolon Antrasit",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500329",
+    "8684483500312",
+    "8684483500305",
+    "8684483500299",
+    "8684483509605"
+   ]
   },
   "1513": {
    "stok_kodu": "8684483500237",
    "urun_adi": "Antrasit Pile Detay Çıtçıtlı Ceket Antrasit",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500237",
+    "8684483500220",
+    "8684483500244",
+    "8684483500251"
+   ]
   },
   "1531": {
    "stok_kodu": "8684483500985",
    "urun_adi": "FC Gri Lastikli Yüksek Bel Palazzo Pantolon Gri",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483500985",
+    "8684483500992",
+    "8684483501005",
+    "8684483501012",
+    "8684483500978"
+   ]
   },
   "1532": {
    "stok_kodu": "8684483501036",
    "urun_adi": "FC Siyah Lastikli Yüksek Bel Palazzo Pantolon Siyah",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483501036",
+    "8684483501043",
+    "8684483501050",
+    "8684483501067",
+    "8684483501029"
+   ]
   },
   "1533": {
    "stok_kodu": "8684483501081",
    "urun_adi": "FC Lacivert Lastikli Yüksek Bel Palazzo Pantolon Lacivert",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483501081",
+    "8684483501098",
+    "8684483501104",
+    "8684483501111",
+    "8684483501074"
+   ]
   },
   "1534": {
    "stok_kodu": "8684483501135",
    "urun_adi": "FC Bej Lastikli Yüksek Bel Palazzo Pantolon Bej",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483501135",
+    "8684483501142",
+    "8684483501166",
+    "8684483501159",
+    "8684483501128"
+   ]
   },
   "1535": {
    "stok_kodu": "8684483501180",
    "urun_adi": "FC Ekru Lastikli Yüksek Bel Palazzo Pantolon Ekru",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483501180",
+    "8684483501197",
+    "8684483501203",
+    "8684483501210",
+    "8684483501173"
+   ]
   },
   "1565": {
    "stok_kodu": "8684483501982",
    "urun_adi": "Bej Düğmeli Crop Blazer Ceket Bej",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483501982",
+    "8684483501999",
+    "8684483502002"
+   ]
   },
   "1582": {
    "stok_kodu": "8684483502361",
    "urun_adi": "Lacivert Düğmeli Blazer Ceket Lacivert",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483502361",
+    "8684483502378",
+    "8684483502385",
+    "8684483502392"
+   ]
   },
   "1758": {
    "stok_kodu": "8684483506727",
    "urun_adi": "3'lü Soft Touch Uzun Konç Çorap Çok Renkli",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483506727",
+    "8684483506710"
+   ]
   },
   "1818": {
    "stok_kodu": "38942898948",
    "urun_adi": "2'li Soft Touch Uzun Konç Çorap Vizon",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "38942898948"
+   ]
   },
   "1822": {
    "stok_kodu": "8684483508486",
    "urun_adi": "Camel Süet Düğmeli Ceket Camel",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483508486",
+    "8684483508493",
+    "8684483508509"
+   ]
   },
   "1825": {
    "stok_kodu": "8684483508226",
@@ -176,35 +304,56 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483508226",
+    "8684483508233",
+    "8684483508240"
+   ]
   },
   "1909": {
    "stok_kodu": "2021359932",
    "urun_adi": "Siyah Mevsimlik Kısa Kaşe Kaban Siyah",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "2021359932"
+   ]
   },
   "1932": {
    "stok_kodu": "8684483510625",
    "urun_adi": "Zebra Desen Şifon Crop Bluz Desenli",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483510625",
+    "8684483510632",
+    "8684483510649"
+   ]
   },
   "1965": {
    "stok_kodu": "8684483511530",
    "urun_adi": "Acı Kahve Mevsimlik Kısa Kaşe Kaban Acı Kahve",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511530"
+   ]
   },
   "1966": {
    "stok_kodu": "8684483511547",
    "urun_adi": "Siyah Kol Apoletli Kuşaklı Kaşe Kaban Siyah",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511547",
+    "8684483511554",
+    "8684483511561"
+   ]
   },
   "1967": {
    "stok_kodu": "1967",
@@ -225,63 +374,107 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483511578",
+    "8684483511769"
+   ]
   },
   "1968": {
    "stok_kodu": "8684483511585",
    "urun_adi": "Acı Kahve Düğme Detay Yüksek Bel Palazzo Pantolon Acı Kahve",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511585",
+    "8684483511592",
+    "8684483511608",
+    "8684483511615",
+    "8684483516986"
+   ]
   },
   "1969": {
    "stok_kodu": "8684483511622",
    "urun_adi": "Siyah Düğme Detay Yüksek Bel Palazzo Pantolon Siyah",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511622",
+    "8684483511639",
+    "8684483511646",
+    "8684483511653",
+    "8684483517075"
+   ]
   },
   "1971": {
    "stok_kodu": "8684483511707",
    "urun_adi": "Siyah Kapüşonlu Kısa Şişme Mont Siyah",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511707",
+    "8684483511714",
+    "8684483511721"
+   ]
   },
   "1974": {
    "stok_kodu": "8684483511783",
    "urun_adi": "Gri Düğme Detay Yüksek Bel Palazzo Pantolon Gri",
    "ozellikler": {
     "Sezon": "FALL-WİNTER"
-   }
+   },
+   "barkodlar": [
+    "8684483511783",
+    "8684483511790",
+    "8684483511806",
+    "8684483511776",
+    "8684483517068"
+   ]
   },
   "2052": {
    "stok_kodu": "2025140002",
    "urun_adi": "Ekru Beli Lastikli Midi Etek Ekru",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483513664",
+    "8684483513657"
+   ]
   },
   "2053": {
    "stok_kodu": "2025140002",
    "urun_adi": "Kahverengi Beli Lastikli Midi Etek Kahverengi",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483513688",
+    "8684483513671"
+   ]
   },
   "2108": {
    "stok_kodu": "2025140007",
    "urun_adi": "Siyah Çift Renkli Elbise",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483515309"
+   ]
   },
   "2109": {
    "stok_kodu": "2025140007",
    "urun_adi": "Su Yeşili Çift Renkli Elbise",
    "ozellikler": {
     "Sezon": "SPRİNG-SUMMER"
-   }
+   },
+   "barkodlar": [
+    "8684483515316"
+   ]
   },
   "2135": {
    "stok_kodu": "1967",
@@ -302,7 +495,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "868448351676",
+    "868448351677"
+   ]
   },
   "2136": {
    "stok_kodu": "1967",
@@ -323,7 +520,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "868448351674",
+    "868448351675"
+   ]
   },
   "2566": {
    "stok_kodu": "FCSS1800001",
@@ -335,7 +536,14 @@
     "Ortam": "KADIN",
     "Boy": "Tek Ebat",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483517235",
+    "8684483517242",
+    "8684483517259",
+    "8684483517266",
+    "8684483517440"
+   ]
   },
   "2567": {
    "stok_kodu": "FCSS0900001",
@@ -348,7 +556,12 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517419",
+    "8684483517426",
+    "8684483517433"
+   ]
   },
   "2568": {
    "stok_kodu": "FCSS0900001",
@@ -361,7 +574,12 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517389",
+    "8684483517396",
+    "8684483517402"
+   ]
   },
   "2569": {
    "stok_kodu": "FCSS0900001",
@@ -374,7 +592,12 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517358",
+    "8684483517365",
+    "8684483517372"
+   ]
   },
   "2570": {
    "stok_kodu": "FCSS0900001",
@@ -387,7 +610,12 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517303",
+    "8684483517310",
+    "8684483517327"
+   ]
   },
   "2571": {
    "stok_kodu": "FCFW0900001",
@@ -399,7 +627,10 @@
     "Materyal": "Polyester",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517341"
+   ]
   },
   "2572": {
    "stok_kodu": "FCFW0900001",
@@ -411,7 +642,10 @@
     "Materyal": "Polyester",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517334"
+   ]
   },
   "2573": {
    "stok_kodu": "FCFW0900001",
@@ -423,7 +657,10 @@
     "Materyal": "Polyester",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517297"
+   ]
   },
   "2574": {
    "stok_kodu": "FCFW0400001",
@@ -442,7 +679,11 @@
     "Kalıp": "Regular",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517273",
+    "8684483517280"
+   ]
   },
   "2576": {
    "stok_kodu": "FCFW2000001",
@@ -455,7 +696,14 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Kapama Şekli": "Şardonlu",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517693",
+    "8684483517709",
+    "8684483517716",
+    "8684483517723",
+    "8684483517792"
+   ]
   },
   "2577": {
    "stok_kodu": "FCFW2000001",
@@ -468,7 +716,14 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Kapama Şekli": "Şardonlu",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517655",
+    "8684483517662",
+    "8684483517679",
+    "8684483517686",
+    "8684483517785"
+   ]
   },
   "2578": {
    "stok_kodu": "FCFW2000001",
@@ -481,7 +736,14 @@
     "Ürün İçerik Bilgisi": "Yetişkin",
     "Kapama Şekli": "Şardonlu",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517617",
+    "8684483517624",
+    "8684483517631",
+    "8684483517648",
+    "8684483517778"
+   ]
   },
   "2579": {
    "stok_kodu": "FCFW0100001",
@@ -489,7 +751,13 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517532",
+    "8684483517549",
+    "8684483517754",
+    "8684483517556"
+   ]
   },
   "2580": {
    "stok_kodu": "FCFW0100001",
@@ -497,7 +765,13 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517570",
+    "8684483517587",
+    "8684483517761",
+    "8684483517594"
+   ]
   },
   "2581": {
    "stok_kodu": "FCFW0100001",
@@ -505,7 +779,13 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517495",
+    "8684483517501",
+    "8684483517747",
+    "8684483517518"
+   ]
   },
   "2582": {
    "stok_kodu": "FCFW0100001",
@@ -513,7 +793,13 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517457",
+    "8684483517464",
+    "8684483517730",
+    "8684483517471"
+   ]
   },
   "2583": {
    "stok_kodu": "FCFW0400002",
@@ -532,7 +818,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517822"
+   ]
   },
   "2584": {
    "stok_kodu": "FCFW0400002",
@@ -551,7 +840,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517815"
+   ]
   },
   "2585": {
    "stok_kodu": "FCFW0400002",
@@ -570,7 +862,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517808"
+   ]
   },
   "2586": {
    "stok_kodu": "FCFW0600001",
@@ -587,7 +882,14 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517990",
+    "8684483518003",
+    "8684483518010",
+    "8684483518027",
+    "8684483518324"
+   ]
   },
   "2587": {
    "stok_kodu": "FCFW0100002",
@@ -596,7 +898,12 @@
     "Sezon": "FALL-WİNTER",
     "Kol Boyu": "UZUN",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517860",
+    "8684483517877",
+    "8684483517884"
+   ]
   },
   "2588": {
    "stok_kodu": "FCFW0100002",
@@ -605,7 +912,12 @@
     "Sezon": "FALL-WİNTER",
     "Kol Boyu": "UZUN",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483517839",
+    "8684483517846",
+    "8684483517853"
+   ]
   },
   "2589": {
    "stok_kodu": "FCFW1800003",
@@ -619,7 +931,14 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518379",
+    "8684483518386",
+    "8684483518393",
+    "8684483518409",
+    "8684483518683"
+   ]
   },
   "2590": {
    "stok_kodu": "FCFW1800003",
@@ -633,7 +952,14 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518492",
+    "8684483518508",
+    "8684483518515",
+    "8684483518522",
+    "8684483518690"
+   ]
   },
   "2591": {
    "stok_kodu": "FCFW1800003",
@@ -647,7 +973,14 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518287",
+    "8684483518294",
+    "8684483518300",
+    "8684483518317",
+    "8684483518676"
+   ]
   },
   "2592": {
    "stok_kodu": "FCFW1800003",
@@ -661,7 +994,14 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518249",
+    "8684483518256",
+    "8684483518263",
+    "8684483518270",
+    "8684483518614"
+   ]
   },
   "2593": {
    "stok_kodu": "FCFW1800002",
@@ -678,7 +1018,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483518577",
+    "8684483518584",
+    "8684483518591",
+    "8684483518607"
+   ]
   },
   "2594": {
    "stok_kodu": "FCFW1800002",
@@ -695,7 +1041,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483518454",
+    "8684483518461",
+    "8684483518478",
+    "8684483518485"
+   ]
   },
   "2595": {
    "stok_kodu": "FCFW1800002",
@@ -712,7 +1064,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483518201",
+    "8684483518218",
+    "8684483518225",
+    "8684483518232"
+   ]
   },
   "2596": {
    "stok_kodu": "FCFW1000001",
@@ -730,7 +1088,10 @@
     "Kalıp": "Bol Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518157"
+   ]
   },
   "2597": {
    "stok_kodu": "FCFW1000001",
@@ -748,7 +1109,10 @@
     "Kalıp": "Bol Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518140"
+   ]
   },
   "2598": {
    "stok_kodu": "FCFW1000001",
@@ -766,7 +1130,10 @@
     "Kalıp": "Bol Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518133"
+   ]
   },
   "2599": {
    "stok_kodu": "FCFW0700001",
@@ -780,7 +1147,13 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518539",
+    "8684483518546",
+    "8684483518553",
+    "8684483518560"
+   ]
   },
   "2600": {
    "stok_kodu": "FCFW0700001",
@@ -794,7 +1167,13 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518416",
+    "8684483518423",
+    "8684483518430",
+    "8684483518447"
+   ]
   },
   "2601": {
    "stok_kodu": "FCFW0700001",
@@ -808,7 +1187,13 @@
     "Astar Durumu": "Astarsız",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518164",
+    "8684483518171",
+    "8684483518188",
+    "8684483518195"
+   ]
   },
   "2602": {
    "stok_kodu": "FCFW0600002",
@@ -830,7 +1215,13 @@
     "Boy": "Tek Ebat",
     "Bel": "Standart",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483518331",
+    "8684483518348",
+    "8684483518355",
+    "8684483518362"
+   ]
   },
   "2603": {
    "stok_kodu": "FCFW0100003",
@@ -846,7 +1237,14 @@
     "Kalıp": "Tam",
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük"
-   }
+   },
+   "barkodlar": [
+    "8684483518058",
+    "8684483518065",
+    "8684483518072",
+    "8684483518034",
+    "8684483518041"
+   ]
   },
   "2604": {
    "stok_kodu": "FCFW0100003",
@@ -862,7 +1260,14 @@
     "Kalıp": "Tam",
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük"
-   }
+   },
+   "barkodlar": [
+    "8684483518119",
+    "8684483518126",
+    "8684483518089",
+    "8684483518096",
+    "8684483518102"
+   ]
   },
   "2605": {
    "stok_kodu": "FCFW0100003",
@@ -878,7 +1283,14 @@
     "Kalıp": "Tam",
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük"
-   }
+   },
+   "barkodlar": [
+    "8684483517945",
+    "8684483517952",
+    "8684483517969",
+    "8684483517976",
+    "8684483517983"
+   ]
   },
   "2606": {
    "stok_kodu": "FCFW0100003",
@@ -894,7 +1306,14 @@
     "Kalıp": "Tam",
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük"
-   }
+   },
+   "barkodlar": [
+    "8684483517891",
+    "8684483517907",
+    "8684483517914",
+    "8684483517921",
+    "8684483517938"
+   ]
   },
   "2607": {
    "stok_kodu": "FCFW1800004",
@@ -902,7 +1321,14 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518621",
+    "8684483518638",
+    "8684483518645",
+    "8684483518652",
+    "8684483518669"
+   ]
   },
   "2612": {
    "stok_kodu": "FCFW0700002",
@@ -915,7 +1341,13 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518973",
+    "8684483518980",
+    "8684483518997",
+    "8684483519000"
+   ]
   },
   "2613": {
    "stok_kodu": "FCFW0700002",
@@ -928,7 +1360,13 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518812",
+    "8684483518829",
+    "8684483518836",
+    "8684483518843"
+   ]
   },
   "2614": {
    "stok_kodu": "FCFW0400003",
@@ -944,7 +1382,13 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518935",
+    "8684483518942",
+    "8684483518959",
+    "8684483518966"
+   ]
   },
   "2615": {
    "stok_kodu": "FCFW0400003",
@@ -960,7 +1404,13 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518775",
+    "8684483518782",
+    "8684483518799",
+    "8684483518805"
+   ]
   },
   "2616": {
    "stok_kodu": "FCFW1800005",
@@ -972,7 +1422,13 @@
     "Cep": "Cepli",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519017",
+    "8684483519024",
+    "8684483519031",
+    "8684483519048"
+   ]
   },
   "2617": {
    "stok_kodu": "FCFW1800005",
@@ -984,7 +1440,13 @@
     "Cep": "Cepli",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483518850",
+    "8684483518867",
+    "8684483518874",
+    "8684483518881"
+   ]
   },
   "2618": {
    "stok_kodu": "FCFW0400004",
@@ -1000,7 +1462,14 @@
     "Kalıp": "Dar Kalıp",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519130",
+    "8684483519147",
+    "8684483519154",
+    "8684483519161",
+    "8684483520037"
+   ]
   },
   "2619": {
    "stok_kodu": "FCFW1800006",
@@ -1022,7 +1491,15 @@
     "Boy": "Normal Boy",
     "Bel": "Standart",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483519185",
+    "8684483519192",
+    "8684483519208",
+    "8684483519215",
+    "8684483520877",
+    "8684483521065"
+   ]
   },
   "2620": {
    "stok_kodu": "FCFW0900002",
@@ -1035,7 +1512,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519338"
+   ]
   },
   "2621": {
    "stok_kodu": "FCFW0900002",
@@ -1048,7 +1528,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519314"
+   ]
   },
   "2622": {
    "stok_kodu": "FCFW0900002",
@@ -1061,7 +1544,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519291"
+   ]
   },
   "2623": {
    "stok_kodu": "FCFW0900002",
@@ -1074,7 +1560,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519277"
+   ]
   },
   "2624": {
    "stok_kodu": "FCFW0900002",
@@ -1087,7 +1576,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519253"
+   ]
   },
   "2625": {
    "stok_kodu": "FCFW0900002",
@@ -1100,7 +1592,10 @@
     "Kalıp": "Oversize",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483519239"
+   ]
   },
   "2626": {
    "stok_kodu": "FCFW0600003",
@@ -1122,7 +1617,11 @@
     "Boy": "Normal Boy",
     "Bel": "Normal Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483519352",
+    "8684483519369"
+   ]
   },
   "2627": {
    "stok_kodu": "FCFW0900003",
@@ -1139,7 +1638,10 @@
     "Ortam": "KADIN",
     "Boy": "Uzun",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519376"
+   ]
   },
   "2629": {
    "stok_kodu": "FCFW0100005",
@@ -1149,7 +1651,10 @@
     "Ortam": "KADIN",
     "Boy": "Kısa/Mini",
     "Bel": "Lastikli"
-   }
+   },
+   "barkodlar": [
+    "8684483519390"
+   ]
   },
   "2630": {
    "stok_kodu": "FCFW0400005",
@@ -1164,7 +1669,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519437",
+    "8684483519444",
+    "8684483519451",
+    "8684483519468"
+   ]
   },
   "2631": {
    "stok_kodu": "FCFW0400005",
@@ -1179,7 +1690,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519512",
+    "8684483519529",
+    "8684483519536",
+    "8684483519543"
+   ]
   },
   "2632": {
    "stok_kodu": "FCFW0400005",
@@ -1194,7 +1711,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519598",
+    "8684483519604",
+    "8684483519611",
+    "8684483519628"
+   ]
   },
   "2633": {
    "stok_kodu": "FCFW1800007",
@@ -1209,7 +1732,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519635",
+    "8684483519642",
+    "8684483519659",
+    "8684483519666"
+   ]
   },
   "2634": {
    "stok_kodu": "FCFW1800007",
@@ -1224,7 +1753,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519550",
+    "8684483519567",
+    "8684483519574",
+    "8684483519581"
+   ]
   },
   "2635": {
    "stok_kodu": "FCFW1800007",
@@ -1239,7 +1774,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519475",
+    "8684483519482",
+    "8684483519499",
+    "8684483519505"
+   ]
   },
   "2636": {
    "stok_kodu": "FCFW1300001",
@@ -1256,7 +1797,10 @@
     "Ortam": "KADIN",
     "Boy": "Kısa",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519697"
+   ]
   },
   "2637": {
    "stok_kodu": "FCFW1300001",
@@ -1273,7 +1817,10 @@
     "Ortam": "KADIN",
     "Boy": "Kısa",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519680"
+   ]
   },
   "2638": {
    "stok_kodu": "FCFW1300001",
@@ -1290,7 +1837,10 @@
     "Ortam": "KADIN",
     "Boy": "Kısa",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483519673"
+   ]
   },
   "2639": {
    "stok_kodu": "FCFW3100001",
@@ -1300,7 +1850,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519765"
+   ]
   },
   "2640": {
    "stok_kodu": "FCFW3100001",
@@ -1310,7 +1863,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519734"
+   ]
   },
   "2641": {
    "stok_kodu": "FCFW3100001",
@@ -1320,7 +1876,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519727"
+   ]
   },
   "2642": {
    "stok_kodu": "FCFW2900001",
@@ -1330,7 +1889,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519758"
+   ]
   },
   "2643": {
    "stok_kodu": "FCFW2900001",
@@ -1340,7 +1902,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519710"
+   ]
   },
   "2644": {
    "stok_kodu": "FCFW2900001",
@@ -1350,7 +1915,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519703"
+   ]
   },
   "2645": {
    "stok_kodu": "FCFW2800001",
@@ -1360,7 +1928,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483519741"
+   ]
   },
   "2646": {
    "stok_kodu": "FCFW2800001",
@@ -1370,7 +1941,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483520082"
+   ]
   },
   "2652": {
    "stok_kodu": "1440",
@@ -1380,7 +1954,12 @@
     "Ortam": "KADIN",
     "Boy": "Kısa",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483520051",
+    "8684483520068",
+    "8684483520075"
+   ]
   },
   "2653": {
    "stok_kodu": "FCFW1000003",
@@ -1390,7 +1969,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520099"
+   ]
   },
   "2654": {
    "stok_kodu": "FCFW1000002",
@@ -1412,7 +1994,10 @@
     "Boy": "Regular",
     "Bel": "Normal Bel",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483520112"
+   ]
   },
   "2655": {
    "stok_kodu": "FCFW1000002",
@@ -1434,7 +2019,10 @@
     "Boy": "Regular",
     "Bel": "Normal Bel",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483520105"
+   ]
   },
   "2656": {
    "stok_kodu": "FCFW0600005",
@@ -1444,7 +2032,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520303",
+    "8684483520310",
+    "8684483520327",
+    "8684483520334"
+   ]
   },
   "2657": {
    "stok_kodu": "FCFW0600005",
@@ -1454,7 +2048,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520341",
+    "8684483520358",
+    "8684483520365",
+    "8684483520372"
+   ]
   },
   "2658": {
    "stok_kodu": "FCFW0600005",
@@ -1464,7 +2064,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520167",
+    "8684483520174",
+    "8684483520181",
+    "8684483520198"
+   ]
   },
   "2659": {
    "stok_kodu": "FCFW0600005",
@@ -1474,7 +2080,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520129",
+    "8684483520136",
+    "8684483520143",
+    "8684483520150"
+   ]
   },
   "2660": {
    "stok_kodu": "FCFW0600005",
@@ -1484,7 +2096,13 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520402",
+    "8684483520419",
+    "8684483520389",
+    "8684483520396"
+   ]
   },
   "2661": {
    "stok_kodu": "FCFW0600006",
@@ -1494,7 +2112,13 @@
     "Ortam": "KADIN",
     "Boy": "Midi",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520204",
+    "8684483520211",
+    "8684483520228",
+    "8684483520235"
+   ]
   },
   "2662": {
    "stok_kodu": "FCFW0600006",
@@ -1504,7 +2128,13 @@
     "Ortam": "KADIN",
     "Boy": "Midi",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520259",
+    "8684483520266",
+    "8684483520273",
+    "8684483520280"
+   ]
   },
   "2663": {
    "stok_kodu": "FCFW0600006",
@@ -1514,7 +2144,13 @@
     "Ortam": "KADIN",
     "Boy": "Midi",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520426",
+    "8684483520433",
+    "8684483520440",
+    "8684483520457"
+   ]
   },
   "2664": {
    "stok_kodu": "FCFW1200001",
@@ -1524,7 +2160,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520464"
+   ]
   },
   "2665": {
    "stok_kodu": "FCFW1200001",
@@ -1534,7 +2173,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520297"
+   ]
   },
   "2666": {
    "stok_kodu": "FCFW1200001",
@@ -1544,7 +2186,10 @@
     "Ortam": "KADIN",
     "Boy": "Normal Boy",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520242"
+   ]
   },
   "2667": {
    "stok_kodu": "FCFW5500001",
@@ -1554,7 +2199,11 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520600",
+    "8684483520617"
+   ]
   },
   "2668": {
    "stok_kodu": "FCFW5500001",
@@ -1564,7 +2213,11 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520570",
+    "8684483520587"
+   ]
   },
   "2669": {
    "stok_kodu": "FCFW1800008",
@@ -1574,7 +2227,14 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520686",
+    "8684483520693",
+    "8684483520709",
+    "8684483520716",
+    "8684483520723"
+   ]
   },
   "2670": {
    "stok_kodu": "FCFW1800008",
@@ -1584,7 +2244,14 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520525",
+    "8684483520532",
+    "8684483520549",
+    "8684483520556",
+    "8684483520563"
+   ]
   },
   "2671": {
    "stok_kodu": "FCFW1300002",
@@ -1594,7 +2261,10 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520747"
+   ]
   },
   "2672": {
    "stok_kodu": "FCFW1300002",
@@ -1604,7 +2274,10 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520624"
+   ]
   },
   "2673": {
    "stok_kodu": "FCFW0600007",
@@ -1614,7 +2287,10 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520730"
+   ]
   },
   "2674": {
    "stok_kodu": "FCFW0600007",
@@ -1624,7 +2300,10 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520594"
+   ]
   },
   "2675": {
    "stok_kodu": "FCFW0400006",
@@ -1634,7 +2313,14 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520631",
+    "8684483520648",
+    "8684483520655",
+    "8684483520662",
+    "8684483520679"
+   ]
   },
   "2676": {
    "stok_kodu": "FCFW0400006",
@@ -1644,7 +2330,14 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Bel": "Normal Bel"
-   }
+   },
+   "barkodlar": [
+    "8684483520471",
+    "8684483520488",
+    "8684483520495",
+    "8684483520501",
+    "8684483520518"
+   ]
   },
   "2677": {
    "stok_kodu": "FCFW1300003",
@@ -1652,7 +2345,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520815"
+   ]
   },
   "2678": {
    "stok_kodu": "FCFW1300003",
@@ -1660,7 +2356,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520822"
+   ]
   },
   "2679": {
    "stok_kodu": "FCFW0400007",
@@ -1669,7 +2368,11 @@
     "Sezon": "FALL-WİNTER",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520853",
+    "8684483520860"
+   ]
   },
   "2680": {
    "stok_kodu": "FCFW0400007",
@@ -1678,7 +2381,11 @@
     "Sezon": "FALL-WİNTER",
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520839",
+    "8684483520846"
+   ]
   },
   "2681": {
    "stok_kodu": "FCFW3200002",
@@ -1686,7 +2393,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520969"
+   ]
   },
   "2682": {
    "stok_kodu": "FCFW3200002",
@@ -1694,7 +2404,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520952"
+   ]
   },
   "2683": {
    "stok_kodu": "FCFW3200002",
@@ -1702,7 +2415,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520945"
+   ]
   },
   "2684": {
    "stok_kodu": "FCFW3200001",
@@ -1710,7 +2426,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520938"
+   ]
   },
   "2685": {
    "stok_kodu": "FCFW3200001",
@@ -1718,7 +2437,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520921"
+   ]
   },
   "2686": {
    "stok_kodu": "FCFW3200001",
@@ -1726,7 +2448,10 @@
    "ozellikler": {
     "Sezon": "FALL-WİNTER",
     "Ortam": "KADIN"
-   }
+   },
+   "barkodlar": [
+    "8684483520914"
+   ]
   },
   "2690": {
    "stok_kodu": "FCFW0400008",
@@ -1747,7 +2472,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521010",
+    "8684483521027"
+   ]
   },
   "2691": {
    "stok_kodu": "FCFW0400008",
@@ -1768,7 +2497,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483520990",
+    "8684483521003"
+   ]
   },
   "2692": {
    "stok_kodu": "FCFW0400008",
@@ -1789,7 +2522,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483520976",
+    "8684483520983"
+   ]
   },
   "2693": {
    "stok_kodu": "FCFW1200003",
@@ -1810,7 +2547,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483521058"
+   ]
   },
   "2694": {
    "stok_kodu": "FCFW1200003",
@@ -1831,7 +2571,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483521041"
+   ]
   },
   "2695": {
    "stok_kodu": "FCFW1200003",
@@ -1852,7 +2595,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483521034"
+   ]
   },
   "2696": {
    "stok_kodu": "FCFW1300005",
@@ -1873,7 +2619,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521171",
+    "8684483521188"
+   ]
   },
   "2698": {
    "stok_kodu": "FCFW1300005",
@@ -1894,7 +2644,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521133",
+    "8684483521140"
+   ]
   },
   "2699": {
    "stok_kodu": "FCFW1300004",
@@ -1915,7 +2669,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521119",
+    "8684483521126"
+   ]
   },
   "2701": {
    "stok_kodu": "FCFW1300004",
@@ -1936,7 +2694,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521072",
+    "8684483521089"
+   ]
   },
   "2702": {
    "stok_kodu": "FCFW1800009",
@@ -1955,7 +2717,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521232",
+    "8684483521249",
+    "8684483521256",
+    "8684483521263"
+   ]
   },
   "2703": {
    "stok_kodu": "FCFW0700003",
@@ -1975,7 +2743,13 @@
     "Boy": "Mini",
     "Bel": "Normal Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521270",
+    "8684483521287",
+    "8684483521294",
+    "8684483521300"
+   ]
   },
   "2704": {
    "stok_kodu": "FCFW0400009",
@@ -1996,7 +2770,13 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483521195",
+    "8684483521201",
+    "8684483521218",
+    "8684483521225"
+   ]
   },
   "2705": {
    "stok_kodu": "FCFW0100006",
@@ -2017,7 +2797,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521393",
+    "8684483521409",
+    "8684483521416",
+    "8684483521423",
+    "8684483521454"
+   ]
   },
   "2706": {
    "stok_kodu": "FCFW0100006",
@@ -2038,7 +2825,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521355",
+    "8684483521362",
+    "8684483521379",
+    "8684483521386",
+    "8684483521447"
+   ]
   },
   "2707": {
    "stok_kodu": "FCFW0100006",
@@ -2059,7 +2853,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521317",
+    "8684483521324",
+    "8684483521331",
+    "8684483521348",
+    "8684483521430"
+   ]
   },
   "2708": {
    "stok_kodu": "FCFW2800002",
@@ -2076,7 +2877,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521461"
+   ]
   },
   "2709": {
    "stok_kodu": "FCFW2800002",
@@ -2093,7 +2897,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521478"
+   ]
   },
   "2710": {
    "stok_kodu": "FCFW2800002",
@@ -2110,7 +2917,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521492"
+   ]
   },
   "2711": {
    "stok_kodu": "FCFW2800002",
@@ -2127,7 +2937,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521485"
+   ]
   },
   "2712": {
    "stok_kodu": "FCFW0400010",
@@ -2148,7 +2961,11 @@
     "Ortam": "KADIN",
     "Boy": "Orta",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483521508",
+    "8684483521515"
+   ]
   },
   "2713": {
    "stok_kodu": "FCFW0900004",
@@ -2169,7 +2986,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521553",
+    "8684483521560",
+    "8684483521577"
+   ]
   },
   "2714": {
    "stok_kodu": "FCFW0900004",
@@ -2190,7 +3012,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521522",
+    "8684483521539",
+    "8684483521546"
+   ]
   },
   "2715": {
    "stok_kodu": "FCSS0200001",
@@ -2206,7 +3033,14 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521836",
+    "8684483521843",
+    "8684483521850",
+    "8684483521867",
+    "8684483521874"
+   ]
   },
   "2716": {
    "stok_kodu": "FCSS0200001",
@@ -2222,7 +3056,14 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521782",
+    "8684483521799",
+    "8684483521805",
+    "8684483521812",
+    "8684483521829"
+   ]
   },
   "2718": {
    "stok_kodu": "FCSS0200001",
@@ -2238,7 +3079,14 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521683",
+    "8684483521690",
+    "8684483521706",
+    "8684483521713",
+    "8684483521720"
+   ]
   },
   "2719": {
    "stok_kodu": "FCSS0200001",
@@ -2254,7 +3102,14 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521638",
+    "8684483521645",
+    "8684483521652",
+    "8684483521669",
+    "8684483521676"
+   ]
   },
   "2720": {
    "stok_kodu": "FCSS0200001",
@@ -2270,7 +3125,14 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483521584",
+    "8684483521591",
+    "8684483521607",
+    "8684483521614",
+    "8684483521621"
+   ]
   },
   "2721": {
    "stok_kodu": "FCSS3300002",
@@ -2291,7 +3153,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522598",
+    "8684483522604",
+    "8684483522611",
+    "8684483522628"
+   ]
   },
   "2722": {
    "stok_kodu": "FCSS3300002",
@@ -2312,7 +3180,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522550",
+    "8684483522567",
+    "8684483522574",
+    "8684483522581"
+   ]
   },
   "2723": {
    "stok_kodu": "FCSS3300002",
@@ -2333,7 +3207,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522512",
+    "8684483522529",
+    "8684483522536",
+    "8684483522543"
+   ]
   },
   "2724": {
    "stok_kodu": "FCSS3300002",
@@ -2354,7 +3234,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522475",
+    "8684483522482",
+    "8684483522499",
+    "8684483522505"
+   ]
   },
   "2725": {
    "stok_kodu": "FCSS3300001",
@@ -2373,7 +3259,13 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Regular"
-   }
+   },
+   "barkodlar": [
+    "8684483522437",
+    "8684483522444",
+    "8684483522451",
+    "8684483522468"
+   ]
   },
   "2726": {
    "stok_kodu": "FCSS3300001",
@@ -2392,7 +3284,13 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Regular"
-   }
+   },
+   "barkodlar": [
+    "8684483522390",
+    "8684483522406",
+    "8684483522413",
+    "8684483522420"
+   ]
   },
   "2727": {
    "stok_kodu": "FCSS3300001",
@@ -2411,7 +3309,13 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Regular"
-   }
+   },
+   "barkodlar": [
+    "8684483522352",
+    "8684483522369",
+    "8684483522376",
+    "8684483522383"
+   ]
   },
   "2728": {
    "stok_kodu": "FCSS0700001",
@@ -2431,7 +3335,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522314",
+    "8684483522321",
+    "8684483522338",
+    "8684483522345"
+   ]
   },
   "2729": {
    "stok_kodu": "FCSS0700001",
@@ -2451,7 +3361,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522277",
+    "8684483522284",
+    "8684483522291",
+    "8684483522307"
+   ]
   },
   "2730": {
    "stok_kodu": "FCSS0400002",
@@ -2470,7 +3386,10 @@
     "Koleksiyon": "Türkiye",
     "Ortam": "KADIN",
     "Boy": "Normal Boy"
-   }
+   },
+   "barkodlar": [
+    "8684483522260"
+   ]
   },
   "2731": {
    "stok_kodu": "FCSS0200004",
@@ -2491,7 +3410,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522215",
+    "8684483522222",
+    "8684483522239",
+    "8684483522246",
+    "8684483522253"
+   ]
   },
   "2732": {
    "stok_kodu": "FCSS0200004",
@@ -2512,7 +3438,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522161",
+    "8684483522178",
+    "8684483522185",
+    "8684483522192",
+    "8684483522208"
+   ]
   },
   "2733": {
    "stok_kodu": "FCSS0200004",
@@ -2533,7 +3466,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522116",
+    "8684483522123",
+    "8684483522130",
+    "8684483522147",
+    "8684483522154"
+   ]
   },
   "2734": {
    "stok_kodu": "FCSS0200004",
@@ -2554,7 +3494,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522062",
+    "8684483522079",
+    "8684483522086",
+    "8684483522093",
+    "8684483522109"
+   ]
   },
   "2735": {
    "stok_kodu": "FCSS0200003",
@@ -2575,7 +3522,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522031",
+    "8684483522048",
+    "8684483522055"
+   ]
   },
   "2736": {
    "stok_kodu": "FCSS0200003",
@@ -2596,7 +3548,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522000",
+    "8684483522017",
+    "8684483522024"
+   ]
   },
   "2737": {
    "stok_kodu": "FCSS0200003",
@@ -2617,7 +3574,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521973",
+    "8684483521980",
+    "8684483521997"
+   ]
   },
   "2738": {
    "stok_kodu": "FCSS0200002",
@@ -2638,7 +3600,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521942",
+    "8684483521959",
+    "8684483521966"
+   ]
   },
   "2739": {
    "stok_kodu": "FCSS0200002",
@@ -2659,7 +3626,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521911",
+    "8684483521928",
+    "8684483521935"
+   ]
   },
   "2740": {
    "stok_kodu": "FCSS0200002",
@@ -2680,7 +3652,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483521881",
+    "8684483521898",
+    "8684483521904"
+   ]
   },
   "2741": {
    "stok_kodu": "FCSS0200004",
@@ -2701,7 +3678,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522635",
+    "8684483522642",
+    "8684483522659",
+    "8684483522666",
+    "8684483522673"
+   ]
   },
   "2742": {
    "stok_kodu": "FCSS0900002",
@@ -2722,7 +3706,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522680",
+    "8684483522697"
+   ]
   },
   "2743": {
    "stok_kodu": "FCSS0100002",
@@ -2743,7 +3731,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522727",
+    "8684483522734"
+   ]
   },
   "2744": {
    "stok_kodu": "FCSS0100002",
@@ -2764,7 +3756,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522703",
+    "8684483522710"
+   ]
   },
   "2747": {
    "stok_kodu": "FCSS0900003",
@@ -2785,7 +3781,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522802",
+    "8684483522819",
+    "8684483522826",
+    "8684483525889"
+   ]
   },
   "2748": {
    "stok_kodu": "FCSS0900003",
@@ -2806,7 +3808,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522772",
+    "8684483522789",
+    "8684483522796",
+    "8684483525872"
+   ]
   },
   "2749": {
    "stok_kodu": "FCSS0900003",
@@ -2827,7 +3835,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483522741",
+    "8684483522758",
+    "8684483522765",
+    "8684483525865"
+   ]
   },
   "2750": {
    "stok_kodu": "FCSS0400004",
@@ -2848,7 +3862,13 @@
     "Ortam": "KADIN",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522871",
+    "8684483522888",
+    "8684483522895",
+    "8684483522901"
+   ]
   },
   "2751": {
    "stok_kodu": "FCSS0400003",
@@ -2868,7 +3888,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Boy": "Regular"
-   }
+   },
+   "barkodlar": [
+    "8684483522857",
+    "8684483522864"
+   ]
   },
   "2752": {
    "stok_kodu": "FCSS0400003",
@@ -2888,7 +3912,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Boy": "Regular"
-   }
+   },
+   "barkodlar": [
+    "8684483522833",
+    "8684483522840"
+   ]
   },
   "2753": {
    "stok_kodu": "FCSS2700001",
@@ -2908,7 +3936,13 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523168",
+    "8684483523175",
+    "8684483523182",
+    "8684483523199"
+   ]
   },
   "2754": {
    "stok_kodu": "FCSS2100001",
@@ -2928,7 +3962,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523410",
+    "8684483523427",
+    "8684483523434"
+   ]
   },
   "2755": {
    "stok_kodu": "FCSS2100001",
@@ -2948,7 +3987,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523113",
+    "8684483523120",
+    "8684483523137"
+   ]
   },
   "2760": {
    "stok_kodu": "FCSS0900004",
@@ -2969,7 +4013,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523441",
+    "8684483523458",
+    "8684483523465"
+   ]
   },
   "2761": {
    "stok_kodu": "FCSS0900004",
@@ -2990,7 +4039,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523267",
+    "8684483523274",
+    "8684483523281"
+   ]
   },
   "2762": {
    "stok_kodu": "FCSS0900004",
@@ -3011,7 +4065,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523236",
+    "8684483523243",
+    "8684483523250"
+   ]
   },
   "2763": {
    "stok_kodu": "FCSS0900004",
@@ -3032,7 +4091,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523205",
+    "8684483523212",
+    "8684483523229"
+   ]
   },
   "2764": {
    "stok_kodu": "FCSS0700002",
@@ -3052,7 +4116,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523472",
+    "8684483523489",
+    "8684483523496",
+    "8684483523502"
+   ]
   },
   "2765": {
    "stok_kodu": "FCSS0700002",
@@ -3072,7 +4142,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523298",
+    "8684483523304",
+    "8684483523311",
+    "8684483523328"
+   ]
   },
   "2766": {
    "stok_kodu": "FCSS0700002",
@@ -3092,7 +4168,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483522994",
+    "8684483523007",
+    "8684483523014",
+    "8684483523021"
+   ]
   },
   "2767": {
    "stok_kodu": "FCSS0400005",
@@ -3113,7 +4195,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523144",
+    "8684483523151"
+   ]
   },
   "2768": {
    "stok_kodu": "FCSS3300003",
@@ -3134,7 +4220,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa/Mini",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483523847",
+    "8684483523854",
+    "8684483523861",
+    "8684483523878",
+    "8684483523885"
+   ]
   },
   "2769": {
    "stok_kodu": "FCSS3300003",
@@ -3155,7 +4248,14 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa/Mini",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483523731",
+    "8684483523748",
+    "8684483523755",
+    "8684483523762",
+    "8684483523779"
+   ]
   },
   "2770": {
    "stok_kodu": "FCSS1800005",
@@ -3175,7 +4275,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523786",
+    "8684483523793",
+    "8684483523809",
+    "8684483523816",
+    "8684483523823"
+   ]
   },
   "2771": {
    "stok_kodu": "FCSS1800005",
@@ -3195,7 +4302,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523687",
+    "8684483523694",
+    "8684483523700",
+    "8684483523717",
+    "8684483523724"
+   ]
   },
   "2772": {
    "stok_kodu": "FCSS1800005",
@@ -3215,7 +4329,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523519",
+    "8684483523526",
+    "8684483523533",
+    "8684483523540",
+    "8684483523557"
+   ]
   },
   "2773": {
    "stok_kodu": "FCSS0900005",
@@ -3236,7 +4357,10 @@
     "Ortam": "KADIN",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483523830"
+   ]
   },
   "2774": {
    "stok_kodu": "FCSS0600001",
@@ -3257,7 +4381,13 @@
     "Ortam": "KADIN",
     "Boy": "Kısa/Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523977",
+    "8684483523984",
+    "8684483523991",
+    "8684483524004"
+   ]
   },
   "2775": {
    "stok_kodu": "FCSS0600001",
@@ -3278,7 +4408,13 @@
     "Ortam": "KADIN",
     "Boy": "Kısa/Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523649",
+    "8684483523656",
+    "8684483523663",
+    "8684483523670"
+   ]
   },
   "2776": {
    "stok_kodu": "FCSS0100004",
@@ -3300,7 +4436,13 @@
     "Boy": "Regular",
     "Bel": "Normal Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523939",
+    "8684483523946",
+    "8684483523953",
+    "8684483523960"
+   ]
   },
   "2777": {
    "stok_kodu": "FCSS0100004",
@@ -3322,7 +4464,13 @@
     "Boy": "Regular",
     "Bel": "Normal Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523601",
+    "8684483523618",
+    "8684483523625",
+    "8684483523632"
+   ]
   },
   "2778": {
    "stok_kodu": "FCSS0100003",
@@ -3343,7 +4491,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523892",
+    "8684483523908",
+    "8684483523915",
+    "8684483523922"
+   ]
   },
   "2779": {
    "stok_kodu": "FCSS0100003",
@@ -3364,7 +4518,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483523564",
+    "8684483523571",
+    "8684483523588",
+    "8684483523595"
+   ]
   },
   "2780": {
    "stok_kodu": "FCSS1800006",
@@ -3383,7 +4543,13 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524134",
+    "8684483524141",
+    "8684483524158",
+    "8684483524165"
+   ]
   },
   "2781": {
    "stok_kodu": "FCSS1800006",
@@ -3402,7 +4568,13 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524097",
+    "8684483524103",
+    "8684483524110",
+    "8684483524127"
+   ]
   },
   "2782": {
    "stok_kodu": "FCSS1800006",
@@ -3421,7 +4593,13 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524011",
+    "8684483524028",
+    "8684483524035",
+    "8684483524042"
+   ]
   },
   "2783": {
    "stok_kodu": "FCSS0900006",
@@ -3442,7 +4620,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483524264"
+   ]
   },
   "2784": {
    "stok_kodu": "FCSS0900006",
@@ -3463,7 +4644,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483524219"
+   ]
   },
   "2785": {
    "stok_kodu": "FCSS0700003",
@@ -3483,7 +4667,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524059",
+    "8684483524066",
+    "8684483524073",
+    "8684483524080"
+   ]
   },
   "2788": {
    "stok_kodu": "FCSS0200005",
@@ -3504,7 +4694,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524172",
+    "8684483524189",
+    "8684483524196",
+    "8684483524202"
+   ]
   },
   "2790": {
    "stok_kodu": "FCSS2100002",
@@ -3522,7 +4718,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524820",
+    "8684483524837",
+    "8684483524844",
+    "8684483524851"
+   ]
   },
   "2791": {
    "stok_kodu": "FCSS2100002",
@@ -3540,7 +4742,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524691",
+    "8684483524707",
+    "8684483524714",
+    "8684483524721"
+   ]
   },
   "2792": {
    "stok_kodu": "FCSS2100002",
@@ -3558,7 +4766,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524608",
+    "8684483524615",
+    "8684483524622",
+    "8684483524639"
+   ]
   },
   "2793": {
    "stok_kodu": "FCSS2100002",
@@ -3576,7 +4790,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524523",
+    "8684483524530",
+    "8684483524547",
+    "8684483524554"
+   ]
   },
   "2794": {
    "stok_kodu": "FCSS2100002",
@@ -3594,7 +4814,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524394",
+    "8684483524400",
+    "8684483524417",
+    "8684483524424"
+   ]
   },
   "2795": {
    "stok_kodu": "FCSS2100002",
@@ -3612,7 +4838,13 @@
     "Kalıp": "Regular",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524356",
+    "8684483524363",
+    "8684483524370",
+    "8684483524387"
+   ]
   },
   "2796": {
    "stok_kodu": "FCSS1800008",
@@ -3632,7 +4864,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524776",
+    "8684483524783",
+    "8684483524790",
+    "8684483524806",
+    "8684483524813"
+   ]
   },
   "2797": {
    "stok_kodu": "FCSS1800008",
@@ -3652,7 +4891,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524646",
+    "8684483524653",
+    "8684483524660",
+    "8684483524677",
+    "8684483524684"
+   ]
   },
   "2798": {
    "stok_kodu": "FCSS1800008",
@@ -3672,7 +4918,14 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524479",
+    "8684483524486",
+    "8684483524493",
+    "8684483524509",
+    "8684483524516"
+   ]
   },
   "2799": {
    "stok_kodu": "FCSS1800007",
@@ -3692,7 +4945,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524738",
+    "8684483524745",
+    "8684483524752",
+    "8684483524769"
+   ]
   },
   "2800": {
    "stok_kodu": "FCSS1800007",
@@ -3712,7 +4971,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525995",
+    "8684483526008",
+    "8684483526015",
+    "8684483526022"
+   ]
   },
   "2801": {
    "stok_kodu": "FCSS1800007",
@@ -3732,7 +4997,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526039",
+    "8684483526046",
+    "8684483526053",
+    "8684483526060"
+   ]
   },
   "2802": {
    "stok_kodu": "FCSS1800010",
@@ -3752,7 +5023,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525926",
+    "8684483525933",
+    "8684483525940",
+    "8684483525957"
+   ]
   },
   "2803": {
    "stok_kodu": "FCSS1800009",
@@ -3771,7 +5048,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525124",
+    "8684483525131",
+    "8684483525148",
+    "8684483525155"
+   ]
   },
   "2804": {
    "stok_kodu": "FCSS1800009",
@@ -3790,7 +5073,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524967",
+    "8684483524974",
+    "8684483524981",
+    "8684483524998"
+   ]
   },
   "2807": {
    "stok_kodu": "FCSS1800011",
@@ -3809,7 +5098,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525261",
+    "8684483525278",
+    "8684483525285",
+    "8684483525292"
+   ]
   },
   "2808": {
    "stok_kodu": "FCSS1800011",
@@ -3828,7 +5123,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525063",
+    "8684483525070",
+    "8684483525087",
+    "8684483525094"
+   ]
   },
   "2809": {
    "stok_kodu": "FCSS0900007",
@@ -3849,7 +5150,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525223",
+    "8684483525230"
+   ]
   },
   "2810": {
    "stok_kodu": "FCSS0900007",
@@ -3870,7 +5175,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525209",
+    "8684483525216"
+   ]
   },
   "2811": {
    "stok_kodu": "FCSS0900007",
@@ -3891,7 +5200,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525100",
+    "8684483525117"
+   ]
   },
   "2812": {
    "stok_kodu": "FCSS0900007",
@@ -3912,7 +5225,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483524943",
+    "8684483524950"
+   ]
   },
   "2813": {
    "stok_kodu": "FCSS0600002",
@@ -3933,7 +5250,13 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "KADIN",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525162",
+    "8684483525179",
+    "8684483525186",
+    "8684483525193"
+   ]
   },
   "2814": {
    "stok_kodu": "FCSS0600002",
@@ -3955,7 +5278,13 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "KADIN",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529191",
+    "8684483529207",
+    "8684483529214",
+    "8684483529221"
+   ]
   },
   "2815": {
    "stok_kodu": "FCSS0400008",
@@ -3976,7 +5305,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525247",
+    "8684483525254"
+   ]
   },
   "2816": {
    "stok_kodu": "FCSS0400008",
@@ -3997,7 +5330,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525049",
+    "8684483525056"
+   ]
   },
   "2817": {
    "stok_kodu": "FCSS0400007",
@@ -4018,7 +5355,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525308",
+    "8684483525315"
+   ]
   },
   "2818": {
    "stok_kodu": "FCSS2000001",
@@ -4039,7 +5380,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525391",
+    "8684483525407",
+    "8684483525414"
+   ]
   },
   "2819": {
    "stok_kodu": "FCSS2000001",
@@ -4060,7 +5406,12 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525360",
+    "8684483525377",
+    "8684483525384"
+   ]
   },
   "2820": {
    "stok_kodu": "FCSS0400009",
@@ -4081,7 +5432,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525346",
+    "8684483525353"
+   ]
   },
   "2821": {
    "stok_kodu": "FCSS0400009",
@@ -4102,7 +5457,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525322",
+    "8684483525339"
+   ]
   },
   "2822": {
    "stok_kodu": "FCSS0700004",
@@ -4121,7 +5480,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525452",
+    "8684483525469",
+    "8684483525476",
+    "8684483525483"
+   ]
   },
   "2823": {
    "stok_kodu": "FCSS0600003",
@@ -4142,7 +5507,12 @@
     "Ortam": "KADIN",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525490",
+    "8684483525506",
+    "8684483525513"
+   ]
   },
   "2825": {
    "stok_kodu": "FCSS2500001",
@@ -4158,7 +5528,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "KADIN",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483525544"
+   ]
   },
   "2826": {
    "stok_kodu": "FCSS2500001",
@@ -4174,7 +5547,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "KADIN",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483525537"
+   ]
   },
   "2827": {
    "stok_kodu": "FCSS2500001",
@@ -4190,7 +5566,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "KADIN",
     "Kalınlık": "Kalın"
-   }
+   },
+   "barkodlar": [
+    "8684483525520"
+   ]
   },
   "2828": {
    "stok_kodu": "FCSS1100001",
@@ -4208,7 +5587,15 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525551",
+    "8684483525568",
+    "8684483525575",
+    "8684483525582",
+    "8684483525599",
+    "8684483525964"
+   ]
   },
   "2829": {
    "stok_kodu": "FCSS1100001",
@@ -4226,7 +5613,15 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525650",
+    "8684483525667",
+    "8684483525674",
+    "8684483525681",
+    "8684483525698",
+    "8684483525988"
+   ]
   },
   "2830": {
    "stok_kodu": "FCSS1100001",
@@ -4244,7 +5639,15 @@
     "Ortam": "Casual/Günlük",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525605",
+    "8684483525612",
+    "8684483525629",
+    "8684483525636",
+    "8684483525643",
+    "8684483525971"
+   ]
   },
   "2832": {
    "stok_kodu": "FCFW1300005",
@@ -4265,7 +5668,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525827",
+    "8684483525834"
+   ]
   },
   "2833": {
    "stok_kodu": "FCFW1300004",
@@ -4286,7 +5693,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Normal Boy",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525841",
+    "8684483525858"
+   ]
   },
   "2836": {
    "stok_kodu": "FCSS0600003",
@@ -4307,7 +5718,12 @@
     "Ortam": "KADIN",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483525896",
+    "8684483525902",
+    "8684483525919"
+   ]
   },
   "2838": {
    "stok_kodu": "FCSS0600004",
@@ -4328,7 +5744,13 @@
     "Ortam": "KADIN",
     "Boy": "Midi",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528668",
+    "8684483526176",
+    "8684483526183",
+    "8684483528675"
+   ]
   },
   "2839": {
    "stok_kodu": "FCSS2000002",
@@ -4350,7 +5772,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483526121",
+    "8684483526138",
+    "8684483526145",
+    "8684483526152"
+   ]
   },
   "2840": {
    "stok_kodu": "FCSS2000002",
@@ -4372,7 +5800,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483526084",
+    "8684483526091",
+    "8684483526107",
+    "8684483526114"
+   ]
   },
   "2841": {
    "stok_kodu": "FCSS2000003",
@@ -4394,7 +5828,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528682",
+    "8684483528699",
+    "8684483526220",
+    "8684483528705"
+   ]
   },
   "2844": {
    "stok_kodu": "FCSS2700002",
@@ -4413,7 +5853,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528712",
+    "8684483527159",
+    "8684483527166",
+    "8684483528729"
+   ]
   },
   "2845": {
    "stok_kodu": "FCSS2000004",
@@ -4435,7 +5881,13 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526695",
+    "8684483526701",
+    "8684483526718",
+    "8684483526725"
+   ]
   },
   "2846": {
    "stok_kodu": "FCSS2000004",
@@ -4457,7 +5909,13 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529412",
+    "8684483529429",
+    "8684483529436",
+    "8684483529443"
+   ]
   },
   "2847": {
    "stok_kodu": "FCSS1800013",
@@ -4477,7 +5935,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527104",
+    "8684483527111",
+    "8684483527128",
+    "8684483527135"
+   ]
   },
   "2848": {
    "stok_kodu": "FCSS1800013",
@@ -4497,7 +5961,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527029",
+    "8684483527036",
+    "8684483527043",
+    "8684483527050"
+   ]
   },
   "2849": {
    "stok_kodu": "FCSS1800013",
@@ -4517,7 +5987,13 @@
     "Boy": "Uzun",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528767",
+    "8684483526770",
+    "8684483526787",
+    "8684483528774"
+   ]
   },
   "2852": {
    "stok_kodu": "FCSS0900008",
@@ -4538,7 +6014,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528828",
+    "8684483528835"
+   ]
   },
   "2853": {
    "stok_kodu": "FCSS0900008",
@@ -4559,7 +6039,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528804",
+    "8684483528811"
+   ]
   },
   "2854": {
    "stok_kodu": "FCSS0900008",
@@ -4581,7 +6065,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483529252",
+    "8684483529269"
+   ]
   },
   "2855": {
    "stok_kodu": "FCSS0600007",
@@ -4602,7 +6090,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526732"
+   ]
   },
   "2856": {
    "stok_kodu": "FCSS0600007",
@@ -4624,7 +6115,10 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529344"
+   ]
   },
   "2857": {
    "stok_kodu": "FCSS0600006",
@@ -4645,7 +6139,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526398",
+    "8684483526404",
+    "8684483528859",
+    "8684483528866"
+   ]
   },
   "2858": {
    "stok_kodu": "FCSS0600005",
@@ -4666,7 +6166,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526602",
+    "8684483528880"
+   ]
   },
   "2861": {
    "stok_kodu": "FCSS0400010",
@@ -4687,7 +6191,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527074",
+    "8684483528897"
+   ]
   },
   "2864": {
    "stok_kodu": "FCFW2300001",
@@ -4708,7 +6216,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483526350",
+    "8684483526367"
+   ]
   },
   "2865": {
    "stok_kodu": "FCFW2300001",
@@ -4730,7 +6242,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529238",
+    "8684483529245"
+   ]
   },
   "2872": {
    "stok_kodu": "FCSS2000005",
@@ -4752,7 +6268,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528903",
+    "8684483528910",
+    "8684483528927",
+    "8684483528934"
+   ]
   },
   "2873": {
    "stok_kodu": "FCSS2000005",
@@ -4774,7 +6296,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527289",
+    "8684483527296",
+    "8684483527302",
+    "8684483527319"
+   ]
   },
   "2874": {
    "stok_kodu": "FCSS0900009",
@@ -4795,7 +6323,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528965",
+    "8684483528972"
+   ]
   },
   "2875": {
    "stok_kodu": "FCSS0900009",
@@ -4817,7 +6349,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483529276",
+    "8684483529283"
+   ]
   },
   "2876": {
    "stok_kodu": "FCSS0700005",
@@ -4836,7 +6372,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527241",
+    "8684483527258",
+    "8684483527265",
+    "8684483527272"
+   ]
   },
   "2877": {
    "stok_kodu": "FCSS0600008",
@@ -4857,7 +6399,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527388",
+    "8684483527395"
+   ]
   },
   "2878": {
    "stok_kodu": "FCSS0600008",
@@ -4879,7 +6425,11 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483529351",
+    "8684483529368"
+   ]
   },
   "2879": {
    "stok_kodu": "FCSS0400012",
@@ -4900,7 +6450,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527227",
+    "8684483527234"
+   ]
   },
   "2880": {
    "stok_kodu": "FCSS3400001",
@@ -4920,7 +6474,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527647",
+    "8684483527654",
+    "8684483527661",
+    "8684483527678"
+   ]
   },
   "2881": {
    "stok_kodu": "FCSS3400001",
@@ -4940,7 +6500,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527487",
+    "8684483527494",
+    "8684483527500",
+    "8684483527517"
+   ]
   },
   "2882": {
    "stok_kodu": "FCSS2700004",
@@ -4960,7 +6526,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527722",
+    "8684483527739",
+    "8684483527746",
+    "8684483527753"
+   ]
   },
   "2883": {
    "stok_kodu": "FCSS2700004",
@@ -4980,7 +6552,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527562",
+    "8684483527579",
+    "8684483527586",
+    "8684483527593"
+   ]
   },
   "2884": {
    "stok_kodu": "FCSS2700004",
@@ -5001,7 +6579,13 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529047",
+    "8684483527418",
+    "8684483527425",
+    "8684483529054"
+   ]
   },
   "2885": {
    "stok_kodu": "FCSS2000007",
@@ -5023,7 +6607,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527685",
+    "8684483527692",
+    "8684483527708",
+    "8684483527715"
+   ]
   },
   "2886": {
    "stok_kodu": "FCSS2000007",
@@ -5045,7 +6635,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527524",
+    "8684483527531",
+    "8684483527548",
+    "8684483527555"
+   ]
   },
   "2887": {
    "stok_kodu": "FCSS2000006",
@@ -5067,7 +6663,13 @@
     "Boy": "Crop",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527609",
+    "8684483527616",
+    "8684483527623",
+    "8684483527630"
+   ]
   },
   "2888": {
    "stok_kodu": "FCSS2000006",
@@ -5089,7 +6691,13 @@
     "Boy": "Crop",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483527449",
+    "8684483527456",
+    "8684483527463",
+    "8684483527470"
+   ]
   },
   "2889": {
    "stok_kodu": "FCSS2000008",
@@ -5111,7 +6719,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527845",
+    "8684483527852",
+    "8684483527869",
+    "8684483527876"
+   ]
   },
   "2890": {
    "stok_kodu": "FCSS2000008",
@@ -5133,7 +6747,13 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527807",
+    "8684483527814",
+    "8684483527821",
+    "8684483527838"
+   ]
   },
   "2891": {
    "stok_kodu": "FCSS0600009",
@@ -5154,7 +6774,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483527883",
+    "8684483527890",
+    "8684483527906",
+    "8684483527913"
+   ]
   },
   "2892": {
    "stok_kodu": "FCSS0600009",
@@ -5176,7 +6802,13 @@
     "Koleksiyon": "Casual / Günlük",
     "Ortam": "Casual/Günlük",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529375",
+    "8684483529382",
+    "8684483529399",
+    "8684483529405"
+   ]
   },
   "2893": {
    "stok_kodu": "FCSS2000010",
@@ -5198,7 +6830,10 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528002"
+   ]
   },
   "2896": {
    "stok_kodu": "FCSS3500001",
@@ -5218,7 +6853,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528101",
+    "8684483528118",
+    "8684483528125",
+    "8684483528132"
+   ]
   },
   "2897": {
    "stok_kodu": "FCSS3500001",
@@ -5238,7 +6879,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528033",
+    "8684483528040",
+    "8684483528057",
+    "8684483528064"
+   ]
   },
   "2898": {
    "stok_kodu": "FCSS0900010",
@@ -5259,7 +6906,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528231"
+   ]
   },
   "2899": {
    "stok_kodu": "FCSS0900010",
@@ -5280,7 +6930,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528187"
+   ]
   },
   "2900": {
    "stok_kodu": "FCSS0700006",
@@ -5300,7 +6953,13 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528194",
+    "8684483528200",
+    "8684483528217",
+    "8684483528224"
+   ]
   },
   "2901": {
    "stok_kodu": "FCSS0700006",
@@ -5320,7 +6979,13 @@
     "Boy": "Kısa",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528149",
+    "8684483528156",
+    "8684483528163",
+    "8684483528170"
+   ]
   },
   "2902": {
    "stok_kodu": "FCSS0400013",
@@ -5341,7 +7006,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528088",
+    "8684483528095"
+   ]
   },
   "2903": {
    "stok_kodu": "FCSS0400013",
@@ -5362,7 +7031,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528019",
+    "8684483528026"
+   ]
   },
   "2904": {
    "stok_kodu": "FCSS1400001",
@@ -5383,7 +7056,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529061"
+   ]
   },
   "2905": {
    "stok_kodu": "FCSS0700007",
@@ -5404,7 +7080,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528477",
+    "8684483528484",
+    "8684483528491",
+    "8684483528507"
+   ]
   },
   "2906": {
    "stok_kodu": "FCSS0700007",
@@ -5425,7 +7107,13 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528385",
+    "8684483528392",
+    "8684483528408",
+    "8684483528415"
+   ]
   },
   "2907": {
    "stok_kodu": "FCSS0300001",
@@ -5446,7 +7134,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528439",
+    "8684483528446",
+    "8684483528453",
+    "8684483528460"
+   ]
   },
   "2908": {
    "stok_kodu": "FCSS0300001",
@@ -5467,7 +7161,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Regular",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528347",
+    "8684483528354",
+    "8684483528361",
+    "8684483528378"
+   ]
   },
   "2909": {
    "stok_kodu": "FCSS1800001",
@@ -5479,7 +7179,14 @@
     "Ortam": "KADIN",
     "Boy": "Tek Ebat",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483528316",
+    "8684483528323",
+    "8684483528330",
+    "8684483528293",
+    "8684483528309"
+   ]
   },
   "2910": {
    "stok_kodu": "FCSS1800001",
@@ -5491,7 +7198,14 @@
     "Ortam": "KADIN",
     "Boy": "Tek Ebat",
     "Bel": "Standart"
-   }
+   },
+   "barkodlar": [
+    "8684483528248",
+    "8684483528255",
+    "8684483528262",
+    "8684483528279",
+    "8684483528286"
+   ]
   },
   "2911": {
    "stok_kodu": "FCSS3600002",
@@ -5508,7 +7222,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528521"
+   ]
   },
   "2912": {
    "stok_kodu": "FCSS3600001",
@@ -5526,7 +7243,10 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Kısa",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "8684483528514"
+   ]
   },
   "2913": {
    "stok_kodu": "20212122325",
@@ -5547,7 +7267,14 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "İnce"
-   }
+   },
+   "barkodlar": [
+    "20212122325",
+    "20212122324",
+    "20212122323",
+    "20212122326",
+    "20212122322"
+   ]
   },
   "2914": {
    "stok_kodu": "FCSS0600010",
@@ -5568,7 +7295,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528620",
+    "8684483528637",
+    "8684483528644",
+    "8684483528651"
+   ]
   },
   "2915": {
    "stok_kodu": "FCSS0600010",
@@ -5589,7 +7322,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Uzun",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483528538",
+    "8684483528545",
+    "8684483528552",
+    "8684483528569"
+   ]
   },
   "2975": {
    "stok_kodu": "FCSS0600011",
@@ -5610,7 +7349,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529153",
+    "8684483529160",
+    "8684483529177",
+    "8684483529184"
+   ]
   },
   "2976": {
    "stok_kodu": "FCSS0600011",
@@ -5631,7 +7376,13 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Midi",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529115",
+    "8684483529122",
+    "8684483529139",
+    "8684483529146"
+   ]
   },
   "2977": {
    "stok_kodu": "FCSS2000012",
@@ -5653,7 +7404,10 @@
     "Boy": "Mini",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529597"
+   ]
   },
   "2978": {
    "stok_kodu": "FCSS2000011",
@@ -5675,7 +7429,11 @@
     "Boy": "Regular",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529573",
+    "8684483529580"
+   ]
   },
   "2979": {
    "stok_kodu": "FCSS1800015",
@@ -5695,7 +7453,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529535",
+    "8684483529542",
+    "8684483529559",
+    "8684483529566"
+   ]
   },
   "2980": {
    "stok_kodu": "FCSS1800014",
@@ -5715,7 +7479,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529498",
+    "8684483529504",
+    "8684483529511",
+    "8684483529528"
+   ]
   },
   "2981": {
    "stok_kodu": "FCSS1800014",
@@ -5735,7 +7505,13 @@
     "Boy": "Midi",
     "Bel": "Yüksek Bel",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529450",
+    "8684483529467",
+    "8684483529474",
+    "8684483529481"
+   ]
   },
   "2982": {
    "stok_kodu": "FCSS0600012",
@@ -5756,7 +7532,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529627",
+    "8684483529634"
+   ]
   },
   "2983": {
    "stok_kodu": "FCSS0600012",
@@ -5777,7 +7557,11 @@
     "Ortam": "Casual/Günlük",
     "Boy": "Mini",
     "Kalınlık": "Orta"
-   }
+   },
+   "barkodlar": [
+    "8684483529603",
+    "8684483529610"
+   ]
   }
  }
 }
