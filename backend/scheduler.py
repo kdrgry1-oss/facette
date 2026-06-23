@@ -15,12 +15,12 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 async def auto_cancel_unpaid_havale_orders():
-    """Cancel havale/transfer orders that remain unpaid after 48 hours and restock."""
+    """Cancel havale/transfer orders that remain unpaid after 72 hours and restock."""
     from routes.deps import db  # lazy import
     from routes.orders import _stock_delta_for_order
 
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
         # Accept both payment_method names
         query = {
             "payment_status": "pending",
@@ -37,7 +37,7 @@ async def auto_cancel_unpaid_havale_orders():
                     {"$set": {
                         "status": "cancelled",
                         "payment_status": "expired",
-                        "cancel_reason": "48 saat içinde havale ödemesi yapılmadı (otomatik iptal)",
+                        "cancel_reason": "72 saat içinde havale ödemesi yapılmadı (otomatik iptal)",
                         "auto_cancelled": True,
                         "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -45,7 +45,7 @@ async def auto_cancel_unpaid_havale_orders():
                 )
                 await db.stock_movements.insert_one({
                     "id": str(uuid.uuid4()),
-                    "type": "auto_cancel_havale_48h",
+                    "type": "auto_cancel_havale_72h",
                     "order_id": order["id"],
                     "order_number": order.get("order_number", ""),
                     "items": moves,
@@ -55,9 +55,38 @@ async def auto_cancel_unpaid_havale_orders():
             except Exception as e_item:
                 logger.error(f"Failed to cancel order {order.get('order_number')}: {e_item}")
         if cancelled:
-            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid havale orders (>48h)")
+            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid havale orders (>72h)")
     except Exception as e:
         logger.exception(f"[scheduler] auto_cancel_unpaid_havale_orders failed: {e}")
+
+
+async def _ensure_hb_2min_sync():
+    """Tek seferlik: Hepsiburada hesabını 2 dk'da bir STOK + SİPARİŞ senkronuna ayarlar.
+    settings.hb_sync_2min_v1 bayrağıyla yalnızca bir kez uygulanır; sonradan
+    Admin → Otomasyon panelinden serbestçe değiştirilebilir (bayrak tekrar yazmaz)."""
+    from routes.deps import db  # lazy import
+    try:
+        flag = await db.settings.find_one({"id": "hb_sync_2min_v1"})
+        if flag:
+            return
+        await db.marketplace_accounts.update_one(
+            {"key": "hepsiburada"},
+            {"$set": {
+                "enabled": True,
+                "auto_sync.products_enabled": True,
+                "auto_sync.orders_enabled": True,
+                "auto_sync.products_interval_min": 2,
+                "auto_sync.orders_interval_min": 2,
+            }},
+        )
+        await db.settings.update_one(
+            {"id": "hb_sync_2min_v1"},
+            {"$set": {"id": "hb_sync_2min_v1", "applied_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        logger.info("[scheduler] Hepsiburada senkron 2 dk'ya ayarlandı (stok + sipariş)")
+    except Exception as e:
+        logger.warning(f"[scheduler] _ensure_hb_2min_sync failed: {e}")
 
 
 async def _run_trendyol_auto_products_sync():
@@ -1223,6 +1252,13 @@ def start_scheduler():
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
         max_instances=1,
         coalesce=True,
+    )
+    # Tek seferlik: Hepsiburada senkronunu 2 dk'ya çek (stok + sipariş). Bayrakla bir kez çalışır.
+    _scheduler.add_job(
+        _ensure_hb_2min_sync,
+        "date",
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=20),
+        id="ensure_hb_2min_sync_once",
     )
     # Trendyol İPTAL HIZLI tarama — her 5 DK (eskiden 60 sn idi; site yavaşlamasının
     # sebebi buydu). Sadece Cancelled + 14g dar pencere → hafif. Yeni iptaller ~5 dk'da düşer.
