@@ -164,11 +164,18 @@ function InstaShop({ block }) {
   const links = block?.links?.length > 0 ? block.links : DEFAULT_INSTASHOP.map(i => i.link);
 
   return (
-    <section className="py-10 bg-gray-50" data-testid="instashop">
+    <section className="py-14 md:py-20 bg-gray-50" data-testid="instashop">
       <div className="max-w-screen-2xl mx-auto px-4">
-        <p className="text-center text-[10px] tracking-[0.3em] uppercase text-gray-500 mb-6">
-          {block?.title || "@facette collection"}
-        </p>
+        {/* #FACETTE × YOU — premium imza başlığı (eski "Stilini Yarat" metni kaldırıldı) */}
+        <div className="text-center mb-8 md:mb-10">
+          <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-gray-400 mb-3">Stilini Paylaş</p>
+          <h2 className="text-2xl md:text-[2.4rem] leading-none font-extralight tracking-[0.22em] text-black">
+            #FACETTE <span className="text-gray-300 mx-1">×</span> YOU
+          </h2>
+          <p className="mt-3.5 text-xs md:text-sm font-light text-gray-500 max-w-md mx-auto leading-relaxed">
+            Tarzını <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a> etiketiyle paylaş, koleksiyonun bir parçası ol.
+          </p>
+        </div>
         <div className="grid grid-cols-5 gap-1">
           {images.slice(0, 5).map((img, index) => (
             <Link key={index} to={links[index] || "/"} className="block overflow-hidden group">

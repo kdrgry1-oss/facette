@@ -631,11 +631,6 @@ export default function ProductDetail() {
                     <span className="text-red-600 ml-2">Tükendi</span>
                   )}
                 </span>
-                {sizeTableData && (
-                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline" data-testid="show-size-table-btn">
-                    Beden Tablosu
-                  </button>
-                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
@@ -661,6 +656,14 @@ export default function ProductDetail() {
                   );
                 })}
               </div>
+              {/* Beden Tablosu — bedenlerin alt hizasında, sağa dayalı */}
+              {sizeTableData && (
+                <div className="flex justify-end mt-2">
+                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline" data-testid="show-size-table-btn">
+                    Beden Tablosu
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
@@ -727,12 +730,6 @@ export default function ProductDetail() {
                     );
                   })()}
 
-                  {/* Tahmini teslimat — görünür dönüşüm sinyali */}
-                  <p className="mt-2 text-xs text-gray-600 flex items-center gap-1.5" data-testid="pdp-delivery-estimate">
-                    <Truck size={14} strokeWidth={1.6} className="text-gray-500" />
-                    Tahmini teslimat: <span className="font-medium text-black">{estimateDelivery()}</span>
-                  </p>
-
                   {/* Güven banner'ı — ücretsiz iade / hızlı teslimat / taksitli ödeme */}
                   <div className="mt-4 grid grid-cols-3 gap-2 border-y border-black/10 py-3.5" data-testid="pdp-trust-badges">
                     <div className="flex flex-col items-center text-center gap-1.5 px-1">
@@ -782,7 +779,7 @@ export default function ProductDetail() {
 
             {/* Görünümü Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
             {comboProducts.length > 0 && (
-              <div className="mb-6 pb-6 border-b border-black/10" data-testid="product-combo-mini">
+              <div className="mb-6 pb-2" data-testid="product-combo-mini">
                 <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Görünümü Tamamla</p>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 lg:mx-0 lg:px-0">
                   {comboProducts.slice(0, 6).map((p) => {
@@ -796,7 +793,7 @@ export default function ProductDetail() {
                         title={p.name}
                       >
                         <div className="relative w-16 h-20 bg-stone-100 overflow-hidden">
-                          <img src={optimizeImg(img, 200)} alt={p.name} className="w-full h-full object-cover group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" decoding="async" />
+                          <img src={optimizeImg(img, 200)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-[9px] text-black/50 tabular-nums mt-1 truncate">
                           {((p.discount_price && p.discount_price > 0) ? p.discount_price : p.price || 0).toFixed(0)} TL
@@ -875,7 +872,7 @@ export default function ProductDetail() {
                       data-testid={`combo-product-${p.id}`}
                     >
                       <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
-                        <img src={optimizeImg(img, 700)} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                        <img src={optimizeImg(img, 700)} alt={p.name} className="w-full h-full object-cover object-top" loading="lazy" decoding="async" />
                         <button
                           type="button"
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -913,7 +910,7 @@ export default function ProductDetail() {
                 return (
                   <div key={p.id} className="group relative">
                     <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
-                      <img src={img} alt={p.name} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
+                      <img src={img} alt={p.name} className="w-full h-full object-cover object-top transition-transform duration-700 ease-out group-hover:scale-[1.03]" loading="lazy" />
                       <button
                         type="button"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
