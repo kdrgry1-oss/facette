@@ -20,7 +20,7 @@
 import { useState, useEffect } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import {
-  User, Package, MapPin, Heart, LogOut, ChevronRight, ChevronDown,
+  User, Package, MapPin, Bookmark, LogOut, ChevronRight, ChevronDown,
   Eye, Truck, CheckCircle, Clock, X, Edit2, Trash2, Plus, Star,
   ShoppingBag, Calendar, Mail, Phone, Lock
 } from "lucide-react";
@@ -39,7 +39,7 @@ const MENU_ITEMS = [
   { id: "profile",   label: "Profil",       icon: User },
   { id: "orders",    label: "Siparişlerim", icon: Package },
   { id: "addresses", label: "Adreslerim",   icon: MapPin },
-  { id: "favorites", label: "Favorilerim",  icon: Heart },
+  { id: "favorites", label: "Kaydedilenler", icon: Bookmark },
   { id: "security",  label: "Şifre",        icon: Lock },
 ];
 
@@ -837,10 +837,10 @@ function FavoritesPane() {
     return (
       <div className="bg-white border border-gray-100 py-20 px-6 text-center max-w-4xl" data-testid="favorites-empty">
         <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-          <Heart size={20} className="text-gray-400" />
+          <Bookmark size={20} className="text-gray-400" />
         </div>
-        <p className="text-sm text-gray-500 mb-1 tracking-wide">Henüz favori ürününüz yok</p>
-        <p className="text-xs text-gray-400 mb-6">Beğendiğiniz ürünleri kalp ikonu ile favorilerinize ekleyin.</p>
+        <p className="text-sm text-gray-500 mb-1 tracking-wide">Henüz kaydedilen ürününüz yok</p>
+        <p className="text-xs text-gray-400 mb-6">Beğendiğiniz ürünleri kaydet ikonu ile listenize ekleyin.</p>
         <a href="/" className="inline-block bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
           Ürünleri Keşfet
         </a>

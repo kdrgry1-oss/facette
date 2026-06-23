@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Search, User, ShoppingBag, Menu, X, Bookmark } from "lucide-react";
+import { Search, User, ShoppingBag, X, Bookmark } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useFavorites } from "../context/FavoritesContext";
@@ -232,7 +232,11 @@ export default function Header({ hideMenu = false }) {
                     aria-label="Menü"
                     data-testid="mobile-menu-btn"
                   >
-                    <Menu size={20} strokeWidth={1.4} />
+                    {/* Zara tarzı minimal hamburger — iki ince yatay çizgi */}
+                    <svg width="22" height="10" viewBox="0 0 22 10" fill="none" aria-hidden="true">
+                      <line x1="0" y1="1.5" x2="22" y2="1.5" stroke="currentColor" strokeWidth="1.1" />
+                      <line x1="0" y1="8.5" x2="22" y2="8.5" stroke="currentColor" strokeWidth="1.1" />
+                    </svg>
                   </button>
 
                   <nav className="hidden lg:flex items-center gap-5">

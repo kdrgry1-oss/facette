@@ -133,9 +133,9 @@ export default function CountdownBar() {
 
   const currentMsg = messages.length ? messages[msgIdx % messages.length] : "";
   const multi = messages.length > 1;
-  const fadeStyle = multi ? { animation: "fctMarqueeFade .5s ease" } : undefined;
+  const fadeStyle = multi ? { animation: "fctTopbarSlide .6s cubic-bezier(.16,1,.3,1)" } : undefined;
   const fadeKeyframes = multi
-    ? <style>{"@keyframes fctMarqueeFade{from{opacity:0}to{opacity:1}}"}</style>
+    ? <style>{"@keyframes fctTopbarSlide{0%{opacity:0;transform:translateY(7px)}100%{opacity:1;transform:translateY(0)}}"}</style>
     : null;
 
   // page-blocks henüz dönmedi → nötr, sabit yükseklikli, METİNSİZ bar.

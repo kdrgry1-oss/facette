@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Heart, Minus, Plus, X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star } from "lucide-react";
+import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -33,6 +33,38 @@ function estimateDelivery(minDays = 2, maxDays = 4) {
   return `${fmt(addBiz(now, minDays))} - ${fmt(addBiz(now, maxDays))}`;
 }
 
+// "xx saat içinde sipariş ver → bugün/yarın kargoda" aciliyet ibaresi.
+// Cutoff: hafta içi 16:00. Öncesinde → bugün kargoda; sonrasında/haftasonu → bir
+// sonraki iş günü kargoda.
+function shippingCutoff(cutoffHour = 16) {
+  const now = new Date();
+  const wd = now.getDay(); // 0 Paz, 6 Cmt
+  const isWeekend = wd === 0 || wd === 6;
+  const beforeCutoff = now.getHours() < cutoffHour;
+  if (!isWeekend && beforeCutoff) {
+    const remMs = new Date(now).setHours(cutoffHour, 0, 0, 0) - now.getTime();
+    const h = Math.floor(remMs / 3600000);
+    const m = Math.floor((remMs % 3600000) / 60000);
+    const left = h >= 1 ? `${h} saat ${m} dk` : `${m} dk`;
+    return { urgent: true, text: `Sonraki ${left} içinde sipariş ver,`, strong: "bugün kargoda." };
+  }
+  return { urgent: false, text: "Siparişin", strong: "yarın kargoda." };
+}
+
+// Son gezilen ürünler — localStorage'da küçük anlık görüntü (snapshot) listesi.
+const RV_KEY = "facette_recently_viewed";
+const readRecentlyViewed = () => {
+  try { return JSON.parse(localStorage.getItem(RV_KEY) || "[]"); } catch { return []; }
+};
+const pushRecentlyViewed = (snap) => {
+  if (!snap || !snap.id) return;
+  try {
+    const list = readRecentlyViewed().filter((x) => x && x.id !== snap.id);
+    list.unshift(snap);
+    localStorage.setItem(RV_KEY, JSON.stringify(list.slice(0, 12)));
+  } catch { /* sessiz */ }
+};
+
 export default function ProductDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -42,6 +74,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null);
   const [similarProducts, setSimilarProducts] = useState([]);
   const [comboProducts, setComboProducts] = useState([]);
+  const [recentItems, setRecentItems] = useState([]); // son gezilenler (önceki sayfalardan)
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [selectedSize, setSelectedSize] = useState(null);
@@ -191,6 +224,22 @@ export default function ProductDetail() {
       try {
         const res = await axios.get(`${API}/products/${slug}`);
         setProduct(res.data);
+
+        // Son gezilenler: önceki listeyi (mevcut ürün hariç) göster, sonra mevcut
+        // ürünü snapshot olarak kaydet (bir sonraki sayfada görünsün).
+        try {
+          const _p = res.data;
+          setRecentItems(readRecentlyViewed().filter((x) => x && x.id !== _p.id).slice(0, 10));
+          pushRecentlyViewed({
+            id: _p.id,
+            name: _p.name,
+            slug: _p.slug || _p.id,
+            image: (_p.images && _p.images[0]) || _p.image || "",
+            price: _p.price,
+            discount_price: _p.discount_price,
+            sale_price: _p.sale_price,
+          });
+        } catch { /* sessiz */ }
 
         // Canonical URL: ürün id/eski slug ile açıldıysa doğru slug'a yönlendir (SEO + tutarlı URL)
         if (res.data?.slug && res.data.slug !== slug) {
@@ -451,9 +500,9 @@ export default function ProductDetail() {
       </div>
 
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
-        <div className="grid lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+        <div className="grid lg:grid-cols-12 gap-8 lg:gap-16 items-start">
           {/* Image Gallery — mobile: swipe carousel, desktop: 2-col grid */}
-          <div className="lg:col-span-6 space-y-2 min-w-0">
+          <div className="lg:col-span-7 space-y-2 min-w-0">
             {/* Mobile: full-width snap carousel with dots */}
             <div className="lg:hidden -mx-4">
               <div
@@ -530,7 +579,7 @@ export default function ProductDetail() {
           </div>
 
           {/* Product Info */}
-          <div className="lg:col-span-6 lg:sticky lg:top-24 min-w-0">
+          <div className="lg:col-span-5 lg:sticky lg:top-24 min-w-0 lg:max-w-[420px] lg:mx-auto w-full">
             <h1 className="text-xl md:text-2xl font-light mb-3">{product.name}</h1>
             
             {/* Price */}
@@ -543,8 +592,27 @@ export default function ProductDetail() {
                   <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
                 )}
               </div>
+
+              {/* Yıldız derecelendirme — fiyatın hemen altında, tıkla → yorumlara git */}
+              <button
+                type="button"
+                onClick={() => document.getElementById("reviews")?.scrollIntoView({ behavior: "smooth" })}
+                className="mt-2 flex items-center gap-1.5 group"
+                data-testid="pdp-rating-jump"
+                aria-label="Değerlendirmeleri gör"
+              >
+                <span className="flex">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Star key={i} size={14} className={i <= Math.round(reviewAvg || 0) ? "fill-black text-black" : "text-gray-300"} />
+                  ))}
+                </span>
+                <span className="text-xs text-gray-500 group-hover:text-black transition-colors underline-offset-2 group-hover:underline">
+                  {reviewTotal > 0 ? `${(reviewAvg || 0).toFixed(1)} · ${reviewTotal} değerlendirme` : "İlk değerlendirmeyi yap"}
+                </span>
+              </button>
+
               {displayPrice > 0 && (
-                <p className="text-xs text-gray-500 mt-1.5" data-testid="installment-hint">
+                <p className="text-xs text-gray-500 mt-2" data-testid="installment-hint">
                   💳 9 taksite kadar · <span className="font-medium text-gray-700">{(displayPrice / 9).toFixed(2).replace('.', ',')} TL</span>/ay'dan başlayan taksitlerle
                 </p>
               )}
@@ -557,9 +625,16 @@ export default function ProductDetail() {
             {/* Size Selection */}
             <div className="mb-5">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs">Beden Seçiniz</span>
-                {selectedVariant && selectedVariant.stock === 0 && (
-                  <span className="text-xs text-red-600">Tükendi</span>
+                <span className="text-xs">
+                  Beden Seçiniz
+                  {selectedVariant && selectedVariant.stock === 0 && (
+                    <span className="text-red-600 ml-2">Tükendi</span>
+                  )}
+                </span>
+                {sizeTableData && (
+                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline" data-testid="show-size-table-btn">
+                    Beden Tablosu
+                  </button>
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -589,15 +664,6 @@ export default function ProductDetail() {
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
-
-            {/* Size Chart Link – only shown when HTML table exists */}
-            {sizeTableData && (
-              <div className="mb-3">
-                <button onClick={() => setShowSizeChart(true)} className="text-xs underline hover:no-underline" data-testid="show-size-table-btn">
-                  Beden Tablosu
-                </button>
-              </div>
-            )}
 
             {/* Add to Cart */}
             {(() => {
@@ -638,20 +704,50 @@ export default function ProductDetail() {
                     <button
                       onClick={() => toggleFavorite(product)}
                       data-testid="pdp-favorite-btn"
-                      aria-label="Favorilere ekle"
+                      aria-label="Kaydet"
+                      title="Kaydet"
                       className={`w-12 h-12 border flex items-center justify-center transition-colors ${
-                        isFavorite(product.id) ? "border-red-500 bg-red-50" : "border-gray-300 hover:border-black"
+                        isFavorite(product.id) ? "border-black bg-gray-50" : "border-gray-300 hover:border-black"
                       }`}
                     >
-                      <Heart size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-red-500 text-red-500" : ""} />
+                      <Bookmark size={18} strokeWidth={1.5} className={isFavorite(product.id) ? "fill-black text-black" : ""} />
                     </button>
                   </div>
 
+                  {/* Kargo aciliyeti — xx saat içinde sipariş ver → bugün/yarın kargoda */}
+                  {(() => {
+                    const c = shippingCutoff();
+                    return (
+                      <p className="mt-3 text-xs flex items-center gap-1.5" data-testid="pdp-shipping-cutoff">
+                        <Clock size={14} strokeWidth={1.7} className={c.urgent ? "text-emerald-600" : "text-gray-500"} />
+                        <span className={c.urgent ? "text-gray-700" : "text-gray-600"}>
+                          {c.text} <span className={`font-semibold ${c.urgent ? "text-emerald-700" : "text-black"}`}>{c.strong}</span>
+                        </span>
+                      </p>
+                    );
+                  })()}
+
                   {/* Tahmini teslimat — görünür dönüşüm sinyali */}
-                  <p className="mt-3 text-xs text-gray-600 flex items-center gap-1.5" data-testid="pdp-delivery-estimate">
+                  <p className="mt-2 text-xs text-gray-600 flex items-center gap-1.5" data-testid="pdp-delivery-estimate">
                     <Truck size={14} strokeWidth={1.6} className="text-gray-500" />
                     Tahmini teslimat: <span className="font-medium text-black">{estimateDelivery()}</span>
                   </p>
+
+                  {/* Güven banner'ı — ücretsiz iade / hızlı teslimat / taksitli ödeme */}
+                  <div className="mt-4 grid grid-cols-3 gap-2 border-y border-black/10 py-3.5" data-testid="pdp-trust-badges">
+                    <div className="flex flex-col items-center text-center gap-1.5 px-1">
+                      <RotateCcw size={18} strokeWidth={1.4} className="text-black/75" />
+                      <span className="text-[10px] leading-tight text-black/65">Ücretsiz<br />İade</span>
+                    </div>
+                    <div className="flex flex-col items-center text-center gap-1.5 px-1 border-x border-black/10">
+                      <Truck size={18} strokeWidth={1.4} className="text-black/75" />
+                      <span className="text-[10px] leading-tight text-black/65">Hızlı<br />Teslimat</span>
+                    </div>
+                    <div className="flex flex-col items-center text-center gap-1.5 px-1">
+                      <CreditCard size={18} strokeWidth={1.4} className="text-black/75" />
+                      <span className="text-[10px] leading-tight text-black/65">Taksitli<br />Ödeme</span>
+                    </div>
+                  </div>
 
                   {/* Stok bildirim formu */}
                   {oosSelected && notifyOpen && (
@@ -848,7 +944,7 @@ export default function ProductDetail() {
         )}
 
         {/* Değerlendirmeler (yorum + puan) */}
-        <section className="mt-12 pt-12 border-t" data-testid="product-reviews">
+        <section id="reviews" className="mt-12 pt-12 border-t scroll-mt-24" data-testid="product-reviews">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-base font-light">Değerlendirmeler{reviewTotal > 0 ? ` (${reviewTotal})` : ""}</h2>
             {reviewTotal > 0 && (
@@ -934,6 +1030,30 @@ export default function ProductDetail() {
             <h2 className="text-base font-light mb-6">Benzer Ürünler</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {similarProducts.map((p) => <ProductCard key={p.id} product={p} />)}
+            </div>
+          </section>
+        )}
+
+        {/* Son Gezdiklerin — localStorage snapshot'larından dinamik */}
+        {recentItems.length > 0 && (
+          <section className="mt-12 pt-12 border-t" data-testid="recently-viewed">
+            <h2 className="text-base font-light mb-6">Son Gezdiklerin</h2>
+            <div className="-mx-4 px-4 overflow-x-auto scrollbar-hide md:mx-0 md:px-0 md:overflow-visible">
+              <div className="flex gap-3 md:grid md:grid-cols-6 md:gap-4" style={{ minWidth: "max-content" }}>
+                {recentItems.slice(0, 6).map((p) => {
+                  const disc = (p.discount_price && p.discount_price > 0) ? p.discount_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
+                  const shown = disc || p.price || 0;
+                  return (
+                    <Link key={p.id} to={`/${p.slug || p.id}`} className="shrink-0 w-[40vw] md:w-auto group" data-testid={`recent-${p.id}`}>
+                      <div className="aspect-[2/3] bg-stone-100 overflow-hidden">
+                        <img src={optimizeImg(p.image, 500)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500" loading="lazy" decoding="async" />
+                      </div>
+                      <p className="text-[12px] font-light text-black/85 line-clamp-1 mt-2">{p.name}</p>
+                      <p className="text-[12px] tabular-nums mt-0.5">{(shown).toFixed(2).replace('.', ',')} TL</p>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           </section>
         )}
