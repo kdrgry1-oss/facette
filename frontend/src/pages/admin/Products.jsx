@@ -1578,6 +1578,101 @@ export default function AdminProducts() {
             Eksik Açıklama Kurtar
           </button>
           <button
+            onClick={async () => {
+              const token = localStorage.getItem('token');
+              const t = toast.loading("Renk/Web Color önizlemesi hazırlanıyor...");
+              try {
+                const pre = await axios.post(
+                  `${API}/integrations/site/renk-webcolor/autofill?apply=false`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+                );
+                toast.dismiss(t);
+                const d = pre.data || {};
+                const ok = window.confirm(
+                  "RENK + WEB COLOR DOLDUR — ÖNİZLEME\n\n" +
+                  `• Taranan ürün: ${d.taranan_urun}\n` +
+                  `• Rengi bulunan: ${d.renk_bulunan_urun}  ·  Bulunamayan: ${d.renk_bulunamayan}\n` +
+                  `• Çok renkli (atlanan): ${d.cok_renkli_atlanan}\n` +
+                  `• Doldurulacak — Renk: ${d.renk_doldurulacak}  ·  Web Color: ${d.webcolor_doldurulacak}\n` +
+                  `• HB: ${d.hb_dolan_toplam}  ·  Temu: ${d.temu_dolan_toplam}\n\n` +
+                  "Renk = ürün adının SON kelimesi (renk sözlüğüyle doğrulanır).\n" +
+                  "Web Color gönderimde pazaryeri değerine (en yakın) çözülür.\n" +
+                  "Çok renkli kart ATLANIR · Beden YAZILMAZ · yalnız BOŞ alanlar.\n\n" +
+                  "Uygulansın mı?"
+                );
+                if (!ok) { toast("İptal edildi"); return; }
+                const t2 = toast.loading("Renk + Web Color yazılıyor...");
+                const res = await axios.post(
+                  `${API}/integrations/site/renk-webcolor/autofill?apply=true`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+                );
+                toast.dismiss(t2);
+                toast.success(`${res.data.guncellenen_urun} üründe Renk + Web Color dolduruldu`);
+                fetchProducts();
+              } catch (e) {
+                toast.dismiss(t);
+                toast.error(e.response?.data?.detail || "Renk/Web Color doldurma başarısız");
+              }
+            }}
+            data-testid="renk-webcolor-autofill-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-fuchsia-600 text-white rounded hover:bg-fuchsia-700 transition-all font-medium text-sm shadow-sm"
+            title="Renk'i ürün adının son kelimesinden çıkarır, Web Color'ı ondan türetir; çok renkli kart atlanır, yalnız boş alanlar dolar — önce önizleme"
+          >
+            <RefreshCw size={16} />
+            Renk + Web Color Doldur
+          </button>
+          <button
+            onClick={async () => {
+              const token = localStorage.getItem('token');
+              const t = toast.loading("Boş açıklamalar sayılıyor...");
+              try {
+                const pre = await axios.post(
+                  `${API}/integrations/site/aciklama/generate?apply=false`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 60000 }
+                );
+                toast.dismiss(t);
+                const total = pre.data?.bos_aciklamali_urun || 0;
+                if (total === 0) { toast("Boş açıklamalı ürün yok"); return; }
+                const ok = window.confirm(
+                  "AI AÇIKLAMA ÜRET — ÖNİZLEME\n\n" +
+                  `• Açıklaması boş ürün: ${total}\n\n` +
+                  "Ürün Bilgisi AI ile özniteliklerden yazılır.\n" +
+                  "Kumaş = Materyal, Kalıp = Kalıp özniteliğinden.\n" +
+                  "Beden/Model ölçüleri BOŞ '___' bırakılır (elle doldurursun).\n" +
+                  "Yalnız BOŞ açıklamalar doldurulur; mevcutlar KORUNUR.\n\n" +
+                  "Üretim batch'ler halinde sürer. Başlatılsın mı?"
+                );
+                if (!ok) { toast("İptal edildi"); return; }
+                let done = 0, remaining = total, guard = 0;
+                const t2 = toast.loading(`AI açıklama üretiliyor... 0/${total}`);
+                while (remaining > 0 && guard < 80) {
+                  guard++;
+                  const res = await axios.post(
+                    `${API}/integrations/site/aciklama/generate?apply=true&limit=10`,
+                    null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+                  );
+                  const g = res.data?.uretilen || 0;
+                  remaining = res.data?.kalan ?? 0;
+                  done += g;
+                  toast.loading(`AI açıklama üretiliyor... ${done}/${total}`, { id: t2 });
+                  if (g === 0) break;
+                }
+                toast.dismiss(t2);
+                toast.success(`${done} ürüne AI açıklama üretildi` + (remaining > 0 ? ` · kalan ${remaining}` : ''));
+                fetchProducts();
+              } catch (e) {
+                toast.dismiss(t);
+                toast.error(e.response?.data?.detail || "AI açıklama üretimi başarısız");
+              }
+            }}
+            data-testid="aciklama-generate-ai-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700 transition-all font-medium text-sm shadow-sm"
+            title="Boş açıklamalı ürünlere özniteliklerden AI ile açıklama üretir; ölçüler boş '___' bırakılır — önce önizleme"
+          >
+            <RefreshCw size={16} />
+            AI Açıklama Üret
+          </button>
+          <button
             onClick={() => setBarcodePushOpen(true)}
             data-testid="trendyol-push-barcodes-btn"
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-all font-medium text-sm shadow-sm"
@@ -2463,7 +2558,9 @@ export default function AdminProducts() {
                                   : false;
                       const hasVal = !!valuesMap[attr.name];
                       return { attr, isRequired: isReq, hasValue: hasVal };
-                    });
+                    })
+                    // Beden ürün kartından gizlenir: pazaryeri varyant (beden) alanından eşleştiriliyor.
+                    .filter(x => (x.attr.name || '').toLocaleLowerCase('tr').trim() !== 'beden');
                     const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const otherEmpty = processed.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));

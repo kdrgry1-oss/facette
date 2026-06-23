@@ -464,12 +464,12 @@ export default function AdminQuestions() {
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Model</label>
                   <input value={aiSettings.model || ""} onChange={e => setAiSettings({ ...aiSettings, model: e.target.value })}
-                    className="w-full border px-3 py-2 rounded text-sm" placeholder="gpt-5.2" />
+                    className="w-full border px-3 py-2 rounded text-sm" placeholder="claude-sonnet-4-6" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Hızlı Model (sınıflandırma)</label>
                   <input value={aiSettings.fast_model || ""} onChange={e => setAiSettings({ ...aiSettings, fast_model: e.target.value })}
-                    className="w-full border px-3 py-2 rounded text-sm" placeholder="gpt-5-mini" />
+                    className="w-full border px-3 py-2 rounded text-sm" placeholder="claude-haiku-4-5" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Güven Eşiği (0-1)</label>
@@ -483,13 +483,16 @@ export default function AdminQuestions() {
                 <label className="flex items-center gap-2 mb-2">
                   <input type="checkbox" checked={!!aiSettings.use_emergent_key}
                     onChange={e => setAiSettings({ ...aiSettings, use_emergent_key: e.target.checked })} />
-                  <span className="text-sm font-medium">Emergent Universal Key kullan (önerilen)</span>
+                  <span className="text-sm font-medium">Emergent Universal Key kullan (ESKİ — kapalı tutun, kendi anahtarınızı girin)</span>
                 </label>
                 {!aiSettings.use_emergent_key && (
+                  <>
                   <input type="password" value={aiSettings.custom_api_key === "********" ? "" : (aiSettings.custom_api_key || "")}
                     onChange={e => setAiSettings({ ...aiSettings, custom_api_key: e.target.value })}
-                    placeholder="Kendi API key'iniz"
+                    placeholder="Kendi API anahtarınız (örn. Anthropic sk-ant-...)"
                     className="w-full border px-3 py-2 rounded text-sm" />
+                  <p className="text-xs text-gray-500 mt-1">Sağlayıcı: Anthropic (Claude) önerilir. Model: claude-sonnet-4-6 · Hızlı: claude-haiku-4-5. Anahtarı console.anthropic.com'dan alın.</p>
+                  </>
                 )}
               </div>
 

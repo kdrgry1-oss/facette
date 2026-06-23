@@ -5514,6 +5514,338 @@ async def recover_aciklama_from_snapshot(
     }
 
 
+# ============================================================================
+#  RENK + WEB COLOR OTOMATİK DOLDURMA (isimden renk türetme)
+#  Her renk varyantı split sonrası AYRI ürün kartı olur ve adı renkle biter
+#  (ör. "...Saten Elbise Bej"). Adın SON kelimesini renk sözlüğüyle doğrulayıp
+#  Renk + Web Color'ı doldururuz. Web Color, gönderim anında ilgili pazaryeri
+#  enum'una (en yakın değere) çözülür. Beden ASLA yazılmaz (varyant-bazlı).
+# ============================================================================
+
+def _rk_lower(s: str) -> str:
+    """tr-lower (İ/I güvenli)."""
+    return (s or "").replace("I", "ı").replace("İ", "i").lower()
+
+# Renk sözlüğü: tr-lower anahtar -> kanonik (Proper-case) renk.
+# YALNIZ bu sözlükteki kelimeler RENK kabul edilir (Elbise/Desenli/Renkli atlanır).
+_RENK_CANON = {
+    "siyah": "Siyah", "black": "Siyah", "beyaz": "Beyaz", "white": "Beyaz",
+    "ekru": "Ekru", "krem": "Krem", "cream": "Krem", "bej": "Bej", "beige": "Bej",
+    "kahve": "Kahverengi", "kahverengi": "Kahverengi", "brown": "Kahverengi",
+    "vizon": "Vizon", "camel": "Camel", "taş": "Taş", "tas": "Taş", "stone": "Taş",
+    "gri": "Gri", "grey": "Gri", "gray": "Gri", "antrasit": "Antrasit",
+    "füme": "Füme", "fume": "Füme", "lacivert": "Lacivert", "navy": "Lacivert",
+    "mavi": "Mavi", "blue": "Mavi", "indigo": "İndigo", "petrol": "Petrol",
+    "turkuaz": "Turkuaz", "mint": "Mint", "yeşil": "Yeşil", "yesil": "Yeşil",
+    "green": "Yeşil", "haki": "Haki", "zümrüt": "Zümrüt", "zumrut": "Zümrüt",
+    "sarı": "Sarı", "sari": "Sarı", "yellow": "Sarı", "hardal": "Hardal",
+    "gold": "Gold", "altın": "Gold", "altin": "Gold", "turuncu": "Turuncu",
+    "orange": "Turuncu", "mercan": "Mercan", "somon": "Somon", "salmon": "Somon",
+    "kiremit": "Kiremit", "kırmızı": "Kırmızı", "kirmizi": "Kırmızı", "red": "Kırmızı",
+    "bordo": "Bordo", "fuşya": "Fuşya", "fusya": "Fuşya", "fuchsia": "Fuşya",
+    "pembe": "Pembe", "pink": "Pembe", "pudra": "Pudra", "lila": "Lila",
+    "mor": "Mor", "purple": "Mor", "leylak": "Leylak", "gümüş": "Gümüş",
+    "gumus": "Gümüş", "silver": "Gümüş", "bronz": "Bronz", "metalik": "Metalik",
+    "mürdüm": "Mürdüm", "murdum": "Mürdüm", "yavruağzı": "Yavruağzı",
+    "yavruagzi": "Yavruağzı", "fıstık": "Fıstık Yeşili", "fistik": "Fıstık Yeşili",
+}
+
+
+def _renk_from_name(name: str) -> str:
+    """Ürün adının SON kelimesinden rengi çıkarır; sözlükle doğrulanır.
+    Renk değilse '' (asla tahmin etmez)."""
+    toks = re.sub(r"[^0-9A-Za-zçğıöşüÇĞİÖŞÜ ]", " ", str(name or "")).split()
+    if not toks:
+        return ""
+    return _RENK_CANON.get(_rk_lower(toks[-1]), "")
+
+
+def _renk_canon(val: str) -> str:
+    """Serbest renk değerini (ürün/varyant color) kanonik renge çevirir; tanınmazsa ''."""
+    v = _rk_lower(str(val or "").strip())
+    if not v:
+        return ""
+    if v in _RENK_CANON:
+        return _RENK_CANON[v]
+    parts = v.split()
+    return _RENK_CANON.get(parts[-1], "") if parts else ""
+
+
+@router.post("/site/renk-webcolor/autofill")
+async def autofill_renk_webcolor(
+    apply: bool = Query(False, description="false=ÖNİZLEME · true=UYGULA"),
+    current_user: dict = Depends(require_admin),
+):
+    """Renk + Web Color'ı ürün ADINDAN otomatik doldurur.
+    Her renk varyantı split sonrası ayrı kart olur ve adı renkle biter
+    (ör. '...Elbise Bej' → Renk=Bej, Web Color=Bej). Web Color gönderimde
+    pazaryeri enum'una (en yakın) çözülür.
+    GÜVENLİK: çok renkli (henüz bölünmemiş) kartlara tek renk YAZILMAZ; yalnız BOŞ
+    Renk/Web Color doldurulur; Beden ASLA yazılmaz; fiyat/KDV/stok/barkoda dokunulmaz;
+    attributes formatı (list/dict) korunur — Trendyol güvende."""
+    PROJ = {"_id": 0, "id": 1, "name": 1, "color": 1, "attributes": 1,
+            "variants": 1, "hepsiburada_attributes": 1, "temu_attributes": 1}
+    scanned = matched = updated = renk_fill = webcolor_fill = 0
+    no_color = multi_color = hb_fill_t = temu_fill_t = 0
+    sample: list = []
+
+    async for p in db.products.find({}, PROJ):
+        scanned += 1
+        # GÜVENLİK: çok renkli (bölünmemiş) kart → tek renk yazma, ATLA
+        vcols_all: list = []
+        for v in (p.get("variants") or []):
+            c = str((v or {}).get("color") or "").strip()
+            if c and _rk_lower(c) not in [_rk_lower(x) for x in vcols_all]:
+                vcols_all.append(c)
+        if len(vcols_all) > 1:
+            multi_color += 1
+            continue
+
+        name = p.get("name") or ""
+        color = _renk_from_name(name)              # 1) isim son kelimesi
+        if not color:
+            color = _renk_canon(p.get("color"))    # 2) ürün color alanı
+        if not color and len(vcols_all) == 1:
+            color = _renk_canon(vcols_all[0])      # 3) tek distinct varyant rengi
+        if not color:
+            no_color += 1
+            continue
+        matched += 1
+
+        # mevcut genel Renk/Web Color DOLU mu?
+        cur = p.get("attributes")
+        existing_names: set = set()
+        cur_list: list = []
+        if isinstance(cur, list):
+            for a in cur:
+                if isinstance(a, dict):
+                    cur_list.append(a)
+                    nm = a.get("name") or a.get("label") or a.get("type")
+                    vv = a.get("value") or a.get("attribute_value")
+                    if nm and str(vv or "").strip():
+                        existing_names.add(_hb_norm(nm))
+        elif isinstance(cur, dict):
+            for k, v in cur.items():
+                if isinstance(v, dict):
+                    nm = v.get("label") or v.get("name") or k
+                    vv = v.get("value") or v.get("attribute_value")
+                else:
+                    nm, vv = k, v
+                if nm and str(vv or "").strip():
+                    existing_names.add(_hb_norm(nm))
+
+        targets = [("Renk", color), ("Web Color", color)]
+        adds = [{"name": nm, "value": vv} for nm, vv in targets
+                if _hb_norm(nm) not in existing_names]
+
+        hb = dict(p.get("hepsiburada_attributes") or {})
+        temu = dict(p.get("temu_attributes") or {})
+        hb_norms = {_hb_norm(k) for k, v in hb.items() if str(v or "").strip()}
+        temu_norms = {_hb_norm(k) for k, v in temu.items() if str(v or "").strip()}
+        hb_f = temu_f = 0
+        for nm, vv in targets:
+            nn = _hb_norm(nm)
+            if nn not in hb_norms:
+                hb[nm] = vv; hb_f += 1; hb_norms.add(nn)
+            if nn not in temu_norms:
+                temu[nm] = vv; temu_f += 1; temu_norms.add(nn)
+
+        if not adds and hb_f == 0 and temu_f == 0:
+            continue
+        renk_fill += sum(1 for a in adds if a["name"] == "Renk")
+        webcolor_fill += sum(1 for a in adds if a["name"] == "Web Color")
+        hb_fill_t += hb_f
+        temu_fill_t += temu_f
+        if len(sample) < 15:
+            sample.append({"urun": name[:55], "renk": color,
+                           "genel_eklenecek": [a["name"] for a in adds],
+                           "hb_dolan": hb_f, "temu_dolan": temu_f})
+
+        if apply:
+            setdoc = {"hepsiburada_attributes": hb, "temu_attributes": temu}
+            if not str(p.get("color") or "").strip():
+                setdoc["color"] = color
+            if adds:
+                if isinstance(cur, dict):
+                    new_attrs = dict(cur)
+                    for a in adds:
+                        new_attrs[a["name"]] = a["value"]
+                else:
+                    new_attrs = (cur_list if isinstance(cur, list) else []) + adds
+                setdoc["attributes"] = new_attrs
+            await db.products.update_one({"id": p["id"]}, {"$set": setdoc})
+            updated += 1
+
+    return {
+        "mode": "apply" if apply else "preview",
+        "taranan_urun": scanned,
+        "renk_bulunan_urun": matched,
+        "renk_bulunamayan": no_color,
+        "cok_renkli_atlanan": multi_color,
+        "renk_doldurulacak": renk_fill,
+        "webcolor_doldurulacak": webcolor_fill,
+        "hb_dolan_toplam": hb_fill_t,
+        "temu_dolan_toplam": temu_fill_t,
+        "guncellenen_urun": updated,
+        "ornek": sample,
+        "not": ("Renk = ürün ADININ son kelimesi (renk sözlüğüyle doğrulanır); değilse "
+                "ürün/varyant renginden. Web Color = Renk; gönderimde pazaryeri enum'una "
+                "(en yakın) çözülür. Çok renkli kart ATLANIR. Beden YAZILMAZ. Yalnız BOŞ "
+                "alanlar dolduruldu; fiyat/KDV/stok/barkoda dokunulmadı."
+                + ("" if apply else " — ÖNİZLEME: hiçbir şey yazılmadı.")),
+    }
+
+
+# ============================================================================
+#  AI AÇIKLAMA ÜRETİMİ (boş açıklamalı ürünlere, özniteliklerden, mevcut formatta)
+#  Ürün Bilgisi prozası LLM (AI Chatbot ayarlarındaki sağlayıcı/model) ile yazılır.
+#  Kumaş Bilgisi = Materyal özniteliği · Kalıp = Kalıp özniteliği.
+#  Beden/Model ölçüleri BOŞ '___' placeholder bırakılır (kullanıcı elle doldurur).
+#  GÜVENLİK: yalnız BOŞ açıklama doldurulur; ölçü/fiyat/beden UYDURULMAZ.
+#  Batch: her çağrı en çok `limit` ürün işler, `kalan` döner (frontend döngüyle bitirir).
+# ============================================================================
+
+def _desc_is_blank(s) -> bool:
+    """HTML açıklamayı düz metne indirip boş mu (sadece etiket/boşluk) kontrol eder."""
+    t = re.sub(r"<[^>]+>", " ", str(s or ""))
+    t = t.replace("&nbsp;", " ").replace("\xa0", " ")
+    return not t.strip()
+
+
+def _attr_flat(p: dict) -> dict:
+    """Ürünün genel attributes (list/dict) + hepsiburada_attributes'ını ad->değer düz sözlüğe indirir."""
+    out: dict = {}
+    cur = p.get("attributes")
+    if isinstance(cur, list):
+        for a in cur:
+            if isinstance(a, dict):
+                nm = a.get("name") or a.get("label") or a.get("type")
+                vv = a.get("value") or a.get("attribute_value")
+                if nm and str(vv or "").strip():
+                    out.setdefault(str(nm), str(vv).strip())
+    elif isinstance(cur, dict):
+        for k, v in cur.items():
+            vv = v.get("value") if isinstance(v, dict) else v
+            if str(vv or "").strip():
+                out.setdefault(str(k), str(vv).strip())
+    for k, v in (p.get("hepsiburada_attributes") or {}).items():
+        if str(v or "").strip():
+            out.setdefault(str(k), str(v).strip())
+    return out
+
+
+def _attr_get(am: dict, *names) -> str:
+    """Düz öznitelik sözlüğünden ad(lar)a göre (HB-normalize ile) ilk dolu değeri döner."""
+    for n in names:
+        for k, v in am.items():
+            if _hb_norm(k) == _hb_norm(n):
+                return v
+    return ""
+
+
+@router.post("/site/aciklama/generate")
+async def generate_aciklama_ai(
+    apply: bool = Query(False, description="false=SAY (üretme yok) · true=ÜRET (batch)"),
+    limit: int = Query(10, ge=1, le=30, description="apply'da her çağrıda işlenecek ürün sayısı"),
+    current_user: dict = Depends(require_admin),
+):
+    """Boş açıklamalı ürünlere ÖZNİTELİKLERDEN beslenerek mevcut formatta açıklama üretir.
+    Ürün Bilgisi prozası LLM ile (AI Chatbot ayarlarındaki sağlayıcı/model — Gemini de olur);
+    Kumaş = Materyal, Kalıp = Kalıp özniteliği; Beden/Model ölçüleri BOŞ '___' bırakılır.
+    GÜVENLİK: yalnız BOŞ açıklama doldurulur (mevcut korunur); ölçü/fiyat/beden UYDURULMAZ;
+    fiyat/KDV/stok/başlık/özelliklere dokunulmaz."""
+    PROJ = {"_id": 0, "id": 1, "name": 1, "description": 1,
+            "attributes": 1, "hepsiburada_attributes": 1}
+    total_empty = 0
+    batch: list = []
+    async for p in db.products.find({}, PROJ):
+        if _desc_is_blank(p.get("description")):
+            total_empty += 1
+            if apply and len(batch) < limit:
+                batch.append(p)
+
+    if not apply:
+        return {
+            "mode": "preview",
+            "bos_aciklamali_urun": total_empty,
+            "not": (f"{total_empty} ürünün açıklaması boş. 'Uygula' her çağrıda en çok {limit} "
+                    "tanesini AI ile üretir; arayüz kalan bitene kadar döngüyle çağırır. "
+                    "Ürün Bilgisi AI ile özniteliklerden yazılır, ölçüler boş '___' bırakılır."),
+        }
+
+    from .ai_chatbot import get_ai_settings, _api_key_for, llm_chat
+    settings = await get_ai_settings()
+    api_key = _api_key_for(settings)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="AI anahtarı yapılandırılmamış (Ayarlar → AI Chatbot).")
+    provider = settings.get("provider", "anthropic")
+    model = settings.get("fast_model") or settings.get("model", "claude-haiku-4-5")
+
+    SYS = (
+        "Sen bir kadın giyim e-ticaret editörüsün. Sana ürün adı ve öznitelikleri verilir. "
+        "SADECE 'Ürün Bilgisi' bölümü için 1-2 kısa, akıcı, abartısız Türkçe cümle yaz. "
+        "Yalnızca verilen özniteliklere dayan; ölçü, fiyat, beden, kumaş oranı, malzeme UYDURMA. "
+        "Başlık, etiket, HTML, madde işareti, tırnak KULLANMA — yalnızca düz cümle döndür."
+    )
+
+    generated = failed = 0
+    sample: list = []
+    for p in batch:
+        am = _attr_flat(p)
+        name = p.get("name") or ""
+        feed = "\n".join(
+            f"- {k}: {v}" for k, v in am.items()
+            if _hb_norm(k) not in (_hb_norm("Web Color"), _hb_norm("Renk"), _hb_norm("Beden"))
+        )
+        user_text = (f"Ürün adı: {name}\nÖznitelikler:\n{feed or '(öznitelik yok)'}\n\n"
+                     "Bu ürün için 'Ürün Bilgisi' cümlesini yaz:")
+        try:
+            resp = await llm_chat(
+                api_key=api_key, provider=provider, model=model,
+                system_message=SYS, user_text=user_text, max_tokens=500,
+            )
+            prose = re.sub(r"<[^>]+>", "", str(resp or "")).strip()
+            prose = re.sub(r"^\s*(Ürün Bilgisi\s*:?)\s*", "", prose, flags=re.I).strip()
+        except Exception:
+            failed += 1
+            continue
+        if not prose:
+            failed += 1
+            continue
+
+        kumas = _attr_get(am, "Materyal", "Kumaş", "Kumaş Tipi")
+        kalip = _attr_get(am, "Kalıp")
+        parts = [f"<p><strong>Ürün Bilgisi:&nbsp;</strong>{prose}</p>"]
+        if kumas:
+            parts.append(f"<p><strong>Kumaş Bilgisi:&nbsp;</strong>{kumas}</p>")
+        if kalip:
+            parts.append(f"<p><strong>Kalıp:&nbsp;</strong>{kalip}</p>")
+        parts.append("<p><strong>STD Beden Ölçüleri:</strong>&nbsp; Göğüs: ___ cm&nbsp; "
+                     "Boy: ___ cm&nbsp; Kol Boyu: ___ cm</p>")
+        parts.append("<p><strong>Model Ölçüleri:</strong>&nbsp; Boy: ___&nbsp; Göğüs: ___&nbsp; "
+                     "Bel: ___&nbsp; Kalça: ___&nbsp; Kilo: ___</p>")
+        parts.append("<p>Modelin üzerindeki ürün <strong>STD</strong> bedendir.</p>")
+        parts.append("<p>Bedenler arası +/- sapma olabilir.</p>")
+        html = "\n".join(parts)
+
+        await db.products.update_one({"id": p["id"]}, {"$set": {"description": html}})
+        generated += 1
+        if len(sample) < 6:
+            sample.append({"urun": name[:55], "uretilen_proza": prose[:140]})
+
+    return {
+        "mode": "apply",
+        "uretilen": generated,
+        "basarisiz": failed,
+        "kalan": max(0, total_empty - generated),
+        "kullanilan_model": f"{provider}/{model}",
+        "ornek": sample,
+        "not": ("Ürün Bilgisi AI ile özniteliklerden yazıldı; Kumaş=Materyal, Kalıp=Kalıp "
+                "özniteliğinden. Beden/Model ölçüleri boş '___' bırakıldı (elle doldur). "
+                "Yalnız boş açıklamalar dolduruldu; fiyat/KDV/stok/başlık/özelliklere dokunulmadı."),
+    }
+
+
 
 
 

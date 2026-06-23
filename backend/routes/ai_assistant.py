@@ -22,11 +22,11 @@ from typing import Optional
 import uuid
 import re
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Emergent kaldırıldı → ai_chatbot.llm_chat kullanılıyor
 
 from .deps import db, require_admin, logger
 from .ai_chatbot import (
-    get_ai_settings, _api_key_for, DEFAULT_PERSONA, MARKETPLACE_TO_COLL,
+    get_ai_settings, _api_key_for, llm_chat, DEFAULT_PERSONA, MARKETPLACE_TO_COLL,
     _gather_kb_context, _gather_product_context,
 )
 
@@ -81,14 +81,15 @@ async def chat_with_assistant(payload: dict, current_user: dict = Depends(requir
     if not api_key:
         raise HTTPException(status_code=400, detail="AI anahtarı yapılandırılmamış")
 
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message=CHAT_INTENT_SYSTEM,
-    ).with_model(settings.get("provider", "openai"), settings.get("fast_model", "gpt-5-mini"))
-
     try:
-        resp_raw = await chat.send_message(UserMessage(text=text))
+        resp_raw = await llm_chat(
+            api_key=api_key,
+            provider=settings.get("provider", "anthropic"),
+            model=settings.get("fast_model", "claude-haiku-4-5"),
+            system_message=CHAT_INTENT_SYSTEM,
+            user_text=text,
+            max_tokens=800,
+        )
     except Exception as e:
         logger.exception("AI assistant chat failed")
         raise HTTPException(status_code=500, detail=f"AI yanıt veremedi: {e}")
@@ -314,15 +315,15 @@ async def evaluate_answer(payload: dict, current_user: dict = Depends(require_ad
     if not api_key:
         raise HTTPException(status_code=400, detail="AI anahtarı yok")
 
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=f"qc-{uuid.uuid4().hex[:8]}",
-        system_message=QUALITY_CHECK_SYSTEM,
-    ).with_model("openai", settings.get("fast_model", "gpt-5-mini"))
-
     try:
-        resp = await chat.send_message(UserMessage(
-            text=f"Soru: {question}\nCevap: {answer}"))
+        resp = await llm_chat(
+            api_key=api_key,
+            provider=settings.get("provider", "anthropic"),
+            model=settings.get("fast_model", "claude-haiku-4-5"),
+            system_message=QUALITY_CHECK_SYSTEM,
+            user_text=f"Soru: {question}\nCevap: {answer}",
+            max_tokens=600,
+        )
     except Exception as e:
         return {"sufficient": True, "reason": f"QC çağrı hatası, varsayılan yeterli ({e})"}
 
@@ -401,14 +402,15 @@ async def auto_answer_batch(
             "Cevabın sonuna ZORUNLU şu metayı ekle:\n"
             "---META---\nCONFIDENCE: <0.0-1.0>\nHANDOFF: <yes|no>\n"
         )
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"auto-{channel}-{q_id}",
-            system_message=sys,
-        ).with_model(settings.get("provider", "openai"), settings.get("model", "gpt-5.2"))
-
         try:
-            r = await chat.send_message(UserMessage(text=f"Soru: {q_text}"))
+            r = await llm_chat(
+                api_key=api_key,
+                provider=settings.get("provider", "anthropic"),
+                model=settings.get("model", "claude-sonnet-4-6"),
+                system_message=sys,
+                user_text=f"Soru: {q_text}",
+                max_tokens=1200,
+            )
         except Exception as e:
             results.append({"question_id": q_id, "ok": False, "error": str(e)})
             continue

@@ -21,7 +21,7 @@ import os
 import uuid
 import re
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Emergent kaldırıldı → sağlayıcı-bağımsız doğrudan SDK çağrısı: llm_chat() (aşağıda)
 
 from .deps import db, require_admin, logger
 
@@ -43,12 +43,12 @@ async def get_ai_settings() -> dict:
         return {
             "id": "ai_chatbot",
             "enabled": True,
-            "provider": "openai",
-            "model": "gpt-5.2",
-            "fast_model": "gpt-5-mini",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "fast_model": "claude-haiku-4-5",
             "persona": DEFAULT_PERSONA,
             "confidence_threshold": 0.7,
-            "use_emergent_key": True,
+            "use_emergent_key": False,
             "custom_api_key": "",
             "channels": {
                 "trendyol": True, "hepsiburada": True, "temu": True,
@@ -59,9 +59,69 @@ async def get_ai_settings() -> dict:
 
 
 def _api_key_for(settings: dict) -> str:
-    if settings.get("use_emergent_key", True):
+    """AI anahtarını çözer (öncelik sırası):
+      1) Ayarlardaki kendi anahtarın (custom_api_key)
+      2) Sağlayıcıya göre ortam değişkeni (OPENAI/ANTHROPIC/GEMINI_API_KEY)
+      3) Geriye dönük: Emergent (EMERGENT_LLM_KEY) — Emergent'ten çıkınca devre dışı."""
+    if settings.get("custom_api_key"):
+        return settings["custom_api_key"]
+    prov = (settings.get("provider") or "openai").strip().lower()
+    env_name = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY", "claude": "ANTHROPIC_API_KEY",
+        "gemini": "GEMINI_API_KEY", "google": "GEMINI_API_KEY",
+    }.get(prov, "")
+    if env_name and os.environ.get(env_name):
+        return os.environ[env_name]
+    if settings.get("use_emergent_key"):
         return os.environ.get("EMERGENT_LLM_KEY", "")
-    return settings.get("custom_api_key") or ""
+    return ""
+
+
+async def llm_chat(api_key: str, provider: str, model: str,
+                   system_message: str, user_text: str,
+                   max_tokens: int = 1200) -> str:
+    """Sağlayıcı-bağımsız tek-tur sohbet (Emergent yerine DOĞRUDAN resmi SDK).
+    provider: 'openai' | 'anthropic'/'claude' | 'gemini'/'google'. Düz metin döner."""
+    prov = (provider or "openai").strip().lower()
+
+    if prov in ("anthropic", "claude"):
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        msg = await client.messages.create(
+            model=model or "claude-sonnet-4-6",
+            max_tokens=max_tokens,
+            system=system_message or "",
+            messages=[{"role": "user", "content": user_text}],
+        )
+        parts = []
+        for b in (msg.content or []):
+            t = getattr(b, "text", None)
+            if t:
+                parts.append(t)
+        return "".join(parts).strip()
+
+    if prov in ("gemini", "google", "google-gemini"):
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        resp = await client.aio.models.generate_content(
+            model=model or "gemini-3.1-flash",
+            contents=user_text,
+            config={"system_instruction": system_message or "",
+                    "max_output_tokens": max_tokens},
+        )
+        return (getattr(resp, "text", None) or "").strip()
+
+    # varsayılan: OpenAI (gpt-5.x → max_completion_tokens)
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=api_key)
+    resp = await client.chat.completions.create(
+        model=model or "gpt-5.4-mini",
+        messages=[{"role": "system", "content": system_message or ""},
+                  {"role": "user", "content": user_text}],
+        max_completion_tokens=max_tokens,
+    )
+    return (resp.choices[0].message.content or "").strip()
 
 
 # -------------------- Settings endpoints --------------------
@@ -228,13 +288,6 @@ async def generate_draft_answer(
         "HANDOFF: <yes veya no – insan temsilciye devredilmeli mi?>\n"
     )
 
-    session_id = f"q-{marketplace}-{question_id}"
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=session_id,
-        system_message=system,
-    ).with_model(settings.get("provider", "openai"), settings.get("model", "gpt-5.2"))
-
     user_text = (
         f"[{marketplace.upper()} Kanalı]\n"
         f"Ürün: {q.get('product_name', '—')}\n"
@@ -243,7 +296,14 @@ async def generate_draft_answer(
     )
 
     try:
-        response = await chat.send_message(UserMessage(text=user_text))
+        response = await llm_chat(
+            api_key=api_key,
+            provider=settings.get("provider", "anthropic"),
+            model=settings.get("model", "claude-sonnet-4-6"),
+            system_message=system,
+            user_text=user_text,
+            max_tokens=1200,
+        )
     except Exception as e:
         logger.exception("AI draft failed")
         raise HTTPException(status_code=500, detail=f"AI cevap üretemedi: {e}")
