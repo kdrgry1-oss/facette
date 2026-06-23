@@ -1492,6 +1492,48 @@ export default function AdminProducts() {
             Teknik Detay Yükle
           </button>
           <button
+            onClick={async () => {
+              const token = localStorage.getItem('token');
+              const t = toast.loading("Önizleme hazırlanıyor...");
+              try {
+                const pre = await axios.post(
+                  `${API}/integrations/site/teknik-detay/recover?apply=false`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+                );
+                toast.dismiss(t);
+                const d = pre.data || {};
+                const ok = window.confirm(
+                  "SİLİNEN TEKNİK DETAY KURTARMA — ÖNİZLEME\n\n" +
+                  `• Eşleşen ürün: ${d.eslesen_urun}\n` +
+                  `• Doldurulacak özellik (toplam): ${d.doldurulacak_ozellik_toplam}\n` +
+                  `• Eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Belirsiz (atlanan): ${d.belirsiz_urun_karti}\n\n` +
+                  "Eşleştirme YALNIZCA urun_karti_id ile yapılır.\n" +
+                  "Yalnız BOŞ özellikler doldurulur, mevcut değerler KORUNUR.\n" +
+                  "Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
+                  "Uygulansın mı?"
+                );
+                if (!ok) { toast("İptal edildi"); return; }
+                const t2 = toast.loading("Kurtarma uygulanıyor...");
+                const res = await axios.post(
+                  `${API}/integrations/site/teknik-detay/recover?apply=true`,
+                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+                );
+                toast.dismiss(t2);
+                toast.success(`${res.data.guncellenen_urun} üründe ${res.data.doldurulacak_ozellik_toplam} özellik kurtarıldı`);
+                fetchProducts();
+              } catch (e) {
+                toast.dismiss(t);
+                toast.error(e.response?.data?.detail || "Kurtarma başarısız");
+              }
+            }}
+            data-testid="teknik-detay-recover-btn"
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition-all font-medium text-sm shadow-sm"
+            title="Silinen ürün-kartı teknik detaylarını doğrulanmış snapshot'tan (urun_karti_id ile) güvenle geri yükler — önce önizleme gösterir"
+          >
+            <RefreshCw size={16} />
+            Silinen Özellik Kurtar
+          </button>
+          <button
             onClick={() => setBarcodePushOpen(true)}
             data-testid="trendyol-push-barcodes-btn"
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-all font-medium text-sm shadow-sm"

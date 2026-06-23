@@ -101,7 +101,7 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
         onFocus={() => setOpen(true)}
         onChange={(e) => { setQ(e.target.value); onChange(e.target.value); setOpen(true); }}
         placeholder={placeholder}
-        className="border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-stone-300"
+        className="border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-orange-300"
         data-testid={testId}
       />
       {open && (filtered.length > 0 || (options || []).length > 0) && (
@@ -119,7 +119,7 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
                   key={opt.id || n}
                   type="button"
                   onClick={() => { onChange(n); setQ(n); setOpen(false); }}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-stone-100 border-b last:border-b-0 border-gray-100 flex items-center justify-between gap-2"
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-orange-50 border-b last:border-b-0 border-gray-100 flex items-center justify-between gap-2"
                 >
                   <span className="font-medium">{n}</span>
                   {vCount > 0 && (
@@ -147,7 +147,7 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
           role="combobox"
           aria-expanded={open}
           className={`flex items-center justify-between gap-2 border rounded px-2 py-1 text-sm w-full text-left ${
-            selected ? `bg-stone-100 border-stone-400 font-semibold text-stone-900` : "bg-white"
+            selected ? `bg-${color}-50 border-${color}-300 font-semibold text-${color}-900` : "bg-white"
           }`}
           data-testid={testId}
         >
@@ -176,7 +176,7 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
                   onSelect={() => { onChange(String(opt.id)); setOpen(false); }}
                   data-testid={`${testId}-opt-${opt.id}`}
                 >
-                  <Check size={14} className={String(opt.id) === String(value) ? "opacity-100 text-stone-700" : "opacity-0"} />
+                  <Check size={14} className={String(opt.id) === String(value) ? "opacity-100 text-green-600" : "opacity-0"} />
                   <span className="truncate">{opt.name}</span>
                 </CommandItem>
               ))}
@@ -402,14 +402,14 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                   <span className="text-gray-500">{category.marketplace_category_name}</span>
                 </>
               )}
-              <span className={`text-[10px] font-bold bg-stone-200 text-stone-700 px-2 py-0.5 rounded-full uppercase`}>
+              <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
                 {marketplace}
               </span>
             </DialogTitle>
             <div className="flex items-center gap-2">
               <button
                 onClick={refreshFromMarketplace}
-                className="flex items-center gap-2 px-3 py-1.5 border border-stone-300 text-stone-700 bg-white rounded text-xs font-semibold hover:bg-stone-100"
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded text-xs font-semibold hover:bg-blue-600"
                 data-testid="adv-refresh-mp-btn"
                 title="Pazaryerinden anlık attribute listesini çek (Trendyol için canlı API)"
               >
@@ -417,7 +417,7 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
               </button>
               <button
                 onClick={handleFillCompanyDefaults}
-                className="flex items-center gap-2 px-3 py-1.5 border border-stone-300 text-stone-700 bg-white rounded text-xs font-semibold hover:bg-stone-100"
+                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500 text-white rounded text-xs font-semibold hover:bg-purple-600"
                 data-testid="adv-fill-company-btn"
                 title="Ayarlar > Şirket Bilgisi'nden Üretici / İthalatçı Adı / Adres / Mail alanlarını otomatik doldur"
               >
@@ -425,7 +425,7 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
               </button>
               <button
                 onClick={handleAutoMatch}
-                className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 text-white rounded text-xs font-semibold hover:bg-stone-800"
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
                 data-testid="adv-auto-match-btn"
               >
                 <LinkIcon size={14} /> Otomatik Eşleştir
@@ -435,11 +435,11 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
         </DialogHeader>
 
         {hint && (
-          <div className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs text-stone-600">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
             <AlertCircle size={12} className="inline mr-1" /> {hint}
           </div>
         )}
-        <div className="bg-stone-50 border border-stone-200 rounded-lg px-4 py-3 text-sm text-stone-700 space-y-1">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-800 space-y-1">
           <div className="flex items-center justify-between gap-3">
             <div className="flex-1">
               <p className="font-semibold flex items-center gap-1"><AlertCircle size={14} /> Dikkat</p>
@@ -457,7 +457,7 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                     setGlobalAttrs(g.data?.attributes || []);
                   } catch { toast.error("Sync başarısız"); }
                 }}
-                className="bg-stone-900 text-white text-xs px-3 py-1.5 rounded-lg font-semibold hover:bg-stone-800 whitespace-nowrap"
+                className="bg-yellow-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold hover:bg-yellow-600 whitespace-nowrap"
                 data-testid="adv-sync-attrs-btn"
               >
                 Ürünlerden Yükle
@@ -489,7 +489,7 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                 {marketplace !== "trendyol" && (
                   <button
                     onClick={() => setUploadOpen(true)}
-                    className="bg-stone-900 text-white text-xs px-3 py-1.5 rounded hover:bg-stone-800 whitespace-nowrap flex items-center gap-1"
+                    className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700 whitespace-nowrap flex items-center gap-1"
                     data-testid="adv-upload-cache-btn"
                   >
                     <FileJson size={12} /> JSON Yükle
@@ -522,29 +522,29 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                   return (
                     <React.Fragment key={id}>
                       {showReqHeader && (
-                        <tr className="bg-stone-50">
-                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-[#B0413A] uppercase tracking-wide">
+                        <tr className="bg-red-50">
+                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-red-700 uppercase tracking-wide">
                             Zorunlu Alanlar ({required.length})
                           </td>
                         </tr>
                       )}
                       {showOptHeader && (
-                        <tr className="bg-stone-50">
-                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-stone-500 uppercase tracking-wide">
+                        <tr className="bg-gray-50">
+                          <td colSpan={4} className="px-4 py-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wide">
                             Opsiyonel Alanlar ({mpAttrs.length > 0 ? optional.length : rows.length})
                           </td>
                         </tr>
                       )}
-                      <tr className={`border-b hover:bg-stone-50 ${isReq ? "bg-stone-100/60" : ""}`}>
+                      <tr className={`border-b hover:bg-gray-50 ${isReq ? "bg-red-50/40" : ""}`}>
                         <td className="px-4 py-2.5">
                           {isReq ? (
-                            <span className="text-[10px] font-bold bg-[#B0413A] text-white px-2 py-0.5 rounded uppercase">Zorunlu</span>
+                            <span className="text-[10px] font-bold bg-red-500 text-white px-2 py-0.5 rounded uppercase">Zorunlu</span>
                           ) : (
                             <span className="text-xs text-gray-300">—</span>
                           )}
                         </td>
                         <td className="px-4 py-2.5">
-                          <p className={`font-medium ${isReq ? "text-stone-900" : "text-stone-800"}`}>{name}</p>
+                          <p className={`font-medium ${isReq ? "text-red-900" : "text-gray-800"}`}>{name}</p>
                           {attr.attributeType && (
                             <p className="text-xs text-gray-400">Tür: {attr.attributeType}</p>
                           )}
@@ -560,28 +560,28 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                             testId={`adv-mapinput-${id}`}
                           />
                           {(attr.allowCustom || attr.attribute?.allowCustom) && (
-                            <div className="p-1.5 bg-stone-50 rounded border border-stone-200">
-                              <div className="text-[10px] font-bold text-stone-600 mb-1 px-1">Özel Değer:</div>
+                            <div className="p-1 bg-blue-50/50 rounded border border-blue-100">
+                              <div className="text-[10px] font-bold text-blue-800 mb-1 px-1">Özel Değer:</div>
                               <input
                                 type="text"
                                 placeholder="Varsayılan metin..."
                                 value={defaults[id] || ""}
                                 onChange={(e) => setDefaults((p) => ({ ...p, [id]: e.target.value }))}
-                                className="border border-stone-300 rounded px-2 py-1 text-xs w-full bg-white"
+                                className="border border-blue-200 rounded px-2 py-1 text-xs w-full bg-white"
                               />
                             </div>
                           )}
                           {hasVals && (
-                            <div className="p-1.5 bg-stone-50 rounded border border-stone-200">
-                              <div className="text-[10px] font-bold text-stone-600 mb-1 px-1">Listeden Seçin:</div>
+                            <div className="p-1 bg-orange-50/50 rounded border border-orange-100">
+                              <div className="text-[10px] font-bold text-orange-800 mb-1 px-1">Listeden Seçin:</div>
                               <div className="relative">
-                                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-stone-400" />
+                                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400" />
                                 <input
                                   type="text"
                                   placeholder="Değer ara..."
                                   value={searchTerms[id] || ""}
                                   onChange={(e) => setSearchTerms((p) => ({ ...p, [id]: e.target.value }))}
-                                  className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-stone-400 outline-none rounded-t"
+                                  className="w-full pl-6 pr-2 py-1 text-xs border-b border-transparent bg-transparent focus:bg-white focus:border-orange-300 outline-none rounded-t"
                                 />
                               </div>
                               <select
@@ -599,9 +599,9 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           {mapped || defaults[id] ? (
-                            <Check size={16} className="text-[#3F7A52] mx-auto" />
+                            <Check size={16} className="text-green-500 mx-auto" />
                           ) : isReq ? (
-                            <X size={16} className="text-[#B0413A] mx-auto" />
+                            <X size={16} className="text-red-400 mx-auto" />
                           ) : (
                             <span className="text-gray-300">—</span>
                           )}
@@ -618,12 +618,12 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
 
         <div className="flex justify-end items-center gap-2 pt-3 border-t">
           {autoSavedAt && (
-            <span className="text-xs text-[#3F7A52] mr-auto">✓ Değişiklikler otomatik kaydedildi</span>
+            <span className="text-xs text-green-600 mr-auto">✓ Değişiklikler otomatik kaydedildi</span>
           )}
           <button onClick={() => onClose(false)}
             className="px-4 py-2 border rounded text-sm hover:bg-gray-50">İptal</button>
           <button onClick={handleSave} disabled={saving}
-            className={`flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded text-sm hover:bg-stone-800 disabled:opacity-50`}
+            className={`flex items-center gap-2 px-4 py-2 bg-${color}-500 text-white rounded text-sm hover:bg-${color}-600 disabled:opacity-50`}
             data-testid="adv-attr-save">
             {saving && <RefreshCw size={14} className="animate-spin" />}
             Eşleştirmeleri Kaydet
@@ -734,7 +734,10 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       "mor": ["purple"], "turuncu": ["orange"], "kahverengi": ["brown"], "bej": ["beige"],
       "lacivert": ["navy", "dark blue"], "altın": ["gold"], "gümüş": ["silver"],
       "s": ["small", "küçük"], "m": ["medium", "orta"], "l": ["large", "büyük"],
-      "xl": ["x-large", "extra large"], "xxl": ["xx-large", "2xl"], "xs": ["x-small", "extra small"],
+      "xs": ["x-small", "extra small", "xsmall", "x small", "xxs", "2xs"],
+      "xl": ["x-large", "extra large", "xlarge", "x large"],
+      "xxl": ["xx-large", "2xl", "2 xl", "xxlarge", "2x"],
+      "xxxl": ["xxx-large", "3xl", "3 xl", "xxxlarge"],
     };
 
     mpAttrs.forEach((mpAttr) => {
@@ -820,14 +823,14 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
             <DialogTitle className="text-base flex items-center gap-2">
               <Store size={18} className={`text-${color}-500`} />
               Değer Eşleştirme — {category?.category_name}
-              <span className={`text-[10px] font-bold bg-stone-200 text-stone-700 px-2 py-0.5 rounded-full uppercase`}>
+              <span className={`text-[10px] font-bold bg-${color}-100 text-${color}-700 px-2 py-0.5 rounded-full uppercase`}>
                 {marketplace}
               </span>
             </DialogTitle>
             {mpAttrs.length > 0 && (
               <button
                 onClick={handleAutoMatchValues}
-                className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 text-white rounded text-xs font-semibold hover:bg-stone-800"
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600"
                 data-testid="adv-auto-match-values-btn"
                 title="Tüm özellik sekmelerindeki TÜM değerleri otomatik eşleştirir"
               >
@@ -837,7 +840,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
           </div>
         </DialogHeader>
 
-        {hint && <div className="text-xs text-stone-600 bg-stone-50 border border-stone-200 rounded px-3 py-2">
+        {hint && <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2">
           <AlertCircle size={12} className="inline mr-1" /> {hint}
         </div>}
 
@@ -896,7 +899,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       onClick={() => setSelectedAttrId(id)}
                       className={`w-full text-left px-3 py-2 text-xs transition flex items-center justify-between gap-2 ${
                         isActive
-                          ? `bg-stone-100 border-l-2 border-stone-500 font-semibold text-stone-900`
+                          ? `bg-${color}-50 border-l-2 border-${color}-500 font-semibold text-${color}-900`
                           : "hover:bg-gray-50 border-l-2 border-transparent text-gray-700"
                       }`}
                       data-testid={`adv-attr-tab-${id}`}
@@ -904,7 +907,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       <span className="truncate">{name}</span>
                       <span className="flex items-center gap-1 shrink-0">
                         {mappedCount > 0 && (
-                          <span className="text-[9px] bg-[#E7EFE9] text-[#3F7A52] px-1 py-0.5 rounded font-bold">
+                          <span className="text-[9px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">
                             {mappedCount}
                           </span>
                         )}
@@ -973,18 +976,18 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       const mpVals = currentAttr?.attributeValues || [];
                       const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(mpVals, (v) => v.name) : mpVals;
                       return (
-                        <tr key={lv} className={`border-b hover:bg-stone-50 ${isMapped ? "bg-[#F3F7F4]" : ""}`}>
+                        <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
                           <td className="px-4 py-2 font-medium">
                             <div className="flex items-center gap-2">
                               <span>{lv}</span>
                               {isMapped && (
-                                <span className="text-[9px] bg-[#E7EFE9] text-[#3F7A52] px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
+                                <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-2">
                             {sortedMp.length === 0 ? (
-                              <span className="inline-flex items-center gap-1.5 text-xs text-[#3F7A52] bg-[#F3F7F4] border border-[#D9E6DE] rounded px-2 py-1" data-testid={`adv-valmap-auto-${lv}`}>
+                              <span className="inline-flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1" data-testid={`adv-valmap-auto-${lv}`}>
                                 ✓ Otomatik gönderilir (serbest metin)
                               </span>
                             ) : (
@@ -1013,7 +1016,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
         <div className="flex justify-end gap-2 pt-3 border-t">
           <button onClick={() => onClose(false)} className="px-4 py-2 border rounded text-sm hover:bg-gray-50">İptal</button>
           <button onClick={save} disabled={saving}
-            className={`flex items-center gap-2 px-4 py-2 bg-stone-900 text-white rounded text-sm hover:bg-stone-800 disabled:opacity-50`}
+            className={`flex items-center gap-2 px-4 py-2 bg-${color}-500 text-white rounded text-sm hover:bg-${color}-600 disabled:opacity-50`}
             data-testid="adv-val-save">
             {saving && <RefreshCw size={14} className="animate-spin" />}
             Değerleri Kaydet
