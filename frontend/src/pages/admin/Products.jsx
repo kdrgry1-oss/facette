@@ -1505,11 +1505,13 @@ export default function AdminProducts() {
                 const ok = window.confirm(
                   "SİLİNEN TEKNİK DETAY KURTARMA — ÖNİZLEME\n\n" +
                   `• Eşleşen ürün: ${d.eslesen_urun}\n` +
-                  `• Doldurulacak özellik (toplam): ${d.doldurulacak_ozellik_toplam}\n` +
+                  `• Genel (Trendyol) dolacak özellik: ${d.doldurulacak_ozellik_toplam}\n` +
+                  `• Hepsiburada'ya dolacak: ${d.hb_dolan_toplam}\n` +
+                  `• Temu'ya dolacak: ${d.temu_dolan_toplam}\n` +
                   `• Eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Belirsiz (atlanan): ${d.belirsiz_urun_karti}\n\n` +
                   "Eşleştirme YALNIZCA urun_karti_id ile yapılır.\n" +
-                  "Yalnız BOŞ özellikler doldurulur, mevcut değerler KORUNUR.\n" +
-                  "Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
+                  "Genel + Hepsiburada + Temu alanlarına, yalnız BOŞ olanlara yazılır; mevcut değerler KORUNUR.\n" +
+                  "attributes formatına dokunulmaz (Trendyol güvende). Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
                   "Uygulansın mı?"
                 );
                 if (!ok) { toast("İptal edildi"); return; }
@@ -1519,7 +1521,7 @@ export default function AdminProducts() {
                   null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
                 );
                 toast.dismiss(t2);
-                toast.success(`${res.data.guncellenen_urun} üründe ${res.data.doldurulacak_ozellik_toplam} özellik kurtarıldı`);
+                toast.success(`${res.data.guncellenen_urun} üründe — Genel ${res.data.doldurulacak_ozellik_toplam} · HB ${res.data.hb_dolan_toplam} · Temu ${res.data.temu_dolan_toplam} özellik dolduruldu`);
                 fetchProducts();
               } catch (e) {
                 toast.dismiss(t);
