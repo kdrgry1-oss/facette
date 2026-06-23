@@ -98,6 +98,19 @@ export default function Footer() {
 
   return (
     <footer className="bg-black text-white mt-16 md:mt-24" data-testid="footer-structured">
+      {/* #FACETTE X YOU — premium imza bandı (footer kolonlarının hemen üstünde) */}
+      <div className="border-b border-white/10">
+        <div className="container-main py-12 md:py-16 text-center">
+          <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-white/45 mb-3.5">Stilini Paylaş</p>
+          <h3 className="text-2xl md:text-[2.6rem] leading-none font-extralight tracking-[0.22em]">
+            #FACETTE <span className="text-white/35 mx-1">×</span> YOU
+          </h3>
+          <p className="mt-4 text-xs md:text-sm font-light text-white/55 max-w-md mx-auto leading-relaxed">
+            Tarzını <span className="text-white/80">@facette</span> etiketiyle paylaş, koleksiyonun bir parçası ol.
+          </p>
+        </div>
+      </div>
+
       <div className="container-main pt-14 md:pt-20 pb-8">
         {/* Brand strip */}
         <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16">

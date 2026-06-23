@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { SlidersHorizontal, Grid2X2, Grid3X3, LayoutGrid, X, Check } from "lucide-react";
+import { SlidersHorizontal, Square, Columns2, Grid2X2, X, Check } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -36,10 +36,10 @@ export default function Category() {
   const [pages, setPages] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // Grid sütun tercihi localStorage'a kaydedilir.
+  // Grid sütun tercihi localStorage'a kaydedilir. Seçenekler: 1 / 2 / 4
   const [gridCols, setGridColsState] = useState(() => {
     const saved = parseInt(localStorage.getItem("facette_plp_grid") || "", 10);
-    return [2, 3, 4].includes(saved) ? saved : 4;
+    return [1, 2, 4].includes(saved) ? saved : 2;
   });
   const setGridCols = (n) => {
     setGridColsState(n);
@@ -73,7 +73,7 @@ export default function Category() {
   }, [slug, sort, order, minPrice, maxPrice, sizesParam, colorsParam, page]);
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "auto" });
   }, [page]);
 
   const fetchProducts = async () => {
@@ -200,9 +200,9 @@ export default function Category() {
   ];
 
   const gridClass = {
+    1: "grid-cols-1",
     2: "grid-cols-2",
-    3: "grid-cols-2 md:grid-cols-3",
-    4: "grid-cols-2 md:grid-cols-4",
+    4: "grid-cols-4",
   };
 
   // Aktif (uygulanmış) filtre sayısı — toolbar rozetinde gösterilir.
@@ -241,14 +241,14 @@ export default function Category() {
           <span className="text-sm text-gray-500 hidden md:block">{total} Ürün</span>
 
           <div className="flex items-center gap-3">
-            <button onClick={() => setGridCols(2)} className={`p-1 ${gridCols === 2 ? "text-black" : "text-gray-400"}`} data-testid="grid-2">
+            <button onClick={() => setGridCols(1)} className={`p-1 ${gridCols === 1 ? "text-black" : "text-gray-400"}`} data-testid="grid-1" aria-label="Tekli görünüm">
+              <Square size={18} strokeWidth={1.5} />
+            </button>
+            <button onClick={() => setGridCols(2)} className={`p-1 ${gridCols === 2 ? "text-black" : "text-gray-400"}`} data-testid="grid-2" aria-label="İkili görünüm">
+              <Columns2 size={18} strokeWidth={1.5} />
+            </button>
+            <button onClick={() => setGridCols(4)} className={`p-1 ${gridCols === 4 ? "text-black" : "text-gray-400"}`} data-testid="grid-4" aria-label="Dörtlü görünüm">
               <Grid2X2 size={18} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => setGridCols(3)} className={`p-1 ${gridCols === 3 ? "text-black" : "text-gray-400"}`} data-testid="grid-3">
-              <Grid3X3 size={18} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => setGridCols(4)} className={`p-1 ${gridCols === 4 ? "text-black" : "text-gray-400"}`} data-testid="grid-4">
-              <LayoutGrid size={18} strokeWidth={1.5} />
             </button>
           </div>
         </div>

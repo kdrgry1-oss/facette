@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Search, User, ShoppingBag, Menu, X, Heart } from "lucide-react";
+import { Search, User, ShoppingBag, Menu, X, Bookmark } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { useFavorites } from "../context/FavoritesContext";
@@ -139,7 +139,7 @@ export default function Header({ hideMenu = false }) {
     setActiveMenu(m);
   };
   const scheduleClose = () => {
-    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 450);
+    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 650);
     setCloseTimer(t);
   };
   const cancelClose = () => {
@@ -236,12 +236,15 @@ export default function Header({ hideMenu = false }) {
                   </button>
 
                   <nav className="hidden lg:flex items-center gap-5">
-                    {/* EN YENİLER */}
+                    {/* YENİ KOLEKSİYON — premium flagship menü (Seçenek A: elmas işareti + animasyonlu hairline) */}
                     <Link
                       to="/en-yeniler"
-                      className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
+                      className="group relative text-xs font-medium tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5"
+                      data-testid="nav-yeni-koleksiyon"
                     >
-                      EN YENİLER
+                      <span className="inline-block w-[5px] h-[5px] rotate-45 bg-black/55 group-hover:bg-black transition-colors duration-300" aria-hidden="true" />
+                      YENİ KOLEKSİYON
+                      <span className="pointer-events-none absolute left-0 bottom-2.5 h-px w-full bg-black origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500 ease-out" aria-hidden="true" />
                     </Link>
 
                     {/* GİYİM - Mega Menu */}
@@ -284,10 +287,9 @@ export default function Header({ hideMenu = false }) {
               )}
             </div>
 
-            {/* Center: Logo (text on mobile, image on desktop) */}
+            {/* Center: Logo (image on every breakpoint — mobil dahil) */}
             <Link to="/" className="flex-shrink-0 absolute left-1/2 -translate-x-1/2 lg:static lg:translate-x-0" data-testid="header-logo">
-              <span className="lg:hidden text-[13px] tracking-[0.45em] font-light">FACETTE</span>
-              <img src="/logo.webp" alt="FACETTE" className="hidden lg:block h-6" />
+              <img src="/logo.webp" alt="FACETTE" className="h-5 md:h-6" />
             </Link>
 
             {/* Right: Icons (mobile: search + cart only; desktop: full set) */}
@@ -301,14 +303,16 @@ export default function Header({ hideMenu = false }) {
                     </span>
                     <span className="mt-1.5 h-px bg-current w-24 md:w-32"></span>
                   </button>
-                  <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Favoriler" data-testid="favorites-btn">
-                    <Heart size={17} strokeWidth={1.4} />
-                    {favCount > 0 && (
-                      <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 bg-red-500 text-white text-[8px] font-light rounded-full flex items-center justify-center">
-                        {favCount}
-                      </span>
-                    )}
-                  </Link>
+                  {user && (
+                    <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Kaydedilenler" data-testid="favorites-btn">
+                      <Bookmark size={17} strokeWidth={1.4} />
+                      {favCount > 0 && (
+                        <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 bg-black text-white text-[8px] font-light rounded-full flex items-center justify-center">
+                          {favCount}
+                        </span>
+                      )}
+                    </Link>
+                  )}
                   <Link to={user ? "/hesabim" : "/giris"} className="hidden lg:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
                     <User size={17} strokeWidth={1.4} />
                   </Link>
@@ -335,8 +339,8 @@ export default function Header({ hideMenu = false }) {
           >
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
-                {/* Categories */}
-                <div className="flex-1 grid grid-cols-3 gap-8">
+                {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
+                <div className="grid grid-cols-3 gap-x-6 max-w-lg">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
                       <Link
@@ -461,7 +465,7 @@ export default function Header({ hideMenu = false }) {
         <div className={`mobile-menu ${mobileMenuOpen ? "open" : ""}`}>
           <div className="flex items-center justify-between px-5 h-14 border-b border-black/5">
             <Link to="/" onClick={() => setMobileMenuOpen(false)}>
-              <span className="text-base tracking-[0.4em] font-light">FACETTE</span>
+              <img src="/logo.webp" alt="FACETTE" className="h-5" />
             </Link>
             <button onClick={() => setMobileMenuOpen(false)} className="-mr-2 p-2" aria-label="Kapat">
               <X size={20} strokeWidth={1.4} />
@@ -472,10 +476,11 @@ export default function Header({ hideMenu = false }) {
             <div className="px-5 pt-6 pb-4">
               <Link
                 to="/en-yeniler"
-                className="block py-3 text-sm tracking-[0.15em] uppercase font-light"
+                className="flex items-center gap-2 py-3 text-sm tracking-[0.18em] uppercase font-medium"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                En Yeniler
+                <span className="inline-block w-[5px] h-[5px] rotate-45 bg-black" aria-hidden="true" />
+                Yeni Koleksiyon
               </Link>
 
               {/* GİYİM accordion */}
@@ -603,7 +608,9 @@ export default function Header({ hideMenu = false }) {
               <nav className="hidden md:flex flex-col gap-3.5 text-[11px] tracking-[0.18em] uppercase md:items-end">
                 <button onClick={() => { closeSearch(); setIsOpen(true); }} className="hover:opacity-60 transition-opacity">Sepet{itemCount > 0 ? ` (${itemCount})` : ""}</button>
                 <Link to={user ? "/hesabim" : "/giris"} onClick={closeSearch} className="hover:opacity-60 transition-opacity">{user ? "Hesabım" : "Giriş Yap"}</Link>
-                <Link to="/hesabim?tab=favorites" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Favoriler{favCount > 0 ? ` (${favCount})` : ""}</Link>
+                {user && (
+                  <Link to="/hesabim?tab=favorites" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Kaydedilenler{favCount > 0 ? ` (${favCount})` : ""}</Link>
+                )}
               </nav>
 
               {/* Mobil: kategori + hesap linkleri yatay (md'de gizli) */}
@@ -612,7 +619,7 @@ export default function Header({ hideMenu = false }) {
                 <Link to="/aksesuar" onClick={closeSearch}>Aksesuar</Link>
                 <Link to="/sale" onClick={closeSearch} className="text-red-700">Sale</Link>
                 <Link to={user ? "/hesabim" : "/giris"} onClick={closeSearch}>{user ? "Hesabım" : "Giriş"}</Link>
-                <Link to="/hesabim?tab=favorites" onClick={closeSearch}>Favoriler</Link>
+                {user && <Link to="/hesabim?tab=favorites" onClick={closeSearch}>Kaydedilenler</Link>}
               </div>
             </div>
 

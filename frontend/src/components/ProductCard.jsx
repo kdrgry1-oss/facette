@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Heart, ShoppingBag } from "lucide-react";
+import { Bookmark, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { optimizeImg } from "../lib/img";
@@ -136,13 +136,13 @@ export default function ProductCard({ product, listId = "", listName = "", index
             onClick={handleFavorite}
             className="absolute top-3 right-3 z-10"
             data-testid={`favorite-${product.id}`}
-            aria-label={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
-            title={isFav ? "Favorilerden çıkar" : "Favorilere ekle"}
+            aria-label={isFav ? "Kaydedilenlerden çıkar" : "Kaydet"}
+            title={isFav ? "Kaydedilenlerden çıkar" : "Kaydet"}
           >
-            <Heart
+            <Bookmark
               size={20}
               strokeWidth={1.5}
-              className={`transition-colors ${isFav ? "fill-red-500 text-red-500" : "text-gray-400 hover:text-black"}`}
+              className={`transition-colors ${isFav ? "fill-black text-black" : "text-gray-400 hover:text-black"}`}
             />
           </button>
 

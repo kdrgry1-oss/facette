@@ -1,0 +1,58 @@
+FAZ IA TAM — Tüm pazaryeri ayarları Entegrasyonlar'dan Pazaryerleri'ne taşındı
+==============================================================================
+Trendyol + Temu + Hepsiburada. Entegrasyonlar'da artık HİÇBİR pazaryeri kartı yok.
+
+⚠️ BU PAKET BACKEND İÇERİR → ÖNCE RAILWAY, YEŞİL OL, SONRA frontend.
+   Railway boot onayı: log'da "[scheduler] Background scheduler started"
+
+DEĞİŞEN 3 DOSYA
+  backend/routes/category_mapping.py            (_get_hb_client → db.settings birincil)
+  frontend/src/pages/admin/MarketplaceHub.jsx   (Trendyol + HB operatif bölümleri)
+  frontend/src/pages/admin/Integrations.jsx     (Trendyol + HB + Temu kart/modal kaldırıldı)
+
+──────────────────────────────────────────────────────────────────────────
+HEPSİBURADA (bu tur — en dikkatli kısım)
+──────────────────────────────────────────────────────────────────────────
+SORUN: HB iki store'a bağlıydı. _get_hb_client KİMLİĞİ marketplace_accounts'tan
+  (birincil) okuyordu; ama HB durum rozeti + is_active + integrations doğrudan
+  okumaları db.settings'ten. Yani Pazaryerleri'ndeki generic creds ile
+  Entegrasyonlar modalı ÇELİŞEBİLİYORDU.
+
+ÇÖZÜM (tek doğru kaynak = db.settings):
+  BACKEND: _get_hb_client artık db.settings'i BİRİNCİL okur, marketplace_accounts'u
+    YEDEK. Simetrik flip — alanlar/OMS/ortam mantığı AYNI; her iki store da
+    okunmaya devam eder (eski girişin olan kullanıcı bozulmaz).
+  FRONTEND (Hub): Pazaryerleri → Hepsiburada'da operatif "API Ayarları" bölümü:
+    Merchant ID, Secret Key, Developer Username, Ortam (sandbox/production),
+    Entegrasyon Aktif + "Bağlantı Test Et" + "Kaydet".
+    -> GET/POST /integrations/hepsiburada/settings (modalın kullandığı AYNI endpoint).
+    Secret "********" maskesi backend'de korunur (boşa yazmaz).
+    default_markup (vestigial — HB fiyatı okumuyor) GET->POST round-trip ile korunur.
+  FRONTEND (Integrations): HB kartı + modalı kaldırıldı; generic HB creds Hub'da gizlendi.
+  SONUÇ: HB için TEK düzenleme noktası = Pazaryerleri > Hepsiburada. Status rozeti,
+    is_active, OMS, ortam — hepsi çalışmaya devam eder.
+
+──────────────────────────────────────────────────────────────────────────
+TRENDYOL (önceki turlardan — bu pakette dahil)
+──────────────────────────────────────────────────────────────────────────
+  Pazaryerleri → Trendyol'da operatif "API & Varsayılanları" + "İşlemler"
+  (db.settings). Integrations Trendyol kartı/modalı kaldırıldı. Backend değişmedi.
+
+TEMU (önceki turdan)
+──────────────────────────────────────────────────────────────────────────
+  Integrations Temu kartı/modalı kaldırıldı (db.settings'e yazıp boşa çalışıyordu;
+  _get_temu_config sadece marketplace_accounts okuyor). Operatif editör = Hub'daki
+  generic API alanları (marketplace_accounts) — orada duruyor.
+
+──────────────────────────────────────────────────────────────────────────
+KORUNANLAR (Entegrasyonlar): iyzico, TÜM kargo (MNG/Aras/Yurtiçi/PTT/HepsiJet/
+  Trendyol Express/Sürat), GİB, NetGSM, XML Feed, Loglar, yardım kutusu.
+
+DOĞRULAMA: MarketplaceHub.jsx + Integrations.jsx esbuild ✓ ·
+  category_mapping.py ast.parse ✓ · prod build'de ESLint kapalı (ölü kod kırmaz).
+
+DEPLOY SIRASI:
+  1) git push  (Railway backend'i derler)
+  2) Railway log'da "[scheduler] Background scheduler started" → YEŞİL bekle
+  3) Cloudflare frontend'i otomatik derler (Railway'den bağımsız)
+  4) Ctrl+Shift+R

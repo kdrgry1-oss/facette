@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
@@ -29,9 +29,20 @@ const MiuMiuTheme = lazy(() => import("./pages/storefront/MiuMiuTheme"));
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import SlugRouter from "./components/SlugRouter";
 import MaintenanceGate from "./components/MaintenanceGate";
+import CookieConsent from "./components/CookieConsent";
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
+
+// Rota değişiminde sayfayı anında en üste al — 2./3. sayfaya geçişte veya yeni
+// sayfa açıldığında footer'ın önce görünüp sonra yukarı zıplaması engellenir.
+function ScrollToTop() {
+  const { pathname, search } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [pathname, search]);
+  return null;
+}
 
 // Admin paneli (~75 sayfa + ağır kütüphaneler) AYRI bir chunk olarak,
 // sadece /admin'e girilince yüklenir. Storefront ziyaretçileri bunu indirmez.
@@ -60,8 +71,10 @@ function App() {
       <CartProvider>
         <FavoritesProvider>
           <BrowserRouter>
+            <ScrollToTop />
             <Toaster position="top-center" richColors />
             <MarketingPixelsInjector />
+            <CookieConsent />
             <MaintenanceGate>
               <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
                 <Routes>
