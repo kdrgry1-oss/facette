@@ -1504,12 +1504,12 @@ export default function AdminProducts() {
                 const d = pre.data || {};
                 const ok = window.confirm(
                   "SİLİNEN TEKNİK DETAY KURTARMA — ÖNİZLEME\n\n" +
-                  `• Eşleşen ürün: ${d.eslesen_urun}\n` +
+                  `• Eşleşen ürün: ${d.eslesen_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
                   `• Genel (Trendyol) dolacak özellik: ${d.doldurulacak_ozellik_toplam}\n` +
                   `• Hepsiburada'ya dolacak: ${d.hb_dolan_toplam}\n` +
                   `• Temu'ya dolacak: ${d.temu_dolan_toplam}\n` +
-                  `• Eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Belirsiz (atlanan): ${d.belirsiz_urun_karti}\n\n` +
-                  "Eşleştirme YALNIZCA urun_karti_id ile yapılır.\n" +
+                  `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal (atlanan): ${d.anormal_atlanmis}\n\n` +
+                  "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (varyant-benzersiz, güvenli).\n" +
                   "Genel + Hepsiburada + Temu alanlarına, yalnız BOŞ olanlara yazılır; mevcut değerler KORUNUR.\n" +
                   "attributes formatına dokunulmaz (Trendyol güvende). Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
                   "Uygulansın mı?"
@@ -1548,10 +1548,10 @@ export default function AdminProducts() {
                 const d = pre.data || {};
                 const ok = window.confirm(
                   "EKSİK AÇIKLAMA KURTARMA — ÖNİZLEME\n\n" +
-                  `• Açıklaması doldurulacak ürün: ${d.doldurulacak_urun}\n` +
+                  `• Açıklaması doldurulacak ürün: ${d.doldurulacak_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
                   `• Zaten dolu (atlanan): ${d.zaten_dolu}\n` +
-                  `• Eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Belirsiz: ${d.belirsiz_urun_karti}\n\n` +
-                  "Eşleştirme YALNIZCA urun_karti_id ile.\n" +
+                  `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal: ${d.anormal_atlanmis}\n\n` +
+                  "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (güvenli).\n" +
                   "Yalnız BOŞ açıklama doldurulur, mevcut açıklama KORUNUR.\n" +
                   "Fiyat / KDV / stok / başlık / özelliklere DOKUNULMAZ.\n\n" +
                   "Uygulansın mı?"
