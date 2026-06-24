@@ -217,6 +217,8 @@ export default function AdminProducts() {
   const [techImportModalOpen, setTechImportModalOpen] = useState(false);
   const [techImportResults, setTechImportResults] = useState(null);
   const [techImporting, setTechImporting] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const toolsMenuRef = useRef(null);
   const [techApplying, setTechApplying] = useState(false);
 
   const [filters, setFilters] = useState(() => _loadProductsView().appliedFilters || {
@@ -645,6 +647,192 @@ export default function AdminProducts() {
    *        kullanılır; aynı değer hem üst (compact) hem alt (full) pagination'a
    *        beslenir.
    */
+  // ── "Toplu İşlemler" menüsü (ürün aramanın altındaki dropdown) handlerleri ──
+  // Buton onClick'leri buraya taşındı; menü öğeleri bu fonksiyonları çağırır.
+  const handleOtomatikDoldur = async () => {
+    if (!window.confirm("TÜM ürünlerin Trendyol/HB/Temu özelliklerini otomatik doldur?\n\nMevcut manuel girilen değerler korunur.")) return;
+    const t = toast.loading("Teknik detaylar eşleniyor...");
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `${API}/integrations/site/teknik-detay/sync?use_cache=true`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+      );
+      toast.dismiss(t);
+      toast.success(res.data.message || "Eşleme tamamlandı");
+      fetchProducts();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Eşleme başarısız");
+    }
+  };
+
+  const handleSilinenOzellikKurtar = async () => {
+    const token = localStorage.getItem('token');
+    const t = toast.loading("Önizleme hazırlanıyor...");
+    try {
+      const pre = await axios.post(
+        `${API}/integrations/site/teknik-detay/recover?apply=false`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+      );
+      toast.dismiss(t);
+      const d = pre.data || {};
+      const ok = window.confirm(
+        "SİLİNEN TEKNİK DETAY KURTARMA — ÖNİZLEME\n\n" +
+        `• Eşleşen ürün: ${d.eslesen_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
+        `• Genel (Trendyol) dolacak özellik: ${d.doldurulacak_ozellik_toplam}\n` +
+        `• Hepsiburada'ya dolacak: ${d.hb_dolan_toplam}\n` +
+        `• Temu'ya dolacak: ${d.temu_dolan_toplam}\n` +
+        `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal (atlanan): ${d.anormal_atlanmis}\n\n` +
+        "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (varyant-benzersiz, güvenli).\n" +
+        "Genel + Hepsiburada + Temu alanlarına, yalnız BOŞ olanlara yazılır; mevcut değerler KORUNUR.\n" +
+        "attributes formatına dokunulmaz (Trendyol güvende). Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
+        "Uygulansın mı?"
+      );
+      if (!ok) { toast("İptal edildi"); return; }
+      const t2 = toast.loading("Kurtarma uygulanıyor...");
+      const res = await axios.post(
+        `${API}/integrations/site/teknik-detay/recover?apply=true`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+      );
+      toast.dismiss(t2);
+      toast.success(`${res.data.guncellenen_urun} üründe — Genel ${res.data.doldurulacak_ozellik_toplam} · HB ${res.data.hb_dolan_toplam} · Temu ${res.data.temu_dolan_toplam} özellik dolduruldu`);
+      fetchProducts();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Kurtarma başarısız");
+    }
+  };
+
+  const handleEksikAciklamaKurtar = async () => {
+    const token = localStorage.getItem('token');
+    const t = toast.loading("Açıklama önizlemesi hazırlanıyor...");
+    try {
+      const pre = await axios.post(
+        `${API}/integrations/site/aciklama/recover?apply=false`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+      );
+      toast.dismiss(t);
+      const d = pre.data || {};
+      const ok = window.confirm(
+        "EKSİK AÇIKLAMA KURTARMA — ÖNİZLEME\n\n" +
+        `• Açıklaması doldurulacak ürün: ${d.doldurulacak_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
+        `• Zaten dolu (atlanan): ${d.zaten_dolu}\n` +
+        `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal: ${d.anormal_atlanmis}\n\n` +
+        "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (güvenli).\n" +
+        "Yalnız BOŞ açıklama doldurulur, mevcut açıklama KORUNUR.\n" +
+        "Fiyat / KDV / stok / başlık / özelliklere DOKUNULMAZ.\n\n" +
+        "Uygulansın mı?"
+      );
+      if (!ok) { toast("İptal edildi"); return; }
+      const t2 = toast.loading("Açıklamalar yazılıyor...");
+      const res = await axios.post(
+        `${API}/integrations/site/aciklama/recover?apply=true`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+      );
+      toast.dismiss(t2);
+      toast.success(`${res.data.guncellenen_urun} ürünün açıklaması dolduruldu`);
+      fetchProducts();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Açıklama kurtarma başarısız");
+    }
+  };
+
+  const handleRenkWebColorDoldur = async () => {
+    const token = localStorage.getItem('token');
+    const t = toast.loading("Renk/Web Color önizlemesi hazırlanıyor...");
+    try {
+      const pre = await axios.post(
+        `${API}/integrations/site/renk-webcolor/autofill?apply=false`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
+      );
+      toast.dismiss(t);
+      const d = pre.data || {};
+      const ok = window.confirm(
+        "RENK + WEB COLOR DOLDUR — ÖNİZLEME\n\n" +
+        `• Taranan ürün: ${d.taranan_urun}\n` +
+        `• Rengi bulunan: ${d.renk_bulunan_urun}  ·  Bulunamayan: ${d.renk_bulunamayan}\n` +
+        `• Çok renkli (atlanan): ${d.cok_renkli_atlanan}\n` +
+        `• Doldurulacak — Renk: ${d.renk_doldurulacak}  ·  Web Color: ${d.webcolor_doldurulacak}\n` +
+        `• HB: ${d.hb_dolan_toplam}  ·  Temu: ${d.temu_dolan_toplam}\n\n` +
+        "Renk = ürün adının SON kelimesi (renk sözlüğüyle doğrulanır).\n" +
+        "Web Color gönderimde pazaryeri değerine (en yakın) çözülür.\n" +
+        "Çok renkli kart ATLANIR · Beden YAZILMAZ · yalnız BOŞ alanlar.\n\n" +
+        "Uygulansın mı?"
+      );
+      if (!ok) { toast("İptal edildi"); return; }
+      const t2 = toast.loading("Renk + Web Color yazılıyor...");
+      const res = await axios.post(
+        `${API}/integrations/site/renk-webcolor/autofill?apply=true`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+      );
+      toast.dismiss(t2);
+      toast.success(`${res.data.guncellenen_urun} üründe Renk + Web Color dolduruldu`);
+      fetchProducts();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Renk/Web Color doldurma başarısız");
+    }
+  };
+
+  const handleAIAciklamaUret = async () => {
+    const token = localStorage.getItem('token');
+    const t = toast.loading("Boş açıklamalar sayılıyor...");
+    try {
+      const pre = await axios.post(
+        `${API}/integrations/site/aciklama/generate?apply=false`,
+        null, { headers: { Authorization: `Bearer ${token}` }, timeout: 60000 }
+      );
+      toast.dismiss(t);
+      const total = pre.data?.bos_aciklamali_urun || 0;
+      if (total === 0) { toast("Boş açıklamalı ürün yok"); return; }
+      const ok = window.confirm(
+        "AI AÇIKLAMA ÜRET — ÖNİZLEME\n\n" +
+        `• Açıklaması boş ürün: ${total}\n\n` +
+        "Ürün Bilgisi AI ile özniteliklerden yazılır.\n" +
+        "Kumaş = Materyal, Kalıp = Kalıp özniteliğinden.\n" +
+        "Beden/Model ölçüleri BOŞ '___' bırakılır (elle doldurursun).\n" +
+        "Yalnız BOŞ açıklamalar doldurulur; mevcutlar KORUNUR.\n\n" +
+        "Üretim batch'ler halinde sürer. Başlatılsın mı?"
+      );
+      if (!ok) { toast("İptal edildi"); return; }
+      let done = 0, remaining = total, guard = 0;
+      const t2 = toast.loading(`AI açıklama üretiliyor... 0/${total}`);
+      while (remaining > 0 && guard < 80) {
+        guard++;
+        const res = await axios.post(
+          `${API}/integrations/site/aciklama/generate?apply=true&limit=10`,
+          null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
+        );
+        const g = res.data?.uretilen || 0;
+        remaining = res.data?.kalan ?? 0;
+        done += g;
+        toast.loading(`AI açıklama üretiliyor... ${done}/${total}`, { id: t2 });
+        if (g === 0) break;
+      }
+      toast.dismiss(t2);
+      toast.success(`${done} ürüne AI açıklama üretildi` + (remaining > 0 ? ` · kalan ${remaining}` : ''));
+      fetchProducts();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "AI açıklama üretimi başarısız");
+    }
+  };
+
+  const handleBarkodPush = () => setBarcodePushOpen(true);
+
+  // Toplu İşlemler menüsü: dışarı tıklayınca kapat
+  useEffect(() => {
+    if (!toolsMenuOpen) return;
+    const onDocClick = (e) => {
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target)) setToolsMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [toolsMenuOpen]);
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
@@ -1471,32 +1659,6 @@ export default function AdminProducts() {
             Excel Yükle
           </button>
           <button
-            onClick={async () => {
-              if (!window.confirm("TÜM ürünlerin Trendyol/HB/Temu özelliklerini otomatik doldur?\n\nMevcut manuel girilen değerler korunur.")) return;
-              const t = toast.loading("Teknik detaylar eşleniyor...");
-              try {
-                const token = localStorage.getItem('token');
-                const res = await axios.post(
-                  `${API}/integrations/site/teknik-detay/sync?use_cache=true`,
-                  null,
-                  { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
-                );
-                toast.dismiss(t);
-                toast.success(res.data.message || "Eşleme tamamlandı");
-                fetchProducts();
-              } catch (e) {
-                toast.dismiss(t);
-                toast.error(e.response?.data?.detail || "Eşleme başarısız");
-              }
-            }}
-            data-testid="ticimax-tekdetay-sync-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-all font-medium text-sm shadow-sm"
-            title="Ana listeden tüm ürünlerin teknik detaylarını eşler"
-          >
-            <RefreshCw size={16} />
-            Otomatik Doldur
-          </button>
-          <button
             onClick={() => techFileInputRef.current?.click()}
             disabled={techImporting}
             data-testid="tech-import-btn"
@@ -1504,196 +1666,6 @@ export default function AdminProducts() {
           >
             {techImporting ? <RefreshCw className="animate-spin" size={16} /> : <FileSpreadsheet size={16} />}
             Teknik Detay Yükle
-          </button>
-          <button
-            onClick={async () => {
-              const token = localStorage.getItem('token');
-              const t = toast.loading("Önizleme hazırlanıyor...");
-              try {
-                const pre = await axios.post(
-                  `${API}/integrations/site/teknik-detay/recover?apply=false`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
-                );
-                toast.dismiss(t);
-                const d = pre.data || {};
-                const ok = window.confirm(
-                  "SİLİNEN TEKNİK DETAY KURTARMA — ÖNİZLEME\n\n" +
-                  `• Eşleşen ürün: ${d.eslesen_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
-                  `• Genel (Trendyol) dolacak özellik: ${d.doldurulacak_ozellik_toplam}\n` +
-                  `• Hepsiburada'ya dolacak: ${d.hb_dolan_toplam}\n` +
-                  `• Temu'ya dolacak: ${d.temu_dolan_toplam}\n` +
-                  `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal (atlanan): ${d.anormal_atlanmis}\n\n` +
-                  "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (varyant-benzersiz, güvenli).\n" +
-                  "Genel + Hepsiburada + Temu alanlarına, yalnız BOŞ olanlara yazılır; mevcut değerler KORUNUR.\n" +
-                  "attributes formatına dokunulmaz (Trendyol güvende). Fiyat / KDV / stok / barkoda DOKUNULMAZ.\n\n" +
-                  "Uygulansın mı?"
-                );
-                if (!ok) { toast("İptal edildi"); return; }
-                const t2 = toast.loading("Kurtarma uygulanıyor...");
-                const res = await axios.post(
-                  `${API}/integrations/site/teknik-detay/recover?apply=true`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
-                );
-                toast.dismiss(t2);
-                toast.success(`${res.data.guncellenen_urun} üründe — Genel ${res.data.doldurulacak_ozellik_toplam} · HB ${res.data.hb_dolan_toplam} · Temu ${res.data.temu_dolan_toplam} özellik dolduruldu`);
-                fetchProducts();
-              } catch (e) {
-                toast.dismiss(t);
-                toast.error(e.response?.data?.detail || "Kurtarma başarısız");
-              }
-            }}
-            data-testid="teknik-detay-recover-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 transition-all font-medium text-sm shadow-sm"
-            title="Silinen ürün-kartı teknik detaylarını doğrulanmış snapshot'tan (urun_karti_id ile) güvenle geri yükler — önce önizleme gösterir"
-          >
-            <RefreshCw size={16} />
-            Silinen Özellik Kurtar
-          </button>
-          <button
-            onClick={async () => {
-              const token = localStorage.getItem('token');
-              const t = toast.loading("Açıklama önizlemesi hazırlanıyor...");
-              try {
-                const pre = await axios.post(
-                  `${API}/integrations/site/aciklama/recover?apply=false`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
-                );
-                toast.dismiss(t);
-                const d = pre.data || {};
-                const ok = window.confirm(
-                  "EKSİK AÇIKLAMA KURTARMA — ÖNİZLEME\n\n" +
-                  `• Açıklaması doldurulacak ürün: ${d.doldurulacak_urun}  (kart-ID: ${d.eslesen_kart_id_ile} · barkod: ${d.eslesen_barkod_ile})\n` +
-                  `• Zaten dolu (atlanan): ${d.zaten_dolu}\n` +
-                  `• Hiç eşleşmeyen kart: ${d.eslesmeyen_urun_karti}  ·  Anormal: ${d.anormal_atlanmis}\n\n` +
-                  "Eşleştirme: önce urun_karti_id, tutmazsa BARKOD (güvenli).\n" +
-                  "Yalnız BOŞ açıklama doldurulur, mevcut açıklama KORUNUR.\n" +
-                  "Fiyat / KDV / stok / başlık / özelliklere DOKUNULMAZ.\n\n" +
-                  "Uygulansın mı?"
-                );
-                if (!ok) { toast("İptal edildi"); return; }
-                const t2 = toast.loading("Açıklamalar yazılıyor...");
-                const res = await axios.post(
-                  `${API}/integrations/site/aciklama/recover?apply=true`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
-                );
-                toast.dismiss(t2);
-                toast.success(`${res.data.guncellenen_urun} ürünün açıklaması dolduruldu`);
-                fetchProducts();
-              } catch (e) {
-                toast.dismiss(t);
-                toast.error(e.response?.data?.detail || "Açıklama kurtarma başarısız");
-              }
-            }}
-            data-testid="aciklama-recover-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded hover:bg-cyan-700 transition-all font-medium text-sm shadow-sm"
-            title="Eksik ürün açıklamalarını doğrulanmış Ticimax export'tan (urun_karti_id ile) güvenle doldurur — önce önizleme"
-          >
-            <RefreshCw size={16} />
-            Eksik Açıklama Kurtar
-          </button>
-          <button
-            onClick={async () => {
-              const token = localStorage.getItem('token');
-              const t = toast.loading("Renk/Web Color önizlemesi hazırlanıyor...");
-              try {
-                const pre = await axios.post(
-                  `${API}/integrations/site/renk-webcolor/autofill?apply=false`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 120000 }
-                );
-                toast.dismiss(t);
-                const d = pre.data || {};
-                const ok = window.confirm(
-                  "RENK + WEB COLOR DOLDUR — ÖNİZLEME\n\n" +
-                  `• Taranan ürün: ${d.taranan_urun}\n` +
-                  `• Rengi bulunan: ${d.renk_bulunan_urun}  ·  Bulunamayan: ${d.renk_bulunamayan}\n` +
-                  `• Çok renkli (atlanan): ${d.cok_renkli_atlanan}\n` +
-                  `• Doldurulacak — Renk: ${d.renk_doldurulacak}  ·  Web Color: ${d.webcolor_doldurulacak}\n` +
-                  `• HB: ${d.hb_dolan_toplam}  ·  Temu: ${d.temu_dolan_toplam}\n\n` +
-                  "Renk = ürün adının SON kelimesi (renk sözlüğüyle doğrulanır).\n" +
-                  "Web Color gönderimde pazaryeri değerine (en yakın) çözülür.\n" +
-                  "Çok renkli kart ATLANIR · Beden YAZILMAZ · yalnız BOŞ alanlar.\n\n" +
-                  "Uygulansın mı?"
-                );
-                if (!ok) { toast("İptal edildi"); return; }
-                const t2 = toast.loading("Renk + Web Color yazılıyor...");
-                const res = await axios.post(
-                  `${API}/integrations/site/renk-webcolor/autofill?apply=true`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
-                );
-                toast.dismiss(t2);
-                toast.success(`${res.data.guncellenen_urun} üründe Renk + Web Color dolduruldu`);
-                fetchProducts();
-              } catch (e) {
-                toast.dismiss(t);
-                toast.error(e.response?.data?.detail || "Renk/Web Color doldurma başarısız");
-              }
-            }}
-            data-testid="renk-webcolor-autofill-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-fuchsia-600 text-white rounded hover:bg-fuchsia-700 transition-all font-medium text-sm shadow-sm"
-            title="Renk'i ürün adının son kelimesinden çıkarır, Web Color'ı ondan türetir; çok renkli kart atlanır, yalnız boş alanlar dolar — önce önizleme"
-          >
-            <RefreshCw size={16} />
-            Renk + Web Color Doldur
-          </button>
-          <button
-            onClick={async () => {
-              const token = localStorage.getItem('token');
-              const t = toast.loading("Boş açıklamalar sayılıyor...");
-              try {
-                const pre = await axios.post(
-                  `${API}/integrations/site/aciklama/generate?apply=false`,
-                  null, { headers: { Authorization: `Bearer ${token}` }, timeout: 60000 }
-                );
-                toast.dismiss(t);
-                const total = pre.data?.bos_aciklamali_urun || 0;
-                if (total === 0) { toast("Boş açıklamalı ürün yok"); return; }
-                const ok = window.confirm(
-                  "AI AÇIKLAMA ÜRET — ÖNİZLEME\n\n" +
-                  `• Açıklaması boş ürün: ${total}\n\n` +
-                  "Ürün Bilgisi AI ile özniteliklerden yazılır.\n" +
-                  "Kumaş = Materyal, Kalıp = Kalıp özniteliğinden.\n" +
-                  "Beden/Model ölçüleri BOŞ '___' bırakılır (elle doldurursun).\n" +
-                  "Yalnız BOŞ açıklamalar doldurulur; mevcutlar KORUNUR.\n\n" +
-                  "Üretim batch'ler halinde sürer. Başlatılsın mı?"
-                );
-                if (!ok) { toast("İptal edildi"); return; }
-                let done = 0, remaining = total, guard = 0;
-                const t2 = toast.loading(`AI açıklama üretiliyor... 0/${total}`);
-                while (remaining > 0 && guard < 80) {
-                  guard++;
-                  const res = await axios.post(
-                    `${API}/integrations/site/aciklama/generate?apply=true&limit=10`,
-                    null, { headers: { Authorization: `Bearer ${token}` }, timeout: 180000 }
-                  );
-                  const g = res.data?.uretilen || 0;
-                  remaining = res.data?.kalan ?? 0;
-                  done += g;
-                  toast.loading(`AI açıklama üretiliyor... ${done}/${total}`, { id: t2 });
-                  if (g === 0) break;
-                }
-                toast.dismiss(t2);
-                toast.success(`${done} ürüne AI açıklama üretildi` + (remaining > 0 ? ` · kalan ${remaining}` : ''));
-                fetchProducts();
-              } catch (e) {
-                toast.dismiss(t);
-                toast.error(e.response?.data?.detail || "AI açıklama üretimi başarısız");
-              }
-            }}
-            data-testid="aciklama-generate-ai-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700 transition-all font-medium text-sm shadow-sm"
-            title="Boş açıklamalı ürünlere özniteliklerden AI ile açıklama üretir; ölçüler boş '___' bırakılır — önce önizleme"
-          >
-            <RefreshCw size={16} />
-            AI Açıklama Üret
-          </button>
-          <button
-            onClick={() => setBarcodePushOpen(true)}
-            data-testid="trendyol-push-barcodes-btn"
-            className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition-all font-medium text-sm shadow-sm"
-            title="Barkod / Stok kodu yazıp seçili ürünleri Trendyol'a aktar"
-          >
-            <Store size={16} />
-            Barkod ile Trendyol'a Aktar
           </button>
           <button
             onClick={openTrash}
@@ -1734,6 +1706,52 @@ export default function AdminProducts() {
           <span>Gelişmiş Filtreleme</span>
           {showFilters ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
+      </div>
+
+      {/* Toplu İşlemler — ürün aramanın altında dropdown (toolbar'dan taşındı) */}
+      <div className="relative mb-4" ref={toolsMenuRef}>
+        <button
+          onClick={() => setToolsMenuOpen((o) => !o)}
+          data-testid="bulk-tools-menu-btn"
+          className="flex items-center gap-2 px-4 py-2 border rounded bg-white hover:bg-gray-50 transition-colors font-medium text-sm shadow-sm"
+        >
+          <Layers size={18} className="text-gray-700" />
+          <span>Toplu İşlemler</span>
+          <ChevronDown size={16} className={`transition-transform ${toolsMenuOpen ? "rotate-180" : ""}`} />
+        </button>
+        {toolsMenuOpen && (
+          <div className="absolute left-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl py-1.5 z-30">
+            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              Ürün Toplu İşlemleri
+            </div>
+            {[
+              { label: "Otomatik Doldur", desc: "Tüm ürünlerin teknik detaylarını eşle", color: "bg-purple-600", on: handleOtomatikDoldur, testid: "ticimax-tekdetay-sync-btn", icon: RefreshCw },
+              { label: "Silinen Özellik Kurtar", desc: "Snapshot'tan teknik detayları geri yükle", color: "bg-teal-600", on: handleSilinenOzellikKurtar, testid: "teknik-detay-recover-btn", icon: RefreshCw },
+              { label: "Eksik Açıklama Kurtar", desc: "Boş açıklamaları export'tan doldur", color: "bg-cyan-600", on: handleEksikAciklamaKurtar, testid: "aciklama-recover-btn", icon: RefreshCw },
+              { label: "Renk + Web Color Doldur", desc: "Ad son kelimesinden renk + web color", color: "bg-fuchsia-600", on: handleRenkWebColorDoldur, testid: "renk-webcolor-autofill-btn", icon: RefreshCw },
+              { label: "AI Açıklama Üret", desc: "Boş açıklamalara AI ile üret", color: "bg-violet-600", on: handleAIAciklamaUret, testid: "aciklama-generate-ai-btn", icon: RefreshCw },
+              { label: "Barkod ile Trendyol'a Aktar", desc: "Barkod yazıp seçili ürünleri Trendyol'a gönder", color: "bg-orange-500", on: handleBarkodPush, testid: "trendyol-push-barcodes-btn", icon: Store },
+            ].map((it) => {
+              const Icon = it.icon;
+              return (
+                <button
+                  key={it.testid}
+                  data-testid={it.testid}
+                  onClick={() => { setToolsMenuOpen(false); it.on(); }}
+                  className="w-full flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 text-left transition-colors"
+                >
+                  <span className={`mt-0.5 w-7 h-7 shrink-0 rounded-md ${it.color} text-white flex items-center justify-center`}>
+                    <Icon size={14} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-900">{it.label}</span>
+                    <span className="block text-xs text-gray-500 truncate">{it.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Advanced Filters Panel — Ticimax tarzı 3 kolonlu gelişmiş filtre */}

@@ -404,13 +404,47 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
                 attr_lines.append(f"- {n}: {v}")
     attr_txt = "\n".join(attr_lines[:25])
 
-    sys = (
-        "Sen Türk bir kadın giyim e-ticaret markası (FACETTE) için ürün açıklaması yazan "
-        "profesyonel bir metin yazarısın. SADECE temiz HTML döndür: 2-3 kısa <p> paragraf, "
-        "gerekiyorsa bir <ul><li>…</li></ul> özellik listesi. <a>, <script>, <style>, inline "
-        "style KULLANMA. Şık, akıcı, satışa yönelik ama abartısız Türkçe yaz. Fiyat, indirim, "
-        "kargo, iade bilgisi yazma. Verilmeyen marka/materyal bilgisi uydurma."
+    # ── SABİT ŞABLON — çıktı bu HTML iskeletini BİREBİR korur; yalnız içerik ürüne göre değişir.
+    TEMPLATE = (
+        '<p><span style="font-size: 11px;">Kayık yaka. Panço detaylı üst. Yüksek bel etek. Oversize kalıp. Midi boy. Lastikli bel. Cepsiz.</span></p>\n'
+        '<p><span style="font-size: 11px;">Kumaş &amp; İçerik Bilgisi</span></p>\n'
+        '<p><span style="font-size:11px;">\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Kumaş içeriği: %80 Viskon %20 Polyester<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Dokuma kumaştan üretilmiştir<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Viskon içerikli yapısı sayesinde yumuşak ve akışkan kullanım sunar<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Panço detaylı tasarımı ile modern ve şık görünüm sağlar<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Oversize kalıbı sayesinde rahat kullanım sunar<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Astarsız yapıya sahiptir\n'
+        '</span></p>\n'
+        '<p>&nbsp;</p>\n'
+        '<p><span style="font-size:11px;">\n'
+        'Yıkama ve Bakım Talimatı<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;30°C’de benzer renklerle yıkanmalıdır<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Hassas program tercih edilmelidir<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Ağartıcı kullanılmamalıdır<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Kurutma makinesinde kurutulması önerilmez<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Düşük ısıda tersinden ütüleyiniz<br />\n'
+        '&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;Uzun ömürlü kullanım için askıda muhafaza ediniz\n'
+        '</span></p>\n'
+        '<p>&nbsp;</p>\n'
+        '<span style="font-size:11px;"> </span>'
     )
+
+    sys = (
+        "Sen FACETTE (Türk kadın giyim) için ürün açıklaması üreten bir asistansın. "
+        "Sana SABİT bir HTML ŞABLONU verilecek. Çıktın bu şablonun HTML yapısını, etiketlerini, "
+        "inline style'larını (font-size:11px), &nbsp; girintilerini, <br /> satır sonlarını ve ÜÇ "
+        "bölümünü (1) kısa özellikler paragrafı, (2) 'Kumaş &amp; İçerik Bilgisi', (3) 'Yıkama ve "
+        "Bakım Talimatı' — BİREBİR korumalıdır. SADECE içeriği bu ürüne göre değiştir. "
+        "Kural: 'Yıkama ve Bakım Talimatı' bölümünü ve son satırdaki <span> boşluğunu AYNEN bırak. "
+        "İlk paragraftaki kısa özellikleri (yaka, kalıp, boy, bel, kol, cep, kapama vb.) ürüne göre, "
+        "nokta ile ayrılmış kısa cümleler hâlinde yaz. 'Kumaş içeriği:' maddesini verilen ürün "
+        "özelliklerinden al; verilmemişse materyal UYDURMA, o maddeyi genel/uygun bir ifadeyle geç. "
+        "Kumaş & İçerik maddeleri 4-6 adet olabilir; bullet biçimi (&nbsp;&nbsp; &nbsp;•&nbsp;&nbsp; &nbsp;) "
+        "ve <br /> düzeni aynı kalmalı, SON maddede <br /> olmamalı. "
+        "SADECE HTML döndür: kod bloğu (```), başlık, açıklama veya ekstra metin EKLEME."
+    )
+
     user = f"Ürün adı: {name}\n"
     if category:
         user += f"Kategori: {category}\n"
@@ -418,7 +452,10 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
         user += f"Marka: {brand}\n"
     if attr_txt:
         user += f"Ürün özellikleri:\n{attr_txt}\n"
-    user += "\nBu ürün için yukarıdaki bilgilere dayanarak HTML açıklama üret."
+    user += (
+        "\nAŞAĞIDAKİ ŞABLONU BİREBİR KULLAN; format/stil/etiketleri ASLA bozma, yalnız içeriği "
+        "bu ürüne göre değiştir:\n\n" + TEMPLATE
+    )
 
     try:
         html_out = await llm_chat(
@@ -427,7 +464,7 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
             model=settings.get("model") or "claude-sonnet-4-6",
             system_message=sys,
             user_text=user,
-            max_tokens=900,
+            max_tokens=1100,
         )
     except Exception as e:
         raise HTTPException(502, f"AI açıklama üretimi başarısız: {e}")

@@ -898,12 +898,12 @@ export default function Checkout() {
                 <Step n={sBase + 2} title="Ödeme" icon={CreditCard} />
                 <div className="space-y-3">
                   {/* Method radios */}
-                  <div className="grid sm:grid-cols-2 gap-2">
+                  <div className="grid sm:grid-cols-2 gap-3">
                     {[
-                      { key: "credit_card", label: "Banka & Kredi Kartı ile Öde", icon: CreditCard },
+                      { key: "credit_card", label: "Kredi / Banka Kartı", icon: CreditCard },
                       { key: "bank_transfer", label: "Havale / EFT", icon: Building },
                     ].filter(({ key }) => enabledPM[key]).map(({ key, label, icon: Icon }) => (
-                      <label key={key} className={`flex items-center gap-2 p-3 border rounded cursor-pointer transition-colors text-sm ${paymentMethod === key ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
+                      <label key={key} className={`relative flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition-all ${paymentMethod === key ? "border-stone-900 ring-1 ring-stone-900 bg-stone-50" : "border-stone-200 hover:border-stone-400"}`}>
                         <input type="radio" name="payment" value={key}
                           checked={paymentMethod === key}
                           onChange={(e) => {
@@ -935,15 +935,23 @@ export default function Checkout() {
                               });
                             } catch (_) { /* silent */ }
                           }}
-                          className="accent-black" />
-                        <Icon size={16} className={paymentMethod === key ? "text-black" : "text-gray-500"} />
-                        <span>{label}</span>
+                          className="sr-only" />
+                        <span className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center ${paymentMethod === key ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-500"}`}>
+                          <Icon size={18} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold text-stone-900">{label}</span>
+                          <span className="block text-xs text-stone-500">{key === "credit_card" ? "Tek çekim veya taksit imkânı" : "Sipariş sonrası IBAN paylaşılır"}</span>
+                        </span>
+                        <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${paymentMethod === key ? "border-stone-900" : "border-stone-300"}`}>
+                          {paymentMethod === key && <span className="w-2 h-2 rounded-full bg-stone-900" />}
+                        </span>
                       </label>
                     ))}
                   </div>
 
                   {paymentMethod === "credit_card" && (
-                    <div className="mt-3 pt-3 border-t space-y-3">
+                    <div className="mt-1 rounded-xl border border-stone-200 bg-stone-50/60 p-4 space-y-4">
                       <div className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
                         <Lock size={12} className="text-green-600" /> Kart Bilgileri
                       </div>
@@ -979,7 +987,7 @@ export default function Checkout() {
                           {installments.map((opt) => (
                             <button type="button" key={opt.number}
                               onClick={() => setSelectedInstallment(opt.number)}
-                              className={`border rounded px-2 py-1.5 text-left transition-colors ${selectedInstallment === opt.number ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
+                              className={`border rounded-lg px-2.5 py-2 text-left transition-colors ${selectedInstallment === opt.number ? "border-stone-900 bg-stone-50" : "border-stone-200 hover:border-stone-400"}`}>
                               <div className="text-xs font-semibold">{opt.number === 1 ? "Tek Çekim" : `${opt.number} Taksit`}</div>
                               <div className="text-[11px] text-gray-500">
                                 {(opt.totalPrice ?? grandTotal).toFixed(2)} TL
