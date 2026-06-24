@@ -28,7 +28,7 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, Copy, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
 import MultiSelect from "../../components/admin/MultiSelect";
@@ -328,6 +328,7 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars -- per-row buton kaldırıldı (Toplu Fatura Yazdır kullanılır); detay/ileride kullanılabilir
   const handlePrintInvoice = async (orderId) => {
     const token = localStorage.getItem('token');
     window.open(`${API}/orders/${orderId}/invoice/print?token=${token}`, '_blank');
@@ -1230,9 +1231,12 @@ export default function AdminOrders({ unpaidView = false }) {
                         }
                         // Sadece barkod oluşturulmuş — kargo firması takip no'yu henüz üretmedi (kargoda değil)
                         if (barcodeNo) {
+                          // Barkod oluşturuldu → kamyon YEŞİL yansır (kargoya hazır). Takip no
+                          // henüz gelmediği için "takip bekleniyor" yazısı silik kalır. Salt CSS;
+                          // kargo çalışma mantığı (barkod/takip no tespiti) değişmedi.
                           return (
-                            <span className="inline-flex items-center gap-1.5 text-gray-300" title={`Barkod hazır: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
-                              <Truck size={16} />
+                            <span className="inline-flex items-center gap-1.5" title={`Barkod hazır: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
+                              <Truck size={16} className="text-emerald-500" />
                               <span className="text-[10px] text-gray-400">takip bekleniyor</span>
                             </span>
                           );
@@ -1252,22 +1256,8 @@ export default function AdminOrders({ unpaidView = false }) {
                         >
                           <FolderOpen size={15} />
                         </button>
-                        {/* 2. Kargo Durum Yenile */}
-                        <button
-                          onClick={() => handleCreateMngShipment(order.id)}
-                          title="DHL E-Commerce ile Kargoya Ver / Güncelle"
-                          className="tci-btn tci-btn-orange"
-                        >
-                          <RefreshCw size={15} />
-                        </button>
-                        {/* 3. Fatura Yazdır - gri yazıcı */}
-                        <button
-                          onClick={() => handlePrintInvoice(order.id)}
-                          title="Fatura Yazdır"
-                          className="tci-btn tci-btn-gray"
-                        >
-                          <Printer size={15} />
-                        </button>
+                        {/* 2. (kaldırıldı) Kargoya Ver → üst bar "Toplu Barkod Oluştur" + sipariş detayından yapılır */}
+                        {/* 3. (kaldırıldı) Fatura Yazdır → üst bar "Toplu Fatura Yazdır" kullanılır */}
                         {/* 4. E-Arşiv Fatura Oluştur - kesilince saydam+pasif (Fatura Sıfırla'ya kadar) */}
                         {(() => {
                           const invoiced = isInvoiceIssued || !!order.invoice_number || !!order.invoice?.invoice_number;
@@ -1286,24 +1276,7 @@ export default function AdminOrders({ unpaidView = false }) {
                             </button>
                           );
                         })()}
-                        {/* 5. Kargo Etiketi - yeşil çift */}
-                        {order.platform === 'trendyol' && order.cargo_tracking_number ? (
-                          <button
-                            onClick={() => handleTrendyolPrintLabel(order.cargo_tracking_number)}
-                            title={`Trendyol Etiketi: ${order.cargo_tracking_number}`}
-                            className="tci-btn tci-btn-orange"
-                          >
-                            <Copy size={15} />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => order.cargo?.tracking_number ? handlePrintLabel(order.id) : openShipModal(order.id)}
-                            title={order.cargo?.tracking_number ? `Kargo Etiketi: ${order.cargo.tracking_number}` : "Kargoya Ver / Etiket"}
-                            className={`tci-btn ${order.cargo?.tracking_number ? 'tci-btn-green-active' : 'tci-btn-gray'}`}
-                          >
-                            <Copy size={15} />
-                          </button>
-                        )}
+                        {/* 5. (kaldırıldı) Kargo Etiketi → sipariş detayından / üst bardan yapılır */}
                         {/* 5b. Kargo Durum Yenile (şube işlemi sonrası) */}
                         {order.cargo?.tracking_number && order.cargo?.provider === 'MNG' && (
                           <button
@@ -1315,26 +1288,49 @@ export default function AdminOrders({ unpaidView = false }) {
                             <RefreshCw size={15} />
                           </button>
                         )}
-                        {/* 6. SMS Gönder */}
-                        <button
-                          onClick={() => order.cargo?.tracking_number ? handleSendShippingSMS(order.id) : handleSendConfirmationSMS(order.id)}
-                          title={order.cargo?.tracking_number ? "Kargo SMS Gönder" : "Onay SMS Gönder"}
-                          className="tci-btn tci-btn-gray"
-                        >
-                          <MessageSquare size={15} />
-                        </button>
-                        {/* FAZ 1 B3 - Not butonu */}
-                        <button
-                          onClick={() => openNoteModal(order)}
-                          title={order.admin_notes?.length ? `${order.admin_notes.length} not` : "Not Ekle"}
-                          data-testid={`note-btn-${order.id}`}
-                          className={`tci-btn ${order.admin_notes?.length ? 'tci-btn-yellow-active' : 'tci-btn-gray'}`}
-                        >
-                          <FileCheck size={15} />
-                          {order.admin_notes?.length > 0 && (
-                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">{order.admin_notes.length}</span>
-                          )}
-                        </button>
+                        {/* 6. (kaldırıldı) SMS → sipariş detayından gönderilir */}
+                        {/* Not butonu — admin notu + müşteri sipariş notu göstergesi (en sağda) */}
+                        {(() => {
+                          const adminCount = order.admin_notes?.length || 0;
+                          const custNote = (order.notes || "").trim();
+                          const hasNote = adminCount > 0 || !!custNote;
+                          return (
+                            <button
+                              onClick={() => openNoteModal(order)}
+                              title={[
+                                custNote ? `Müşteri notu: ${custNote}` : "",
+                                adminCount ? `${adminCount} admin notu` : "",
+                              ].filter(Boolean).join("\n") || "Not Ekle"}
+                              data-testid={`note-btn-${order.id}`}
+                              className={`tci-btn ${hasNote ? 'tci-btn-yellow-active' : 'tci-btn-gray'}`}
+                            >
+                              <FileCheck size={15} />
+                              {adminCount > 0 ? (
+                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">{adminCount}</span>
+                              ) : custNote ? (
+                                <span className="absolute -top-1 -right-1 bg-amber-500 w-2.5 h-2.5 rounded-full border border-white" title="Müşteri notu var" />
+                              ) : null}
+                            </button>
+                          );
+                        })()}
+                        {/* Hediye Notu butonu — 🎁; müşteri hediye notu/paketi girince belirteç (en sağda) */}
+                        {(() => {
+                          const giftNote = (order.gift_note || "").trim();
+                          const hasGift = !!giftNote || !!order.gift_wrap;
+                          return (
+                            <button
+                              onClick={() => openNoteModal(order)}
+                              title={giftNote ? `Hediye notu: ${giftNote}` : (order.gift_wrap ? "Hediye paketi istendi" : "Hediye notu yok")}
+                              data-testid={`gift-btn-${order.id}`}
+                              className={`tci-btn ${hasGift ? 'tci-btn-pink-active' : 'tci-btn-gray'}`}
+                            >
+                              <span className={`text-[15px] leading-none ${hasGift ? '' : 'grayscale opacity-50'}`}>🎁</span>
+                              {hasGift && (
+                                <span className="absolute -top-1 -right-1 bg-pink-500 w-2.5 h-2.5 rounded-full border border-white" title="Hediye notu/paketi var" />
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
@@ -1873,6 +1869,21 @@ export default function AdminOrders({ unpaidView = false }) {
             <DialogTitle>Sipariş Notu {noteTargetOrder?.order_number ? `- ${noteTargetOrder.order_number}` : ""}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
+            {/* Müşteri sipariş notu (checkout'ta girilen) — salt okunur */}
+            {noteTargetOrder?.notes && noteTargetOrder.notes.trim() && (
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-3 rounded">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1">Müşteri Sipariş Notu</p>
+                <p className="text-sm text-gray-800 whitespace-pre-wrap">{noteTargetOrder.notes}</p>
+              </div>
+            )}
+            {/* Hediye notu / paketi — salt okunur */}
+            {(noteTargetOrder?.gift_note?.trim() || noteTargetOrder?.gift_wrap) && (
+              <div className="bg-pink-50 border-l-4 border-pink-400 p-3 rounded">
+                <p className="text-xs font-bold text-pink-700 uppercase tracking-wider mb-1">🎁 Hediye Notu</p>
+                {noteTargetOrder?.gift_wrap && <p className="text-[11px] text-pink-600 mb-1">Hediye paketi istendi</p>}
+                {noteTargetOrder?.gift_note?.trim() && <p className="text-sm text-gray-800 whitespace-pre-wrap">{noteTargetOrder.gift_note}</p>}
+              </div>
+            )}
             {noteTargetOrder?.admin_notes?.length > 0 && (
               <div className="space-y-2 max-h-[240px] overflow-y-auto">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Önceki Notlar</p>

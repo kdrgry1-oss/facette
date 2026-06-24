@@ -337,6 +337,8 @@ button { font-weight: 400; }
 .tci-btn-yellow     { @apply bg-yellow-100 text-yellow-700 hover:bg-yellow-200 hover:shadow; }
 .tci-btn-yellow-active { @apply bg-yellow-400 text-white hover:bg-yellow-500 shadow; }
 .tci-btn-purple     { @apply bg-purple-100 text-purple-700 hover:bg-purple-200 hover:shadow; }
+.tci-btn-pink       { @apply bg-pink-100 text-pink-700 hover:bg-pink-200 hover:shadow; }
+.tci-btn-pink-active { @apply bg-pink-500 text-white hover:bg-pink-600 shadow; }
 
 @layer base {
   * {
