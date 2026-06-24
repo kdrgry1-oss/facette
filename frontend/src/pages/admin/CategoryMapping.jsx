@@ -556,6 +556,8 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const [showInvalidOnly, setShowInvalidOnly] = useState(true);
   const [batchDetail, setBatchDetail] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [hbTracking, setHbTracking] = useState(null);
+  const [hbTrackingLoading, setHbTrackingLoading] = useState(false);
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [catFilterOpen, setCatFilterOpen] = useState(false);
 
@@ -638,6 +640,23 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
     }
   };
 
+  const loadHbTracking = async (tid) => {
+    if (!tid) return;
+    setHbTrackingLoading(true);
+    setHbTracking(null);
+    try {
+      const r = await axios.get(
+        `${API}/integrations/hepsiburada/products/tracking/${encodeURIComponent(tid)}`,
+        { ...auth, timeout: 30000 }
+      );
+      setHbTracking(r.data?.data ?? r.data ?? {});
+    } catch (e) {
+      toast.error("İçe aktarım durumu alınamadı: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setHbTrackingLoading(false);
+    }
+  };
+
   const onSubmit = async () => {
     const body = buildBody();
     const codes = body.stock_codes || [];
@@ -647,6 +666,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
       return;
     }
     setLoading(true);
+    setHbTracking(null);
     const t = toast.loading(`${marketplace} aktarımı başlatılıyor...`);
     try {
       const res = await axios.post(
@@ -1003,6 +1023,66 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
               >
                 {batchLoading ? "Yükleniyor..." : "Batch Detayını Yükle"}
               </button>
+            </div>
+          )}
+          {lastResult.tracking_id && marketplace === "hepsiburada" && (
+            <div className="px-3 py-2 border-b bg-orange-50">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-orange-900">
+                  <b>HB importu asenkron çalışır</b> — &ldquo;başarı&rdquo; yalnızca <u>gönderildi</u> demektir.
+                  Ürün gerçekten oluştu mu yoksa reddedildi mi (ve sebebi) görmek için durumu sorgulayın.
+                  <div className="font-mono text-[10px] text-orange-600 mt-0.5">Takip No: {lastResult.tracking_id}</div>
+                </div>
+                <button
+                  onClick={() => loadHbTracking(lastResult.tracking_id)}
+                  disabled={hbTrackingLoading}
+                  className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded font-semibold disabled:opacity-50 shrink-0"
+                  data-testid="load-hb-tracking-btn"
+                >
+                  {hbTrackingLoading ? "Sorgulanıyor..." : "İçe Aktarım Durumunu Sorgula"}
+                </button>
+              </div>
+              {hbTracking && (() => {
+                const d = hbTracking || {};
+                const items = Array.isArray(d) ? d : (d.data || d.items || d.results || []);
+                const status = d.status || d.trackingStatus || d.state || "";
+                return (
+                  <div className="mt-2 bg-white border rounded p-2">
+                    {status && <div className="text-xs mb-1"><b>Durum:</b> {String(status)}</div>}
+                    {Array.isArray(items) && items.length > 0 ? (
+                      <div className="space-y-1 max-h-60 overflow-auto">
+                        {items.map((it, i) => {
+                          const sku = it.merchantSku || it.sku || it.productId || "-";
+                          const st = it.status || it.state || "";
+                          const errsRaw = it.errors || it.failureReasons || it.validationResults || it.messages || [];
+                          const errTxt = (Array.isArray(errsRaw) ? errsRaw : [errsRaw])
+                            .map((e2) => (typeof e2 === "string" ? e2 : (e2?.message || e2?.reason || e2?.description || (e2 ? JSON.stringify(e2) : ""))))
+                            .filter(Boolean).join(" · ");
+                          const ok = !!String(st).toUpperCase().match(/SUCCESS|CREATED|MATCHED|DONE|OK|APPROVED/);
+                          return (
+                            <div key={i} className={`text-[10px] border rounded px-2 py-1 ${ok ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                              <div className="flex justify-between gap-2">
+                                <span className="font-mono">{String(sku)}</span>
+                                <span className={`font-bold ${ok ? "text-green-700" : "text-red-700"}`}>{String(st) || (ok ? "OK" : "?")}</span>
+                              </div>
+                              {errTxt && <div className="text-red-800 mt-0.5 break-words">{errTxt}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-gray-500">
+                        Henüz işlenmemiş olabilir — birkaç saniye sonra tekrar sorgulayın. Reddedilenler
+                        ayrıca <b>Statü = REJECTED</b> listesinde sebepleriyle görünür.
+                      </div>
+                    )}
+                    <details className="mt-1">
+                      <summary className="text-[10px] text-gray-400 cursor-pointer hover:text-black">Ham yanıt</summary>
+                      <pre className="text-[9px] bg-gray-50 p-2 rounded overflow-auto max-h-48">{JSON.stringify(hbTracking, null, 2)}</pre>
+                    </details>
+                  </div>
+                );
+              })()}
             </div>
           )}
           {batchDetail && (

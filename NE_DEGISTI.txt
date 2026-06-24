@@ -1,6 +1,6 @@
 FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
 ========================================
-Bu zip ÜÇ işi birden içerir; tek seferde uygulanabilir.
+Tek zip; 4 işi birden içerir.
 
 DEĞİŞEN DOSYALAR
   - backend/routes/integrations.py
@@ -8,34 +8,20 @@ DEĞİŞEN DOSYALAR
   - frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
   - frontend/src/pages/admin/CategoryMapping.jsx
 
-────────────────────────────────────────────────────────────────────────
-1) STOK KODU GÖNDERME AYARINA "ÜRÜN KART ID" SEÇENEĞİ
-   - "Varsayılan Alan Eşleştirme" → Satıcı Stok Kodu kaynağı dropdown'una
-     "Ürün Kart ID" eklendi. Seçilince merchantSku, Kart ID'den (urun_karti_id
-     → yoksa csv_card_id) üretilir; varyantta benzersizlik için beden/renk
-     soneki eklenir (12345-S, 12345-M).
-   - Oluşturma ile stok/fiyat güncelleme AYNI SKU'yu üretir (tek fonksiyon).
-   - Varsayılan (Stok Kodu) davranış birebir korunur; mevcut listelemeler bozulmaz.
-   ⚠️ Kaynağı Kart ID'ye GEÇİRİRSEN, eski stok-kodu SKU'suyla açılmış listelemeler
-      yeni SKU'larla eşleşmez → o ürünler yeniden gönderilene kadar stok tutmaz.
+1) Satıcı Stok Kodu kaynağına "Ürün Kart ID" seçeneği (merchantSku = kart id, varyantta sonek).
+2) Değer Eşleştirme — özellik değerleri (XS/XL, renk vb.) canlı çekim + cache self-heal.
+3) Filtreli Aktarım panelinde "Ürün Kart ID" kutusu → kart id ile ürün aktarımı.
+4) ← YENİ: HB İÇE AKTARIM DURUM SORGULAMA
+   - HB ürün importu ASENKRON: API "başarılı" dese de bu yalnızca GÖNDERİLDİ demektir;
+     ürün arka planda oluşturulur veya REDDEDİLİR (zorunlu özellik eksik / marka onayı /
+     görsel erişimi / kategori). Ayrıca yeni ürün HB onayından geçmeden mağazada görünmez.
+   - Panelde aktarım sonrası "İçe Aktarım Durumunu Sorgula" butonu eklendi → tracking_id
+     ile /hepsiburada/products/tracking/{id} sorgulanır, varsa ürün-bazlı durum + RET SEBEBİ
+     gösterilir (ham yanıt da açılır panelde).
+   - Reddedilen ürünler ayrıca Statü=REJECTED listesinde sebepleriyle görünür
+     (GET /integrations/hepsiburada/products/by-status?product_status=REJECTED).
 
-2) KATEGORİ EŞLEŞTİRME — ÖZELLİK DEĞERLERİ GELMİYOR DÜZELTMESİ
-   - Belirti: Değer Eşleştir'de sadece "Beden" çıkıyor, XS/XL ve diğer özellik
-     değerleri hiç gelmiyordu (cache değer listesi boş kalmış).
-   - Çözüm: Değer Eşleştir açılışında HB özellikleri DEĞERLERİYLE canlı çekilir
-     (/attributes?refresh=1) + backend cache'i değersizse kendini onarır.
-     Inline değer tespiti genişletildi.
-   - HB değer ucu yetki hatası dönerse ekran artık "çekilemedi: ..." uyarısı verir.
-
-3) ÜRÜN KART ID GİREREK ÜRÜN AKTARMA  ← YENİ
-   - Filtreli Aktarım panelinde (Kategori Eşleştirme sayfası) "Stok Kodu / Barkod"
-     kutusunun yanına "Ürün Kart ID" kutusu eklendi. Kart ID yazıp Doğrula/Gönder
-     ile ürün aktarabilirsin.
-   - Backend: card_ids → urun_karti_id (asıl) + csv_card_id (yedek) ile eşleşir.
-     HB ve Trendyol aktarım/doğrulama uçlarının hepsinde geçerli.
-
-────────────────────────────────────────────────────────────────────────
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_KARTID_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: kart id stok kodu kaynagi + deger eslestirme canli + kart id ile aktarim" && git push
-  Railway yeşil sinyali: [scheduler] Background scheduler started
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_IMPORT_DURUM_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: import durum sorgulama + kart id kaynak/aktarim + deger eslestirme" && git push
+  Railway yeşil: [scheduler] Background scheduler started
