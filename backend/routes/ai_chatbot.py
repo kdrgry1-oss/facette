@@ -245,23 +245,64 @@ async def _gather_kb_context(question_text: str) -> str:
     return "\n".join(f"- S: {i['question']}\n  C: {i['answer']}" for i in items)
 
 
-async def _gather_product_context(product_name: str) -> str:
+async def _gather_product_qa_rules(product_name: str) -> str:
+    """Ürüne özel cevap kuralları — AI Asistan → 'Ürüne Özel Yanıt' sekmesinden girilir.
+    Soru product_name taşıdığından eşleştirme isim bazlıdır. EN YÜKSEK ÖNCELİK."""
     if not product_name:
         return ""
+    try:
+        rdoc = await db.product_qa_rules.find_one(
+            {"product_name": {"$regex": re.escape(product_name[:32]), "$options": "i"}},
+            {"_id": 0, "instructions": 1, "rules": 1},
+        )
+    except Exception:
+        rdoc = None
+    if not rdoc:
+        return ""
+    parts = []
+    if (rdoc.get("instructions") or "").strip():
+        parts.append(rdoc["instructions"].strip())
+    for r in (rdoc.get("rules") or [])[:20]:
+        rq = (r.get("q") or "").strip()
+        ra = (r.get("a") or "").strip()
+        if ra:
+            parts.append(f"Soru '{rq}' benzeri ise: {ra}" if rq else ra)
+    if not parts:
+        return ""
+    return ("[ÜRÜNE ÖZEL KURALLAR — EN YÜKSEK ÖNCELİK; ÇELİŞKİDE BUNLARI UYGULA]\n"
+            + "\n".join(f"• {p}" for p in parts))
+
+
+async def _gather_product_context(product_name: str) -> str:
+    rule_txt = await _gather_product_qa_rules(product_name)
+    if not product_name:
+        return rule_txt
     prods = await db.products.find(
         {"name": {"$regex": re.escape(product_name[:40]), "$options": "i"}},
-        {"_id": 0, "name": 1, "price": 1, "stock": 1, "variants": 1, "description": 1}
+        {"_id": 0, "name": 1, "price": 1, "stock": 1, "variants": 1, "description": 1, "attributes": 1, "category_name": 1}
     ).limit(3).to_list(3)
-    if not prods:
-        return ""
     lines = []
     for p in prods:
         sv = [f"{v.get('size')}:{v.get('stock', 0)}" for v in (p.get("variants") or [])][:10]
-        lines.append(
-            f"- Ürün: {p.get('name')} | Fiyat: {p.get('price', '—')} TL | "
-            f"Toplam Stok: {p.get('stock', 0)} | Bedenler: {', '.join(sv) if sv else 'tek beden'}"
+        attrs = []
+        for a in (p.get("attributes") or [])[:18]:
+            if isinstance(a, dict):
+                an = (a.get("name") or "").strip()
+                av = (a.get("value") or "").strip()
+                if an and av:
+                    attrs.append(f"{an}: {av}")
+        line = (
+            f"- Ürün: {p.get('name')} | Kategori: {p.get('category_name', '—')} | "
+            f"Fiyat: {p.get('price', '—')} TL | Toplam Stok: {p.get('stock', 0)} | "
+            f"Bedenler: {', '.join(sv) if sv else 'tek beden'}"
         )
-    return "\n".join(lines)
+        if attrs:
+            line += f"\n  Özellikler: {', '.join(attrs)}"
+        lines.append(line)
+    prod_txt = "\n".join(lines)
+    if rule_txt and prod_txt:
+        return rule_txt + "\n\n" + prod_txt
+    return rule_txt or prod_txt
 
 
 @router.post("/draft/{marketplace}/{question_id}")
@@ -385,3 +426,98 @@ async def train_from_question(payload: dict, current_user: dict = Depends(requir
     }
     await db.ai_knowledge_base.insert_one(doc)
     return {"success": True}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Ürüne Özel Yanıt Kuralları (AI Asistan → 'Ürüne Özel Yanıt' sekmesi)
+# Soru product_name taşıdığından eşleşme isim bazlıdır. EN YÜKSEK ÖNCELİK.
+# ──────────────────────────────────────────────────────────────────────────
+@router.get("/product-qa-rules")
+async def list_product_qa_rules(current_user: dict = Depends(require_admin)):
+    """Tanımlı tüm ürüne özel kuralları listeler (sekme için)."""
+    rows = await db.product_qa_rules.find({}, {"_id": 0}).sort("updated_at", -1).limit(1000).to_list(1000)
+    return {"items": rows, "total": len(rows)}
+
+
+@router.get("/product-qa-rules/{product_id}")
+async def get_product_qa_rule(product_id: str, current_user: dict = Depends(require_admin)):
+    doc = await db.product_qa_rules.find_one({"product_id": str(product_id)}, {"_id": 0})
+    return doc or {"product_id": str(product_id), "instructions": "", "rules": []}
+
+
+@router.post("/product-qa-rules")
+async def upsert_product_qa_rule(payload: dict, current_user: dict = Depends(require_admin)):
+    """Bir ürüne özel cevap kuralını kaydeder/günceller.
+    Body: {product_id, product_name, instructions?, rules?: [{q, a}]}"""
+    pid = str((payload or {}).get("product_id", "")).strip()
+    pname = ((payload or {}).get("product_name") or "").strip()
+    if not pid or not pname:
+        raise HTTPException(400, "product_id ve product_name gerekli")
+    rules = []
+    for r in (payload.get("rules") or [])[:50]:
+        if isinstance(r, dict):
+            q = (r.get("q") or "").strip()
+            a = (r.get("a") or "").strip()
+            if a:
+                rules.append({"q": q, "a": a})
+    doc = {
+        "product_id": pid,
+        "product_name": pname,
+        "instructions": (payload.get("instructions") or "").strip()[:4000],
+        "rules": rules,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": current_user.get("email", ""),
+    }
+    await db.product_qa_rules.update_one({"product_id": pid}, {"$set": doc}, upsert=True)
+    return {"success": True, "product_id": pid, "rules_count": len(rules)}
+
+
+@router.delete("/product-qa-rules/{product_id}")
+async def delete_product_qa_rule(product_id: str, current_user: dict = Depends(require_admin)):
+    res = await db.product_qa_rules.delete_one({"product_id": str(product_id)})
+    return {"success": True, "deleted": res.deleted_count}
+
+
+@router.post("/kb/backfill-marketplace")
+async def backfill_kb_from_marketplace(payload: Optional[dict] = None, current_user: dict = Depends(require_admin)):
+    """Geçmişteki TÜM cevaplanmış TY/HB/Temu sorularını Bilgi Bankası'na aktarır (tek tıkla eğit).
+    Aynı soru-cevap zaten varsa atlar (idempotent)."""
+    colls = {"trendyol": "trendyol_questions", "hepsiburada": "hepsiburada_questions", "temu": "temu_questions"}
+    added = 0
+    scanned = 0
+    skipped = 0
+    for mp, cname in colls.items():
+        try:
+            cur = db[cname].find(
+                {"answer": {"$nin": ["", None]}},
+                {"_id": 0, "question_text": 1, "question": 1, "answer": 1, "product_name": 1, "question_id": 1},
+            )
+            async for q in cur:
+                scanned += 1
+                qt = (q.get("question_text") or q.get("question") or "").strip()
+                at = (q.get("answer") or "").strip()
+                if not qt or not at:
+                    skipped += 1
+                    continue
+                exists = await db.ai_knowledge_base.find_one(
+                    {"question": qt, "answer": at}, {"_id": 0, "id": 1}
+                )
+                if exists:
+                    skipped += 1
+                    continue
+                await db.ai_knowledge_base.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "question": qt,
+                    "answer": at,
+                    "channel": mp,
+                    "source_question_id": q.get("question_id"),
+                    "tags": ["backfill", mp],
+                    "product_name": q.get("product_name", ""),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": current_user.get("email", "backfill"),
+                    "usage_count": 0,
+                })
+                added += 1
+        except Exception as e:
+            logger.warning(f"[kb-backfill] {mp} atlandı: {e}")
+    return {"success": True, "scanned": scanned, "added": added, "skipped": skipped}

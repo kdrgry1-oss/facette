@@ -11,7 +11,8 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Brain, Send, Database, Zap, MessageCircle, Trash2, RefreshCw,
-  CheckCircle, AlertTriangle, Sparkles, Search, Bot, ShieldCheck, Key, Save, Lock
+  CheckCircle, AlertTriangle, Sparkles, Search, Bot, ShieldCheck, Key, Save, Lock,
+  Tag, Plus, X
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -80,6 +81,7 @@ export default function AIAssistant() {
         <Tab id="kb" label="Bilgi Bankası" icon={Database} activeId={tab} onClick={setTab} badge={trainStatus?.kb_total} />
         <Tab id="train" label="Toplu Eğitim" icon={Sparkles} activeId={tab} onClick={setTab} />
         <Tab id="auto" label="Otomatik Yanıt" icon={Zap} activeId={tab} onClick={setTab} badge={stats?.pending_trendyol} />
+        <Tab id="prodqa" label="Ürüne Özel Yanıt" icon={Tag} activeId={tab} onClick={setTab} />
         <Tab id="key" label="API Anahtarı" icon={Key} activeId={tab} onClick={setTab} />
       </div>
 
@@ -87,6 +89,7 @@ export default function AIAssistant() {
       {tab === "kb" && <KbTab />}
       {tab === "train" && <TrainTab status={trainStatus} onUpdate={loadStats} />}
       {tab === "auto" && <AutoTab stats={stats} onUpdate={loadStats} />}
+      {tab === "prodqa" && <ProdQaTab />}
       {tab === "key" && <KeyTab />}
     </div>
   );
@@ -682,6 +685,188 @@ function KeyTab() {
           {saving ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
           {saving ? "Kaydediliyor…" : "Kaydet"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   ÜRÜNE ÖZEL YANIT — bir ürün için AI'ın MUTLAKA uyacağı talimat + kalıp cevaplar
+   (eşleşme ürün adı bazlı; TY/HB soruları product_name taşır). EN YÜKSEK ÖNCELİK.
+   ────────────────────────────────────────────────────────────────────────── */
+function ProdQaTab() {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(null); // { id, name }
+  const [instructions, setInstructions] = useState("");
+  const [rules, setRules] = useState([]); // [{q,a}]
+  const [list, setList] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [searching, setSearching] = useState(false);
+
+  const loadList = async () => {
+    try {
+      const res = await axios.get(`${API}/ai/product-qa-rules`, auth());
+      setList(res.data?.items || []);
+    } catch { /* sessiz */ }
+  };
+  useEffect(() => { loadList(); }, []);
+
+  const search = async () => {
+    if (!q.trim()) { setResults([]); return; }
+    setSearching(true);
+    try {
+      const res = await axios.get(`${API}/products?search=${encodeURIComponent(q.trim())}&limit=8`, auth());
+      setResults(res.data?.products || []);
+    } catch { toast.error("Ürün araması başarısız"); }
+    setSearching(false);
+  };
+
+  const pick = async (p) => {
+    setSelected({ id: p.id, name: p.name });
+    setResults([]); setQ(p.name);
+    try {
+      const res = await axios.get(`${API}/ai/product-qa-rules/${p.id}`, auth());
+      setInstructions(res.data?.instructions || "");
+      setRules(res.data?.rules || []);
+    } catch { setInstructions(""); setRules([]); }
+  };
+
+  const editExisting = (item) => {
+    setSelected({ id: item.product_id, name: item.product_name });
+    setQ(item.product_name);
+    setInstructions(item.instructions || "");
+    setRules(item.rules || []);
+    setResults([]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const removeExisting = async (pid) => {
+    if (!window.confirm("Bu ürünün özel yanıt kuralı silinsin mi?")) return;
+    try { await axios.delete(`${API}/ai/product-qa-rules/${pid}`, auth()); toast.success("Silindi"); loadList(); }
+    catch { toast.error("Silinemedi"); }
+  };
+
+  const save = async () => {
+    if (!selected) { toast.error("Önce bir ürün seçin"); return; }
+    setSaving(true);
+    try {
+      await axios.post(`${API}/ai/product-qa-rules`, {
+        product_id: selected.id,
+        product_name: selected.name,
+        instructions,
+        rules: rules.filter((r) => (r.a || "").trim()),
+      }, auth());
+      toast.success("Ürüne özel yanıt kaydedildi");
+      setSelected(null); setInstructions(""); setRules([]); setQ("");
+      loadList();
+    } catch (e) { toast.error(e.response?.data?.detail || "Kaydedilemedi"); }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+        Buraya girdiğin kurallar, o ürünle ilgili Trendyol/Hepsiburada sorularında AI'ın <b>en yüksek öncelikle</b> uyacağı yanıtlardır. Genel bilgi + geçmiş soru-cevaplar bunun altında kullanılır.
+      </div>
+
+      {/* Ürün seç */}
+      <div className="border rounded-lg p-4">
+        <label className="block text-xs font-semibold text-gray-600 mb-2">1) Ürün seç</label>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && search()}
+              placeholder="Ürün adı ara…"
+              className="w-full border rounded pl-9 pr-3 py-2 text-sm" />
+          </div>
+          <button onClick={search} disabled={searching}
+            className="px-4 py-2 bg-black text-white rounded text-sm disabled:opacity-50">
+            {searching ? "…" : "Ara"}
+          </button>
+        </div>
+        {results.length > 0 && (
+          <div className="mt-2 border rounded divide-y max-h-64 overflow-auto">
+            {results.map((p) => (
+              <button key={p.id} onClick={() => pick(p)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-3">
+                {p.images?.[0] && <img src={p.images[0]} alt="" className="w-8 h-10 object-cover rounded" />}
+                <span className="flex-1">{p.name}</span>
+                <span className="text-xs text-gray-400">{p.price} TL</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {selected && <div className="mt-2 text-sm text-green-700 flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> Seçili: <b>{selected.name}</b></div>}
+      </div>
+
+      {selected && (
+        <>
+          {/* Genel talimat */}
+          <div className="border rounded-lg p-4">
+            <label className="block text-xs font-semibold text-gray-600 mb-2">2) Bu ürüne özel genel talimat (opsiyonel)</label>
+            <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={3}
+              placeholder="Örn: Bu ürün dar kalıptır, bir beden büyük önerilir. Kumaşı %100 pamuktur, ütü gerektirmez."
+              className="w-full border rounded px-3 py-2 text-sm resize-none" />
+          </div>
+
+          {/* Kalıp soru→cevap */}
+          <div className="border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-gray-600">3) Kalıp soru → cevap (opsiyonel)</label>
+              <button onClick={() => setRules((r) => [...r, { q: "", a: "" }])}
+                className="text-xs flex items-center gap-1 text-black border px-2 py-1 rounded hover:bg-gray-50">
+                <Plus className="w-3 h-3" /> Kural ekle
+              </button>
+            </div>
+            <div className="space-y-2">
+              {rules.length === 0 && <p className="text-xs text-gray-400">Henüz kalıp yok. "Kural ekle" ile soru kalıbı + sabit cevap tanımla.</p>}
+              {rules.map((r, i) => (
+                <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr_auto] gap-2 items-start">
+                  <input value={r.q} onChange={(e) => setRules((rs) => rs.map((x, j) => j === i ? { ...x, q: e.target.value } : x))}
+                    placeholder="Soru kalıbı (örn: kumaşı ne)" className="border rounded px-2 py-1.5 text-sm" />
+                  <input value={r.a} onChange={(e) => setRules((rs) => rs.map((x, j) => j === i ? { ...x, a: e.target.value } : x))}
+                    placeholder="Verilecek cevap" className="border rounded px-2 py-1.5 text-sm" />
+                  <button onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}
+                    className="p-1.5 text-gray-400 hover:text-red-600"><X className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={save} disabled={saving}
+            className="px-5 py-2.5 bg-black text-white rounded text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
+            <Save className="w-4 h-4" /> {saving ? "Kaydediliyor…" : "Ürüne Özel Yanıtı Kaydet"}
+          </button>
+        </>
+      )}
+
+      {/* Mevcut kurallar */}
+      <div className="border rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Tanımlı ürün kuralları ({list.length})</h3>
+          <button onClick={loadList} className="text-xs text-gray-500 flex items-center gap-1 hover:text-black"><RefreshCw className="w-3 h-3" /> Yenile</button>
+        </div>
+        {list.length === 0 ? (
+          <p className="text-xs text-gray-400">Henüz tanım yok.</p>
+        ) : (
+          <div className="divide-y">
+            {list.map((item) => (
+              <div key={item.product_id} className="py-2.5 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{item.product_name}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {item.instructions ? item.instructions.slice(0, 80) : "—"}
+                    {item.rules?.length ? ` · ${item.rules.length} kalıp` : ""}
+                  </div>
+                </div>
+                <button onClick={() => editExisting(item)} className="text-xs text-black underline">Düzenle</button>
+                <button onClick={() => removeExisting(item.product_id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
