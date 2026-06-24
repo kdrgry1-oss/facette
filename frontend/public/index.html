@@ -22,6 +22,25 @@
             })(window, document, 'script', 'dataLayer', 'GTM-THJQQDL');
         </script>
         <!-- End Google Tag Manager -->
+        <!-- Google Tag Manager (PWQH4P45) -->
+        <script>
+            // İkinci GTM container — THJQQDL ile aynı deferred (requestIdleCallback) desende yüklenir.
+            window.dataLayer = window.dataLayer || [];
+            (function (w, d, s, l, i) {
+                function loadGTM2() {
+                    w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+                    var f = d.getElementsByTagName(s)[0],
+                        j = d.createElement(s),
+                        dl = l != 'dataLayer' ? '&l=' + l : '';
+                    j.async = true;
+                    j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+                    f.parentNode.insertBefore(j, f);
+                }
+                if ('requestIdleCallback' in w) { w.requestIdleCallback(loadGTM2, { timeout: 4000 }); }
+                else { setTimeout(loadGTM2, 2500); }
+            })(window, document, 'script', 'dataLayer', 'GTM-PWQH4P45');
+        </script>
+        <!-- End Google Tag Manager (PWQH4P45) -->
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#000000" />
@@ -99,6 +118,10 @@
         <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-THJQQDL"
         height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         <!-- End Google Tag Manager (noscript) -->
+        <!-- Google Tag Manager (noscript) (PWQH4P45) -->
+        <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-PWQH4P45"
+        height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+        <!-- End Google Tag Manager (noscript) (PWQH4P45) -->
         <noscript>You need to enable JavaScript to run this app.</noscript>
         <div id="root"></div>
         <!--
