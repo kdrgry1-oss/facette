@@ -1180,6 +1180,55 @@ def _match_general_value(lv: str, mp_values: list, aliases: dict):
 
 
 
+@router.post("/{marketplace}/bulk-auto-setup")
+async def bulk_auto_setup(marketplace: str, current_user: dict = Depends(require_admin)):
+    """Matched TÜM kategorilerde tam otomatik kurulum: özellik + DEĞER + şirket/ortak default.
+    _auto_setup_mapping motorunu her kategoride çalıştırır. Manuel eşleştirmeler EZİLMEZ.
+    Son durum raporu döner (kategori başı + toplam)."""
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    matched_cats = await db.category_mappings.find(
+        {"marketplace": marketplace, "marketplace_category_id": {"$nin": [None, ""]}},
+        {"_id": 0}
+    ).to_list(length=5000)
+    details = []
+    tot = {"attr_matched": 0, "value_matched": 0, "company_filled": 0, "defaults_set": 0}
+    processed = 0
+    failed = 0
+    for cm in matched_cats:
+        cid = cm.get("category_id")
+        if not cid:
+            continue
+        try:
+            r = await _auto_setup_mapping(marketplace, cid)
+            if r and r.get("ok") is not False:
+                processed += 1
+                for k in tot:
+                    tot[k] += int(r.get(k, 0) or 0)
+                details.append({"category_id": cid,
+                                "category_name": cm.get("category_name") or cm.get("name") or "",
+                                **{k: int(r.get(k, 0) or 0) for k in tot}})
+            else:
+                failed += 1
+                details.append({"category_id": cid,
+                                "category_name": cm.get("category_name") or "",
+                                "skipped": (r or {}).get("reason", "?")})
+        except Exception as e:
+            failed += 1
+            details.append({"category_id": cid, "error": str(e)[:200]})
+    return {
+        "marketplace": marketplace,
+        "total_categories": len(matched_cats),
+        "processed": processed, "failed": failed,
+        "totals": tot,
+        "message": (f"{processed}/{len(matched_cats)} kategori kuruldu — "
+                    f"özellik {tot['attr_matched']}, değer {tot['value_matched']}, "
+                    f"şirket {tot['company_filled']}, default {tot['defaults_set']}"
+                    + (f", {failed} hata" if failed else "")),
+        "details": details[:2000],
+    }
+
+
 async def _auto_setup_mapping(marketplace: str, category_id: str) -> dict:
     """Yeni eşleştirilmiş bir kategori için TÜM otomatik kurulumu yapar:
       1) Live Trendyol attribute'larını çek ve cache'le

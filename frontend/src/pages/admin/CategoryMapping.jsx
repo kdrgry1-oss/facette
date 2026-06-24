@@ -153,6 +153,26 @@ export default function CategoryMapping() {
     }
   };
 
+  const bulkAutoSetup = async () => {
+    if (!await window.appConfirm(
+      `${active} için matched TÜM kategorilerde özellik + DEĞER + şirket/ortak default otomatik kurulacak.\n\n` +
+      `• Mevcut manuel eşleştirmeler KORUNUR (ezilmez), sadece boş olanlar doldurulur.\n` +
+      `• Renk/Beden gibi DEĞERLER de eşleştirilir.\n\n` +
+      `Devam edilsin mi?`
+    )) return;
+    setBulkAttrLoading(true);
+    try {
+      const r = await axios.post(`${API}/category-mapping/${active}/bulk-auto-setup`, {}, { ...auth, timeout: 600000 });
+      const d = r.data || {};
+      toast.success(d.message || "Tam eşleştirme tamamlandı", { duration: 8000 });
+      load();
+    } catch (e) {
+      toast.error("Tam eşleştirme hatası: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setBulkAttrLoading(false);
+    }
+  };
+
   const bulkFillCompanyDefaults = async () => {
     if (!await window.appConfirm(
       `${active} için TÜM matched kategorilerin "Üretici / İthalatçı Adı / Adres / Mail" alanları\n` +
@@ -189,6 +209,14 @@ export default function CategoryMapping() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={bulkAutoSetup}
+            disabled={bulkAttrLoading || data.matched === 0}
+            className="flex items-center gap-1 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Matched tüm kategorilerde özellik + değer + şirket/ortak default'u birlikte otomatik kur"
+            data-testid="cat-bulk-auto-setup">
+            {bulkAttrLoading ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
+            {bulkAttrLoading ? "Eşleşiyor..." : "Tümünü Eşleştir (Özellik+Değer)"}
+          </button>
           <button onClick={bulkAutoMatchAttributes}
             disabled={bulkAttrLoading || data.matched === 0}
             className="flex items-center gap-1 px-3 py-2 bg-stone-900 text-white rounded-lg text-sm font-semibold hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -558,6 +586,8 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const [batchLoading, setBatchLoading] = useState(false);
   const [hbTracking, setHbTracking] = useState(null);
   const [hbTrackingLoading, setHbTrackingLoading] = useState(false);
+  const [recon, setRecon] = useState(null);
+  const [reconLoading, setReconLoading] = useState(false);
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [catFilterOpen, setCatFilterOpen] = useState(false);
 
@@ -655,6 +685,34 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
     } finally {
       setHbTrackingLoading(false);
     }
+  };
+
+  const loadReconcile = async () => {
+    setReconLoading(true);
+    setRecon(null);
+    try {
+      const r = await axios.get(
+        `${API}/integrations/hepsiburada/reconcile/preview?markup=25&active_only=true`,
+        { ...auth, timeout: 180000 }
+      );
+      setRecon(r.data || {});
+    } catch (e) {
+      toast.error("Mutabakat alınamadı: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setReconLoading(false);
+    }
+  };
+
+  const exportCsv = (rows, name) => {
+    if (!rows || !rows.length) return;
+    const head = Object.keys(rows[0]);
+    const esc = (x) => `"${String(x ?? "").replace(/"/g, '""')}"`;
+    const csv = [head.join(","), ...rows.map((r) => head.map((h) => esc(r[h])).join(","))].join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const onSubmit = async () => {
@@ -1181,6 +1239,81 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                 {JSON.stringify(lastResult.trendyol_response, null, 2)}
               </pre>
             </details>
+          )}
+        </div>
+      )}
+      {marketplace === "hepsiburada" && (
+        <div className="mt-3 bg-white border rounded-lg overflow-hidden" data-testid="hb-reconcile">
+          <div className="px-3 py-2 bg-indigo-50 border-b flex items-center justify-between gap-2">
+            <div className="text-xs text-indigo-900">
+              <b>Hepsiburada Mutabakat (Önizleme)</b> — sitedeki ürünlerle HB kataloğunu barkod/SKU ile karşılaştırır.
+              <span className="block text-[10px] text-indigo-500">Salt-okunur; hiçbir şey göndermez/silmez. Fiyat %25 marjla hesaplanır.</span>
+            </div>
+            <button onClick={loadReconcile} disabled={reconLoading}
+              className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-semibold disabled:opacity-50 shrink-0"
+              data-testid="hb-reconcile-btn">
+              {reconLoading ? "Hesaplanıyor..." : "Mutabakatı Çalıştır"}
+            </button>
+          </div>
+          {recon && (
+            <div className="p-3 text-xs">
+              {recon.is_test && (
+                <div className="mb-2 bg-red-100 border border-red-300 text-red-900 rounded px-2 py-1">
+                  ⚠️ SANDBOX okunuyor — bu rapor gerçek mağazayı yansıtmaz. Önce Ortam=Canlı yapın.
+                </div>
+              )}
+              {recon.hb_truncated && (
+                <div className="mb-2 bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1">
+                  HB kataloğu sayfa sınırına takıldı ({recon.hb_pages_scanned} sayfa) — liste eksik olabilir.
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                <div className="bg-gray-50 border rounded p-2 text-center"><div className="text-[9px] text-gray-500 uppercase">Site SKU</div><div className="text-sm font-bold">{recon.site_sku_count ?? 0}</div></div>
+                <div className="bg-gray-50 border rounded p-2 text-center"><div className="text-[9px] text-gray-500 uppercase">HB Katalog</div><div className="text-sm font-bold">{recon.hb_catalog_count ?? 0}</div></div>
+                <div className="bg-green-50 border border-green-200 rounded p-2 text-center"><div className="text-[9px] text-green-700 uppercase">Eşleşen</div><div className="text-sm font-bold text-green-700">{recon.matched_count ?? 0}</div></div>
+                <div className="bg-orange-50 border border-orange-200 rounded p-2 text-center"><div className="text-[9px] text-orange-700 uppercase">Eksik → Aktarılacak</div><div className="text-sm font-bold text-orange-700">{recon.missing_on_hb?.count ?? 0}</div></div>
+              </div>
+
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] font-bold text-orange-800 uppercase">Eksik (sitede var, HB'de yok) — %25 marjla aktarılacak</div>
+                  <button onClick={() => exportCsv(recon.missing_on_hb?.items, "hb_eksik_urunler.csv")}
+                    disabled={!recon.missing_on_hb?.count}
+                    className="text-[10px] bg-orange-600 hover:bg-orange-700 text-white px-2 py-0.5 rounded disabled:opacity-40">CSV indir</button>
+                </div>
+                <div className="max-h-56 overflow-auto border rounded">
+                  <table className="w-full text-[10px]">
+                    <thead className="bg-gray-50 sticky top-0"><tr><th className="text-left px-2 py-1">merchantSku</th><th className="text-left px-2 py-1">Ürün</th><th className="text-right px-2 py-1">Fiyat (%25)</th><th className="text-right px-2 py-1">Stok</th></tr></thead>
+                    <tbody>
+                      {(recon.missing_on_hb?.items || []).slice(0, 250).map((r, i) => (
+                        <tr key={i} className="border-t"><td className="px-2 py-1 font-mono">{r.merchantSku}</td><td className="px-2 py-1 truncate max-w-[180px]">{r.name}</td><td className="px-2 py-1 text-right">{r.price}</td><td className="px-2 py-1 text-right">{r.stock}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {recon.missing_on_hb?.count > 250 && <div className="text-[10px] text-gray-400 mt-0.5">İlk 250 gösterildi; tamamı CSV'de.</div>}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] font-bold text-red-800 uppercase">HB'de var, barkodunla eşleşmiyor — silinecek/listelenecek</div>
+                  <button onClick={() => exportCsv(recon.orphan_on_hb?.items, "hb_eslesmeyen_urunler.csv")}
+                    disabled={!recon.orphan_on_hb?.count}
+                    className="text-[10px] bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded disabled:opacity-40">CSV indir</button>
+                </div>
+                <div className="max-h-56 overflow-auto border rounded">
+                  <table className="w-full text-[10px]">
+                    <thead className="bg-gray-50 sticky top-0"><tr><th className="text-left px-2 py-1">merchantSku</th><th className="text-left px-2 py-1">Barkod</th><th className="text-left px-2 py-1">Ürün</th><th className="text-left px-2 py-1">Statü</th></tr></thead>
+                    <tbody>
+                      {(recon.orphan_on_hb?.items || []).slice(0, 250).map((r, i) => (
+                        <tr key={i} className="border-t"><td className="px-2 py-1 font-mono">{r.merchantSku}</td><td className="px-2 py-1 font-mono">{r.barcode}</td><td className="px-2 py-1 truncate max-w-[160px]">{r.name}</td><td className="px-2 py-1">{r.status}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {recon.orphan_on_hb?.count > 250 && <div className="text-[10px] text-gray-400 mt-0.5">İlk 250 gösterildi; tamamı CSV'de.</div>}
+              </div>
+            </div>
           )}
         </div>
       )}

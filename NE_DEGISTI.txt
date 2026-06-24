@@ -1,40 +1,47 @@
 FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
 ========================================
-Tek zip; tüm işleri içerir.
-
 DEĞİŞEN DOSYALAR
-  - backend/routes/integrations.py
-  - backend/routes/category_mapping.py
-  - frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
-  - frontend/src/pages/admin/CategoryMapping.jsx
-  - frontend/src/pages/admin/MarketplaceHub.jsx
+  backend/routes/integrations.py
+  backend/routes/category_mapping.py
+  frontend/src/pages/admin/CategoryMapping.jsx
+  frontend/src/pages/admin/MarketplaceHub.jsx
+  frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
 
-★ ASIL SEBEP — "aktarıldı diyor ama aktarmıyor"
-  HB "Ortam" seçici UI'da varsayılan SANDBOX idi (Trendyol'da varsayılan Canlı).
-  Ortam Canlı'ya ayarlanmadıysa _get_hb_client → test=True → ürünler HB SANDBOX'a
-  (mpop-sit.hepsiburada.com) gider. Sandbox 200 + trackingId döner ("başarılı"),
-  ama gerçek mağazada ASLA görünmez ve logda hata olarak çıkmaz.
+ÖNEMLİ: Bu işlemler CANLI veride çalışır. Ben buradan çalıştıramam; araçları
+ekledim, sen panelden tek tıkla çalıştırınca gerçek sonuç/rapor çıkar.
 
-  HEMEN YAPILACAK (config): Pazaryerleri/Entegrasyonlar → Hepsiburada →
-  Ortam = "Production (Canlı)" → Kaydet → ürünü tekrar aktar.
+TASK 1 — Kategori özellik+DEĞER eşleştirme (tüm kategoriler)
+  • YENİ endpoint: POST /category-mapping/{mp}/bulk-auto-setup
+    Matched tüm kategorilerde _auto_setup_mapping motorunu koşturur:
+    özellik adı + DEĞER (renk/beden vb.) + şirket/ortak default. Manuel olanlar EZİLMEZ.
+    Kategori başı + toplam rapor döner.
+  • YENİ buton (Kategori Eşleştirme sayfası, sağ üst): "Tümünü Eşleştir (Özellik+Değer)".
+    Çalıştır → toast'ta son durum (özellik X, değer Y, şirket Z, default W · N kategori).
+  • Not: Mevcut "Tümünü Otomatik Eşleştir" (yalnız özellik) ve beden-rebuild zaten vardı;
+    bu yeni buton özellik+değer+default'u BİRLİKTE yapar.
 
-  Bu pakette kod tarafında:
-  5) MarketplaceHub: HB Ortam varsayılanı artık "Production (Canlı)"; Sandbox
-     seçiliyken kırmızı uyarı.
-  4) Aktarım sonucu hangi ortama gittiğini açıkça yazar; SANDBOX ise panelde
-     büyük kırmızı uyarı + düzeltme talimatı. Sync yanıtına environment/host/is_test
-     eklendi; integration log'a da ortam + host yazılır (bundan sonra log gerçek
-     durumu gösterir).
-  4b) HB importu asenkron: "İçe Aktarım Durumunu Sorgula" butonu (tracking_id ile
-     /hepsiburada/products/tracking/{id}) → ürün-bazlı durum + RET SEBEBİ.
-     Reddedilenler: GET /integrations/hepsiburada/products/by-status?product_status=REJECTED
+TASK 2/3 — HB mutabakatı (eksikleri %25 aktar + stok/fiyat; barkodsuz HB ürünü sil/listele)
+  • YENİ endpoint (SALT-OKUNUR önizleme): GET /integrations/hepsiburada/reconcile/preview?markup=25
+    Site ürünleri ile HB kataloğunu merchantSku + barkod ile karşılaştırır:
+      - missing_on_hb : sitede var, HB'de yok → AKTARILACAKLAR (fiyat = taban×1.25)
+      - orphan_on_hb  : HB'de var, senin barkodun/SKU'nla eşleşmiyor → SİLİNECEK/LİSTELENECEK
+    Hiçbir şey göndermez/silmez. Sandbox'tan okunuyorsa kırmızı uyarı verir.
+  • YENİ panel (Filtreli Aktarım altında): "Hepsiburada Mutabakat (Önizleme)" →
+    sayımlar + iki liste (eksik / eşleşmeyen) + CSV indir.
+  • EXECUTE (gerçek aktarım + stok/fiyat + silme) henüz YOK — bilerek. Önce önizlemeyi
+    gör, sonra parametreleri onayla; ikinci pakette tek tık çalıştırma + silme ekleyeceğim.
 
-DİĞER İŞLER (önceki, kümülatif)
-  1) Satıcı Stok Kodu kaynağına "Ürün Kart ID" (merchantSku = kart id, varyantta sonek).
-  2) Değer Eşleştirme — özellik değerleri (XS/XL, renk) canlı çekim + cache self-heal.
-  3) Filtreli Aktarım panelinde "Ürün Kart ID" kutusu → kart id ile aktarım.
+ASIL TIKANIKLIK (önceki paketten, hâlâ kritik)
+  HB "Ortam" varsayılanı SANDBOX idi → ürünler test ortamına gidip "başarılı" görünüyordu.
+  • MarketplaceHub: varsayılan artık Production (Canlı); Sandbox'ta kırmızı uyarı.
+  • Aktarım sonucu hangi ortama gittiğini yazar; SANDBOX ise panelde büyük uyarı.
+  • HB asenkron import için "İçe Aktarım Durumunu Sorgula" (ret sebebi) butonu.
+  ⇒ İLK İŞ: Entegrasyonlar → Hepsiburada → Ortam = "Production (Canlı)" → Kaydet.
+
+DİĞER (kümülatif, önceki): Satıcı Stok Kodu kaynağına "Ürün Kart ID";
+  Değer Eşleştirme canlı çekim + cache self-heal; Filtreli Aktarım'a "Ürün Kart ID" kutusu.
 
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_SANDBOX_FIX_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: sandbox tuzagi fix + ortam gorunurlugu + import durum + kart id" && git push
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_MUTABAKAT_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: mutabakat onizleme + tum kategori ozellik/deger auto-setup + sandbox fix" && git push
   Railway yeşil: [scheduler] Background scheduler started

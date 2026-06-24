@@ -4531,6 +4531,95 @@ async def hb_products_by_status(product_status: str = "WAITING", task_status: bo
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/hepsiburada/reconcile/preview")
+async def hb_reconcile_preview(markup: float = 25.0, active_only: bool = True,
+                               max_pages: int = 25, page_size: int = 1000,
+                               current_user: dict = Depends(require_admin)):
+    """SALT-OKUNUR mutabakat önizlemesi — hiçbir şey yazmaz/silmez.
+    Site ürünleri ile HB kataloğunu merchantSku + barkod üzerinden karşılaştırır:
+      - missing_on_hb: sitede olup HB'de olmayan (→ aktarılacaklar; fiyat = taban × (1+markup/100))
+      - orphan_on_hb : HB'de olup site SKU'su/barkodu ile eşleşmeyen (→ silinecek/listelenecek aday)
+    """
+    import asyncio
+    from hepsiburada_client import HepsiburadaError
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    is_test = bool(getattr(client, "test", False))
+    price_source = await _hb_price_source()
+    sku_source = await _hb_sku_source()
+
+    # 1) Site ürünleri -> beklenen HB kalemleri (merchantSku -> {price, stock, ürün})
+    q = {"is_active": True} if active_only else {}
+    products = await db.products.find(q, {"_id": 0}).to_list(length=None)
+    products = _dedupe_products_by_stock_code(products)
+    site_sku_map: dict = {}
+    site_barcodes: set = set()
+    for p in products:
+        for b in ([p.get("barcode")] + [v.get("barcode") for v in (p.get("variants") or [])]):
+            b = str(b or "").strip()
+            if b:
+                site_barcodes.add(b)
+        for it in _hb_listing_items_from_product(p, markup, price_source, sku_source):
+            sk = str(it.get("merchantSku") or "").strip()
+            if sk and sk not in site_sku_map:
+                site_sku_map[sk] = {"product_id": p.get("id"), "name": p.get("name"),
+                                    "merchantSku": sk, "price": it.get("price"),
+                                    "stock": it.get("availableStock")}
+
+    # 2) HB kataloğu (sayfalı, salt-okunur)
+    hb_sku_set: set = set()
+    hb_items: list = []
+    pages = 0
+    truncated = False
+    try:
+        for page in range(max_pages):
+            d = await asyncio.to_thread(client.get_all_products, page, page_size)
+            rows = (d.get("data") if isinstance(d, dict) else d) or []
+            if not rows:
+                break
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                msku = str(r.get("merchantSku") or r.get("merchantSKU") or r.get("sku") or "").strip()
+                bc = str(r.get("barcode") or "").strip()
+                hbsku = str(r.get("hepsiburadaSku") or r.get("hbSku") or r.get("hepsiburadaSKU") or "").strip()
+                nm = r.get("productName") or r.get("name") or r.get("title") or ""
+                st = r.get("status") or r.get("productStatus") or ""
+                if msku:
+                    hb_sku_set.add(msku)
+                hb_items.append({"merchantSku": msku, "hepsiburadaSku": hbsku, "barcode": bc,
+                                 "name": nm, "status": st})
+            pages += 1
+            if isinstance(d, dict) and d.get("last") is True:
+                break
+        else:
+            truncated = True
+    except HepsiburadaError as e:
+        raise HTTPException(status_code=502, detail=f"HB ürün listesi alınamadı: {e}")
+
+    # 3) Karşılaştırma
+    missing = [v for k, v in site_sku_map.items() if k not in hb_sku_set]
+    matched = sum(1 for k in site_sku_map if k in hb_sku_set)
+    orphans = [r for r in hb_items
+               if r["merchantSku"] and r["merchantSku"] not in site_sku_map
+               and (not r["barcode"] or r["barcode"] not in site_barcodes)]
+
+    CAP = 1000
+    return {
+        "environment": "sandbox" if is_test else "production",
+        "is_test": is_test, "host": getattr(client, "base", ""),
+        "markup": markup, "price_source": price_source, "sku_source": sku_source,
+        "site_product_count": len(products), "site_sku_count": len(site_sku_map),
+        "hb_catalog_count": len(hb_items), "hb_pages_scanned": pages, "hb_truncated": truncated,
+        "matched_count": matched,
+        "missing_on_hb": {"count": len(missing), "items": missing[:CAP], "capped": len(missing) > CAP},
+        "orphan_on_hb": {"count": len(orphans), "items": orphans[:CAP], "capped": len(orphans) > CAP},
+        "note": "SALT-OKUNUR önizleme. Hiçbir ürün gönderilmedi/güncellenmedi/silinmedi.",
+    }
+
+
 # ---------------------------- SİPARİŞ / PAKET (OMS) ----------------------------
 @router.get("/hepsiburada/orders/{order_number}")
 async def hb_order_detail(order_number: str, current_user: dict = Depends(require_admin)):
