@@ -41,6 +41,39 @@ class HepsiburadaError(Exception):
     pass
 
 
+def _hb_decode_body(raw, headers=None) -> str:
+    """HB yanıt/hata gövdesini güvenle metne çevirir: gzip/deflate ise açar,
+    HTTP cevabı binary (WAF/CDN gzip 403 sayfası) olsa bile okunur metin döndürür."""
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    try:
+        enc = ""
+        if headers:
+            try:
+                enc = (headers.get("Content-Encoding") or headers.get("content-encoding") or "").lower()
+            except Exception:
+                enc = ""
+        if raw[:2] == b"\x1f\x8b" or "gzip" in enc:
+            import gzip
+            raw = gzip.decompress(raw)
+        elif "deflate" in enc:
+            import zlib
+            try:
+                raw = zlib.decompress(raw)
+            except Exception:
+                raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+    except Exception:
+        pass
+    txt = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    # WAF/HTML sayfalarını sadeleştir: etiketleri kaba temizle, boşlukları daralt
+    import re as _re
+    if "<html" in txt.lower() or "<!doctype" in txt.lower():
+        txt = _re.sub(r"<[^>]+>", " ", txt)
+    return " ".join(txt.split())
+
+
 class HepsiburadaClient:
     # MPOP (katalog + ürün)
     SANDBOX = "https://mpop-sit.hepsiburada.com"
@@ -85,6 +118,7 @@ class HepsiburadaClient:
             "Authorization": self._auth,
             "User-Agent": self.dev_username,
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
         }
         data = None
         if json_body is not None:
@@ -100,12 +134,19 @@ class HepsiburadaClient:
                 body = r.read()
                 if raw_response:
                     return (body, dict(r.headers)) if return_headers else body
-                text = body.decode("utf-8", "replace")
+                text = _hb_decode_body(body, r.headers)
                 parsed = json.loads(text) if text.strip() else {}
                 return (parsed, dict(r.headers)) if return_headers else parsed
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")[:600]
-            raise HepsiburadaError(f"HTTP {e.code} {method} {path} -> {detail}")
+            try:
+                detail = _hb_decode_body(e.read(), e.headers)[:600]
+            except Exception:
+                detail = ""
+            hint = ""
+            if e.code == 403:
+                hint = (" | 403: kimlik/ortam uyuşmazlığı (sandbox kimlik + CANLI host ya da tersi) "
+                        "veya HB tarafı erişim engeli olabilir. Ortamı /hepsiburada/env-status ile doğrula.")
+            raise HepsiburadaError(f"HTTP {e.code} {method} {path} -> {detail}{hint}")
         except urllib.error.URLError as e:
             raise HepsiburadaError(f"Baglanti hatasi {path}: {e}")
 
@@ -367,7 +408,7 @@ class HepsiburadaClient:
             cands.sort(key=lambda c: 0 if c[1] == ok else 1)
         for label, auth in cands:
             headers = {"Authorization": auth, "User-Agent": self.dev_username,
-                       "Accept": "application/json"}
+                       "Accept": "application/json", "Accept-Encoding": "identity"}
             headers.update(extra)
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
@@ -376,10 +417,13 @@ class HepsiburadaClient:
                     body = r.read()
                     if raw_response:
                         return body
-                    text = body.decode("utf-8", "replace")
+                    text = _hb_decode_body(body, r.headers)
                     return json.loads(text) if text.strip() else {}
             except urllib.error.HTTPError as e:
-                detail = e.read().decode("utf-8", "replace")[:300]
+                try:
+                    detail = _hb_decode_body(e.read(), e.headers)[:300]
+                except Exception:
+                    detail = ""
                 if e.code in (401, 403):
                     tried.append(label)
                     last_detail = detail

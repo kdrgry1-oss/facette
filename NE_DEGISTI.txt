@@ -1,37 +1,44 @@
 FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
 ========================================
-★★ ASIL HATA DÜZELTİLDİ — "ekran Canlı ama gönderim Sandbox"
-  HB ortamı İKİ yerde tutuluyordu: marketplace_accounts (Pazaryerleri Yönetimi)
-  ve db.settings (Entegrasyonlar/MarketplaceHub). _get_hb_client ÖNCE
-  marketplace_accounts'u okuyordu; orada eski "sandbox" yazılıysa, senin
-  Canlı yaptığın db.settings DEĞERİ GÖRMEZDEN GELİNİYORDU → gönderim sandbox.
-  DÜZELTME (backend/routes/category_mapping.py · _get_hb_client):
-    - db.settings HER ZAMAN okunur.
-    - Üretim kuralı: İKİ kaynaktan HERHANGİ BİRİ 'canlı/production' ise CANLI.
-      Sandbox'a yalnız İKİSİ DE canlı değilse düşülür. (Sessiz-sandbox tuzağı bitti.)
-  ⇒ Deploy sonrası ekstra ayar gerekmeden, senin "Canlı" değerin geçerli olacak.
+★★ EKRANDAKİ 403 + ÖNCEKİ DÜZELTMEMİN YAN ETKİSİ
+  Belirti: Değer Eşleştirme'de "HB 403 GET /categories/{id}/attributes" + okunamayan
+  (gzip) çöp gövde.
 
-  YENİ TEŞHİS endpoint'i: GET /integrations/hepsiburada/env-status
-    Çözülen ortamı + host + her iki kaynağın değerini açıkça döner.
-    Tarayıcıda admin token ile aç → "resolved_environment":"production" görmelisin.
+  İKİ KÖK SEBEP:
+  1) Gövde gzip'ti, kod düz utf-8 okuyordu → ekranda binary çöp, gerçek 403 mesajı görünmüyordu.
+     DÜZELTME (hepsiburada_client.py): tüm yanıt/hata gövdeleri gzip/deflate açılarak ve
+     WAF HTML sayfaları sadeleştirilerek OKUNUR yazılır. Accept-Encoding: identity eklendi.
+     403'e net ipucu eklendi.
+  2) Bir önceki "iki kaynaktan biri canlıysa canlı" kuralım KİMLİK ile ORTAMI AYIRMIŞTI:
+     kimlik marketplace_accounts'tan (muhtemelen SIT/sandbox kimliği) gelirken ortam
+     db.settings="production" yüzünden CANLI host'a çıkıyordu → sandbox kimliği + canlı host = 403.
+     DÜZELTME (category_mapping.py · _get_hb_client): kimlik + ortam artık DAİMA AYNI
+     KAYNAKTAN (eşli) alınır. Tam kimlik hangi kaynakta varsa ortam da o kaynaktan.
+
+  TEŞHİS: GET /integrations/hepsiburada/env-status artık şunları döner:
+     resolved_environment, host, cred_source (hangi ekran), her iki kaynağın has_creds + env.
+     → Hangi ekranı düzelteceğini buradan gör.
+
+  ⇒ DOĞRU KURULUM: cred_source hangi ekranı gösteriyorsa, ORTAMI o ekranda ayarla VE
+     o ekrandaki kimlikler o ortama ait olsun (canlı için CANLI merchant/secret/dev,
+     sandbox için SIT kimliği). Karışırsa HB 403 verir.
 
 DEĞİŞEN DOSYALAR
-  backend/routes/category_mapping.py   (env çözümü düzeltmesi + bulk-auto-setup)
-  backend/routes/integrations.py       (env-status + mutabakat önizleme + sandbox görünürlük)
-  frontend/src/pages/admin/CategoryMapping.jsx
-  frontend/src/pages/admin/MarketplaceHub.jsx
-  frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
+  backend/hepsiburada_client.py        (gzip/binary-güvenli okuma + 403 ipucu + identity)
+  backend/routes/category_mapping.py   (_get_hb_client eşli kimlik+ortam + bulk-auto-setup)
+  backend/routes/integrations.py       (env-status zengin + mutabakat önizleme + sandbox görünürlük)
+  frontend/.../CategoryMapping.jsx, MarketplaceHub.jsx, MarketplaceAdvancedMatch.jsx
 
-DİĞER İŞLER (kümülatif)
-  • Task 1: "Tümünü Eşleştir (Özellik+Değer)" butonu → POST /category-mapping/{mp}/bulk-auto-setup
-    (tüm matched kategorilerde özellik+değer+default; manuel olanları ezmez; son durum raporu).
-  • Task 2/3: "Hepsiburada Mutabakat (Önizleme)" — GET /hepsiburada/reconcile/preview?markup=25
-    (salt-okunur; eksik→%25 aktarılacaklar / barkodsuz HB ürünleri; CSV indir).
-  • HB aktarım sonucu ortamı (CANLI/SANDBOX) yazar; HB asenkron import durum sorgulama.
-  • Satıcı Stok Kodu kaynağına "Ürün Kart ID"; Değer Eşleştirme canlı çekim; Filtreli Aktarım'a kart-id kutusu.
+DİĞER (kümülatif): "Tümünü Eşleştir (Özellik+Değer)" butonu; HB Mutabakat önizleme;
+  HB import durum sorgulama; aktarım sonucu CANLI/SANDBOX etiketi; Ürün Kart ID kaynağı/aktarımı.
 
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_ORTAM_FIX_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: ortam cozumu fix (iki kaynak, canli oncelik) + env-status + mutabakat + auto-setup" && git push
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_403_FIX_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: gzip-safe hata okuma + esli kimlik/ortam (403 fix) + env-status" && git push
   Railway yeşil: [scheduler] Background scheduler started
-  Doğrulama: /integrations/hepsiburada/env-status → resolved_environment = production
+
+DEPLOY SONRASI (sırayla)
+  1) …/api/integrations/hepsiburada/env-status aç → cred_source + resolved_environment'a bak.
+  2) cred_source hangi ekransa, o ekranda: kimlikleri o ORTAMA ait gir + Ortamı eşle, Kaydet.
+  3) Değer Eşleştirme'yi tekrar aç → 403 yerine ya değerler gelir ya da OKUNUR gerçek HB mesajı.
+     O mesajı bana at, kalırsa oradan devam.

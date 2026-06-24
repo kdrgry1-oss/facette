@@ -4542,18 +4542,24 @@ async def hb_env_status(current_user: dict = Depends(require_admin)):
     s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
     env_acc = (cr.get("env") or cr.get("mode") or "").strip().lower()
     env_set = (s.get("mode") or s.get("env") or "").strip().lower()
+    acc_has_creds = bool((cr.get("merchant_id") or "").strip() and (cr.get("secret_key") or cr.get("password") or "").strip() and (cr.get("dev_username") or "").strip())
+    set_has_creds = bool((s.get("merchant_id") or "").strip() and (s.get("secret_key") or s.get("password") or "").strip() and (s.get("dev_username") or "").strip())
     client, err = await _get_hb_client()
-    resolved = host = None
+    resolved = host = cred_source = None
     if client is not None:
         resolved = "sandbox" if getattr(client, "test", False) else "production"
         host = getattr(client, "base", "")
+        cred_source = getattr(client, "_cred_source", None)
     return {
         "resolved_environment": resolved,
         "host": host,
-        "marketplace_accounts_env": env_acc or "(boş)",
-        "settings_env": env_set or "(boş)",
+        "cred_source": cred_source,
+        "marketplace_accounts": {"has_creds": acc_has_creds, "env": env_acc or "(boş)"},
+        "settings": {"has_creds": set_has_creds, "env": env_set or "(boş)"},
         "error": err,
-        "note": "Biri 'canlı/production' ise CANLI. İkisi de değilse sandbox.",
+        "note": "Kimlik + ortam AYNI kaynaktan alınır. cred_source hangi ekranı gösteriyorsa "
+                "ortamı O ekranda ayarla VE o ekrandaki kimlikler o ortama ait olsun "
+                "(SIT/sandbox kimliği ≠ canlı kimliği). Uyuşmazlık = HB 403.",
     }
 
 

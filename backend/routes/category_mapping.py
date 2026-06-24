@@ -121,37 +121,56 @@ _temu_sync_lock = asyncio.Lock()
 
 
 async def _get_hb_client():
-    """Hepsiburada kimligini once Pazaryerleri Yonetimi (marketplace_accounts),
-    yoksa eski db.settings'ten okur. Ortam: env/mode 'prod/production/canli' degilse sandbox."""
-    # 1) Birincil: marketplace_accounts.credentials (Pazaryerleri Yonetimi ekrani)
+    """Hepsiburada client. KRİTİK: kimlik (merchant/secret/dev) ile ORTAM (sandbox/canlı)
+    DAİMA AYNI kaynaktan alınır (eşli). Aksi halde sandbox kimliği canlı host'a (ya da tersi)
+    gider → HB 403. Kaynak önceliği: tam kimlik hangisinde varsa o (önce marketplace_accounts,
+    sonra db.settings). Seçilen kaynağın ortamı boşsa diğer kaynağın ortamına düşülür."""
     acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0})
     cr = (acc or {}).get("credentials") or {}
-    mid = (cr.get("merchant_id") or "").strip()
-    sk = (cr.get("secret_key") or cr.get("password") or "").strip()
-    du = (cr.get("dev_username") or "").strip()
-    env_acc = (cr.get("env") or cr.get("mode") or "").strip().lower()
-    # 2) db.settings'i HER ZAMAN oku (yalnız kimlik eksikse değil). Ortam İKİ kaynaktan
-    #    birlikte çözülür; böylece bir ekranda "Canlı" dendiyse diğer ekrandaki eski
-    #    "sandbox" değeri onu sessizce ezip sandbox'a düşüremez.
+    a_mid = (cr.get("merchant_id") or "").strip()
+    a_sk = (cr.get("secret_key") or cr.get("password") or "").strip()
+    a_du = (cr.get("dev_username") or "").strip()
+    a_env = (cr.get("env") or cr.get("mode") or "").strip().lower()
+    a_omsu = (cr.get("oms_username") or "").strip()
+    a_omsp = (cr.get("oms_password") or "").strip()
+
     s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
-    mid = mid or (s.get("merchant_id") or "").strip()
-    sk = sk or (s.get("secret_key") or s.get("password") or "").strip()
-    du = du or (s.get("dev_username") or "").strip()
-    env_set = (s.get("mode") or s.get("env") or "").strip().lower()
+    s_mid = (s.get("merchant_id") or "").strip()
+    s_sk = (s.get("secret_key") or s.get("password") or "").strip()
+    s_du = (s.get("dev_username") or "").strip()
+    s_env = (s.get("mode") or s.get("env") or "").strip().lower()
+    s_omsu = (s.get("oms_username") or "").strip()
+    s_omsp = (s.get("oms_password") or "").strip()
+
+    if a_mid and a_sk and a_du:
+        mid, sk, du = a_mid, a_sk, a_du
+        env = a_env or s_env          # kimlik bu kaynakta → ortamı da bu kaynaktan
+        oms_u, oms_p = (a_omsu or s_omsu), (a_omsp or s_omsp)
+        cred_source = "marketplace_accounts"
+    elif s_mid and s_sk and s_du:
+        mid, sk, du = s_mid, s_sk, s_du
+        env = s_env or a_env
+        oms_u, oms_p = (s_omsu or a_omsu), (s_omsp or a_omsp)
+        cred_source = "settings"
+    else:
+        mid, sk, du = (a_mid or s_mid), (a_sk or s_sk), (a_du or s_du)
+        env = a_env or s_env
+        oms_u, oms_p = (a_omsu or s_omsu), (a_omsp or s_omsp)
+        cred_source = "mixed"
+
     if not (mid and sk and du):
         return None, "Hepsiburada kimlik bilgileri eksik (Merchant ID / Secret Key / Developer Username). Entegrasyonlar → Hepsiburada altından kaydedin."
-    # Opsiyonel: OMS (siparis) icin AYRI Basic auth kimligi (varsa). Once marketplace_accounts, sonra db.settings.
-    oms_u = (cr.get("oms_username") or "").strip()
-    oms_p = (cr.get("oms_password") or "").strip()
-    if (not oms_u or not oms_p):
-        oms_u = oms_u or (s.get("oms_username") or "").strip()
-        oms_p = oms_p or (s.get("oms_password") or "").strip()
-    # ÜRETİM KURALI: iki kaynaktan HERHANGİ BİRİ 'canlı/prod' diyorsa CANLI.
-    # Sandbox'a yalnızca HİÇBİR kaynak canlı demediğinde düşülür (sessiz-sandbox tuzağı biter).
+
     _PROD = ("prod", "production", "live", "canli", "canlı")
-    test = not (env_acc in _PROD or env_set in _PROD)
+    test = env not in _PROD
     from hepsiburada_client import HepsiburadaClient
-    return HepsiburadaClient(mid, sk, du, test=test, oms_username=oms_u, oms_password=oms_p), None
+    client = HepsiburadaClient(mid, sk, du, test=test, oms_username=oms_u, oms_password=oms_p)
+    try:
+        client._cred_source = cred_source
+        client._env_value = env
+    except Exception:
+        pass
+    return client, None
 
 
 def _hb_sysnorm(s):
