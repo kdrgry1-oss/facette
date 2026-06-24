@@ -1179,7 +1179,7 @@ async def create_product(
     
     # Fetch settings for default VAT
     settings = await db.settings.find_one({"id": "main"})
-    default_vat = settings.get("default_vat_rate", 20) if settings else 20
+    default_vat = settings.get("default_vat_rate", 10) if settings else 10
 
     # Auto-generate barcodes efficiently
     used_barcodes_set = await build_used_barcode_set()

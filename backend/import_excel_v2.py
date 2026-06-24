@@ -192,7 +192,7 @@ async def import_products_with_variants():
                 # Additional fields
                 "keywords": safe_str(first_row.get('ANAHTARKELIME')),
                 "supplier": safe_str(first_row.get('TEDARIKCI')),
-                "vat_rate": safe_float(first_row.get('KDVORANI'), 20),
+                "vat_rate": safe_float(first_row.get('KDVORANI'), 10),
                 "vat_included": safe_int(first_row.get('KDVDAHIL')) == 1,
                 "currency": safe_str(first_row.get('PARABIRIMI')) or "TRY",
                 "cargo_weight": safe_float(first_row.get('KARGOAGIRLIGI')),

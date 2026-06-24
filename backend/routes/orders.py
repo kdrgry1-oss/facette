@@ -287,7 +287,7 @@ async def _product_vat_map(order: dict) -> dict:
     return m
 
 
-def _item_kdv(it: dict, vat_map: dict, default: float = 20.0) -> float:
+def _item_kdv(it: dict, vat_map: dict, default: float = 10.0) -> float:
     """Kalem KDV oranı: önce kalemin vat_rate/kdv_rate'i, sonra ürünün vat_rate'i, en son default.
     Eskiden sabit 10.0'a düşüyordu; artık ürün içindeki gerçek KDV alanına köprüleniyor."""
     for cand in (it.get("vat_rate"), it.get("kdv_rate"), vat_map.get(it.get("product_id"))):

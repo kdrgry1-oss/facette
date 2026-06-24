@@ -144,7 +144,7 @@ async def import_products():
                 "consignment_stock": safe_int(row.get('KONSINYESTOKADEDI')),
                 "purchase_price": safe_float(row.get('ALISFIYATI')),
                 "market_price": safe_float(row.get('PIYASAFIYATI')),
-                "vat_rate": safe_float(row.get('KDVORANI'), 20),
+                "vat_rate": safe_float(row.get('KDVORANI'), 10),
                 "vat_included": safe_int(row.get('KDVDAHIL')) == 1,
                 "currency": safe_str(row.get('PARABIRIMI')) or "TRY",
                 "cargo_weight": safe_float(row.get('KARGOAGIRLIGI')),
