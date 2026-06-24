@@ -676,7 +676,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     setLoading(true);
     try {
       const [a, v] = await Promise.all([
-        axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/attributes`, { headers: auth() }),
+        axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/attributes?refresh=1`, { headers: auth() }),
         axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/values`, { headers: auth() }),
       ]);
       const lv = v.data?.local_values || {};

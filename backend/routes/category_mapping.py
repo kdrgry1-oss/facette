@@ -215,6 +215,7 @@ HB_PRODUCT_SOURCES = [
     {"value": "name", "label": "Ürün Adı"},
     {"value": "description", "label": "Açıklama / Ön Yazı"},
     {"value": "stock_code", "label": "Stok Kodu"},
+    {"value": "card_id", "label": "Ürün Kart ID"},
     {"value": "barcode", "label": "Barkod"},
     {"value": "brand", "label": "Marka"},
     {"value": "category_name", "label": "Kategori Adı"},
@@ -327,7 +328,8 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         # Inline gelen degerleri kullan; yoksa deger-listesi olabilecek HER ozellik icin canli cek.
         # (Cinsiyet gibi tipi "enum" olmayan ama deger listesi olan ozellikler de dahil; yalnizca
         #  acikca deger-listesiz tipler -sayisal/tarih/medya/serbest-metin- haric.)
-        inline = a.get("attributeValues") or a.get("values") or []
+        inline = (a.get("attributeValues") or a.get("values")
+                  or a.get("allowedValues") or a.get("attributeValueList") or [])
         vals = []
         if inline:
             for v in inline:
@@ -1765,6 +1767,7 @@ async def include_category(marketplace: str, category_id: str,
 async def get_advanced_attributes(
     marketplace: str,
     local_category_id: str,
+    refresh: bool = False,
     current_user: dict = Depends(require_admin),
 ):
     """Sistem kategorisinin MP'deki karşılığı için zorunlu/opsiyonel özellikler."""
@@ -1834,11 +1837,15 @@ async def get_advanced_attributes(
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
-        if not attrs or (cached or {}).get("_v") != 8:
-            attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id)
+        # Cache'de HİÇBİR özelliğin değer listesi (XS/XL, renk değerleri vb.) yoksa değer-eşleştirme
+        # ekranı boş kalır → değerleriyle birlikte taze çek (kendini onaran cache). `refresh=1`
+        # parametresi de (Değer Eşleştir ekranı açılışında) zorla canlı çekimi tetikler.
+        no_values = bool(attrs) and not any((x.get("attributeValues") or []) for x in attrs)
+        if refresh or not attrs or (cached or {}).get("_v") != 8 or no_values:
+            attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
             if hb_err:
                 return {
-                    "attributes": [],
+                    "attributes": attrs or [],
                     "attribute_mappings": mapping.get("attribute_mappings", []),
                     "default_mappings": mapping.get("default_mappings", {}),
                     "value_mappings": mapping.get("value_mappings", {}),

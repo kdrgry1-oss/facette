@@ -1,58 +1,42 @@
-FAZ IA TAM — Tüm pazaryeri ayarları Entegrasyonlar'dan Pazaryerleri'ne taşındı
-==============================================================================
-Trendyol + Temu + Hepsiburada. Entegrasyonlar'da artık HİÇBİR pazaryeri kartı yok.
+FACETTE — Hepsiburada: Stok Kodu Kaynağına "Ürün Kart ID" + Değer Eşleştirme Düzeltmesi
+========================================================================================
 
-⚠️ BU PAKET BACKEND İÇERİR → ÖNCE RAILWAY, YEŞİL OL, SONRA frontend.
-   Railway boot onayı: log'da "[scheduler] Background scheduler started"
+DEĞİŞEN DOSYALAR
+  - backend/routes/integrations.py
+  - backend/routes/category_mapping.py
+  - frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
 
-DEĞİŞEN 3 DOSYA
-  backend/routes/category_mapping.py            (_get_hb_client → db.settings birincil)
-  frontend/src/pages/admin/MarketplaceHub.jsx   (Trendyol + HB operatif bölümleri)
-  frontend/src/pages/admin/Integrations.jsx     (Trendyol + HB + Temu kart/modal kaldırıldı)
+1) STOK KODU GÖNDERME AYARINA "ÜRÜN KART ID" SEÇENEĞİ
+   - "Varsayılan Alan Eşleştirme" → Satıcı Stok Kodu kaynağı dropdown'una
+     "Ürün Kart ID" eklendi (value=card_id).
+   - Seçildiğinde merchantSku, ürünün Kart ID'sinden (urun_karti_id → yoksa csv_card_id)
+     üretilir. Varyantlı üründe HB'nin bedenleri tek ürüne indirmemesi için Kart ID'ye
+     beden/renk soneki eklenir:  12345-S, 12345-M ...
+   - Ürün OLUŞTURMA ile STOK/FİYAT GÜNCELLEME aynı SKU'yu üretir (tek ortak fonksiyon
+     _hb_variant_sku) → güncellemeler eşleşir.
+   - Varsayılan (Stok Kodu) davranış BİREBİR korunur; mevcut listelemeler etkilenmez.
 
-──────────────────────────────────────────────────────────────────────────
-HEPSİBURADA (bu tur — en dikkatli kısım)
-──────────────────────────────────────────────────────────────────────────
-SORUN: HB iki store'a bağlıydı. _get_hb_client KİMLİĞİ marketplace_accounts'tan
-  (birincil) okuyordu; ama HB durum rozeti + is_active + integrations doğrudan
-  okumaları db.settings'ten. Yani Pazaryerleri'ndeki generic creds ile
-  Entegrasyonlar modalı ÇELİŞEBİLİYORDU.
+   ⚠️ ÖNEMLİ: Kaynağı "Ürün Kart ID"ye GEÇİRİRSENİZ, daha önce stok-kodu SKU'su ile
+   HB'de açılmış listelemeler yeni Kart-ID SKU'larıyla EŞLEŞMEZ. O ürünler için stok
+   güncellemesi, ürünler yeni SKU ile yeniden gönderilene kadar tutmaz. Yeni kataloglar
+   için kullanın ya da geçişi bilinçli yapın.
 
-ÇÖZÜM (tek doğru kaynak = db.settings):
-  BACKEND: _get_hb_client artık db.settings'i BİRİNCİL okur, marketplace_accounts'u
-    YEDEK. Simetrik flip — alanlar/OMS/ortam mantığı AYNI; her iki store da
-    okunmaya devam eder (eski girişin olan kullanıcı bozulmaz).
-  FRONTEND (Hub): Pazaryerleri → Hepsiburada'da operatif "API Ayarları" bölümü:
-    Merchant ID, Secret Key, Developer Username, Ortam (sandbox/production),
-    Entegrasyon Aktif + "Bağlantı Test Et" + "Kaydet".
-    -> GET/POST /integrations/hepsiburada/settings (modalın kullandığı AYNI endpoint).
-    Secret "********" maskesi backend'de korunur (boşa yazmaz).
-    default_markup (vestigial — HB fiyatı okumuyor) GET->POST round-trip ile korunur.
-  FRONTEND (Integrations): HB kartı + modalı kaldırıldı; generic HB creds Hub'da gizlendi.
-  SONUÇ: HB için TEK düzenleme noktası = Pazaryerleri > Hepsiburada. Status rozeti,
-    is_active, OMS, ortam — hepsi çalışmaya devam eder.
+2) KATEGORİ EŞLEŞTİRME — ÖZELLİK DEĞERLERİ GELMİYOR DÜZELTMESİ
+   - Belirti: Değer Eşleştir ekranında sadece "Beden" çıkıyor, onun da XS/XL değerleri
+     boş; diğer özelliklerin (Renk/Cinsiyet/Materyal...) değerleri hiç gelmiyordu.
+   - Sebep: HB özellik cache'i değer listesi BOŞ kalmış (eski/yarım çekim) ve ekran o
+     boş cache'i gösteriyordu.
+   - Çözüm:
+     * Değer Eşleştir ekranı açılışında HB özellikleri DEĞERLERİYLE canlı çekilir
+       (frontend: /attributes?refresh=1).
+     * Backend kendini onarır: cache'te hiçbir özelliğin değeri yoksa otomatik olarak
+       değerleriyle yeniden çeker (refresh=1 + no_values guard).
+     * Inline değer tespiti genişletildi (attributeValues/values/allowedValues/
+       attributeValueList).
+   - Not: HB değer uçları kimlik/yetki hatası dönerse ekran artık sessiz boş kalmaz,
+     "Hepsiburada özellikleri çekilemedi: ..." uyarısını gösterir.
 
-──────────────────────────────────────────────────────────────────────────
-TRENDYOL (önceki turlardan — bu pakette dahil)
-──────────────────────────────────────────────────────────────────────────
-  Pazaryerleri → Trendyol'da operatif "API & Varsayılanları" + "İşlemler"
-  (db.settings). Integrations Trendyol kartı/modalı kaldırıldı. Backend değişmedi.
-
-TEMU (önceki turdan)
-──────────────────────────────────────────────────────────────────────────
-  Integrations Temu kartı/modalı kaldırıldı (db.settings'e yazıp boşa çalışıyordu;
-  _get_temu_config sadece marketplace_accounts okuyor). Operatif editör = Hub'daki
-  generic API alanları (marketplace_accounts) — orada duruyor.
-
-──────────────────────────────────────────────────────────────────────────
-KORUNANLAR (Entegrasyonlar): iyzico, TÜM kargo (MNG/Aras/Yurtiçi/PTT/HepsiJet/
-  Trendyol Express/Sürat), GİB, NetGSM, XML Feed, Loglar, yardım kutusu.
-
-DOĞRULAMA: MarketplaceHub.jsx + Integrations.jsx esbuild ✓ ·
-  category_mapping.py ast.parse ✓ · prod build'de ESLint kapalı (ölü kod kırmaz).
-
-DEPLOY SIRASI:
-  1) git push  (Railway backend'i derler)
-  2) Railway log'da "[scheduler] Background scheduler started" → YEŞİL bekle
-  3) Cloudflare frontend'i otomatik derler (Railway'den bağımsız)
-  4) Ctrl+Shift+R
+DEPLOY
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_STOKKODU_KARTID_VE_DEGER.zip -d . \
+    && git add -A && git commit -m "HB: stok kodu kaynagi Urun Kart ID + deger eslestirme canli cekim" && git push
+  Railway yeşil sinyali: [scheduler] Background scheduler started

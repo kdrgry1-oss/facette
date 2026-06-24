@@ -3652,17 +3652,83 @@ def _hb_merchant_sku(obj: dict) -> str:
     return str(obj.get("stock_code") or obj.get("barcode") or obj.get("sku") or "").strip()
 
 
-def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_source: str = "auto"):
+def _hb_card_id(product: dict) -> str:
+    """Ürün Kart ID — urun_karti_id (asıl) veya csv_card_id (yedek)."""
+    return str(product.get("urun_karti_id") or product.get("csv_card_id") or "").strip()
+
+
+def _hb_sku_base_from_source(product: dict, source: str) -> str:
+    """'Satıcı Stok Kodu' kaynağına göre ürün-seviyesi temel SKU değeri."""
+    src = source or "stock_code"
+    if src == "card_id":
+        return _hb_card_id(product) or str(_hb_merchant_sku(product) or product.get("id") or "").strip()
+    if src == "barcode":
+        return str(product.get("barcode") or "").strip()
+    if src == "name":
+        return str(product.get("name") or "").strip()
+    if src == "brand":
+        return str(product.get("brand") or product.get("brand_name") or "").strip()
+    if src == "category_name":
+        return str(product.get("category_name") or "").strip()
+    # stock_code (varsayılan) ve bilinmeyenler
+    return str(_hb_merchant_sku(product) or product.get("stock_code") or product.get("id") or "").strip()
+
+
+def _hb_variant_sku(product: dict, variant, vi: int, source: str = "stock_code", used: set = None) -> str:
+    """Configured 'Satıcı Stok Kodu' kaynağına göre VARYANT BAŞINA BENZERSIZ merchantSku.
+    Hem ürün oluşturmada hem stok/fiyat güncellemede AYNI sonucu üretir (HB join anahtarı).
+    Varsayılan (stock_code) davranış birebir korunur; kullanıcı bir kaynak seçtiyse (ör.
+    Ürün Kart ID) o değer baz alınır, varyantlarda benzersizlik için beden/renk soneki eklenir."""
+    src = source or "stock_code"
+    local = _hb_collect_local(product, variant)
+
+    def _suffix():
+        sx = (local.get("beden") or local.get("size") or local.get("numara")
+              or local.get("renk") or local.get("color") or "")
+        return _hb_norm(sx).replace(" ", "").upper() if sx else f"V{vi + 1}"
+
+    if src == "stock_code":
+        # Varsayılan: varyantın kendi stok kodu/barkodu öncelikli (mevcut davranış)
+        sku = (str((variant or {}).get("stock_code") or "").strip()
+               or str((variant or {}).get("barcode") or "").strip())
+        if not sku:
+            base = _hb_sku_base_from_source(product, "stock_code")
+            sku = (f"{base}-{_suffix()}" if base else _suffix()) if variant is not None else base
+    else:
+        # Kullanıcı kaynağı (ör. Ürün Kart ID): base bu kaynaktan; varyantta benzersizlik için sonek
+        base = _hb_sku_base_from_source(product, src) or _hb_sku_base_from_source(product, "stock_code")
+        sku = (f"{base}-{_suffix()}" if base else _suffix()) if variant is not None else base
+
+    sku = (sku or "").strip()
+    if used is not None and sku:
+        if sku in used:
+            sku = f"{sku}-V{vi + 1}"
+        used.add(sku)
+    return sku
+
+
+async def _hb_sku_source() -> str:
+    """Kayıtlı 'Satıcı Stok Kodu' gönderim kaynağı (base_field_mappings.merchantSku.source)."""
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    cfg = (s.get("base_field_mappings") or {}).get("merchantSku") or {}
+    return cfg.get("source") or "stock_code"
+
+
+def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_source: str = "auto",
+                                   sku_source: str = "stock_code"):
     """Yerel ürün -> HB listing kalemleri [{merchantSku, price, availableStock}].
-    Fiyat, price_source'a göre (auto/price/sale_price) seçilir; markup uygulanır."""
+    Fiyat, price_source'a göre (auto/price/sale_price) seçilir; markup uygulanır.
+    merchantSku, gönderim kaynağına (sku_source) göre _hb_variant_sku ile üretilir →
+    ürün oluşturma ile stok/fiyat güncellemesi AYNI SKU'yu kullanır."""
     items = []
     base_price = _hb_pick_base_price(product, price_source)
     if markup > 0:
         base_price = base_price * (1 + markup / 100)
     variants = product.get("variants", []) or []
+    used: set = set()
     if variants:
-        for v in variants:
-            sku = str(v.get("stock_code") or v.get("barcode") or "").strip()
+        for vi, v in enumerate(variants):
+            sku = _hb_variant_sku(product, v, vi, sku_source, used)
             if not sku:
                 continue
             # Varyantın kendi fiyatı varsa onu (kaynağa göre) baz al, yoksa ürün fiyatı + price_diff
@@ -3674,7 +3740,7 @@ def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_sou
             items.append({"merchantSku": sku, "price": round(p, 2),
                           "availableStock": int(v.get("stock", 0) or 0)})
     else:
-        sku = _hb_merchant_sku(product)
+        sku = _hb_variant_sku(product, None, 0, sku_source)
         if sku:
             items.append({"merchantSku": sku, "price": round(base_price, 2),
                           "availableStock": int(product.get("stock", 0) or 0)})
@@ -3718,7 +3784,8 @@ async def hb_update_product_stock_price(product_id: str, body: HbBulkListingReq 
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     markup = await _hb_markup()
     price_source = await _hb_price_source()
-    items = _hb_listing_items_from_product(product, markup, price_source)
+    sku_source = await _hb_sku_source()
+    items = _hb_listing_items_from_product(product, markup, price_source, sku_source)
     if not items:
         raise HTTPException(status_code=400, detail="Ürünün stok kodu/barkodu bulunamadı")
     do_price = True if (body is None) else body.update_price
@@ -3753,9 +3820,10 @@ async def hb_update_category_stock_price(category_id: str, body: HbBulkListingRe
         raise HTTPException(status_code=404, detail="Bu kategoride ürün bulunamadı")
     markup = await _hb_markup()
     price_source = await _hb_price_source()
+    sku_source = await _hb_sku_source()
     items = []
     for p in products:
-        items.extend(_hb_listing_items_from_product(p, markup, price_source))
+        items.extend(_hb_listing_items_from_product(p, markup, price_source, sku_source))
     if not items:
         raise HTTPException(status_code=400, detail="Ürünlerin stok kodu/barkodu bulunamadı")
     do_price = True if (body is None) else body.update_price
@@ -4093,6 +4161,7 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
     # Global "Varsayılan Alan Eşleştirme" — temel HB alanlarının ürün-kartı kaynağı / sabit değeri
     from .category_mapping import _HB_BASE_BY_KEY
     bfm = (await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}).get("base_field_mappings") or {}
+    sku_source = ((bfm.get("merchantSku") or {}).get("source") or "stock_code")
 
     def _src_val(src, variant):
         if src == "name":
@@ -4102,6 +4171,8 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
         if src == "stock_code":
             return ((variant or {}).get("stock_code") or (variant or {}).get("barcode")
                     or product.get("stock_code") or _hb_merchant_sku(product))
+        if src == "card_id":
+            return _hb_card_id(product)
         if src == "barcode":
             return (variant or {}).get("barcode") or product.get("barcode")
         if src == "brand":
@@ -4188,27 +4259,13 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             if a.get("required") and aname not in attrs:
                 missing_req.append(aname)
 
-        # Taban alanlar — global "Varsayılan Alan Eşleştirme" panelinden çözülür
+        # Taban alanlar — global "Varsayılan Alan Eşleştirme" panelinden çözülür.
         # merchantSku VARYANT BAŞINA BENZERSIZ olmalı; yoksa HB tüm bedenleri tek ürüne indirger.
-        sku = (str((variant or {}).get("stock_code") or "").strip()
-               or str((variant or {}).get("barcode") or "").strip())
-        if not sku:
-            base_sku = str(_hb_merchant_sku(product) or product.get("stock_code")
-                           or product.get("id") or "").strip()
-            if variant is not None:
-                suffix = (local.get("beden") or local.get("size") or local.get("numara")
-                          or local.get("renk") or local.get("color") or "")
-                suffix = _hb_norm(suffix).replace(" ", "").upper() if suffix else f"V{vi + 1}"
-                sku = f"{base_sku}-{suffix}" if base_sku else (suffix or f"V{vi + 1}")
-            else:
-                sku = base_sku
+        # Gönderim kaynağı "Ürün Kart ID" ise kart id baz alınır (+ varyant soneki ile benzersizleşir).
+        sku = _hb_variant_sku(product, variant, vi, sku_source, used_skus)
         if not sku:
             errors.add("stok kodu/barkod yok")
             continue
-        # Aynı ürün içinde çakışan merchantSku'yu benzersizleştir (HB tekilleştirmesin)
-        if sku in used_skus:
-            sku = f"{sku}-V{vi + 1}"
-        used_skus.add(sku)
         bc = (str(_base_val("Barcode", variant) or "").strip()
               or (variant or {}).get("barcode") or product.get("barcode") or sku)
         attrs.setdefault("merchantSku", sku)
@@ -4336,9 +4393,10 @@ async def hb_inventory_sync(current_user: dict = Depends(require_admin)):
     products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
     markup = await _hb_markup()
     price_source = await _hb_price_source()
+    sku_source = await _hb_sku_source()
     items = []
     for p in products:
-        items.extend(_hb_listing_items_from_product(p, markup, price_source))
+        items.extend(_hb_listing_items_from_product(p, markup, price_source, sku_source))
     if not items:
         return {"message": "Gönderilecek stok/fiyat kalemi bulunamadı", "items_count": 0}
     res = await _hb_push_stock_price(client, items, True, True)
