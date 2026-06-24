@@ -181,7 +181,7 @@ async def temu_openapi_call(api_type: str, business_params: Optional[Dict] = Non
     payload["app_key"] = cfg["app_key"]
     payload["access_token"] = cfg["access_token"]
     payload["data_type"] = "JSON"
-    payload["timestamp"] = int(time.time())
+    payload["timestamp"] = str(int(time.time()))  # Temu: STRING, 10 haneli UNIX saniye
     payload["sign"] = _sign_openapi(payload, cfg["app_secret"])
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(cfg["gateway"], json=payload, headers={"Content-Type": "application/json"})
@@ -193,12 +193,19 @@ async def temu_openapi_call(api_type: str, business_params: Optional[Dict] = Non
 
 
 async def temu_fetch_child_categories(parent_cat_id: Any = 0) -> Dict:
-    """bg.local.goods.cats.get — verilen parentCatId'nin alt kategorilerini döner (0 = kök)."""
+    """bg.local.goods.cats.get — parentCatId verilirse o kategorinin altları döner.
+
+    Temu spec: "parentCatId verilmezse tüm ANA kategoriler döner." Bu yüzden kök
+    (0/None/boş) için parentCatId hiç gönderilmez; alt seviyeler için catId geçilir.
+    """
+    business: Dict[str, Any] = {}
     try:
         pid = int(parent_cat_id)
     except Exception:
         pid = parent_cat_id
-    return await temu_openapi_call("bg.local.goods.cats.get", {"parentCatId": pid})
+    if pid not in (0, None, ""):
+        business["parentCatId"] = pid
+    return await temu_openapi_call("bg.local.goods.cats.get", business)
 
 
 # -----------------------------------------------------------------------------
