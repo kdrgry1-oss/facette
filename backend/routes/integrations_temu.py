@@ -68,12 +68,25 @@ async def _get_temu_config() -> Dict[str, Any]:
             or ("https://api-sandbox.temu.com" if is_sandbox else "https://api.temu.com"))
     mall_id = (creds.get("partner_account") or creds.get("mall_id")
                or acc.get("supplier_id") or acc.get("mall_id") or "")
+    # Temu Açık Platform gateway router — bölgeye göre. TR dahil "diğer tüm" durumlar EU.
+    #   EU:           https://openapi-b-eu.temu.com/openapi/router
+    #   US:           https://openapi-b-us.temu.com/openapi/router
+    #   Meksika/Japonya: https://openapi-b-global.temu.com/openapi/router
+    region = str(creds.get("region") or acc.get("region") or "eu").lower()
+    if region in ("us", "usa", "united states"):
+        gateway = "https://openapi-b-us.temu.com/openapi/router"
+    elif region in ("global", "mx", "mexico", "jp", "japan"):
+        gateway = "https://openapi-b-global.temu.com/openapi/router"
+    else:  # eu + tr + diğer tüm durumlar
+        gateway = "https://openapi-b-eu.temu.com/openapi/router"
+    gateway = creds.get("gateway") or acc.get("gateway") or gateway
     return {
         "app_key": app_key,
         "app_secret": app_secret,
         "mall_id": mall_id,
         "access_token": access_token,
         "base_url": base.rstrip("/"),
+        "gateway": gateway,
     }
 
 
@@ -127,6 +140,65 @@ async def _temu_request(method: str, path: str, *, params: Optional[Dict] = None
     if not ok:
         raise HTTPException(status_code=502, detail=f"Temu API: {data.get('message') or data.get('error') or r.text[:300]}")
     return data.get("data", data)
+
+
+# -----------------------------------------------------------------------------
+# GERÇEK Temu Açık Platform çağrısı (gateway router + MD5 imza)
+# Yukarıdaki _temu_request/_sign varsayımsal REST scaffold'dur; aşağıdaki katman
+# Temu'nun gerçek açık API'sini kullanır: tek gateway router URL'ine POST + `type`
+# alanı (örn. bg.local.goods.cats.get) + MD5 imza (params sıralı, app_secret
+# sandviç, hex UPPERCASE). Mevcut scaffold endpoint'lerine dokunulmadı.
+# -----------------------------------------------------------------------------
+
+def _sign_openapi(params: Dict[str, Any], secret: str) -> str:
+    """Temu açık API MD5 imzası.
+
+    Algoritma: `sign` hariç tüm parametreler key'e göre alfabetik sıralanır;
+    her biri `key+value` (value dict/list ise compact JSON) olarak birleştirilir;
+    başına ve sonuna app_secret eklenir; MD5 hex UPPERCASE.
+    """
+    parts = []
+    for k in sorted(params.keys()):
+        if k == "sign":
+            continue
+        v = params[k]
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v, separators=(",", ":"), ensure_ascii=False)
+        elif isinstance(v, bool):
+            v = "true" if v else "false"
+        parts.append(f"{k}{v}")
+    pre = f"{secret}{''.join(parts)}{secret}"
+    return hashlib.md5(pre.encode("utf-8")).hexdigest().upper()
+
+
+async def temu_openapi_call(api_type: str, business_params: Optional[Dict] = None) -> Dict:
+    """İmzalı Temu açık API çağrısı (gateway router POST). Ham JSON yanıt döner."""
+    cfg = await _get_temu_config()
+    if not cfg.get("access_token"):
+        raise HTTPException(status_code=400, detail="Temu access_token yok. Önce Temu uygulamasını mağazaya yetkilendirin.")
+    payload: Dict[str, Any] = dict(business_params or {})
+    payload["type"] = api_type
+    payload["app_key"] = cfg["app_key"]
+    payload["access_token"] = cfg["access_token"]
+    payload["data_type"] = "JSON"
+    payload["timestamp"] = int(time.time())
+    payload["sign"] = _sign_openapi(payload, cfg["app_secret"])
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(cfg["gateway"], json=payload, headers={"Content-Type": "application/json"})
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text[:800], "http_status": r.status_code}
+    return data
+
+
+async def temu_fetch_child_categories(parent_cat_id: Any = 0) -> Dict:
+    """bg.local.goods.cats.get — verilen parentCatId'nin alt kategorilerini döner (0 = kök)."""
+    try:
+        pid = int(parent_cat_id)
+    except Exception:
+        pid = parent_cat_id
+    return await temu_openapi_call("bg.local.goods.cats.get", {"parentCatId": pid})
 
 
 # -----------------------------------------------------------------------------

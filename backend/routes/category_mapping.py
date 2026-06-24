@@ -117,6 +117,7 @@ def _tr_lower(s: str) -> str:
 
 
 _hb_sync_lock = asyncio.Lock()
+_temu_sync_lock = asyncio.Lock()
 
 
 async def _get_hb_client():
@@ -412,15 +413,145 @@ async def _sync_hb_categories(force=False):
         return len(docs), None
 
 
+def _temu_extract_list(resp):
+    """Temu cats.get yanıtından kategori listesini defansif çıkar.
+
+    Temu bg: {success, errorCode, result:{...liste...}}; PDD ailesi:
+    {goods_cats_get_response:{goods_cats_list:[...]}}. İkisini de dener.
+    """
+    if not isinstance(resp, dict):
+        return []
+    res = resp.get("result") if isinstance(resp.get("result"), dict) else resp
+    if isinstance(res, dict):
+        for key in ("goodsCatsList", "goods_cats_list", "categoryList",
+                    "categories", "catList", "cats", "list", "children", "subCats"):
+            v = res.get(key)
+            if isinstance(v, list):
+                return v
+        # result doğrudan liste taşıyan tek alanı olabilir
+        for v in res.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return v
+    inner = resp.get("goods_cats_get_response")
+    if isinstance(inner, dict) and isinstance(inner.get("goods_cats_list"), list):
+        return inner["goods_cats_list"]
+    if isinstance(resp.get("result"), list):
+        return resp["result"]
+    return []
+
+
+def _temu_cat_fields(item):
+    """Bir kategori öğesinden (id, ad, leaf) çıkar — camelCase + snake_case."""
+    cid = (item.get("catId") if item.get("catId") is not None else
+           item.get("cat_id") if item.get("cat_id") is not None else
+           item.get("categoryId") if item.get("categoryId") is not None else
+           item.get("id"))
+    cname = (item.get("catName") or item.get("cat_name") or
+             item.get("categoryName") or item.get("name") or "")
+    leaf = item.get("leaf")
+    if leaf is None:
+        leaf = item.get("isLeaf")
+    if leaf is None:
+        leaf = item.get("is_leaf")
+    return cid, cname, leaf
+
+
+async def _sync_temu_categories(force=False, max_calls=1800, deadline_s=110):
+    """Temu kategori ağacını bg.local.goods.cats.get ile özyinelemeli çekip
+    db.temu_categories'e (HB ile aynı şema) cache'ler.
+
+    Dönüş: (kayıt_sayısı, uyarı|None, ilk_ham_yanıt|None).
+    İlk çağrı boş/hatalıysa ham yanıtı tanı için döndürür.
+    """
+    from collections import deque
+    import time as _t
+    async with _temu_sync_lock:
+        if not force:
+            existing = await db.temu_categories.count_documents({})
+            if existing > 0:
+                return existing, None, None
+        from .integrations_temu import temu_fetch_child_categories
+        start = _t.time()
+        calls = 0
+        first_raw = None
+        docs = []
+        seen_parents = set()
+        truncated = False
+        queue = deque([(0, "")])  # (parentCatId, parent_full_path)
+        while queue:
+            if calls >= max_calls or (_t.time() - start) > deadline_s:
+                truncated = True
+                break
+            parent_id, parent_path = queue.popleft()
+            try:
+                resp = await temu_fetch_child_categories(parent_id)
+            except Exception as e:
+                if calls == 0:
+                    return 0, f"Temu kategori çekme hatası: {e}", first_raw
+                continue
+            calls += 1
+            if first_raw is None:
+                first_raw = resp
+            items = _temu_extract_list(resp)
+            if calls == 1 and not items:
+                msg = ""
+                if isinstance(resp, dict):
+                    msg = str(resp.get("errorMsg") or resp.get("error_msg")
+                              or resp.get("message") or resp.get("errorCode") or "")
+                return 0, (f"Temu kök kategori boş döndü. {msg}".strip() or "Boş yanıt"), first_raw
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                cid, cname, leaf = _temu_cat_fields(it)
+                if cid is None:
+                    continue
+                cid_s = str(cid)
+                full_path = f"{parent_path} > {cname}" if parent_path else cname
+                docs.append({
+                    "category_id": cid_s,
+                    "name": cname,
+                    "full_path": full_path,
+                    "parent_id": str(parent_id),
+                    "leaf": (bool(leaf) if leaf is not None else None),
+                    "_path_lower": _tr_lower(full_path),
+                })
+                # Yaprak değilse (veya bilinmiyorsa) alt seviyeye in
+                if leaf is not True and cid_s not in seen_parents:
+                    seen_parents.add(cid_s)
+                    queue.append((cid, full_path))
+        # leaf=None olanlar: çocuğu yoksa yaprak kabul et
+        parent_ids = {d["parent_id"] for d in docs}
+        for d in docs:
+            if d["leaf"] is None:
+                d["leaf"] = d["category_id"] not in parent_ids
+        await db.temu_categories.delete_many({})
+        if docs:
+            for i in range(0, len(docs), 1000):
+                await db.temu_categories.insert_many(docs[i:i + 1000])
+        warn = "kısmi: tarama limiti aşıldı" if truncated else None
+        return len(docs), warn, first_raw
+
+
 @router.post("/{marketplace}/sync-categories")
 async def sync_marketplace_categories(marketplace: str, current_user: dict = Depends(require_admin)):
-    """Pazaryeri kategori cache'ini canli API'den yeniler (su an: hepsiburada)."""
-    if marketplace != "hepsiburada":
-        raise HTTPException(status_code=400, detail="Şimdilik sadece Hepsiburada senkronizasyonu destekleniyor")
-    n, err = await _sync_hb_categories(force=True)
-    if err:
-        raise HTTPException(status_code=400, detail=err)
-    return {"success": True, "count": n, "message": f"{n} Hepsiburada kategorisi senkronize edildi"}
+    """Pazaryeri kategori cache'ini canli API'den yeniler (hepsiburada + temu)."""
+    if marketplace == "hepsiburada":
+        n, err = await _sync_hb_categories(force=True)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        return {"success": True, "count": n, "message": f"{n} Hepsiburada kategorisi senkronize edildi"}
+    if marketplace == "temu":
+        n, warn, raw = await _sync_temu_categories(force=True)
+        if not n:
+            detail = warn or "Temu kategorileri çekilemedi"
+            if raw is not None:
+                detail += f" | Ham yanıt: {str(raw)[:400]}"
+            raise HTTPException(status_code=400, detail=detail)
+        msg = f"{n} Temu kategorisi senkronize edildi"
+        if warn:
+            msg += f" ({warn})"
+        return {"success": True, "count": n, "message": msg}
+    raise HTTPException(status_code=400, detail="Bu pazaryeri için kategori senkronizasyonu desteklenmiyor")
 
 
 @router.get("/{marketplace}/options")
@@ -463,6 +594,28 @@ async def search_marketplace_categories(
                 "leaf": True,
             })
         rows.sort(key=lambda c: len(c["full_path"] or ""))
+        return {"items": rows, "count": len(rows)}
+
+    if marketplace == "temu":
+        if (mode or "flat").lower() == "tree":
+            return {"tree": [], "hint": "Temu için liste (arama) görünümünü kullanın."}
+        if await db.temu_categories.count_documents({}) == 0:
+            return {"items": [], "hint": "Temu kategorileri henüz çekilmedi. Üstteki 'Temu Kategorilerini Çek' butonuna basın."}
+        tokens = [t for t in _tr_lower((q or "").strip()).split() if t]
+        query = {}
+        if tokens:
+            query = {"$and": [{"_path_lower": {"$regex": _re.escape(t)}} for t in tokens]}
+        rows = []
+        lim = max(1, min(2000, int(limit)))
+        async for c in db.temu_categories.find(query, {"_id": 0, "_path_lower": 0}).limit(lim):
+            rows.append({
+                "id": c.get("category_id"),
+                "name": c.get("name"),
+                "full_path": c.get("full_path"),
+                "parent_id": c.get("parent_id"),
+                "leaf": bool(c.get("leaf")),
+            })
+        rows.sort(key=lambda c: (not c["leaf"], len(c["full_path"] or "")))
         return {"items": rows, "count": len(rows)}
 
     if marketplace != "trendyol":

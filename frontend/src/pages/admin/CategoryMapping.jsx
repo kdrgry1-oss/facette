@@ -38,6 +38,7 @@ export default function CategoryMapping() {
   const [bulkAttrLoading, setBulkAttrLoading] = useState(false);
   const [bulkAttrReport, setBulkAttrReport] = useState(null);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [temuSyncing, setTemuSyncing] = useState(false);
 
   const token = useMemo(() => localStorage.getItem("token"), []);
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -86,6 +87,18 @@ export default function CategoryMapping() {
   const restoreCategory = async (row) => {
     await axios.post(`${API}/category-mapping/${active}/${row.category_id}/include`, {}, auth);
     toast.success("Kategori tekrar gösterildi"); load();
+  };
+
+  const syncTemuCategories = async () => {
+    setTemuSyncing(true);
+    try {
+      const r = await axios.post(`${API}/category-mapping/temu/sync-categories`, {}, auth);
+      toast.success(r.data?.message || "Temu kategorileri çekildi");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Temu kategorileri çekilemedi");
+    } finally {
+      setTemuSyncing(false);
+    }
   };
 
   const bulkDelete = async () => {
@@ -237,6 +250,21 @@ export default function CategoryMapping() {
           <div className="text-2xl font-black mt-1 text-[#B0413A]">{data.unmatched}</div>
         </div>
       </div>
+
+      {active === "temu" && (
+        <div className="flex items-center justify-between gap-3 mb-4 p-3 bg-white border border-stone-200 rounded-xl">
+          <div className="text-sm text-stone-600">
+            Temu kategori ağacını canlı API'den çek ve eşleştirme aramasını aktifleştir.
+            <span className="text-stone-400"> (Yetkilendirme + access token gerektirir.)</span>
+          </div>
+          <button onClick={syncTemuCategories} disabled={temuSyncing}
+            className="flex items-center gap-1 px-3 py-2 bg-stone-900 text-white rounded-lg text-sm font-semibold hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            data-testid="cat-temu-sync">
+            {temuSyncing ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
+            {temuSyncing ? "Çekiliyor..." : "Temu Kategorilerini Çek"}
+          </button>
+        </div>
+      )}
 
       {active === "hepsiburada" && <HepsiburadaBaseFieldPanel auth={auth} />}
       {active === "hepsiburada" && <HepsiburadaOrderPull auth={auth} />}
