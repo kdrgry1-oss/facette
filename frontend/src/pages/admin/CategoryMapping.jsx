@@ -546,6 +546,7 @@ export default function CategoryMapping() {
 /* ───────── Filtreli Toplu Aktarım Paneli ───────── */
 function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const [stockCodes, setStockCodes] = useState("");
+  const [cardIds, setCardIds] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -571,10 +572,17 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
       .split(/[\s,;\n]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+    const cards = cardIds
+      .split(/[\s,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     const body = {};
     if (codes.length) {
       body.stock_codes = codes;
       body.barcodes = codes;
+    }
+    if (cards.length) {
+      body.card_ids = cards;
     }
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
@@ -633,8 +641,9 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
   const onSubmit = async () => {
     const body = buildBody();
     const codes = body.stock_codes || [];
-    if (!codes.length && !dateFrom && !dateTo) {
-      toast.error("Stok kodu veya tarih aralığı girin");
+    const cards = body.card_ids || [];
+    if (!codes.length && !cards.length && !dateFrom && !dateTo) {
+      toast.error("Stok kodu / Kart ID veya tarih aralığı girin");
       return;
     }
     setLoading(true);
@@ -761,15 +770,31 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
           >
             {loading ? "Gönderiliyor..." : `2. ${marketplace.toUpperCase()}'a Gönder`}
           </button>
-          {(stockCodes || dateFrom || dateTo || selectedCatIds.length > 0) && (
+          {(stockCodes || cardIds || dateFrom || dateTo || selectedCatIds.length > 0) && (
             <button
-              onClick={() => { setStockCodes(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); setSelectedCatIds([]); }}
+              onClick={() => { setStockCodes(""); setCardIds(""); setDateFrom(""); setDateTo(""); setLastResult(null); setValidation(null); setSelectedCatIds([]); }}
               className="text-xs text-gray-500 hover:underline"
             >
               Temizle
             </button>
           )}
         </div>
+      </div>
+
+      {/* Ürün Kart ID ile aktarım — stok kodu/barkod gibi kart id de yazılabilir */}
+      <div className="mt-3">
+        <label className="text-xs font-medium text-gray-600 block mb-1">
+          Ürün Kart ID (her satıra veya virgülle)
+          <span className="text-gray-400 font-normal ml-1">— Kart ID girerek de ürün aktarabilirsiniz</span>
+        </label>
+        <textarea
+          value={cardIds}
+          onChange={(e) => setCardIds(e.target.value)}
+          rows={2}
+          placeholder="12345, 12346, 12347"
+          className="w-full border rounded px-2 py-1.5 text-sm bg-white font-mono"
+          data-testid="push-card-ids"
+        />
       </div>
 
       {/* Kategori filtresi */}

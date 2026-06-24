@@ -617,15 +617,17 @@ async def _build_product_query_from_payload(payload: dict) -> dict:
     category_filters = payload.get("category_filters", [])
     barcodes_raw = payload.get("barcodes", [])
     stock_codes_raw = payload.get("stock_codes", [])
+    card_ids_raw = payload.get("card_ids", [])
     barcodes = [str(b).strip() for b in (barcodes_raw or []) if str(b).strip()]
     stock_codes = [str(s).strip() for s in (stock_codes_raw or []) if str(s).strip()]
+    card_ids = [str(c).strip() for c in (card_ids_raw or []) if str(c).strip()]
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
 
     query: dict = {}
     if product_ids:
         query = {"id": {"$in": product_ids}}
-    elif barcodes or stock_codes:
+    elif barcodes or stock_codes or card_ids:
         or_conditions = []
         if barcodes:
             or_conditions.append({"barcode": {"$in": barcodes}})
@@ -634,6 +636,10 @@ async def _build_product_query_from_payload(payload: dict) -> dict:
             or_conditions.append({"stock_code": {"$in": stock_codes}})
             or_conditions.append({"sku": {"$in": stock_codes}})
             or_conditions.append({"variants.stock_code": {"$in": stock_codes}})
+        if card_ids:
+            # Ürün Kart ID ile aktarım — urun_karti_id (asıl) + csv_card_id (yedek)
+            or_conditions.append({"urun_karti_id": {"$in": card_ids}})
+            or_conditions.append({"csv_card_id": {"$in": card_ids}})
         query = {"$or": or_conditions}
     elif category_filters:
         or_conditions = []
@@ -1215,8 +1221,10 @@ async def sync_products_to_trendyol(
     # Yeni: Barkod/stok kodu ile filtre (kullanıcı UI'da yazıp aktarabilsin)
     barcodes_raw = payload.get("barcodes", [])
     stock_codes_raw = payload.get("stock_codes", [])
+    card_ids_raw = payload.get("card_ids", [])
     barcodes = [str(b).strip() for b in (barcodes_raw or []) if str(b).strip()]
     stock_codes = [str(s).strip() for s in (stock_codes_raw or []) if str(s).strip()]
+    card_ids = [str(c).strip() for c in (card_ids_raw or []) if str(c).strip()]
     # Yeni: Tarih aralığı (created_at — ürün eklenme tarihi)
     date_from = payload.get("date_from")  # ISO format "2026-01-01"
     date_to = payload.get("date_to")
@@ -1224,7 +1232,7 @@ async def sync_products_to_trendyol(
     query = {}
     if product_ids:
         query = {"id": {"$in": product_ids}}
-    elif barcodes or stock_codes:
+    elif barcodes or stock_codes or card_ids:
         # Hem ürünün kendi barcode/stock_code'una hem de variants[] içine bak
         or_conditions = []
         if barcodes:
@@ -1234,6 +1242,10 @@ async def sync_products_to_trendyol(
             or_conditions.append({"stock_code": {"$in": stock_codes}})
             or_conditions.append({"sku": {"$in": stock_codes}})
             or_conditions.append({"variants.stock_code": {"$in": stock_codes}})
+        if card_ids:
+            # Ürün Kart ID ile aktarım — urun_karti_id (asıl) + csv_card_id (yedek)
+            or_conditions.append({"urun_karti_id": {"$in": card_ids}})
+            or_conditions.append({"csv_card_id": {"$in": card_ids}})
         query = {"$or": or_conditions}
     elif category_filters:
         # Build an $or query for each category + its filters

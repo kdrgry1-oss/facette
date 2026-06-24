@@ -1,42 +1,41 @@
-FACETTE — Hepsiburada: Stok Kodu Kaynağına "Ürün Kart ID" + Değer Eşleştirme Düzeltmesi
-========================================================================================
+FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
+========================================
+Bu zip ÜÇ işi birden içerir; tek seferde uygulanabilir.
 
 DEĞİŞEN DOSYALAR
   - backend/routes/integrations.py
   - backend/routes/category_mapping.py
   - frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
+  - frontend/src/pages/admin/CategoryMapping.jsx
 
+────────────────────────────────────────────────────────────────────────
 1) STOK KODU GÖNDERME AYARINA "ÜRÜN KART ID" SEÇENEĞİ
    - "Varsayılan Alan Eşleştirme" → Satıcı Stok Kodu kaynağı dropdown'una
-     "Ürün Kart ID" eklendi (value=card_id).
-   - Seçildiğinde merchantSku, ürünün Kart ID'sinden (urun_karti_id → yoksa csv_card_id)
-     üretilir. Varyantlı üründe HB'nin bedenleri tek ürüne indirmemesi için Kart ID'ye
-     beden/renk soneki eklenir:  12345-S, 12345-M ...
-   - Ürün OLUŞTURMA ile STOK/FİYAT GÜNCELLEME aynı SKU'yu üretir (tek ortak fonksiyon
-     _hb_variant_sku) → güncellemeler eşleşir.
-   - Varsayılan (Stok Kodu) davranış BİREBİR korunur; mevcut listelemeler etkilenmez.
-
-   ⚠️ ÖNEMLİ: Kaynağı "Ürün Kart ID"ye GEÇİRİRSENİZ, daha önce stok-kodu SKU'su ile
-   HB'de açılmış listelemeler yeni Kart-ID SKU'larıyla EŞLEŞMEZ. O ürünler için stok
-   güncellemesi, ürünler yeni SKU ile yeniden gönderilene kadar tutmaz. Yeni kataloglar
-   için kullanın ya da geçişi bilinçli yapın.
+     "Ürün Kart ID" eklendi. Seçilince merchantSku, Kart ID'den (urun_karti_id
+     → yoksa csv_card_id) üretilir; varyantta benzersizlik için beden/renk
+     soneki eklenir (12345-S, 12345-M).
+   - Oluşturma ile stok/fiyat güncelleme AYNI SKU'yu üretir (tek fonksiyon).
+   - Varsayılan (Stok Kodu) davranış birebir korunur; mevcut listelemeler bozulmaz.
+   ⚠️ Kaynağı Kart ID'ye GEÇİRİRSEN, eski stok-kodu SKU'suyla açılmış listelemeler
+      yeni SKU'larla eşleşmez → o ürünler yeniden gönderilene kadar stok tutmaz.
 
 2) KATEGORİ EŞLEŞTİRME — ÖZELLİK DEĞERLERİ GELMİYOR DÜZELTMESİ
-   - Belirti: Değer Eşleştir ekranında sadece "Beden" çıkıyor, onun da XS/XL değerleri
-     boş; diğer özelliklerin (Renk/Cinsiyet/Materyal...) değerleri hiç gelmiyordu.
-   - Sebep: HB özellik cache'i değer listesi BOŞ kalmış (eski/yarım çekim) ve ekran o
-     boş cache'i gösteriyordu.
-   - Çözüm:
-     * Değer Eşleştir ekranı açılışında HB özellikleri DEĞERLERİYLE canlı çekilir
-       (frontend: /attributes?refresh=1).
-     * Backend kendini onarır: cache'te hiçbir özelliğin değeri yoksa otomatik olarak
-       değerleriyle yeniden çeker (refresh=1 + no_values guard).
-     * Inline değer tespiti genişletildi (attributeValues/values/allowedValues/
-       attributeValueList).
-   - Not: HB değer uçları kimlik/yetki hatası dönerse ekran artık sessiz boş kalmaz,
-     "Hepsiburada özellikleri çekilemedi: ..." uyarısını gösterir.
+   - Belirti: Değer Eşleştir'de sadece "Beden" çıkıyor, XS/XL ve diğer özellik
+     değerleri hiç gelmiyordu (cache değer listesi boş kalmış).
+   - Çözüm: Değer Eşleştir açılışında HB özellikleri DEĞERLERİYLE canlı çekilir
+     (/attributes?refresh=1) + backend cache'i değersizse kendini onarır.
+     Inline değer tespiti genişletildi.
+   - HB değer ucu yetki hatası dönerse ekran artık "çekilemedi: ..." uyarısı verir.
 
+3) ÜRÜN KART ID GİREREK ÜRÜN AKTARMA  ← YENİ
+   - Filtreli Aktarım panelinde (Kategori Eşleştirme sayfası) "Stok Kodu / Barkod"
+     kutusunun yanına "Ürün Kart ID" kutusu eklendi. Kart ID yazıp Doğrula/Gönder
+     ile ürün aktarabilirsin.
+   - Backend: card_ids → urun_karti_id (asıl) + csv_card_id (yedek) ile eşleşir.
+     HB ve Trendyol aktarım/doğrulama uçlarının hepsinde geçerli.
+
+────────────────────────────────────────────────────────────────────────
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_STOKKODU_KARTID_VE_DEGER.zip -d . \
-    && git add -A && git commit -m "HB: stok kodu kaynagi Urun Kart ID + deger eslestirme canli cekim" && git push
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_KARTID_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: kart id stok kodu kaynagi + deger eslestirme canli + kart id ile aktarim" && git push
   Railway yeşil sinyali: [scheduler] Background scheduler started
