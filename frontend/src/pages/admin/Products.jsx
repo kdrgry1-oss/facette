@@ -385,6 +385,44 @@ export default function AdminProducts() {
     }
   }, [formData.hepsiburada_category_id, modalOpen]);
 
+  // HB OTOMATİK DOLUM (yaklaşım A): Varsayılan özellikler (genel `attributes` + Teknik Detay)
+  // HB kategori şemasına normalize ad + değer eşlemesiyle yazılır. Sadece BOŞ HB alanları doldurulur;
+  // manuel değer ASLA ezilmez. Temu'daki otomatik dolumun HB karşılığı.
+  useEffect(() => {
+    if (!modalOpen || !(hepsiburadaAttributesList || []).length) return;
+    const _norm = (s) => (s || "").toLocaleLowerCase("tr").replace(/[\s\-_/().]/g, "").trim();
+    const defaults = { ...(formData.attributes || {}) };
+    Object.values(technicalDetails || {}).forEach(t => { if (t?.label && t?.value) defaults[t.label] = t.value; });
+    const defKeys = Object.keys(defaults);
+    const next = { ...(formData.hepsiburada_attributes || {}) };
+    let changed = false;
+    for (const hbAttr of hepsiburadaAttributesList) {
+      const hbName = hbAttr.name;
+      if (!hbName || next[hbName]) continue;                 // dolu → ezme
+      const nb = _norm(hbName);
+      const matchKey = defKeys.find(dn => {
+        const na = _norm(dn);
+        return na && (na === nb || na.includes(nb) || nb.includes(na));
+      });
+      if (!matchKey) continue;
+      const dv = defaults[matchKey];
+      if (dv === undefined || dv === null || dv === "") continue;
+      const vals = (hbAttr.attributeValues || []).map(v => v.name).filter(Boolean);
+      let hbVal = dv;
+      if (vals.length) {
+        const exact = vals.find(v => _norm(v) === _norm(dv));
+        const partial = vals.find(v => _norm(v).includes(_norm(dv)) || _norm(dv).includes(_norm(v)));
+        if (exact) hbVal = exact;
+        else if (partial) hbVal = partial;
+        else if (!hbAttr.allowCustom) continue;              // HB enum'da yok ve serbest değil → atla
+      }
+      next[hbName] = hbVal;
+      changed = true;
+    }
+    if (changed) setFormData(p => ({ ...p, hepsiburada_attributes: next }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hepsiburadaAttributesList, formData.attributes, technicalDetails, modalOpen]);
+
   useEffect(() => {
     if (modalOpen && !editingProduct) {
       axios.get(`${API}/settings`)
@@ -2650,6 +2688,14 @@ export default function AdminProducts() {
                       ? tyMerged
                       : baseList;
 
+                    // Mükerrer fix: Teknik Detay panelinde gösterilen etiketler (Materyal, Kalıp, Kumaş...)
+                    // pazaryeri özellik bölümlerinde TEKRAR listelenmez — tek kaynak. (HB kendi şema isimlerini
+                    // kullandığı için pratikte Trendyol/Temu bölümlerini etkiler.) Değer yine kaydedilir.
+                    const _techNames = new Set(
+                      Object.values(technicalDetails || {})
+                        .map(t => (t?.label || "").toLocaleLowerCase('tr').trim())
+                        .filter(Boolean)
+                    );
                     const processed = sourceList.map(attr => {
                       const isReq = marketplace === 'trendyol' ? getIsRequired(attr)
                                   : marketplace === 'hepsiburada' ? !!attr.required
@@ -2658,7 +2704,8 @@ export default function AdminProducts() {
                       return { attr, isRequired: isReq, hasValue: hasVal };
                     })
                     // Beden ürün kartından gizlenir: pazaryeri varyant (beden) alanından eşleştiriliyor.
-                    .filter(x => (x.attr.name || '').toLocaleLowerCase('tr').trim() !== 'beden');
+                    .filter(x => (x.attr.name || '').toLocaleLowerCase('tr').trim() !== 'beden')
+                    .filter(x => !_techNames.has((x.attr.name || '').toLocaleLowerCase('tr').trim()));
                     const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const otherEmpty = processed.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
