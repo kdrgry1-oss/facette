@@ -1,47 +1,37 @@
 FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
 ========================================
+★★ ASIL HATA DÜZELTİLDİ — "ekran Canlı ama gönderim Sandbox"
+  HB ortamı İKİ yerde tutuluyordu: marketplace_accounts (Pazaryerleri Yönetimi)
+  ve db.settings (Entegrasyonlar/MarketplaceHub). _get_hb_client ÖNCE
+  marketplace_accounts'u okuyordu; orada eski "sandbox" yazılıysa, senin
+  Canlı yaptığın db.settings DEĞERİ GÖRMEZDEN GELİNİYORDU → gönderim sandbox.
+  DÜZELTME (backend/routes/category_mapping.py · _get_hb_client):
+    - db.settings HER ZAMAN okunur.
+    - Üretim kuralı: İKİ kaynaktan HERHANGİ BİRİ 'canlı/production' ise CANLI.
+      Sandbox'a yalnız İKİSİ DE canlı değilse düşülür. (Sessiz-sandbox tuzağı bitti.)
+  ⇒ Deploy sonrası ekstra ayar gerekmeden, senin "Canlı" değerin geçerli olacak.
+
+  YENİ TEŞHİS endpoint'i: GET /integrations/hepsiburada/env-status
+    Çözülen ortamı + host + her iki kaynağın değerini açıkça döner.
+    Tarayıcıda admin token ile aç → "resolved_environment":"production" görmelisin.
+
 DEĞİŞEN DOSYALAR
-  backend/routes/integrations.py
-  backend/routes/category_mapping.py
+  backend/routes/category_mapping.py   (env çözümü düzeltmesi + bulk-auto-setup)
+  backend/routes/integrations.py       (env-status + mutabakat önizleme + sandbox görünürlük)
   frontend/src/pages/admin/CategoryMapping.jsx
   frontend/src/pages/admin/MarketplaceHub.jsx
   frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
 
-ÖNEMLİ: Bu işlemler CANLI veride çalışır. Ben buradan çalıştıramam; araçları
-ekledim, sen panelden tek tıkla çalıştırınca gerçek sonuç/rapor çıkar.
-
-TASK 1 — Kategori özellik+DEĞER eşleştirme (tüm kategoriler)
-  • YENİ endpoint: POST /category-mapping/{mp}/bulk-auto-setup
-    Matched tüm kategorilerde _auto_setup_mapping motorunu koşturur:
-    özellik adı + DEĞER (renk/beden vb.) + şirket/ortak default. Manuel olanlar EZİLMEZ.
-    Kategori başı + toplam rapor döner.
-  • YENİ buton (Kategori Eşleştirme sayfası, sağ üst): "Tümünü Eşleştir (Özellik+Değer)".
-    Çalıştır → toast'ta son durum (özellik X, değer Y, şirket Z, default W · N kategori).
-  • Not: Mevcut "Tümünü Otomatik Eşleştir" (yalnız özellik) ve beden-rebuild zaten vardı;
-    bu yeni buton özellik+değer+default'u BİRLİKTE yapar.
-
-TASK 2/3 — HB mutabakatı (eksikleri %25 aktar + stok/fiyat; barkodsuz HB ürünü sil/listele)
-  • YENİ endpoint (SALT-OKUNUR önizleme): GET /integrations/hepsiburada/reconcile/preview?markup=25
-    Site ürünleri ile HB kataloğunu merchantSku + barkod ile karşılaştırır:
-      - missing_on_hb : sitede var, HB'de yok → AKTARILACAKLAR (fiyat = taban×1.25)
-      - orphan_on_hb  : HB'de var, senin barkodun/SKU'nla eşleşmiyor → SİLİNECEK/LİSTELENECEK
-    Hiçbir şey göndermez/silmez. Sandbox'tan okunuyorsa kırmızı uyarı verir.
-  • YENİ panel (Filtreli Aktarım altında): "Hepsiburada Mutabakat (Önizleme)" →
-    sayımlar + iki liste (eksik / eşleşmeyen) + CSV indir.
-  • EXECUTE (gerçek aktarım + stok/fiyat + silme) henüz YOK — bilerek. Önce önizlemeyi
-    gör, sonra parametreleri onayla; ikinci pakette tek tık çalıştırma + silme ekleyeceğim.
-
-ASIL TIKANIKLIK (önceki paketten, hâlâ kritik)
-  HB "Ortam" varsayılanı SANDBOX idi → ürünler test ortamına gidip "başarılı" görünüyordu.
-  • MarketplaceHub: varsayılan artık Production (Canlı); Sandbox'ta kırmızı uyarı.
-  • Aktarım sonucu hangi ortama gittiğini yazar; SANDBOX ise panelde büyük uyarı.
-  • HB asenkron import için "İçe Aktarım Durumunu Sorgula" (ret sebebi) butonu.
-  ⇒ İLK İŞ: Entegrasyonlar → Hepsiburada → Ortam = "Production (Canlı)" → Kaydet.
-
-DİĞER (kümülatif, önceki): Satıcı Stok Kodu kaynağına "Ürün Kart ID";
-  Değer Eşleştirme canlı çekim + cache self-heal; Filtreli Aktarım'a "Ürün Kart ID" kutusu.
+DİĞER İŞLER (kümülatif)
+  • Task 1: "Tümünü Eşleştir (Özellik+Değer)" butonu → POST /category-mapping/{mp}/bulk-auto-setup
+    (tüm matched kategorilerde özellik+değer+default; manuel olanları ezmez; son durum raporu).
+  • Task 2/3: "Hepsiburada Mutabakat (Önizleme)" — GET /hepsiburada/reconcile/preview?markup=25
+    (salt-okunur; eksik→%25 aktarılacaklar / barkodsuz HB ürünleri; CSV indir).
+  • HB aktarım sonucu ortamı (CANLI/SANDBOX) yazar; HB asenkron import durum sorgulama.
+  • Satıcı Stok Kodu kaynağına "Ürün Kart ID"; Değer Eşleştirme canlı çekim; Filtreli Aktarım'a kart-id kutusu.
 
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_MUTABAKAT_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: mutabakat onizleme + tum kategori ozellik/deger auto-setup + sandbox fix" && git push
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_ORTAM_FIX_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: ortam cozumu fix (iki kaynak, canli oncelik) + env-status + mutabakat + auto-setup" && git push
   Railway yeşil: [scheduler] Background scheduler started
+  Doğrulama: /integrations/hepsiburada/env-status → resolved_environment = production

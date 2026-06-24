@@ -4531,6 +4531,32 @@ async def hb_products_by_status(product_status: str = "WAITING", task_status: bo
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/hepsiburada/env-status")
+async def hb_env_status(current_user: dict = Depends(require_admin)):
+    """HB ortamının NEREDEN çözüldüğünü gösterir (sandbox tuzağı teşhisi).
+    Kural: marketplace_accounts veya db.settings kaynaklarından biri 'canlı/production'
+    ise CANLI; ikisi de değilse sandbox."""
+    from .category_mapping import _get_hb_client
+    acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0}) or {}
+    cr = acc.get("credentials") or {}
+    s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
+    env_acc = (cr.get("env") or cr.get("mode") or "").strip().lower()
+    env_set = (s.get("mode") or s.get("env") or "").strip().lower()
+    client, err = await _get_hb_client()
+    resolved = host = None
+    if client is not None:
+        resolved = "sandbox" if getattr(client, "test", False) else "production"
+        host = getattr(client, "base", "")
+    return {
+        "resolved_environment": resolved,
+        "host": host,
+        "marketplace_accounts_env": env_acc or "(boş)",
+        "settings_env": env_set or "(boş)",
+        "error": err,
+        "note": "Biri 'canlı/production' ise CANLI. İkisi de değilse sandbox.",
+    }
+
+
 @router.get("/hepsiburada/reconcile/preview")
 async def hb_reconcile_preview(markup: float = 25.0, active_only: bool = True,
                                max_pages: int = 25, page_size: int = 1000,
