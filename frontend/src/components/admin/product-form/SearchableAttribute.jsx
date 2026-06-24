@@ -36,7 +36,14 @@ const SearchableAttribute = ({
   const dropdownRef = useRef(null);
 
   const hasValue = !!value;
-  const opts = attr.values || [];
+  // #14: Değerler önce alfabetik (Türkçe), sonra sayısal sırada.
+  const _isNumVal = (s) => /^\d+([.,]\d+)?$/.test(String(s).trim());
+  const opts = [...(attr.values || [])].sort((a, b) => {
+    const an = _isNumVal(a), bn = _isNumVal(b);
+    if (an && bn) return parseFloat(String(a).replace(",", ".")) - parseFloat(String(b).replace(",", "."));
+    if (an !== bn) return an ? 1 : -1; // sayısal değerler en sona
+    return String(a).localeCompare(String(b), "tr");
+  });
   const filteredValues = opts.filter((v) =>
     v.toLowerCase().includes(searchTerm.toLowerCase())
   );

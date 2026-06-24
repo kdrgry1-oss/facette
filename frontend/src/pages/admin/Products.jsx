@@ -302,7 +302,7 @@ export default function AdminProducts() {
   const [formData, setFormData] = useState({
     name: "", slug: "", description: "", short_description: "",
     price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
-    images: [], is_active: true, is_featured: false, is_new: false,
+    images: [], is_active: false, is_featured: false, is_new: false,
     stock: 0, stock_code: "", barcode: "", sku: "",
     urun_karti_id: "", urun_id: "",
     // Ticimax fields
@@ -341,6 +341,11 @@ export default function AdminProducts() {
   const [globalAttributes, setGlobalAttributes] = useState([]);
   const [globalSizes, setGlobalSizes] = useState([]);
   const [globalColors, setGlobalColors] = useState([]);
+  // #3: Satış fiyatı → Üye Tipi 1 otomatik aktarım; üye fiyatı manuel değişince bağımsız olur.
+  const [memberPriceManual, setMemberPriceManual] = useState(false);
+  // #6: Hızlı varyant — çoklu beden/renk seçimi (kombinasyondan kart üret).
+  const [multiSizes, setMultiSizes] = useState([]);
+  const [multiColors, setMultiColors] = useState([]);
   const [fetchingAttributes, setFetchingAttributes] = useState(false);
   const [attrSearch, setAttrSearch] = useState({});
 
@@ -1041,6 +1046,8 @@ export default function AdminProducts() {
       
       // Build attributes array - auto-add Yaş Grubu and Menşei if missing
       const attrObj = { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(formData.attributes || {}) };
+      // #16: "Yaka" formdan kaldırıldı; arka planda lazımsa "Yaka Tipi" değerinden türet.
+      if (attrObj["Yaka Tipi"] && !attrObj["Yaka"]) attrObj["Yaka"] = attrObj["Yaka Tipi"];
       const attributesArray = Object.entries(attrObj)
         .filter(([_, v]) => v !== "" && v !== null && v !== undefined)
         .map(([k, v]) => ({ type: k, name: k, value: v }));
@@ -1352,6 +1359,7 @@ export default function AdminProducts() {
       navigate(`/admin/urunler/${product.id}`, { replace: false });
     }
     setEditingProduct(product);
+    setMemberPriceManual(true); // mevcut ürün: üye fiyatı bağımsız, otomatik ezilmez
     // Parse edilmiş teknik detayları (XML import'dan) ayrı state'e al — Özellikler sekmesinin
     // üstündeki "Teknik Detay" panelinde gösterilecek
     const raw = product.attributes;
@@ -1483,17 +1491,18 @@ export default function AdminProducts() {
   const resetForm = () => {
     setEditingProduct(null);
     setShowAllAttributes(false);
+    setMemberPriceManual(false); setMultiSizes([]); setMultiColors([]);
     setFormData({
       name: "", slug: "", description: "", short_description: "",
       price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
-      images: [], is_active: true, is_featured: false, is_new: false,
+      images: [], is_active: false, is_featured: false, is_new: false,
       stock: 0, stock_code: "", barcode: "", sku: "",
       urun_karti_id: "", urun_id: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
       supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0, member_price_1: null,
     // FAZ 7 — İmalat modülü entegrasyonu için ek alanlar
     collection: "", color: "",
-      market_price: 0, vat_rate: globalVatRate, vat_included: true, currency: "TRY",
+      market_price: 0, vat_rate: 10, vat_included: true, currency: "TRY",
       cargo_weight: 0, product_weight: 0, width: 0, depth: 0, height: 0,
       min_order_qty: 1, max_order_qty: 999, estimated_delivery: "2-3",
       is_free_shipping: false, is_showcase: false,
@@ -1504,7 +1513,16 @@ export default function AdminProducts() {
       temu_attributes: {},
       variants: [], newVariant: {},
       combine_products: [],
-      attributes: { "Yaş Grubu": "Yetişkin", "Menşei": "TR" },
+      attributes: {
+        "Yaş Grubu": "Yetişkin",          // #9
+        "Menşei": "TR",
+        "Cinsiyet": "Kadın",               // #7
+        "Koleksiyon": "Casual/Günlük",     // #8
+        "Ortam": "Casual/Günlük",          // #8
+        "Ek Özellik": "Mevcut Değil",      // #10
+        "Performans": "Cool & Comfort",    // #11
+        "Kutu Durumu": "Kutu Yok",         // #12
+      },
       ticimax_fields: {},
     });
   };
@@ -2351,11 +2369,15 @@ export default function AdminProducts() {
                     <h3 className="font-semibold text-gray-900 border-b pb-2 mb-4">Fiyatlandırma</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Normal Fiyat (TL)</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Satış Fiyatı (TL)</label>
                         <input
                           type="number"
                           value={formData.price}
-                          onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value) || 0;
+                            // #3: Satış fiyatı, üye fiyatı manuel değiştirilmediyse Üye Tipi 1'e de yazılır.
+                            setFormData(prev => ({ ...prev, price: v, ...(memberPriceManual ? {} : { member_price_1: v }) }));
+                          }}
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all font-bold"
                         />
                       </div>
@@ -2383,7 +2405,7 @@ export default function AdminProducts() {
                         <input
                           type="number"
                           value={formData.member_price_1 ?? ""}
-                          onChange={(e) => setFormData({ ...formData, member_price_1: e.target.value === "" ? null : parseFloat(e.target.value) })}
+                          onChange={(e) => { setMemberPriceManual(true); setFormData({ ...formData, member_price_1: e.target.value === "" ? null : parseFloat(e.target.value) }); }}
                           placeholder="Üye tipi 1'e özel fiyat"
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all font-bold text-purple-600"
                           data-testid="product-member-price-1"
@@ -2496,7 +2518,7 @@ export default function AdminProducts() {
                       <p className="text-xs font-bold text-gray-500 uppercase mb-4 tracking-widest text-center">Tahmini Trendyol Satış Fiyatı</p>
                       <div className="text-center">
                         <span className="text-4xl font-black text-orange-600">
-                          {((formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
+                          {(((formData.member_price_1 || formData.price) || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
                         </span>
                         <span className="text-xl font-bold text-orange-400 ml-1">TL</span>
                       </div>
@@ -2514,11 +2536,24 @@ export default function AdminProducts() {
                 {(() => {
                   const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
                   const attrMappings = selectedCat?.attribute_mappings || [];
-                  const hiddenAttrNames = ["beden", "renk", "web color"];
+                  const hiddenAttrNames = ["beden", "renk", "web color", "yaka"];
 
                   const baseList = globalAttributes
                     .filter(a => !hiddenAttrNames.includes(a.name.toLowerCase()))
                     .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()));
+
+                  // #7-#12: formData.attributes'ta olup kütüphanede olmayan (varsayılan/seeded)
+                  // özellikleri de listeye ekle ki Özellikler sekmesinde dolu görünsünler.
+                  {
+                    const _seedNames = new Set(baseList.map(a => (a.name || "").toLowerCase()));
+                    Object.keys(formData.attributes || {}).forEach(nm => {
+                      const low = (nm || "").toLowerCase();
+                      if (!nm || _seedNames.has(low) || hiddenAttrNames.includes(low)) return;
+                      if (!low.includes(attributeSearchTerm.toLowerCase())) return;
+                      baseList.push({ id: `seed-${nm}`, name: nm, values: [] });
+                      _seedNames.add(low);
+                    });
+                  }
 
                   // Determine required attrs from Trendyol mapping
                   const getIsRequired = (attr) => {
@@ -2885,6 +2920,62 @@ export default function AdminProducts() {
                   {/* Add New Variant Section */}
                   <div className="bg-orange-50 rounded-xl p-6 border border-orange-100">
                     <h4 className="text-sm font-bold text-orange-900 mb-4 uppercase tracking-wider">Hızlı Varyant Ekle</h4>
+                    {/* #6: Bedenleri ve renkleri buton buton seç → seçilen kombinasyonlardan kartları tek seferde üret */}
+                    <div className="mb-5 bg-white rounded-lg border border-orange-200 p-4">
+                      <div className="mb-3">
+                        <span className="block text-xs font-bold text-orange-700 mb-2 uppercase">Bedenler (çoklu seç)</span>
+                        <div className="flex flex-wrap gap-2">
+                          {globalSizes.map(s => {
+                            const on = multiSizes.includes(s.value);
+                            return (
+                              <button key={s.id} type="button"
+                                onClick={() => setMultiSizes(p => on ? p.filter(x => x !== s.value) : [...p, s.value])}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-bold border-2 transition-all ${on ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-700 border-gray-200 hover:border-orange-300'}`}>
+                                {s.value}
+                              </button>
+                            );
+                          })}
+                          {globalSizes.length === 0 && <span className="text-xs text-gray-400 italic">Beden tanımlı değil</span>}
+                        </div>
+                      </div>
+                      <div className="mb-3">
+                        <span className="block text-xs font-bold text-orange-700 mb-2 uppercase">Renkler (çoklu seç — boş bırakılırsa renksiz)</span>
+                        <div className="flex flex-wrap gap-2">
+                          {globalColors.map(c => {
+                            const on = multiColors.includes(c.value);
+                            return (
+                              <button key={c.id} type="button"
+                                onClick={() => setMultiColors(p => on ? p.filter(x => x !== c.value) : [...p, c.value])}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-bold border-2 transition-all ${on ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-700 border-gray-200 hover:border-orange-300'}`}>
+                                {c.value}
+                              </button>
+                            );
+                          })}
+                          {globalColors.length === 0 && <span className="text-xs text-gray-400 italic">Renk tanımlı değil</span>}
+                        </div>
+                      </div>
+                      <button type="button"
+                        onClick={() => {
+                          if (!multiSizes.length) { toast.error("En az bir beden seçin"); return; }
+                          const colors = multiColors.length ? multiColors : [""];
+                          const existing = new Set((formData.variants || []).map(v => `${v.size}|${v.color || ""}`));
+                          const adds = [];
+                          multiSizes.forEach(sz => colors.forEach(cl => {
+                            const key = `${sz}|${cl}`;
+                            if (existing.has(key)) return;
+                            existing.add(key);
+                            adds.push({ id: `var-${Date.now()}-${sz}-${cl}`.replace(/\s+/g, ''), size: sz, color: cl, stock: 0, barcode: "", stock_code: formData.stock_code || "" });
+                          }));
+                          if (!adds.length) { toast.error("Seçili kombinasyonlar zaten ekli"); return; }
+                          setFormData(prev => ({ ...prev, variants: [...(prev.variants || []), ...adds] }));
+                          setMultiSizes([]); setMultiColors([]);
+                          toast.success(`${adds.length} varyant oluşturuldu`);
+                        }}
+                        className="w-full bg-orange-600 text-white font-bold py-2.5 rounded-lg hover:bg-orange-700 shadow-md shadow-orange-200 transition-all">
+                        Seçili Kombinasyonları Oluştur ({multiSizes.length || 0} beden × {multiColors.length || 1} renk)
+                      </button>
+                      <p className="text-[10px] text-gray-400 mt-2 text-center">Stok ve barkodları oluşan kartlardan düzenleyebilirsin. Tek tek eklemek için aşağıyı kullan.</p>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
                       <div>
                         <label className="block text-xs font-bold text-orange-700 mb-1 uppercase">Beden *</label>
@@ -3126,14 +3217,14 @@ export default function AdminProducts() {
                             <div className="flex justify-between items-baseline border-b border-gray-800 pb-4">
                               <span className="text-gray-400 text-xs font-bold uppercase">Markup (%{formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate})</span>
                               <span className="text-green-400 font-bold">
-                                +{(((formData.price || 0) * (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate)) / 100).toFixed(2)} TL
+                                +{((((formData.member_price_1 || formData.price) || 0) * (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate)) / 100).toFixed(2)} TL
                               </span>
                             </div>
                             <div className="flex justify-between items-center pt-2">
                               <span className="text-white text-sm font-black uppercase tracking-widest">Trendyol Fiyatı</span>
                               <div className="text-right">
                                 <span className="text-3xl font-black text-orange-500">
-                                  {((formData.price || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate) / 100)).toFixed(2)}
+                                  {(((formData.member_price_1 || formData.price) || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : formData.markup_rate) / 100)).toFixed(2)}
                                 </span>
                                 <span className="text-orange-300 font-bold ml-1">TL</span>
                               </div>

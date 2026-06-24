@@ -88,6 +88,21 @@ def calculate_trendyol_price(base_price: float, product_data: dict, trendyol_con
     final_price = base_price * (1 + markup / 100)
     return round(final_price, 2)
 
+
+def _mp_base_price(obj: dict) -> float:
+    """Pazaryeri fiyat tabanı (#4): Üye Tipi 1 fiyatı (member_price_1) baz alınır;
+    boş/0 ise satış fiyatına (price) düşülür. Pazaryeri marjı bu tabanın üzerine eklenir."""
+    try:
+        m = float(obj.get("member_price_1") or 0)
+    except Exception:
+        m = 0.0
+    if m > 0:
+        return m
+    try:
+        return float(obj.get("price") or 0)
+    except Exception:
+        return 0.0
+
 @router.get("/trendyol/settings")
 async def get_trendyol_settings(current_user: dict = Depends(require_admin)):
     """Get Trendyol settings"""
@@ -1665,8 +1680,8 @@ async def sync_products_to_trendyol(
                 "categoryId": int(trendyol_cat_id),
                 "description": clean_desc,
                 "currencyType": product.get("currency", "TRY"),
-                "listPrice": calculate_trendyol_price(float(product.get("price", 0)), product, config),
-                "salePrice": calculate_trendyol_price(float(product.get("price", 0)), product, config),
+                "listPrice": calculate_trendyol_price(_mp_base_price(product), product, config),
+                "salePrice": calculate_trendyol_price(_mp_base_price(product), product, config),
                 "vatRate": int(product.get("vat_rate", config.get("default_vat_rate") or 20)),
                 "cargoCompanyId": int(config.get("default_cargo_company_id") or 10), # Assuming 10 is MNG Kargo (Needs specific Cargo Provider ID)
                 "dimensionalWeight": float(product.get("cargo_weight", 1)),
@@ -2456,8 +2471,8 @@ async def _sync_inventory_to_trendyol(products: list):
         _mult = product.get("trendyol_multiplier")
         markup = float(_mult) if (_mult is not None and float(_mult) > 0) else default_markup
         factor = 1 + markup / 100.0
-        base_price = float(product.get("price", 0) or 0) * factor
-        sale_price = float(product.get("price", 0) or 0) * factor  # Trendyol: indirimsiz satis fiyati
+        base_price = _mp_base_price(product) * factor  # #4: üye fiyatı baz
+        sale_price = _mp_base_price(product) * factor  # Trendyol: indirimsiz satis fiyati
         variants = product.get("variants", [])
         if not variants:
             if product.get("barcode"):
@@ -3608,7 +3623,14 @@ async def _hb_price_source() -> str:
 
 
 def _hb_pick_base_price(obj: dict, price_source: str = "auto") -> float:
-    """Ürün/varyanttan, seçili kaynağa göre temel fiyatı çöz."""
+    """Ürün/varyanttan, seçili kaynağa göre temel fiyatı çöz.
+    #4: Önce Üye Tipi 1 fiyatı (member_price_1) baz alınır; boş/0 ise eski mantığa düşer."""
+    try:
+        member = float(obj.get("member_price_1") or 0)
+    except Exception:
+        member = 0.0
+    if member > 0:
+        return member
     try:
         price = float(obj.get("price", 0) or 0)
     except Exception:
