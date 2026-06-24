@@ -135,7 +135,7 @@ export default function CountdownBar() {
   const multi = messages.length > 1;
   const fadeStyle = multi ? { animation: "fctTopbarSlide .6s cubic-bezier(.16,1,.3,1)" } : undefined;
   const fadeKeyframes = multi
-    ? <style>{"@keyframes fctTopbarSlide{0%{opacity:0;transform:translateY(7px)}100%{opacity:1;transform:translateY(0)}}"}</style>
+    ? <style>{"@keyframes fctTopbarSlide{0%{opacity:0;transform:translateY(110%)}100%{opacity:1;transform:translateY(0)}}"}</style>
     : null;
 
   // page-blocks henüz dönmedi → nötr, sabit yükseklikli, METİNSİZ bar.
@@ -162,10 +162,8 @@ export default function CountdownBar() {
       <div className="text-center py-1.5 md:py-2" style={{ backgroundColor: bg, color: fg }}
            data-testid="topbar-fallback">
         {fadeKeyframes}
-        <p key={msgIdx} style={fadeStyle}
-           className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light">
-          {currentMsg}
-        </p>
+        <Rotator idx={msgIdx} text={currentMsg} multi={multi}
+           className="text-[10px] md:text-[11px] tracking-[0.25em] uppercase font-light" />
       </div>
     );
   }
@@ -184,10 +182,8 @@ export default function CountdownBar() {
       {fadeKeyframes}
       <div className="max-w-screen-2xl mx-auto px-3 md:px-6 flex items-center justify-center md:justify-between gap-3 flex-wrap">
         {currentMsg && (
-          <p key={msgIdx} style={fadeStyle}
-             className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light flex-shrink-0">
-            {currentMsg}
-          </p>
+          <Rotator idx={msgIdx} text={currentMsg} multi={multi}
+             className="text-[10px] md:text-[12px] tracking-[0.25em] uppercase font-light flex-shrink-0" />
         )}
         <div className="flex items-center gap-2 md:gap-3">
           {timerLbl && (
@@ -202,6 +198,21 @@ export default function CountdownBar() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Üst bar yazı geçişi — suudcollection tarzı: dikey kayan (clipped slide-up) rotasyon.
+function Rotator({ idx, text, multi, className }) {
+  if (!multi) return <p className={className}>{text}</p>;
+  return (
+    <p className={`${className} overflow-hidden`} style={{ lineHeight: 1.6 }}>
+      <span
+        key={idx}
+        style={{ display: "inline-block", animation: "fctTopbarSlide .6s cubic-bezier(.22,1,.36,1)", willChange: "transform, opacity" }}
+      >
+        {text}
+      </span>
+    </p>
   );
 }
 

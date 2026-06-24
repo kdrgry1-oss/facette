@@ -390,7 +390,7 @@ export default function Header({ hideMenu = false }) {
                 </div>
                 
                 {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
-                <div className="flex-shrink-0 flex gap-3 min-w-[564px]">
+                <div className="flex-shrink-0 flex gap-3 min-w-[564px] ml-auto">
                   <MegaProductsPanel
                     products={activeMegaProducts}
                     loading={megaLoading}
@@ -440,7 +440,7 @@ export default function Header({ hideMenu = false }) {
                 </div>
                 
                 {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
-                <div className="flex-shrink-0 flex gap-3 min-w-[564px]">
+                <div className="flex-shrink-0 flex gap-3 min-w-[564px] ml-auto">
                   {activeMegaProducts.length > 0 ? (
                     activeMegaProducts.map((p) => (
                       <Link
@@ -599,7 +599,7 @@ export default function Header({ hideMenu = false }) {
 
               {/* ORTA: büyük arama girişi */}
               <form onSubmit={(e) => { e.preventDefault(); submitSearch(); }} className="w-full">
-                <div className="relative border-b border-black max-w-xl mx-auto md:max-w-2xl md:mx-0">
+                <div className="relative border-b border-black max-w-2xl mx-auto md:max-w-4xl md:mx-0">
                   <input
                     type="text"
                     value={searchQuery}
