@@ -44,20 +44,35 @@ router = APIRouter(prefix="/temu", tags=["Integrations-Temu"])
 # -----------------------------------------------------------------------------
 
 async def _get_temu_config() -> Dict[str, Any]:
-    """marketplace_accounts.temu kaydından config çek."""
+    """marketplace_accounts.temu kaydından config çek.
+
+    Pazaryeri Hub kimlik bilgilerini `credentials` alt-objesinde ve Temu panel
+    isimleriyle (app_key/app_secret/access_token/env) saklar. Bu yüzden önce
+    `credentials` okunur; eski düz (top-level) kayıtlar için geriye dönük fallback
+    bırakıldı. Önceki sürüm top-level `api_key`/`api_secret` aradığı için Hub'dan
+    girilen bilgiler hiç görünmüyordu (her zaman "App Key/App Secret eksik")."""
     acc = await db.marketplace_accounts.find_one({"key": "temu"}, {"_id": 0})
     if not acc:
         raise HTTPException(status_code=400, detail="Temu hesabı tanımlı değil. Önce Pazaryeri Hub'da credential girin.")
     if not acc.get("enabled"):
         raise HTTPException(status_code=400, detail="Temu hesabı aktif değil")
-    if not acc.get("api_key") or not acc.get("api_secret"):
-        raise HTTPException(status_code=400, detail="Temu app_key/app_secret eksik")
-    base = acc.get("base_url") or ("https://api-sandbox.temu.com" if acc.get("mode") == "sandbox" else "https://api.temu.com")
+    creds = acc.get("credentials") or {}
+    app_key = creds.get("app_key") or creds.get("api_key") or acc.get("api_key") or acc.get("app_key") or ""
+    app_secret = creds.get("app_secret") or creds.get("api_secret") or acc.get("api_secret") or acc.get("app_secret") or ""
+    access_token = creds.get("access_token") or acc.get("access_token") or ""
+    if not app_key or not app_secret:
+        raise HTTPException(status_code=400, detail="Temu App Key/App Secret eksik")
+    env = str(creds.get("env") or acc.get("env") or acc.get("mode") or "prod").lower()
+    is_sandbox = env in ("test", "sandbox")
+    base = (creds.get("base_url") or acc.get("base_url")
+            or ("https://api-sandbox.temu.com" if is_sandbox else "https://api.temu.com"))
+    mall_id = (creds.get("partner_account") or creds.get("mall_id")
+               or acc.get("supplier_id") or acc.get("mall_id") or "")
     return {
-        "app_key": acc["api_key"],
-        "app_secret": acc["api_secret"],
-        "mall_id": acc.get("supplier_id") or acc.get("mall_id", ""),
-        "access_token": acc.get("access_token", ""),
+        "app_key": app_key,
+        "app_secret": app_secret,
+        "mall_id": mall_id,
+        "access_token": access_token,
         "base_url": base.rstrip("/"),
     }
 
