@@ -1,27 +1,40 @@
 FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
 ========================================
-Tek zip; 4 işi birden içerir.
+Tek zip; tüm işleri içerir.
 
 DEĞİŞEN DOSYALAR
   - backend/routes/integrations.py
   - backend/routes/category_mapping.py
   - frontend/src/components/admin/MarketplaceAdvancedMatch.jsx
   - frontend/src/pages/admin/CategoryMapping.jsx
+  - frontend/src/pages/admin/MarketplaceHub.jsx
 
-1) Satıcı Stok Kodu kaynağına "Ürün Kart ID" seçeneği (merchantSku = kart id, varyantta sonek).
-2) Değer Eşleştirme — özellik değerleri (XS/XL, renk vb.) canlı çekim + cache self-heal.
-3) Filtreli Aktarım panelinde "Ürün Kart ID" kutusu → kart id ile ürün aktarımı.
-4) ← YENİ: HB İÇE AKTARIM DURUM SORGULAMA
-   - HB ürün importu ASENKRON: API "başarılı" dese de bu yalnızca GÖNDERİLDİ demektir;
-     ürün arka planda oluşturulur veya REDDEDİLİR (zorunlu özellik eksik / marka onayı /
-     görsel erişimi / kategori). Ayrıca yeni ürün HB onayından geçmeden mağazada görünmez.
-   - Panelde aktarım sonrası "İçe Aktarım Durumunu Sorgula" butonu eklendi → tracking_id
-     ile /hepsiburada/products/tracking/{id} sorgulanır, varsa ürün-bazlı durum + RET SEBEBİ
-     gösterilir (ham yanıt da açılır panelde).
-   - Reddedilen ürünler ayrıca Statü=REJECTED listesinde sebepleriyle görünür
-     (GET /integrations/hepsiburada/products/by-status?product_status=REJECTED).
+★ ASIL SEBEP — "aktarıldı diyor ama aktarmıyor"
+  HB "Ortam" seçici UI'da varsayılan SANDBOX idi (Trendyol'da varsayılan Canlı).
+  Ortam Canlı'ya ayarlanmadıysa _get_hb_client → test=True → ürünler HB SANDBOX'a
+  (mpop-sit.hepsiburada.com) gider. Sandbox 200 + trackingId döner ("başarılı"),
+  ama gerçek mağazada ASLA görünmez ve logda hata olarak çıkmaz.
+
+  HEMEN YAPILACAK (config): Pazaryerleri/Entegrasyonlar → Hepsiburada →
+  Ortam = "Production (Canlı)" → Kaydet → ürünü tekrar aktar.
+
+  Bu pakette kod tarafında:
+  5) MarketplaceHub: HB Ortam varsayılanı artık "Production (Canlı)"; Sandbox
+     seçiliyken kırmızı uyarı.
+  4) Aktarım sonucu hangi ortama gittiğini açıkça yazar; SANDBOX ise panelde
+     büyük kırmızı uyarı + düzeltme talimatı. Sync yanıtına environment/host/is_test
+     eklendi; integration log'a da ortam + host yazılır (bundan sonra log gerçek
+     durumu gösterir).
+  4b) HB importu asenkron: "İçe Aktarım Durumunu Sorgula" butonu (tracking_id ile
+     /hepsiburada/products/tracking/{id}) → ürün-bazlı durum + RET SEBEBİ.
+     Reddedilenler: GET /integrations/hepsiburada/products/by-status?product_status=REJECTED
+
+DİĞER İŞLER (önceki, kümülatif)
+  1) Satıcı Stok Kodu kaynağına "Ürün Kart ID" (merchantSku = kart id, varyantta sonek).
+  2) Değer Eşleştirme — özellik değerleri (XS/XL, renk) canlı çekim + cache self-heal.
+  3) Filtreli Aktarım panelinde "Ürün Kart ID" kutusu → kart id ile aktarım.
 
 DEPLOY
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_IMPORT_DURUM_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: import durum sorgulama + kart id kaynak/aktarim + deger eslestirme" && git push
+  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_SANDBOX_FIX_PAKET.zip -d . \
+    && git add -A && git commit -m "HB: sandbox tuzagi fix + ortam gorunurlugu + import durum + kart id" && git push
   Railway yeşil: [scheduler] Background scheduler started

@@ -4361,12 +4361,20 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
         await log_integration_event("hepsiburada", "product_import", "bulk", str(len(items)), "error", str(e))
         raise HTTPException(status_code=502, detail=str(e))
     tracking_id = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("id")
+    is_test = bool(getattr(client, "test", False))
+    env_code = "sandbox" if is_test else "production"
+    env_label = "SANDBOX (TEST — ürünler gerçek mağazada görünmez!)" if is_test else "CANLI (production)"
     await log_integration_event("hepsiburada", "product_import", "bulk", str(tracking_id or len(items)),
-                                "success", f"{len(items)} ürün gönderildi, {len(skipped)} atlandı")
+                                "success",
+                                f"{len(items)} ürün {env_code.upper()} ortamına gönderildi ({getattr(client,'base','')}), "
+                                f"{len(skipped)} atlandı · Takip: {tracking_id}")
     return {"successful": len(items), "failed": len(skipped), "tracking_id": tracking_id,
-            "message": f"{len(items)} ürün gönderildi"
+            "environment": env_code, "environment_label": env_label,
+            "host": getattr(client, "base", ""), "is_test": is_test,
+            "message": f"{len(items)} ürün {('SANDBOX' if is_test else 'CANLI')} ortamına gönderildi"
                        + (f", {len(skipped)} atlandı (eşleşme eksik)" if skipped else "")
-                       + (f" · Takip: {tracking_id}" if tracking_id else ""),
+                       + (f" · Takip: {tracking_id}" if tracking_id else "")
+                       + (" — ⚠️ SANDBOX! Gerçek mağazada görünmez." if is_test else ""),
             "skipped": skipped, "raw": res}
 
 

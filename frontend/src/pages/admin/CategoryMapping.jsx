@@ -1010,6 +1010,17 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
           {lastResult.message && (
             <div className="px-3 py-2 text-xs text-gray-700 border-b">{lastResult.message}</div>
           )}
+          {lastResult.environment && marketplace === "hepsiburada" && (
+            <div className={`px-3 py-2 text-xs border-b ${lastResult.is_test ? "bg-red-100 border-red-300 text-red-900" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`}>
+              {lastResult.is_test ? (
+                <span><b>⚠️ SANDBOX (TEST) ortamına gönderildi.</b> Ürünler gerçek Hepsiburada mağazanda
+                görünmez. Düzelt: <b>Pazaryerleri/Entegrasyonlar → Hepsiburada → Ortam = “Production (Canlı)” → Kaydet</b>,
+                sonra tekrar aktar. <span className="font-mono text-[10px]">({lastResult.host})</span></span>
+              ) : (
+                <span><b>✓ CANLI (production)</b> ortamına gönderildi. <span className="font-mono text-[10px]">({lastResult.host})</span></span>
+              )}
+            </div>
+          )}
           {lastResult.batchRequestId && (
             <div className="px-3 py-2 border-b flex items-center justify-between bg-stone-50">
               <div className="text-xs text-stone-700">

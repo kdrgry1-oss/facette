@@ -553,11 +553,16 @@ export default function MarketplaceHub() {
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Ortam</label>
-                          <select value={hbOp.mode ?? "sandbox"} onChange={(e) => hbUpd("mode", e.target.value)}
+                          <select value={hbOp.mode ?? "production"} onChange={(e) => hbUpd("mode", e.target.value)}
                                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" data-testid="hb-op-mode">
-                            <option value="sandbox">Sandbox (SIT Test)</option>
                             <option value="production">Production (Canlı)</option>
+                            <option value="sandbox">Sandbox (SIT Test)</option>
                           </select>
+                          {(hbOp.mode ?? "production") === "sandbox" && (
+                            <p className="mt-1 text-[11px] text-red-600 font-semibold">
+                              ⚠️ Sandbox seçili — ürün/stok/fiyat gönderimleri TEST ortamına gider, gerçek mağazada görünmez.
+                            </p>
+                          )}
                         </div>
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">
