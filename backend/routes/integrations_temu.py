@@ -249,6 +249,51 @@ class ReturnDecisionReq(BaseModel):
 
 
 # =============================================================================
+# 0) TANI — Backend egress IP (Temu IP whitelist için)
+# =============================================================================
+
+@router.get("/egress-ip")
+async def temu_egress_ip(current_user=Depends(require_admin)):
+    """Backend'in dışarı çıkış (egress) IP'sini döner — Temu IP whitelist için.
+
+    Temu uygulamasının IP whitelist alanına yazılacak adres BUDUR (kişisel IP'in
+    değil). Railway dinamik egress kullanıyorsa bu değer deploy/restart'ta
+    değişebilir; sabitlemek için Railway Static Outbound IP (Pro) gerekir.
+    """
+    sources = [
+        "https://api.ipify.org?format=json",
+        "https://ifconfig.me/all.json",
+        "https://checkip.amazonaws.com",
+    ]
+    results = []
+    ip = None
+    async with httpx.AsyncClient(timeout=8) as c:
+        for url in sources:
+            try:
+                r = await c.get(url, headers={"Accept": "application/json"})
+                got = None
+                try:
+                    j = r.json()
+                    got = j.get("ip") or j.get("ip_addr") or j.get("address")
+                except Exception:
+                    got = r.text.strip()
+                if got:
+                    got = str(got).strip()
+                results.append({"source": url, "ip": got})
+                if got and not ip:
+                    ip = got
+            except Exception as e:
+                results.append({"source": url, "error": str(e)[:120]})
+    return {
+        "egress_ip": ip,
+        "detail": results,
+        "note": ("Bu IP'yi Temu IP whitelist'e ekleyin. Railway dinamikse "
+                 "deploy/restart'ta değişebilir; Railway Static Outbound IP (Pro) "
+                 "ile sabitleyin."),
+    }
+
+
+# =============================================================================
 # 1) ÜRÜN
 # =============================================================================
 
