@@ -279,6 +279,43 @@ async def initialize_payment(order_id: str, callback_url: str, return_url: str =
     }
 
 
+async def _notify_paid_order_confirmed(order_id: str) -> None:
+    """Ödeme başarıyla geçtikten (paid → confirmed) SONRA 'Siparişiniz Alındı'
+    onay bildirimini BİR KEZ gönderir. Kart (iyzico) siparişlerinde onay maili
+    artık sipariş oluşturma anında değil, yalnızca ödeme onaylandıktan sonra
+    buradan çıkar — böylece başarısız/yarıda kalan ödemede müşteriye yanlış
+    "alındı" maili gitmez. Idempotent: order_confirmed_notified bayrağı çift
+    maili (yarış / tekrar gelen callback) engeller. Hata olsa bile ödeme akışını
+    bozmaz (fire-and-forget mantığı; yalnızca loglar)."""
+    try:
+        order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+        if not order or order.get("order_confirmed_notified"):
+            return
+        # Önce işaretle (tek mail garantisi), sonra gönder.
+        await db.orders.update_one(
+            {"id": order_id}, {"$set": {"order_confirmed_notified": True}}
+        )
+        import sys, os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from notification_service import send_notification
+        from .orders import _order_notify_vars
+        ship = order.get("shipping_address") or {}
+        variables = await _order_notify_vars(order)
+        await send_notification(
+            db, "order_confirmed",
+            to_phone=ship.get("phone") or order.get("phone"),
+            to_email=ship.get("email") or order.get("email"),
+            variables=variables,
+        )
+        logger.info(
+            f"order_confirmed (ödeme sonrası) gönderildi order={order.get('order_number')}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"order_confirmed (ödeme sonrası) gönderilemedi order_id={order_id}: {e}"
+        )
+
+
 async def _retrieve_and_finalize(token: str) -> dict:
     """token ile iyzico'dan sonucu çeker, siparişi günceller. Döner: {ok, order, return_url}."""
     order = await db.orders.find_one({"iyzico_token": token}, {"_id": 0})
@@ -310,6 +347,8 @@ async def _retrieve_and_finalize(token: str) -> dict:
 
     await db.orders.update_one({"id": order.get("id")}, {"$set": update})
     logger.info(f"iyzico payment {'PAID' if paid else 'FAILED'} order={order.get('order_number')} pid={data.get('paymentId')}")
+    if paid:
+        await _notify_paid_order_confirmed(order.get("id"))
     return {"ok": paid, "order": order, "return_url": order.get("iyzico_return_url") or ""}
 
 
@@ -423,6 +462,8 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         update["payment_status"] = "failed"
     await db.orders.update_one({"id": order_id}, {"$set": update})
     logger.info(f"iyzico kart odeme {'PAID' if paid else 'FAILED'} order_id={order_id} pid={data.get('paymentId')}")
+    if paid:
+        await _notify_paid_order_confirmed(order_id)
     return paid
 
 

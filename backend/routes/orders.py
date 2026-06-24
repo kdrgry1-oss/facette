@@ -899,12 +899,27 @@ async def create_order(
                     channels=_channels,
                 )
             else:
-                await send_notification(
-                    db, "order_confirmed",
-                    to_phone=ship.get("phone") or order.get("phone"),
-                    to_email=ship.get("email") or order.get("email"),
-                    variables=variables,
-                )
+                # ÖNEMLİ: Online kart (iyzico) siparişinde "Siparişiniz Alındı" onay
+                # maili sipariş OLUŞTURMA anında DEĞİL, ödeme onaylandıktan SONRA
+                # (payment callback: paid → confirmed) gönderilir. Aksi halde iyzico
+                # ödemesi başarısız/yarıda kalsa bile müşteriye yanlış "alındı" maili
+                # gider. Burada yalnızca kapıda ödeme (COD) veya zaten ödenmiş sipariş
+                # anında onaylanır; havale zaten yukarıdaki awaiting_payment dalına gider.
+                _pm = (order.get("payment_method") or "").lower()
+                _cod = _pm in ("cash_on_delivery", "kapida", "kapida_odeme", "cod")
+                _already_paid = (order.get("payment_status") or "").lower() == "paid"
+                if _cod or _already_paid:
+                    await send_notification(
+                        db, "order_confirmed",
+                        to_phone=ship.get("phone") or order.get("phone"),
+                        to_email=ship.get("email") or order.get("email"),
+                        variables=variables,
+                    )
+                else:
+                    logger.info(
+                        f"[order_confirmed ERTELENDİ] online kart, ödeme onayı bekleniyor "
+                        f"order={order.get('order_number')} pm={_pm}"
+                    )
         except Exception as e:
             logger.warning(f"order_confirmed notification dispatch failed: {e}")
 
