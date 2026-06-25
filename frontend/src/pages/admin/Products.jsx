@@ -1003,41 +1003,71 @@ export default function AdminProducts() {
     }
   };
 
-  const handleImageUpload = async (e) => {
-    const files = e.target.files;
-    if (!files.length) return;
-
+  /**
+   * uploadImageFiles — Bir FileList/diziyi sırayla yükler (hem "Görsel Yükle" butonu hem
+   * sürükle-bırak bu çekirdeği kullanır). Sadece resim (image/*) dosyaları kabul edilir;
+   * diğerleri sessizce atlanır (kullanıcı klasöre alakasız dosya bırakırsa patlamaz).
+   */
+  const uploadImageFiles = async (fileList) => {
+    const files = Array.from(fileList || []).filter(
+      (f) => f && (f.type ? f.type.startsWith("image/") : /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i.test(f.name || ""))
+    );
+    if (!files.length) {
+      const had = (fileList && fileList.length) || 0;
+      if (had) toast.error("Sadece resim dosyaları yüklenebilir.");
+      return;
+    }
     setUploading(true);
-    console.log("Image upload started for", files.length, "files");
     const token = localStorage.getItem('token');
-    const newImages = [...formData.images];
-
+    const uploaded = [];
     for (let file of files) {
       try {
-        console.log("Uploading file:", file.name, "Size:", file.size, "Type:", file.type);
         const fd = new FormData();
         fd.append('file', file);
         const res = await axios.post(`${API}/upload/image`, fd, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
         });
-        console.log("Upload response for", file.name, ":", res.data);
         if (res.data.url) {
           const fullUrl = res.data.url.startsWith('http') ? res.data.url : `${BACKEND_ORIGIN}${res.data.url}`;
-          console.log("Adding image URL:", fullUrl);
-          newImages.push(fullUrl);
+          uploaded.push(fullUrl);
         }
       } catch (err) {
         console.error("Upload error for", file.name, ":", err.response?.data || err.message);
         toast.error(`${file.name} yüklenemedi: ${err.response?.data?.detail || err.message}`);
       }
     }
-
-    setFormData({ ...formData, images: newImages });
+    // Fonksiyonel güncelleme: sıralama/silme ile yarış (stale state) olmasın.
+    if (uploaded.length) setFormData((prev) => ({ ...prev, images: [...(prev.images || []), ...uploaded] }));
     setUploading(false);
+  };
+
+  const handleImageUpload = async (e) => {
+    await uploadImageFiles(e.target.files);
     if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
+  // OS'tan dosya sürükle-bırak ile yükleme. Tile sıralama drag'i (HTML5 draggable) ile
+  // ÇAKIŞMASIN diye yalnızca gerçek DOSYA sürüklemelerinde (dataTransfer "Files") devreye girer.
+  const [fileDropActive, setFileDropActive] = useState(false);
+  const _isFileDrag = (e) => {
+    const t = e?.dataTransfer?.types;
+    return !!t && (Array.from(t).includes("Files") || (t.contains && t.contains("Files")));
+  };
+  const handleGalleryDragOver = (e) => {
+    if (!_isFileDrag(e)) return;          // tile sıralaması → dokunma
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!fileDropActive) setFileDropActive(true);
+  };
+  const handleGalleryDragLeave = (e) => {
+    if (!_isFileDrag(e)) return;
+    if (!e.currentTarget.contains(e.relatedTarget)) setFileDropActive(false);
+  };
+  const handleGalleryDrop = (e) => {
+    if (!(e.dataTransfer?.files && e.dataTransfer.files.length)) return;  // sıralama drop'u → yok say
+    e.preventDefault();
+    setFileDropActive(false);
+    uploadImageFiles(e.dataTransfer.files);
   };
 
   /**
@@ -3357,11 +3387,23 @@ export default function AdminProducts() {
 
               {/* Images Tab */}
               <TabsContent value="images" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="bg-white p-8 rounded-xl border shadow-sm">
+                <div
+                  className={`relative bg-white p-8 rounded-xl border shadow-sm transition-all ${fileDropActive ? "ring-2 ring-orange-400 ring-offset-2 bg-orange-50/40" : ""}`}
+                  onDragOver={handleGalleryDragOver}
+                  onDragLeave={handleGalleryDragLeave}
+                  onDrop={handleGalleryDrop}
+                >
+                  {fileDropActive && (
+                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-orange-50/80 border-2 border-dashed border-orange-400">
+                      <div className="flex items-center gap-2 text-orange-700 font-bold uppercase tracking-widest text-sm">
+                        <Upload size={18} /> Görselleri buraya bırakın
+                      </div>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center mb-6">
                     <div>
                       <h3 className="font-bold text-gray-900 uppercase tracking-widest text-sm">Ürün Galerisi</h3>
-                      <p className="text-xs text-gray-400 mt-1">Sürükleyip bırakarak sıralayabilirsiniz.</p>
+                      <p className="text-xs text-gray-400 mt-1">Dosyaları buraya sürükleyip bırakarak yükleyebilir; yüklü görselleri sürükleyerek sıralayabilirsiniz.</p>
                     </div>
                     <label className="bg-black text-white px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest cursor-pointer hover:bg-gray-800 transition-all flex items-center gap-2">
                       <Upload size={16} /> Görsel Yükle
@@ -3383,15 +3425,27 @@ export default function AdminProducts() {
                     </div>
                   )}
 
+                  {formData.images.length === 0 && !uploading && (
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="w-full flex flex-col items-center justify-center gap-3 py-14 rounded-2xl border-2 border-dashed border-gray-300 text-gray-400 hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50/30 transition-all"
+                    >
+                      <Upload size={32} className="opacity-60" />
+                      <span className="text-sm font-bold uppercase tracking-widest">Görselleri sürükleyip bırakın</span>
+                      <span className="text-xs">ya da seçmek için tıklayın · PNG, JPG, WEBP</span>
+                    </button>
+                  )}
+
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {formData.images.map((img, idx) => (
                       <div
                         key={idx}
                         draggable
                         onDragStart={() => setDraggedImgIdx(idx)}
-                        onDragOver={(e) => { e.preventDefault(); if (dragOverImgIdx !== idx) setDragOverImgIdx(idx); }}
+                        onDragOver={(e) => { if (draggedImgIdx === null) return; e.preventDefault(); if (dragOverImgIdx !== idx) setDragOverImgIdx(idx); }}
                         onDragLeave={() => setDragOverImgIdx((cur) => (cur === idx ? null : cur))}
-                        onDrop={(e) => { e.preventDefault(); reorderImages(draggedImgIdx, idx); setDraggedImgIdx(null); setDragOverImgIdx(null); }}
+                        onDrop={(e) => { if (e.dataTransfer?.files && e.dataTransfer.files.length) return; e.preventDefault(); reorderImages(draggedImgIdx, idx); setDraggedImgIdx(null); setDragOverImgIdx(null); }}
                         onDragEnd={() => { setDraggedImgIdx(null); setDragOverImgIdx(null); }}
                         className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all cursor-move ${isSizeTableImg(img) ? "border-amber-400" : "border-white"} ${draggedImgIdx === idx ? "opacity-40" : ""} ${dragOverImgIdx === idx && draggedImgIdx !== idx ? "ring-4 ring-orange-400 scale-[1.03]" : ""}`}
                       >
