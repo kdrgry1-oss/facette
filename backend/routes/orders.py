@@ -2798,31 +2798,36 @@ async def create_cargo_barcode(
             "teslim_subesi": status_info.get("teslim_subesi"),
             "created_at": datetime.now(timezone.utc).isoformat(),
         },
-        "status": "shipped" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
+        "cargo_barcode_created": True,
+        # BARKOD OLUSTURMA = siparis HAZIRLANIYOR. "Kargoya Verildi" (shipped) DEGIL —
+        # o, kargocu/DHL gonderiyi fiilen okuttugunda scheduler (_dhl_cargo_poll_tick) ile
+        # gercek takip kodu yakalaninca olur. Burada erken "shipped" YAPMA.
+        "status": "preparing" if order.get("status") in ("pending", "confirmed", "processing") else order.get("status"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.orders.update_one({"id": order_id}, {"$set": update_doc})
 
-    # Otomatik müşteri bildirimi (SMS + WhatsApp + Email) — kargoya verildi
+    # Bildirim: "Hazirlaniyor" (Ayarlar > Siparis Durumlari'nda acildiysa). "Kargoya Verildi"
+    # bildirimi barkod olusturmada GONDERILMEZ — gercek DHL takip kodu yakalaninca scheduler gonderir.
     try:
-        from notification_service import send_notification
-        ship_addr = order.get("shipping_address") or {}
-        full_name = (
-            f"{ship_addr.get('first_name','')} {ship_addr.get('last_name','')}".strip()
-            or ship_addr.get("name") or ""
-        )
-        # Gercek MNG/DHL gonderi no (siparis no DEGIL). E005 kurtarmasinda barkod=siparis_no
-        # oldugu icin SMS'te yanlislikla siparis no gozukuyordu; gercek no yoksa bos birak.
-        _real_tn = (nz_barkod or nz_gonderi_no or gonderi_no_status or "").strip()
-        await send_notification(
-            db,
-            event="order_shipped",
-            to_phone=ship_addr.get("phone") or order.get("customer_phone"),
-            to_email=ship_addr.get("email") or order.get("customer_email") or order.get("user_email"),
-            variables=await _order_notify_vars(order, order_number=order.get("order_number") or order_id, tracking_number=_real_tn, tracking_link=track_link, tracking_url=track_link, cargo_provider="MNG Kargo"),
-        )
+        if update_doc.get("status") == "preparing":
+            from order_statuses import get_status_config
+            _cfg = await get_status_config(db)
+            _nz = (_cfg.get("notify") or {}).get("preparing") or {}
+            _ch = [c for c in ("sms", "email") if _nz.get(c)]
+            if _ch:
+                from notification_service import send_notification
+                ship_addr = order.get("shipping_address") or {}
+                await send_notification(
+                    db,
+                    event="order_preparing",
+                    to_phone=ship_addr.get("phone") or order.get("customer_phone"),
+                    to_email=ship_addr.get("email") or order.get("customer_email") or order.get("user_email"),
+                    variables=await _order_notify_vars(order, order_number=order.get("order_number") or order_id, cargo_provider="MNG Kargo"),
+                    channels=_ch,
+                )
     except Exception as ne:
-        logger.warning(f"Kargo bildirimi gönderilemedi (order={order_id}): {ne}")
+        logger.warning(f"Hazirlaniyor bildirimi gönderilemedi (order={order_id}): {ne}")
     await db.cargo_logs.insert_one({
         "id": generate_id(),
         "order_id": order_id,

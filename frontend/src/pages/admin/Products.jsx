@@ -66,6 +66,22 @@ import ProductDetailFields from "../../components/admin/product-form/ProductDeta
 import ProductFilters from "../../components/admin/ProductFilters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+// API.replace('/api','') HATALIYDI: "https://api.facette.com.tr/api" icinde ilk "/api"
+// "https://api"deki //api'dir → "https:/.facette.com.tr/api" (bozuk). Origin'i dogru turet:
+// REACT_APP_BACKEND_URL zaten /api'siz taban; yine de sondaki /api'yi guvenle ayikla.
+const BACKEND_ORIGIN = String(process.env.REACT_APP_BACKEND_URL || "").replace(/\/+$/, "").replace(/\/api$/, "");
+// Gorsel URL normalizasyonu: relatif yollari mutlaklastir + gecmiste kaydedilmis bozuk
+// ("https:/.host/api/api/upload/..") URL'leri onar. R2 CDN (https://...) URL'leri aynen gecer.
+const fixImg = (u) => {
+  if (!u || typeof u !== "string") return u;
+  const i = u.indexOf("/upload/files/");
+  if (i >= 0 && (u.startsWith("https:/.") || u.startsWith("http:/.") || u.includes("/api/api/"))) {
+    return `${BACKEND_ORIGIN}/api${u.slice(i)}`;
+  }
+  if (u.startsWith("/api/upload") || u.startsWith("/api/files")) return `${BACKEND_ORIGIN}${u}`;
+  if (u.startsWith("/upload") || u.startsWith("/files")) return `${BACKEND_ORIGIN}/api${u}`;
+  return u;
+};
 
 // SearchableAttribute, SeoTab, StockTab artık ayrı dosyalarda:
 //   /app/frontend/src/components/admin/product-form/*
@@ -80,6 +96,16 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  */
 function DescriptionEditor({ value, onChange, onGenerate, generating }) {
   const [mode, setMode] = useState("split"); // "source" | "preview" | "split"
+  // Önizleme artık DÜZENLENEBİLİR (contentEditable/WYSIWYG). İmleç sıçramasını önlemek için
+  // innerHTML'i yalnızca DIŞ değişikliklerde (kaynak textarea düzenlemesi / mod değişimi) yaz;
+  // kullanıcı önizlemede yazarken innerHTML === value olduğundan reset edilmez → imleç korunur.
+  const previewRef = useRef(null);
+  useEffect(() => {
+    const el = previewRef.current;
+    if (el && el.innerHTML !== (value || "")) {
+      el.innerHTML = value || "";
+    }
+  }, [value, mode]);
   const tabBtn = (m, label) => (
     <button
       type="button"
@@ -139,15 +165,20 @@ function DescriptionEditor({ value, onChange, onGenerate, generating }) {
         )}
         {(mode === "preview" || mode === "split") && (
           <div
+            ref={previewRef}
             data-testid="desc-preview"
-            className="w-full px-3 py-2.5 text-sm prose prose-sm max-w-none bg-white min-h-[252px] max-h-[440px] overflow-y-auto"
-            dangerouslySetInnerHTML={{ __html: value || "<p class='text-gray-400 italic'>Önizleme burada görünecek…</p>" }}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={(e) => onChange(e.currentTarget.innerHTML)}
+            data-ph="Önizlemede doğrudan yazıp düzenleyebilirsiniz…"
+            className="fct-rte w-full px-3 py-2.5 text-sm prose prose-sm max-w-none bg-white min-h-[252px] max-h-[440px] overflow-y-auto outline-none focus:ring-2 focus:ring-violet-200"
           />
         )}
       </div>
       <div className="px-3 py-1.5 bg-amber-50 border-t border-amber-200 text-[10px] text-amber-800">
-        <strong>Not:</strong> Trendyol'a aktarımda HTML etiketleri otomatik temizlenip
-        düz metin (paragraflar ve satır sonları korunarak) gönderilir.
+        <strong>İpucu:</strong> Önizleme alanı da düzenlenebilir — imleci tıklayıp doğrudan yazabilirsiniz
+        (değişiklik kaynağa da işlenir). <strong>Not:</strong> Trendyol'a aktarımda HTML etiketleri
+        otomatik temizlenip düz metin (paragraflar ve satır sonları korunarak) gönderilir.
       </div>
     </div>
   );
@@ -211,6 +242,7 @@ export default function AdminProducts() {
   const [colorSearchOpen, setColorSearchOpen] = useState(false);
   const [colorSearchTerm, setColorSearchTerm] = useState("");
   const fileInputRef = useRef(null);
+  const imageInputRef = useRef(null);   // Görsel yükleme inputu — Excel import ref'iyle ÇAKIŞMASIN
   const techFileInputRef = useRef(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -993,7 +1025,7 @@ export default function AdminProducts() {
         });
         console.log("Upload response for", file.name, ":", res.data);
         if (res.data.url) {
-          const fullUrl = res.data.url.startsWith('http') ? res.data.url : `${API.replace('/api', '')}${res.data.url}`;
+          const fullUrl = res.data.url.startsWith('http') ? res.data.url : `${BACKEND_ORIGIN}${res.data.url}`;
           console.log("Adding image URL:", fullUrl);
           newImages.push(fullUrl);
         }
@@ -1005,7 +1037,7 @@ export default function AdminProducts() {
 
     setFormData({ ...formData, images: newImages });
     setUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
   /**
@@ -1133,7 +1165,12 @@ export default function AdminProducts() {
       if (uniqueColors.length > 1 && !editingProduct) {
         // Multi-color: create a separate product per color
         toast.info(`${uniqueColors.length} farklı renk için ayrı ürünler oluşturuluyor...`);
-        
+
+        // Renk-kardeşi gruplama anahtarı (csv_card_id) TÜM renklerde AYNI → "Diğer Renkler"
+        // swatch'ında bağlı kalır. Ama her renk LİSTEDE kendi BENZERSİZ Ürün Kart ID'sini gösterir:
+        // ilk renk taban kart id'de kalır, sonraki renkler backend'de max+1 ile otomatik artar.
+        const groupCardId = String(payload.urun_karti_id || "").trim();
+        let _firstColor = true;
         for (const color of uniqueColors) {
           const colorVariants = payload.variants.filter(v => v.color === color);
           // Set Web Color and Renk to this color in attributes
@@ -1150,11 +1187,28 @@ export default function AdminProducts() {
             slug: generateSlug(`${formData.name} ${color}`) + `-${Date.now()}`,
             attributes: colorAttrs,
             variants: colorVariants,
+            csv_card_id: groupCardId || undefined,   // paylaşımlı renk-kardeşi anahtarı
           };
+          if (_firstColor) {
+            // İlk renk taban Ürün Kart ID'sinde kalır
+            if (groupCardId) {
+              colorPayload.urun_karti_id = groupCardId;
+              colorPayload.ticimax_fields = { ...(colorPayload.ticimax_fields || {}), URUNKARTIID: groupCardId };
+            }
+          } else {
+            // Sonraki renkler BENZERSİZ kart id alsın → urun_karti_id/URUNKARTIID gönderme,
+            // backend sistemdeki max + 1'i otomatik atar (insert'ler sıralı olduğu için artar).
+            delete colorPayload.urun_karti_id;
+            if (colorPayload.ticimax_fields) {
+              colorPayload.ticimax_fields = { ...colorPayload.ticimax_fields };
+              delete colorPayload.ticimax_fields.URUNKARTIID;
+            }
+          }
           delete colorPayload.newVariant;
           await axios.post(`${API}/products`, colorPayload, { headers });
+          _firstColor = false;
         }
-        toast.success(`${uniqueColors.length} ürün başarıyla oluşturuldu`);
+        toast.success(`${uniqueColors.length} ürün oluşturuldu (her renk ayrı kart ID, renkler bağlı)`);
       } else if (uniqueColors.length === 1 && !editingProduct) {
         // Single color: auto-set Web Color and Renk
         const color = uniqueColors[0];
@@ -1529,6 +1583,7 @@ export default function AdminProducts() {
   const resetForm = () => {
     setEditingProduct(null);
     setShowAllAttributes(false);
+    setTechnicalDetails({});   // önceki düzenlemeden teknik detay TAŞINMASIN (yeni üründe boş)
     setMemberPriceManual(false); setMultiSizes([]); setMultiColors([]);
     setFormData({
       name: "", slug: "", description: "", short_description: "",
@@ -1937,7 +1992,7 @@ export default function AdminProducts() {
                     {product.images?.[0] ? (
                       <div className="relative group/img overflow-visible z-0 hover:z-50">
                         <img 
-                          src={product.images[0]} 
+                          src={fixImg(product.images[0])} 
                           alt="" 
                           className="w-10 h-14 object-cover rounded shadow-sm border border-gray-100 transition-all duration-300 group-hover/img:scale-[3.0] group-hover/img:shadow-xl group-hover/img:border-orange-200 cursor-zoom-in" 
                         />
@@ -2827,10 +2882,14 @@ export default function AdminProducts() {
 
                   return (
                     <div className="space-y-6">
-                      <TeknikDetayPanel
-                        details={technicalDetails}
-                        onChange={(updated) => setTechnicalDetails(updated)}
-                      />
+                      {/* Teknik Detay paneli SADECE mevcut ürün düzenlenirken görünür.
+                          YENİ ürün oluştururken gizli (Kadir: "yeni ürün oluştururken teknik detay alanını yok et"). */}
+                      {editingProduct && (
+                        <TeknikDetayPanel
+                          details={technicalDetails}
+                          onChange={(updated) => setTechnicalDetails(updated)}
+                        />
+                      )}
                       {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TRENDYOL')}
                       {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'HEPSIBURADA')}
                       {renderSection('temu', 'Temu için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TEMU')}
@@ -3307,7 +3366,7 @@ export default function AdminProducts() {
                     <label className="bg-black text-white px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest cursor-pointer hover:bg-gray-800 transition-all flex items-center gap-2">
                       <Upload size={16} /> Görsel Yükle
                       <input 
-                        ref={fileInputRef}
+                        ref={imageInputRef}
                         type="file" 
                         multiple 
                         accept="image/*" 
@@ -3336,7 +3395,7 @@ export default function AdminProducts() {
                         onDragEnd={() => { setDraggedImgIdx(null); setDragOverImgIdx(null); }}
                         className={`relative group aspect-[2/3] rounded-2xl overflow-hidden border-4 shadow-md hover:shadow-xl transition-all cursor-move ${isSizeTableImg(img) ? "border-amber-400" : "border-white"} ${draggedImgIdx === idx ? "opacity-40" : ""} ${dragOverImgIdx === idx && draggedImgIdx !== idx ? "ring-4 ring-orange-400 scale-[1.03]" : ""}`}
                       >
-                        <img src={imgUrl(img)} draggable={false} className="w-full h-full object-cover pointer-events-none" alt="" />
+                        <img src={fixImg(imgUrl(img))} draggable={false} className="w-full h-full object-cover pointer-events-none" alt="" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                           <button
                             type="button"

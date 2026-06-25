@@ -26,6 +26,8 @@ import {
 } from "../../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+// Origin'i dogru turet (API.replace('/api','') ilk //api'yi silip bozuk URL uretirdi).
+const BACKEND_ORIGIN = String(process.env.REACT_APP_BACKEND_URL || "").replace(/\/+$/, "").replace(/\/api$/, "");
 
 const BLOCK_TYPES = [
   { value: "countdown_bar", label: "Geri Sayım Barı (Üst Bar)", icon: "⏱️", description: "Sitenin EN ÜST'ünde, planlanabilir tarih/saatli countdown" },
@@ -319,7 +321,7 @@ export default function PageDesign() {
       
       if (res.data.url || res.data.path) {
         const raw = res.data.url || `/api/upload/files/${res.data.path}`;
-        const url = raw.startsWith('http') ? raw : `${API.replace('/api', '')}${raw}`;
+        const url = raw.startsWith('http') ? raw : `${BACKEND_ORIGIN}${raw}`;
         const newImages = [...formData.images];
         const newLinks = [...formData.links];
         

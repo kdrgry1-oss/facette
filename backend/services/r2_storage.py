@@ -16,12 +16,18 @@ _client = None
 
 
 def is_enabled() -> bool:
-    """R2 yapılandırılmış mı?"""
+    """R2 yapılandırılmış mı?
+
+    R2_PUBLIC_URL ŞART: yoksa public_url() relatif/bozuk bir URL üretir
+    (ör. "/uploads/x.jpg") ve görsel hiçbir yerde açılmaz. Eksikse R2'yi KAPALI
+    say → güvenilir DB/disk fallback'ine düş (görsel her zaman servis edilir).
+    """
     return bool(
         os.environ.get("R2_ENDPOINT")
         and os.environ.get("R2_ACCESS_KEY_ID")
         and os.environ.get("R2_SECRET_ACCESS_KEY")
         and os.environ.get("R2_BUCKET")
+        and (os.environ.get("R2_PUBLIC_URL") or "").strip().lower().startswith("http")
     )
 
 

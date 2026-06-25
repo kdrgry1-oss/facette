@@ -348,3 +348,10 @@ button { font-weight: 400; }
     @apply bg-background text-foreground;
   }
 }
+
+/* AI açıklama önizlemesi (contentEditable) — boşken placeholder göster */
+.fct-rte:empty:before {
+  content: attr(data-ph);
+  color: #9ca3af;
+  font-style: italic;
+}

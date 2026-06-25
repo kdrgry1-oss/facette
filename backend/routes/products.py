@@ -1207,10 +1207,15 @@ async def create_product(
     _pid = await generate_short_id("products")
     # Urun Kart ID: form "Kimlik & Kodlar > Urun Kart ID" (ticimax_fields.URUNKARTIID)
     # veya ust-seviye urun_karti_id; ikisi de bossa SON kart id + 1 otomatik atanir.
+    # ÖNEMLİ: csv_card_id'ye FALLBACK YOK — yoksa renk kardesleri AYNI kart id'yi alirdi.
+    # Renk kardesligi ayri bir grup anahtariyla (csv_card_id) tutulur.
     _tf_in = product_data.get("ticimax_fields") or {}
-    urun_karti_id = str(_tf_in.get("URUNKARTIID") or product_data.get("urun_karti_id") or product_data.get("csv_card_id") or "").strip()
+    urun_karti_id = str(_tf_in.get("URUNKARTIID") or product_data.get("urun_karti_id") or "").strip()
     if not urun_karti_id:
         urun_karti_id = await generate_urun_karti_id()
+    # Renk-kardesi gruplama anahtari: gelen csv_card_id (coklu-renk POST'larinda PAYLASILIR)
+    # yoksa bu urunun kendi kart id'si. Storefront "Diger Renkler" swatch'i bununla baglar.
+    group_card_id = str(product_data.get("csv_card_id") or "").strip() or urun_karti_id
     # liste/etiket (urun_karti_id) ile form (ticimax_fields.URUNKARTIID) senkron
     product_data["ticimax_fields"] = {**_tf_in, "URUNKARTIID": urun_karti_id}
     _card = urun_karti_id
@@ -1275,7 +1280,7 @@ async def create_product(
     _all_variants = product.get("variants") or []
     _colors = _distinct_variant_colors(_all_variants)
     # Renk-kardeşi gruplama anahtarı HER ZAMAN yazılır (manuel ürünler de bağlansın)
-    product["csv_card_id"] = urun_karti_id
+    product["csv_card_id"] = group_card_id
 
     if len(_colors) <= 1:
         if _colors and not product.get("color"):
@@ -1290,11 +1295,16 @@ async def create_product(
     for _idx, _col in enumerate(_colors):
         _doc = {k: v for k, v in product.items()}
         _doc["id"] = product["id"] if _idx == 0 else await generate_short_id("products")
-        _doc["csv_card_id"] = urun_karti_id
-        _doc["urun_karti_id"] = urun_karti_id
+        # Her renk AYRI (benzersiz) Urun Kart ID alir: ilk renk taban id'de kalir,
+        # sonraki renkler sistemdeki max + 1 ile otomatik artar. Insert'ler sirali
+        # (await) oldugu icin generate_urun_karti_id her seferinde bir oncekini gorur.
+        _color_card = urun_karti_id if _idx == 0 else await generate_urun_karti_id()
+        _doc["urun_karti_id"] = _color_card
+        _doc["ticimax_fields"] = {**(_doc.get("ticimax_fields") or {}), "URUNKARTIID": _color_card}
+        _doc["csv_card_id"] = group_card_id   # renk kardesligi PAYLASIMLI → "Diger Renkler" bagli kalir
         _doc["color"] = _col
         _doc["variants"] = _variants_for_color(_all_variants, _col)
-        _doc["slug"] = slug_with_card_id(f"{_base_name} {_col}", urun_karti_id)
+        _doc["slug"] = slug_with_card_id(f"{_base_name} {_col}", _color_card)
         _now = datetime.now(timezone.utc).isoformat()
         _doc["created_at"] = _doc.get("created_at") or _now
         _doc["updated_at"] = _now

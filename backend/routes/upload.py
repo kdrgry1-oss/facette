@@ -83,9 +83,12 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
 async def _serve(path: str, w: int = 0, q: int = 90):
     record = await db.files.find_one({"storage_path": path, "is_deleted": False})
 
-    # 0) R2'ye taşınmış/yüklenmişse → R2 public URL'ine yönlendir (CDN servis eder)
-    if record and record.get("r2_url"):
-        return RedirectResponse(url=record["r2_url"], status_code=302)
+    # 0) R2'ye taşınmış/yüklenmişse → R2 public URL'ine yönlendir (CDN servis eder).
+    #    SADECE mutlak http(s) URL'e yönlendir; eski/bozuk relatif r2_url ("/uploads/..")
+    #    varsa GÖZ ARDI et ve DB/disk içeriğinden servis et (görsel kaybolmasın).
+    _r2 = (record or {}).get("r2_url") or ""
+    if _r2 and str(_r2).lower().startswith("http"):
+        return RedirectResponse(url=_r2, status_code=302)
 
     content = None
     ctype = (record or {}).get("content_type", "image/jpeg")
