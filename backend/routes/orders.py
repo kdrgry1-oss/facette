@@ -3246,13 +3246,18 @@ async def get_cargo_logs_diag(limit: int = 10, current_user: dict = Depends(requ
         return {"ok": False, "error": str(e)[:300]}
 
 
-@router.post("/bulk/cargo-barcode")
+@router.post("/bulk-cargo-barcode")
 async def bulk_create_cargo_barcode(
     order_ids: List[str],
     cargo_company: str = Query("MNG"),
     current_user: dict = Depends(require_admin)
 ):
-    """Birden çok sipariş için topluca kargo barkodu oluştur."""
+    """Birden çok sipariş için topluca kargo barkodu oluştur.
+
+    NOT: Path BİLEREK tek segment ('/bulk-cargo-barcode'). Daha önce '/bulk/cargo-barcode'
+    idi ve '/{order_id}/cargo-barcode' route'u daha önce tanımlı olduğu için FastAPI bu
+    isteği order_id='bulk' sanıp tekil route'a yönlendiriyor, toplu işlem ÇALIŞMIYORDU.
+    """
     success = []
     errors = []
     for oid in order_ids or []:

@@ -512,17 +512,104 @@ export default function AdminOrders({ unpaidView = false }) {
       toast.error("Lütfen sipariş seçiniz");
       return;
     }
+    const t = toast.loading("Toplu kargo barkodu oluşturuluyor...");
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API}/orders/bulk/cargo-barcode?cargo_company=${selectedCargo}`, 
-        selectedOrders, 
+      const res = await axios.post(`${API}/orders/bulk-cargo-barcode?cargo_company=${selectedCargo}`,
+        selectedOrders,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`${res.data.success_count} sipariş için kargo barkodu oluşturuldu`);
+      toast.dismiss(t);
+      const ok = res.data.success_count || 0;
+      const err = res.data.error_count || 0;
+      if (ok > 0 && err === 0) {
+        toast.success(`${ok} sipariş için kargo barkodu oluşturuldu`);
+      } else if (ok > 0 && err > 0) {
+        toast.success(`${ok} oluşturuldu, ${err} başarısız`);
+      } else {
+        const firstErr = res.data.errors?.[0]?.error;
+        toast.error(firstErr ? `Oluşturulamadı: ${firstErr}` : "Hiçbir barkod oluşturulamadı");
+      }
       setSelectedOrders([]);
       fetchOrders();
     } catch (err) {
-      toast.error("Toplu barkod oluşturulamadı");
+      toast.dismiss(t);
+      toast.error(err.response?.data?.detail || "Toplu barkod oluşturulamadı");
+    }
+  };
+
+  /**
+   * handleBulkPrintCargoLabels — Seçili siparişlerin kargo barkodu ETİKETLERİNİ tek
+   *   yazdırılabilir pencerede birleştirir. Her etiket /cargo-label'dan HTML olarak
+   *   alınır; ilk etiketin head'i (Google Fonts + stil + @page 100x120) bir kez
+   *   kullanılır, her etiketin body'si ayrı sayfa (page-break) olarak eklenir. Her
+   *   etiketteki tekil fit-script'i çıkarılıp tüm '.barcode'ları sığdıran tek script konur.
+   */
+  const handleBulkPrintCargoLabels = async () => {
+    if (selectedOrders.length === 0) {
+      toast.error("Lütfen sipariş seçiniz");
+      return;
+    }
+    const token = localStorage.getItem('token');
+    toast.loading("Kargo etiketleri hazırlanıyor...", { id: "bulklbl" });
+    try {
+      const htmls = await Promise.all(
+        selectedOrders.map(async (id) => {
+          try {
+            const r = await fetch(`${API}/orders/${id}/cargo-label?token=${token}`);
+            if (!r.ok) return "";
+            return await r.text();
+          } catch {
+            return "";
+          }
+        })
+      );
+      const valid = htmls.filter(Boolean);
+      toast.dismiss("bulklbl");
+      if (!valid.length) {
+        toast.error("Yazdırılacak etiket bulunamadı");
+        return;
+      }
+      // İlk etiketin <head> içeriği (Google Fonts link + stil + @page) bir kez kullanılır.
+      const headInner = (valid[0].match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || "")
+        .replace(/<title[\s\S]*?<\/title>/i, "");
+      // Her etiketin body'si; içindeki tekil <script> çıkarılır.
+      const bodies = valid.map((html) => {
+        const m = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        return (m ? m[1] : html).replace(/<script[\s\S]*?<\/script>/gi, "");
+      });
+      const doc =
+        `<!doctype html><html lang="tr"><head>` + headInner +
+        `<style>` +
+        `html,body{height:auto!important;width:auto!important;background:#e5e7eb}` +
+        `.label{page-break-after:always;margin:4mm auto;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2)}` +
+        `.print-bar{position:sticky;top:0;z-index:9;background:#ecfdf5;border-bottom:1px solid #a7f3d0;padding:8px 14px;display:flex;justify-content:space-between;align-items:center;font-family:system-ui,Arial,sans-serif}` +
+        `.print-bar button{padding:6px 16px;background:#059669;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:700}` +
+        `@media print{.print-bar{display:none}.label{margin:0;box-shadow:none}html,body{background:#fff}}` +
+        `</style></head><body>` +
+        `<div class="print-bar"><strong>${bodies.length} Kargo Etiketi</strong><button onclick="window.print()">Tümünü Yazdır</button></div>` +
+        bodies.join("") +
+        `<script>` +
+        `(async function(){` +
+        `if(document.fonts&&document.fonts.ready){try{await document.fonts.ready}catch(e){}}` +
+        `await new Promise(r=>requestAnimationFrame(()=>r()));` +
+        `document.querySelectorAll('.barcode').forEach(function(el){` +
+        `var main=el.closest('.main');var maxW=(main?main.clientWidth:340)-12;` +
+        `var size=36;el.style.fontSize=size+'pt';var safety=24;` +
+        `while(el.scrollWidth>maxW&&size>18&&safety-->0){size-=1;el.style.fontSize=size+'pt';}` +
+        `});` +
+        `})();` +
+        `</script></body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) {
+        toast.error("Açılır pencere engellendi — tarayıcı pop-up iznini açın");
+        return;
+      }
+      w.document.write(doc);
+      w.document.close();
+    } catch (e) {
+      toast.dismiss("bulklbl");
+      toast.error("Etiket yazdırma başarısız");
     }
   };
 
@@ -938,6 +1025,15 @@ export default function AdminOrders({ unpaidView = false }) {
             >
               <Package size={16} />
               Toplu Barkod Oluştur
+            </button>
+            <button
+              onClick={handleBulkPrintCargoLabels}
+              className="flex items-center gap-1 px-3 py-1.5 bg-emerald-700 text-white text-sm rounded hover:bg-emerald-800"
+              data-testid="bulk-print-cargo-label-btn"
+              title="Seçili siparişlerin kargo barkodu etiketlerini tek sayfada yazdır"
+            >
+              <Printer size={16} />
+              Kargo Barkodu Yazdır
             </button>
             {/* Yeni: Toplu fatura oluştur + yazdır */}
             <button
