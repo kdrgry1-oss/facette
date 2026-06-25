@@ -120,6 +120,17 @@ _hb_sync_lock = asyncio.Lock()
 _temu_sync_lock = asyncio.Lock()
 
 
+def _hb_unmask(sec):
+    """Maskeli secret'ı geçersiz say. UI gizli alanı '********' / sadece •/* gönderirse
+    bunu GERÇEK kimlik kabul etme; aksi halde sahte kaynak öne geçip 403'e yol açar."""
+    s = (sec or "").strip()
+    if not s:
+        return ""
+    if set(s) <= {"*", "•", "·"}:   # tamamı maske karakteri
+        return ""
+    return s
+
+
 async def _get_hb_client():
     """Hepsiburada client. KRİTİK: kimlik (merchant/secret/dev) ile ORTAM (sandbox/canlı)
     DAİMA AYNI kaynaktan alınır (eşli). Aksi halde sandbox kimliği canlı host'a (ya da tersi)
@@ -128,7 +139,7 @@ async def _get_hb_client():
     acc = await db.marketplace_accounts.find_one({"key": "hepsiburada"}, {"_id": 0})
     cr = (acc or {}).get("credentials") or {}
     a_mid = (cr.get("merchant_id") or "").strip()
-    a_sk = (cr.get("secret_key") or cr.get("password") or "").strip()
+    a_sk = _hb_unmask(cr.get("secret_key") or cr.get("password"))
     a_du = (cr.get("dev_username") or "").strip()
     a_env = (cr.get("env") or cr.get("mode") or "").strip().lower()
     a_omsu = (cr.get("oms_username") or "").strip()
@@ -136,7 +147,7 @@ async def _get_hb_client():
 
     s = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
     s_mid = (s.get("merchant_id") or "").strip()
-    s_sk = (s.get("secret_key") or s.get("password") or "").strip()
+    s_sk = _hb_unmask(s.get("secret_key") or s.get("password"))
     s_du = (s.get("dev_username") or "").strip()
     s_env = (s.get("mode") or s.get("env") or "").strip().lower()
     s_omsu = (s.get("oms_username") or "").strip()

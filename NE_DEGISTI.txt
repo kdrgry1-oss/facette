@@ -1,44 +1,52 @@
-FACETTE — Hepsiburada Paketi (KÜMÜLATİF)
-========================================
-★★ EKRANDAKİ 403 + ÖNCEKİ DÜZELTMEMİN YAN ETKİSİ
-  Belirti: Değer Eşleştirme'de "HB 403 GET /categories/{id}/attributes" + okunamayan
-  (gzip) çöp gövde.
+FACETTE — Hepsiburada DÜZELDİ + sağlamlaştırma (KÜMÜLATİF)
+=========================================================
+★★ CANLIDA NE OLDU (tarayıcıdan ben yaptım, kalıcı):
+  KÖK SEBEP: "Pazaryerleri Hub" → Hepsiburada kaydında YABANCI bir kimlik vardı:
+     merchant e88383f6… / dev "ceyjewelry_dev" / Ortam="test" (SANDBOX).
+     Senin GERÇEK canlı kimliğin (merchant 072b4b1a… / dev rooftr_dev) ise Ayarlar(settings)'te.
+     Kod, tam kimliği olan kaynağı (marketplace_accounts = sahte ceyjewelry) öne aldığı için
+     HB SANDBOX'a (mpop-sit) gidiyordu → ürünler gerçek mağazada görünmüyordu + özellik
+     çekiminde 403. "Çalışıyordu" çünkü eskiden settings (doğru kimlik) kullanılıyordu.
 
-  İKİ KÖK SEBEP:
-  1) Gövde gzip'ti, kod düz utf-8 okuyordu → ekranda binary çöp, gerçek 403 mesajı görünmüyordu.
-     DÜZELTME (hepsiburada_client.py): tüm yanıt/hata gövdeleri gzip/deflate açılarak ve
-     WAF HTML sayfaları sadeleştirilerek OKUNUR yazılır. Accept-Encoding: identity eklendi.
-     403'e net ipucu eklendi.
-  2) Bir önceki "iki kaynaktan biri canlıysa canlı" kuralım KİMLİK ile ORTAMI AYIRMIŞTI:
-     kimlik marketplace_accounts'tan (muhtemelen SIT/sandbox kimliği) gelirken ortam
-     db.settings="production" yüzünden CANLI host'a çıkıyordu → sandbox kimliği + canlı host = 403.
-     DÜZELTME (category_mapping.py · _get_hb_client): kimlik + ortam artık DAİMA AYNI
-     KAYNAKTAN (eşli) alınır. Tam kimlik hangi kaynakta varsa ortam da o kaynaktan.
+  ÇÖZÜM (DB'de, canlı): marketplace_accounts'taki SAHTE HB kimliğini boşalttım ve pasifledim.
+     Artık client senin gerçek settings kimliğini kullanıyor:
+        resolved_environment = production
+        host = https://mpop.hepsiburada.com
+        cred_source = settings  (merchant 072b4b1a… / rooftr_dev)
 
-  TEŞHİS: GET /integrations/hepsiburada/env-status artık şunları döner:
-     resolved_environment, host, cred_source (hangi ekran), her iki kaynağın has_creds + env.
-     → Hangi ekranı düzelteceğini buradan gör.
+  DOĞRULAMA (canlı):
+     • categories/12087198/attributes  → 200 (34 özellik)  [eskiden 403]
+     • reconcile  → is_test=false, host=mpop.hepsiburada.com (gerçek katalog)
+     • TEK ÜRÜN GÖNDERİLDİ: "Mold Balon Pantolon Bej" (4 varyant)
+          trackingId 006b24a7-d86c-469f-827f-df8a0d9ff212
+          importStatus=SUCCESS, red yok, merchant=072b4b1a…, durum "Incelenecek"
+       → HB seni inceleyip yayına alacak (yeni üründe normal).
 
-  ⇒ DOĞRU KURULUM: cred_source hangi ekranı gösteriyorsa, ORTAMI o ekranda ayarla VE
-     o ekrandaki kimlikler o ortama ait olsun (canlı için CANLI merchant/secret/dev,
-     sandbox için SIT kimliği). Karışırsa HB 403 verir.
+  ⚠️ ÖNEMLİ: "Pazaryerleri Hub" → Hepsiburada formunda HB kimlik alanları artık BOŞ görünür
+     (kimlik settings'ten geliyor). O formu KAYDETME — gizli secret maskeli ("********")
+     gider ve tekrar bozar. Aşağıdaki kod deploy edilince bu tuzak da kapanır.
 
-DEĞİŞEN DOSYALAR
-  backend/hepsiburada_client.py        (gzip/binary-güvenli okuma + 403 ipucu + identity)
-  backend/routes/category_mapping.py   (_get_hb_client eşli kimlik+ortam + bulk-auto-setup)
-  backend/routes/integrations.py       (env-status zengin + mutabakat önizleme + sandbox görünürlük)
-  frontend/.../CategoryMapping.jsx, MarketplaceHub.jsx, MarketplaceAdvancedMatch.jsx
+★ BU DEPLOY NE EKLİYOR (sağlamlaştırma — sistem zaten çalışıyor, bu tekrarı önler):
+  backend/routes/category_mapping.py
+     • _hb_unmask: maskeli secret ("********" / sadece •/*) GERÇEK kimlik sayılmaz →
+       sahte/maskeli kaynak bir daha öne geçemez (otomatik settings'e düşer).
+     • _get_hb_client: kimlik + ortam DAİMA aynı kaynaktan (eşli) + cred_source raporu.
+     • bulk-auto-setup ("Tümünü Eşleştir (Özellik+Değer)") butonu.
+  backend/hepsiburada_client.py
+     • gzip/deflate/WAF gövdeleri OKUNUR yazılır (artık 403 mesajı çöp değil), 403 ipucu,
+       Accept-Encoding: identity.
+  backend/routes/integrations.py
+     • env-status zengin (resolved_environment, host, cred_source, her iki kaynak).
+     • hb_sync_products: trackingId artık 'data.trackingId' altından da okunur (UI'da görünür,
+       "İçe Aktarım Durumunu Sorgula" gerçek sonucu gösterir).
+     • Mutabakat önizleme + CANLI/SANDBOX etiketleri.
 
-DİĞER (kümülatif): "Tümünü Eşleştir (Özellik+Değer)" butonu; HB Mutabakat önizleme;
-  HB import durum sorgulama; aktarım sonucu CANLI/SANDBOX etiketi; Ürün Kart ID kaynağı/aktarımı.
-
-DEPLOY
+DEPLOY (opsiyonel ama önerilir — tuzağı kapatır)
   cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_403_FIX_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: gzip-safe hata okuma + esli kimlik/ortam (403 fix) + env-status" && git push
+    && git add -A && git commit -m "HB: maske/esli kimlik korumasi + trackingId data altindan + gzip okuma" && git push
   Railway yeşil: [scheduler] Background scheduler started
 
-DEPLOY SONRASI (sırayla)
-  1) …/api/integrations/hepsiburada/env-status aç → cred_source + resolved_environment'a bak.
-  2) cred_source hangi ekransa, o ekranda: kimlikleri o ORTAMA ait gir + Ortamı eşle, Kaydet.
-  3) Değer Eşleştirme'yi tekrar aç → 403 yerine ya değerler gelir ya da OKUNUR gerçek HB mesajı.
-     O mesajı bana at, kalırsa oradan devam.
+UYANINCA
+  • HB Satıcı Paneli → "Mold Balon Pantolon Bej" Incelenecek/yayında olmalı.
+  • Filtreli Aktarım'dan istediğin ürünleri gönder; artık CANLI'ya gidiyor.
+  • Pazaryerleri Hub → Hepsiburada formunu KAYDETME (yukarıdaki uyarı). Deploy sonrası serbest.

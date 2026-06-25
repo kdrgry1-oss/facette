@@ -4360,7 +4360,9 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     except HepsiburadaError as e:
         await log_integration_event("hepsiburada", "product_import", "bulk", str(len(items)), "error", str(e))
         raise HTTPException(status_code=502, detail=str(e))
-    tracking_id = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("id")
+    _rd = (res or {}).get("data") or {}
+    tracking_id = ((res or {}).get("trackingId") or (res or {}).get("tracking_id")
+                   or (res or {}).get("id") or _rd.get("trackingId") or _rd.get("tracking_id"))
     is_test = bool(getattr(client, "test", False))
     env_code = "sandbox" if is_test else "production"
     env_label = "SANDBOX (TEST — ürünler gerçek mağazada görünmez!)" if is_test else "CANLI (production)"
