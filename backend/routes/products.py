@@ -478,16 +478,12 @@ async def ai_generate_description(payload: dict, current_user: dict = Depends(re
     return {"description": html_out}
 
 
-@router.get("")
-async def get_products(
+async def _build_products_query(
     request: Request,
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=500),
+    *,
     category: Optional[str] = None,
     category_id: Optional[str] = None,
     search: Optional[str] = None,
-    sort: str = Query("created_at"),
-    order: str = Query("desc"),
     is_featured: Optional[bool] = None,
     is_new: Optional[bool] = None,
     min_price: Optional[float] = None,
@@ -504,7 +500,6 @@ async def get_products(
     barcode: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    # --- Gelişmiş Ticimax tarzı filtreler ---
     urun_karti_id: Optional[str] = None,
     varyasyon_id: Optional[str] = None,
     name: Optional[str] = None,
@@ -521,22 +516,14 @@ async def get_products(
     attr_value: Optional[str] = None,
     pub_date_from: Optional[str] = None,
     pub_date_to: Optional[str] = None,
-    # --- Storefront facet filtreleri (Mango usulü beden/renk) ---
-    sizes: Optional[str] = None,   # virgülle ayrık beden listesi (ör. "S,M,L")
-    colors: Optional[str] = None,  # virgülle ayrık renk adı listesi (ör. "Siyah,Mavi")
+    sizes: Optional[str] = None,
+    colors: Optional[str] = None,
 ):
-    """Get products with filtering and pagination.
-
-    Gelişmiş filtreler (Ticimax paneli ile birebir): yukarıdaki açık parametrelerin
-    yanı sıra `ticimax_fields` ham verisi üzerinde çalışan dinamik parametreler de
-    kabul edilir:
-      - tf_<KOLON>=deger        → ticimax_fields.<KOLON> (BOOL ise eşitlik, değilse regex)
-      - tf_<KOLON>=__nonempty__ → alan dolu (Var)
-      - tf_<KOLON>=__empty__    → alan boş (Yok)
-      - tfmin_<KOLON> / tfmax_<KOLON> → sayısal aralık (ticimax_fields.<KOLON>)
-    Veri henüz yoksa bile yapı hazırdır; senkron aktifleşince otomatik sorgulanır.
+    """Urun liste + Excel disa-aktarim icin ORTAK Mongo sorgu ureticisi.
+    get_products ve export_products_excel AYNI filtre/arama mantigini kullansin
+    diye cikarildi -> panelde hangi filtre/arama aciksa Excel de birebir onu indirir.
+    Doner: (query, _admin_view).
     """
-    skip = (page - 1) * limit
     query = {}
     # `and_clauses` — yeni gelişmiş filtreler birbirini ezmeden eklenir.
     and_clauses: list = []
@@ -891,6 +878,82 @@ async def get_products(
                     {"brand": {"$regex": _fz, "$options": "i"}},
                     {"description": {"$regex": _fz, "$options": "i"}},
                 ]
+    return query, _admin_view
+
+
+@router.get("")
+async def get_products(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=500),
+    category: Optional[str] = None,
+    category_id: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
+    is_featured: Optional[bool] = None,
+    is_new: Optional[bool] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    status: Optional[str] = None,
+    admin_view: Optional[str] = None,
+    brand: Optional[str] = None,
+    min_stock: Optional[int] = None,
+    max_stock: Optional[int] = None,
+    is_showcase: Optional[bool] = None,
+    is_opportunity: Optional[bool] = None,
+    is_free_shipping: Optional[bool] = None,
+    stock_code: Optional[str] = None,
+    barcode: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    # --- Gelişmiş Ticimax tarzı filtreler ---
+    urun_karti_id: Optional[str] = None,
+    varyasyon_id: Optional[str] = None,
+    name: Optional[str] = None,
+    gtip: Optional[str] = None,
+    breadcrumb: Optional[str] = None,
+    supplier: Optional[str] = None,
+    tag: Optional[str] = None,
+    has_image: Optional[str] = None,
+    has_variants: Optional[str] = None,
+    has_video: Optional[str] = None,
+    multi_barcode: Optional[str] = None,
+    discounted: Optional[str] = None,
+    attr_key: Optional[str] = None,
+    attr_value: Optional[str] = None,
+    pub_date_from: Optional[str] = None,
+    pub_date_to: Optional[str] = None,
+    # --- Storefront facet filtreleri (Mango usulü beden/renk) ---
+    sizes: Optional[str] = None,   # virgülle ayrık beden listesi (ör. "S,M,L")
+    colors: Optional[str] = None,  # virgülle ayrık renk adı listesi (ör. "Siyah,Mavi")
+):
+    """Get products with filtering and pagination.
+
+    Gelişmiş filtreler (Ticimax paneli ile birebir): yukarıdaki açık parametrelerin
+    yanı sıra `ticimax_fields` ham verisi üzerinde çalışan dinamik parametreler de
+    kabul edilir:
+      - tf_<KOLON>=deger        → ticimax_fields.<KOLON> (BOOL ise eşitlik, değilse regex)
+      - tf_<KOLON>=__nonempty__ → alan dolu (Var)
+      - tf_<KOLON>=__empty__    → alan boş (Yok)
+      - tfmin_<KOLON> / tfmax_<KOLON> → sayısal aralık (ticimax_fields.<KOLON>)
+    Veri henüz yoksa bile yapı hazırdır; senkron aktifleşince otomatik sorgulanır.
+    """
+    skip = (page - 1) * limit
+    query, _admin_view = await _build_products_query(
+        request,
+        category=category, category_id=category_id, search=search, is_featured=is_featured,
+        is_new=is_new, min_price=min_price, max_price=max_price, status=status,
+        admin_view=admin_view, brand=brand, min_stock=min_stock, max_stock=max_stock,
+        is_showcase=is_showcase, is_opportunity=is_opportunity,
+        is_free_shipping=is_free_shipping, stock_code=stock_code, barcode=barcode,
+        date_from=date_from, date_to=date_to, urun_karti_id=urun_karti_id,
+        varyasyon_id=varyasyon_id, name=name, gtip=gtip, breadcrumb=breadcrumb,
+        supplier=supplier, tag=tag, has_image=has_image, has_variants=has_variants,
+        has_video=has_video, multi_barcode=multi_barcode, discounted=discounted,
+        attr_key=attr_key, attr_value=attr_value, pub_date_from=pub_date_from,
+        pub_date_to=pub_date_to, sizes=sizes, colors=colors,
+    )
 
     sort_order = -1 if order == "desc" else 1
     # Kategori sayfasında kullanıcı özel sıralama seçmediyse (default created_at):
@@ -2145,11 +2208,91 @@ async def bulk_add_to_category_after(
     }
 
 
+# openpyxl, hücrede kontrol karakteri (0x00–0x1F, tab/satır-sonu hariç) görünce
+# IllegalCharacterError fırlatıp TÜM dışa aktarımı patlatır. Ürün açıklamaları
+# (HTML) ve içe aktarılan kayıtlar bu karakterleri içerebildiği için her metin
+# hücresini temizliyoruz. Ayrıca Excel hücre sınırı 32.767 karaktere kırpılır.
+_XLSX_ILLEGAL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+def _xlsx_clean(v):
+    if v is None:
+        return ""
+    if isinstance(v, (int, float, bool)):
+        return v
+    s = str(v)
+    s = _XLSX_ILLEGAL_RE.sub("", s)
+    if len(s) > 32767:
+        s = s[:32767]
+    return s
+
+
 @router.get("/export/excel")
-async def export_products_excel(current_user: dict = Depends(require_admin)):
-    """Export all products to an Excel file (variants as rows with dynamic attributes)"""
+async def export_products_excel(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+    # Liste ekranıyla AYNI filtreler — panelde hangi arama/filtre açıksa Excel de onu indirir.
+    category: Optional[str] = None,
+    category_id: Optional[str] = None,
+    search: Optional[str] = None,
+    is_featured: Optional[bool] = None,
+    is_new: Optional[bool] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    status: Optional[str] = None,
+    brand: Optional[str] = None,
+    min_stock: Optional[int] = None,
+    max_stock: Optional[int] = None,
+    is_showcase: Optional[bool] = None,
+    is_opportunity: Optional[bool] = None,
+    is_free_shipping: Optional[bool] = None,
+    stock_code: Optional[str] = None,
+    barcode: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    urun_karti_id: Optional[str] = None,
+    varyasyon_id: Optional[str] = None,
+    name: Optional[str] = None,
+    gtip: Optional[str] = None,
+    breadcrumb: Optional[str] = None,
+    supplier: Optional[str] = None,
+    tag: Optional[str] = None,
+    has_image: Optional[str] = None,
+    has_variants: Optional[str] = None,
+    has_video: Optional[str] = None,
+    multi_barcode: Optional[str] = None,
+    discounted: Optional[str] = None,
+    attr_key: Optional[str] = None,
+    attr_value: Optional[str] = None,
+    pub_date_from: Optional[str] = None,
+    pub_date_to: Optional[str] = None,
+    sizes: Optional[str] = None,
+    colors: Optional[str] = None,
+):
+    """Ürünleri Excel'e aktar (varyantlar satır satır + dinamik özellikler).
+
+    Liste ekranındaki filtre/aramayla BİREBİR aynı sonuç indirilir: aynı
+    `_build_products_query` yardımcı fonksiyonu kullanılır. Hiç filtre yoksa
+    admin görünümünün tamamı (aktif + pasif ürünler) aktarılır.
+    """
     try:
-        products = await db.products.find({}, {"_id": 0}).to_list(None)
+        # admin_view="1" → liste ekranındaki admin görünümünün AYNISI (status verilmedikçe hepsi).
+        query, _ = await _build_products_query(
+            request,
+            category=category, category_id=category_id, search=search,
+            is_featured=is_featured, is_new=is_new, min_price=min_price, max_price=max_price,
+            status=status, admin_view="1", brand=brand,
+            min_stock=min_stock, max_stock=max_stock,
+            is_showcase=is_showcase, is_opportunity=is_opportunity, is_free_shipping=is_free_shipping,
+            stock_code=stock_code, barcode=barcode, date_from=date_from, date_to=date_to,
+            urun_karti_id=urun_karti_id, varyasyon_id=varyasyon_id, name=name, gtip=gtip,
+            breadcrumb=breadcrumb, supplier=supplier, tag=tag,
+            has_image=has_image, has_variants=has_variants, has_video=has_video,
+            multi_barcode=multi_barcode, discounted=discounted,
+            attr_key=attr_key, attr_value=attr_value,
+            pub_date_from=pub_date_from, pub_date_to=pub_date_to,
+            sizes=sizes, colors=colors,
+        )
+        products = await db.products.find(query, {"_id": 0}).to_list(None)
         
         # Collect all unique attribute names
         all_attr_names = set()
@@ -2200,7 +2343,8 @@ async def export_products_excel(current_user: dict = Depends(require_admin)):
                     if attr_name and attr.get("value"):
                         row[f"Özellik: {attr_name}"] = attr["value"]
                         
-                rows.append(row)
+                # Her hücreyi openpyxl-güvenli hale getir (kontrol karakteri temizliği + 32k kırpma)
+                rows.append({k: _xlsx_clean(val) for k, val in row.items()})
         
         df = pd.DataFrame(rows)
         output = io.BytesIO()

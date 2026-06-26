@@ -606,14 +606,64 @@ export default function AdminProducts() {
     }
   };
 
+  // Liste + Excel için ORTAK sorgu parametreleri (arama + TÜM gelişmiş filtreler).
+  // Hem fetchProducts hem handleExport kullanır → Excel ekrandaki filtrenin AYNISINI indirir.
+  const buildProductParams = ({ paging = false } = {}) => {
+    const p = new URLSearchParams();
+    if (paging) { p.set('page', page); p.set('limit', pageSize); }
+    if (debouncedSearch) p.set('search', debouncedSearch);
+    if (sortBy.field) { p.set('sort', sortBy.field); p.set('order', sortBy.dir); }
+
+    const f = appliedFilters;
+    const set = (key, val) => { if (val !== "" && val !== undefined && val !== null) p.set(key, val); };
+
+    // Doğrudan geçen parametreler (backend ile aynı ad)
+    [
+      'status', 'category_id', 'urun_karti_id', 'varyasyon_id', 'name', 'stock_code',
+      'gtip', 'barcode', 'breadcrumb', 'brand', 'supplier', 'tag',
+      'min_stock', 'max_stock', 'min_price', 'max_price',
+      'date_from', 'date_to', 'pub_date_from', 'pub_date_to',
+      'has_image', 'has_variants', 'has_video', 'multi_barcode', 'discounted',
+      'is_free_shipping', 'is_showcase', 'is_opportunity', 'is_new',
+      'attr_key', 'attr_value',
+    ].forEach((k) => set(k, f[k]));
+
+    // ticimax_fields sayısal aralıkları
+    const rangeMap = {
+      min_indirimli: 'tfmin_INDIRIMLIFIYAT', max_indirimli: 'tfmax_INDIRIMLIFIYAT',
+      min_alis: 'tfmin_ALISFIYATI', max_alis: 'tfmax_ALISFIYATI',
+      min_piyasa: 'tfmin_PIYASAFIYATI', max_piyasa: 'tfmax_PIYASAFIYATI',
+    };
+    Object.entries(rangeMap).forEach(([k, param]) => set(param, f[k]));
+
+    // ticimax_fields tekil alanları (tf_)
+    const tfMap = {
+      kdv_dahil: 'tf_KDVDAHIL', kart_aktif: 'tf_KARTAKTIF', para_birimi: 'tf_PARABIRIMI',
+      yemek_karti: 'tf_YEMEKKARTIODEMEYASAKLILISTESI',
+      teslim_goster: 'tf_TAHMINITESLIMSURESIGOSTER', ayni_gun: 'tf_TAHMINITESLIMSURESIAYNIGUN',
+      sureli_indirim: 'tf_SURELIINDIRIMOZELLIK', entegrasyon: 'tf_ENTEGRASYONGUNCELLEMEAKTIF',
+      mp1: 'tf_MARKETPLACEAKTIF', mp2: 'tf_MARKETPLACEAKTIF2', mp3: 'tf_MARKETPLACEAKTIF3',
+      mp4: 'tf_MARKETPLACEAKTIF4', mp5: 'tf_MARKETPLACEAKTIF5',
+      ozel1: 'tf_OZELALAN1', ozel2: 'tf_OZELALAN2', ozel3: 'tf_OZELALAN3',
+      ozel4: 'tf_OZELALAN4', ozel5: 'tf_OZELALAN5',
+      seo_title: 'tf_SEO_SAYFABASLIK', seo_keywords: 'tf_SEO_ANAHTARKELIME', seo_desc: 'tf_SEO_SAYFAACIKLAMA',
+    };
+    Object.entries(tfMap).forEach(([k, param]) => set(param, f[k]));
+
+    return p;
+  };
+
   const handleExport = async () => {
     setExporting(true);
     toast.info("Excel dosyası hazırlanıyor...");
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get(`${API}/products/export/excel`, {
+      const p = buildProductParams({ paging: false });   // ekrandaki arama + tüm filtreler
+      const _qs = p.toString();
+      const response = await axios.get(`${API}/products/export/excel${_qs ? `?${_qs}` : ""}`, {
         headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: 120000,   // büyük katalog export'u uzun sürebilir → erken kopma olmasın
       });
       
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -924,47 +974,7 @@ export default function AdminProducts() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const p = new URLSearchParams();
-      p.set('page', page);
-      p.set('limit', pageSize);
-      if (debouncedSearch) p.set('search', debouncedSearch);
-      if (sortBy.field) { p.set('sort', sortBy.field); p.set('order', sortBy.dir); }
-
-      const f = appliedFilters;
-      const set = (key, val) => { if (val !== "" && val !== undefined && val !== null) p.set(key, val); };
-
-      // Doğrudan geçen parametreler (backend ile aynı ad)
-      [
-        'status', 'category_id', 'urun_karti_id', 'varyasyon_id', 'name', 'stock_code',
-        'gtip', 'barcode', 'breadcrumb', 'brand', 'supplier', 'tag',
-        'min_stock', 'max_stock', 'min_price', 'max_price',
-        'date_from', 'date_to', 'pub_date_from', 'pub_date_to',
-        'has_image', 'has_variants', 'has_video', 'multi_barcode', 'discounted',
-        'is_free_shipping', 'is_showcase', 'is_opportunity', 'is_new',
-        'attr_key', 'attr_value',
-      ].forEach((k) => set(k, f[k]));
-
-      // ticimax_fields sayısal aralıkları
-      const rangeMap = {
-        min_indirimli: 'tfmin_INDIRIMLIFIYAT', max_indirimli: 'tfmax_INDIRIMLIFIYAT',
-        min_alis: 'tfmin_ALISFIYATI', max_alis: 'tfmax_ALISFIYATI',
-        min_piyasa: 'tfmin_PIYASAFIYATI', max_piyasa: 'tfmax_PIYASAFIYATI',
-      };
-      Object.entries(rangeMap).forEach(([k, param]) => set(param, f[k]));
-
-      // ticimax_fields tekil alanları (tf_)
-      const tfMap = {
-        kdv_dahil: 'tf_KDVDAHIL', kart_aktif: 'tf_KARTAKTIF', para_birimi: 'tf_PARABIRIMI',
-        yemek_karti: 'tf_YEMEKKARTIODEMEYASAKLILISTESI',
-        teslim_goster: 'tf_TAHMINITESLIMSURESIGOSTER', ayni_gun: 'tf_TAHMINITESLIMSURESIAYNIGUN',
-        sureli_indirim: 'tf_SURELIINDIRIMOZELLIK', entegrasyon: 'tf_ENTEGRASYONGUNCELLEMEAKTIF',
-        mp1: 'tf_MARKETPLACEAKTIF', mp2: 'tf_MARKETPLACEAKTIF2', mp3: 'tf_MARKETPLACEAKTIF3',
-        mp4: 'tf_MARKETPLACEAKTIF4', mp5: 'tf_MARKETPLACEAKTIF5',
-        ozel1: 'tf_OZELALAN1', ozel2: 'tf_OZELALAN2', ozel3: 'tf_OZELALAN3',
-        ozel4: 'tf_OZELALAN4', ozel5: 'tf_OZELALAN5',
-        seo_title: 'tf_SEO_SAYFABASLIK', seo_keywords: 'tf_SEO_ANAHTARKELIME', seo_desc: 'tf_SEO_SAYFAACIKLAMA',
-      };
-      Object.entries(tfMap).forEach(([k, param]) => set(param, f[k]));
+      const p = buildProductParams({ paging: true });
 
       const res = await axios.get(`${API}/products?${p.toString()}&admin_view=1`, { headers: { Authorization: `Bearer ${token}` } });
       if (_seq !== _prodReqSeq.current) return;   // daha yeni bir istek başladı → bu (eski) yanıtı YOKSAY
