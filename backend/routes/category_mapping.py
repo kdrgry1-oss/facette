@@ -1848,6 +1848,7 @@ async def get_advanced_attributes(
     marketplace: str,
     local_category_id: str,
     refresh: bool = False,
+    force: bool = False,
     current_user: dict = Depends(require_admin),
 ):
     """Sistem kategorisinin MP'deki karşılığı için zorunlu/opsiyonel özellikler."""
@@ -1918,10 +1919,15 @@ async def get_advanced_attributes(
         cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
         attrs = (cached or {}).get("attributes")
         # Cache'de HİÇBİR özelliğin değer listesi (XS/XL, renk değerleri vb.) yoksa değer-eşleştirme
-        # ekranı boş kalır → değerleriyle birlikte taze çek (kendini onaran cache). `refresh=1`
-        # parametresi de (Değer Eşleştir ekranı açılışında) zorla canlı çekimi tetikler.
+        # ekranı boş kalır → değerleriyle birlikte taze çek (kendini onaran cache).
+        # PERF/UI-DÜZELTME: HB değer çekimi TÜM değerleri sayfalayarak ~1 dk sürebilir (Renk 1999,
+        # Beden 414 ...). Frontend değer-eşleştirme ekranı her açılışta refresh=1 gönderiyordu →
+        # her seferinde canlı çekim → tarayıcı HTTP timeout → ekran boş ("Hepsiburada için
+        # eşleştiremiyorum"). Artık: cache TAZE & DEĞERLİYSE anında servis et; yalnız cache
+        # yok/eski(_v!=8)/değersizse VEYA açıkça force=1 ile istenirse canlı çek.
         no_values = bool(attrs) and not any((x.get("attributeValues") or []) for x in attrs)
-        if refresh or not attrs or (cached or {}).get("_v") != 8 or no_values:
+        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 8 and not no_values
+        if force or not cache_fresh:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
             if hb_err:
                 return {

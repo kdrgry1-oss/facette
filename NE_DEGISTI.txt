@@ -1,52 +1,27 @@
-FACETTE — Hepsiburada DÜZELDİ + sağlamlaştırma (KÜMÜLATİF)
-=========================================================
-★★ CANLIDA NE OLDU (tarayıcıdan ben yaptım, kalıcı):
-  KÖK SEBEP: "Pazaryerleri Hub" → Hepsiburada kaydında YABANCI bir kimlik vardı:
-     merchant e88383f6… / dev "ceyjewelry_dev" / Ortam="test" (SANDBOX).
-     Senin GERÇEK canlı kimliğin (merchant 072b4b1a… / dev rooftr_dev) ise Ayarlar(settings)'te.
-     Kod, tam kimliği olan kaynağı (marketplace_accounts = sahte ceyjewelry) öne aldığı için
-     HB SANDBOX'a (mpop-sit) gidiyordu → ürünler gerçek mağazada görünmüyordu + özellik
-     çekiminde 403. "Çalışıyordu" çünkü eskiden settings (doğru kimlik) kullanılıyordu.
+HEPSİBURADA DEĞER-EŞLEŞTİRME EKRANI DÜZELTMESİ
+================================================
 
-  ÇÖZÜM (DB'de, canlı): marketplace_accounts'taki SAHTE HB kimliğini boşalttım ve pasifledim.
-     Artık client senin gerçek settings kimliğini kullanıyor:
-        resolved_environment = production
-        host = https://mpop.hepsiburada.com
-        cred_source = settings  (merchant 072b4b1a… / rooftr_dev)
+SORUN:
+  Kategori Eşleştirme > "Değer Eşleştir" ekranı Hepsiburada için açılmıyordu
+  (boş kalıyor / "Değerler yüklenemedi"). Sebep: ekran her açılışta
+  /category-mapping/hepsiburada/{cat}/attributes?refresh=1 çağırıyor; bu da
+  HB'nin TÜM değerlerini (Renk ~1999, Beden ~414 ...) sayfa sayfa canlı çekiyor
+  → ~56 saniye → tarayıcı HTTP timeout → ekran boş. Bu yüzden Trendyol'daki gibi
+  değer eşleştirmesi HB'de yapılamıyordu.
 
-  DOĞRULAMA (canlı):
-     • categories/12087198/attributes  → 200 (34 özellik)  [eskiden 403]
-     • reconcile  → is_test=false, host=mpop.hepsiburada.com (gerçek katalog)
-     • TEK ÜRÜN GÖNDERİLDİ: "Mold Balon Pantolon Bej" (4 varyant)
-          trackingId 006b24a7-d86c-469f-827f-df8a0d9ff212
-          importStatus=SUCCESS, red yok, merchant=072b4b1a…, durum "Incelenecek"
-       → HB seni inceleyip yayına alacak (yeni üründe normal).
+DÜZELTME (backend, tek dosya):
+  backend/routes/category_mapping.py > get_advanced_attributes()
+  - HB dalı artık CACHE-FIRST: kategori özellik+değer cache'i taze ve değerliyse
+    (_v==8, attributeValues dolu) ANINDA servis edilir (canlı çekim yapılmaz).
+  - Canlı çekim yalnızca cache yok / eski / değersizse VEYA yeni 'force=1'
+    parametresiyle açıkça istenirse yapılır.
+  - Transfer yolu (_hb_category_attributes_for → _build_hb_product_item) AYNI
+    cache'i kullanır; çekim mantığı değişmedi → ürün aktarımı etkilenmez.
 
-  ⚠️ ÖNEMLİ: "Pazaryerleri Hub" → Hepsiburada formunda HB kimlik alanları artık BOŞ görünür
-     (kimlik settings'ten geliyor). O formu KAYDETME — gizli secret maskeli ("********")
-     gider ve tekrar bozar. Aşağıdaki kod deploy edilince bu tuzak da kapanır.
+NOT:
+  - İlk açılışta cache yoksa yine bir kez ~1dk çekim olur, sonra anında.
+  - Mevcut eşli kategorilerin cache'i (Elbise, Pantolon, Bluz, Etek, Ceket, Kaban)
+    canlıda önceden ısıtıldı; bu kategoriler deploy sonrası anında açılır.
+  - İleride bir "Yenile" butonu için backend hazır: ?force=1 ile canlı çekim.
 
-★ BU DEPLOY NE EKLİYOR (sağlamlaştırma — sistem zaten çalışıyor, bu tekrarı önler):
-  backend/routes/category_mapping.py
-     • _hb_unmask: maskeli secret ("********" / sadece •/*) GERÇEK kimlik sayılmaz →
-       sahte/maskeli kaynak bir daha öne geçemez (otomatik settings'e düşer).
-     • _get_hb_client: kimlik + ortam DAİMA aynı kaynaktan (eşli) + cred_source raporu.
-     • bulk-auto-setup ("Tümünü Eşleştir (Özellik+Değer)") butonu.
-  backend/hepsiburada_client.py
-     • gzip/deflate/WAF gövdeleri OKUNUR yazılır (artık 403 mesajı çöp değil), 403 ipucu,
-       Accept-Encoding: identity.
-  backend/routes/integrations.py
-     • env-status zengin (resolved_environment, host, cred_source, her iki kaynak).
-     • hb_sync_products: trackingId artık 'data.trackingId' altından da okunur (UI'da görünür,
-       "İçe Aktarım Durumunu Sorgula" gerçek sonucu gösterir).
-     • Mutabakat önizleme + CANLI/SANDBOX etiketleri.
-
-DEPLOY (opsiyonel ama önerilir — tuzağı kapatır)
-  cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/FACETTE_HB_403_FIX_PAKET.zip -d . \
-    && git add -A && git commit -m "HB: maske/esli kimlik korumasi + trackingId data altindan + gzip okuma" && git push
-  Railway yeşil: [scheduler] Background scheduler started
-
-UYANINCA
-  • HB Satıcı Paneli → "Mold Balon Pantolon Bej" Incelenecek/yayında olmalı.
-  • Filtreli Aktarım'dan istediğin ürünleri gönder; artık CANLI'ya gidiyor.
-  • Pazaryerleri Hub → Hepsiburada formunu KAYDETME (yukarıdaki uyarı). Deploy sonrası serbest.
+DOĞRULAMA: python3 -c "import ast; ast.parse(open('backend/routes/category_mapping.py').read())"  → OK
