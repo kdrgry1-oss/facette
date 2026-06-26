@@ -194,7 +194,9 @@ export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState(() => _loadProductsView().search || "");
+  const [search, setSearch] = useState("");                 // arama sayfa yenilenince sıfırlanır (localStorage'dan geri YÜKLENMEZ)
+  const [debouncedSearch, setDebouncedSearch] = useState(""); // kullanıcı yazmayı bırakınca tek istek atılır
+  const _prodReqSeq = useRef(0);                              // yarış koruması: yalnız EN SON isteğin yanıtı uygulanır
   const [page, setPage] = useState(() => _loadProductsView().page || 1);
   const [pageSize, setPageSize] = useState(() => _loadProductsView().pageSize || 20);
   const [total, setTotal] = useState(0);
@@ -495,18 +497,27 @@ export default function AdminProducts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // Arama "debounce": kullanıcı yazmayı ~350ms bıraktığında TEK istek atılır.
+  // Önceden her tuş vuruşu /products çağırıyordu → yarış durumu (eski yanıt yeni
+  // yanıtın üstüne yazıp YANLIŞ sonuç gösterebiliyordu) ve gereksiz sunucu yükü.
+  useEffect(() => {
+    const _t = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(_t);
+  }, [search]);
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();
     fetchTrendyolCategories();
     fetchGlobalTrendyolMarkup();
     fetchGlobalSettings();
-  }, [page, pageSize, search, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
+  }, [page, pageSize, debouncedSearch, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
 
-  // Görünüm kalıcılığı: yenilemede sayfa + boyut + arama + filtreler + sıralama korunur
+  // Görünüm kalıcılığı: yenilemede sayfa + boyut + filtreler + sıralama korunur.
+  // NOT: arama (search) BİLİNÇLİ olarak saklanmaz → sayfa yenilenince arama sıfırlanır.
   useEffect(() => {
-    try { localStorage.setItem(PRODUCTS_VIEW_KEY, JSON.stringify({ page, pageSize, search, appliedFilters, sortBy })); } catch (e) {}
-  }, [page, pageSize, search, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
+    try { localStorage.setItem(PRODUCTS_VIEW_KEY, JSON.stringify({ page, pageSize, appliedFilters, sortBy })); } catch (e) {}
+  }, [page, pageSize, JSON.stringify(appliedFilters), JSON.stringify(sortBy)]);
 
   // Ürün detay alan şemasını bir kez çek (sekmelere gömülü ek alanlar için)
   useEffect(() => {
@@ -909,13 +920,14 @@ export default function AdminProducts() {
   }, [toolsMenuOpen]);
 
   const fetchProducts = async () => {
+    const _seq = ++_prodReqSeq.current;   // bu isteğin sıra no'su
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const p = new URLSearchParams();
       p.set('page', page);
       p.set('limit', pageSize);
-      if (search) p.set('search', search);
+      if (debouncedSearch) p.set('search', debouncedSearch);
       if (sortBy.field) { p.set('sort', sortBy.field); p.set('order', sortBy.dir); }
 
       const f = appliedFilters;
@@ -955,12 +967,13 @@ export default function AdminProducts() {
       Object.entries(tfMap).forEach(([k, param]) => set(param, f[k]));
 
       const res = await axios.get(`${API}/products?${p.toString()}&admin_view=1`, { headers: { Authorization: `Bearer ${token}` } });
+      if (_seq !== _prodReqSeq.current) return;   // daha yeni bir istek başladı → bu (eski) yanıtı YOKSAY
       setProducts(res.data?.products || []);
       setTotal(res.data?.total || 0);
     } catch (err) {
-      console.error(err);
+      if (_seq === _prodReqSeq.current) console.error(err);
     } finally {
-      setLoading(false);
+      if (_seq === _prodReqSeq.current) setLoading(false);
     }
   };
 

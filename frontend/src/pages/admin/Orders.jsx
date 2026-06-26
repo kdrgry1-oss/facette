@@ -92,12 +92,17 @@ export default function AdminOrders({ unpaidView = false }) {
   const [total, setTotal] = useState(0);
   // --- Gelişmiş Filtreler (kullanıcı talebiyle geri eklendi) ---
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState(() => _loadOrdersView().filters || {
-    search: "", phone: "", email: "", order_number: "",
-    cargo_tracking: "", invoice_number: "", coupon_code: "",
-    start_date: "", end_date: "",
-    payment_method: "", payment_status: "", platform: "", channel: "",
-    influencer: "", is_corporate: ""
+  const [filters, setFilters] = useState(() => {
+    const _def = {
+      search: "", phone: "", email: "", order_number: "",
+      cargo_tracking: "", invoice_number: "", coupon_code: "",
+      start_date: "", end_date: "",
+      payment_method: "", payment_status: "", platform: "", channel: "",
+      influencer: "", is_corporate: ""
+    };
+    // Diğer filtreler korunur; ANCAK genel arama (search) sayfa yenilenince SIFIRLANIR.
+    const _saved = _loadOrdersView().filters;
+    return _saved ? { ..._def, ..._saved, search: "" } : _def;
   });
   const [searchTick, setSearchTick] = useState(0);
   const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
@@ -160,9 +165,10 @@ export default function AdminOrders({ unpaidView = false }) {
     fetchOrders();
   }, [page, pageSize, unpaidView, searchTick]);
 
-  // Görünüm kalıcılığı: yenilemede sayfa + boyut + filtreler korunur
+  // Görünüm kalıcılığı: yenilemede sayfa + boyut + filtreler korunur.
+  // NOT: genel arama (search) saklanmaz → sayfa yenilenince arama kutusu temizlenir.
   useEffect(() => {
-    try { localStorage.setItem(ORDERS_VIEW_KEY, JSON.stringify({ page, pageSize, filters })); } catch (e) {}
+    try { localStorage.setItem(ORDERS_VIEW_KEY, JSON.stringify({ page, pageSize, filters: { ...filters, search: "" } })); } catch (e) {}
   }, [page, pageSize, filters]);
 
   /**
