@@ -2935,14 +2935,9 @@ export default function AdminProducts() {
 
                   return (
                     <div className="space-y-6">
-                      {/* Teknik Detay paneli SADECE mevcut ürün düzenlenirken görünür.
-                          YENİ ürün oluştururken gizli (Kadir: "yeni ürün oluştururken teknik detay alanını yok et"). */}
-                      {editingProduct && (
-                        <TeknikDetayPanel
-                          details={technicalDetails}
-                          onChange={(updated) => setTechnicalDetails(updated)}
-                        />
-                      )}
+                      {/* Teknik Detay paneli KALDIRILDI (Kadir): aşağıdaki "Trendyol/HB/Temu
+                          için Özellikler" bölümleriyle mükerrer oluyordu. technicalDetails state'i
+                          ve kaydı arka planda korunur; yalnızca bu mükerrer düzenleme paneli gizlendi. */}
                       {renderSection('trendyol', 'Trendyol için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TRENDYOL')}
                       {renderSection('hepsiburada', 'Hepsiburada için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'HEPSIBURADA')}
                       {renderSection('temu', 'Temu için Özellikler', { border: '#e5e5e5', bg: '#1a1a1a', text: '#1a1a1a' }, 'TEMU')}
