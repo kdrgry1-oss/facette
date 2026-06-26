@@ -2774,7 +2774,7 @@ export default function AdminProducts() {
                     });
                     const tyMerged = (() => {
                       const out = baseList.map(attr => {
-                        const ty = tyByName[(attr.name || "").toLowerCase()];
+                        const ty = tyByName[(attr.name || "").trim().toLowerCase()];
                         if (ty && ty.values.length) {
                           const merged = Array.from(new Set([...(attr.values || []), ...ty.values]));
                           return { ...attr, values: merged };

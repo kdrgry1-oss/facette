@@ -2292,7 +2292,15 @@ async def export_products_excel(
             pub_date_from=pub_date_from, pub_date_to=pub_date_to,
             sizes=sizes, colors=colors,
         )
-        products = await db.products.find(query, {"_id": 0}).to_list(None)
+        # PERF: Excel için yalnızca KULLANILAN alanları çek (ticimax_fields, pazaryeri
+        # attribute blob'ları, images vb. ÇEKİLMEZ) → büyük katalogda bellek/süre düşer,
+        # Railway timeout/OOM riski azalır.
+        _proj = {
+            "_id": 0, "id": 1, "name": 1, "category_name": 1, "brand": 1,
+            "stock_code": 1, "barcode": 1, "price": 1, "sale_price": 1, "stock": 1,
+            "description": 1, "is_active": 1, "variants": 1, "attributes": 1,
+        }
+        products = await db.products.find(query, _proj).to_list(None)
         
         # Collect all unique attribute names
         all_attr_names = set()
