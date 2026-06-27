@@ -2306,6 +2306,8 @@ async def export_products_excel(
         all_attr_names = set()
         for p in products:
             for attr in p.get("attributes", []):
+                if not isinstance(attr, dict):
+                    continue
                 attr_name = attr.get("name") or attr.get("type")
                 if attr_name:
                     all_attr_names.add(attr_name)
@@ -2325,6 +2327,8 @@ async def export_products_excel(
                 }]
             
             for v in variants:
+                if not isinstance(v, dict):
+                    continue
                 row = {
                     "ID": p.get("id"),
                     "Ürün Adı": p.get("name"),
@@ -2347,6 +2351,8 @@ async def export_products_excel(
                     
                 # apply product attributes
                 for attr in p.get("attributes", []):
+                    if not isinstance(attr, dict):
+                        continue
                     attr_name = attr.get("name") or attr.get("type")
                     if attr_name and attr.get("value"):
                         row[f"Özellik: {attr_name}"] = attr["value"]
