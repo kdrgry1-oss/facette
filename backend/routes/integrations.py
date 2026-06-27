@@ -3680,24 +3680,49 @@ async def _hb_price_source() -> str:
     return ps if ps in _HB_PRICE_SOURCE_KEYS else "price"
 
 
+def _to_float_tr(v) -> float:
+    """Türkçe/karışık sayı biçimlerini güvenle float'a çevirir.
+    '2100,99' → 2100.99 · '2.100,99' → 2100.99 · '1,234.56' → 1234.56 · '₺2.100,99' → 2100.99.
+    ÖNEMLİ: eski kod 'float(\"2100,99\")' yapıp ValueError'a düşüyor, fiyatı 0 sanıyordu →
+    HB'ye '0 fiyat' gidiyordu. Bu helper o kaybı önler. Çözülemezse 0.0 döner."""
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+    s = str(v).strip()
+    if not s:
+        return 0.0
+    # Para sembolleri / boşluk / harf temizliği (rakam, nokta, virgül, eksi kalsın)
+    s = re.sub(r"[^0-9,.\-]", "", s)
+    if not s:
+        return 0.0
+    has_comma, has_dot = "," in s, "." in s
+    if has_comma and has_dot:
+        # Son görülen ayraç ondalıktır (TR: '2.100,99' → ',' ondalık; US: '1,234.56' → '.' ondalık)
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")   # TR
+        else:
+            s = s.replace(",", "")                       # US binlik
+    elif has_comma:
+        s = s.replace(",", ".")                          # tek virgül → ondalık
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+
 def _hb_pick_base_price(obj: dict, price_source: str = "auto") -> float:
     """Ürün/varyanttan, seçili kaynağa göre temel fiyatı çöz.
-    #4: Önce Üye Tipi 1 fiyatı (member_price_1) baz alınır; boş/0 ise eski mantığa düşer."""
-    try:
-        member = float(obj.get("member_price_1") or 0)
-    except Exception:
-        member = 0.0
+    #4: Önce Üye Tipi 1 fiyatı (member_price_1) baz alınır; boş/0 ise eski mantığa düşer.
+    Sayılar _to_float_tr ile çözülür → '2100,99' gibi virgüllü fiyatlar 0'a DÜŞMEZ."""
+    member = _to_float_tr(obj.get("member_price_1"))
     if member > 0:
         return member
-    try:
-        price = float(obj.get("price", 0) or 0)
-    except Exception:
-        price = 0.0
-    sale = obj.get("sale_price")
-    try:
-        sale = float(sale) if sale not in (None, "") else 0.0
-    except Exception:
-        sale = 0.0
+    price = _to_float_tr(obj.get("price"))
+    sale = _to_float_tr(obj.get("sale_price"))
     if price_source == "price":
         return price
     if price_source == "sale_price":
@@ -3796,14 +3821,14 @@ def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_sou
             if v_price > 0:
                 p = v_price * (1 + markup / 100) if markup > 0 else v_price
             else:
-                p = base_price + float(v.get("price_diff", 0) or 0)
+                p = base_price + _to_float_tr(v.get("price_diff", 0))
             items.append({"merchantSku": sku, "price": round(p, 2),
-                          "availableStock": int(v.get("stock", 0) or 0)})
+                          "availableStock": int(_to_float_tr(v.get("stock", 0)))})
     else:
         sku = _hb_variant_sku(product, None, 0, sku_source)
         if sku:
             items.append({"merchantSku": sku, "price": round(base_price, 2),
-                          "availableStock": int(product.get("stock", 0) or 0)})
+                          "availableStock": int(_to_float_tr(product.get("stock", 0)))})
     return items
 
 
@@ -4538,6 +4563,65 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
                             "missing_required_attrs": [], "unmatched_values": [],
                             "variant_count": len(built)})
     return {"valid_count": valid_count, "invalid_count": invalid_count, "results": results}
+
+
+@router.get("/hepsiburada/products/{product_id}/debug-payload")
+async def hb_debug_payload(product_id: str, current_user: dict = Depends(require_admin)):
+    """SALT-OKUNUR teşhis. HB'ye HİÇBİR ŞEY göndermez. Bir ürün için:
+      • import_items  : create_products'a gidecek TAM kalem(ler) {categoryId, merchant, attributes}
+      • build_error   : kalem üretilemediyse sebebi (eksik zorunlu vb.)
+      • listing_items : price/stock-uploads'a gidecek {merchantSku, price, availableStock}
+      • hb_category_attributes : HB'nin bu kategori için döndürdüğü GERÇEK özellik adları+zorunluluk
+      • hb_base_attributes     : HB'nin GERÇEK temel alan adları (KDV/Garanti/Desi vb. gerçek anahtar)
+      • config        : merchantSku kaynağı, fiyat kaynağı, markup
+    Amaç: 'HB neyi reddediyor' tahminini bitirmek — gönderdiğimiz anahtarlarla HB'nin
+    beklediği anahtarları yan yana görüp KDV/Garanti/Fiyat anahtarını kesin düzeltmek."""
+    from .category_mapping import _get_hb_client  # noqa: F401 (kimlik kontrolü gerekmez, salt okuma)
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+
+    cm = await db.category_mappings.find_one(
+        {"marketplace": "hepsiburada", "category_id": p.get("category_id")}, {"_id": 0})
+    if not cm:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": p.get("category_name")}, {"_id": 0})
+    hb_cat = (cm or {}).get("marketplace_category_id")
+
+    items, build_err = await _build_hb_product_item(p, "DEBUG")
+    try:
+        markup = await _hb_markup()
+        price_source = await _hb_price_source()
+        sku_source = await _hb_sku_source()
+        listing_items = _hb_listing_items_from_product(p, markup, price_source, sku_source)
+    except Exception as e:
+        markup, price_source, sku_source, listing_items = 0.0, "auto", "stock_code", [f"hata: {e}"]
+
+    cat_attrs, base_attrs = [], []
+    if hb_cat:
+        try:
+            cat_attrs, _ = await _hb_category_attributes_for(hb_cat)
+            base_attrs = await _hb_base_attributes_for(hb_cat)
+        except Exception:
+            pass
+
+    return {
+        "product": {"id": p.get("id"), "name": p.get("name"),
+                    "category_id": p.get("category_id"), "category_name": p.get("category_name"),
+                    "price": p.get("price"), "sale_price": p.get("sale_price"),
+                    "member_price_1": p.get("member_price_1"), "stock": p.get("stock"),
+                    "variant_count": len(p.get("variants") or [])},
+        "hb_category_id": hb_cat,
+        "config": {"merchantSku_source": sku_source, "price_source": price_source, "markup_pct": markup},
+        "import_items": items, "build_error": build_err,
+        "listing_items": listing_items,
+        "hb_required_attributes": [a for a in (cat_attrs or []) if a.get("required")],
+        "hb_base_attributes": [{"name": b.get("name"),
+                                "mandatory": bool(b.get("mandatory") or b.get("required")
+                                                  or b.get("mandatoryVariant")),
+                                "type": b.get("type")}
+                               for b in (base_attrs or []) if isinstance(b, dict)],
+    }
 
 
 @router.post("/hepsiburada/products/inventory-sync")
