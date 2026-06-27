@@ -521,7 +521,8 @@ async def _run_hepsiburada_auto_stock_sync():
     try:
         from routes.category_mapping import _get_hb_client
         from routes.integrations import (
-            _hb_markup, _hb_price_source, _hb_listing_items_from_product, _hb_push_stock_price,
+            _hb_markup, _hb_price_source, _hb_sku_source,
+            _hb_listing_items_from_product, _hb_push_stock_price,
         )
         client, err = await _get_hb_client()
         if err:
@@ -529,9 +530,13 @@ async def _run_hepsiburada_auto_stock_sync():
         products = await db.products.find({"is_active": True}, {"_id": 0}).to_list(length=None)
         markup = await _hb_markup()
         price_source = await _hb_price_source()
+        # ⚠️ KRİTİK: merchantSku kaynağı import ile AYNI olmalı. Aksi halde stok/fiyat
+        # gönderimi import'taki SKU ile eşleşmez → HB listing'i bulamaz → fiyat/stok
+        # sessizce hiç uygulanmaz ("aktardım ama fiyat/stok gitmedi"). sku_source'u oku.
+        sku_source = await _hb_sku_source()
         items = []
         for prod in products:
-            items.extend(_hb_listing_items_from_product(prod, markup, price_source))
+            items.extend(_hb_listing_items_from_product(prod, markup, price_source, sku_source))
         if not items:
             return
         res = await _hb_push_stock_price(client, items, True, True)

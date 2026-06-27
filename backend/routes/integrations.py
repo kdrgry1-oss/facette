@@ -4178,6 +4178,16 @@ async def _hb_category_attributes_for(hb_cat):
     return attrs or [], None
 
 
+async def _hb_base_attributes_for(hb_cat) -> list:
+    """HB'nin bu kategori için döndürdüğü ZORUNLU temel/sistem alanlarını (baseAttributes)
+    cache'ten getirir. _fetch_hb_category_attributes bunları `base_attributes` altında saklar.
+    Boş dönerse (cache yok / kategoride base yok) çağıran taraf eski sabit davranışa düşer."""
+    key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
+    cad = await db.hepsiburada_category_attributes.find_one(
+        {"category_id": key}, {"_id": 0, "base_attributes": 1, "media_attributes": 1})
+    return (cad or {}).get("base_attributes") or []
+
+
 async def _build_hb_product_item(product: dict, merchant_id: str):
     """Yerel ürün -> HB import kalem(ler)i. Liste döner (varyant başına bir kalem).
 
@@ -4229,9 +4239,33 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
     cat_val = int(hb_cat) if str(hb_cat).isdigit() else hb_cat
 
     # Global "Varsayılan Alan Eşleştirme" — temel HB alanlarının ürün-kartı kaynağı / sabit değeri
-    from .category_mapping import _HB_BASE_BY_KEY
+    from .category_mapping import _HB_BASE_BY_KEY, _HB_BASE_ALIAS, _hb_sysnorm
     bfm = (await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}).get("base_field_mappings") or {}
     sku_source = ((bfm.get("merchantSku") or {}).get("source") or "stock_code")
+
+    # 🎯 HB'nin BU kategori için zorunlu kıldığı TEMEL alanlar (baseAttributes).
+    # Eski davranış yalnız kategori-özelliklerini zorunlu sayıyordu; HB bir temel alanı
+    # (ör. Garanti Süresi) zorunlu kılıp biz göndermezsek import SESSİZCE reddediliyordu.
+    # Artık bunları da doğruluyoruz → eksikse kullanıcıya net hata, HB'de sessiz red yok.
+    _HB_BASE_PAYLOAD_KEY = {
+        "merchantSku": "merchantSku", "Barcode": "Barcode", "UrunAdi": "UrunAdi",
+        "UrunAciklamasi": "UrunAciklamasi", "Marka": "Marka", "GarantiSuresi": "GarantiSuresi",
+        "kg": "kg", "kdv": "tax", "Image": "Image1", "VaryantGroupID": "VaryantGroupID",
+    }
+    base_required = []  # [(payload_key, label)]
+    try:
+        for ba in (await _hb_base_attributes_for(hb_cat)):
+            if not isinstance(ba, dict):
+                continue
+            if not (ba.get("mandatory") or ba.get("required") or ba.get("mandatoryVariant")):
+                continue
+            our_key = _HB_BASE_ALIAS.get(_hb_sysnorm(ba.get("name") or ""))
+            pk = _HB_BASE_PAYLOAD_KEY.get(our_key or "")
+            if pk:
+                label = (_HB_BASE_BY_KEY.get(our_key, {}) or {}).get("label") or ba.get("name") or pk
+                base_required.append((pk, label))
+    except Exception:
+        base_required = []
 
     def _src_val(src, variant):
         if src == "name":
@@ -4379,6 +4413,13 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
 
         if missing_req:
             errors.add("zorunlu HB özellikleri eksik: " + ", ".join(sorted(set(missing_req))))
+            continue
+        # HB'nin zorunlu kıldığı temel alanlar payload'da dolu mu? (Garanti/Desi/KDV vb.)
+        miss_base = [lbl for (pk, lbl) in base_required
+                     if str(attrs.get(pk) or "").strip() == ""]
+        if miss_base:
+            errors.add("zorunlu HB temel alanı eksik: " + ", ".join(sorted(set(miss_base)))
+                       + " (Varsayılan Alan Eşleştirme ekranından doldurun)")
             continue
         items.append({"categoryId": cat_val, "merchant": merchant_id, "attributes": attrs})
 
