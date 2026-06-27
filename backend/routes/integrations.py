@@ -4725,6 +4725,11 @@ async def hb_autofill_attributes(request: Request, current_user: dict = Depends(
             if any(w in _hb_norm(aname) for w in skip_norm):
                 continue  # varyant-bazlı → gönderimde türetilir
             raw = _hb_local_for_attr(aname, local)
+            if not raw:
+                # AÇIK türetme — yalnız autofill'de: ürün adındaki kelime HB enum'una TAM eşleşirse
+                # öneri olarak yaz. Kaydedilir, ürün kartında gözden geçirilebilir. (Aktarım addan
+                # KAZIMAZ; burada bir kez, görünür ve onaylanabilir biçimde dolar.)
+                raw = _hb_value_from_name(p.get("name"), a)
             orig_raw = raw
             if raw:
                 aid = str(a.get("id"))
