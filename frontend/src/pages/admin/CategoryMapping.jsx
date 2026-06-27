@@ -1015,8 +1015,17 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                               <div key={i} className="inline-block mr-1 bg-red-100 text-red-800 text-[10px] px-1.5 py-0.5 rounded">{e}</div>
                             ))}
                             {(r.missing_required_attrs || []).length > 0 && (
-                              <div className="text-[10px] text-amber-700 mt-0.5">
-                                Eksik özellikler: {r.missing_required_attrs.map((m) => m.name).join(", ")}
+                              <div className="mt-1 bg-red-50 border border-red-300 rounded-md px-2 py-1.5">
+                                <div className="text-[10px] font-bold text-red-700 uppercase mb-1">
+                                  Hepsiburada zorunlu — eksik ({r.missing_required_attrs.length})
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {r.missing_required_attrs.map((m, mi) => (
+                                    <span key={mi} className="inline-flex items-center bg-red-100 border border-red-300 text-red-800 text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                                      {m.name}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
                             )}
                             {(r.unmatched_values || []).length > 0 && (

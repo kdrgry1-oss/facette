@@ -4392,14 +4392,8 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 # KATMAN 1 — VARYANT EKSENİ: yalnız varyant/ürün alanından (Renk/Beden).
                 raw = _hb_local_for_attr(aname, local) or v_hb.get(aname) or hb_attrs_for_product.get(aname)
             else:
-                # KATMAN 2 — AÇIK KAYNAK (öncelik tek ve net; ad-kazıma / fuzzy tahmin YOK):
-                #   a) ürün kartına girilmiş HB değeri (varyant > ürün) — HB'ye özel override
-                #   b) TRENDYOL için girilmiş AYNI ADLI özellik (ürüne özgü gerçek değer) — Temu gibi
-                #   c) kategori sabiti (Varsayılan Alan Eşleştirme) — o kategoride sabit olanlar
-                #   d) ortak global default (Ortak Özellikler, ör. Cinsiyet=Kadın)
-                #   e) AÇIKÇA bir ürün alanına bağlanmışsa (attribute_mapping)
-                # NOT: local.get(anorm) TAM ad eşleşmesidir (TY'de girdiğin "Yaka Stili" → buradaki
-                #      "Yaka Stili"). Fuzzy _hb_local_for_attr KULLANILMAZ — addan/benzerden tahmin yok.
+                # KATMAN 2 — BİREBİR eşleşen açık kaynak (ad-kazıma / fuzzy tahmin YOK):
+                #   kart(HB) → TRENDYOL aynı-adlı özellik → kategori sabiti → ortak default → alan-eşleştirme
                 raw = (v_hb.get(aname) or hb_attrs_for_product.get(aname)
                        or local.get(anorm)
                        or defaults.get(aname) or defaults.get(aid)
@@ -4578,6 +4572,22 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
     products = _dedupe_products_by_stock_code(products)
     results = []
     valid_count = invalid_count = 0
+
+    def _parse_missing(err: str) -> list[dict]:
+        """Build hatasındaki 'zorunlu ... eksik: A, B' kısımlarından yapısal liste çıkarır."""
+        out, seen = [], set()
+        for seg in (err or "").split(";"):
+            seg = seg.strip()
+            for key in ("zorunlu HB özellikleri eksik:", "zorunlu HB temel alanı eksik:"):
+                if seg.startswith(key):
+                    rest = seg[len(key):].split(" (")[0]
+                    for nm in rest.split(","):
+                        nm = nm.strip()
+                        if nm and nm not in seen:
+                            seen.add(nm)
+                            out.append({"name": nm})
+        return out
+
     for p in products:
         # Gerçek gönderim mantığıyla doğrula: motor zorunlu HB özelliklerini ürün
         # verisinden türetir; türetemediği zorunluları sebep olarak raporlar.
@@ -4586,14 +4596,18 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
         sc = _hb_merchant_sku(p) or _resolve_stock_code(p) or p.get("barcode") or ""
         if e:
             invalid_count += 1
+            miss = _parse_missing(e)
+            # Eşleşen zorunluların DIŞINDA kalan, HB'nin istediği zorunlu alanlar → kırmızı kutu.
             results.append({"product_id": p.get("id"), "name": p.get("name"),
+                            "category_name": p.get("category_name"),
                             "stock_code": sc, "barcode": p.get("barcode"),
-                            "is_valid": False, "errors": [e],
-                            "missing_required_attrs": [], "unmatched_values": [],
+                            "is_valid": False, "errors": ([e] if not miss else []),
+                            "missing_required_attrs": miss, "unmatched_values": [],
                             "variant_count": 0})
         else:
             valid_count += 1
             results.append({"product_id": p.get("id"), "name": p.get("name"),
+                            "category_name": p.get("category_name"),
                             "stock_code": sc, "barcode": p.get("barcode"),
                             "is_valid": True, "errors": [],
                             "missing_required_attrs": [], "unmatched_values": [],
