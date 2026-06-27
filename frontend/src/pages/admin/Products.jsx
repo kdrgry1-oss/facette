@@ -1992,7 +1992,7 @@ export default function AdminProducts() {
       )}
 
       {/* Products Table */}
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
         <table className="admin-table admin-table-compact">
           <thead>
             <tr>

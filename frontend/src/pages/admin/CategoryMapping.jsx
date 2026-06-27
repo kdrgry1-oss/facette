@@ -264,7 +264,7 @@ export default function CategoryMapping() {
         })}
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div className="bg-white border border-stone-200 rounded-xl p-4">
           <div className="text-xs text-stone-500 uppercase tracking-wide">Toplam Kategori</div>
           <div className="text-2xl font-black mt-1 text-stone-900">{data.total}</div>
@@ -338,7 +338,7 @@ export default function CategoryMapping() {
         </div>
       )}
 
-      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
         <table className="admin-table admin-table-compact">
           <thead>
             <tr>
@@ -492,7 +492,7 @@ export default function CategoryMapping() {
 
           {bulkAttrReport && (
             <>
-              <div className="grid grid-cols-3 gap-3 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
                 <div className="bg-white border rounded-lg p-3">
                   <div className="text-[10px] text-gray-500 uppercase">İşlenen Kategori</div>
                   <div className="text-xl font-black mt-1">{bulkAttrReport.processed}</div>
@@ -942,7 +942,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
       {/* Validation Report */}
       {validation && (
         <div className="mt-4 bg-white border rounded-lg overflow-hidden" data-testid="validation-report">
-          <div className="grid grid-cols-3 divide-x border-b">
+          <div className="grid grid-cols-1 sm:grid-cols-3 divide-x border-b">
             <div className="px-4 py-2.5">
               <div className="text-[10px] text-gray-500 uppercase">Toplam</div>
               <div className="text-lg font-black">{validation.total}</div>
@@ -1156,7 +1156,7 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
           )}
           {batchDetail && (
             <div className="px-3 py-2 border-b bg-gray-50" data-testid="batch-detail">
-              <div className="grid grid-cols-4 gap-2 text-center mb-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mb-2">
                 <div className="bg-white border rounded p-1.5">
                   <div className="text-[9px] text-gray-500 uppercase">Status</div>
                   <div className="text-xs font-bold">{batchDetail.status}</div>
