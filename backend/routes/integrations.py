@@ -4648,7 +4648,35 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
     return {"valid_count": valid_count, "invalid_count": invalid_count, "results": results}
 
 
-@router.get("/hepsiburada/products/{product_id}/debug-payload")
+@router.post("/hepsiburada/products/{product_id}/set-category-default")
+async def hb_set_category_default(product_id: str, request: Request,
+                                  current_user: dict = Depends(require_admin)):
+    """Validate kırmızı kutusundan TEK TIK: eksik bir zorunlu HB özelliğini, ürünün ait olduğu
+    HB kategori eşleşmesine KATEGORİ SABİTİ (default_mappings) olarak kaydeder.
+    Etki kategori geneli — o kategorideki TÜM ürünler bu değeri alır (bir kez gir, herkes alsın)."""
+    body = await request.json()
+    attr = (body.get("attr") or "").strip()
+    value = (body.get("value") or "").strip()
+    if not attr or not value:
+        raise HTTPException(status_code=400, detail="attr ve value zorunlu")
+    p = await db.products.find_one({"id": product_id}, {"_id": 0, "category_id": 1, "category_name": 1})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    cm = await db.category_mappings.find_one(
+        {"marketplace": "hepsiburada", "category_id": p.get("category_id")}, {"_id": 0})
+    if not cm:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": p.get("category_name")}, {"_id": 0})
+    if not cm:
+        raise HTTPException(status_code=404, detail="Bu ürün için HB kategori eşleşmesi yok")
+    defaults = dict(cm.get("default_mappings") or {})
+    defaults[attr] = value
+    await db.category_mappings.update_one(
+        {"category_id": cm.get("category_id"), "marketplace": "hepsiburada"},
+        {"$set": {"default_mappings": defaults,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"success": True, "category_name": cm.get("category_name"),
+            "message": f"'{attr} = {value}' → {cm.get('category_name')} kategorisine sabit eklendi"}
 async def hb_debug_payload(product_id: str, current_user: dict = Depends(require_admin)):
     """SALT-OKUNUR teşhis. HB'ye HİÇBİR ŞEY göndermez. Bir ürün için:
       • import_items  : create_products'a gidecek TAM kalem(ler) {categoryId, merchant, attributes}

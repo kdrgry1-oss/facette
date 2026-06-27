@@ -653,6 +653,23 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
     }
   };
 
+  const setCategoryDefault = async (productId, attr, value) => {
+    const t = toast.loading(`'${attr} = ${value}' kategoriye ekleniyor...`);
+    try {
+      const res = await axios.post(
+        `${API}/integrations/hepsiburada/products/${productId}/set-category-default`,
+        { attr, value },
+        auth,
+      );
+      toast.dismiss(t);
+      toast.success(res.data?.message || "Kategori sabiti eklendi");
+      onValidate();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Eklenemedi");
+    }
+  };
+
   const loadBatchDetail = async (batchId) => {
     if (!batchId) return;
     setBatchLoading(true);
@@ -1029,9 +1046,20 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                                         <>
                                           <span className="text-[9px] text-gray-400">→</span>
                                           {m.valid_values.map((vv, vi) => (
-                                            <span key={vi} className="inline-flex items-center bg-white border border-gray-300 text-gray-600 text-[9px] px-1 py-0.5 rounded">
-                                              {vv}
-                                            </span>
+                                            marketplace === "hepsiburada" ? (
+                                              <button
+                                                key={vi}
+                                                onClick={() => setCategoryDefault(r.product_id, m.name, vv)}
+                                                title="Kategori sabiti yap (tüm kategoriye uygula)"
+                                                className="inline-flex items-center bg-white border border-gray-300 text-gray-600 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700 text-[9px] px-1 py-0.5 rounded cursor-pointer transition-colors"
+                                              >
+                                                {vv}
+                                              </button>
+                                            ) : (
+                                              <span key={vi} className="inline-flex items-center bg-white border border-gray-300 text-gray-600 text-[9px] px-1 py-0.5 rounded">
+                                                {vv}
+                                              </span>
+                                            )
                                           ))}
                                           {m.value_count > (m.valid_values || []).length && (
                                             <span className="text-[9px] text-gray-400">+{m.value_count - m.valid_values.length}</span>
