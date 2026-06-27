@@ -4573,8 +4573,32 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
     results = []
     valid_count = invalid_count = 0
 
-    def _parse_missing(err: str) -> list[dict]:
-        """Build hatasındaki 'zorunlu ... eksik: A, B' kısımlarından yapısal liste çıkarır."""
+    # Kategori eşleşmelerini bir kez yükle (eksik zorunluların HB geçerli-değerlerini eklemek için).
+    cm_list = await db.category_mappings.find(
+        {"marketplace": "hepsiburada", "marketplace_category_id": {"$nin": [None, ""]}}, {"_id": 0}
+    ).to_list(length=5000)
+    cm_by_id = {str(c.get("category_id")): c for c in cm_list}
+    cm_by_name = {(c.get("category_name") or "").strip(): c for c in cm_list}
+    valvals_cache: dict = {}  # hb_cat -> {norm(attr_name): [değer adları]}
+
+    async def _hb_valid_values_map(hb_cat):
+        ck = str(hb_cat)
+        if ck in valvals_cache:
+            return valvals_cache[ck]
+        out = {}
+        try:
+            calist, _ = await _hb_category_attributes_for(hb_cat)  # cache'ten (build ısıttı)
+            for a in (calist or []):
+                nm = a.get("name")
+                vals = [v.get("name") for v in (a.get("attributeValues") or []) if v.get("name")]
+                if nm:
+                    out[_hb_norm(nm)] = vals
+        except Exception:
+            pass
+        valvals_cache[ck] = out
+        return out
+
+    def _parse_missing(err: str) -> list[str]:
         out, seen = [], set()
         for seg in (err or "").split(";"):
             seg = seg.strip()
@@ -4585,7 +4609,7 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
                         nm = nm.strip()
                         if nm and nm not in seen:
                             seen.add(nm)
-                            out.append({"name": nm})
+                            out.append(nm)
         return out
 
     for p in products:
@@ -4596,8 +4620,17 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
         sc = _hb_merchant_sku(p) or _resolve_stock_code(p) or p.get("barcode") or ""
         if e:
             invalid_count += 1
-            miss = _parse_missing(e)
-            # Eşleşen zorunluların DIŞINDA kalan, HB'nin istediği zorunlu alanlar → kırmızı kutu.
+            names = _parse_missing(e)
+            # HB'nin kabul ettiği geçerli değerleri ekle (küçük enum'lar için; dev havuzlarda atla).
+            cm = (cm_by_id.get(str(p.get("category_id")))
+                  or cm_by_name.get((p.get("category_name") or "").strip()))
+            vmap = await _hb_valid_values_map(cm.get("marketplace_category_id")) if cm else {}
+            miss = []
+            for nm in names:
+                vals = vmap.get(_hb_norm(nm)) or []
+                miss.append({"name": nm,
+                             "valid_values": (vals[:12] if 0 < len(vals) <= 80 else []),
+                             "value_count": len(vals)})
             results.append({"product_id": p.get("id"), "name": p.get("name"),
                             "category_name": p.get("category_name"),
                             "stock_code": sc, "barcode": p.get("barcode"),

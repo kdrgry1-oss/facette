@@ -1019,11 +1019,26 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                                 <div className="text-[10px] font-bold text-red-700 uppercase mb-1">
                                   Hepsiburada zorunlu — eksik ({r.missing_required_attrs.length})
                                 </div>
-                                <div className="flex flex-wrap gap-1">
+                                <div className="space-y-1">
                                   {r.missing_required_attrs.map((m, mi) => (
-                                    <span key={mi} className="inline-flex items-center bg-red-100 border border-red-300 text-red-800 text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                                      {m.name}
-                                    </span>
+                                    <div key={mi} className="flex flex-wrap items-center gap-1">
+                                      <span className="inline-flex items-center bg-red-100 border border-red-300 text-red-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                        {m.name}
+                                      </span>
+                                      {(m.valid_values || []).length > 0 && (
+                                        <>
+                                          <span className="text-[9px] text-gray-400">→</span>
+                                          {m.valid_values.map((vv, vi) => (
+                                            <span key={vi} className="inline-flex items-center bg-white border border-gray-300 text-gray-600 text-[9px] px-1 py-0.5 rounded">
+                                              {vv}
+                                            </span>
+                                          ))}
+                                          {m.value_count > (m.valid_values || []).length && (
+                                            <span className="text-[9px] text-gray-400">+{m.value_count - m.valid_values.length}</span>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
                                   ))}
                                 </div>
                               </div>
