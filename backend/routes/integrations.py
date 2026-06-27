@@ -4392,12 +4392,16 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 # KATMAN 1 — VARYANT EKSENİ: yalnız varyant/ürün alanından (Renk/Beden).
                 raw = _hb_local_for_attr(aname, local) or v_hb.get(aname) or hb_attrs_for_product.get(aname)
             else:
-                # KATMAN 2 — AÇIK KAYNAK (öncelik sırası tek ve nettir):
-                #   a) ürün kartına girilmiş HB değeri (varyant > ürün) — ürüne özgü değerler
-                #   b) kategori sabiti (Varsayılan Alan Eşleştirme) — o kategoride sabit olanlar
-                #   c) ortak global default (Ortak Özellikler, ör. Cinsiyet=Kadın)
-                #   d) AÇIKÇA bir ürün alanına bağlanmışsa (attribute_mapping)
+                # KATMAN 2 — AÇIK KAYNAK (öncelik tek ve net; ad-kazıma / fuzzy tahmin YOK):
+                #   a) ürün kartına girilmiş HB değeri (varyant > ürün) — HB'ye özel override
+                #   b) TRENDYOL için girilmiş AYNI ADLI özellik (ürüne özgü gerçek değer) — Temu gibi
+                #   c) kategori sabiti (Varsayılan Alan Eşleştirme) — o kategoride sabit olanlar
+                #   d) ortak global default (Ortak Özellikler, ör. Cinsiyet=Kadın)
+                #   e) AÇIKÇA bir ürün alanına bağlanmışsa (attribute_mapping)
+                # NOT: local.get(anorm) TAM ad eşleşmesidir (TY'de girdiğin "Yaka Stili" → buradaki
+                #      "Yaka Stili"). Fuzzy _hb_local_for_attr KULLANILMAZ — addan/benzerden tahmin yok.
                 raw = (v_hb.get(aname) or hb_attrs_for_product.get(aname)
+                       or local.get(anorm)
                        or defaults.get(aname) or defaults.get(aid)
                        or gad.get(anorm))
                 if not raw:
