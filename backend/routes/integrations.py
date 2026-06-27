@@ -3672,6 +3672,8 @@ def _hb_card_id(product: dict) -> str:
 def _hb_sku_base_from_source(product: dict, source: str) -> str:
     """'Satıcı Stok Kodu' kaynağına göre ürün-seviyesi temel SKU değeri."""
     src = source or "stock_code"
+    if src == "id":
+        return str(product.get("id") or "").strip()
     if src == "card_id":
         return _hb_card_id(product) or str(_hb_merchant_sku(product) or product.get("id") or "").strip()
     if src == "barcode":
@@ -4185,6 +4187,8 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                     or product.get("stock_code") or _hb_merchant_sku(product))
         if src == "card_id":
             return _hb_card_id(product)
+        if src == "id":
+            return product.get("id")
         if src == "barcode":
             return (variant or {}).get("barcode") or product.get("barcode")
         if src == "brand":

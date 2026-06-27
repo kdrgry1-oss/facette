@@ -246,6 +246,7 @@ HB_PRODUCT_SOURCES = [
     {"value": "name", "label": "Ürün Adı"},
     {"value": "description", "label": "Açıklama / Ön Yazı"},
     {"value": "stock_code", "label": "Stok Kodu"},
+    {"value": "id", "label": "Ürün ID (sistem benzersiz id)"},
     {"value": "card_id", "label": "Ürün Kart ID"},
     {"value": "barcode", "label": "Barkod"},
     {"value": "brand", "label": "Marka"},
