@@ -4089,21 +4089,37 @@ def _hb_local_for_attr(attr_name: str, local: dict) -> str | None:
 
 
 def _hb_value_from_name(product_name, attr: dict):
-    """Ürün adındaki bir KELİME, HB özelliğinin enum değerlerinden biriyle tam eşleşirse onu döner.
-    Örn: 'Mira Dantelli Mini Etek Ekru' + Renk(enum: ...,Ekru,Siyah) -> 'Ekru'. Yapısal renk
-    alanı olmayan, rengi yalnız adında geçen ürünler için. Tam-kelime eşleşme (parça değil) → güvenli."""
+    """Ürün adında geçen bir DEĞER, HB özelliğinin enum değerlerinden biriyle eşleşirse onu döner.
+    TEK kelime  : tam-kelime eşleşmesi ('Ekru' ∈ 'Mira Mini Etek Ekru').
+    ÇOK kelime  : değer adı, üründe geçen bitişik kelime dizisiyle eşleşir
+                  ('V Yaka' ∈ 'Alba V Yaka Uzun Triko Elbise'). Eski kod yalnız tek
+                  kelimeye baktığından 'V Yaka' gibi boşluklu değerleri KAÇIRIYORDU →
+                  HB 'Yaka Stili zorunlu' diye reddediyordu. En UZUN eşleşen değer seçilir."""
     vals = attr.get("attributeValues") or []
     if not vals or not product_name:
         return None
-    words = {_hb_norm(w) for w in re.split(r"[\s/,\.\-_()\[\]]+", str(product_name)) if w}
-    words.discard("")
-    if not words:
+    toks = [_hb_norm(w) for w in re.split(r"[\s/,\.\-_()\[\]]+", str(product_name)) if w]
+    toks = [t for t in toks if t]
+    if not toks:
         return None
+    word_set = set(toks)
+    name_padded = " " + " ".join(toks) + " "   # sınır-korumalı bitişik dizi araması için
+    best = None  # (uzunluk, ad) — en uzun/özel eşleşme kazanır ('V Yaka' > 'Yaka')
     for v in vals:
-        vn = _hb_norm(v.get("name"))
-        if vn and len(vn) >= 2 and vn in words:
-            return v.get("name")
-    return None
+        nm = v.get("name")
+        vn = _hb_norm(nm)
+        if not vn or len(vn) < 2:
+            continue
+        hit = False
+        if " " in vn:
+            # çok kelimeli değer: ada bitişik dizi olarak gömülü mü? (' v yaka ' ⊂ ' ... ')
+            if (" " + vn + " ") in name_padded:
+                hit = True
+        elif vn in word_set:
+            hit = True
+        if hit and (best is None or len(vn) > best[0]):
+            best = (len(vn), nm)
+    return best[1] if best else None
 
 
 # Renk/Beden/Materyal gibi "satıcı havuzu" enum'larını (yüzlerce-binlerce kirli serbest-girdi)
@@ -4365,22 +4381,31 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             aname = a.get("name")
             if not aname:
                 continue
-            # 1) Manuel girilmiş HB değeri (varyant > ürün)
-            raw = v_hb.get(aname) or hb_attrs_for_product.get(aname)
-            # 2) Kaydedilmiş attribute_mapping (local_attr → bu HB özelliği)
-            if not raw:
-                m = map_by_attr_id.get(aid)
-                if m and m.get("local_attr"):
-                    raw = local.get(_hb_norm(m["local_attr"]))
-            # 3) Otomatik: HB özellik adından ürün verisini türet
-            if not raw:
-                raw = _hb_local_for_attr(aname, local)
-            # 3b) Hâlâ yoksa, ürün adındaki bir kelime HB enum değeriyle TAM eşleşiyorsa kullan
-            #     (Renk yapısal alanda değil, yalnız adında geçiyorsa: "...Etek Ekru" -> Ekru)
-            if not raw:
-                raw = _hb_value_from_name(product.get("name"), a)
-            # 4) value_mapping çevirisi (Kırmızı↔Red gibi). Orijinal etiket saklanır →
-            #    map'lenen ID bu kategoride çözülemezse etikete geri düşeriz (Cinsiyet=17530 fix).
+            # ── YENİ MODEL: TEK ve GÖRÜNÜR kaynak. Ad-kazıma YOK, gizli arka-plan türetme YOK. ──
+            # Bir özellik ya VARYANTTAN gelir (ürün içinde değişen: Renk/Beden), ya da
+            # AÇIK BİR KAYNAKTAN: ürün kartındaki HB değeri · kategori sabiti · ortak default ·
+            # açık alan-eşleştirmesi. Hiçbiri yoksa boştur (zorunluysa "eksik" der, çöp basmaz).
+            anorm = _hb_norm(aname)
+            is_variant_axis = bool(a.get("variant")) or any(
+                w in anorm for w in ("renk", "color", "beden", "size", "numara"))
+            if is_variant_axis:
+                # KATMAN 1 — VARYANT EKSENİ: yalnız varyant/ürün alanından (Renk/Beden).
+                raw = _hb_local_for_attr(aname, local) or v_hb.get(aname) or hb_attrs_for_product.get(aname)
+            else:
+                # KATMAN 2 — AÇIK KAYNAK (öncelik sırası tek ve nettir):
+                #   a) ürün kartına girilmiş HB değeri (varyant > ürün) — ürüne özgü değerler
+                #   b) kategori sabiti (Varsayılan Alan Eşleştirme) — o kategoride sabit olanlar
+                #   c) ortak global default (Ortak Özellikler, ör. Cinsiyet=Kadın)
+                #   d) AÇIKÇA bir ürün alanına bağlanmışsa (attribute_mapping)
+                raw = (v_hb.get(aname) or hb_attrs_for_product.get(aname)
+                       or defaults.get(aname) or defaults.get(aid)
+                       or gad.get(anorm))
+                if not raw:
+                    m = map_by_attr_id.get(aid)
+                    if m and m.get("local_attr"):
+                        raw = local.get(_hb_norm(m["local_attr"]))
+            # value_mapping çevirisi (Kırmızı↔Red gibi). Orijinal etiket saklanır →
+            # map'lenen ID bu kategoride çözülemezse etikete geri döneriz (Cinsiyet=17530 fix).
             orig_raw = raw
             if raw:
                 mapped = vmaps.get(f"{aid}|{raw}")
@@ -4388,27 +4413,14 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                     mapped = vmaps[aid].get(str(raw))
                 if mapped:
                     raw = mapped
-            # 5) enum'a/serbest metne çöz (çözülemeyen sayısal ID → orijinal etikete düş)
+            # enum'a/serbest metne çöz (çözülemeyen sayısal ID → orijinal etikete düş, çöp filtrelenir)
             if raw not in (None, ""):
                 rv = _hb_resolve_with_fallback(a, raw, orig_raw)
                 if rv not in (None, ""):
                     attrs[aname] = rv
-            # 6) şirket default'u (per-kategori)
-            if aname not in attrs:
-                dv = defaults.get(aname) or defaults.get(aid)
-                if dv not in (None, ""):
-                    rv = _hb_resolve_value(a, dv)
-                    if rv not in (None, ""):
-                        attrs[aname] = rv
-            # 6b) global ortak-özellik default'u (panel, ör. Cinsiyet=Kadın — tüm kategoriler)
-            if aname not in attrs:
-                gdv = gad.get(_hb_norm(aname))
-                if gdv not in (None, ""):
-                    rv = _hb_resolve_value(a, gdv)
-                    if rv not in (None, ""):
-                        attrs[aname] = rv
             if a.get("required") and aname not in attrs:
                 missing_req.append(aname)
+
 
         # Taban alanlar — global "Varsayılan Alan Eşleştirme" panelinden çözülür.
         # merchantSku VARYANT BAŞINA BENZERSIZ olmalı; yoksa HB tüm bedenleri tek ürüne indirger.
