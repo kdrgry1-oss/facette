@@ -4035,6 +4035,12 @@ def _hb_value_from_name(product_name, attr: dict):
     return None
 
 
+# Renk/Beden/Materyal gibi "satıcı havuzu" enum'larını (yüzlerce-binlerce kirli serbest-girdi)
+# gerçek/temiz enum'lardan (Cinsiyet=6 değer) ayıran eşik. Üstündeki değer-listeleri pratikte
+# serbest kabul edilir → tam eşleşme yoksa ürün değeri aynen gönderilir (yanlış parçalı eşleşme yapılmaz).
+_HB_DIRTY_POOL_MIN = 200
+
+
 def _hb_resolve_value(attr: dict, raw):
     """raw değeri HB özelliğinin izin verdiği değerlerden (enum) birine çözer.
     raw bir değer ADı veya değer ID'si olabilir (Özel Değer dropdown'u id kaydediyor).
@@ -4054,32 +4060,36 @@ def _hb_resolve_value(attr: dict, raw):
     for v in vals:
         if _hb_norm(v.get("name")) == nr:
             return v.get("name")
-    # 3) En iyi parçalı/kelime eşleşmesi: tam-kelime içeren ve EN KISA değer tercih edilir.
-    #    Böylece "Ekru" daima "Altın - Ekru"ya tercih edilir (yanlış birebir-olmayan eşleşmeyi önler).
-    nr_words = set(nr.split())
-    nr2 = " ".join(nr.replace("-", " ").split())
-    best = None  # (skor, uzunluk, ad) — küçük skor + kısa ad daha iyi
-    for v in vals:
-        nm = v.get("name")
-        vn = _hb_norm(nm)
-        if not vn or len(vn) < 2:
-            continue
-        vn_words = set(vn.split())
-        vn2 = " ".join(vn.replace("-", " ").split())
-        score = None
-        if nr in vn_words:               # raw, değerin bir kelimesi: "ekru" ∈ "Altın - Ekru"
-            score = 10
-        elif vn in nr_words:             # değer, raw'ın bir kelimesi: "Ekru" ∈ "Altın Ekru"
-            score = 20
-        elif len(nr2) >= 3 and (nr2 in vn2 or vn2 in nr2):  # gevşek substring (son çare)
-            score = 100
-        if score is not None:
-            cand = (score, len(vn), nm)
-            if best is None or cand < best:
-                best = cand
-    if best:
-        return best[2]
-    if attr.get("allowCustom"):
+    # 3) En iyi parçalı/kelime eşleşmesi — YALNIZCA küçük/temiz enum'lar için.
+    #    Renk/Beden/Materyal gibi yüksek-kardinaliteli "satıcı havuzu" enum'larında (yüzlerce-binlerce
+    #    kirli serbest-girdi: "0-Gri", "690Ekru", "Altın - Ekru"...) parçalı eşleşme YANLIŞ sonuç verir
+    #    ("Ekru" → "Açık Ekru"). Bu alanlar pratikte serbest değer kabul eder (havuzdaki satıcı-custom
+    #    değerler bunun kanıtı); tam eşleşme yoksa raw'ı AYNEN göndeririz, HB yeni değeri kabul eder.
+    if len(vals) <= _HB_DIRTY_POOL_MIN:
+        nr_words = set(nr.split())
+        nr2 = " ".join(nr.replace("-", " ").split())
+        best = None  # (skor, uzunluk, ad) — küçük skor + kısa ad daha iyi
+        for v in vals:
+            nm = v.get("name")
+            vn = _hb_norm(nm)
+            if not vn or len(vn) < 2:
+                continue
+            vn_words = set(vn.split())
+            vn2 = " ".join(vn.replace("-", " ").split())
+            score = None
+            if nr in vn_words:               # raw, değerin bir kelimesi: "ekru" ∈ "Altın - Ekru"
+                score = 10
+            elif vn in nr_words:             # değer, raw'ın bir kelimesi: "Ekru" ∈ "Altın Ekru"
+                score = 20
+            elif len(nr2) >= 3 and (nr2 in vn2 or vn2 in nr2):  # gevşek substring (son çare)
+                score = 100
+            if score is not None:
+                cand = (score, len(vn), nm)
+                if best is None or cand < best:
+                    best = cand
+        if best:
+            return best[2]
+    if attr.get("allowCustom") or len(vals) > _HB_DIRTY_POOL_MIN:
         return str(raw)
     return None
 

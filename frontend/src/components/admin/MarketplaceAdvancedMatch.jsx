@@ -944,7 +944,8 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                     const q = (valSearch || "").toLocaleLowerCase("tr").trim();
                     const filtered = q ? all.filter((v) => String(v).toLocaleLowerCase("tr").includes(q)) : all;
                     const mappedN = filtered.filter((v) => valueMappings[`${selectedAttrId}|${v}`]).length;
-                    return `${filtered.length} satır · ${mappedN} eşleşti`;
+                    const dp = (currentAttr?.attributeValues?.length || 0) > 200;
+                    return dp ? `${filtered.length} değer · otomatik gönderilir` : `${filtered.length} satır · ${mappedN} eşleşti`;
                   })()}
                 </span>
               </div>
@@ -974,6 +975,10 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       const mappedId = valueMappings[`${selectedAttrId}|${lv}`] || "";
                       const isMapped = !!mappedId;
                       const mpVals = currentAttr?.attributeValues || [];
+                      // Renk/Beden/Materyal gibi HB "satıcı havuzu" alanları (yüzlerce-binlerce kirli
+                      // serbest-girdi; düz "Ekru" yok): eşleştirme anlamsız. Backend ürün değerini aynen
+                      // gönderir → dropdown yerine "otomatik gönderilir" gösterilir.
+                      const dirtyPool = mpVals.length > 200;
                       const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(mpVals, (v) => v.name) : mpVals;
                       return (
                         <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
@@ -986,9 +991,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                             </div>
                           </td>
                           <td className="px-4 py-2">
-                            {sortedMp.length === 0 ? (
+                            {(sortedMp.length === 0 || dirtyPool) ? (
                               <span className="inline-flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1" data-testid={`adv-valmap-auto-${lv}`}>
-                                ✓ Otomatik gönderilir (serbest metin)
+                                ✓ Otomatik gönderilir {sortedMp.length === 0 ? "(serbest metin)" : "(ürün değeri)"}
                               </span>
                             ) : (
                               <SearchableValueSelect
