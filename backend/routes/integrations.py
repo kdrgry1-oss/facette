@@ -4112,10 +4112,30 @@ def _hb_value_from_name(product_name, attr: dict):
 _HB_DIRTY_POOL_MIN = 200
 
 
+def _hb_is_junk_value(raw) -> bool:
+    """HB'ye ASLA gönderilmemesi gereken çöp değerler.
+    Ekranda görülen 'Yaka Stili = 2|belirtilmemis|1' gibi pipe-artefaktlar ve
+    'belirtilmemiş/diğer/yok' türü sahte-değerler. Bunlar kayıtlı hepsiburada_attributes
+    veya default_mappings'ten faithfully taşınıp HB ürününe çöp basıyordu."""
+    if raw in (None, ""):
+        return True
+    s = str(raw).strip()
+    if not s:
+        return True
+    if "|" in s:                      # "2|belirtilmemis|1" → kayıt artefaktı, asla geçerli değil
+        return True
+    n = _hb_norm(s)
+    if n in ("belirtilmemis", "diger", "other", "yok", "na", "none", "null", "bos", "seciniz", "seciniz"):
+        return True
+    return False
+
+
 def _hb_resolve_value(attr: dict, raw):
     """raw değeri HB özelliğinin izin verdiği değerlerden (enum) birine çözer.
     raw bir değer ADı veya değer ID'si olabilir (Özel Değer dropdown'u id kaydediyor).
     enum değilse serbest metin döner. Uyuşmayan ve allowCustom kapalıysa None."""
+    if _hb_is_junk_value(raw):
+        return None  # çöp/sahte değer → hiç gönderme (HB zorunlu alanı boş ister, çöp değil)
     vals = attr.get("attributeValues") or []
     if not vals:
         return str(raw)  # serbest metin / varchar
