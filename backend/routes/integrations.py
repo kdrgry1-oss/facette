@@ -4621,16 +4621,21 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
         if e:
             invalid_count += 1
             names = _parse_missing(e)
-            # HB'nin kabul ettiği geçerli değerleri ekle (küçük enum'lar için; dev havuzlarda atla).
+            # HB'nin kabul ettiği geçerli değerleri + ürünün Trendyol verisinde BİREBİR bulunanları ekle.
             cm = (cm_by_id.get(str(p.get("category_id")))
                   or cm_by_name.get((p.get("category_name") or "").strip()))
             vmap = await _hb_valid_values_map(cm.get("marketplace_category_id")) if cm else {}
+            local_p = _hb_collect_local(p, None)
+            local_vals_norm = {_hb_norm(v): v for v in local_p.values() if v not in (None, "")}
             miss = []
             for nm in names:
                 vals = vmap.get(_hb_norm(nm)) or []
+                # Ürünün TY verisinde, bu HB özelliğinin geçerli bir değerine BİREBİR uyan var mı?
+                ty_found = [vv for vv in vals if _hb_norm(vv) in local_vals_norm]
                 miss.append({"name": nm,
                              "valid_values": (vals[:12] if 0 < len(vals) <= 80 else []),
-                             "value_count": len(vals)})
+                             "value_count": len(vals),
+                             "ty_found": ty_found[:6]})
             results.append({"product_id": p.get("id"), "name": p.get("name"),
                             "category_name": p.get("category_name"),
                             "stock_code": sc, "barcode": p.get("barcode"),
@@ -4677,6 +4682,31 @@ async def hb_set_category_default(product_id: str, request: Request,
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"success": True, "category_name": cm.get("category_name"),
             "message": f"'{attr} = {value}' → {cm.get('category_name')} kategorisine sabit eklendi"}
+
+
+@router.post("/hepsiburada/products/{product_id}/set-product-attribute")
+async def hb_set_product_attribute(product_id: str, request: Request,
+                                   current_user: dict = Depends(require_admin)):
+    """Validate kırmızı kutusundan TEK TIK (yalnız bu ürün): bir zorunlu HB özelliğini
+    SADECE bu ürünün `hepsiburada_attributes` alanına yazar. Kategoriye dokunmaz —
+    üründen ürüne değişen alanlar (Yaka Stili vb.) için doğru yol budur."""
+    body = await request.json()
+    attr = (body.get("attr") or "").strip()
+    value = (body.get("value") or "").strip()
+    if not attr or not value:
+        raise HTTPException(status_code=400, detail="attr ve value zorunlu")
+    p = await db.products.find_one({"id": product_id},
+                                   {"_id": 0, "hepsiburada_attributes": 1, "name": 1})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    hb = dict(p.get("hepsiburada_attributes") or {})
+    hb[attr] = value
+    await db.products.update_one({"id": product_id},
+                                 {"$set": {"hepsiburada_attributes": hb}})
+    return {"success": True, "message": f"'{attr} = {value}' → bu ürüne uygulandı"}
+
+
+@router.get("/hepsiburada/products/{product_id}/debug-payload")
 async def hb_debug_payload(product_id: str, current_user: dict = Depends(require_admin)):
     """SALT-OKUNUR teşhis. HB'ye HİÇBİR ŞEY göndermez. Bir ürün için:
       • import_items  : create_products'a gidecek TAM kalem(ler) {categoryId, merchant, attributes}

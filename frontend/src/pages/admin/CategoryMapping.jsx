@@ -670,6 +670,23 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
     }
   };
 
+  const setProductAttribute = async (productId, attr, value) => {
+    const t = toast.loading(`'${attr} = ${value}' bu ürüne uygulanıyor...`);
+    try {
+      const res = await axios.post(
+        `${API}/integrations/hepsiburada/products/${productId}/set-product-attribute`,
+        { attr, value },
+        auth,
+      );
+      toast.dismiss(t);
+      toast.success(res.data?.message || "Uygulandı");
+      onValidate();
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e.response?.data?.detail || "Uygulanamadı");
+    }
+  };
+
   const loadBatchDetail = async (batchId) => {
     if (!batchId) return;
     setBatchLoading(true);
@@ -1042,10 +1059,25 @@ function FilteredPushPanel({ marketplace, auth, categories = [] }) {
                                       <span className="inline-flex items-center bg-red-100 border border-red-300 text-red-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
                                         {m.name}
                                       </span>
-                                      {(m.valid_values || []).length > 0 && (
+                                      {marketplace === "hepsiburada" && (m.ty_found || []).length > 0 && (
+                                        <>
+                                          <span className="text-[9px] text-emerald-600 font-bold">TY:</span>
+                                          {m.ty_found.map((vv, ti) => (
+                                            <button
+                                              key={ti}
+                                              onClick={() => setProductAttribute(r.product_id, m.name, vv)}
+                                              title="Trendyol'da bulundu — yalnız bu ürüne uygula"
+                                              className="inline-flex items-center bg-emerald-50 border border-emerald-400 text-emerald-700 hover:bg-emerald-100 text-[9px] font-bold px-1 py-0.5 rounded cursor-pointer transition-colors"
+                                            >
+                                              {vv}
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                      {(m.valid_values || []).filter((vv) => !(m.ty_found || []).includes(vv)).length > 0 && (
                                         <>
                                           <span className="text-[9px] text-gray-400">→</span>
-                                          {m.valid_values.map((vv, vi) => (
+                                          {m.valid_values.filter((vv) => !(m.ty_found || []).includes(vv)).map((vv, vi) => (
                                             marketplace === "hepsiburada" ? (
                                               <button
                                                 key={vi}
