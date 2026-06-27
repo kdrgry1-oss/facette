@@ -4420,6 +4420,30 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     except HepsiburadaError as e:
         await log_integration_event("hepsiburada", "product_import", "bulk", str(len(items)), "error", str(e))
         raise HTTPException(status_code=502, detail=str(e))
+
+    # 💰 KATALOG ≠ FİYAT/STOK. HB ürün importu fiyat/stok TAŞIMAZ (ayrı price/stock-uploads
+    # kapısı). Eski davranış: "aktar" sadece katalog gönderiyordu → "fiyat stok aktarmadı".
+    # Artık aynı SKU kaynağıyla fiyat/stok'u da gönderiyoruz (best-effort). Daha önce
+    # aktarılmış/eşleşmiş ürünlerde anında uygulanır; HB henüz eşleştirmediği yeni
+    # ürünlerde geçici olarak reddedebilir (uyarı olarak raporlanır, katalog yine gitti).
+    price_stock_msg = ""
+    price_stock = {"price_upload_id": None, "stock_upload_id": None, "errors": []}
+    try:
+        markup = await _hb_markup()
+        price_source = await _hb_price_source()
+        sku_source = await _hb_sku_source()
+        listing_items = []
+        for p in products:
+            listing_items.extend(_hb_listing_items_from_product(p, markup, price_source, sku_source))
+        if listing_items:
+            price_stock = await _hb_push_stock_price(client, listing_items, True, True)
+            if price_stock.get("errors"):
+                price_stock_msg = " · ⚠️ fiyat/stok: " + "; ".join(price_stock["errors"])
+            else:
+                price_stock_msg = f" · {len(listing_items)} kalem fiyat/stok da gönderildi"
+    except Exception as ps_err:
+        price_stock_msg = f" · ⚠️ fiyat/stok gönderilemedi: {ps_err}"
+
     _rd = (res or {}).get("data") or {}
     tracking_id = ((res or {}).get("trackingId") or (res or {}).get("tracking_id")
                    or (res or {}).get("id") or _rd.get("trackingId") or _rd.get("tracking_id"))
@@ -4433,8 +4457,10 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     return {"successful": len(items), "failed": len(skipped), "tracking_id": tracking_id,
             "environment": env_code, "environment_label": env_label,
             "host": getattr(client, "base", ""), "is_test": is_test,
+            "price_stock": price_stock,
             "message": f"{len(items)} ürün {('SANDBOX' if is_test else 'CANLI')} ortamına gönderildi"
                        + (f", {len(skipped)} atlandı (eşleşme eksik)" if skipped else "")
+                       + price_stock_msg
                        + (f" · Takip: {tracking_id}" if tracking_id else "")
                        + (" — ⚠️ SANDBOX! Gerçek mağazada görünmez." if is_test else ""),
             "skipped": skipped, "raw": res}
@@ -4454,14 +4480,22 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
         # Gerçek gönderim mantığıyla doğrula: motor zorunlu HB özelliklerini ürün
         # verisinden türetir; türetemediği zorunluları sebep olarak raporlar.
         built, e = await _build_hb_product_item(p, "")
+        # HB stok kodu = gönderimde kullanılan merchantSku kaynağı (TY ile aynı alanlar).
+        sc = _hb_merchant_sku(p) or _resolve_stock_code(p) or p.get("barcode") or ""
         if e:
             invalid_count += 1
             results.append({"product_id": p.get("id"), "name": p.get("name"),
-                            "errors": [e], "variant_count": 0})
+                            "stock_code": sc, "barcode": p.get("barcode"),
+                            "is_valid": False, "errors": [e],
+                            "missing_required_attrs": [], "unmatched_values": [],
+                            "variant_count": 0})
         else:
             valid_count += 1
             results.append({"product_id": p.get("id"), "name": p.get("name"),
-                            "errors": [], "variant_count": len(built)})
+                            "stock_code": sc, "barcode": p.get("barcode"),
+                            "is_valid": True, "errors": [],
+                            "missing_required_attrs": [], "unmatched_values": [],
+                            "variant_count": len(built)})
     return {"valid_count": valid_count, "invalid_count": invalid_count, "results": results}
 
 
