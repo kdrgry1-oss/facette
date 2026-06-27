@@ -3743,8 +3743,8 @@ def _hb_card_id(product: dict) -> str:
 def _hb_sku_base_from_source(product: dict, source: str) -> str:
     """'Satıcı Stok Kodu' kaynağına göre ürün-seviyesi temel SKU değeri."""
     src = source or "stock_code"
-    if src == "id":
-        return str(product.get("id") or "").strip()
+    if src in ("id", "variant_urun_id", "urun_id"):
+        return str(product.get("urun_id") or product.get("id") or "").strip()
     if src == "card_id":
         return _hb_card_id(product) or str(_hb_merchant_sku(product) or product.get("id") or "").strip()
     if src == "barcode":
@@ -3771,6 +3771,17 @@ def _hb_variant_sku(product: dict, variant, vi: int, source: str = "stock_code",
         sx = (local.get("beden") or local.get("size") or local.get("numara")
               or local.get("renk") or local.get("color") or "")
         return _hb_norm(sx).replace(" ", "").upper() if sx else f"V{vi + 1}"
+
+    # KULLANICI "Ürün ID" seçtiyse: her bedenin KENDİ urun_id'si varyantta (variants[].urun_id)
+    # duruyor → doğrudan onu merchantSku yap. Uydurma sonek YOK; her beden zaten benzersiz.
+    if src in ("id", "variant_urun_id", "urun_id") and variant is not None:
+        vid = str((variant or {}).get("urun_id") or "").strip()
+        if vid:
+            if used is not None:
+                if vid in used:
+                    vid = f"{vid}-V{vi + 1}"
+                used.add(vid)
+            return vid
 
     if src == "stock_code":
         # Varsayılan: varyantın kendi stok kodu/barkodu öncelikli (mevcut davranış)
@@ -4572,6 +4583,19 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
     products = _dedupe_products_by_stock_code(products)
     results = []
     valid_count = invalid_count = 0
+    sku_source = await _hb_sku_source()  # gönderimde kullanılan merchantSku kaynağı (Ürün ID vb.)
+
+    def _display_sku(p):
+        """Validate ekranındaki 'Stok Kodu' sütunu — GERÇEKTEN gidecek merchantSku'yu gösterir
+        (stok kodu DEĞİL; kullanıcı 'Ürün ID' seçtiyse beden urun_id'leri)."""
+        vs = p.get("variants") or []
+        if vs:
+            seen = set()
+            skus = [_hb_variant_sku(p, v, i, sku_source, seen) for i, v in enumerate(vs)]
+            skus = [s for s in skus if s]
+            if skus:
+                return skus[0] + (f"  +{len(skus) - 1}" if len(skus) > 1 else "")
+        return _hb_variant_sku(p, None, 0, sku_source) or _resolve_stock_code(p) or p.get("barcode") or ""
 
     # Kategori eşleşmelerini bir kez yükle (eksik zorunluların HB geçerli-değerlerini eklemek için).
     cm_list = await db.category_mappings.find(
@@ -4616,8 +4640,8 @@ async def hb_validate_products(request: Request, current_user: dict = Depends(re
         # Gerçek gönderim mantığıyla doğrula: motor zorunlu HB özelliklerini ürün
         # verisinden türetir; türetemediği zorunluları sebep olarak raporlar.
         built, e = await _build_hb_product_item(p, "")
-        # HB stok kodu = gönderimde kullanılan merchantSku kaynağı (TY ile aynı alanlar).
-        sc = _hb_merchant_sku(p) or _resolve_stock_code(p) or p.get("barcode") or ""
+        # HB stok kodu = gönderimde kullanılan merchantSku (Ürün ID seçiliyse beden urun_id).
+        sc = _display_sku(p)
         if e:
             invalid_count += 1
             names = _parse_missing(e)
@@ -4704,6 +4728,28 @@ async def hb_set_product_attribute(product_id: str, request: Request,
     await db.products.update_one({"id": product_id},
                                  {"$set": {"hepsiburada_attributes": hb}})
     return {"success": True, "message": f"'{attr} = {value}' → bu ürüne uygulandı"}
+
+
+@router.get("/hepsiburada/products/{product_id}/category-attributes")
+async def hb_product_category_attributes(product_id: str, current_user: dict = Depends(require_admin)):
+    """Ürün modalındaki 'Hepsiburada için Özellikler' bölümünü besler.
+    HB kategorisi ÜRÜNDE durmaz; category_mappings'te (yerel kategori → HB kategori) durur.
+    Burada onu çözüp HB'nin GERÇEK kategori özelliklerini (zorunlu + enum değerleri) döneriz →
+    modaldeki 'Zorunlu - Boş' kırmızı bölüm otomatik dolar."""
+    p = await db.products.find_one(
+        {"id": product_id}, {"_id": 0, "category_id": 1, "category_name": 1})
+    if not p:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    cm = await db.category_mappings.find_one(
+        {"marketplace": "hepsiburada", "category_id": p.get("category_id")}, {"_id": 0})
+    if not cm and p.get("category_name"):
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": p.get("category_name")}, {"_id": 0})
+    hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
+    if not hb_cat:
+        return {"attributes": [], "hb_category_id": None, "has_mapping": False}
+    attrs, err = await _hb_category_attributes_for(hb_cat)
+    return {"attributes": attrs or [], "hb_category_id": hb_cat, "has_mapping": True, "error": err}
 
 
 @router.get("/hepsiburada/products/{product_id}/debug-payload")

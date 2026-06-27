@@ -403,21 +403,27 @@ export default function AdminProducts() {
     }
   }, [formData.trendyol_category_id, formData.category_name, modalOpen, categories]);
 
-  // Hepsiburada: urun editorunun HB bolumu icin HB kategori ozelliklerini canli cek
+  // Hepsiburada: urun editorunun HB bolumu icin HB kategori ozelliklerini canli cek.
+  // HB kategori id URUNDE durmaz (category_mappings'te durur) — Trendyol gibi kategoriden cozulur.
+  // 1) formData.hepsiburada_category_id varsa onunla; 2) yoksa duzenlenen urunun id'siyle
+  // /products/{id}/category-attributes endpoint'inden esleme uzerinden cek → 'Zorunlu - Bos' kirmizi dolar.
   useEffect(() => {
     if (!modalOpen) return;
+    const token = localStorage.getItem('token');
+    const auth = { headers: { Authorization: `Bearer ${token}` } };
     const hbCatId = formData.hepsiburada_category_id;
     if (hbCatId) {
-      const token = localStorage.getItem('token');
-      axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, auth)
+        .then(res => setHepsiburadaAttributesList(res.data.attributes || []))
+        .catch(() => setHepsiburadaAttributesList([]));
+    } else if (formData.id) {
+      axios.get(`${API}/integrations/hepsiburada/products/${formData.id}/category-attributes`, auth)
         .then(res => setHepsiburadaAttributesList(res.data.attributes || []))
         .catch(() => setHepsiburadaAttributesList([]));
     } else {
       setHepsiburadaAttributesList([]);
     }
-  }, [formData.hepsiburada_category_id, modalOpen]);
+  }, [formData.hepsiburada_category_id, formData.id, formData.category_name, modalOpen]);
 
   // HB OTOMATİK DOLUM (yaklaşım A): Varsayılan özellikler (genel `attributes` + Teknik Detay)
   // HB kategori şemasına normalize ad + değer eşlemesiyle yazılır. Sadece BOŞ HB alanları doldurulur;
