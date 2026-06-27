@@ -544,6 +544,36 @@ def _dedupe_products_by_stock_code(products: list) -> list:
     return deduped
 
 
+def _resolve_stock_code(p: dict) -> str:
+    """Ürünün 'stok kodu'nu tek bir sırayla çözer.
+
+    Bazı ürünlerde stok kodu üst seviyede `stock_code` yerine `sku` alanında ya da
+    sadece varyantların içinde (`variants[].stock_code` / `variants[].sku`) duruyor.
+    Bu durumda panel '-' gösteriyor ve aktarımda productMainId UUID'ye düşüyordu.
+    Çözüm sırası: stock_code → sku → ilk varyant stock_code/sku → urun_karti_id.
+    Hiçbiri yoksa boş string döner (çağıran taraf barcode'a düşebilir).
+    """
+    if not isinstance(p, dict):
+        return ""
+    sc = (p.get("stock_code") or p.get("sku") or "")
+    if isinstance(sc, str):
+        sc = sc.strip()
+    if sc:
+        return str(sc)
+    for v in (p.get("variants") or []):
+        if not isinstance(v, dict):
+            continue
+        vsc = (v.get("stock_code") or v.get("sku") or "")
+        if isinstance(vsc, str):
+            vsc = vsc.strip()
+        if vsc:
+            return str(vsc)
+    kart = (p.get("urun_karti_id") or p.get("csv_card_id") or "")
+    if isinstance(kart, str):
+        kart = kart.strip()
+    return str(kart) if kart else ""
+
+
 def _normalize_attr_key(s: str) -> str:
     """Türkçe duyarsız normalize (İ/ı/ş/ğ/ü/ö/ç + birleşik nokta)."""
     s = (s or "").casefold()
@@ -934,7 +964,7 @@ async def validate_products_for_trendyol(
         results.append({
             "id": p.get("id"),
             "name": p.get("name"),
-            "stock_code": p.get("stock_code"),
+            "stock_code": _resolve_stock_code(p) or p.get("barcode") or "",
             "barcode": p.get("barcode"),
             "category_name": cat_name,
             "marketplace_category_id": mp_cat_id,
@@ -1687,7 +1717,7 @@ async def sync_products_to_trendyol(
             # 3. Base Product Details
             base_item = {
                 "title": product.get("name"),
-                "productMainId": product.get("stock_code") or product.get("id"),
+                "productMainId": _resolve_stock_code(product) or product.get("id"),
                 "brandId": int(product.get("trendyol_brand_id") or config.get("default_brand_id") or 975755),
                 "categoryId": int(trendyol_cat_id),
                 "description": clean_desc,
@@ -1715,7 +1745,7 @@ async def sync_products_to_trendyol(
                     continue
                 item = base_item.copy()
                 item["barcode"] = product.get("barcode")
-                item["stockCode"] = product.get("stock_code") or product.get("barcode")
+                item["stockCode"] = product.get("stock_code") or product.get("sku") or product.get("barcode")
                 item["quantity"] = int(product.get("stock", 0))
                 item["attributes"] = resolve_attributes(attributes, product, None, category, meta)
                 items_to_send.append(item)
@@ -1827,7 +1857,14 @@ async def sync_products_to_trendyol(
                 or "duplicate request" in trendyol_error.lower()
                 or "recurring" in trendyol_error.lower()
             ):
-                logger.info("Trendyol create reddetti (tekrarlı). price-and-inventory fallback deneniyor.")
+                # ⚠️ Ürün Trendyol'da zaten yaşıyor. İKİ İŞ birden yapılmalı:
+                #   1) price-and-inventory  → stok/fiyat senkronu (ayrı, throttle'a takılmaz kapı)
+                #   2) update_products PUT  → kategori/attribute/görsel senkronu
+                # ÖNCEKİ HATA: price-and-inventory batch dönünce burada DURULUYORDU; PUT hiç
+                # çalışmadığı için "tekrar aktardım ama özellikleri güncellenmedi" oluyordu.
+                # Artık PUT her zaman çalışır ve raporlanan batch = PUT batch'i olur (attribute
+                # sonucunu kullanıcı görsün). pi yalnızca stok/fiyat için kısa süre poll edilir.
+                logger.info("Trendyol create reddetti (tekrarlı). price-and-inventory + update_products fallback.")
                 try:
                     pi_items = []
                     for it in items_to_send:
@@ -1848,23 +1885,32 @@ async def sync_products_to_trendyol(
                             except Exception:
                                 pass
                         pi_items.append(entry)
-                    pi_response = await client.update_price_and_inventory(pi_items) if pi_items else {}
-                    pi_batch = (pi_response or {}).get("batchRequestId")
-                    if pi_batch:
+                    # 1) Stok/fiyat senkronu (best-effort)
+                    pi_batch = None
+                    try:
+                        pi_response = await client.update_price_and_inventory(pi_items) if pi_items else {}
+                        pi_batch = (pi_response or {}).get("batchRequestId")
+                        if pi_batch:
+                            logger.info(f"Tekrarlı fallback price-and-inventory batch={pi_batch}")
+                    except Exception as pi_err:
+                        logger.warning(f"Tekrarlı fallback price-and-inventory exception: {pi_err}")
+                    # 2) Kategori/attribute/görsel senkronu — HER ZAMAN çalışır
+                    upd_response = await client.update_products(items_to_send)
+                    upd_batch = (upd_response or {}).get("batchRequestId")
+                    if upd_batch:
+                        batch_id = upd_batch
+                        response = upd_response
+                        trendyol_error = None
+                        logger.info(f"Tekrarlı fallback update_products (attribute) başarılı: batch={upd_batch}")
+                    elif pi_batch:
+                        # PUT batch dönmediyse en azından stok/fiyat batch'ini takip et
                         batch_id = pi_batch
                         response = pi_response
                         trendyol_error = None
-                        logger.info(f"Trendyol price-and-inventory fallback başarılı: batch={pi_batch}")
+                        logger.info(f"Tekrarlı fallback: PUT batch yok, price-and-inventory batch={pi_batch} izleniyor.")
                     else:
-                        # Son çare: update_products PUT
-                        logger.info("price-and-inventory de batch_id dönmedi. update_products fallback.")
-                        upd_response = await client.update_products(items_to_send)
-                        upd_batch = (upd_response or {}).get("batchRequestId")
-                        if upd_batch:
-                            batch_id = upd_batch
-                            response = upd_response
-                            trendyol_error = None
-                            logger.info(f"Trendyol update_products fallback başarılı: batch={upd_batch}")
+                        upd_err = (upd_response or {}).get("message") or str(upd_response)[:500]
+                        logger.warning(f"Tekrarlı fallback update_products reddetti: {upd_err}")
                 except Exception as upd_err:
                     logger.error(f"Update fallback exception: {upd_err}")
 
