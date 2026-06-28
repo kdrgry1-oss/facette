@@ -1178,7 +1178,7 @@ export default function AdminProducts() {
       const attrObj = {
         "Yaş Grubu": "Yetişkin", "Menşei": "TR", "Cinsiyet": "Kadın",
         "Koleksiyon": "Casual/Günlük", "Ortam": "Casual/Günlük",
-        "Ek Özellik": "Mevcut Değil", "Performans": "Cool & Comfort",
+        "Ek Özellik": "Yok", "Performans": "Cool & Comfort",
         "Kutu Durumu": "Kutu Yok", "Persona": "Fashion Forward",
         ...(formData.attributes || {}),
       };
@@ -1682,7 +1682,7 @@ export default function AdminProducts() {
         "Cinsiyet": "Kadın",               // #7
         "Koleksiyon": "Casual/Günlük",     // #8
         "Ortam": "Casual/Günlük",          // #8
-        "Ek Özellik": "Mevcut Değil",      // #10
+        "Ek Özellik": "Yok",      // #10
         "Performans": "Cool & Comfort",    // #11
         "Kutu Durumu": "Kutu Yok",         // #12
         "Persona": "Fashion Forward",      // sabit
@@ -2791,7 +2791,7 @@ export default function AdminProducts() {
                   const FIXED_DEFAULT_ATTRS = {
                     "Menşei": "TR", "Cinsiyet": "Kadın", "Yaş Grubu": "Yetişkin",
                     "Ortam": "Casual/Günlük", "Koleksiyon": "Casual/Günlük",
-                    "Ek Özellik": "Mevcut Değil", "Kutu Durumu": "Kutu Yok",
+                    "Ek Özellik": "Yok", "Kutu Durumu": "Kutu Yok",
                     "Persona": "Fashion Forward", "Performans": "Cool & Comfort",
                   };
 

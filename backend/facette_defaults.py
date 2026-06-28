@@ -27,7 +27,7 @@ FACETTE_FIXED_ATTR_DEFAULTS = {
     "Yaş Grubu": "Yetişkin",
     "Ortam": "Casual/Günlük",
     "Koleksiyon": "Casual/Günlük",
-    "Ek Özellik": "Mevcut Değil",
+    "Ek Özellik": "Yok",
     "Kutu Durumu": "Kutu Yok",
     "Persona": "Fashion Forward",
     "Performans": "Cool & Comfort",
