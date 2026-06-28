@@ -4499,6 +4499,25 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                     _comp = _hb_match_fabric_from_desc(a, desc)
                     if _comp:
                         attrs[aname] = _comp
+            # MENŞEİ (ülke menüsü ~285 seçenek): HB listesinde 7 farklı "Türkiye" varyantı var
+            # ("TR - ( Türkiye )", "TR - (Türkiye)", "TR - Türkiye", "TR (Türkiye)" ...). Kartta
+            # tutulan boşluklu çöp varyant ("TR - ( Türkiye )") HB tarafında güvenilir eşleşmiyor
+            # → yanlış ülkeye (Avustralya) düşüyor. Türkiye niyetini, listenin geri kalanıyla aynı
+            # STANDART formatlı seçeneğe ("TR - (Türkiye)") deterministik sabitle (kart verisinden
+            # bağımsız, her push'ta doğru gider). KKTC hariç tutulur.
+            if ("mense" in anorm) and (a.get("attributeValues") or []):
+                _curm = _hb_norm(attrs.get(aname) or raw)
+                if _curm and ("turkiye" in _curm) and ("kibris" not in _curm):
+                    _tropts = [o.get("name") for o in (a.get("attributeValues") or [])
+                               if "turkiye" in _hb_norm(o.get("name"))
+                               and "kibris" not in _hb_norm(o.get("name"))]
+                    if _tropts:
+                        def _tr_std_score(nm):
+                            n = nm or ""
+                            return ((1 if ("(" in n and ")" in n) else 0)
+                                    + (1 if " - (" in n else 0)
+                                    + (1 if ("( " not in n and " )" not in n) else 0))
+                        attrs[aname] = sorted(_tropts, key=lambda n: (-_tr_std_score(n), len(n or "")))[0]
             if a.get("required") and aname not in attrs:
                 missing_req.append(aname)
 
