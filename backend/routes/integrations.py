@@ -3853,12 +3853,15 @@ def _hb_listing_items_from_product(product: dict, markup: float = 0.0, price_sou
                 p = v_price * (1 + markup / 100) if markup > 0 else v_price
             else:
                 p = base_price + _to_float_tr(v.get("price_diff", 0))
-            items.append({"merchantSku": sku, "price": round(p, 2),
+            # Fiyat 0/negatif ise HB'ye GÖNDERME (None → push filtresi düşürür). Stok yine gider.
+            items.append({"merchantSku": sku,
+                          "price": (round(p, 2) if (p and p > 0) else None),
                           "availableStock": int(_to_float_tr(v.get("stock", 0)))})
     else:
         sku = _hb_variant_sku(product, None, 0, sku_source)
         if sku:
-            items.append({"merchantSku": sku, "price": round(base_price, 2),
+            items.append({"merchantSku": sku,
+                          "price": (round(base_price, 2) if (base_price and base_price > 0) else None),
                           "availableStock": int(_to_float_tr(product.get("stock", 0)))})
     return items
 
@@ -4479,8 +4482,16 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
         # Garanti zorunlu olan kategoride: "Varsayılan Alan Eşleştirme"den GarantiSuresi default'u gir.
         if gar_s.isdigit() and 1 <= int(gar_s) <= 99:
             attrs.setdefault("GarantiSuresi", str(int(gar_s)))
-        # KDV (zorunlu) -> HB anahtarı "tax", tam sayı. Panel/default'tan gelir (varsayılan 10).
-        kdv_raw = _base_val("kdv", variant)
+        # KDV (zorunlu) -> HB anahtarı "tax", tam sayı.
+        # ÖNCE ürünün KENDİ KDV'si (product.vat_rate — Trendyol ile AYNI kaynak),
+        # yoksa panel/temel "Varsayılan Alan Eşleştirme" default'u (10). Böylece HB ile
+        # Trendyol aynı KDV'yi gönderir; kadın hazır giyim %10 sapması olmaz.
+        _pv = product.get("vat_rate")
+        try:
+            _pv_ok = float(str(_pv).replace("%", "").replace(",", ".")) > 0 if _pv not in (None, "") else False
+        except Exception:
+            _pv_ok = False
+        kdv_raw = _pv if _pv_ok else _base_val("kdv", variant)
         kdv_s = str(kdv_raw or "").strip().replace("%", "").replace(",", ".")
         if kdv_s:
             try:
@@ -4565,11 +4576,15 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
         for p in products:
             listing_items.extend(_hb_listing_items_from_product(p, markup, price_source, sku_source))
         if listing_items:
+            no_price = sum(1 for it in listing_items if it.get("price") is None)
             price_stock = await _hb_push_stock_price(client, listing_items, True, True)
             if price_stock.get("errors"):
                 price_stock_msg = " · ⚠️ fiyat/stok: " + "; ".join(price_stock["errors"])
             else:
                 price_stock_msg = f" · {len(listing_items)} kalem fiyat/stok da gönderildi"
+            if no_price:
+                price_stock_msg += (f" · ⚠️ {no_price} kalemde fiyat 0/boş → fiyat GÖNDERİLMEDİ "
+                                    f"(ürün fiyatını gir; stok yine gönderildi)")
     except Exception as ps_err:
         price_stock_msg = f" · ⚠️ fiyat/stok gönderilemedi: {ps_err}"
 
