@@ -51,19 +51,29 @@ def facette_company_value(attr_name):
     'Üretici Adı', 'Birincil/İkincil/Üçüncül İthalatçı Adı' → firma adı;
     '...Mail...' → e-posta; '...Adres...' → adres. Değilse None (akış bozulmaz).
     """
+    field = company_field_for_attr(attr_name)
+    return FACETTE_COMPANY[field] if field else None
+
+
+def company_field_for_attr(attr_name):
+    """GPSR üretici/ithalatçı özellik adının hangi şirket alanına denk geldiğini döndürür:
+    'company_name' | 'email' | 'address' | None.
+    İSİM-EŞLEME TEK KAYNAK — hem push gap-fill (facette_company_value) hem kategori
+    şirket-doldurma (category_mapping._resolve_company_value) bunu kullanır.
+    """
     if not attr_name:
         return None
     nm = _norm(attr_name)  # İthalatçı → "ithalatci" (combining-dot temizlenir)
     if not _re.search(r"uretici|ithalatc|imalatc", nm):
         return None
     if "mail" in nm or "posta" in nm or "email" in nm:
-        return FACETTE_COMPANY["email"]
+        return "email"
     if "adres" in nm:
-        return FACETTE_COMPANY["address"]
+        return "address"
     if _re.search(r"\bad[i]\b|\bism", nm) or "unvan" in nm or "firma" in nm \
             or nm in ("uretici", "ithalatci"):
-        return FACETTE_COMPANY["company_name"]
-    return None  # üretici/ithalatçı'nın tanımadığımız alt-alanı (telefon/vergi no…) → dokunma
+        return "company_name"
+    return None  # tanımadığımız alt-alan (telefon/vergi no…) → dokunma
 
 
 def facette_fixed_value_for(attr_name):

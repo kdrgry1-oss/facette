@@ -770,29 +770,17 @@ async def upload_attribute_cache(
 # ŞİRKET BİLGİSİ → MP "Üretici / İthalatçı" özelliklerini OTOMATİK doldur
 # ─────────────────────────────────────────────────────────────────────────────
 def _resolve_company_value(attr_name: str, company: dict):
-    """Trendyol/MP attribute adından şirket bilgisini eşler.
-    - "...mail..." → email
-    - "...adres..." → address (mail içermiyorsa)
-    - "üretici/ithalatçı ad(ı)" → company_name (mail/adres içermiyorsa)
-    """
-    import re as _re
+    """Trendyol/MP attribute adindan sirket bilgisini esler.
+    ISIM-ESLEME tek kaynaktan gelir: facette_defaults.company_field_for_attr.
+    Deger settings.main.company_info'dan (company_name/email/address)."""
     if not attr_name or not company:
         return None
-    nm = attr_name.lower().strip()
-    has_uretici_or_ithalatci = bool(_re.search(r"üretici|i?thala?tç[ıi]|i?thalatci", nm))
-    if not has_uretici_or_ithalatci:
+    from facette_defaults import company_field_for_attr
+    field = company_field_for_attr(attr_name)
+    if not field:
         return None
-    if "mail" in nm:
-        v = (company.get("email") or "").strip()
-        return v or None
-    if "adres" in nm:
-        v = (company.get("address") or "").strip()
-        return v or None
-    # "Üretici Adı" / "Birincil İthalatçı Adı" / "İhracatçı Adı"
-    if _re.search(r"\bad[ıi]\b|\bismi?\b|\bunvan", nm):
-        v = (company.get("company_name") or "").strip()
-        return v or None
-    return None
+    v = (company.get(field) or "").strip()
+    return v or None
 
 
 @router.post("/{marketplace}/{local_category_id}/fill-company-defaults")

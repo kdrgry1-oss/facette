@@ -35,7 +35,11 @@ Değerler **isimle** tutulur (value_id değil). Her pazaryeri push çekirdeği d
 Bu, Trendyol mantığının aynısıdır; HB de aynı isim-çözümlemeyle çalışır.
 
 ## 3) GPSR — Üretici / İthalatçı (ayrı alan DEĞİL, free-text attribute)
-`facette_company_value()` ile ada göre çözülür:
+İsim-eşleme **TEK KAYNAK**: `facette_defaults.company_field_for_attr(attr_name)` → `company_name|email|address|None`.
+- Push gap-fill: `facette_company_value()` bunu FACETTE_COMPANY ile kullanır.
+- Kategori şirket-doldurma: `category_mapping._resolve_company_value()` bunu settings.main.company_info ile kullanır (mükerrer mantık kaldırıldı, delege eder).
+
+Eşleme:
 - "Üretici/İthalatçı … Adı" → **FACETTE DIŞ TİCARET A.Ş.**
 - "… Mail …" → **info@facette.com.tr**
 - "… Adres …" → **İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3**
