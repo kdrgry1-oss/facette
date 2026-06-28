@@ -2776,13 +2776,27 @@ export default function AdminProducts() {
 
                     // HB bolumu HB'nin kendi kategori ozelliklerinden beslenir
                     // (Beden/Renk/Cinsiyet + HB enum degerleri). Diger pazaryerleri global listeden.
-                    const hbSource = (hepsiburadaAttributesList || []).map(a => ({
-                      id: a.id,
-                      name: a.name,
-                      values: (a.attributeValues || []).map(v => v.name),
-                      required: !!a.required,
-                      allowCustom: !!a.allowCustom,
-                    }));
+                    // HB bazı kategorilerde aynı özelliği iki kez döndürür (örn. "Renk" hem
+                    // varyant hem normal attribute) → modalde ÇİFT alan çıkıyordu. Normalize
+                    // ada göre tekilleştir: değerli/zorunlu olanı tut, diğerini at.
+                    const _hbNorm = (s) => (s || "").toLocaleLowerCase("tr").replace(/[\s\-_/().]/g, "").trim();
+                    const _hbMap = new Map();
+                    (hepsiburadaAttributesList || []).forEach(a => {
+                      const nk = _hbNorm(a.name);
+                      if (!nk) return;
+                      const cand = {
+                        id: a.id,
+                        name: a.name,
+                        values: (a.attributeValues || []).map(v => v.name),
+                        required: !!a.required,
+                        allowCustom: !!a.allowCustom,
+                      };
+                      const prev = _hbMap.get(nk);
+                      if (!prev) { _hbMap.set(nk, cand); return; }
+                      const score = (x) => (x.values.length > 0 ? 2 : 0) + (x.required ? 1 : 0);
+                      if (score(cand) > score(prev)) _hbMap.set(nk, cand);
+                    });
+                    const hbSource = [..._hbMap.values()];
 
                     // TRENDYOL: kendi kategori özelliklerinin TÜM izin verilen değerlerini
                     // (attributeValues) global kütüphaneyle BİRLEŞTİR ve global'de olmayan
