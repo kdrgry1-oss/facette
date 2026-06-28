@@ -1158,6 +1158,45 @@ async def _sort_variants_by_pool(variants: list) -> list:
     return sorted(variants, key=_k)
 
 
+@router.post("/{product_id}/copy-attributes-to-siblings")
+async def copy_attributes_to_siblings(product_id: str, current_user: dict = Depends(require_admin)):
+    """Bu rengin ürün ÖZELLİKLERİNİ (Kol Tipi, Yaka Stili, Kumaş, Kalıp... + HB/Temu map'leri)
+    AYNI modelin diğer renk kartlarına (csv_card_id) kopyalar. RENK/BEDEN'e DOKUNMAZ:
+    Renk/Web Color özellikleri ve her kartın kendi bedenleri/varyant urun_id/barkod/stok korunur.
+    Tekten bölünen renk kartlarının özelliklerini tek tıkla birebir eşitlemek için."""
+    src = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not src:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    card_id = src.get("csv_card_id")
+    if not card_id:
+        return {"updated": 0, "siblings": 0, "detail": "Renk kardeşi yok (csv_card_id boş)."}
+
+    COLOR_NAMES = {"renk", "web color", "color"}
+    def _n(s): return (s or "").strip().lower()
+
+    src_attrs_nc = [a for a in (src.get("attributes") or []) if _n(a.get("name")) not in COLOR_NAMES]
+    src_hb_nc = {k: v for k, v in (src.get("hepsiburada_attributes") or {}).items() if _n(k) not in COLOR_NAMES}
+    src_temu_nc = {k: v for k, v in (src.get("temu_attributes") or {}).items() if _n(k) not in COLOR_NAMES}
+
+    updated, sib_ids = 0, []
+    cursor = db.products.find({"csv_card_id": card_id, "id": {"$ne": src["id"]}}, {"_id": 0})
+    async for s in cursor:
+        s_color = [a for a in (s.get("attributes") or []) if _n(a.get("name")) in COLOR_NAMES]
+        s_hb_color = {k: v for k, v in (s.get("hepsiburada_attributes") or {}).items() if _n(k) in COLOR_NAMES}
+        s_temu_color = {k: v for k, v in (s.get("temu_attributes") or {}).items() if _n(k) in COLOR_NAMES}
+        await db.products.update_one(
+            {"id": s["id"]},
+            {"$set": {
+                "attributes": src_attrs_nc + s_color,            # renk hariç özellikler kaynakla aynı
+                "hepsiburada_attributes": {**src_hb_nc, **s_hb_color},
+                "temu_attributes": {**src_temu_nc, **s_temu_color},
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }})
+        updated += 1
+        sib_ids.append(s["id"])
+    return {"updated": updated, "siblings": updated, "sibling_ids": sib_ids}
+
+
 @router.get("/{product_id}/color-siblings")
 async def get_color_siblings(product_id: str):
     """Aynı modelin (csv_card_id) farklı renk varyantlarını getir.

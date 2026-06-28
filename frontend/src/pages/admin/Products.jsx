@@ -2747,6 +2747,22 @@ export default function AdminProducts() {
                     setFormData(next);
                   };
 
+                  // Renk kardeşlerine özellik kopyala: tekten bölünen renk kartlarının
+                  // özelliklerini (Kol Tipi, Yaka Stili, Kumaş... + HB/Temu) birebir eşitler.
+                  // RENK/BEDEN'e dokunmaz. Önce bu kart KAYDEDİLMİŞ olmalı (DB'den kopyalanır).
+                  const copyAttrsToSiblings = async () => {
+                    if (!formData.id) { alert("Önce ürünü kaydet."); return; }
+                    if (!window.confirm("Bu rengin özellikleri (Kol Tipi, Yaka Stili, Kumaş vb. — RENK/BEDEN HARİÇ) aynı modelin diğer renk kartlarına kopyalanacak.\n\nÖnce bu kartı KAYDETTİĞİNDEN emin ol (DB'den kopyalanır). Devam edilsin mi?")) return;
+                    try {
+                      const token = localStorage.getItem('token');
+                      const res = await axios.post(`${API}/products/${formData.id}/copy-attributes-to-siblings`, {}, { headers: { Authorization: `Bearer ${token}` } });
+                      const u = res.data?.updated ?? 0;
+                      alert(u > 0 ? `${u} renk kardeşine kopyalandı. Kartları açıp doğrula.` : (res.data?.detail || "Renk kardeşi bulunamadı."));
+                    } catch (e) {
+                      alert("Kopyalama başarısız: " + (e?.response?.data?.detail || e.message));
+                    }
+                  };
+
                   const renderSection = (marketplace, title, accent, logo) => {
                     const mapKey = marketplace === 'trendyol' ? 'attributes'
                                  : marketplace === 'hepsiburada' ? 'hepsiburada_attributes'
@@ -2941,6 +2957,20 @@ export default function AdminProducts() {
 
                   return (
                     <div className="space-y-6">
+                      {formData.id && (
+                        <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3">
+                          <div className="text-xs text-amber-800 leading-relaxed">
+                            <span className="font-bold">Renk kardeşleri:</span> Bu kartın özelliklerini (Kol Tipi, Yaka Stili, Kumaş… — renk/beden hariç) aynı modelin diğer renk kartlarına kopyala. Önce bu kartı kaydet.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={copyAttrsToSiblings}
+                            className="shrink-0 px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors"
+                          >
+                            Renk kardeşlerine kopyala
+                          </button>
+                        </div>
+                      )}
                       {/* Teknik Detay paneli KALDIRILDI (Kadir): aşağıdaki "Trendyol/HB/Temu
                           için Özellikler" bölümleriyle mükerrer oluyordu. technicalDetails state'i
                           ve kaydı arka planda korunur; yalnızca bu mükerrer düzenleme paneli gizlendi. */}
