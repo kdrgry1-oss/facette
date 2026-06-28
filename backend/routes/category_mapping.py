@@ -395,6 +395,24 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
     for a in base_list:
         await _add(a)
 
+    # İSİM BAZLI DEDUP: HB bazı kategorilerde aynı adı taşıyan iki ayrı attribute döndürebilir
+    # (ör. Elbise'de "Renk" → hem `renk_variant_property` [varyant ekseni, zorunlu, ~1999 değer]
+    #  hem de `renk` [opsiyonel katalog, ~1042 değer]). UI'da mükerrer görünür, kafa karıştırır.
+    # Aynı normalize adlı attribute'lardan EN İYİsini tut (varyant > zorunlu > en çok değer),
+    # diğerlerini at. Varyant Renk korunduğundan renk eksenine gönderim ETKİLENMEZ.
+    if out:
+        _best_by_name = {}
+        for _a in out:
+            _k = _sysnorm(_a.get("name"))
+            _score = (1 if _a.get("variant") else 0,
+                      1 if _a.get("required") else 0,
+                      len(_a.get("attributeValues") or []))
+            _cur = _best_by_name.get(_k)
+            if _cur is None or _score > _cur[0]:
+                _best_by_name[_k] = (_score, id(_a))
+        _keep_ids = {v[1] for v in _best_by_name.values()}
+        out = [_a for _a in out if id(_a) in _keep_ids]
+
     try:
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(

@@ -64,6 +64,18 @@ function _normVal(s) {
   return x.replace(/[^a-z0-9]/g, "");
 }
 
+// FACETTE sabit varsayılan değerleri (backend/facette_defaults.py FACETTE_FIXED_ATTR_DEFAULTS ile
+// uyumlu). Bu özelliklere DEĞER EŞLEŞTİRMESİ GEREKMEZ — her üründe bu sabit değer gönderilir.
+const FIXED_DEFAULT_VALUES = {
+  "menşei": "Türkiye", "cinsiyet": "Kadın", "yaş grubu": "Yetişkin",
+  "ortam": "Casual/Günlük", "koleksiyon": "Casual/Günlük", "ek özellik": "Yok",
+  "kutu durumu": "Kutu Yok", "persona": "Fashion Forward", "performans": "Cool & Comfort",
+};
+function _fixedDefaultFor(name) {
+  const k = (name || "").toLocaleLowerCase("tr").trim();
+  return FIXED_DEFAULT_VALUES[k] || null;
+}
+
 function sortLikeSize(arr, getName) {
   return [...(arr || [])].sort((a, b) => {
     const ra = _sizeRank(getName(a));
@@ -138,9 +150,22 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
 // ─── Aranabilir Trendyol Değer Seçici (Popover + Command) ───────────────────
 function SearchableValueSelect({ value, options, onChange, placeholder, testId, color = "orange" }) {
   const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
   const selected = (options || []).find((o) => String(o.id) === String(value));
+  // Büyük listelerde (Renk ~1999, Menşei ~285) TÜM seçenekleri DOM'a basmak donmaya yol açar.
+  // Aramaya göre filtrele ve en fazla 250 seçenek göster; seçili olanı her zaman dahil et.
+  const nq = _normVal(q);
+  const filtered = React.useMemo(() => {
+    const base = nq
+      ? (options || []).filter((o) => _normVal(o.name).includes(nq))
+      : (options || []);
+    const top = base.slice(0, 250);
+    if (selected && !top.some((o) => String(o.id) === String(selected.id))) top.unshift(selected);
+    return top;
+  }, [options, nq, selected]);
+  const moreCount = Math.max(0, (nq ? (options || []).filter((o) => _normVal(o.name).includes(nq)).length : (options || []).length) - 250);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -158,28 +183,31 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
         </button>
       </PopoverTrigger>
       <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]" align="start">
-        <Command filter={(val, search) => (_normVal(val).includes(_normVal(search)) ? 1 : 0)}>
-          <CommandInput placeholder="Değer ara..." data-testid={`${testId}-search`} />
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Değer ara..." value={q} onValueChange={setQ} data-testid={`${testId}-search`} />
           <CommandList>
             <CommandEmpty>Eşleşen değer yok</CommandEmpty>
             <CommandGroup>
               <CommandItem
                 value="__none__"
-                onSelect={() => { onChange(""); setOpen(false); }}
+                onSelect={() => { onChange(""); setOpen(false); setQ(""); }}
               >
                 <span className="text-gray-400">— seçilmemiş —</span>
               </CommandItem>
-              {(options || []).map((opt) => (
+              {filtered.map((opt) => (
                 <CommandItem
                   key={opt.id}
                   value={`${opt.name} ${opt.id}`}
-                  onSelect={() => { onChange(String(opt.id)); setOpen(false); }}
+                  onSelect={() => { onChange(String(opt.id)); setOpen(false); setQ(""); }}
                   data-testid={`${testId}-opt-${opt.id}`}
                 >
                   <Check size={14} className={String(opt.id) === String(value) ? "opacity-100 text-green-600" : "opacity-0"} />
                   <span className="truncate">{opt.name}</span>
                 </CommandItem>
               ))}
+              {moreCount > 0 && (
+                <div className="px-3 py-1.5 text-[10px] text-gray-400">+{moreCount} sonuç daha — aramayı daraltın</div>
+              )}
             </CommandGroup>
           </CommandList>
         </Command>
@@ -661,18 +689,22 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   const [mpAttrs, setMpAttrs] = useState([]);
   const [localValues, setLocalValues] = useState({});
   const [valueMappings, setValueMappings] = useState({});
+  const [defaults, setDefaults] = useState({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedAttrId, setSelectedAttrId] = useState("");
   const [hint, setHint] = useState("");
   const [valSearch, setValSearch] = useState("");
   const [attrSearch, setAttrSearch] = useState("");
+  const didLoadV = useRef(false);
+  const autosaveV = useRef(null);
   // Attribute değiştiğinde aramayı sıfırla
   useEffect(() => { setValSearch(""); }, [selectedAttrId]);
   const color = MP_COLORS[marketplace] || "orange";
 
   const load = useCallback(async () => {
     if (!category) return;
+    didLoadV.current = false;        // yükleme bitene kadar autosave tetiklenmesin
     setLoading(true);
     try {
       const [a, v] = await Promise.all([
@@ -691,16 +723,38 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       setMpAttrs(attrs);
       setLocalValues(lv);
       setValueMappings(v.data?.value_mappings || {});
+      setDefaults(a.data?.default_mappings || {});
       setHint(a.data?.hint || "");
-      if (attrs.length && !selectedAttrId) setSelectedAttrId(String(attrs[0].id || attrs[0].attribute?.id));
+      // Seçili özelliği KORU (yeni kategoride yoksa ilkine düş) — sekme değişiminde reload YOK,
+      // bu yüzden buraya yalnız modal/kategori ilk açıldığında gelinir.
+      setSelectedAttrId((prev) => {
+        const valid = prev && attrs.some((x) => String(x.id ?? x.attribute?.id) === String(prev));
+        return valid ? prev : String(attrs[0]?.id ?? attrs[0]?.attribute?.id ?? "");
+      });
     } catch {
       toast.error("Değerler yüklenemedi");
     } finally {
       setLoading(false);
+      didLoadV.current = true;
     }
-  }, [marketplace, category, selectedAttrId]);
+  }, [marketplace, category]);
 
   useEffect(() => { if (open && category) load(); }, [open, category, load]);
+
+  // Otomatik kaydet: değer eşleştirmeleri değişince debounce ile sessizce kaydet → özellik
+  // sekmeleri arası gezerken VEYA modal kapanınca eşleştirmeler KAYBOLMAZ (madde 2).
+  useEffect(() => {
+    if (!open || !category || !didLoadV.current) return;
+    if (autosaveV.current) clearTimeout(autosaveV.current);
+    autosaveV.current = setTimeout(() => {
+      axios.post(
+        `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
+        { value_mappings: valueMappings },
+        { headers: auth() }
+      ).catch(() => {});
+    }, 800);
+    return () => { if (autosaveV.current) clearTimeout(autosaveV.current); };
+  }, [valueMappings, open, category, marketplace]);
 
   const save = async () => {
     setSaving(true);
@@ -906,6 +960,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                     >
                       <span className="truncate">{name}</span>
                       <span className="flex items-center gap-1 shrink-0">
+                        {_fixedDefaultFor(name) && (
+                          <span className="text-[8px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded font-bold" title="Varsayılan değer tanımlı">VS</span>
+                        )}
                         {mappedCount > 0 && (
                           <span className="text-[9px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">
                             {mappedCount}
@@ -922,6 +979,21 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
 
             {/* Sağ taraf — değer tablosu */}
             <div className="flex-1 border rounded-lg overflow-auto">
+              {/* Sabit/önceden tanımlı varsayılan değer uyarısı (madde 1): bu özelliğe ait varsayılan
+                  zaten tanımlıysa değer eşleştirmesi gerekmez — her üründe bu değer gönderilir. */}
+              {(() => {
+                const fd = _fixedDefaultFor(attrName) || defaults?.[attrName];
+                if (!fd) return null;
+                return (
+                  <div className="bg-blue-50 border-b border-blue-200 px-3 py-2 text-xs text-blue-800 flex items-center gap-2" data-testid="adv-val-default-banner">
+                    <Check size={14} className="text-blue-600 shrink-0" />
+                    <span>
+                      <b>Varsayılan değer tanımlandı:</b> "{fd}" — bu özellik için değer eşleştirmesi gerekmez,
+                      her üründe bu değer gönderilir. Yine de aşağıdan istisna eşleştirebilirsiniz.
+                    </span>
+                  </div>
+                );
+              })()}
               {/* Arama kutusu */}
               <div className="bg-white border-b px-3 py-2 sticky top-0 z-10 flex items-center gap-2">
                 <Search size={14} className="text-gray-400" />
@@ -944,8 +1016,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                     const q = (valSearch || "").toLocaleLowerCase("tr").trim();
                     const filtered = q ? all.filter((v) => String(v).toLocaleLowerCase("tr").includes(q)) : all;
                     const mappedN = filtered.filter((v) => valueMappings[`${selectedAttrId}|${v}`]).length;
-                    const dp = (currentAttr?.attributeValues?.length || 0) > 200;
-                    return dp ? `${filtered.length} değer · otomatik gönderilir` : `${filtered.length} satır · ${mappedN} eşleşti`;
+                    return `${filtered.length} satır · ${mappedN} eşleşti`;
                   })()}
                 </span>
               </div>
@@ -976,8 +1047,8 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       const isMapped = !!mappedId;
                       const mpVals = currentAttr?.attributeValues || [];
                       // Renk/Beden/Materyal gibi HB "satıcı havuzu" alanları (yüzlerce-binlerce kirli
-                      // serbest-girdi; düz "Ekru" yok): eşleştirme anlamsız. Backend ürün değerini aynen
-                      // gönderir → dropdown yerine "otomatik gönderilir" gösterilir.
+                      // serbest-girdi). Eşleşme yoksa backend ürünün KENDİ değerini aynen gönderir;
+                      // yine de OTOMATİK EŞLEŞENİ GÖSTER + gerektiğinde MANUEL düzeltilebilsin (madde 3-4).
                       const dirtyPool = mpVals.length > 200;
                       const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(mpVals, (v) => v.name) : mpVals;
                       return (
@@ -991,18 +1062,30 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                             </div>
                           </td>
                           <td className="px-4 py-2">
-                            {(sortedMp.length === 0 || dirtyPool) ? (
-                              <span className="inline-flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1" data-testid={`adv-valmap-auto-${lv}`}>
-                                ✓ Otomatik gönderilir {sortedMp.length === 0 ? "(serbest metin)" : "(ürün değeri)"}
-                              </span>
+                            {sortedMp.length === 0 ? (
+                              // HB değer listesi yok (serbest metin alanı) → düzenlenebilir kutu.
+                              // Boşsa ürünün kendi değeri (lv) gönderilir; yazınca o değer gönderilir.
+                              <input
+                                type="text"
+                                value={mappedId}
+                                onChange={(e) =>
+                                  setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: e.target.value }))
+                                }
+                                placeholder={`ürün değeri: ${lv}`}
+                                className={`border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-${color}-300`}
+                                data-testid={`adv-valmap-free-${lv}`}
+                              />
                             ) : (
+                              // Listeli alan (dirty pool dahil) → aranabilir dropdown; oto-eşleşen değer
+                              // dolu gelir, yanlışsa manuel değiştirilebilir. Eşleşmemişse placeholder
+                              // ürünün kendi değerinin gönderileceğini belirtir.
                               <SearchableValueSelect
                                 value={mappedId}
                                 options={sortedMp}
                                 onChange={(val) =>
                                   setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: val }))
                                 }
-                                placeholder="— seçilmemiş —"
+                                placeholder={dirtyPool ? `ürün değeri: ${lv}` : "— seçilmemiş —"}
                                 color={color}
                                 testId={`adv-valmap-${lv}`}
                               />
