@@ -412,17 +412,18 @@ export default function AdminProducts() {
     const token = localStorage.getItem('token');
     const auth = { headers: { Authorization: `Bearer ${token}` } };
     const hbCatId = formData.hepsiburada_category_id;
-    if (hbCatId) {
-      axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, auth)
-        .then(res => setHepsiburadaAttributesList(res.data.attributes || []))
-        .catch(() => setHepsiburadaAttributesList([]));
-    } else if (formData.id) {
-      axios.get(`${API}/integrations/hepsiburada/products/${formData.id}/category-attributes`, auth)
-        .then(res => setHepsiburadaAttributesList(res.data.attributes || []))
-        .catch(() => setHepsiburadaAttributesList([]));
-    } else {
-      setHepsiburadaAttributesList([]);
-    }
+    // Once urunun kategori eslemesinden coz (en guvenilir, mapping uzerinden);
+    // bos donerse formData.hepsiburada_category_id ile dene.
+    const byProduct = () => formData.id
+      ? axios.get(`${API}/integrations/hepsiburada/products/${formData.id}/category-attributes`, auth).then(r => r.data.attributes || [])
+      : Promise.resolve([]);
+    const byCat = () => hbCatId
+      ? axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, auth).then(r => r.data.attributes || [])
+      : Promise.resolve([]);
+    byProduct()
+      .then(list => (list && list.length) ? list : byCat())
+      .then(list => setHepsiburadaAttributesList(list || []))
+      .catch(() => setHepsiburadaAttributesList([]));
   }, [formData.hepsiburada_category_id, formData.id, formData.category_name, modalOpen]);
 
   // HB OTOMATİK DOLUM (yaklaşım A): Varsayılan özellikler (genel `attributes` + Teknik Detay)
@@ -1539,6 +1540,10 @@ export default function AdminProducts() {
       setTechnicalDetails({});
     }
     setFormData({
+      id: product.id,
+      category_id: product.category_id,
+      trendyol_category_id: product.trendyol_category_id,
+      hepsiburada_category_id: product.hepsiburada_category_id,
       name: product.name || "",
       slug: product.slug || "",
       description: product.description || "",
