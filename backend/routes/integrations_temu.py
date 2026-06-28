@@ -299,6 +299,20 @@ async def temu_egress_ip(current_user=Depends(require_admin)):
 
 @router.post("/products")
 async def temu_create_product(req: ProductCreateReq, current_user=Depends(require_admin)):
+    # 🎯 FACETTE SABİT VARSAYILANLAR (gap-fill): ürünün taşımadığı ortak özellikleri
+    # (Menşei/Cinsiyet/Yaş Grubu/Ortam/Ek Özellik/Kutu Durumu/Persona/Performans +
+    # Üretici/İthalatçı GPSR) Temu attribute'larına ekle. Mevcut değer DOKUNULMAZ.
+    from facette_defaults import FACETTE_FIXED_ATTR_DEFAULTS, FACETTE_COMPANY, _norm as _fnorm
+    attrs_in = dict(req.attributes or {})
+    _have = {_fnorm(k) for k in attrs_in}
+    for k, v in FACETTE_FIXED_ATTR_DEFAULTS.items():
+        if _fnorm(k) not in _have:
+            attrs_in[k] = v
+    for label, val in (("Üretici Adı", FACETTE_COMPANY["company_name"]),
+                       ("Üretici Mail Adresi", FACETTE_COMPANY["email"]),
+                       ("Üretici Adres Bilgisi", FACETTE_COMPANY["address"])):
+        if _fnorm(label) not in _have:
+            attrs_in[label] = val
     payload = {
         "product_name": req.name,
         "product_description": req.description,
@@ -307,7 +321,7 @@ async def temu_create_product(req: ProductCreateReq, current_user=Depends(requir
         "currency": req.currency,
         "primary_image": req.images[0] if req.images else "",
         "additional_images": req.images[1:],
-        "attributes": [{"attribute_name": k, "attribute_value": str(v)} for k, v in req.attributes.items()],
+        "attributes": [{"attribute_name": k, "attribute_value": str(v)} for k, v in attrs_in.items()],
         "variants": req.variants,
     }
     return await _temu_request("POST", "/product/create", json_body=payload)

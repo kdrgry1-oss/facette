@@ -14,6 +14,7 @@ import httpx
 import hashlib
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
+from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations"])
 
@@ -1627,6 +1628,25 @@ async def sync_products_to_trendyol(
                 _push(m_ty_id, value_id=auto_vid, custom=lval)
             else:
                 _push(m_ty_id, custom=lval)
+
+        # 🎯 FACETTE SABİT VARSAYILANLAR (gap-fill, EN SON):
+        # Menşei=Türkiye · Cinsiyet=Kadın · Yaş Grubu=Yetişkin · Ortam/Koleksiyon=Casual/Günlük ·
+        # Ek Özellik=Mevcut Değil · Kutu Durumu=Kutu Yok · Persona=Fashion Forward ·
+        # Performans=Cool & Comfort · Üretici/İthalatçı (GPSR)=FACETTE bilgileri.
+        # Yalnız ürünün DOLDURMADIĞI (processed olmayan) Trendyol özelliğine yazılır; listeli
+        # alanlar ADIYLA value_id'ye çözülür (Türkiye→TR), serbest alanlar custom gider.
+        for m_ty_id, m_meta in meta.items():
+            if m_ty_id in processed:
+                continue
+            fv = facette_fixed_value_for(m_meta.get("name") or "")
+            if not fv:
+                continue
+            name_map = m_meta.get("value_name_to_id") or {}
+            auto_vid = _resolve_value_id(name_map, fv) if name_map else None
+            if auto_vid:
+                _push(m_ty_id, value_id=auto_vid, custom=fv)
+            else:
+                _push(m_ty_id, custom=fv)
 
         return item_attrs
     
@@ -4404,11 +4424,13 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 raw = _hb_local_for_attr(aname, local) or v_hb.get(aname) or hb_attrs_for_product.get(aname)
             else:
                 # KATMAN 2 — BİREBİR eşleşen açık kaynak (ad-kazıma / fuzzy tahmin YOK):
-                #   kart(HB) → TRENDYOL aynı-adlı özellik → kategori sabiti → ortak default → alan-eşleştirme
+                #   kart(HB) → TRENDYOL aynı-adlı özellik → kategori sabiti → ortak default →
+                #   FACETTE sabit varsayılan (Menşei/Cinsiyet/Yaş Grubu/…, Üretici/İthalatçı) → alan-eşleştirme
                 raw = (v_hb.get(aname) or hb_attrs_for_product.get(aname)
                        or local.get(anorm)
                        or defaults.get(aname) or defaults.get(aid)
-                       or gad.get(anorm))
+                       or gad.get(anorm)
+                       or facette_fixed_value_for(aname))
                 if not raw:
                     m = map_by_attr_id.get(aid)
                     if m and m.get("local_attr"):

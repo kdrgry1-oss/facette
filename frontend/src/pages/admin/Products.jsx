@@ -1174,8 +1174,14 @@ export default function AdminProducts() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      // Build attributes array - auto-add Yaş Grubu and Menşei if missing
-      const attrObj = { "Yaş Grubu": "Yetişkin", "Menşei": "TR", ...(formData.attributes || {}) };
+      // FACETTE SABİT VARSAYILANLAR — her kayıtta boş kalanlar doldurulur (kullanıcı değeri ezilmez).
+      const attrObj = {
+        "Yaş Grubu": "Yetişkin", "Menşei": "TR", "Cinsiyet": "Kadın",
+        "Koleksiyon": "Casual/Günlük", "Ortam": "Casual/Günlük",
+        "Ek Özellik": "Mevcut Değil", "Performans": "Cool & Comfort",
+        "Kutu Durumu": "Kutu Yok", "Persona": "Fashion Forward",
+        ...(formData.attributes || {}),
+      };
       // #16: "Yaka" formdan kaldırıldı; arka planda lazımsa "Yaka Tipi" değerinden türet.
       if (attrObj["Yaka Tipi"] && !attrObj["Yaka"]) attrObj["Yaka"] = attrObj["Yaka Tipi"];
       const attributesArray = Object.entries(attrObj)
@@ -1679,6 +1685,7 @@ export default function AdminProducts() {
         "Ek Özellik": "Mevcut Değil",      // #10
         "Performans": "Cool & Comfort",    // #11
         "Kutu Durumu": "Kutu Yok",         // #12
+        "Persona": "Fashion Forward",      // sabit
       },
       ticimax_fields: {},
     });
@@ -2693,10 +2700,22 @@ export default function AdminProducts() {
                 {(() => {
                   const selectedCat = categories.find(c => c.name === formData.category_name || c.id === formData.category_name);
                   const attrMappings = selectedCat?.attribute_mappings || [];
-                  const hiddenAttrNames = ["beden", "renk", "web color", "yaka"];
+                  // Türkçe-duyarsız normalize (İ/ı/ş/ğ/ü/ö/ç) + tam-eşleşme gizleme.
+                  const _attrNorm = (s) => (s || "").toLowerCase()
+                    .replace(/ı/g, "i").replace(/i̇/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g")
+                    .replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").trim();
+                  // Formda GÖSTERİLMEYECEK özellikler (varyant eksenleri + kullanıcı kaldırma listesi).
+                  // NOT: yalnız form görünümünden gizlenir — veri korunur, pazaryeri push'u etkilenmez.
+                  // "Alt-Üst Takım" HARİÇ tutuldu (listede kalır).
+                  const hiddenAttrNames = [
+                    "beden", "renk", "web color", "yaka",
+                    "alt siluet", "ust siluet", "kesim", "ozellik", "stil",
+                    "urun icerik bilgisi", "kumas", "yikama talimati", "materyal analiz testi",
+                  ].map(_attrNorm);
+                  const _isHiddenAttr = (nm) => hiddenAttrNames.includes(_attrNorm(nm));
 
                   const baseList = globalAttributes
-                    .filter(a => !hiddenAttrNames.includes(a.name.toLowerCase()))
+                    .filter(a => !_isHiddenAttr(a.name))
                     .filter(a => a.name.toLowerCase().includes(attributeSearchTerm.toLowerCase()));
 
                   // #7-#12: formData.attributes'ta olup kütüphanede olmayan (varsayılan/seeded)
@@ -2705,7 +2724,7 @@ export default function AdminProducts() {
                     const _seedNames = new Set(baseList.map(a => (a.name || "").toLowerCase()));
                     Object.keys(formData.attributes || {}).forEach(nm => {
                       const low = (nm || "").toLowerCase();
-                      if (!nm || _seedNames.has(low) || hiddenAttrNames.includes(low)) return;
+                      if (!nm || _seedNames.has(low) || _isHiddenAttr(nm)) return;
                       if (!low.includes(attributeSearchTerm.toLowerCase())) return;
                       baseList.push({ id: `seed-${nm}`, name: nm, values: [] });
                       _seedNames.add(low);
