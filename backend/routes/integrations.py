@@ -4260,6 +4260,40 @@ def _hb_resolve_with_fallback(a, raw, orig=None):
     return rv
 
 
+def _hb_fabric_tokens(text):
+    """'%97 Pamuk %3 Elasthan' → {'97pamuk','3elastan'} (sıra-bağımsız, yazım-normalize).
+    HB 'Kumaş Tipi' kapalı bir kompozisyon enum'u (292 seçenek); düz 'Pamuk' eşleşmez.
+    Ürün AÇIKLAMASINDAKİ gerçek kompozisyonu (yüzde+lif) çıkarıp HB seçeneğiyle
+    BİREBİR eşlemek için kullanılır. 'elasthan/elastane' → 'elastan' birleştirilir."""
+    import re as _re
+    t = _hb_norm(text).replace("elasthan", "elastan").replace("elastane", "elastan")
+    toks = set()
+    for m in _re.finditer(r"%\s*(\d{1,3})\s*([a-z]+)", t):
+        toks.add(m.group(1) + m.group(2))
+    return toks
+
+
+def _hb_match_fabric_from_desc(attr, desc):
+    """Büyük 'Kumaş Tipi' enum'unda, açıklamadaki gerçek kompozisyonu HB seçeneğine eşler.
+    Yalnız HB seçeneğinin TÜM yüzde+lif token'ları açıklamada AYNEN geçiyorsa döner
+    (uydurma/tahmin YOK). Birden çok aday varsa en SPESİFİK (en çok token'lı, açıklamada
+    tam desteklenen) seçenek seçilir. Küçük enum'lara dokunmaz (zaten güvenli eşleşiyor)."""
+    vals = attr.get("attributeValues") or []
+    if len(vals) <= _HB_DIRTY_POOL_MIN:
+        return None
+    want = _hb_fabric_tokens(desc)
+    if not want:
+        return None
+    best = None  # (token_sayısı, ad)
+    for v in vals:
+        ot = _hb_fabric_tokens(v.get("name"))
+        if ot and ot <= want:
+            cand = (len(ot), v.get("name"))
+            if best is None or cand > best:
+                best = cand
+    return best[1] if best else None
+
+
 async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
@@ -4452,6 +4486,19 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 rv = _hb_resolve_with_fallback(a, raw, orig_raw)
                 if rv not in (None, ""):
                     attrs[aname] = rv
+            # KUMAŞ TİPİ (büyük kapalı kompozisyon enum'u, ~292 seçenek): ürün kartında düz
+            # "Pamuk" var → HB listesinde yok → HB "belirtilmemis"e düşürüyor. Ürünün
+            # AÇIKLAMASINDAKİ gerçek kompozisyonu ("%97 Pamuk %3 Elastan") HB seçeneğine
+            # BİREBİR eşle. Yalnız mevcut değer geçerli bir HB seçeneği DEĞİLSE devreye girer
+            # (salt-additif: doğru eşleşeni bozmaz); açıklamada karşılığı yoksa olduğu gibi bırakır.
+            if "kumas" in anorm and (a.get("attributeValues") or []):
+                _cur = attrs.get(aname)
+                _isopt = bool(_cur) and any(
+                    _hb_norm(o.get("name")) == _hb_norm(_cur) for o in (a.get("attributeValues") or []))
+                if not _isopt:
+                    _comp = _hb_match_fabric_from_desc(a, desc)
+                    if _comp:
+                        attrs[aname] = _comp
             if a.get("required") and aname not in attrs:
                 missing_req.append(aname)
 
