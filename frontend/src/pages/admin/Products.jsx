@@ -2787,6 +2787,14 @@ export default function AdminProducts() {
                     }
                   };
 
+                  // 🎯 Ortak SABİT varsayılanlar — HER pazaryeri bölümünde DOLU görünmeli.
+                  const FIXED_DEFAULT_ATTRS = {
+                    "Menşei": "TR", "Cinsiyet": "Kadın", "Yaş Grubu": "Yetişkin",
+                    "Ortam": "Casual/Günlük", "Koleksiyon": "Casual/Günlük",
+                    "Ek Özellik": "Mevcut Değil", "Kutu Durumu": "Kutu Yok",
+                    "Persona": "Fashion Forward", "Performans": "Cool & Comfort",
+                  };
+
                   const renderSection = (marketplace, title, accent, logo) => {
                     const mapKey = marketplace === 'trendyol' ? 'attributes'
                                  : marketplace === 'hepsiburada' ? 'hepsiburada_attributes'
@@ -2856,6 +2864,19 @@ export default function AdminProducts() {
                       ? tyMerged
                       : baseList;
 
+                    // 🎯 Değer çözümü: önce pazaryerine-özel harita, yoksa NÖTR formData.attributes,
+                    // yoksa sabit varsayılan → 9 ortak sabit HER bölümde DOLU görünür.
+                    const _effVal = (name) =>
+                      valuesMap[name] || (formData.attributes || {})[name] || FIXED_DEFAULT_ATTRS[name] || "";
+                    // Sabit varsayılanları bu bölümün listesinde yoksa DOLU satır olarak ekle
+                    // (özellikle HB: kategori seçilmeden liste boş kalıyordu).
+                    const _present = new Set((sourceList || []).map(a => (a.name || "").toLocaleLowerCase("tr")));
+                    const fixedRows = Object.keys(FIXED_DEFAULT_ATTRS)
+                      .filter(nm => !_present.has(nm.toLocaleLowerCase("tr"))
+                                 && nm.toLowerCase().includes(attributeSearchTerm.toLowerCase()))
+                      .map(nm => ({ id: `fixed-${marketplace}-${nm}`, name: nm, values: [], allowCustom: true }));
+                    const sourceListAll = [...(sourceList || []), ...fixedRows];
+
                     // Mükerrer fix: Teknik Detay panelinde gösterilen etiketler (Materyal, Kalıp, Kumaş...)
                     // pazaryeri özellik bölümlerinde TEKRAR listelenmez — tek kaynak. (HB kendi şema isimlerini
                     // kullandığı için pratikte Trendyol/Temu bölümlerini etkiler.) Değer yine kaydedilir.
@@ -2864,11 +2885,11 @@ export default function AdminProducts() {
                         .map(t => (t?.label || "").toLocaleLowerCase('tr').trim())
                         .filter(Boolean)
                     );
-                    const processed = sourceList.map(attr => {
+                    const processed = sourceListAll.map(attr => {
                       const isReq = marketplace === 'trendyol' ? getIsRequired(attr)
                                   : marketplace === 'hepsiburada' ? !!attr.required
                                   : false;
-                      const hasVal = !!valuesMap[attr.name];
+                      const hasVal = !!_effVal(attr.name);
                       return { attr, isRequired: isReq, hasValue: hasVal };
                     })
                     // Beden ürün kartından gizlenir: pazaryeri varyant (beden) alanından eşleştiriliyor.
@@ -2887,7 +2908,7 @@ export default function AdminProducts() {
                       <SearchableAttribute
                         key={`${marketplace}-${attr.id}`}
                         attr={attr}
-                        value={valuesMap[attr.name]}
+                        value={_effVal(attr.name)}
                         isRequired={isRequired}
                         channelLabel={logo}
                         allowCustom={marketplace === 'hepsiburada' ? !!attr.allowCustom : marketplace === 'temu'}
