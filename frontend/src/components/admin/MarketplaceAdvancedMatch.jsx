@@ -717,10 +717,35 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       // girer YA da sistem değerleriyle eşleştirir. (Sistem/medya alanları backend'de
       // zaten ayıklanmıştır; burada gizleme YOK → "eksik görüyorum" sorunu biter.)
       const attrs = (a.data?.attributes || []).filter((x) => !!(x.name || x.attribute?.name));
+      // BAYAT KODLU ÇÖP TEMİZLİĞİ: HB satıcı-havuzu (>200 değer) alanlarında BİREBİR olmayan
+      // eski eşleşmeler ("Antrasit→Altın - Antrasit", "Beyaz→0002- Beyaz") gönderimde YANLIŞ
+      // renk basıyor. Yükleme anında bunları temizle → ürünün kendi temiz değeri serbest metin
+      // olarak gider (backend dirty-pool'da zaten kendi değerini geçirir). Yalnız BİREBİR ad
+      // eşleşmeleri korunur. Temiz/küçük havuzlar (≤200) DOKUNULMAZ → manuel/alias maplar güvende.
+      const rawVM = v.data?.value_mappings || {};
+      const cleanVM = { ...rawVM };
+      let _dropped = 0;
+      for (const at of attrs) {
+        const mpv = at.attributeValues || [];
+        if (mpv.length <= 200) continue;
+        const aid = String(at.id ?? at.attribute?.id);
+        const byId = new Map(mpv.map((m) => [String(m.id), _normVal(m.name)]));
+        for (const localVal of (lv[at.name || at.attribute?.name] || [])) {
+          const key = `${aid}|${localVal}`;
+          if (!cleanVM[key]) continue;
+          const selN = byId.get(String(cleanVM[key])) || "";
+          if (selN && selN === _normVal(localVal)) continue; // birebir doğru → koru
+          delete cleanVM[key];
+          _dropped++;
+        }
+      }
       setMpAttrs(attrs);
       setLocalValues(lv);
-      setValueMappings(v.data?.value_mappings || {});
+      setValueMappings(cleanVM);
       setDefaults(a.data?.default_mappings || {});
+      if (_dropped) {
+        toast.info(`${_dropped} kodlu çöp renk eşleşmesi temizlendi — bunlarda ürünün kendi değeri gönderilecek`);
+      }
       setHint(a.data?.hint || "");
       // Seçili özelliği KORU (yeni kategoride yoksa ilkine düş) — sekme değişiminde reload YOK,
       // bu yüzden buraya yalnız modal/kategori ilk açıldığında gelinir.
