@@ -96,6 +96,7 @@ from routes.production_plan import router as production_plan_router
 from routes.marketing_pixels import router as marketing_pixels_router
 from routes.social_auth import router as social_auth_router
 from routes.security_dashboard import router as security_dashboard_router
+from routes.hb_aktarim import router as hb_aktarim_router
 from routes.mobile import router as mobile_router
 from routes.admin_mobile import router as admin_mobile_router
 from routes.secrets_vault import router as secrets_vault_router
@@ -608,6 +609,8 @@ api_router.include_router(marketplace_hub_router)
 api_router.include_router(brand_mapping_router)
 # Kategori Eşleştirme (multi-marketplace)
 api_router.include_router(category_mapping_router)
+# Özel HB Aktarım (clean-room, yalnız Hepsiburada API'si)
+api_router.include_router(hb_aktarim_router)
 # Otomasyon durumu — admin için cron + log özet
 api_router.include_router(automation_status_router)
 # Footer şablonu (public + admin)
