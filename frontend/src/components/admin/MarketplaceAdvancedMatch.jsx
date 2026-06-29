@@ -712,14 +712,11 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
         axios.get(`${API}/category-mapping/${marketplace}/${category.category_id}/values`, { headers: auth() }),
       ]);
       const lv = v.data?.local_values || {};
-      // Listeli (attributeValues) özelliklerin yanı sıra, serbest-metin (allowCustom)
-      // ama sistemde değeri OLAN özellikleri de göster (ör. Materyal Bileşeni → Ürün İçerik Bilgisi).
-      const attrs = (a.data?.attributes || []).filter((x) => {
-        const nm = x.name || x.attribute?.name;
-        const hasVals = (x.attributeValues?.length || 0) > 0;
-        const isCustom = x.allowCustom || x.attribute?.allowCustom;
-        return hasVals || (isCustom && (lv[nm]?.length || 0) > 0);
-      });
+      // TÜM HB özelliklerini göster — değer-listesiz (serbest metin) ya da sistemde
+      // karşılığı olmayanlar dahil. Kullanıcı her özellik için YA varsayılan değer
+      // girer YA da sistem değerleriyle eşleştirir. (Sistem/medya alanları backend'de
+      // zaten ayıklanmıştır; burada gizleme YOK → "eksik görüyorum" sorunu biter.)
+      const attrs = (a.data?.attributes || []).filter((x) => !!(x.name || x.attribute?.name));
       setMpAttrs(attrs);
       setLocalValues(lv);
       setValueMappings(v.data?.value_mappings || {});
@@ -749,19 +746,19 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     autosaveV.current = setTimeout(() => {
       axios.post(
         `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
-        { value_mappings: valueMappings },
+        { value_mappings: valueMappings, default_mappings: defaults },
         { headers: auth() }
       ).catch(() => {});
     }, 800);
     return () => { if (autosaveV.current) clearTimeout(autosaveV.current); };
-  }, [valueMappings, open, category, marketplace]);
+  }, [valueMappings, defaults, open, category, marketplace]);
 
   const save = async () => {
     setSaving(true);
     try {
       await axios.post(
         `${API}/category-mapping/${marketplace}/${category.category_id}/attribute-map`,
-        { value_mappings: valueMappings },
+        { value_mappings: valueMappings, default_mappings: defaults },
         { headers: auth() }
       );
       toast.success("Değer eşleştirmeleri kaydedildi");
@@ -962,6 +959,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                   const id = String(a.id ?? a.attribute?.id);
                   const name = a.name || a.attribute?.name;
                   const localCount = (localValues[name] || []).length;
+                  const hasDefault = !!defaults[id];
                   const mappedCount = Object.keys(valueMappings).filter(
                     (k) => k.startsWith(`${id}|`) && valueMappings[k]
                   ).length;
@@ -982,6 +980,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                         {_fixedDefaultFor(name) && (
                           <span className="text-[8px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded font-bold" title="Varsayılan değer tanımlı">VS</span>
                         )}
+                        {hasDefault && (
+                          <span className="text-[8px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-bold" title="Bu özellik için varsayılan değer girildi">VAR</span>
+                        )}
                         {mappedCount > 0 && (
                           <span className="text-[9px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">
                             {mappedCount}
@@ -1000,16 +1001,58 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
             <div className="flex-1 border rounded-lg overflow-auto">
               {/* Sabit/önceden tanımlı varsayılan değer uyarısı (madde 1): bu özelliğe ait varsayılan
                   zaten tanımlıysa değer eşleştirmesi gerekmez — her üründe bu değer gönderilir. */}
+              {/* Varsayılan değer EDİTÖRÜ: bu HB özelliği için TÜM ürünlere gönderilecek
+                  sabit değeri buradan gir. Doldurursan değer eşleştirmesi opsiyonel olur. */}
               {(() => {
-                const fd = _fixedDefaultFor(attrName) || defaults?.[attrName];
-                if (!fd) return null;
+                const aid = String(currentAttr?.id ?? currentAttr?.attribute?.id ?? "");
+                const mpVals = currentAttr?.attributeValues || [];
+                const fixed = _fixedDefaultFor(attrName);
+                const curDef = defaults?.[aid] ?? "";
+                const setDef = (val) =>
+                  setDefaults((p) => {
+                    const n = { ...p };
+                    if (val) n[aid] = val; else delete n[aid];
+                    return n;
+                  });
                 return (
-                  <div className="bg-blue-50 border-b border-blue-200 px-3 py-2 text-xs text-blue-800 flex items-center gap-2" data-testid="adv-val-default-banner">
-                    <Check size={14} className="text-blue-600 shrink-0" />
-                    <span>
-                      <b>Varsayılan değer tanımlandı:</b> "{fd}" — bu özellik için değer eşleştirmesi gerekmez,
-                      her üründe bu değer gönderilir. Yine de aşağıdan istisna eşleştirebilirsiniz.
+                  <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 flex items-center gap-2 flex-wrap" data-testid="adv-val-default-editor">
+                    <span className="text-xs font-semibold text-amber-800 shrink-0">Varsayılan değer:</span>
+                    <div className="min-w-[220px] max-w-[320px] flex-1">
+                      {mpVals.length > 0 ? (
+                        <SearchableValueSelect
+                          value={curDef}
+                          options={mpVals}
+                          onChange={setDef}
+                          placeholder="— HB değeri seç —"
+                          seed={mpVals.length > 200 ? (attrName || "") : ""}
+                          color={color}
+                          testId={`adv-val-default-${aid}`}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={curDef}
+                          onChange={(e) => setDef(e.target.value)}
+                          placeholder={fixed ? `örn: ${fixed}` : "sabit değer yaz (serbest metin)"}
+                          className={`border rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-2 focus:ring-${color}-300`}
+                          data-testid={`adv-val-default-free-${aid}`}
+                        />
+                      )}
+                    </div>
+                    {curDef && (
+                      <button onClick={() => setDef("")} className="text-[11px] text-amber-700 underline shrink-0" data-testid={`adv-val-default-clear-${aid}`}>
+                        temizle
+                      </button>
+                    )}
+                    <span className="text-[11px] text-amber-700">
+                      Doldurursan TÜM ürünlerde bu gönderilir; değer eşleştirme opsiyonel olur.
                     </span>
+                    {fixed && !curDef && (
+                      <span className="text-[11px] text-blue-700">(Sistem sabiti: "{fixed}" zaten gönderiliyor)</span>
+                    )}
+                    {mpVals.length > 0 && (
+                      <span className="ml-auto text-[10px] text-gray-400 shrink-0">{mpVals.length} HB değeri çekildi</span>
+                    )}
                   </div>
                 );
               })()}
