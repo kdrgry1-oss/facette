@@ -352,3 +352,108 @@ async def get_attribute_values(
            "values": values, "count": len(values), "fetched_at": _now()}
     await db.hb_aktarim_attr_values.replace_one({"_id": key}, {**doc, "_id": key}, upsert=True)
     return doc
+
+
+# ===================================================================== #
+#  KATEGORİ EŞLEŞTİRME  (sol taraf = sistem kategorileri, sağ = HB leaf)
+#  Sol tarafı sistemin KENDİ kategorilerinden okuruz — bu, isteğin gereği
+#  ("sistemdeki değerlerle HB değerlerini eşleştir"). HB tarafı dökümandan.
+# ===================================================================== #
+async def _system_categories() -> List[Dict[str, Any]]:
+    rows = await db.categories.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "parent_id": 1, "is_active": 1}
+    ).to_list(length=10000)
+    by_id = {r.get("id"): r for r in rows if r.get("id")}
+
+    def build_path(r):
+        names, seen, cur = [], set(), r
+        while cur and cur.get("id") not in seen:
+            seen.add(cur.get("id"))
+            if cur.get("name"):
+                names.append(cur["name"])
+            cur = by_id.get(cur.get("parent_id"))
+        return " > ".join(reversed(names))
+
+    out = []
+    for r in rows:
+        if not r.get("id"):
+            continue
+        out.append({
+            "id": r["id"],
+            "name": r.get("name") or "",
+            "path": build_path(r) or (r.get("name") or ""),
+            "is_active": bool(r.get("is_active", True)),
+        })
+    out.sort(key=lambda x: x["path"].lower())
+    return out
+
+
+@router.get("/mappings/categories")
+async def list_category_mappings(
+    search: str = "",
+    only_unmatched: bool = False,
+    limit: int = 1000,
+    current_user: dict = Depends(require_admin),
+):
+    cats = await _system_categories()
+    maps_list = await db.hb_aktarim_category_map.find({}, {"_id": 0}).to_list(length=20000)
+    maps = {m.get("system_category_id"): m for m in maps_list}
+
+    s = (search or "").strip().lower()
+    rows, matched = [], 0
+    for c in cats:
+        m = maps.get(c["id"])
+        is_matched = bool(m and m.get("hb_category_id"))
+        if is_matched:
+            matched += 1
+        if only_unmatched and is_matched:
+            continue
+        if s and s not in c["path"].lower():
+            continue
+        rows.append({
+            "system_category_id": c["id"],
+            "system_category_name": c["name"],
+            "system_category_path": c["path"],
+            "is_active": c["is_active"],
+            "hb_category_id": (m or {}).get("hb_category_id"),
+            "hb_category_name": (m or {}).get("hb_category_name"),
+            "updated_at": (m or {}).get("updated_at"),
+        })
+    limit = max(1, min(int(limit or 1000), 5000))
+    return {
+        "total": len(cats),
+        "matched": matched,
+        "unmatched": len(cats) - matched,
+        "count": len(rows[:limit]),
+        "items": rows[:limit],
+    }
+
+
+@router.post("/mappings/categories/{system_category_id}")
+async def save_category_mapping(
+    system_category_id: str,
+    payload: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(require_admin),
+):
+    hb_id = payload.get("hb_category_id")
+    hb_name = (payload.get("hb_category_name") or "").strip()
+    if hb_id in (None, ""):
+        raise HTTPException(400, "hb_category_id zorunlu (HB leaf kategori seçin).")
+    doc = {
+        "_id": system_category_id,
+        "system_category_id": system_category_id,
+        "hb_category_id": hb_id,
+        "hb_category_name": hb_name,
+        "updated_at": _now(),
+    }
+    await db.hb_aktarim_category_map.replace_one({"_id": system_category_id}, doc, upsert=True)
+    return {"saved": True, "mapping": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@router.delete("/mappings/categories/{system_category_id}")
+async def delete_category_mapping(
+    system_category_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    res = await db.hb_aktarim_category_map.delete_one({"_id": system_category_id})
+    return {"deleted": bool(res.deleted_count)}
