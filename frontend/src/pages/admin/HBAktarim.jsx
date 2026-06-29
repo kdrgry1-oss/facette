@@ -16,8 +16,10 @@ import { toast } from "sonner";
 import {
   KeyRound, FolderTree, RefreshCw, Save, Search, CheckCircle2,
   Circle, Plug, Copy, Trash2, X, Loader2, Sliders, ListChecks,
+  Coins, Send, Upload, PackageSearch, Truck, AlertTriangle, Eye,
 } from "lucide-react";
 
+const HB_IMG_MAX = 10;
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function HBAktarim() {
@@ -65,14 +67,19 @@ export default function HBAktarim() {
         <TabBtn active={tab === "ozellik"} onClick={() => setTab("ozellik")} icon={Sliders}>
           Özellik & Değer
         </TabBtn>
-        <span className="px-3 py-2 text-sm text-gray-300 cursor-not-allowed" title="Sıradaki sürüm">
+        <TabBtn active={tab === "alan"} onClick={() => setTab("alan")} icon={Coins}>
           Alan & Fiyat
-        </span>
+        </TabBtn>
+        <TabBtn active={tab === "gonderim"} onClick={() => setTab("gonderim")} icon={Send}>
+          Gönderim
+        </TabBtn>
       </div>
 
       {tab === "kimlik" && <KimlikTab cfg={cfg} auth={auth} onSaved={loadCfg} />}
       {tab === "kategori" && <KategoriTab auth={auth} configured={cfg?.configured} />}
       {tab === "ozellik" && <OzellikTab auth={auth} configured={cfg?.configured} />}
+      {tab === "alan" && <AlanFiyatTab auth={auth} configured={cfg?.configured} />}
+      {tab === "gonderim" && <GonderimTab auth={auth} configured={cfg?.configured} cfg={cfg} />}
     </div>
   );
 }
@@ -710,5 +717,389 @@ function ValueMapEditor({ hbCatId, attr, field, hbValues, valueMap, onChange, au
         Eşleştirmeyi kalıcı yapmak için satırın sağındaki <b>Kaydet</b>'e bas.
       </p>
     </div>
+  );
+}
+
+/* ====================== ALAN & FİYAT (global config) ====================== */
+function HbWarn({ children }) {
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 flex gap-2">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" /> <div>{children}</div>
+    </div>
+  );
+}
+function HbLoading() {
+  return (
+    <div className="text-center text-gray-400 py-8">
+      <Loader2 size={18} className="animate-spin inline" /> Yükleniyor…
+    </div>
+  );
+}
+
+function AlanFiyatTab({ auth, configured }) {
+  const [cfg, setCfg] = useState(null);
+  const [baseFields, setBaseFields] = useState([]);
+  const [cargoList, setCargoList] = useState([]);
+  const [sourceFields, setSourceFields] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API}/hb-aktarim/config/fields`, auth)
+      .then((r) => {
+        setCfg(r.data?.config || {});
+        setBaseFields(r.data?.hb_base_fields || []);
+        setCargoList(r.data?.cargo_companies || []);
+      })
+      .catch(() => toast.error("Konfigürasyon yüklenemedi"));
+    axios.get(`${API}/hb-aktarim/source-fields`, auth)
+      .then((r) => setSourceFields(r.data?.fields || []))
+      .catch(() => {});
+  }, [auth]);
+
+  const setBase = (key, patch) =>
+    setCfg((c) => ({ ...c, base: { ...(c.base || {}), [key]: { ...((c.base || {})[key] || {}), ...patch } } }));
+  const setPrice = (patch) => setCfg((c) => ({ ...c, price: { ...(c.price || {}), ...patch } }));
+  const setStock = (patch) => setCfg((c) => ({ ...c, stock: { ...(c.stock || {}), ...patch } }));
+  const setListing = (patch) => setCfg((c) => ({ ...c, listing: { ...(c.listing || {}), ...patch } }));
+  const toggleCargo = (name) =>
+    setCfg((c) => {
+      const cur = (c.listing && c.listing.cargo) || [];
+      const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name];
+      return { ...c, listing: { ...(c.listing || {}), cargo: next } };
+    });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await axios.post(`${API}/hb-aktarim/config/fields`, cfg, auth);
+      toast.success("Alan & fiyat ayarları kaydedildi");
+    } catch { toast.error("Kaydedilemedi"); }
+    finally { setSaving(false); }
+  };
+
+  if (!configured) return <HbWarn>Önce <b>Kimlik</b> sekmesini doldur.</HbWarn>;
+  if (!cfg) return <HbLoading />;
+
+  const opts = sourceFields.map((f) => (
+    <option key={f.key} value={f.key}>{f.key}{f.sample ? ` (örn: ${f.sample})` : ""}</option>
+  ));
+
+  return (
+    <div className="space-y-6">
+      <Section title="Temel Alanlar" desc="Hepsiburada zorunlu alanlarının kaynağı (ürün alanı veya sabit değer).">
+        <div className="space-y-2">
+          {baseFields.map((key) => {
+            const fc = (cfg.base || {})[key] || {};
+            return (
+              <div key={key} className="flex flex-wrap items-center gap-2">
+                <span className="w-36 text-sm font-medium text-gray-700">{key}</span>
+                <select value={fc.source || "field"} onChange={(e) => setBase(key, { source: e.target.value })}
+                  className="border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                  <option value="field">Ürün alanı</option>
+                  <option value="fixed">Sabit değer</option>
+                </select>
+                {fc.source === "fixed" ? (
+                  <input value={fc.fixed ?? ""} onChange={(e) => setBase(key, { fixed: e.target.value })}
+                    placeholder="sabit değer"
+                    className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[220px]" />
+                ) : (
+                  <select value={fc.field || ""} onChange={(e) => setBase(key, { field: e.target.value })}
+                    className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[260px]">
+                    <option value="">— ürün alanı seç —</option>{opts}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="w-36 text-sm font-medium text-gray-700">Görseller</span>
+            <select value={cfg.images_field || "images"} onChange={(e) => setCfg((c) => ({ ...c, images_field: e.target.value }))}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[260px]">
+              <option value="images">images</option>{opts}
+            </select>
+            <span className="text-xs text-gray-400">Image1…Image{HB_IMG_MAX} olarak gönderilir</span>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Fiyat" desc="Fiyat kaynağı + kâr marjı (%). HB'ye sayı olarak gider.">
+        <div className="flex flex-wrap items-center gap-3">
+          <select value={(cfg.price || {}).field || "price"} onChange={(e) => setPrice({ field: e.target.value })}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[220px]">
+            <option value="price">price</option>
+            <option value="sale_price">sale_price</option>
+            <option value="market_price">market_price</option>
+            {opts}
+          </select>
+          <label className="text-sm text-gray-600">Marj %</label>
+          <input type="number" value={(cfg.price || {}).margin_pct ?? 0}
+            onChange={(e) => setPrice({ margin_pct: Number(e.target.value) })}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-24" />
+          <label className="text-sm text-gray-600">Yuvarla</label>
+          <input type="number" value={(cfg.price || {}).round ?? 2}
+            onChange={(e) => setPrice({ round: Number(e.target.value) })}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-20" />
+        </div>
+      </Section>
+
+      <Section title="Stok" desc="Stok adedi kaynağı (genelde variant.stock).">
+        <select value={(cfg.stock || {}).field || "variant.stock"} onChange={(e) => setStock({ field: e.target.value })}
+          className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[260px]">
+          <option value="variant.stock">variant.stock</option>
+          <option value="stock">stock</option>
+          {opts}
+        </select>
+      </Section>
+
+      <Section title="Kargo & Termin" desc="Listeleme için varsayılan kargo firmaları ve termin.">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <label className="text-sm text-gray-600">Termin (gün)</label>
+          <input type="number" value={(cfg.listing || {}).dispatch_time ?? 1}
+            onChange={(e) => setListing({ dispatch_time: Number(e.target.value) })}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-24" />
+          <label className="text-sm text-gray-600 ml-2">Maks. adet/sipariş</label>
+          <input type="number" value={(cfg.listing || {}).max_qty ?? ""}
+            onChange={(e) => setListing({ max_qty: e.target.value === "" ? null : Number(e.target.value) })}
+            placeholder="—" className="border border-gray-300 rounded-md px-2 py-1.5 text-sm w-24" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {cargoList.map((name) => {
+            const on = ((cfg.listing || {}).cargo || []).includes(name);
+            return (
+              <button key={name} onClick={() => toggleCargo(name)}
+                className={`text-xs px-2.5 py-1.5 rounded-md border flex items-center gap-1 ${
+                  on ? "bg-orange-600 text-white border-orange-600" : "bg-white text-gray-600 border-gray-300"
+                }`}>
+                <Truck size={12} /> {name}
+              </button>
+            );
+          })}
+        </div>
+      </Section>
+
+      <button onClick={save} disabled={saving}
+        className="inline-flex items-center gap-1.5 bg-orange-600 text-white text-sm px-4 py-2 rounded-md hover:bg-orange-700 disabled:opacity-50">
+        {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Kaydet
+      </button>
+    </div>
+  );
+}
+
+function Section({ title, desc, children }) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+        {desc && <p className="text-xs text-gray-400 mt-0.5">{desc}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ====================== GÖNDERİM (preview / send / status / fiyat-stok / sipariş) ====================== */
+function GonderimTab({ auth, configured, cfg }) {
+  const [busy, setBusy] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [sendRes, setSendRes] = useState(null);
+  const [trackId, setTrackId] = useState("");
+  const [status, setStatus] = useState(null);
+  const [psPrev, setPsPrev] = useState(null);
+  const [psRes, setPsRes] = useState(null);
+  const [obegin, setObegin] = useState("");
+  const [oend, setOend] = useState("");
+  const [orders, setOrders] = useState(null);
+
+  const env = (cfg?.env || cfg?.mode || "sandbox").toLowerCase();
+  const isProd = ["prod", "production", "live", "canli", "canlı"].includes(env);
+  const envText = isProd ? "CANLI (prod)" : "SANDBOX (test)";
+
+  const run = async (key, fn) => { setBusy(key); try { await fn(); } finally { setBusy(""); } };
+
+  const doPreview = () => run("prev", async () => {
+    try {
+      const r = await axios.post(`${API}/hb-aktarim/publish/preview?limit=25`, {}, auth);
+      setPreview(r.data); toast.success(`${r.data.items_built} kalem kuruldu`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Önizleme başarısız"); }
+  });
+
+  const doSend = () => {
+    if (!window.confirm(`${envText} ortamına ürünler gönderilecek (katalog). Emin misin?`)) return;
+    run("send", async () => {
+      try {
+        const r = await axios.post(`${API}/hb-aktarim/publish/send`, {}, auth);
+        setSendRes(r.data); toast.success(`${r.data.sent} kalem gönderildi`);
+      } catch (e) { toast.error(e?.response?.data?.detail || "Gönderim başarısız"); }
+    });
+  };
+
+  const doStatus = () => run("st", async () => {
+    if (!trackId.trim()) return;
+    try {
+      const r = await axios.get(`${API}/hb-aktarim/publish/status/${encodeURIComponent(trackId.trim())}`, auth);
+      setStatus(r.data);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Statü alınamadı"); }
+  });
+
+  const doPsPreview = () => run("psp", async () => {
+    try {
+      const r = await axios.post(`${API}/hb-aktarim/listing/price-stock/preview?limit=25`, {}, auth);
+      setPsPrev(r.data); toast.success(`${r.data.count} satır`);
+    } catch (e) { toast.error(e?.response?.data?.detail || "Önizleme başarısız"); }
+  });
+
+  const doPsSend = () => {
+    if (!window.confirm(`${envText} ortamına fiyat/stok gönderilecek. Emin misin?`)) return;
+    run("pss", async () => {
+      try {
+        const r = await axios.post(`${API}/hb-aktarim/listing/price-stock/send`, {}, auth);
+        setPsRes(r.data); toast.success(`Fiyat:${r.data.sent_price} Stok:${r.data.sent_stock}`);
+      } catch (e) { toast.error(e?.response?.data?.detail || "Gönderim başarısız"); }
+    });
+  };
+
+  const doOrders = () => run("ord", async () => {
+    try {
+      const qs = new URLSearchParams();
+      if (obegin) qs.set("begin_date", obegin);
+      if (oend) qs.set("end_date", oend);
+      const r = await axios.get(`${API}/hb-aktarim/orders?${qs.toString()}`, auth);
+      setOrders(r.data?.orders); toast.success("Siparişler çekildi");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Sipariş çekilemedi"); }
+  });
+
+  if (!configured) return <HbWarn>Önce <b>Kimlik</b> sekmesini doldur ve kategori/özellik eşleştirmesini tamamla.</HbWarn>;
+
+  return (
+    <div className="space-y-6">
+      <div className={`text-xs px-3 py-2 rounded-md inline-flex items-center gap-2 ${
+        isProd ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+      }`}>
+        <Plug size={13} /> Aktif ortam: <b>{envText}</b>
+        {isProd && <span>— gönderimler gerçek mağazana yazar!</span>}
+      </div>
+
+      <Section title="1) Ürün Gönderimi (katalog)" desc="Önce dry-run önizleme; sorun yoksa Hepsiburada'ya gönder.">
+        <div className="flex flex-wrap gap-2 mb-3">
+          <ActBtn onClick={doPreview} busy={busy === "prev"} icon={Eye} ghost>Önizleme (dry-run)</ActBtn>
+          <ActBtn onClick={doSend} busy={busy === "send"} icon={Send}>Hepsiburada'ya Gönder</ActBtn>
+        </div>
+        {preview && (
+          <div className="text-sm space-y-2">
+            <div className="flex flex-wrap gap-4 text-gray-700">
+              <span>Kapsam: <b>{preview.products_in_scope}</b> ürün</span>
+              <span>Kurulan kalem: <b>{preview.items_built}</b></span>
+              <span className={preview.warnings_count ? "text-amber-700" : "text-emerald-700"}>
+                Uyarı: <b>{preview.warnings_count}</b>
+              </span>
+            </div>
+            {preview.warnings?.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 max-h-48 overflow-auto">
+                {preview.warnings.map((w, i) => (
+                  <div key={i} className="text-xs text-amber-800">
+                    <b>{w.merchantSku}</b> ({w.product}) → eksik zorunlu: {w.missing_mandatory?.join(", ")}
+                  </div>
+                ))}
+              </div>
+            )}
+            <JsonBox label="Örnek payload (ilk 5 ürün)" data={preview.sample} />
+          </div>
+        )}
+        {sendRes && (
+          <div className="mt-3 text-sm bg-gray-50 border border-gray-200 rounded p-3">
+            <div>Gönderilen kalem: <b>{sendRes.sent}</b> · ortam: <b>{sendRes.env}</b></div>
+            {sendRes.tracking_ids?.map((t, i) => (
+              <div key={i} className="text-xs text-gray-600 mt-1">
+                batch {t.batch}: {t.count} kalem · trackingId: <code>{String(t.trackingId)}</code>
+              </div>
+            ))}
+            {sendRes.errors?.length > 0 && (
+              <div className="text-xs text-red-600 mt-1">Hatalar: {sendRes.errors.length}</div>
+            )}
+          </div>
+        )}
+      </Section>
+
+      <Section title="2) İçe Aktarım Durumu" desc="Gönderim trackingId ile import sonucunu sorgula.">
+        <div className="flex flex-wrap gap-2">
+          <input value={trackId} onChange={(e) => setTrackId(e.target.value)} placeholder="trackingId"
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm min-w-[280px]" />
+          <ActBtn onClick={doStatus} busy={busy === "st"} icon={Search} ghost>Durum sorgula</ActBtn>
+        </div>
+        {status && <JsonBox label="Statü" data={status} />}
+      </Section>
+
+      <Section title="3) Fiyat / Stok" desc="Listeleme fiyat & stok güncellemesi.">
+        <div className="flex flex-wrap gap-2 mb-3">
+          <ActBtn onClick={doPsPreview} busy={busy === "psp"} icon={Eye} ghost>Önizleme</ActBtn>
+          <ActBtn onClick={doPsSend} busy={busy === "pss"} icon={Upload}>Fiyat/Stok Gönder</ActBtn>
+        </div>
+        {psPrev && (
+          <div className="text-sm">
+            <div className="text-gray-700 mb-1">Satır: <b>{psPrev.count}</b></div>
+            <div className="border border-gray-200 rounded max-h-56 overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500"><tr>
+                  <th className="text-left px-2 py-1">merchantSku</th>
+                  <th className="text-right px-2 py-1">fiyat</th>
+                  <th className="text-right px-2 py-1">stok</th>
+                  <th className="text-left px-2 py-1">ürün</th>
+                </tr></thead>
+                <tbody>
+                  {psPrev.sample?.map((r, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-2 py-1">{r.merchantSku}</td>
+                      <td className="px-2 py-1 text-right">{r.price}</td>
+                      <td className="px-2 py-1 text-right">{r.stock}</td>
+                      <td className="px-2 py-1 truncate">{r.product}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {psRes && (
+          <div className="mt-2 text-sm text-gray-700">
+            Gönderilen → fiyat: <b>{psRes.sent_price}</b>, stok: <b>{psRes.sent_stock}</b> · ortam: <b>{psRes.env}</b>
+          </div>
+        )}
+      </Section>
+
+      <Section title="4) Sipariş Çek (salt-okunur)" desc="Tarih aralığıyla HB siparişlerini çek.">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <input type="date" value={obegin} onChange={(e) => setObegin(e.target.value)}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
+          <span className="text-gray-400">→</span>
+          <input type="date" value={oend} onChange={(e) => setOend(e.target.value)}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
+          <ActBtn onClick={doOrders} busy={busy === "ord"} icon={PackageSearch} ghost>Çek</ActBtn>
+        </div>
+        {orders && <JsonBox label="Siparişler" data={orders} />}
+      </Section>
+    </div>
+  );
+}
+
+function ActBtn({ onClick, busy, icon: Icon, ghost, children }) {
+  return (
+    <button onClick={onClick} disabled={busy}
+      className={`inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md disabled:opacity-50 ${
+        ghost ? "border border-orange-300 text-orange-700 hover:bg-orange-50"
+              : "bg-orange-600 text-white hover:bg-orange-700"
+      }`}>
+      {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />} {children}
+    </button>
+  );
+}
+
+function JsonBox({ label, data }) {
+  return (
+    <details className="mt-2">
+      <summary className="text-xs text-gray-500 cursor-pointer select-none">{label} (aç/kapat)</summary>
+      <pre className="mt-1 text-[11px] bg-gray-900 text-gray-100 rounded p-3 max-h-72 overflow-auto">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </details>
   );
 }

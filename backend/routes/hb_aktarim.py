@@ -639,3 +639,381 @@ async def delete_attribute_map(
         )
         return {"deleted": True}
     return {"deleted": False}
+
+
+# ===================================================================== #
+#  ALAN & FİYAT KONFİGÜRASYONU  (global — kategoriden bağımsız)
+#  hb_aktarim_config (_id="fields"):
+#    base: { "<HB alanı>": {source:"field"|"fixed", field, fixed} }
+#    price: {field, margin_pct, round}
+#    stock: {field}
+#    listing: {dispatch_time, cargo, max_qty}
+# ===================================================================== #
+HB_BASE_FIELDS = ["UrunAdi", "UrunAciklamasi", "Marka", "Barcode",
+                  "merchantSku", "kg", "GarantiSuresi", "tax_vat_rate"]
+HB_IMAGE_MAX = 10
+
+DEFAULT_FIELD_CFG = {
+    "base": {
+        "UrunAdi": {"source": "field", "field": "name"},
+        "UrunAciklamasi": {"source": "field", "field": "description"},
+        "Marka": {"source": "field", "field": "brand"},
+        "Barcode": {"source": "field", "field": "variant.barcode"},
+        "merchantSku": {"source": "field", "field": "variant.stock_code"},
+        "kg": {"source": "fixed", "fixed": "1"},
+        "GarantiSuresi": {"source": "fixed", "fixed": ""},
+        "tax_vat_rate": {"source": "fixed", "fixed": "20"},
+    },
+    "images_field": "images",
+    "price": {"field": "price", "margin_pct": 0, "round": 2},
+    "stock": {"field": "variant.stock"},
+    "listing": {"dispatch_time": 1, "cargo": ["Yurtiçi Kargo"], "max_qty": None},
+}
+
+
+@router.get("/config/fields")
+async def get_field_config(current_user: dict = Depends(require_admin)):
+    doc = await db.hb_aktarim_config.find_one({"_id": "fields"}, {"_id": 0})
+    cfg = dict(DEFAULT_FIELD_CFG)
+    if doc:
+        # sığ birleştir (kullanıcı kaydı varsayılanı ezer)
+        for k, v in doc.items():
+            cfg[k] = v
+    return {"config": cfg, "hb_base_fields": HB_BASE_FIELDS,
+            "cargo_companies": HBAktarimClient.CARGO_COMPANIES}
+
+
+@router.post("/config/fields")
+async def save_field_config(
+    payload: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(require_admin),
+):
+    out = {"_id": "fields"}
+    for k in ("base", "images_field", "price", "stock", "listing"):
+        if k in payload:
+            out[k] = payload[k]
+    out["updated_at"] = _now()
+    await db.hb_aktarim_config.update_one({"_id": "fields"}, {"$set": out}, upsert=True)
+    return await get_field_config(current_user)  # type: ignore
+
+
+# ===================================================================== #
+#  PAYLOAD KURUCU  (eşleştirmelerden HB ürün/listing payload'ı üretir)
+# ===================================================================== #
+def _norm_sku(v) -> str:
+    return ("" if v is None else str(v)).upper().replace(" ", "")
+
+
+def _read_for_variant(product: Dict[str, Any], variant: Optional[Dict[str, Any]], field: Optional[str]):
+    if not field:
+        return None
+    if field.startswith("variant."):
+        return (variant or {}).get(field.split(".", 1)[1])
+    if field.startswith("teknik."):
+        return (product.get("technical_details") or {}).get(field.split(".", 1)[1])
+    return product.get(field)
+
+
+def _resolve_attr_value(acfg, product, variant, value_names):
+    """value_names: {hbValueId(str): name} | None. Enum'da id→name çevirir."""
+    src = acfg.get("source")
+    if src == "fixed":
+        fx = acfg.get("fixed")
+        if value_names and fx is not None and str(fx) in value_names:
+            return value_names[str(fx)]
+        return fx
+    if src == "field":
+        return _read_for_variant(product, variant, acfg.get("field"))
+    if src == "valuemap":
+        raw = _read_for_variant(product, variant, acfg.get("field"))
+        if raw in (None, ""):
+            return None
+        hid = (acfg.get("value_map") or {}).get(str(raw))
+        if hid in (None, ""):
+            return None
+        if value_names:
+            return value_names.get(str(hid), hid)
+        return hid
+    return None
+
+
+def _build_product_items(product, hb_cat_id, merchant_id, attr_map, field_cfg, value_names_by_attr):
+    """Bir sistem ürününü HB import kalemlerine çevirir (her varyant ayrı kalem, aynı VaryantGroupID).
+    Döner: (items, warnings)."""
+    base = field_cfg.get("base") or {}
+    images_field = field_cfg.get("images_field") or "images"
+    images = [u for u in (product.get(images_field) or []) if u][:HB_IMAGE_MAX]
+    group_id = str(product.get("id") or product.get("stock_code") or product.get("sku") or "")
+    variants = product.get("variants") or [None]
+    items, warnings = [], []
+
+    for idx, var in enumerate(variants):
+        attrs: Dict[str, Any] = {}
+        # merchantSku
+        msku_cfg = base.get("merchantSku") or {}
+        msku = (_read_for_variant(product, var, msku_cfg.get("field"))
+                if msku_cfg.get("source") != "fixed" else msku_cfg.get("fixed"))
+        msku = msku or product.get("stock_code") or product.get("sku") or f"{group_id}-{idx + 1}"
+        attrs["merchantSku"] = _norm_sku(msku)
+        attrs["VaryantGroupID"] = group_id
+        # diğer temel metin alanları
+        for key in ("UrunAdi", "UrunAciklamasi", "Marka", "Barcode", "kg", "GarantiSuresi", "tax_vat_rate"):
+            fc = base.get(key) or {}
+            val = fc.get("fixed") if fc.get("source") == "fixed" else _read_for_variant(product, var, fc.get("field"))
+            if val not in (None, ""):
+                attrs[key] = val
+        # görseller
+        for i, u in enumerate(images, 1):
+            attrs[f"Image{i}"] = u
+        # kategori özellikleri
+        for aid, acfg in (attr_map or {}).items():
+            if (acfg or {}).get("source") in (None, "ignore"):
+                continue
+            val = _resolve_attr_value(acfg, product, var, value_names_by_attr.get(aid))
+            if val not in (None, ""):
+                attrs[aid] = val
+        items.append({"categoryId": hb_cat_id, "merchant": merchant_id, "attributes": attrs})
+    return items, warnings
+
+
+async def _gather_publish_context():
+    """Yayın için gerekli bağlamı toplar: kimlik, alan cfg, kategori haritası, attr_map'ler,
+    kategori şemaları (zorunlu alan kontrolü) ve enum değer adları (id→name)."""
+    creds = await _get_config()
+    merchant_id = (creds.get("merchant_id") or "").strip()
+
+    fc_doc = await db.hb_aktarim_config.find_one({"_id": "fields"}, {"_id": 0})
+    field_cfg = dict(DEFAULT_FIELD_CFG)
+    if fc_doc:
+        for k, v in fc_doc.items():
+            field_cfg[k] = v
+
+    cmap_rows = await db.hb_aktarim_category_map.find({}, {"_id": 0}).to_list(length=20000)
+    sys_to_hb = {m["system_category_id"]: m for m in cmap_rows if m.get("hb_category_id") not in (None, "")}
+
+    attr_maps = {}
+    schemas = {}
+    value_names = {}  # hb_cat_id -> {attr_id -> {valueId: name}}
+    hb_cats = {m["hb_category_id"] for m in sys_to_hb.values()}
+    for hid in hb_cats:
+        am = await db.hb_aktarim_attr_map.find_one({"_id": hid}, {"_id": 0})
+        attr_maps[hid] = (am or {}).get("attributes") or {}
+        sch = await db.hb_aktarim_attributes.find_one({"_id": hid}, {"_id": 0})
+        schemas[hid] = sch or {}
+        vn = {}
+        for aid, acfg in attr_maps[hid].items():
+            if (acfg or {}).get("source") in ("valuemap", "fixed"):
+                vdoc = await db.hb_aktarim_attr_values.find_one({"_id": f"{hid}:{aid}"}, {"_id": 0})
+                if vdoc:
+                    vn[aid] = {str(v.get("id")): v.get("name") for v in (vdoc.get("values") or [])}
+        value_names[hid] = vn
+    return merchant_id, field_cfg, sys_to_hb, attr_maps, schemas, value_names
+
+
+def _mandatory_ids(schema):
+    out = set()
+    for grp in ("base_attributes", "attributes"):
+        for a in (schema or {}).get(grp, []) or []:
+            if a.get("mandatory"):
+                out.add(a.get("id"))
+    return out
+
+
+async def _select_mapped_products(sys_to_hb, limit=None):
+    sys_ids = list(sys_to_hb.keys())
+    if not sys_ids:
+        return []
+    q = {"category_id": {"$in": sys_ids}}
+    cur = db.products.find(q, {"ticimax_fields": 0})
+    if limit:
+        cur = cur.limit(int(limit))
+    return await cur.to_list(length=(limit or 5000))
+
+
+@router.post("/publish/preview")
+async def publish_preview(
+    limit: int = 25,
+    current_user: dict = Depends(require_admin),
+):
+    """DRY-RUN: HB'ye HİÇBİR şey göndermez. Payload'ı kurar, zorunlu-alan/değer uyarılarını döndürür."""
+    merchant_id, field_cfg, sys_to_hb, attr_maps, schemas, value_names = await _gather_publish_context()
+    if not merchant_id:
+        raise HTTPException(400, "Kimlik eksik — önce Kimlik sekmesini doldur.")
+    if not sys_to_hb:
+        raise HTTPException(400, "Eşleşmiş kategori yok — önce Kategori Eşleştirme yap.")
+
+    products = await _select_mapped_products(sys_to_hb, limit=max(1, min(int(limit or 25), 200)))
+    sample, warnings, total_items = [], [], 0
+    for p in products:
+        m = sys_to_hb.get(p.get("category_id"))
+        if not m:
+            continue
+        hid = m["hb_category_id"]
+        items, _w = _build_product_items(p, hid, merchant_id, attr_maps.get(hid, {}),
+                                         field_cfg, value_names.get(hid, {}))
+        mand = _mandatory_ids(schemas.get(hid, {}))
+        for it in items:
+            total_items += 1
+            missing = [k for k in mand if k not in it["attributes"] or it["attributes"].get(k) in (None, "")]
+            if missing:
+                warnings.append({"merchantSku": it["attributes"].get("merchantSku"),
+                                 "product": p.get("name"), "missing_mandatory": missing})
+        if len(sample) < 5:
+            sample.append({"product": p.get("name"), "category_id": p.get("category_id"),
+                           "hb_category_id": hid, "items": items})
+    return {
+        "dry_run": True,
+        "products_in_scope": len(products),
+        "items_built": total_items,
+        "warnings_count": len(warnings),
+        "warnings": warnings[:50],
+        "sample": sample,
+    }
+
+
+@router.post("/publish/send")
+async def publish_send(
+    limit: Optional[int] = None,
+    batch_size: int = 200,
+    current_user: dict = Depends(require_admin),
+):
+    """GERÇEK gönderim: eşleşmiş ürünleri HB kataloğuna (products/import) yollar. Döner: trackingId listesi."""
+    client, err = await _build_client()
+    if err:
+        raise HTTPException(400, err)
+    merchant_id, field_cfg, sys_to_hb, attr_maps, schemas, value_names = await _gather_publish_context()
+    if not sys_to_hb:
+        raise HTTPException(400, "Eşleşmiş kategori yok.")
+
+    products = await _select_mapped_products(sys_to_hb, limit=limit)
+    all_items = []
+    for p in products:
+        m = sys_to_hb.get(p.get("category_id"))
+        if not m:
+            continue
+        hid = m["hb_category_id"]
+        items, _w = _build_product_items(p, hid, merchant_id, attr_maps.get(hid, {}),
+                                         field_cfg, value_names.get(hid, {}))
+        all_items.extend(items)
+
+    if not all_items:
+        return {"sent": 0, "tracking_ids": [], "note": "Gönderilecek kalem bulunamadı."}
+
+    bs = max(1, min(int(batch_size or 200), 500))
+    tracking, errors = [], []
+    for i in range(0, len(all_items), bs):
+        batch = all_items[i:i + bs]
+        try:
+            res = await asyncio.to_thread(client.import_products, batch)
+            tid = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("data")
+            tracking.append({"batch": i // bs, "count": len(batch), "trackingId": tid, "raw": res})
+        except HBAktarimError as e:
+            errors.append({"batch": i // bs, "count": len(batch), "error": str(e)})
+    await db.hb_aktarim_config.update_one(
+        {"_id": "last_publish"},
+        {"$set": {"_id": "last_publish", "at": _now(), "items": len(all_items),
+                  "tracking": tracking, "errors": errors}}, upsert=True)
+    return {"sent": len(all_items), "batches": len(tracking) + len(errors),
+            "tracking_ids": tracking, "errors": errors,
+            "env": "prod" if not client.test else "sandbox"}
+
+
+@router.get("/publish/status/{tracking_id}")
+async def publish_status(tracking_id: str, current_user: dict = Depends(require_admin)):
+    client, err = await _build_client()
+    if err:
+        raise HTTPException(400, err)
+    try:
+        return await asyncio.to_thread(client.get_import_status, tracking_id)
+    except HBAktarimError as e:
+        raise HTTPException(502, str(e))
+
+
+# ===================================================================== #
+#  FİYAT / STOK  (listing)
+# ===================================================================== #
+def _calc_price(product, variant, price_cfg):
+    raw = _read_for_variant(product, variant, (price_cfg or {}).get("field") or "price")
+    try:
+        val = float(str(raw).replace(",", "."))
+    except Exception:
+        return None
+    margin = float((price_cfg or {}).get("margin_pct") or 0)
+    val = val * (1 + margin / 100.0)
+    return round(val, int((price_cfg or {}).get("round", 2)))
+
+
+def _build_listing_rows(products, sys_to_hb, field_cfg):
+    base = field_cfg.get("base") or {}
+    price_cfg = field_cfg.get("price") or {}
+    stock_cfg = field_cfg.get("stock") or {}
+    msku_cfg = base.get("merchantSku") or {}
+    prices, stocks, rows = [], [], []
+    for p in products:
+        if p.get("category_id") not in sys_to_hb:
+            continue
+        for idx, var in enumerate((p.get("variants") or [None])):
+            msku = (_read_for_variant(p, var, msku_cfg.get("field"))
+                    if msku_cfg.get("source") != "fixed" else msku_cfg.get("fixed"))
+            msku = _norm_sku(msku or p.get("stock_code") or p.get("sku") or f"{p.get('id')}-{idx + 1}")
+            price = _calc_price(p, var, price_cfg)
+            stock_raw = _read_for_variant(p, var, stock_cfg.get("field") or "variant.stock")
+            try:
+                stock = int(float(stock_raw))
+            except Exception:
+                stock = 0
+            if price is not None:
+                prices.append({"merchantSku": msku, "price": price})
+            stocks.append({"merchantSku": msku, "availableStock": stock})
+            rows.append({"merchantSku": msku, "price": price, "stock": stock, "product": p.get("name")})
+    return prices, stocks, rows
+
+
+@router.post("/listing/price-stock/preview")
+async def price_stock_preview(limit: int = 25, current_user: dict = Depends(require_admin)):
+    _mid, field_cfg, sys_to_hb, *_ = await _gather_publish_context()
+    products = await _select_mapped_products(sys_to_hb, limit=max(1, min(int(limit or 25), 200)))
+    prices, stocks, rows = _build_listing_rows(products, sys_to_hb, field_cfg)
+    return {"dry_run": True, "count": len(rows), "sample": rows[:20]}
+
+
+@router.post("/listing/price-stock/send")
+async def price_stock_send(limit: Optional[int] = None, current_user: dict = Depends(require_admin)):
+    client, err = await _build_client()
+    if err:
+        raise HTTPException(400, err)
+    _mid, field_cfg, sys_to_hb, *_ = await _gather_publish_context()
+    products = await _select_mapped_products(sys_to_hb, limit=limit)
+    prices, stocks, rows = _build_listing_rows(products, sys_to_hb, field_cfg)
+    out = {}
+    try:
+        if prices:
+            out["price"] = await asyncio.to_thread(client.update_prices, prices)
+        if stocks:
+            out["stock"] = await asyncio.to_thread(client.update_stocks, stocks)
+    except HBAktarimError as e:
+        raise HTTPException(502, str(e))
+    return {"sent_price": len(prices), "sent_stock": len(stocks), "result": out,
+            "env": "prod" if not client.test else "sandbox"}
+
+
+# ===================================================================== #
+#  SİPARİŞ ÇEKME  (OMS — salt-okunur)
+# ===================================================================== #
+@router.get("/orders")
+async def pull_orders(
+    begin_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    offset: int = 0,
+    limit: int = 50,
+    current_user: dict = Depends(require_admin),
+):
+    client, err = await _build_client()
+    if err:
+        raise HTTPException(400, err)
+    try:
+        res = await asyncio.to_thread(client.get_orders, begin_date, end_date,
+                                      offset, max(1, min(int(limit or 50), 200)))
+    except HBAktarimError as e:
+        raise HTTPException(502, str(e))
+    return {"orders": res}
