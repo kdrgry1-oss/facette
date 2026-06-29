@@ -148,7 +148,7 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
 }
 
 // ─── Aranabilir Trendyol Değer Seçici (Popover + Command) ───────────────────
-function SearchableValueSelect({ value, options, onChange, placeholder, testId, color = "orange" }) {
+function SearchableValueSelect({ value, options, onChange, placeholder, testId, color = "orange", seed = "" }) {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const selected = (options || []).find((o) => String(o.id) === String(value));
@@ -165,7 +165,7 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
   }, [options, nq, selected]);
   const moreCount = Math.max(0, (nq ? (options || []).filter((o) => _normVal(o.name).includes(nq)).length : (options || []).length) - 250);
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQ(""); }}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); setQ(o ? (seed || "") : ""); }}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -775,11 +775,16 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   // ÖNCELİK: birebir (normalize) eşleşme > eşanlamlı > tek-aday substring.
   // Ayrıca: yanlış kaydedilmiş (substring kaynaklı, örn. "Cepli"→"Kargo Cepli")
   // eşleşmeleri, birebir karşılığı varsa OTOMATİK DÜZELTİR.
+  // KİRLİ HAVUZ (Renk/Materyal gibi >200 satıcı-girdisi değer): kodlu çöpe
+  // (örn. "Sarı"→"00Sarı") substring ile BAĞLAMAZ; birebir/eşanlamlı yoksa boş
+  // bırakır → backend ürünün kendi temiz değerini gönderir. Eski hatalı kodlu
+  // bağlamaları da bu havuzlarda TEMİZLER.
   const handleAutoMatchValues = () => {
     const next = { ...valueMappings };
     let matched = 0;
     let already = 0;
     let corrected = 0;
+    let cleared = 0;
     const perAttr = {};
     // Alias tablosu — en yaygın Türkçe↔İngilizce & beden kısaltmaları
     const aliases = {
@@ -798,6 +803,8 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       const id = String(mpAttr.id ?? mpAttr.attribute?.id);
       const mpValues = mpAttr.attributeValues || [];
       const localVals = localValues[mpAttr.name || mpAttr.attribute?.name] || [];
+      // Kirli satıcı havuzu (Renk ~2000 vb.): kodlu çöp eşleşmeyi engellemek için substring kapalı.
+      const dirtyPool = mpValues.length > 200;
       let localMatched = 0;
 
       // Trendyol değerlerinin normalize haritası (birebir eşleşme için)
@@ -821,8 +828,9 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
             if (m) { best = m; break; }
           }
         }
-        // 3) Tek-aday substring (yalnızca tek bir Trendyol değeri içeriyorsa ve isim ≥3 karakter)
-        if (!best && lvN.length >= 3) {
+        // 3) Tek-aday substring — YALNIZ temiz (küçük) havuzlarda. Kirli satıcı
+        //    havuzunda "Sarı→00Sarı" gibi kodlu çöp eşleşmeyi ENGELLE.
+        if (!best && !dirtyPool && lvN.length >= 3) {
           const subs = mpValues.filter((mv) => {
             const mvN = _normVal(mv.name);
             return mvN.includes(lvN);
@@ -838,6 +846,16 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
             next[key] = String(exactMap[lvN].id);
             corrected++;
             localMatched++;
+          } else if (dirtyPool && !exactMap[lvN]) {
+            // Kirli havuz + birebir karşılık YOK → mevcut bağlama kodlu/yaklaşık çöptür
+            // (örn. "Sarı"→"00Sarı"). Eşanlamlı birebiri değilse TEMİZLE; ürünün kendi
+            // temiz değeri (lv) gönderilsin.
+            const aliasHit = (aliases[lvLower] || []).some((a) => {
+              const m = exactMap[_normVal(a)];
+              return m && String(m.id) === String(next[key]);
+            });
+            if (aliasHit) { already++; }
+            else { delete next[key]; cleared++; }
           } else {
             already++;
           }
@@ -851,12 +869,13 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
     });
 
     setValueMappings(next);
-    if (matched || corrected) {
+    if (matched || corrected || cleared) {
       const top = Object.entries(perAttr).sort((a, b) => b[1] - a[1]).slice(0, 5)
         .map(([k, n]) => `${k} (${n})`).join(", ");
       const parts = [];
       if (matched) parts.push(`${matched} değer eşleşti`);
       if (corrected) parts.push(`${corrected} yanlış eşleşme düzeltildi`);
+      if (cleared) parts.push(`${cleared} kodlu çöp eşleşme temizlendi (kendi değeri gönderilecek)`);
       if (already) parts.push(`${already} zaten doğru`);
       toast.success(`${parts.join(" · ")}${top ? ` · En çok: ${top}` : ""}`);
     } else if (already) {
@@ -1086,6 +1105,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                                   setValueMappings((p) => ({ ...p, [`${selectedAttrId}|${lv}`]: val }))
                                 }
                                 placeholder={dirtyPool ? `ürün değeri: ${lv}` : "— seçilmemiş —"}
+                                seed={dirtyPool ? lv : ""}
                                 color={color}
                                 testId={`adv-valmap-${lv}`}
                               />
