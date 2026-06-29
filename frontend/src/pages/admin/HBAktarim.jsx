@@ -15,7 +15,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   KeyRound, FolderTree, RefreshCw, Save, Search, CheckCircle2,
-  Circle, Plug, Copy, Trash2, X, Loader2,
+  Circle, Plug, Copy, Trash2, X, Loader2, Sliders, ListChecks,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -62,9 +62,9 @@ export default function HBAktarim() {
         <TabBtn active={tab === "kategori"} onClick={() => setTab("kategori")} icon={FolderTree}>
           Kategori Eşleştirme
         </TabBtn>
-        <span className="px-3 py-2 text-sm text-gray-300 cursor-not-allowed" title="Sıradaki sürüm">
+        <TabBtn active={tab === "ozellik"} onClick={() => setTab("ozellik")} icon={Sliders}>
           Özellik & Değer
-        </span>
+        </TabBtn>
         <span className="px-3 py-2 text-sm text-gray-300 cursor-not-allowed" title="Sıradaki sürüm">
           Alan & Fiyat
         </span>
@@ -72,6 +72,7 @@ export default function HBAktarim() {
 
       {tab === "kimlik" && <KimlikTab cfg={cfg} auth={auth} onSaved={loadCfg} />}
       {tab === "kategori" && <KategoriTab auth={auth} configured={cfg?.configured} />}
+      {tab === "ozellik" && <OzellikTab auth={auth} configured={cfg?.configured} />}
     </div>
   );
 }
@@ -428,6 +429,286 @@ function HbCategoryPicker({ auth, onPick, onClose }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ====================== ÖZELLİK & DEĞER EŞLEŞTİRME ====================== */
+function OzellikTab({ auth, configured }) {
+  const [cats, setCats] = useState([]);
+  const [sel, setSel] = useState("");
+  const [attrs, setAttrs] = useState({ base_attributes: [], attributes: [] });
+  const [cfgMap, setCfgMap] = useState({});
+  const [sourceFields, setSourceFields] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadCats = useCallback(async () => {
+    try {
+      const r = await axios.get(`${API}/hb-aktarim/mappings/used-hb-categories`, auth);
+      setCats(r.data?.categories || []);
+    } catch { /* sessiz */ }
+  }, [auth]);
+
+  useEffect(() => {
+    loadCats();
+    axios.get(`${API}/hb-aktarim/source-fields`, auth)
+      .then((r) => setSourceFields(r.data?.fields || []))
+      .catch(() => {});
+  }, [loadCats, auth]);
+
+  const loadCategory = useCallback(async (hbId) => {
+    if (!hbId) { setAttrs({ base_attributes: [], attributes: [] }); setCfgMap({}); return; }
+    setLoading(true);
+    try {
+      const [a, m] = await Promise.all([
+        axios.get(`${API}/hb-aktarim/categories/${hbId}/attributes`, auth),
+        axios.get(`${API}/hb-aktarim/mappings/attributes/${hbId}`, auth),
+      ]);
+      setAttrs({
+        base_attributes: a.data?.base_attributes || [],
+        attributes: a.data?.attributes || [],
+      });
+      setCfgMap(m.data?.attributes || {});
+    } catch { toast.error("Özellikler yüklenemedi"); }
+    finally { setLoading(false); }
+  }, [auth]);
+
+  useEffect(() => { loadCategory(sel); }, [sel, loadCategory]);
+
+  const onAttrSaved = (attrId, cfg) =>
+    setCfgMap((m) => ({ ...m, [attrId]: cfg }));
+
+  if (!configured) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+        Önce <b>Kimlik</b> sekmesini doldur, sonra <b>Kategori Eşleştirme</b>'den en az bir
+        kategori eşle. Burada o HB kategorisinin özelliklerini eşleştireceksin.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm text-gray-600">HB Kategorisi:</label>
+        <select value={sel} onChange={(e) => setSel(e.target.value)}
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm min-w-[280px]">
+          <option value="">— eşleşmiş bir HB kategorisi seç —</option>
+          {cats.map((c) => (
+            <option key={c.hb_category_id} value={c.hb_category_id}>
+              {(c.hb_category_name || c.hb_category_id)} · {c.system_count} sistem kat. ·
+              {" "}{c.configured_attrs} alan ayarlı
+            </option>
+          ))}
+        </select>
+        {cats.length === 0 && (
+          <span className="text-sm text-gray-400">Önce Kategori Eşleştirme yap.</span>
+        )}
+      </div>
+
+      {loading && (
+        <div className="text-center text-gray-400 py-8">
+          <Loader2 size={18} className="animate-spin inline" /> Yükleniyor…
+        </div>
+      )}
+
+      {!loading && sel && (
+        <>
+          <AttrGroup title="Temel Alanlar (HB sabit)" items={attrs.base_attributes}
+            hbCatId={sel} sourceFields={sourceFields} cfgMap={cfgMap} auth={auth} onSaved={onAttrSaved} />
+          <AttrGroup title="Kategori Özellikleri" items={attrs.attributes}
+            hbCatId={sel} sourceFields={sourceFields} cfgMap={cfgMap} auth={auth} onSaved={onAttrSaved} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AttrGroup({ title, items, hbCatId, sourceFields, cfgMap, auth, onSaved }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="bg-gray-50 px-4 py-2 text-xs font-semibold uppercase text-gray-500 flex items-center gap-1.5">
+        <ListChecks size={14} /> {title} <span className="text-gray-400">({items.length})</span>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {items.map((a) => (
+          <AttrRow key={a.id} attr={a} hbCatId={hbCatId} sourceFields={sourceFields}
+            initial={cfgMap[a.id]} auth={auth} onSaved={onSaved} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
+  const [source, setSource] = useState(initial?.source || "ignore");
+  const [field, setField] = useState(initial?.field || "");
+  const [fixed, setFixed] = useState(initial?.fixed ?? "");
+  const [valueMap, setValueMap] = useState(initial?.value_map || {});
+  const [hbValues, setHbValues] = useState(null);
+  const [showVM, setShowVM] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  const loadHbValues = useCallback(async () => {
+    if (hbValues || !attr.selectable) return;
+    try {
+      const r = await axios.get(
+        `${API}/hb-aktarim/categories/${hbCatId}/attributes/${encodeURIComponent(attr.id)}/values`, auth);
+      setHbValues(r.data?.values || []);
+    } catch { setHbValues([]); }
+  }, [hbValues, attr.selectable, attr.id, hbCatId, auth]);
+
+  useEffect(() => {
+    if (attr.selectable && (source === "fixed" || source === "valuemap")) loadHbValues();
+  }, [source, attr.selectable, loadHbValues]);
+
+  const mark = (fn) => (v) => { fn(v); setDirty(true); };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const body = { source, field: field || null, fixed, value_map: valueMap };
+      const r = await axios.post(
+        `${API}/hb-aktarim/mappings/attributes/${hbCatId}/${encodeURIComponent(attr.id)}`, body, auth);
+      toast.success(`"${attr.name}" kaydedildi`);
+      setDirty(false);
+      onSaved && onSaved(attr.id, r.data?.config);
+    } catch { toast.error("Kaydedilemedi"); }
+    finally { setSaving(false); }
+  };
+
+  const mappedCount = Object.values(valueMap || {}).filter(Boolean).length;
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-[180px]">
+          <span className="text-sm font-medium text-gray-800">{attr.name}</span>
+          <div className="flex gap-1 mt-0.5">
+            {attr.mandatory && <Badge color="red">zorunlu</Badge>}
+            {attr.multiValue && <Badge color="blue">çoklu</Badge>}
+            {attr.selectable && <Badge color="gray">değer listesi</Badge>}
+            <span className="text-[10px] text-gray-400">#{attr.id}</span>
+          </div>
+        </div>
+
+        <select value={source} onChange={(e) => mark(setSource)(e.target.value)}
+          className="border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+          <option value="ignore">— Gönderme —</option>
+          <option value="field">Ürün alanı</option>
+          <option value="fixed">Sabit değer</option>
+          {attr.selectable && <option value="valuemap">Değer eşleştirme</option>}
+        </select>
+
+        {source === "field" && (
+          <select value={field} onChange={(e) => mark(setField)(e.target.value)}
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
+            <option value="">— ürün alanı seç —</option>
+            {sourceFields.map((f) => (
+              <option key={f.key} value={f.key}>{f.key}{f.sample ? ` (örn: ${f.sample})` : ""}</option>
+            ))}
+          </select>
+        )}
+
+        {source === "fixed" && (
+          attr.selectable ? (
+            <select value={fixed || ""} onChange={(e) => mark(setFixed)(e.target.value)}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
+              <option value="">{hbValues ? "— HB değeri seç —" : "yükleniyor…"}</option>
+              {(hbValues || []).map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input value={fixed || ""} onChange={(e) => mark(setFixed)(e.target.value)}
+              placeholder="sabit değer"
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]" />
+          )
+        )}
+
+        {source === "valuemap" && (
+          <>
+            <select value={field} onChange={(e) => mark(setField)(e.target.value)}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[160px]">
+              <option value="">— kaynak ürün alanı —</option>
+              {sourceFields.map((f) => (
+                <option key={f.key} value={f.key}>{f.key}</option>
+              ))}
+            </select>
+            <button onClick={() => setShowVM((s) => !s)} disabled={!field}
+              className="text-sm px-2.5 py-1.5 border border-orange-300 rounded-md text-orange-700 hover:bg-orange-50 disabled:opacity-40">
+              Değerleri eşle ({mappedCount})
+            </button>
+          </>
+        )}
+
+        <button onClick={save} disabled={saving}
+          className={`ml-auto inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-md ${
+            dirty ? "bg-orange-600 text-white hover:bg-orange-700" : "bg-gray-100 text-gray-500"
+          } disabled:opacity-50`}>
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Kaydet
+        </button>
+      </div>
+
+      {source === "valuemap" && showVM && field && (
+        <ValueMapEditor hbCatId={hbCatId} attr={attr} field={field}
+          hbValues={hbValues} valueMap={valueMap}
+          onChange={(m) => { setValueMap(m); setDirty(true); }}
+          auth={auth} />
+      )}
+    </div>
+  );
+}
+
+function Badge({ color, children }) {
+  const map = {
+    red: "bg-red-100 text-red-700", blue: "bg-blue-100 text-blue-700",
+    gray: "bg-gray-100 text-gray-600",
+  };
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded ${map[color] || map.gray}`}>{children}</span>;
+}
+
+function ValueMapEditor({ hbCatId, attr, field, hbValues, valueMap, onChange, auth }) {
+  const [sysVals, setSysVals] = useState(null);
+
+  useEffect(() => {
+    let on = true;
+    axios.get(`${API}/hb-aktarim/source-fields/values?field=${encodeURIComponent(field)}`, auth)
+      .then((r) => { if (on) setSysVals(r.data?.values || []); })
+      .catch(() => { if (on) setSysVals([]); });
+    return () => { on = false; };
+  }, [field, auth]);
+
+  const setVal = (sv, hbId) => onChange({ ...valueMap, [sv]: hbId });
+
+  return (
+    <div className="mt-3 ml-1 border border-orange-200 rounded-md bg-orange-50/40 p-3">
+      <div className="text-xs text-gray-500 mb-2">
+        <b>{field}</b> ürün alanındaki değerler → Hepsiburada "{attr.name}" değerleri
+      </div>
+      {sysVals === null && <div className="text-xs text-gray-400">değerler yükleniyor…</div>}
+      {sysVals && sysVals.length === 0 && (
+        <div className="text-xs text-gray-400">Bu alan için üründe değer bulunamadı.</div>
+      )}
+      <div className="max-h-72 overflow-auto divide-y divide-orange-100">
+        {(sysVals || []).map((sv) => (
+          <div key={sv} className="flex items-center gap-3 py-1.5">
+            <span className="text-sm text-gray-700 w-1/2 truncate" title={sv}>{sv}</span>
+            <select value={valueMap[sv] || ""} onChange={(e) => setVal(sv, e.target.value)}
+              className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm">
+              <option value="">— HB değeri —</option>
+              {(hbValues || []).map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-400 mt-2">
+        Eşleştirmeyi kalıcı yapmak için satırın sağındaki <b>Kaydet</b>'e bas.
+      </p>
     </div>
   );
 }

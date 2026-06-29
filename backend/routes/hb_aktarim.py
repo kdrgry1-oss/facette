@@ -457,3 +457,185 @@ async def delete_category_mapping(
 ):
     res = await db.hb_aktarim_category_map.delete_one({"_id": system_category_id})
     return {"deleted": bool(res.deleted_count)}
+
+
+# ===================================================================== #
+#  KAYNAK ALAN KEŞFİ  (sol taraf — ürün dokümanından CANLI keşfedilir)
+#  Hiçbir alan adı gömülü DEĞİL; gerçek ürünlerden okunur. ticimax_fields
+#  (legacy + gürültü) hariç tutulur; teknik özellikler 'teknik.<k>',
+#  varyant alanları 'variant.<k>' olarak yüzeye çıkar.
+# ===================================================================== #
+_SRC_SKIP = {"_id", "id", "ticimax_fields", "created_at", "updated_at", "view_count"}
+
+
+def _is_scalar(v):
+    return v is None or isinstance(v, (str, int, float, bool))
+
+
+@router.get("/source-fields")
+async def source_fields(current_user: dict = Depends(require_admin)):
+    """Ürün dokümanlarından örnekleyerek kullanılabilir kaynak alanlarını döndürür."""
+    docs = await db.products.find({}, {"ticimax_fields": 0}).limit(60).to_list(length=60)
+    fields: Dict[str, str] = {}
+
+    def note(key, val):
+        if key not in fields:
+            fields[key] = ""
+        if not fields[key] and val not in (None, ""):
+            fields[key] = str(val)[:60]
+
+    for p in docs:
+        for k, v in p.items():
+            if k in _SRC_SKIP:
+                continue
+            if k == "variants" and isinstance(v, list):
+                for it in v:
+                    if isinstance(it, dict):
+                        for vk, vv in it.items():
+                            if vk in ("_id",) or not _is_scalar(vv):
+                                continue
+                            note(f"variant.{vk}", vv)
+                continue
+            if k == "technical_details" and isinstance(v, dict):
+                for tk, tv in v.items():
+                    if _is_scalar(tv):
+                        note(f"teknik.{tk}", tv)
+                continue
+            if _is_scalar(v):
+                note(k, v)
+            elif isinstance(v, list) and (not v or isinstance(v[0], str)):
+                note(k, (v[0] if v else ""))
+
+    out = [{"key": k, "label": k, "sample": s} for k, s in fields.items()]
+    out.sort(key=lambda x: x["key"].lower())
+    return {"count": len(out), "fields": out, "scanned": len(docs)}
+
+
+def _read_source(product: Dict[str, Any], field: str):
+    """Bir ürün dokümanından kaynak alan değer(ler)ini okur (variant./teknik. dahil)."""
+    if not field:
+        return None
+    if field.startswith("variant."):
+        k = field.split(".", 1)[1]
+        vals = []
+        for it in product.get("variants") or []:
+            if isinstance(it, dict) and it.get(k) not in (None, ""):
+                vals.append(it.get(k))
+        return vals or None
+    if field.startswith("teknik."):
+        k = field.split(".", 1)[1]
+        return (product.get("technical_details") or {}).get(k)
+    return product.get(field)
+
+
+@router.get("/source-fields/values")
+async def source_field_values(
+    field: str,
+    limit: int = 300,
+    current_user: dict = Depends(require_admin),
+):
+    """Belirli bir kaynak alan için üründe geçen ayırt edici (distinct) değerler —
+    değer eşleştirme tablosunun sol sütununu doldurur."""
+    if not field:
+        raise HTTPException(400, "field zorunlu")
+    docs = await db.products.find({}, {"ticimax_fields": 0}).limit(3000).to_list(length=3000)
+    vals = set()
+    for p in docs:
+        r = _read_source(p, field)
+        if isinstance(r, list):
+            for x in r:
+                if x not in (None, ""):
+                    vals.add(str(x))
+        elif r not in (None, ""):
+            vals.add(str(r))
+    out = sorted(vals, key=lambda s: s.lower())[: max(1, min(int(limit or 300), 1000))]
+    return {"field": field, "count": len(out), "values": out}
+
+
+# ===================================================================== #
+#  ÖZELLİK & DEĞER EŞLEŞTİRME  (HB kategori bazlı)
+#  attr_map (_id = HB kategori id):
+#    { hb_category_id, attributes: { "<attrId>": {
+#        source: "field"|"fixed"|"valuemap"|"ignore",
+#        field, fixed, value_map: {"<sistem değeri>": "<HB value id>"} } } }
+# ===================================================================== #
+@router.get("/mappings/used-hb-categories")
+async def used_hb_categories(current_user: dict = Depends(require_admin)):
+    """Kategori eşleştirmede kullanılan (en az 1 sistem kategorisi bağlı) HB kategorileri."""
+    maps = await db.hb_aktarim_category_map.find({}, {"_id": 0}).to_list(length=20000)
+    agg: Dict[Any, Dict[str, Any]] = {}
+    for m in maps:
+        hid = m.get("hb_category_id")
+        if hid in (None, ""):
+            continue
+        e = agg.setdefault(hid, {"hb_category_id": hid,
+                                 "hb_category_name": m.get("hb_category_name") or "",
+                                 "system_count": 0})
+        e["system_count"] += 1
+    out = list(agg.values())
+    for e in out:
+        am = await db.hb_aktarim_attr_map.find_one({"_id": e["hb_category_id"]},
+                                                   {"_id": 0, "attributes": 1})
+        e["configured_attrs"] = len((am or {}).get("attributes") or {})
+    out.sort(key=lambda x: (x.get("hb_category_name") or "").lower())
+    return {"count": len(out), "categories": out}
+
+
+@router.get("/mappings/attributes/{hb_category_id}")
+async def get_attribute_map(
+    hb_category_id: int,
+    current_user: dict = Depends(require_admin),
+):
+    doc = await db.hb_aktarim_attr_map.find_one({"_id": hb_category_id}, {"_id": 0})
+    return doc or {"hb_category_id": hb_category_id, "attributes": {}}
+
+
+@router.post("/mappings/attributes/{hb_category_id}/{attribute_id}")
+async def save_attribute_map(
+    hb_category_id: int,
+    attribute_id: str,
+    payload: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(require_admin),
+):
+    source = (payload.get("source") or "ignore").strip().lower()
+    if source not in ("field", "fixed", "valuemap", "ignore"):
+        raise HTTPException(400, "source: field | fixed | valuemap | ignore olmalı")
+    cfg = {
+        "source": source,
+        "field": (payload.get("field") or "").strip() or None,
+        "fixed": payload.get("fixed"),
+        "value_map": payload.get("value_map") or {},
+    }
+    # Dotted-key sorununu önlemek için tüm attributes objesini oku-değiştir-yaz.
+    doc = await db.hb_aktarim_attr_map.find_one({"_id": hb_category_id}) or {}
+    attrs = doc.get("attributes") or {}
+    attrs[attribute_id] = cfg
+    await db.hb_aktarim_attr_map.replace_one(
+        {"_id": hb_category_id},
+        {"_id": hb_category_id, "hb_category_id": hb_category_id,
+         "attributes": attrs, "updated_at": _now()},
+        upsert=True,
+    )
+    return {"saved": True, "attribute_id": attribute_id, "config": cfg}
+
+
+@router.delete("/mappings/attributes/{hb_category_id}/{attribute_id}")
+async def delete_attribute_map(
+    hb_category_id: int,
+    attribute_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    doc = await db.hb_aktarim_attr_map.find_one({"_id": hb_category_id})
+    if not doc:
+        return {"deleted": False}
+    attrs = doc.get("attributes") or {}
+    if attribute_id in attrs:
+        attrs.pop(attribute_id, None)
+        await db.hb_aktarim_attr_map.replace_one(
+            {"_id": hb_category_id},
+            {"_id": hb_category_id, "hb_category_id": hb_category_id,
+             "attributes": attrs, "updated_at": _now()},
+            upsert=True,
+        )
+        return {"deleted": True}
+    return {"deleted": False}
