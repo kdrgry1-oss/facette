@@ -272,6 +272,32 @@ async def _order_notify_vars(order: dict, **extra) -> dict:
     return v
 
 
+def _order_vade_farki(order: dict):
+    """Taksitli sipariş için vade farkı (KDV DAHİL tutar), gerçek tahsilat ve taksit sayısı.
+
+    Müşteri taksitli ödediğinde iyzico'ya gönderilen/charge edilen `paidPrice` vade farkı
+    DAHİL tutardır (bkz. payment.py _installment_total_price). Sipariş `total`'ı ise peşin
+    (vade farkı hariç) sepet tutarıdır. Aradaki fark = vade farkı. KDV Kanunu 24/c gereği
+    bu fark matraha dahil edilip aynı oranda KDV ile faturalandırılmalıdır.
+
+    Döner: (vade_farki, charged_total, installment). Taksitsiz/farsız ise vade_farki=0.
+    """
+    iyz = order.get("iyzico_retrieve_response") or {}
+    try:
+        inst = int(float(iyz.get("installment") or order.get("installment") or 1))
+    except Exception:
+        inst = 1
+    try:
+        charged = round(float(iyz.get("paidPrice") or order.get("paid_amount") or 0), 2)
+    except Exception:
+        charged = 0.0
+    base = round(float(order.get("total") or 0), 2)
+    vf = round(charged - base, 2) if (charged > 0 and base > 0) else 0.0
+    if inst > 1 and vf >= 0.01:
+        return vf, charged, inst
+    return 0.0, charged, inst
+
+
 async def _product_vat_map(order: dict) -> dict:
     """Sipariş kalemlerinin ürünlerinden product_id → vat_rate (KDV) haritası.
     Fatura kesiminde, kalemde vat_rate yoksa ürünün KDV oranı kullanılır (DİNAMİK)."""
@@ -2034,6 +2060,19 @@ async def create_invoice_for_order(
         else:
             _carrier_name, _carrier_vkn, _carrier_city = "MNG KARGO YURTİÇİ VE YURTDIŞI TAŞIMACILIK A.Ş.", "6080712084", "İstanbul"
 
+        # Taksitli satış → vade farkı satırı (KDV Kanunu 24/c: matraha dahil, malın oranıyla).
+        # Satır adı faturada İBARE görevi görür: "Vade Farkı (Taksit xN)".
+        _vf, _charged_total, _inst_n = _order_vade_farki(order)
+        _vf_note = ""
+        if _vf >= 0.01:
+            line_items.append({
+                "name": f"Vade Farkı (Taksit x{_inst_n})",
+                "qty": 1, "unit_price": _vf, "kdv_rate": 20.0,
+                "sku": "VADEFARKI", "barcode": "", "note": "",
+            })
+            _vf_note = (f"Taksitli satış ({_inst_n} taksit). Vade farkı (₺{_vf:.2f}) "
+                        f"satış bedeline dahil olup KDV matrahına eklenmiştir.")
+
         _earsiv_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
@@ -2068,11 +2107,11 @@ async def create_invoice_for_order(
             order_ext_id=str(order.get("marketplace_order_id") or order.get("platform_order_id") or order.get("order_number") or ""),
             store_name=order.get("store_name") or order.get("marketplace") or "",
             platform_label=_platform_display(order),
-            payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
+            payment_amount=(_charged_total if _vf >= 0.01 else float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0)),
             carrier_name=_carrier_name,
             carrier_vkn=_carrier_vkn,
             carrier_city=_carrier_city,
-            note="",
+            note=_vf_note,
         )
         # Mikro ihracat İSTİSNA: faturada alıcı = yabancı alıcı (billing_address), kargocu değil.
         if order.get("is_micro_export"):
@@ -2216,6 +2255,15 @@ async def create_invoice_for_order(
         else:
             _carrier_name, _carrier_vkn = "", ""
 
+        # Taksitli satış → vade farkı satırı (KDV Kanunu 24/c). Satır adı = İBARE.
+        _vf, _charged_total, _inst_n = _order_vade_farki(order)
+        if _vf >= 0.01:
+            line_items.append({
+                "name": f"Vade Farkı (Taksit x{_inst_n})",
+                "qty": 1, "unit_price": _vf, "kdv_rate": 20.0,
+                "sku": "VADEFARKI", "barcode": "", "note": "",
+            })
+
         _efatura_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
@@ -2254,7 +2302,7 @@ async def create_invoice_for_order(
             store_name=order.get("store_name") or order.get("marketplace") or "",
             platform_label=_platform_display(order),
             payment_method=order.get("payment_method") or "",
-            payment_amount=float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0),
+            payment_amount=(_charged_total if _vf >= 0.01 else float(order.get("total") or order.get("total_amount") or order.get("grand_total") or 0)),
             dispatch_date=str(order.get("shipped_at") or order.get("dispatch_date") or issue_date)[:10],
             # Senaryo: Ticari Fatura (alıcı 8 gün içinde kabul/red edebilir). Ayardan
             # değiştirilebilir (dogan_settings.einvoice_profile); varsayılan TİCARİ.
@@ -4335,14 +4383,27 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
     """
     fault = (fault or "store").lower()
     items = rec.get("items") or []
-    if returned_net_override not in (None, ""):
-        returned_net = _round2(returned_net_override)
-    else:
-        returned_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
 
-    orig_cart = _round2(order.get("subtotal") or order.get("total") or 0)
-    kept_cart = _round2(max(0.0, orig_cart - returned_net))
-    is_partial = kept_cart > 0.01  # tam iadede (kalan 0) kargo mahsubu uygulanmaz
+    # Müşterinin GERÇEKTE ÖDEDİĞİ tutar = baz (taksitliyse vade farkı dahil paidPrice; değilse
+    # order.total). ESKİ HATA: ürün BRÜT toplamı (Σ price×qty) baz alınıp kupon indirimi yok
+    # sayılıyordu → tam iadede yanlış tutar (örn. 1990−90=1900; doğrusu 1881 / kusur müşteride 1791).
+    _vf, _charged, _inst = _order_vade_farki(order)
+    base_total = _round2(order.get("total") or 0)
+    paid_total = _charged if _charged > base_total + 0.01 else base_total
+
+    if returned_net_override not in (None, ""):
+        # KISMİ İADE → panelde seçili kalemlerin net toplamı.
+        returned_net = _round2(returned_net_override)
+        orig_cart = _round2(order.get("subtotal") or order.get("total") or 0)
+        kept_cart = _round2(max(0.0, orig_cart - returned_net))
+        is_partial = kept_cart > 0.01
+    else:
+        # TAM İADE → müşteriye ödediği tutar iade edilir (kusur müşterideyse kargo düşülür).
+        returned_net = paid_total if paid_total > 0 else _round2(
+            sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
+        orig_cart = returned_net
+        kept_cart = 0.0
+        is_partial = False  # tam iadede kalan 0 → kampanya (ücretsiz-kargo) mahsubu uygulanmaz
 
     # --- Ücretsiz-kargo iptali (Karar #2): kısmi iade sonrası KALAN sepet, vitrindeki
     #     ücretsiz-kargo eşiğinin altına düşerse — ve SADECE müşteri kusurunda —
@@ -4729,33 +4790,39 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
 
     cargo_line = None
     cargo_mode = "none"
+    vade_line = None
+    # Kargo toggle (include_cargo) tek anlam taşır: "kargoyu müşteriden KES (mahsup)".
+    # Kusur müşterideyse operatör işaretler → iade tutarından kargo düşülür. Kesilen kargo
+    # AYRI satır olarak yazılmaz; fark "indirim" toplamına katlanır ki satırlar net ile tutarlı kalsın.
+    deduct_cargo = include_cargo and cargo_amount > 0
     if is_full:
-        # TAM İADE → müşteriye TÜM fatura tutarı iade edilir (kargo dahilse zaten total içindedir;
-        # ücretsiz kargoda mahsup uygulanmaz).
-        net_total = order_total if order_total > 0 else _round2(
-            max(0.0, prod_net - order_disc + (shipping_cost if paid_shipping else 0)))
-        total_gross = _round2((order_sub if order_sub > 0 else prod_gross) + (shipping_cost if paid_shipping else 0))
+        # TAM İADE → baz, müşterinin GERÇEKTE ÖDEDİĞİ tutar (taksitliyse vade farkı dahil
+        # paidPrice; değilse order.total). Kupon indirimi zaten ödenen tutarın içindedir.
+        _vf_r, _charged_r, _inst_r = _order_vade_farki(order)
+        _paid = _charged_r if (_charged_r > order_total + 0.01) else order_total
+        if _paid <= 0:
+            _paid = _round2(max(0.0, prod_net - order_disc + (shipping_cost if paid_shipping else 0)))
+        net_total = _round2(_paid - (cargo_amount if deduct_cargo else 0.0))
+        if deduct_cargo:
+            total_gross = _round2(prod_gross + (_vf_r if _vf_r >= 0.01 else 0))
+            cargo_mode = "deducted"
+        else:
+            total_gross = _round2(prod_gross + (cargo_amount if paid_shipping else 0) + (_vf_r if _vf_r >= 0.01 else 0))
+            if paid_shipping and shipping_cost > 0:
+                cargo_line = {"name": "Kargo Bedeli", "net_price": cargo_amount, "qty": 1}
+                cargo_mode = "refund"
         total_discount = _round2(max(0.0, total_gross - net_total))
-        if paid_shipping and shipping_cost > 0:
-            cargo_line = {"name": "Kargo Bedeli", "net_price": shipping_cost, "qty": 1}
-            cargo_mode = "refund"
+        if _vf_r >= 0.01:
+            vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": _vf_r, "qty": 1}
     else:
         # KISMİ İADE → seçili ürünler; sipariş-seviyesi (kupon) indirimi seçili kalemlere oransal dağıtılır.
         alloc_disc = _round2(order_disc * (prod_net / order_sub)) if (order_disc > 0 and order_sub > 0) else 0.0
         base_net = _round2(max(0.0, prod_net - alloc_disc))
-        cargo_signed = 0.0
-        if include_cargo and cargo_amount > 0:
-            if paid_shipping:
-                cargo_signed = cargo_amount  # +: ödenmiş kargo müşteriye iade edilir
-                cargo_line = {"name": "Kargo Bedeli (iade)", "net_price": cargo_amount, "qty": 1}
-                cargo_mode = "refund"
-            else:
-                cargo_signed = -cargo_amount  # −: ücretsiz kargo iptali, müşteriden mahsup
-                cargo_line = {"name": "Kargo Bedeli (ücretsiz kargo iptali — mahsup)", "net_price": -cargo_amount, "qty": 1}
-                cargo_mode = "clawback"
-        net_total = _round2(max(0.0, base_net + cargo_signed))
-        total_gross = _round2(prod_gross + (cargo_amount if (include_cargo and paid_shipping) else 0))
-        total_discount = _round2(max(0.0, (prod_gross - prod_net) + alloc_disc))
+        net_total = _round2(max(0.0, base_net - (cargo_amount if deduct_cargo else 0.0)))
+        total_gross = _round2(prod_gross)
+        total_discount = _round2(max(0.0, total_gross - net_total))
+        if deduct_cargo:
+            cargo_mode = "deducted"
 
     vat_rate = settings.get("default_vat_rate", 10) if settings else 10
     vat_amount = round(net_total * vat_rate / (100 + vat_rate), 2)
@@ -4788,6 +4855,18 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             "discount": 0,
             "net_price": cargo_line["net_price"],
             "reason": "Kargo",
+        })
+
+    if vade_line:
+        gp_items.append({
+            "name": vade_line["name"],
+            "barcode": "",
+            "size": "",
+            "quantity": vade_line.get("qty", 1),
+            "unit_price": vade_line["net_price"],
+            "discount": 0,
+            "net_price": vade_line["net_price"],
+            "reason": "Vade farkı (taksit)",
         })
 
     gider_pusulasi = {

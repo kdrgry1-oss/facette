@@ -1,49 +1,67 @@
-# Site İade → Gider Pusulası: Kargo Yeniden Yapılandırması (kümülatif)
+# Site İade (kargo + ödenen-tutar düzeltmesi) + Taksit Vade Farkı (kümülatif)
 
-## Ne değişti (bu tur — kargo + tutar düzeltmesi)
-Site iade GP'si artık **kargoyu ve sipariş indirimini** doğru işliyor. Kargo, açılır
-detayda **ayrı, açık etiketli, tiklenebilir** bir satır olarak geliyor.
+İKİ iş tek pakette. Tek deploy ile ikisi de canlıya çıkar.
 
-| Durum | Kargo faturada (shipping_cost>0) | Ücretsiz kargo (shipping_cost=0) |
-|---|---|---|
-| **Tam iade** | net = tüm fatura tutarı (order.total — kargo dahil) | net = order.total (kargo yok, mahsup yok) |
-| **Kısmi iade** | seçili ürün; kargo tiklenirse **+kargo** (iade) | seçili ürün; kargo tiklenirse **-standart ücret** (mahsup) |
+---
 
-- Tam iade = hiç kalem seçilmez **veya** tüm kalemler seçilir -> backend order.total'i esas alir
-  (eski hata: yalniz urun toplami -> kargo + kupon indirimi eksikti).
-- Kismi iadede siparis-seviyesi (kupon) indirimi secili kalemlere **oransal** dagitilir.
-- Ucretsiz kargo standart ucreti /api/settings ile **ayni kaynaktan** okunur.
-- Mahsup satiri pusulada **pozitif (kesinti)**, iade satirlari **negatif** basilir.
+## A) İADE TUTARI = ÖDENEN TUTAR + KARGO "MÜŞTERİDEN KES"  (bu tur — kritik düzeltme)
+
+**Sorun (W10039):** Müşteri **1.881** TL ödedi; İade Onay **1.900** hesaplıyordu (= ürün brütü 1.990 − kargo 90; **kupon indirimi 199 yok sayılıyordu**). Ayrıca kargo tam iadede tiklenemiyordu.
+
+**Kök sebep:** İade hesabı ürünlerin **brüt** toplamını baz alıyordu; müşterinin **gerçekte ödediği** tutarı (order.total / taksitliyse paidPrice) değil.
+
+**Düzeltme:**
+- **İade bazı = ödenen tutar.** Tam iadede `_compute_refund_breakdown` ve GP, `order.total`'ı (taksitliyse vade farkı dahil `paidPrice`) baz alır. Artık kupon indirimi de doğru.
+- **Kargo toggle tek anlam: "Kargoyu müşteriden kes (−₺X)".** Kusur müşterideyse (bana uymadı vb.) işaretle → iadeden kargo düşülür. **Tam iadede de tiklenebilir.**
+  - Kes **kapalı** (mağaza kusuru): net = ödenen (örn. **1.881**).
+  - Kes **açık** (müşteri kusuru): net = ödenen − kargo (örn. **1.791**).
+- **Onay penceresindeki Kusur (müşteri/mağaza) seçimi** kargoyu otomatik belirler: müşteri → kargo düşülür, mağaza → düşülmez.
+- Kesilen kargo ayrı satır olarak yazılmaz; fark **indirim** toplamına katlanır ki pusuladaki satırlar net tutarla tutarlı kalsın. ("Net Tutar" totals'tan gelir.)
+
+**Önceki "+kargo iadeye ekle / −müşteriye yansıt" ikili mantığı kaldırıldı** (kafa karıştırıcıydı ve tam iadede yanlış topluyordu).
+
+---
+
+## B) TAKSİT VADE FARKI — FATURA + İADE  (önceki tur — bu pakette dahil)
+
+**Mevzuat (KDV 24/c):** Vade farkını mağaza uygular ve `paidPrice`=taksit toplamını mağaza tahsil eder → fark matraha dahil, %20.
+
+- Taksitli siparişte faturaya **"Vade Farkı (Taksit xN)"** satırı (KDV %20 dahil = paidPrice − total); fatura toplamı gerçek tahsilata eşitlenir. Hem e-Arşiv hem e-Fatura. Satır adı = İBARE.
+- Tam iadede net, gerçekte ödenen (vade farkı dahil) tutar; GP'de vade farkı satırı görünür.
+
+---
 
 ## Dosyalar
-- backend/routes/orders.py — GP endpoint: kalem secimi + tam/kismi + kargo isaret mantigi, totals.net dogru, cargo meta.
-- backend/routes/rooftr_returns.py — yanita free_ship_fee + (onceki tur) GP-no projeksiyonu.
-- backend/routes/integrations.py — (onceki tur) Trendyol manuel iade koprusu.
-- frontend/src/pages/admin/RooftrReturns.jsx — tiklenebilir kargo satiri + include_cargo.
-- frontend/src/pages/admin/Returns.jsx — pusula satir tutari isaret-korur (neg() kaldirildi).
-- backend/scripts/recompute_site_gp.py — gecmis GP yeniden-hesaplama (DRY-RUN varsayilan).
+- backend/routes/orders.py — `_compute_refund_breakdown` (baz=ödenen), GP endpoint (kargo=kes, baz=ödenen), taksit vade farkı (helper + e-Arşiv & e-Fatura satırı).
+- frontend/src/pages/admin/RooftrReturns.jsx — kargo satırı tek anlam "müşteriden kes", tam iadede de tiklenebilir.
+- frontend/src/pages/admin/Returns.jsx — pusula satır tutarı işaret-korur.
+- backend/routes/rooftr_returns.py — yanıta free_ship_fee + GP-no projeksiyonu.
+- backend/routes/integrations.py — Trendyol manuel iade köprüsü.
+- backend/scripts/recompute_site_gp.py — geçmiş GP yeniden-hesaplama (DRY-RUN varsayılan).
 
 ## Deploy
     cd ~/Downloads/facette_deploy
-    unzip -o ~/Downloads/facette_iade_kopru.zip
+    unzip -o ~/Downloads/facette_iade_vade.zip
     git add -A
-    git commit -m "Site iade GP: kargo (faturali=+ / ucretsiz=mahsup), tam iade=order.total, kismi=oransal indirim"
+    git commit -m "Iade tutari=odenen tutar + kargo musteriden kes; taksit vade farki fatura/iade"
     git push
-- Railway yesil: [scheduler] Background scheduler started
+- Railway yeşil: [scheduler] Background scheduler started
 - Cloudflare Pages: 1-2 dk build + Cmd+Shift+R
 
-## Test
-1. Iade Siparisleri -> Web Sitesi -> bir kayit ac.
-2. Hic kalem secme -> GP butonu -> tutar = siparis genel toplami (kargo dahil) olmali.
-3. Bazi kalemleri sec (kismi) -> kargo satiri aktiflesir:
-   - Faturada kargo varsa +TL "iadeye ekle"; tiklersen GP'ye eklenir.
-   - Ucretsiz kargoda -TL "musteriye yansit"; tiklersen GP'den dusulur (mahsup).
-4. Basilan pusulada: urunler negatif (iade), mahsup satiri pozitif (kesinti), Net Tutar dogru.
+## Test — W10039 (ödenen 1.881, kargo 90, indirim 199)
+1. Web Sitesi → W10039 aç → **İade Onay**.
+   - Kusur **Müşteri** (varsayılan): Otomatik iade **1.791** (1.881 − 90 kargo).
+   - Kusur **Mağaza**: **1.881** (kargo düşülmez).
+2. Kargo satırı artık **tiklenebilir** (tam iadede de). "Kargoyu müşteriden kes −₺90,00".
+3. Belge ikonu → GP:
+   - Kargo **işaretsiz** → Net **1.881,00**.
+   - Kargo **işaretli** → Net **1.791,00**.
 
-## Gecmis GP'leri duzeltme (DIKKAT — muhasebeye gitmis olabilir)
-Railway shell, backend/ dizininde:
-    python -m scripts.recompute_site_gp          # ONCE: yalniz rapor (hicbir sey degismez)
-    python -m scripts.recompute_site_gp --apply  # SONRA: tam iade GP'lerini order.total'a ceker (yedekli)
-- Once dry-run ciktisini incele (eski->yeni tablo + net fark).
-- --apply yalniz tam iadeleri duzeltir; eski degerler GP'de _recompute_backup'a yedeklenir.
-- Kismi iade GP'leri otomatik degismez -> panelden kalem+kargo secerek yeniden uret.
+## Test — Taksit (W10129)
+1. Taksitli siparişin faturasını kes → **"Vade Farkı (Taksit xN)"** satırı; toplam = ödenen (peşin değil).
+2. Tam iade → GP net = ödenen (vade farkı dahil).
+
+## Geçmiş GP'leri düzeltme (DİKKAT)
+Railway shell, backend/:
+    python -m scripts.recompute_site_gp          # rapor
+    python -m scripts.recompute_site_gp --apply  # tam iade GP'lerini ödenen tutara çeker (yedekli)

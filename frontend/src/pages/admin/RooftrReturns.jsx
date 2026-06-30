@@ -572,24 +572,21 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           <div className="text-xs text-gray-400">Ürün kalemi yok.</div>
                         )}
 
-                        {/* Kargo bedeli — ayrı, açık etiketli, tiklenebilir satır.
-                            Faturada kargo VARSA: +tutar (iadeye ekle). Ücretsiz kargoda: −tutar (kısmi iadede mahsup).
-                            Tam iadede pasiftir; tutar zaten "tüm fatura tutarı"na dahildir. */}
+                        {/* Kargo bedeli — tek anlam: "kargoyu müşteriden KES (mahsup)".
+                            Kusur müşterideyse (bana uymadı vb.) işaretle → iade tutarından düşülür.
+                            Tam iadede de tiklenebilir: işaretliyse net = ödenen − kargo. */}
                         {(() => {
                           const paid = Number(r.shipping_cost) > 0;
                           const amt = paid ? Number(r.shipping_cost) : Number(freeShipFee) || 0;
                           if (amt <= 0) return null;
-                          const itemsLen = (r.items || []).length;
-                          const fullReturn = itemsLen > 0 && (selCount(r.id) === 0 || selCount(r.id) >= itemsLen);
                           const sel = !!cargoSel[r.id];
                           return (
-                            <label className={`mt-1 flex items-center gap-3 text-xs border rounded-md px-2.5 py-1.5 ${fullReturn ? "bg-gray-50 border-gray-200 cursor-default text-gray-500" : sel ? "bg-amber-50 border-amber-300 cursor-pointer text-gray-900" : "bg-white cursor-pointer text-gray-900"}`}>
-                              <input type="checkbox" disabled={fullReturn} checked={fullReturn ? paid : sel} onChange={() => { if (!fullReturn) toggleCargo(r.id); }} className="shrink-0" />
-                              <span className="font-medium whitespace-nowrap">Kargo bedeli</span>
-                              <span className="text-gray-500 whitespace-nowrap">{paid ? "(faturada) · iadeye ekle" : "(ücretsiz kargo) · müşteriye yansıt"}</span>
+                            <label className={`mt-1 flex items-center gap-3 text-xs border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
+                              <input type="checkbox" checked={sel} onChange={() => toggleCargo(r.id)} className="shrink-0" />
+                              <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
+                              <span className="text-gray-500 whitespace-nowrap">{paid ? "(faturadaki kargo — mahsup)" : "(ücretsiz kargo iptali — mahsup)"}</span>
                               <span className="flex-1" />
-                              <span className={`font-semibold whitespace-nowrap ${paid ? "text-gray-900" : "text-amber-700"}`}>{paid ? "+" : "−"}{fmtTL(amt)}</span>
-                              {fullReturn && <span className="text-[10px] text-gray-400 whitespace-nowrap">tam iade: tüm fatura tutarı</span>}
+                              <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>
                             </label>
                           );
                         })()}
