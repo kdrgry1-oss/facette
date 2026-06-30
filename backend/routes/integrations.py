@@ -349,7 +349,7 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
     Once cache, yoksa canli cekip cache'ler."""
     key = int(category_id) if str(category_id).isdigit() else str(category_id)
     cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cached and cached.get("_v") == 9 and cached.get("attributes") is not None:
+    if cached and cached.get("_v") == 8 and cached.get("attributes") is not None:
         return {"success": True, "attributes": cached.get("attributes", []),
                 "media_attributes": cached.get("media_attributes", []),
                 "base_attributes": cached.get("base_attributes", []),
@@ -4311,7 +4311,7 @@ async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cad and cad.get("_v") == 9 and cad.get("attributes"):
+    if cad and cad.get("_v") == 8 and cad.get("attributes"):
         return cad.get("attributes") or [], None
     from .category_mapping import _fetch_hb_category_attributes
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
@@ -5006,29 +5006,6 @@ async def hb_product_category_attributes(product_id: str, current_user: dict = D
     if not cm and p.get("category_name"):
         cm = await db.category_mappings.find_one(
             {"marketplace": "hepsiburada", "category_name": p.get("category_name")}, {"_id": 0})
-    hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
-    if not hb_cat:
-        return {"attributes": [], "hb_category_id": None, "has_mapping": False}
-    attrs, err = await _hb_category_attributes_for(hb_cat)
-    return {"attributes": attrs or [], "hb_category_id": hb_cat, "has_mapping": True, "error": err}
-
-
-@router.get("/hepsiburada/category-attributes/by-local")
-async def hb_category_attributes_by_local(
-    category_id: str = "", category_name: str = "",
-    current_user: dict = Depends(require_admin)):
-    """Ürün modalının 'Hepsiburada için Özellikler' bölümünü KAYDEDİLMEMİŞ üründe de besler.
-    HB kategorisi üründe durmaz (category_mappings'te durur); burada onu YEREL kategoriden
-    (id veya ad) çözeriz — push çekirdeği (_build_hb_product_item) ile AYNI kaynak. Böylece
-    yeni üründe de HB'nin GERÇEK tüm kategori özellikleri (zorunlu + enum değerleri) gelir,
-    yalnız 9 sabite düşmez. product.id gerektirmez."""
-    cm = None
-    if category_id:
-        cm = await db.category_mappings.find_one(
-            {"marketplace": "hepsiburada", "category_id": category_id}, {"_id": 0})
-    if not cm and category_name:
-        cm = await db.category_mappings.find_one(
-            {"marketplace": "hepsiburada", "category_name": category_name}, {"_id": 0})
     hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
     if not hb_cat:
         return {"attributes": [], "hb_category_id": None, "has_mapping": False}
@@ -7279,6 +7256,110 @@ def _derive_claim_status(claim: dict) -> str:
     return statuses[0]
 
 
+# ── Sipariş-durumu köprüsü (read-side) ──────────────────────────────────────
+# Trendyol siparişini Trendyol'da claim açılmamış olsa bile elle iade durumuna
+# alınca, İade Siparişleri > Trendyol sekmesinde görünür. Web Sitesi (Rooftr)
+# sekmesi orders üzerinden zaten böyle çalışır; burası onun Trendyol aynası.
+# trendyol_claims koleksiyonuna YAZILMAZ; sipariş durumu handler'ı değişmez.
+_RETURN_STATUS_KEYS = [
+    "return_requested", "return_approved", "return_rejected",
+    "return_in_transit", "returned", "refunded", "partial_refunded",
+]
+_ORDER_STATUS_BUCKET = {
+    "return_requested": "talep_olusturulan",
+    "return_in_transit": "kargoya_verilen",
+    "return_approved": "onaylanan",
+    "returned": "onaylanan",
+    "refunded": "onaylanan",
+    "partial_refunded": "onaylanan",
+    "return_rejected": "reddedilen",
+}
+_ORDER_STATUS_TR = {
+    "return_requested": "İade Talebi Oluşturuldu",
+    "return_in_transit": "İade Kargoda",
+    "return_approved": "İade Onaylandı",
+    "returned": "İade Tamamlandı",
+    "refunded": "İade Bedeli Ödendi",
+    "partial_refunded": "Kısmi İade",
+    "return_rejected": "İade Reddedildi",
+}
+
+
+def _order_payment_type(pm: str) -> str:
+    pm = (pm or "").lower()
+    if pm in ("bank_transfer", "havale", "eft", "transfer"):
+        return "transfer"
+    if pm in ("cash_on_delivery", "cod", "kapida"):
+        return "cod"
+    return "credit_card"
+
+
+async def _order_derived_trendyol_returns(search: str = "", claim_type: str = "",
+                                          exclude_order_numbers=None):
+    """İade durumundaki Trendyol siparişlerinden — senkron claim'i OLMAYANLARI —
+    iade satırına çevirir. Tamamen read-side; satırlar `manual=True` işaretlenir."""
+    if claim_type == "CANCEL":
+        return []  # manuel iade satırları RETURN tipidir; iptal sekmesine girmez
+    exclude = exclude_order_numbers or set()
+    q = {"platform": "trendyol", "status": {"$in": _RETURN_STATUS_KEYS}}
+    proj = {
+        "_id": 0, "id": 1, "order_number": 1, "status": 1, "items": 1,
+        "shipping_address": 1, "billing_address": 1, "customer_name": 1, "full_name": 1,
+        "total": 1, "subtotal": 1, "invoice_number": 1, "created_at": 1, "updated_at": 1,
+        "payment_method": 1, "return_request": 1, "cargo_tracking_number": 1,
+        "cargo_provider_name": 1,
+    }
+    _rx = re.compile(_search_tr_regex(search.strip()), re.IGNORECASE) if search else None
+    out = []
+    async for o in db.orders.find(q, proj).sort("updated_at", -1):
+        onum = str(o.get("order_number") or "")
+        if onum and onum in exclude:
+            continue  # Trendyol senkronundan gerçek claim zaten geldi → tekrarlama
+        addr = o.get("shipping_address") or {}
+        bill = o.get("billing_address") or {}
+        name = (" ".join([addr.get("first_name") or "", addr.get("last_name") or ""]).strip()
+                or addr.get("full_name") or o.get("customer_name") or o.get("full_name")
+                or " ".join([bill.get("first_name") or "", bill.get("last_name") or ""]).strip()
+                or "—")
+        st = o.get("status") or ""
+        rr = o.get("return_request") or {}
+        items = []
+        for it in (o.get("items") or []):
+            up = float(it.get("unit_price") or it.get("list_price") or it.get("price") or 0)
+            pr = float(it.get("price") or up or 0)
+            dc = float(it.get("discount_amount") or it.get("discount") or 0)
+            _nm = it.get("name") or it.get("product_name") or "Ürün"
+            items.append({
+                "claim_item_id": "", "productName": _nm, "product_name": _nm,
+                "barcode": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+                "size": it.get("size", ""), "color": it.get("color", ""),
+                "quantity": int(it.get("quantity", 1) or 1),
+                "unit_price": up, "price": pr, "discount_amount": dc, "reason": "",
+            })
+        net = float(o.get("total") or 0) or sum(i["price"] for i in items)
+        row = {
+            "claim_id": "ord:" + str(o.get("id") or onum),
+            "order_id": o.get("id"), "order_number": onum,
+            "claim_type": "RETURN", "claim_reason": rr.get("reason") or "",
+            "claim_status": st, "order_status": st,
+            "manual": True, "source": "order_status",
+            "customer_name": name,
+            "created_date": o.get("updated_at") or o.get("created_at") or "",
+            "items": items, "refund_amount": net,
+            "invoice_number": str(o.get("invoice_number") or ""),
+            "cargo_tracking_number": str(o.get("cargo_tracking_number") or ""),
+            "cargo_provider_name": o.get("cargo_provider_name") or "",
+            "payment_type": _order_payment_type(o.get("payment_method")),
+        }
+        if _rx is not None:
+            hay = " ".join([onum, name, row["invoice_number"], row["cargo_tracking_number"],
+                            " ".join(i["productName"] for i in items)])
+            if not _rx.search(hay):
+                continue
+        out.append(row)
+    return out
+
+
 def _claim_bucket(c: dict) -> str:
     """Bir Trendyol claim'ini sekme kovasına eşler (status + kargo takip durumuna göre).
 
@@ -7292,6 +7373,9 @@ def _claim_bucket(c: dict) -> str:
     NOT: Bu eşleme canlı 34/54/16/3583/49 sayılarıyla kalibre edilecek tek noktadır;
     backfill sonrası gerçek dağılım ile bire bir tutmazsa yalnız burası ayarlanır.
     """
+    # Manuel / sipariş-durumu kaynaklı satır → kova doğrudan sipariş durumundan.
+    if c.get("manual") and c.get("order_status"):
+        return _ORDER_STATUS_BUCKET.get(c.get("order_status"), "talep_olusturulan")
     st = (c.get("claim_status") or "").strip()
     has_cargo = bool(str(c.get("cargo_tracking_number") or "").strip())
     if st == "Accepted":
@@ -7797,6 +7881,13 @@ async def get_trendyol_claims(
         seen.add(cid)
         deduped.append(c)
 
+    # Sipariş-durumu köprüsü: Trendyol'da claim'i OLMAYAN ama elle iade durumuna
+    # alınmış Trendyol siparişlerini de ekle (Web Sitesi/Rooftr deseninin aynası).
+    _seen_orders = {c.get("order_number") for c in deduped if c.get("order_number")}
+    _manual_rows = await _order_derived_trendyol_returns(
+        search=search, claim_type=claim_type, exclude_order_numbers=_seen_orders)
+    deduped = deduped + _manual_rows
+
     # (b) trendyol_claims koleksiyonu TAMAMEN pazaryeri (Trendyol) kayitlaridir.
     # Site iadeleri ayri koleksiyonda (customer_returns) ve ayri sekmede (Web Sitesi)
     # gosterilir. Bu yuzden burada site/pazaryeri ayrimi YAPILMAZ; mikro ihracat dahil
@@ -7808,6 +7899,7 @@ async def get_trendyol_claims(
     # ayrı bir alandan yönetilir. Böylece "Tüm İadeler" sekmesi ve "Toplam İade"
     # kartı aynı evreni (iptal-hariç tekil iade) sayar.
     iade_scoped = [c for c in platform_scoped if _claim_bucket(c) != "iptal"]
+    iade_scoped.sort(key=lambda c: (c.get("created_date") or ""), reverse=True)
 
     # (c) status sekmesi filtresi (bellekte) — _claim_bucket ile
     if want_tab == "acik_iade":
@@ -7835,6 +7927,8 @@ async def get_trendyol_claims(
         _b = _claim_bucket(c)
         c["bucket"] = _b
         c["bucket_label"] = _BUCKET_LABEL.get(_b, "—")
+        if c.get("manual") and c.get("order_status"):
+            c["bucket_label"] = _ORDER_STATUS_TR.get(c.get("order_status"), c["bucket_label"])
 
     # Sekme adetleri — iade_scoped (iptal hariç) üzerinden, _claim_bucket ile.
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
@@ -7902,7 +7996,11 @@ async def export_trendyol_claims(
         if cid in seen:
             continue
         seen.add(cid); deduped.append(c)
+    _seen_orders = {c.get("order_number") for c in deduped if c.get("order_number")}
+    _manual_rows = await _order_derived_trendyol_returns(search=search, exclude_order_numbers=_seen_orders)
+    deduped = deduped + _manual_rows
     iade_scoped = [c for c in deduped if _claim_bucket(c) != "iptal"]
+    iade_scoped.sort(key=lambda c: (c.get("created_date") or ""), reverse=True)
     if want_tab == "acik_iade":
         rows = [c for c in iade_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
     elif want_tab is not None:
@@ -7934,13 +8032,14 @@ async def export_trendyol_claims(
             for i in items if (i.get("product_name") or i.get("name"))
         ])
         b = _claim_bucket(c)
+        _dlabel = _ORDER_STATUS_TR.get(c.get("order_status")) if c.get("manual") else None
         ws.append([
             c.get("order_number") or "",
             c.get("customer_name") or "",
             urun,
             float(c.get("refund_amount") or 0),
             str(c.get("created_date") or "")[:10],
-            _BUCKET_LABEL.get(b, "—"),
+            _dlabel or _BUCKET_LABEL.get(b, "—"),
             c.get("gider_pusulasi_no") or "",
         ])
 

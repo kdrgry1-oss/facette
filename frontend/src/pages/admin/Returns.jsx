@@ -343,10 +343,11 @@ export default function Returns() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === claims.length) {
+    const selectable = claims.filter(c => !c.manual);
+    if (selectable.length > 0 && selectedIds.size === selectable.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(claims.map(c => c.claim_id)));
+      setSelectedIds(new Set(selectable.map(c => c.claim_id)));
     }
   };
 
@@ -492,7 +493,7 @@ export default function Returns() {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-3 py-3 w-10">
-                  <input type="checkbox" checked={claims.length > 0 && selectedIds.size === claims.length}
+                  <input type="checkbox" checked={claims.filter(c => !c.manual).length > 0 && selectedIds.size === claims.filter(c => !c.manual).length}
                     onChange={toggleSelectAll} className="rounded" data-testid="select-all-checkbox" />
                 </th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş No</th>
@@ -521,9 +522,11 @@ export default function Returns() {
                 return (
                   <tr key={claim.claim_id} className={`${selectedIds.has(claim.claim_id) ? "bg-blue-50" : "hover:bg-gray-50"} transition-colors`}>
                     <td className="px-3 py-3">
-                      <input type="checkbox" checked={selectedIds.has(claim.claim_id)}
-                        onChange={() => toggleSelect(claim.claim_id)} className="rounded"
-                        data-testid={`select-claim-${claim.claim_id}`} />
+                      {!claim.manual && (
+                        <input type="checkbox" checked={selectedIds.has(claim.claim_id)}
+                          onChange={() => toggleSelect(claim.claim_id)} className="rounded"
+                          data-testid={`select-claim-${claim.claim_id}`} />
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <button onClick={() => setExpandedId(isExpanded ? null : claim.claim_id)}
@@ -533,7 +536,12 @@ export default function Returns() {
                       </button>
                       {isExpanded && (
                         <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs space-y-1">
-                          <p className="mb-1"><strong>Claim ID:</strong> {claim.claim_id}{claim.invoice_number ? ` · Fatura: ${claim.invoice_number}` : ""}</p>
+                          <p className="mb-1">
+                            {claim.manual
+                              ? <span><strong>Manuel iade</strong> · sipariş durumundan</span>
+                              : <span><strong>Claim ID:</strong> {claim.claim_id}</span>}
+                            {claim.invoice_number ? ` · Fatura: ${claim.invoice_number}` : ""}
+                          </p>
                           {(() => {
                             const allIds = (claim.items || []).map(i => i.claim_item_id).filter(Boolean);
                             const selIds = itemSel[claim.claim_id] || new Set(allIds);
@@ -542,9 +550,11 @@ export default function Returns() {
                                 <div className="rounded-lg border bg-white divide-y">
                                   {(claim.items || []).map((item, ii) => (
                                     <label key={ii} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-50">
-                                      <input type="checkbox" className="rounded"
-                                        checked={selIds.has(item.claim_item_id)}
-                                        onChange={() => toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
+                                      {!claim.manual && (
+                                        <input type="checkbox" className="rounded"
+                                          checked={selIds.has(item.claim_item_id)}
+                                          onChange={() => toggleItem(claim.claim_id, item.claim_item_id, allIds)} />
+                                      )}
                                       <span className="flex-1">
                                         <span className="font-medium">{item.productName || "-"}</span>
                                         {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
@@ -554,7 +564,7 @@ export default function Returns() {
                                     </label>
                                   ))}
                                 </div>
-                                {!isActioned && (
+                                {!isActioned && !claim.manual && (
                                   <button onClick={() => handleApprove(claim, Array.from(selIds))}
                                     data-testid={`approve-items-${claim.claim_id}`}
                                     disabled={selIds.size === 0}
@@ -600,6 +610,11 @@ export default function Returns() {
                     <td className="px-3 py-3 text-xs text-gray-500">{formatDate(claim.created_date)}</td>
                     <td className="px-3 py-3 text-center">
                       <div className="flex flex-col items-center gap-1">
+                        {claim.manual ? (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200" title="Sipariş durumundan — durumu Siparişler sayfasından değiştirin">
+                            {claim.bucket_label || "—"}
+                          </span>
+                        ) : (<>
                         <ActionBadge action={claim.panel_action} />
                         <select
                           value={claim.claim_status || ""}
@@ -618,10 +633,14 @@ export default function Returns() {
                             title="Manuel kilidi kaldır — durum tekrar Trendyol'dan senkronlanır"
                             className="text-[10px] text-amber-700 hover:underline">🔒 kilidi aç</button>
                         )}
+                        </>)}
                       </div>
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {claim.manual ? (
+                          <span className="text-[10px] text-gray-400 italic px-1" title="Sipariş durumundan türetilmiş iade">Manuel</span>
+                        ) : (<>
                         {claim.gider_pusulasi_no && (
                           <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
                             #{claim.gider_pusulasi_no}
@@ -637,6 +656,7 @@ export default function Returns() {
                           }`} title="Gider Pusulası">
                           <FileText size={14} />
                         </button>
+                        </>)}
                       </div>
                     </td>
                   </tr>
