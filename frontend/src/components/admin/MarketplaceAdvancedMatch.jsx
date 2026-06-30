@@ -894,6 +894,29 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
   const currentAttr = mpAttrs.find((a) => String(a.id ?? a.attribute?.id) === String(selectedAttrId));
   const attrName = currentAttr?.name || currentAttr?.attribute?.name;
 
+  // HB Renk/Beden gibi yüksek-kardinaliteli "satıcı havuzu" alanlarında düz baz değerler
+  // (ör. "Ekru") HB'nin attribute-values API'sinde GÜVENİLİR gelmez — havuz kodlu/bileşik
+  // değerlerle dolu ("00411-Ekru","Altın - Ekru"...), düz "Ekru" eksik kalır. Bu alanlar custom
+  // değer KABUL ettiğinden (havuzdaki binlerce satıcı-custom değer bunun kanıtı), kullanıcının
+  // KENDİ sistem değerlerini (soldaki temiz liste: Ekru, Bej, Gri...) dropdown'a seçenek olarak
+  // ÖNEKLERİZ → temiz "Ekru" görünüp seçilebilir; seçilince düz "Ekru" string'i gider, HB kabul eder.
+  // YALNIZCA custom-friendly alanlarda (kirli havuz >200 VEYA allowCustom) yapılır — kapalı küçük
+  // enum'lara (Kapama Şekli vb.) geçersiz değer eklemeyiz.
+  const _enrichWithLocalVals = (mpVals, aName, attr) => {
+    const list = mpVals || [];
+    const customOk = list.length > 200 || !!attr?.allowCustom;
+    if (!customOk) return list;
+    const locals = localValues[aName] || [];
+    if (!locals.length) return list;
+    const present = new Set(list.map((o) => _normVal(o.name)));
+    const extra = [];
+    for (const lv of locals) {
+      const nv = _normVal(lv);
+      if (nv && !present.has(nv)) { present.add(nv); extra.push({ id: lv, name: lv }); }
+    }
+    return extra.length ? [...extra, ...list] : list;
+  };
+
   return (
     <Dialog open={open} onOpenChange={() => onClose(false)}>
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
@@ -1036,7 +1059,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       {mpVals.length > 0 ? (
                         <SearchableValueSelect
                           value={curDef}
-                          options={mpVals}
+                          options={_enrichWithLocalVals(mpVals, attrName, currentAttr)}
                           onChange={setDef}
                           placeholder="— HB değeri seç —"
                           seed={mpVals.length > 200 ? (attrName || "") : ""}
@@ -1139,7 +1162,8 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       // serbest-girdi). Eşleşme yoksa backend ürünün KENDİ değerini aynen gönderir;
                       // yine de OTOMATİK EŞLEŞENİ GÖSTER + gerektiğinde MANUEL düzeltilebilsin (madde 3-4).
                       const dirtyPool = mpVals.length > 200;
-                      const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(mpVals, (v) => v.name) : mpVals;
+                      const enrichedMp = _enrichWithLocalVals(mpVals, attrName, currentAttr);
+                      const sortedMp = _isSizeAttrName(attrName) ? sortLikeSize(enrichedMp, (v) => v.name) : enrichedMp;
                       return (
                         <tr key={lv} className={`border-b hover:bg-gray-50 ${isMapped ? "bg-green-50/40" : ""}`}>
                           <td className="px-4 py-2 font-medium">

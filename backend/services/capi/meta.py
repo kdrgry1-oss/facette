@@ -166,11 +166,13 @@ async def send(
         payload["test_event_code"] = test_event_code
 
     url = f"{META_BASE}/{pixel_id}/events"
-    params = {"access_token": access_token}
+    # access_token'i query-string yerine Authorization header'inda gonder (Graph API destekler) →
+    # token istek URL'ine girmez, httpx/proxy loglarinda DUZ METIN sizmaz.
+    headers = {"Authorization": f"Bearer {access_token}"}
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, params=params, json=payload)
+            r = await client.post(url, json=payload, headers=headers)
             try:
                 resp_json = r.json()
             except Exception:
