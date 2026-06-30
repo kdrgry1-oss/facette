@@ -4908,7 +4908,15 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     # Servisi" (ticket-api, hbSku ile) bunun için var. Burada her kalemin merchantSku'sunu
     # HB katalogunda arar: zaten varsa GÜNCELLE (update_products), yoksa YENİ GİRİŞ (create_products).
     _send_skus = [str((it.get("attributes") or {}).get("merchantSku") or "") for it in items]
-    sku_to_hb = await _hb_build_sku_to_hbsku_map(client, _send_skus)
+    try:
+        sku_to_hb = await asyncio.wait_for(_hb_build_sku_to_hbsku_map(client, _send_skus), timeout=12)
+    except asyncio.TimeoutError:
+        # HB Listing sorgusu 12sn'de yanıt vermedi — Railway/Cloudflare gateway timeout'a
+        # düşüp tarayıcıda "Network Error" görünmesindense, hepsini "yeni" kabul edip
+        # eski (create_products) davranışa düş. Önceki HB'de var olan bir ürün bu durumda
+        # create_products'a gider; HB import sırasında merchantSku zaten varsa kendi
+        # tarafında reddeder/atlar (veri kaybı yok, yalnız o turda özellik güncellenmez).
+        sku_to_hb = {}
     new_items, update_items, update_src = [], [], []
     for it in items:
         ms = str((it.get("attributes") or {}).get("merchantSku") or "").strip().upper()
@@ -4984,7 +4992,10 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     import_result = None
     verify_msg = ""
     if create_tracking_id and len(new_items) <= 60:
-        import_result = await _hb_poll_import(client, str(create_tracking_id))
+        try:
+            import_result = await asyncio.wait_for(_hb_poll_import(client, str(create_tracking_id)), timeout=10)
+        except asyncio.TimeoutError:
+            import_result = {"done": False, "items": [], "success": 0, "failed": 0, "processing": 0}
         if not import_result.get("done"):
             verify_msg += " · ⏳ YENİ ürünler hâlâ işleniyor — “İçe Aktarım Durumu”ndan kontrol edin"
         else:
@@ -5000,7 +5011,10 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     update_result = None
     update_verify_msg = ""
     if update_tracking_id and len(update_items) <= 60:
-        update_result = await _hb_poll_ticket(client, str(update_tracking_id))
+        try:
+            update_result = await asyncio.wait_for(_hb_poll_ticket(client, str(update_tracking_id)), timeout=10)
+        except asyncio.TimeoutError:
+            update_result = {"done": False, "status": "UNKNOWN", "items": [], "success": 0, "failed": 0, "processing": 0}
         if update_result.get("status") == "UNKNOWN":
             update_verify_msg = (f" · ℹ️ {len(update_items)} ürünün özellikleri güncelleme talebiyle "
                                  f"HB'ye iletildi (durum sorgusu desteklenmiyor — “Ürün Güncelleme "
