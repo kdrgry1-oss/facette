@@ -4682,24 +4682,84 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     cust_name = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
                  or ship.get("full_name", "") or "Müşteri")
 
-    items = rec.get("items", []) or []
-    # Kısmi gider pusulası: yalnızca seçili kalemler (item_indexes verilirse SADECE onlar hesaplanır)
+    all_items = rec.get("items", []) or []
+    # Seçili kalemler (kısmi iade). item_indexes verilmezse => TÜM sipariş (tam iade).
     _sel_idx = (payload or {}).get("item_indexes")
+    _sel = []
     if isinstance(_sel_idx, list) and _sel_idx:
-        _filtered = []
         for _i in _sel_idx:
             try:
-                _filtered.append(items[int(_i)])
+                _i = int(_i)
             except Exception:
                 continue
-        if _filtered:
-            items = _filtered
-    total_net = _round2(sum(_round2(it.get("price", 0)) * int(it.get("quantity", 1) or 1) for it in items))
-    total_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * int(it.get("quantity", 1) or 1) for it in items))
-    total_discount = _round2(max(0.0, total_gross - total_net))
+            if 0 <= _i < len(all_items):
+                _sel.append(_i)
+    if _sel:
+        _sel = sorted(set(_sel))
+        items = [all_items[i] for i in _sel]
+    else:
+        _sel = list(range(len(all_items)))
+        items = list(all_items)
+    is_full = len(all_items) > 0 and len(_sel) >= len(all_items)
+
+    def _q(it):
+        return int(it.get("quantity", 1) or 1)
+    prod_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * _q(it) for it in items))
+    prod_net = _round2(sum(_round2(it.get("price", 0)) * _q(it) for it in items))
+
+    # Kargo bedeli kaynağı:
+    #   faturada ücret VARSA (shipping_cost>0) → ödenmiş kargodur, iadeye + olarak EKLENİR;
+    #   YOKSA (ücretsiz kargo) → vitrindeki standart kargo ücreti, kısmi iadede müşteriye
+    #   yansıtılabilir (− mahsup). Standart ücret /api/settings ile aynı kaynaktan okunur.
+    shipping_cost = _round2(order.get("shipping_cost") or 0)
+    paid_shipping = shipping_cost > 0.009
+    if paid_shipping:
+        cargo_amount = shipping_cost
+    else:
+        try:
+            _thr, _fee = await _storefront_free_shipping()
+        except Exception:
+            _fee = 0.0
+        cargo_amount = _round2(_fee or 0)
+    include_cargo = bool((payload or {}).get("include_cargo"))
+
+    order_total = _round2(order.get("total") or 0)
+    order_sub = _round2(order.get("subtotal") or 0)
+    order_disc = _round2(order.get("discount") or 0)
+
+    cargo_line = None
+    cargo_mode = "none"
+    if is_full:
+        # TAM İADE → müşteriye TÜM fatura tutarı iade edilir (kargo dahilse zaten total içindedir;
+        # ücretsiz kargoda mahsup uygulanmaz).
+        net_total = order_total if order_total > 0 else _round2(
+            max(0.0, prod_net - order_disc + (shipping_cost if paid_shipping else 0)))
+        total_gross = _round2((order_sub if order_sub > 0 else prod_gross) + (shipping_cost if paid_shipping else 0))
+        total_discount = _round2(max(0.0, total_gross - net_total))
+        if paid_shipping and shipping_cost > 0:
+            cargo_line = {"name": "Kargo Bedeli", "net_price": shipping_cost, "qty": 1}
+            cargo_mode = "refund"
+    else:
+        # KISMİ İADE → seçili ürünler; sipariş-seviyesi (kupon) indirimi seçili kalemlere oransal dağıtılır.
+        alloc_disc = _round2(order_disc * (prod_net / order_sub)) if (order_disc > 0 and order_sub > 0) else 0.0
+        base_net = _round2(max(0.0, prod_net - alloc_disc))
+        cargo_signed = 0.0
+        if include_cargo and cargo_amount > 0:
+            if paid_shipping:
+                cargo_signed = cargo_amount  # +: ödenmiş kargo müşteriye iade edilir
+                cargo_line = {"name": "Kargo Bedeli (iade)", "net_price": cargo_amount, "qty": 1}
+                cargo_mode = "refund"
+            else:
+                cargo_signed = -cargo_amount  # −: ücretsiz kargo iptali, müşteriden mahsup
+                cargo_line = {"name": "Kargo Bedeli (ücretsiz kargo iptali — mahsup)", "net_price": -cargo_amount, "qty": 1}
+                cargo_mode = "clawback"
+        net_total = _round2(max(0.0, base_net + cargo_signed))
+        total_gross = _round2(prod_gross + (cargo_amount if (include_cargo and paid_shipping) else 0))
+        total_discount = _round2(max(0.0, (prod_gross - prod_net) + alloc_disc))
+
     vat_rate = settings.get("default_vat_rate", 10) if settings else 10
-    vat_amount = round(total_net * vat_rate / (100 + vat_rate), 2)
-    net_without_vat = round(total_net - vat_amount, 2)
+    vat_amount = round(net_total * vat_rate / (100 + vat_rate), 2)
+    net_without_vat = round(net_total - vat_amount, 2)
 
     # ORTAK numara serisi (Trendyol + site)
     last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
@@ -4717,6 +4777,18 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         "net_price": it.get("price", 0),
         "reason": rec.get("reason", ""),
     } for it in items]
+
+    if cargo_line:
+        gp_items.append({
+            "name": cargo_line["name"],
+            "barcode": "",
+            "size": "",
+            "quantity": cargo_line.get("qty", 1),
+            "unit_price": cargo_line["net_price"],
+            "discount": 0,
+            "net_price": cargo_line["net_price"],
+            "reason": "Kargo",
+        })
 
     gider_pusulasi = {
         "number": gp_number,
@@ -4740,10 +4812,17 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         "totals": {
             "gross": total_gross,
             "discount": total_discount,
-            "net": total_net,
+            "net": net_total,
             "vat_rate": vat_rate,
             "vat_amount": vat_amount,
             "net_without_vat": net_without_vat,
+        },
+        "cargo": {
+            "included": bool(cargo_line),
+            "mode": cargo_mode,            # refund | clawback | none
+            "amount": cargo_amount,
+            "paid_shipping": paid_shipping,
+            "is_full": is_full,
         },
         "claim_reason": rec.get("reason", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),

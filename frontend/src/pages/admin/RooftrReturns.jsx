@@ -83,10 +83,13 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const [perms, setPerms] = useState([]);
   const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
   const [selItems, setSelItems] = useState({}); // açılır detayda tiklenen kalemler: { "orderId::index": true }
+  const [cargoSel, setCargoSel] = useState({}); // kargo satırı tiklendi mi: { orderId: true }
+  const [freeShipFee, setFreeShipFee] = useState(0); // ücretsiz-kargo mahsup tutarı (ayarlardan)
   // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
   const [statusOpts, setStatusOpts] = useState(STATUS_OPTS);        // dropdown (yalnız "görünür" olanlar)
   const [statusLabelMap, setStatusLabelMap] = useState(STATUS_LABEL); // tüm etiketler (pasif olanlar da)
   const toggleItem = (rid, i) => setSelItems((s) => { const k = `${rid}::${i}`; const n = { ...s }; if (n[k]) delete n[k]; else n[k] = true; return n; });
+  const toggleCargo = (rid) => setCargoSel((s) => { const n = { ...s }; if (n[rid]) delete n[rid]; else n[rid] = true; return n; });
   const selCount = (rid) => Object.keys(selItems).filter((k) => k.startsWith(`${rid}::`)).length;
 
   const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -120,6 +123,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       if (debounced) params.append("search", debounced);
       const res = await axios.get(`${API}/admin/rooftr/return-orders?${params}`, auth());
       setRows(res.data.orders || []);
+      setFreeShipFee(Number(res.data.free_ship_fee) || 0);
       setStatusCounts(res.data.status_counts || {});
       setPaymentCounts(res.data.payment_counts || {});
       setTotalReturns(res.data.total_returns || 0);
@@ -331,8 +335,11 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
         .filter((k) => k.startsWith(`${r.id}::`) && selItems[k])
         .map((k) => parseInt(k.split("::")[1], 10))
         .filter((n) => !Number.isNaN(n));
-      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`,
-        selIdx.length ? { tracking_no: trackingNo, item_indexes: selIdx } : { tracking_no: trackingNo }, auth());
+      const includeCargo = !!cargoSel[r.id];
+      const body = { tracking_no: trackingNo };
+      if (selIdx.length) body.item_indexes = selIdx;
+      if (includeCargo) body.include_cargo = true;
+      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`, body, auth());
       const gp = res.data?.gider_pusulasi;
       toast.success(`Gider pusulası: ${gp?.display_number || trackingNo}`);
       if (gp && onGiderCreated) onGiderCreated({ ...gp, assigned_no: trackingNo });
@@ -564,6 +571,28 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                         ) : (
                           <div className="text-xs text-gray-400">Ürün kalemi yok.</div>
                         )}
+
+                        {/* Kargo bedeli — ayrı, açık etiketli, tiklenebilir satır.
+                            Faturada kargo VARSA: +tutar (iadeye ekle). Ücretsiz kargoda: −tutar (kısmi iadede mahsup).
+                            Tam iadede pasiftir; tutar zaten "tüm fatura tutarı"na dahildir. */}
+                        {(() => {
+                          const paid = Number(r.shipping_cost) > 0;
+                          const amt = paid ? Number(r.shipping_cost) : Number(freeShipFee) || 0;
+                          if (amt <= 0) return null;
+                          const itemsLen = (r.items || []).length;
+                          const fullReturn = itemsLen > 0 && (selCount(r.id) === 0 || selCount(r.id) >= itemsLen);
+                          const sel = !!cargoSel[r.id];
+                          return (
+                            <label className={`mt-1 flex items-center gap-3 text-xs border rounded-md px-2.5 py-1.5 ${fullReturn ? "bg-gray-50 border-gray-200 cursor-default text-gray-500" : sel ? "bg-amber-50 border-amber-300 cursor-pointer text-gray-900" : "bg-white cursor-pointer text-gray-900"}`}>
+                              <input type="checkbox" disabled={fullReturn} checked={fullReturn ? paid : sel} onChange={() => { if (!fullReturn) toggleCargo(r.id); }} className="shrink-0" />
+                              <span className="font-medium whitespace-nowrap">Kargo bedeli</span>
+                              <span className="text-gray-500 whitespace-nowrap">{paid ? "(faturada) · iadeye ekle" : "(ücretsiz kargo) · müşteriye yansıt"}</span>
+                              <span className="flex-1" />
+                              <span className={`font-semibold whitespace-nowrap ${paid ? "text-gray-900" : "text-amber-700"}`}>{paid ? "+" : "−"}{fmtTL(amt)}</span>
+                              {fullReturn && <span className="text-[10px] text-gray-400 whitespace-nowrap">tam iade: tüm fatura tutarı</span>}
+                            </label>
+                          );
+                        })()}
 
                         {/* İade kargo süreci: gelen iade barkodu/kodu + reddedilenlerde geri gönderim */}
                         {(r.return_code || r.return_barcode_url || r.cargo_tracking_number || r.reship_code || r.return_cargo_provider) && (

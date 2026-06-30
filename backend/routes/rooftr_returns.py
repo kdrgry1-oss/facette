@@ -233,9 +233,27 @@ async def list_rooftr_return_orders(
     except Exception as e:
         logger.warning(f"[ticimax-returns] stats hatası: {e}")
 
+    # Ücretsiz-kargo siparişlerinde kısmi iade mahsubu için standart kargo ücreti
+    # (vitrin/checkout ile AYNI kaynak: settings.cargo_fees[default] → settings.shipping_fee)
+    _free_ship_fee = 0.0
+    try:
+        _s = await db.settings.find_one(
+            {"id": "main"},
+            {"_id": 0, "cargo_fees": 1, "default_cargo_company": 1, "shipping_fee": 1},
+        ) or {}
+        _cf = _s.get("cargo_fees") or {}
+        _dc = _s.get("default_cargo_company") or ""
+        if _dc and isinstance(_cf, dict) and _cf.get(_dc) not in (None, ""):
+            _free_ship_fee = float(_cf.get(_dc))
+        elif _s.get("shipping_fee") not in (None, ""):
+            _free_ship_fee = float(_s.get("shipping_fee"))
+    except Exception:
+        _free_ship_fee = 0.0
+
     return {
         "success": True,
         "orders": rows,
+        "free_ship_fee": round(_free_ship_fee or 0, 2),
         "total": total,
         "page": page,
         "limit": limit,

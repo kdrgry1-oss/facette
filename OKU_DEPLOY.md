@@ -1,32 +1,49 @@
-# FACETTE — Ürün ID + Çoğalt Paketi (cumulative)
+# Site İade → Gider Pusulası: Kargo Yeniden Yapılandırması (kümülatif)
 
-Bu paket önceki "çoğalt" paketini de içerir → **sadece bunu deploy et**, yeter.
+## Ne değişti (bu tur — kargo + tutar düzeltmesi)
+Site iade GP'si artık **kargoyu ve sipariş indirimini** doğru işliyor. Kargo, açılır
+detayda **ayrı, açık etiketli, tiklenebilir** bir satır olarak geliyor.
 
-## Değişen dosyalar
-- `backend/routes/deps.py`            → urun_id üreticisi (build_used_urun_id_set, next_urun_id)
-- `backend/routes/products.py`        → duplicate + assign-variant-ids + create'te urun_id otomatik atama
-- `frontend/src/pages/admin/Products.jsx` → "Kopyala" düzeltildi + modalda "Ürün ID" düzenlenebilir
+| Durum | Kargo faturada (shipping_cost>0) | Ücretsiz kargo (shipping_cost=0) |
+|---|---|---|
+| **Tam iade** | net = tüm fatura tutarı (order.total — kargo dahil) | net = order.total (kargo yok, mahsup yok) |
+| **Kısmi iade** | seçili ürün; kargo tiklenirse **+kargo** (iade) | seçili ürün; kargo tiklenirse **-standart ücret** (mahsup) |
 
-## Yeni davranışlar
-1. **Ürün ID (beden) düzenlenebilir** — "Beden Varyantları" modalında Ürün ID artık input.
-   Değiştirip KAYDET'e basınca kaydolur.
-2. **Yeni üründe otomatik Ürün ID** — ürün oluşturulurken (create) urun_id'si BOŞ olan her
-   bedene, sistemdeki EN YÜKSEK urun_id + 1'den başlayıp +1 ilerleyerek (mevcut olanları
-   atlayarak) değer atanır. Barkod mantığının aynısı.
-3. **Çoğalt (Kopyala)** — backend'de düzgün çalışıyor: her kopyaya yeni benzersiz Ürün Kart ID,
-   yeni benzersiz barkodlar ve yeni urun_id'ler atanır (orijinalle çakışmaz). stock_code aynı kalır.
+- Tam iade = hiç kalem seçilmez **veya** tüm kalemler seçilir -> backend order.total'i esas alir
+  (eski hata: yalniz urun toplami -> kargo + kupon indirimi eksikti).
+- Kismi iadede siparis-seviyesi (kupon) indirimi secili kalemlere **oransal** dagitilir.
+- Ucretsiz kargo standart ucreti /api/settings ile **ayni kaynaktan** okunur.
+- Mahsup satiri pusulada **pozitif (kesinti)**, iade satirlari **negatif** basilir.
+
+## Dosyalar
+- backend/routes/orders.py — GP endpoint: kalem secimi + tam/kismi + kargo isaret mantigi, totals.net dogru, cargo meta.
+- backend/routes/rooftr_returns.py — yanita free_ship_fee + (onceki tur) GP-no projeksiyonu.
+- backend/routes/integrations.py — (onceki tur) Trendyol manuel iade koprusu.
+- frontend/src/pages/admin/RooftrReturns.jsx — tiklenebilir kargo satiri + include_cargo.
+- frontend/src/pages/admin/Returns.jsx — pusula satir tutari isaret-korur (neg() kaldirildi).
+- backend/scripts/recompute_site_gp.py — gecmis GP yeniden-hesaplama (DRY-RUN varsayilan).
 
 ## Deploy
-```
-cd ~/Downloads/facette_deploy && unzip -o ~/Downloads/facette_urunid_paket.zip -d . \
-  && git add -A && git commit -m "feat(products): urun_id düzenlenebilir + create'te otomatik atama; duplicate düzeltme" && git push
-```
+    cd ~/Downloads/facette_deploy
+    unzip -o ~/Downloads/facette_iade_kopru.zip
+    git add -A
+    git commit -m "Site iade GP: kargo (faturali=+ / ucretsiz=mahsup), tam iade=order.total, kismi=oransal indirim"
+    git push
+- Railway yesil: [scheduler] Background scheduler started
+- Cloudflare Pages: 1-2 dk build + Cmd+Shift+R
 
-## Tek seferlik — Siyah bermuda şort beden id'leri (istersen)
-(assign-variant-ids endpoint'i bu pakette de var.)
-```
-curl -X POST https://api.facette.com.tr/api/products/assign-variant-ids \
-  -H "Authorization: Bearer <ADMIN_TOKEN>" -H "Content-Type: application/json" \
-  -d '{"name":"bermuda","color":"siyah","map":{"S":"8618","XS":"8620","XL":"8619","M":"8617","L":"8616"}}'
-```
-Not: Artık modalda elle de girebilirsin; bu endpoint sadece toplu/hızlı çözüm.
+## Test
+1. Iade Siparisleri -> Web Sitesi -> bir kayit ac.
+2. Hic kalem secme -> GP butonu -> tutar = siparis genel toplami (kargo dahil) olmali.
+3. Bazi kalemleri sec (kismi) -> kargo satiri aktiflesir:
+   - Faturada kargo varsa +TL "iadeye ekle"; tiklersen GP'ye eklenir.
+   - Ucretsiz kargoda -TL "musteriye yansit"; tiklersen GP'den dusulur (mahsup).
+4. Basilan pusulada: urunler negatif (iade), mahsup satiri pozitif (kesinti), Net Tutar dogru.
+
+## Gecmis GP'leri duzeltme (DIKKAT — muhasebeye gitmis olabilir)
+Railway shell, backend/ dizininde:
+    python -m scripts.recompute_site_gp          # ONCE: yalniz rapor (hicbir sey degismez)
+    python -m scripts.recompute_site_gp --apply  # SONRA: tam iade GP'lerini order.total'a ceker (yedekli)
+- Once dry-run ciktisini incele (eski->yeni tablo + net fark).
+- --apply yalniz tam iadeleri duzeltir; eski degerler GP'de _recompute_backup'a yedeklenir.
+- Kismi iade GP'leri otomatik degismez -> panelden kalem+kargo secerek yeniden uret.

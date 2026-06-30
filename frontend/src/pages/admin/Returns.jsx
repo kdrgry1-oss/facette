@@ -800,7 +800,6 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
   const dt = data.date ? new Date(data.date) : null;
   const dateStr = dt ? dt.toLocaleDateString("tr-TR") : "";
   const timeStr = dt ? dt.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
-  const neg = (v) => -Math.abs(v || 0);
   const net = tot.net || 0;
   const matrah = tot.net_without_vat || 0;
   const kdv = tot.vat_amount || 0;
@@ -870,7 +869,7 @@ function GiderPusulasiSlip({ data, overlay, offX = 0, offY = 0, guides = false }
             <tr key={i}>
               <td style={{ padding: "0.3mm 0", wordBreak: "break-word" }}>{it.name || ""}{it.size ? ` — Beden: ${it.size}` : ""}</td>
               <td style={{ textAlign: "right" }}>{it.quantity}</td>
-              <td style={{ textAlign: "right" }}>{fmt2(neg(it.net_price))}</td>
+              <td style={{ textAlign: "right" }}>{fmt2(-(it.net_price || 0))}</td>
             </tr>
           ))}
         </tbody>
