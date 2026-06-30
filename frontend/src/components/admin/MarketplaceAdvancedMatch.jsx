@@ -1081,6 +1081,18 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                   </div>
                 );
               })()}
+              {/* HB serbest-metin bilgilendirmesi: bu özellik HB'de kapalı (seçmeli) liste DEĞİL —
+                  kullanıcı "acaba HB'de var mı" diye tedirgin olmasın diye serbest metin olduğunu açıkça belirt. */}
+              {(currentAttr?.attributeValues || []).length === 0 && (
+                <div className="bg-blue-50 border-b border-blue-200 px-3 py-2 text-[11px] text-blue-800 flex items-start gap-1.5" data-testid="adv-freetext-info">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  <span>
+                    <b>{attrName}</b> HB'de <b>serbest metin</b> alanı — kapalı (seçmeli) liste yok.
+                    Yazdığın her değer geçerlidir (ör. "normal"); HB'nin hazır "kabul edilen değer" listesi yoktur.
+                    Kapalı listeli alanlarda dropdown zaten yalnız HB'nin kabul ettiği değerleri gösterir.
+                  </span>
+                </div>
+              )}
               {/* Arama kutusu */}
               <div className="bg-white border-b px-3 py-2 sticky top-0 z-10 flex items-center gap-2">
                 <Search size={14} className="text-gray-400" />
@@ -1143,9 +1155,11 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                           <td className="px-4 py-2 font-medium">
                             <div className="flex items-center gap-2">
                               <span>{lv}</span>
-                              {isMapped && (
+                              {isMapped && (mpVals.length === 0 ? (
+                                <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold" title="HB serbest metin alanı — yazdığın değer aynen gönderilir; HB kapalı liste vermiyor">HB serbest metin</span>
+                              ) : (
                                 <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold">✓ EŞLEŞTİ</span>
-                              )}
+                              ))}
                             </div>
                           </td>
                           <td className="px-4 py-2">
