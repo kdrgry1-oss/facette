@@ -436,6 +436,32 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
 
     try:
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
+        # FLAKY-ÇEKİM KORUMASI: HB'nin attribute-values API'si zaman zaman bir özelliğin
+        # değerlerini BOŞ ya da KISMİ (ör. Yaka Stili 0, Kumaş Tipi 150/293) döndürüyor. Bu
+        # zehirli sonuç cache'e yazılınca KAPALI ZORUNLU enum (Renk/Beden/Kumaş/Yaka/Kol)
+        # çözülemez olup ürünü bloke ediyor. Önceki cache'te aynı özellik DAHA ÇOK değere
+        # sahipse, son-iyi (daha dolu) listeyi koru — boş/eksik çekim mevcut listeyi DÜŞÜRMESİN.
+        # (id eşleşmesi; yoksa normalize ad. Salt-additif: yalnızca büyütür, asla küçültmez.)
+        try:
+            _prev = await db.hepsiburada_category_attributes.find_one(
+                {"category_id": key}, {"_id": 0, "attributes": 1})
+            _prev_vals = {}
+            for _pa in (_prev or {}).get("attributes", []):
+                _pv = _pa.get("attributeValues") or []
+                if not _pv:
+                    continue
+                _prev_vals["id:" + str(_pa.get("id"))] = _pv
+                _prev_vals["nm:" + _sysnorm(_pa.get("name"))] = _pv
+            for _a in out:
+                _cur = _a.get("attributeValues") or []
+                _old = (_prev_vals.get("id:" + str(_a.get("id")))
+                        or _prev_vals.get("nm:" + _sysnorm(_a.get("name"))))
+                if _old and len(_old) > len(_cur):
+                    _a["attributeValues"] = _old
+                    if (_a.get("type") or "").lower() != "media":
+                        _a["allowCustom"] = False  # dolu kapalı liste → serbest-metin değil
+        except Exception:
+            pass
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
             {"$set": {"category_id": key, "attributes": out, "_v": 9,

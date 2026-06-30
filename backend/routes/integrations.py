@@ -4058,6 +4058,19 @@ def _hb_norm(s) -> str:
     return " ".join(s.split())
 
 
+# HB zorunlu giyim alanlarının ADI ile FACETTE ürünündeki yaygın yerel/kart ADLARI farklı
+# olabilir (HB "Yaka Stili" ↔ ürün "Yaka"/"Yaka Tipi"; HB "Kumaş Tipi" ↔ ürün "Kumaş"/"Materyal";
+# HB "Kol Tipi" ↔ ürün "Kol"). YENİ MODEL birebir-ad eşleşmesi aradığından bu alanlar boş kalıp
+# "zorunlu eksik" diye ürünü bloke ediyordu. Anahtar = HB attribute adının _hb_norm'u; değerler =
+# denenecek yerel/kart kaynak adları (görünür biçim). YALNIZCA birebir kaynak boşsa devreye girer;
+# bulunan değer yine HB enum'una çözülür (geçersizse zaten gönderilmez) → yanlış eşleme riski yok.
+_HB_CLOTHING_SYNONYMS = {
+    "yaka stili": ["Yaka", "Yaka Tipi", "Yaka Modeli", "Yaka Şekli"],
+    "kol tipi": ["Kol", "Kol Modeli", "Kol Şekli"],
+    "kumas tipi": ["Kumaş", "Kumaş Cinsi", "Materyal", "Malzeme", "Kumaş Türü"],
+}
+
+
 def _hb_collect_local(product: dict, variant: dict | None = None) -> dict:
     """Ürün (+varsa varyant) verisinden {normalize(özellik_adı): değer} toplar.
     Tamamen yerel — hiçbir pazaryerine bağlı değil."""
@@ -4477,6 +4490,15 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                     m = map_by_attr_id.get(aid)
                     if m and m.get("local_attr"):
                         raw = local.get(_hb_norm(m["local_attr"]))
+                if not raw:
+                    # EŞANLAMLI YEREL-AD KÖPRÜSÜ: HB "Yaka Stili" ↔ ürün "Yaka"/"Yaka Tipi" gibi
+                    # ad farkları yüzünden zorunlu alan boş kalmasın. Yalnız birebir kaynak boşsa
+                    # devreye girer; bulunan değer yine HB enum'una çözülür (geçersizse gitmez).
+                    for _syn in _HB_CLOTHING_SYNONYMS.get(anorm, ()):
+                        raw = (v_hb.get(_syn) or hb_attrs_for_product.get(_syn)
+                               or local.get(_hb_norm(_syn)))
+                        if raw:
+                            break
             # value_mapping çevirisi (Kırmızı↔Red gibi). Orijinal etiket saklanır →
             # map'lenen ID bu kategoride çözülemezse etikete geri döneriz (Cinsiyet=17530 fix).
             orig_raw = raw
