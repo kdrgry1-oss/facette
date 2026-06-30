@@ -722,25 +722,10 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       // renk basıyor. Yükleme anında bunları temizle → ürünün kendi temiz değeri serbest metin
       // olarak gider (backend dirty-pool'da zaten kendi değerini geçirir). Yalnız BİREBİR ad
       // eşleşmeleri korunur. Temiz/küçük havuzlar (≤200) DOKUNULMAZ → manuel/alias maplar güvende.
-      const rawVM = v.data?.value_mappings || {};
-      // KİRLİ HAVUZ (>200) GÖSTERİM temizliği (SESSİZ): birebir-OLMAYAN eski/kodlu bağları
-      // EKRANDA eşlenmemiş göster (ör. "Sarı→00Sarı" yerine "ürün değeri: Sarı"). Backend bu
-      // havuzlarda kodlu bağı ZATEN yok sayıp ürünün kendi değerini gönderdiği için bu yalnız
-      // görsel netliktir → kullanıcıyı "çöp temizlendi" diye rahatsız eden uyarı KALDIRILDI.
-      const cleanVM = { ...rawVM };
-      for (const at of attrs) {
-        const mpv = at.attributeValues || [];
-        if (mpv.length <= 200) continue;
-        const aid = String(at.id ?? at.attribute?.id);
-        const byId = new Map(mpv.map((m) => [String(m.id), _normVal(m.name)]));
-        for (const localVal of (lv[at.name || at.attribute?.name] || [])) {
-          const key = `${aid}|${localVal}`;
-          if (!cleanVM[key]) continue;
-          const selN = byId.get(String(cleanVM[key])) || "";
-          if (selN && selN === _normVal(localVal)) continue; // birebir doğru → koru
-          delete cleanVM[key];
-        }
-      }
+      // Kaydedilmiş değer eşleştirmeleri AYNEN yüklenir — açılışta HİÇBİR otomatik silme YOK.
+      // (Eskiden kirli havuzda birebir-olmayan bağları açılışta siliyordu → kullanıcının KASITLI
+      // kaydettiği eşleşmeler de uçuyordu. Kaldırıldı: ne kaydettiysen o kalır, o gider.)
+      const cleanVM = v.data?.value_mappings || {};
       setMpAttrs(attrs);
       setLocalValues(lv);
       setValueMappings(cleanVM);
