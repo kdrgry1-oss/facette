@@ -989,6 +989,7 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                     (k) => k.startsWith(`${id}|`) && valueMappings[k]
                   ).length;
                   const isActive = id === String(selectedAttrId);
+                  const isVariant = a.variant === true || /_variant_property$/i.test(id);
                   return (
                     <button
                       key={id}
@@ -1000,7 +1001,12 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
                       }`}
                       data-testid={`adv-attr-tab-${id}`}
                     >
-                      <span className="truncate">{name}</span>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{name}</span>
+                        {isVariant && (
+                          <span className="text-[8px] bg-indigo-100 text-indigo-700 px-1 py-0.5 rounded font-bold shrink-0" title="Varyant ekseni (zorunlu) — ürünün rengi/bedeni bu alandan gönderilir; aynı adlı diğer alan varyant değildir">Varyant</span>
+                        )}
+                      </span>
                       <span className="flex items-center gap-1 shrink-0">
                         {_fixedDefaultFor(name) && (
                           <span className="text-[8px] bg-blue-100 text-blue-700 px-1 py-0.5 rounded font-bold" title="Varsayılan değer tanımlı">VS</span>
