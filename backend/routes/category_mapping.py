@@ -382,7 +382,8 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
             "required": bool(a.get("mandatory") or a.get("mandatoryVariant") or a.get("required")),
             "multiValue": bool(a.get("multiValue")),
             "type": a.get("type"),
-            "allowCustom": (atype != "enum") and (len(vals) == 0),
+            "hbCustom": bool(a.get("allowCustom")),
+            "allowCustom": bool(a.get("allowCustom")) or bool(variant) or ((atype != "enum") and (len(vals) == 0)),
             "variant": variant,
             "attributeValues": vals,
         }
@@ -458,13 +459,13 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
                         or _prev_vals.get("nm:" + _sysnorm(_a.get("name"))))
                 if _old and len(_old) > len(_cur):
                     _a["attributeValues"] = _old
-                    if (_a.get("type") or "").lower() != "media":
-                        _a["allowCustom"] = False  # dolu kapalı liste → serbest-metin değil
+                    if (_a.get("type") or "").lower() != "media" and not _a.get("variant") and not _a.get("hbCustom"):
+                        _a["allowCustom"] = False  # dolu kapalı liste (varyant/HB-custom değil) → serbest-metin değil
         except Exception:
             pass
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 9,
+            {"$set": {"category_id": key, "attributes": out, "_v": 10,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -1980,7 +1981,7 @@ async def get_advanced_attributes(
         # eşleştiremiyorum"). Artık: cache TAZE & DEĞERLİYSE anında servis et; yalnız cache
         # yok/eski(_v!=9)/değersizse VEYA açıkça force=1 ile istenirse canlı çek.
         no_values = bool(attrs) and not any((x.get("attributeValues") or []) for x in attrs)
-        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 9 and not no_values
+        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 10 and not no_values
         if force or not cache_fresh:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
             if hb_err:

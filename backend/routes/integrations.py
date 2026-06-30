@@ -349,7 +349,7 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
     Once cache, yoksa canli cekip cache'ler."""
     key = int(category_id) if str(category_id).isdigit() else str(category_id)
     cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cached and cached.get("_v") == 8 and cached.get("attributes") is not None:
+    if cached and cached.get("_v") == 10 and cached.get("attributes") is not None:
         return {"success": True, "attributes": cached.get("attributes", []),
                 "media_attributes": cached.get("media_attributes", []),
                 "base_attributes": cached.get("base_attributes", []),
@@ -4311,7 +4311,7 @@ async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cad and cad.get("_v") == 8 and cad.get("attributes"):
+    if cad and cad.get("_v") == 10 and cad.get("attributes"):
         return cad.get("attributes") or [], None
     from .category_mapping import _fetch_hb_category_attributes
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
@@ -5011,6 +5011,183 @@ async def hb_product_category_attributes(product_id: str, current_user: dict = D
         return {"attributes": [], "hb_category_id": None, "has_mapping": False}
     attrs, err = await _hb_category_attributes_for(hb_cat)
     return {"attributes": attrs or [], "hb_category_id": hb_cat, "has_mapping": True, "error": err}
+
+
+@router.get("/hepsiburada/category-attributes/by-local")
+async def hb_category_attributes_by_local(
+    category_id: str = "", category_name: str = "",
+    current_user: dict = Depends(require_admin)):
+    """Ürün modalının 'Hepsiburada için Özellikler' bölümünü KAYDEDİLMEMİŞ üründe de besler.
+    HB kategorisi üründe durmaz (category_mappings'te durur); burada onu YEREL kategoriden
+    (id veya ad) çözeriz — push çekirdeği (_build_hb_product_item) ile AYNI kaynak. Böylece
+    yeni üründe de HB'nin GERÇEK tüm kategori özellikleri (zorunlu + enum değerleri) gelir,
+    yalnız 9 sabite düşmez. product.id gerektirmez."""
+    cm = None
+    if category_id:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_id": category_id}, {"_id": 0})
+    if not cm and category_name:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": category_name}, {"_id": 0})
+    hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
+    if not hb_cat:
+        return {"attributes": [], "hb_category_id": None, "has_mapping": False}
+    attrs, err = await _hb_category_attributes_for(hb_cat)
+    return {"attributes": attrs or [], "hb_category_id": hb_cat, "has_mapping": True, "error": err}
+
+
+# ============================================================================
+# HB BAKIM ARAÇLARI (salt-okunur tarama + onaylı düzeltme) — kart push'una dokunmaz
+# ============================================================================
+async def _hb_resolve_local_to_hb(category_id, category_name):
+    """Yerel kategoriyi (id veya ad) category_mappings üzerinden HB kategori id'sine çözer
+    — by-product/by-local/push ile AYNI kaynak."""
+    cm = None
+    if category_id:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_id": category_id}, {"_id": 0})
+    if not cm and category_name:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": category_name}, {"_id": 0})
+    return (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id"), cm
+
+
+async def _hb_numeric_id_findings():
+    """Tüm ürünlerin hepsiburada_attributes'ında DEĞER ADI yerine sızmış HB value-id'lerini
+    (tamamen sayısal, kategori şemasında value-id'ye karşılık gelen ama geçerli değer ADI
+    OLMAYAN) bulur. Beden '36' gibi gerçekten sayısal değer adlarına DOKUNMAZ. Salt-okunur."""
+    findings = []
+    schema_cache = {}
+    map_cache = {}
+
+    async def attrs_for(hb_cat):
+        if hb_cat in schema_cache:
+            return schema_cache[hb_cat]
+        a, _ = await _hb_category_attributes_for(hb_cat)
+        schema_cache[hb_cat] = a or []
+        return schema_cache[hb_cat]
+
+    async def hb_for(cid, cname):
+        key = (cid, cname)
+        if key in map_cache:
+            return map_cache[key]
+        hb, _cm = await _hb_resolve_local_to_hb(cid, cname)
+        map_cache[key] = hb
+        return hb
+
+    cursor = db.products.find(
+        {"hepsiburada_attributes": {"$exists": True, "$ne": {}}},
+        {"_id": 0, "id": 1, "name": 1, "category_id": 1, "category_name": 1, "hepsiburada_attributes": 1})
+    async for p in cursor:
+        ha = p.get("hepsiburada_attributes")
+        if not isinstance(ha, dict) or not ha:
+            continue
+        hb_cat = await hb_for(p.get("category_id"), p.get("category_name"))
+        if not hb_cat:
+            continue
+        schema = await attrs_for(hb_cat)
+        by_attr = {}
+        for a in schema:
+            an = _hb_norm(a.get("name"))
+            id_map, name_set = {}, set()
+            for v in (a.get("attributeValues") or []):
+                vid, vn = v.get("id"), v.get("name")
+                if vid is not None:
+                    id_map[str(vid)] = vn
+                if vn:
+                    name_set.add(_hb_norm(vn))
+            by_attr[an] = (id_map, name_set)
+        prod_fix = {}
+        for aname, val in ha.items():
+            if val is None or val == "":
+                continue
+            sval = str(val).strip()
+            if not sval.isdigit():
+                continue
+            info = by_attr.get(_hb_norm(aname))
+            if not info:
+                continue
+            id_map, name_set = info
+            if _hb_norm(sval) in name_set:
+                continue  # zaten geçerli (sayısal) değer adı → dokunma
+            if sval in id_map and id_map[sval]:
+                prod_fix[aname] = {"old": sval, "new": id_map[sval]}
+        if prod_fix:
+            findings.append({
+                "product_id": p.get("id"),
+                "name": (p.get("name") or "")[:60],
+                "category": p.get("category_name"),
+                "fixes": prod_fix})
+    return findings
+
+
+@router.get("/hepsiburada/attributes/numeric-id-scan")
+async def hb_numeric_id_scan(current_user: dict = Depends(require_admin)):
+    """SALT-OKUNUR. hepsiburada_attributes'ta değer adı yerine sızmış HB value-id'lerini raporlar."""
+    f = await _hb_numeric_id_findings()
+    total = sum(len(x["fixes"]) for x in f)
+    return {"products_affected": len(f), "values_to_fix": total, "findings": f}
+
+
+@router.post("/hepsiburada/attributes/numeric-id-fix")
+async def hb_numeric_id_fix(current_user: dict = Depends(require_admin)):
+    """Sızmış HB value-id'lerini doğru değer ADINA çevirir (scan ile AYNI tespit). Yazar."""
+    f = await _hb_numeric_id_findings()
+    fixed_products = fixed_values = 0
+    for x in f:
+        pid = x["product_id"]
+        prod = await db.products.find_one({"id": pid}, {"_id": 0, "hepsiburada_attributes": 1})
+        if not prod:
+            continue
+        ha = dict(prod.get("hepsiburada_attributes") or {})
+        changed = False
+        for aname, fx in x["fixes"].items():
+            if str(ha.get(aname)).strip() == fx["old"]:
+                ha[aname] = fx["new"]
+                changed = True
+                fixed_values += 1
+        if changed:
+            await db.products.update_one({"id": pid}, {"$set": {"hepsiburada_attributes": ha}})
+            fixed_products += 1
+    return {"fixed_products": fixed_products, "fixed_values": fixed_values}
+
+
+@router.get("/hepsiburada/category-mapping-audit")
+async def hb_category_mapping_audit(current_user: dict = Depends(require_admin)):
+    """Hangi yerel kategori HB'ye eşli/eşsiz + her birinde kaç ürün. Eşsiz kategorideki
+    ürünler HB'ye gidemez (kart 9 sabite düşer). Salt-okunur."""
+    counts = {}
+    async for p in db.products.find({}, {"_id": 0, "category_name": 1}):
+        cn = p.get("category_name") or "(boş)"
+        counts[cn] = counts.get(cn, 0) + 1
+    cats = {}
+    async for c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1}):
+        if c.get("name"):
+            cats[c["name"]] = c.get("id")
+    names = set(list(counts.keys()) + list(cats.keys()))
+    mapped, unmapped = [], []
+    for name in names:
+        if name == "(boş)":
+            continue
+        hb, cm = await _hb_resolve_local_to_hb(cats.get(name), name)
+        row = {
+            "category": name,
+            "product_count": counts.get(name, 0),
+            "mapped": bool(hb),
+            "hb_category_id": hb,
+            "hb_category_name": (cm or {}).get("marketplace_category_name")
+                                or (cm or {}).get("hepsiburada_category_name")}
+        (mapped if hb else unmapped).append(row)
+    mapped.sort(key=lambda r: -r["product_count"])
+    unmapped.sort(key=lambda r: -r["product_count"])
+    return {
+        "total_products": sum(counts.values()),
+        "category_count": len(names),
+        "mapped_count": len(mapped),
+        "unmapped_count": len(unmapped),
+        "unmapped_product_total": sum(r["product_count"] for r in unmapped),
+        "mapped": mapped,
+        "unmapped": unmapped}
 
 
 @router.get("/hepsiburada/products/{product_id}/debug-payload")
