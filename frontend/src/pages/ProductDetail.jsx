@@ -508,12 +508,18 @@ export default function ProductDetail() {
               <div
                 className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
                 onScroll={(e) => {
-                  const idx = Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth);
+                  const cw = e.currentTarget.clientWidth;
+                  if (!cw) return;
+                  const idx = Math.round(e.currentTarget.scrollLeft / cw);
                   setMobileImageIdx(idx);
                 }}
               >
                 {displayImages.map((img, index) => (
-                  <div key={index} className="snap-center shrink-0 w-screen aspect-[2/3] bg-stone-50">
+                  <div
+                    key={index}
+                    className="snap-center shrink-0 w-screen aspect-[2/3] bg-stone-50"
+                    style={{ scrollSnapStop: "always" }}
+                  >
                     <img
                       src={optimizeImg(img, 1200)}
                       alt={`${product.name} ${index + 1}`}

@@ -22,9 +22,57 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+# Yüklemede maksimum uzun kenar (px) — ürün görsel ızgarası + PDP zoom için yeterli,
+# eskiden olduğu gibi 1700-2500px ham görselleri (yavaş decode/paint → "boş çıkıyor"
+# şikayeti) önler. PNG/JPG → WebP'e çevrilir, format başına ortalama %60-80 küçülür.
+MAX_UPLOAD_LONG_EDGE = 1600
+UPLOAD_WEBP_QUALITY = 82
+
+
+def _optimize_for_upload(data: bytes, content_type: str):
+    """Yüklenen görseli WebP'e çevirip gerekirse küçültür.
+
+    Animasyonlu GIF / SVG gibi optimize edilemeyecek türlerde (None, None, None)
+    döner → çağıran orijinal bytes'ı olduğu gibi yükler (davranış bozulmaz).
+    """
+    if not content_type or "svg" in content_type:
+        return None, None, None
+    try:
+        from PIL import Image, ImageOps
+        import io
+
+        im = Image.open(io.BytesIO(data))
+
+        # Animasyonlu GIF/WebP → dokunma (kareleri kaybetmemek için)
+        if getattr(im, "is_animated", False):
+            return None, None, None
+
+        im = ImageOps.exif_transpose(im)  # telefon fotoğraflarında yanlış dönüşü düzelt
+
+        if max(im.width, im.height) > MAX_UPLOAD_LONG_EDGE:
+            ratio = MAX_UPLOAD_LONG_EDGE / float(max(im.width, im.height))
+            im = im.resize(
+                (max(1, int(im.width * ratio)), max(1, int(im.height * ratio))),
+                Image.LANCZOS,
+            )
+
+        # Şeffaflığı koru (RGBA/LA/transparan P), yoksa RGB'ye düş
+        if im.mode == "P" and "transparency" in im.info:
+            im = im.convert("RGBA")
+        elif im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGB")
+
+        out = io.BytesIO()
+        im.save(out, format="WEBP", quality=UPLOAD_WEBP_QUALITY, method=6)
+        return out.getvalue(), "image/webp", "webp"
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"upload optimize failed, orijinal yüklenecek: {e}")
+        return None, None, None
+
+
 @router.post("/image")
 async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
-    """Görseli Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
+    """Görseli optimize edip (resize+WebP) Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Sadece resim dosyaları yüklenebilir")
 
@@ -32,21 +80,27 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 10MB)")
 
-    ext = file.filename.split(".")[-1].lower() if "." in (file.filename or "") else "jpg"
+    content_type = file.content_type
+    opt_data, opt_type, opt_ext = _optimize_for_upload(data, content_type)
+    if opt_data is not None:
+        data, content_type = opt_data, opt_type
+        ext = opt_ext
+    else:
+        ext = file.filename.split(".")[-1].lower() if "." in (file.filename or "") else "jpg"
     filename = f"{uuid.uuid4()}.{ext}"
 
     # 1) Cloudflare R2 (tercih edilen)
     if r2.is_enabled():
         key = f"uploads/{filename}"
         try:
-            public_url = r2.put_object(key, data, file.content_type)
+            public_url = r2.put_object(key, data, content_type)
             await db.files.insert_one({
                 "id": str(uuid.uuid4()),
                 "storage_path": filename,
                 "r2_key": key,
                 "r2_url": public_url,
                 "original_filename": file.filename,
-                "content_type": file.content_type,
+                "content_type": content_type,
                 "size": len(data),
                 "is_deleted": False,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -66,7 +120,7 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
         "id": str(uuid.uuid4()),
         "storage_path": filename,
         "original_filename": file.filename,
-        "content_type": file.content_type,
+        "content_type": content_type,
         "size": len(data),
         "data_b64": base64.b64encode(data).decode("ascii"),
         "is_deleted": False,
