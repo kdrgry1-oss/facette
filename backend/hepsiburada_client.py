@@ -250,6 +250,53 @@ class HepsiburadaClient:
         tid = urllib.parse.quote(str(tracking_id), safe="")
         return self._get(f"/product/api/products/status/{tid}")
 
+    # ====================================================================
+    #  ÜRÜN GÜNCELLEME (ticket-api) — HB'de ZATEN listelenmiş/oluşturulmuş bir
+    #  ürünün ad/açıklama/görsel/video/kategori-özelliklerini değiştirir.
+    #  create_products (/product/api/products/import) İLE KARIŞTIRILMAMALI:
+    #  o yalnız YENİ ürün GİRİŞİ + ilk eşleştirme içindir ve var olan bir
+    #  ürünün özelliklerini güncellemeyi garanti ETMEZ. Var olan ürünü
+    #  güncellemenin resmi yolu budur — anahtar merchantSku DEĞİL, hbSku'dur.
+    #  Fiyat/stok/KDV/Barkod/Desi bu serviste YOK (ayrı Listing kanalından gider).
+    # ====================================================================
+    def update_products(self, items, merchant_id=None):
+        """Var olan ürünlerin ad/açıklama/görsel/video/özelliklerini günceller.
+        items: [{hbSku, productName?, productDescription?, image1..image10?,
+                 video?, attributes:{...}}] — hbSku ZORUNLU.
+        Boş string ("") gönderilen bir attribute değeri o özelliği SİLER;
+        bir alanı hiç göndermemek o alana DOKUNMAZ (HB'nin zenginleştirdiği
+        veriyi ezmemek için yalnız değişen alanları göndermek önerilir).
+        Döner: {trackingId|...}."""
+        if isinstance(items, dict):
+            items = [items]
+        body_obj = {"merchantId": merchant_id or self.merchant_id, "items": items}
+        payload = json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+        boundary = "----HBFacetteTicket" + uuid.uuid4().hex
+        body = b""
+        body += ("--" + boundary + "\r\n").encode()
+        body += b'Content-Disposition: form-data; name="file"; filename="integrator-ticket-upload.json"\r\n'
+        body += b"Content-Type: application/json\r\n\r\n"
+        body += payload + b"\r\n"
+        body += ("--" + boundary + "--\r\n").encode()
+        return self._request(self.base, "POST", "/ticket-api/api/integrator/import",
+                             raw_body=body,
+                             content_type="multipart/form-data; boundary=" + boundary)
+
+    def get_update_ticket_status(self, tracking_id):
+        """Ürün güncelleme (ticket) talebinin durumunu sorgular.
+        NOT: HB döküman sayfası status endpoint'inin tam path'ini göstermiyordu;
+        diğer 'status/{id}' uçlarıyla AYNI desene göre tahmin edilmiştir —
+        ilk canlı/sandbox kullanımda doğrulanmalı (yanlışsa _hb_poll_ticket
+        sessizce 'UNKNOWN' döner, ana akışı bozmaz)."""
+        tid = urllib.parse.quote(str(tracking_id), safe="")
+        return self._get(f"/ticket-api/api/integrator/status/{tid}")
+
+    def get_update_ticket_history(self, hb_sku):
+        """Bir hbSku için geçmiş güncelleme taleplerini (trackingId, createdAt) döner."""
+        sku = urllib.parse.quote(str(hb_sku), safe="")
+        path = f"/ticket-api/api/integrator/merchant/{self.merchant_id}/hbSku/{sku}"
+        return self._get(path)
+
     def check_product_status(self, merchant_sku_list):
         """merchantSku listesinin ürün/eşleşme durumlarını sorgular.
         body: [{"merchant": <mid>, "merchantSkuList": [...]}]"""

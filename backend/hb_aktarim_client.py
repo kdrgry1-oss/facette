@@ -256,6 +256,40 @@ class HBAktarimClient:
         tid = urllib.parse.quote(str(tracking_id), safe="")
         return self._mpop_get(f"/product/api/products/status/{tid}")
 
+    # ================================================================== #
+    #  ÜRÜN GÜNCELLEME (ticket-api)  —  HB'de ZATEN listelenmiş bir ürünün
+    #  ad/açıklama/görsel/video/kategori-özelliklerini değiştirir. import_products
+    #  (/product/api/products/import) İLE KARIŞTIRILMAMALI: o yalnız YENİ ürün
+    #  girişi içindir, var olan ürünün özelliklerini güncellemeyi GARANTİ ETMEZ.
+    #  Anahtar merchantSku DEĞİL, hbSku'dur. Fiyat/stok bu serviste YOK (Listing'den gider).
+    # ================================================================== #
+    def update_products(self, items):
+        """items: [{hbSku, productName?, productDescription?, image1..image10?, video?,
+        attributes:{...}}] — hbSku ZORUNLU. Boş string ("") bir attribute'u SİLER;
+        hiç göndermemek o alana dokunmaz. Döner: {trackingId,...}."""
+        if isinstance(items, dict):
+            items = [items]
+        body_obj = {"merchantId": self.merchant_id, "items": items}
+        payload = json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+        boundary = "----HBAktarimTicket" + uuid.uuid4().hex
+        body = b""
+        body += ("--" + boundary + "\r\n").encode()
+        body += b'Content-Disposition: form-data; name="file"; filename="integrator-ticket-upload.json"\r\n'
+        body += b"Content-Type: application/json\r\n\r\n"
+        body += payload + b"\r\n"
+        body += ("--" + boundary + "--\r\n").encode()
+        return self._request(self.mpop_base, "POST", "/ticket-api/api/integrator/import",
+                             raw_body=body,
+                             content_type="multipart/form-data; boundary=" + boundary)
+
+    def get_update_ticket_status(self, tracking_id):
+        """Ürün güncelleme (ticket) talebinin durumunu sorgular.
+        NOT: HB dökümanı status uç'unun tam path'ini göstermiyordu; diğer
+        'status/{id}' uçlarıyla aynı desene göre tahmin edilmiştir — sandbox'ta
+        doğrulanmalı (yanlışsa publish_status sessizce 'unknown' döner)."""
+        tid = urllib.parse.quote(str(tracking_id), safe="")
+        return self._mpop_get(f"/ticket-api/api/integrator/status/{tid}")
+
     def check_product_status(self, merchant_sku_list):
         """merchantSku listesinin ürün/eşleşme statülerini sorgular."""
         skus = [str(s) for s in (merchant_sku_list or []) if s]

@@ -4725,6 +4725,81 @@ async def _hb_poll_import(client, tracking_id, attempts=8, delay=2.0):
     return last or {"done": False, "items": [], "success": 0, "failed": 0, "processing": 0}
 
 
+async def _hb_build_sku_to_hbsku_map(client, max_pages=25, page_size=1000):
+    """Mağazadaki TÜM ürünleri (katalog) tarar, merchantSku -> hepsiburadaSku haritası
+    çıkarır (hb_reconcile_preview ile AYNI alan-isim toleransı). SALT-OKUNUR.
+    Amaç: 'tekrar aktar' edilen bir ürün HB'de ZATEN var mı (→ ÖZELLİK GÜNCELLE) yoksa
+    YENİ mi (→ KATALOG GİRİŞİ) ayrımını yapmak."""
+    import asyncio
+    out = {}
+    try:
+        for page in range(max_pages):
+            d = await asyncio.to_thread(client.get_all_products, page, page_size)
+            rows = (d.get("data") if isinstance(d, dict) else d) or []
+            if not rows:
+                break
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                ms = str(r.get("merchantSku") or r.get("merchantSKU") or r.get("sku") or "").strip().upper()
+                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("hepsiburadaSKU")
+                if ms and hb:
+                    out[ms] = str(hb)
+            if isinstance(d, dict) and d.get("last") is True:
+                break
+    except Exception:
+        pass  # çözülemezse tüm kalemler 'yeni' kabul edilip create_products'a düşer (eski davranış)
+    return out
+
+
+def _hb_split_ticket_item(attrs: dict) -> dict:
+    """create-shape 'attributes' (UrunAdi/UrunAciklamasi/Image1../tax/kg/...) sözlüğünü
+    Ürün Güncelleme Servisi şemasına (productName/productDescription/image1../attributes)
+    çevirir. Yapısal/katalog-only alanlar (merchantSku, Barcode, VaryantGroupID, tax, kg,
+    GarantiSuresi, Marka) ticket'a YAZILMAZ — bu servis yalnız ad/açıklama/görsel/video/
+    kategori-özelliği günceller; fiyat/stok/KDV zaten ayrı (Listing) kanaldan gidiyor."""
+    a = dict(attrs)
+    t: dict = {}
+    pn = a.pop("UrunAdi", None)
+    pd = a.pop("UrunAciklamasi", None)
+    if pn:
+        t["productName"] = pn
+    if pd:
+        t["productDescription"] = pd
+    for k in list(a.keys()):
+        if k.startswith("Image"):
+            idx = k[5:]
+            v = a.pop(k)
+            if idx.isdigit() and 1 <= int(idx) <= 10 and v:
+                t[f"image{idx}"] = v
+    for sk in ("merchantSku", "Barcode", "VaryantGroupID", "tax", "kg", "GarantiSuresi", "Marka"):
+        a.pop(sk, None)
+    if a:
+        t["attributes"] = a
+    return t
+
+
+async def _hb_poll_ticket(client, tracking_id, attempts=8, delay=2.0):
+    """update_products sonrası ticket durumunu SINIRLI süre yoklar. Status endpoint'i
+    tahmini olduğundan (bkz. get_update_ticket_status) tek denemede hata alırsa
+    sessizce 'UNKNOWN' döner — ana akışı (ticket zaten HB'ye iletildi) bozmaz."""
+    import asyncio
+    last = None
+    for _ in range(max(1, attempts)):
+        try:
+            data = await asyncio.to_thread(client.get_update_ticket_status, tracking_id)
+            last = _hb_summarize_import_status(data)
+            last["raw"] = data
+        except Exception as e:
+            last = {"done": False, "status": "UNKNOWN", "items": [],
+                    "success": 0, "failed": 0, "processing": 0, "error": str(e)}
+            break
+        if last.get("done") and (last.get("success") or last.get("failed")):
+            break
+        await asyncio.sleep(delay)
+    return last or {"done": False, "items": [], "success": 0, "failed": 0, "processing": 0}
+
+
 @router.post("/hepsiburada/products/sync")
 async def hb_sync_products(request: Request, current_user: dict = Depends(require_admin)):
     """Seçili ürünleri Hepsiburada kataloğuna gönderir (import). FilteredPushPanel sözleşmesi:
@@ -4753,11 +4828,49 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
         return {"successful": 0, "failed": len(skipped),
                 "message": "Hiçbir ürün gönderilemedi (kategori/özellik eşleşmesi eksik).",
                 "skipped": skipped}
-    try:
-        res = await asyncio.to_thread(client.create_products, items)
-    except HepsiburadaError as e:
-        await log_integration_event("hepsiburada", "product_import", "bulk", str(len(items)), "error", str(e))
-        raise HTTPException(status_code=502, detail=str(e))
+
+    # 🔁 YENİ vs ZATEN-LİSTELİ ayrımı. "Tekrar Aktar" — yani daha önce HB'ye gönderilmiş
+    # bir ürünü ikinci kez göndermek — create_products (/product/api/products/import) ile
+    # YAPILAMAZ: o uç yalnız YENİ ürün girişi içindir, var olan ürünün ad/görsel/özellik
+    # değişikliklerini HB'ye yansıtmayı GARANTİ ETMEZ. HB'nin resmi "Ürün Güncelleme
+    # Servisi" (ticket-api, hbSku ile) bunun için var. Burada her kalemin merchantSku'sunu
+    # HB katalogunda arar: zaten varsa GÜNCELLE (update_products), yoksa YENİ GİRİŞ (create_products).
+    sku_to_hb = await _hb_build_sku_to_hbsku_map(client)
+    new_items, update_items, update_src = [], [], []
+    for it in items:
+        ms = str((it.get("attributes") or {}).get("merchantSku") or "").strip().upper()
+        hb_sku = sku_to_hb.get(ms) if ms else None
+        if hb_sku:
+            t = {"hbSku": hb_sku}
+            t.update(_hb_split_ticket_item(it.get("attributes") or {}))
+            update_items.append(t)
+            update_src.append(it)
+        else:
+            new_items.append(it)
+
+    create_res, create_tracking_id = None, None
+    if new_items:
+        try:
+            create_res = await asyncio.to_thread(client.create_products, new_items)
+        except HepsiburadaError as e:
+            await log_integration_event("hepsiburada", "product_import", "bulk", str(len(new_items)), "error", str(e))
+            raise HTTPException(status_code=502, detail=str(e))
+        _crd = (create_res or {}).get("data") or {}
+        create_tracking_id = ((create_res or {}).get("trackingId") or (create_res or {}).get("tracking_id")
+                              or (create_res or {}).get("id") or _crd.get("trackingId") or _crd.get("tracking_id"))
+
+    update_res, update_tracking_id = None, None
+    if update_items:
+        try:
+            update_res = await asyncio.to_thread(client.update_products, update_items)
+            _urd = (update_res or {}).get("data") or {}
+            update_tracking_id = ((update_res or {}).get("trackingId") or (update_res or {}).get("tracking_id")
+                                  or (update_res or {}).get("id") or _urd.get("trackingId") or _urd.get("tracking_id"))
+        except HepsiburadaError as e:
+            await log_integration_event("hepsiburada", "product_update", "bulk", str(len(update_items)), "error", str(e))
+            # Güncelleme başarısız olsa bile YENİ ürünler zaten gitmiş olabilir → akışı kesme,
+            # hatayı mesajda raporla.
+            update_res = {"error": str(e)}
 
     # 💰 KATALOG ≠ FİYAT/STOK. HB ürün importu fiyat/stok TAŞIMAZ (ayrı price/stock-uploads
     # kapısı). Eski davranış: "aktar" sadece katalog gönderiyordu → "fiyat stok aktarmadı".
@@ -4786,52 +4899,78 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     except Exception as ps_err:
         price_stock_msg = f" · ⚠️ fiyat/stok gönderilemedi: {ps_err}"
 
-    _rd = (res or {}).get("data") or {}
-    tracking_id = ((res or {}).get("trackingId") or (res or {}).get("tracking_id")
-                   or (res or {}).get("id") or _rd.get("trackingId") or _rd.get("tracking_id"))
+    tracking_id = create_tracking_id  # geriye-uyum: eski FE alanı = YENİ ürün takip id'si
     is_test = bool(getattr(client, "test", False))
     env_code = "sandbox" if is_test else "production"
     env_label = "SANDBOX (TEST — ürünler gerçek mağazada görünmez!)" if is_test else "CANLI (production)"
 
-    # 🔎 İçe-aktarımı DOĞRULA. HB importu ASENKRON: create_products yalnız "istek alındı"
-    # demektir, ürünün gerçekten oluşup oluşmadığı (ya da hangi sebeple reddedildiği) durum
-    # sorgusunda görünür. Eski davranış bunu hiç yoklamadan "gönderildi" diyordu → kullanıcı
-    # ürünü mağazada bulamıyordu. Hedefli/küçük gönderimlerde (≤60 kalem) durumu kısa süre
-    # yoklayıp GERÇEK sonucu mesaja koyuyoruz; büyük gönderimlerde hız için atlanır.
+    # 🔎 İçe-aktarımı DOĞRULA. HB importu ASENKRON: create_products/update_products yalnız
+    # "istek alındı" demektir, gerçekten işlenip işlenmediği (ya da hangi sebeple reddedildiği)
+    # durum sorgusunda görünür. Hedefli/küçük gönderimlerde (≤60 kalem) kısa süre yoklayıp
+    # GERÇEK sonucu mesaja koyuyoruz; büyük gönderimlerde hız için atlanır.
     import_result = None
     verify_msg = ""
-    if tracking_id and len(items) <= 60:
-        import_result = await _hb_poll_import(client, str(tracking_id))
+    if create_tracking_id and len(new_items) <= 60:
+        import_result = await _hb_poll_import(client, str(create_tracking_id))
         if not import_result.get("done"):
-            verify_msg = " · ⏳ HB hâlâ işliyor — birazdan “İçe Aktarım Durumu”ndan kontrol edin"
+            verify_msg += " · ⏳ YENİ ürünler hâlâ işleniyor — “İçe Aktarım Durumu”ndan kontrol edin"
         else:
             fail_rows = [it for it in import_result.get("items", []) if it.get("ok") is False]
             ok_n = import_result.get("success", 0)
             if fail_rows:
                 detail = "; ".join(f"{it['sku']}: {it['reason'] or 'reddedildi'}" for it in fail_rows[:8])
                 more = f" (+{len(fail_rows) - 8} daha)" if len(fail_rows) > 8 else ""
-                verify_msg = f" · ❌ HB {len(fail_rows)} ürünü REDDETTİ → {detail}{more}"
+                verify_msg += f" · ❌ HB {len(fail_rows)} YENİ ürünü REDDETTİ → {detail}{more}"
             elif ok_n:
-                verify_msg = f" · ✅ HB doğruladı: {ok_n} ürün oluşturuldu/güncellendi"
-            else:
-                verify_msg = " · ⚠️ HB durum listesi boş döndü — “İçe Aktarım Durumu”ndan kontrol edin"
+                verify_msg += f" · ✅ HB doğruladı: {ok_n} yeni ürün oluşturuldu"
 
-    await log_integration_event("hepsiburada", "product_import", "bulk", str(tracking_id or len(items)),
-                                "success" if not (import_result and [x for x in import_result.get("items", []) if x.get("ok") is False]) else "error",
-                                f"{len(items)} ürün {env_code.upper()} ortamına gönderildi ({getattr(client,'base','')}), "
-                                f"{len(skipped)} atlandı · Takip: {tracking_id}{verify_msg}")
-    return {"successful": len(items), "failed": len(skipped), "tracking_id": tracking_id,
+    update_result = None
+    update_verify_msg = ""
+    if update_tracking_id and len(update_items) <= 60:
+        update_result = await _hb_poll_ticket(client, str(update_tracking_id))
+        if update_result.get("status") == "UNKNOWN":
+            update_verify_msg = (f" · ℹ️ {len(update_items)} ürünün özellikleri güncelleme talebiyle "
+                                 f"HB'ye iletildi (durum sorgusu desteklenmiyor — “Ürün Güncelleme "
+                                 f"Geçmişi”nden kontrol edin)")
+        elif not update_result.get("done"):
+            update_verify_msg = " · ⏳ özellik güncellemeleri hâlâ işleniyor"
+        else:
+            ufail = [it for it in update_result.get("items", []) if it.get("ok") is False]
+            uok = update_result.get("success", 0)
+            if ufail:
+                udetail = "; ".join(f"{it['sku']}: {it['reason'] or 'reddedildi'}" for it in ufail[:8])
+                update_verify_msg = f" · ❌ HB {len(ufail)} özellik güncellemesini REDDETTİ → {udetail}"
+            elif uok:
+                update_verify_msg = f" · ✅ HB doğruladı: {uok} ürünün özellikleri güncellendi"
+    elif update_items:
+        update_verify_msg = f" · {len(update_items)} ürünün özellikleri güncelleme talebiyle HB'ye iletildi"
+    if isinstance(update_res, dict) and update_res.get("error"):
+        update_verify_msg = f" · ❌ özellik güncelleme isteği HB'ye iletilemedi: {update_res['error']}"
+
+    total_sent = len(new_items) + len(update_items)
+    await log_integration_event(
+        "hepsiburada", "product_import", "bulk", str(create_tracking_id or update_tracking_id or total_sent),
+        "success" if not (import_result and [x for x in import_result.get("items", []) if x.get("ok") is False]) else "error",
+        f"{len(new_items)} yeni ürün + {len(update_items)} özellik güncellemesi → {env_code.upper()} "
+        f"({getattr(client,'base','')}), {len(skipped)} atlandı · Takip: {create_tracking_id}{verify_msg}{update_verify_msg}")
+    return {"successful": total_sent, "failed": len(skipped), "tracking_id": tracking_id,
+            "created": len(new_items), "updated": len(update_items),
+            "update_tracking_id": update_tracking_id,
             "environment": env_code, "environment_label": env_label,
             "host": getattr(client, "base", ""), "is_test": is_test,
             "price_stock": price_stock,
             "import_result": import_result,
-            "message": f"{len(items)} ürün {('SANDBOX' if is_test else 'CANLI')} ortamına gönderildi"
+            "update_result": update_result,
+            "message": f"{total_sent} ürün {('SANDBOX' if is_test else 'CANLI')} ortamına gönderildi"
+                       + (f" ({len(new_items)} yeni, {len(update_items)} özellik güncellemesi)" if new_items and update_items
+                          else (" (özellik güncellemesi)" if update_items and not new_items else ""))
                        + (f", {len(skipped)} atlandı (eşleşme eksik)" if skipped else "")
                        + price_stock_msg
                        + verify_msg
-                       + (f" · Takip: {tracking_id}" if tracking_id else "")
+                       + update_verify_msg
+                       + (f" · Takip: {create_tracking_id}" if create_tracking_id else "")
                        + (" — ⚠️ SANDBOX! Gerçek mağazada görünmez." if is_test else ""),
-            "skipped": skipped, "raw": res}
+            "skipped": skipped, "raw": create_res, "update_raw": update_res}
 
 
 @router.post("/hepsiburada/products/validate")

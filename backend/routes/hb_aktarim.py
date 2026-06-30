@@ -883,6 +883,57 @@ async def _select_mapped_products(sys_to_hb, limit=None):
     return await cur.to_list(length=(limit or 5000))
 
 
+async def _hb_aktarim_sku_to_hbsku_map(client, max_pages=25, page_size=1000):
+    """Mağazadaki TÜM ürünleri (katalog) tarar, merchantSku -> hepsiburadaSku haritası
+    çıkarır. SALT-OKUNUR. Amaç: publish_send'de 'tekrar gönderilen' bir ürün HB'de
+    ZATEN var mı (→ ÖZELLİK GÜNCELLE/ticket-api) yoksa YENİ mi (→ katalog girişi) ayrımı."""
+    out = {}
+    try:
+        for page in range(max_pages):
+            d = await asyncio.to_thread(client.all_products, page, page_size)
+            rows = (d.get("data") if isinstance(d, dict) else d) or []
+            if not rows:
+                break
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                ms = str(r.get("merchantSku") or r.get("merchantSKU") or r.get("sku") or "").strip().upper()
+                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("hepsiburadaSKU")
+                if ms and hb:
+                    out[ms] = str(hb)
+            if isinstance(d, dict) and d.get("last") is True:
+                break
+    except Exception:
+        pass  # çözülemezse tüm kalemler 'yeni' kabul edilir (eski davranış: hepsi import_products'a)
+    return out
+
+
+def _hb_aktarim_split_ticket_item(attrs: Dict[str, Any]) -> Dict[str, Any]:
+    """create-shape 'attributes' (UrunAdi/UrunAciklamasi/Image1../kg/GarantiSuresi/...) sözlüğünü
+    Ürün Güncelleme Servisi şemasına (productName/productDescription/image1../attributes) çevirir.
+    Yapısal/katalog-only alanlar ticket'a YAZILMAZ — fiyat/stok/KDV zaten ayrı (Listing) kanaldan
+    gidiyor; bu servis yalnız ad/açıklama/görsel/video/kategori-özelliğini günceller."""
+    a = dict(attrs)
+    t: Dict[str, Any] = {}
+    pn = a.pop("UrunAdi", None)
+    pd = a.pop("UrunAciklamasi", None)
+    if pn:
+        t["productName"] = pn
+    if pd:
+        t["productDescription"] = pd
+    for k in list(a.keys()):
+        if k.startswith("Image"):
+            idx = k[5:]
+            v = a.pop(k)
+            if idx.isdigit() and 1 <= int(idx) <= 10 and v:
+                t[f"image{idx}"] = v
+    for sk in ("merchantSku", "VaryantGroupID", "Barcode", "kg", "GarantiSuresi", "tax_vat_rate", "Marka"):
+        a.pop(sk, None)
+    if a:
+        t["attributes"] = a
+    return t
+
+
 @router.post("/publish/preview")
 async def publish_preview(
     limit: int = 25,
@@ -930,7 +981,12 @@ async def publish_send(
     batch_size: int = 200,
     current_user: dict = Depends(require_admin),
 ):
-    """GERÇEK gönderim: eşleşmiş ürünleri HB kataloğuna (products/import) yollar. Döner: trackingId listesi."""
+    """GERÇEK gönderim. Eşleşmiş ürünler iki gruba ayrılır:
+      • HB'de henüz YOK (hbSku bulunamadı)  → katalog girişi (products/import, create)
+      • HB'de ZATEN VAR (hbSku bulundu)     → Ürün Güncelleme Servisi (ticket-api, hbSku ile)
+    Böylece bir ürünü TEKRAR gönderdiğinde (ör. ad/görsel/özellik değişikliği sonrası)
+    HB tarafında da gerçekten güncellenir — create endpoint'i bunu garanti etmiyordu.
+    Döner: trackingId listeleri (create + update ayrı)."""
     client, err = await _build_client()
     if err:
         raise HTTPException(400, err)
@@ -952,31 +1008,63 @@ async def publish_send(
     if not all_items:
         return {"sent": 0, "tracking_ids": [], "note": "Gönderilecek kalem bulunamadı."}
 
+    # 🔁 YENİ vs ZATEN-LİSTELİ ayrımı (bkz. fonksiyon docstring'i).
+    sku_to_hb = await _hb_aktarim_sku_to_hbsku_map(client)
+    new_items, update_items = [], []
+    for it in all_items:
+        ms = str((it.get("attributes") or {}).get("merchantSku") or "").strip().upper()
+        hb_sku = sku_to_hb.get(ms) if ms else None
+        if hb_sku:
+            t = {"hbSku": hb_sku}
+            t.update(_hb_aktarim_split_ticket_item(it.get("attributes") or {}))
+            update_items.append(t)
+        else:
+            new_items.append(it)
+
     bs = max(1, min(int(batch_size or 200), 500))
     tracking, errors = [], []
-    for i in range(0, len(all_items), bs):
-        batch = all_items[i:i + bs]
+    for i in range(0, len(new_items), bs):
+        batch = new_items[i:i + bs]
         try:
             res = await asyncio.to_thread(client.import_products, batch)
             tid = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("data")
-            tracking.append({"batch": i // bs, "count": len(batch), "trackingId": tid, "raw": res})
+            tracking.append({"batch": i // bs, "count": len(batch), "trackingId": tid,
+                             "kind": "create", "raw": res})
         except HBAktarimError as e:
-            errors.append({"batch": i // bs, "count": len(batch), "error": str(e)})
+            errors.append({"batch": i // bs, "count": len(batch), "kind": "create", "error": str(e)})
+
+    update_tracking, update_errors = [], []
+    for i in range(0, len(update_items), bs):
+        batch = update_items[i:i + bs]
+        try:
+            res = await asyncio.to_thread(client.update_products, batch)
+            tid = (res or {}).get("trackingId") or (res or {}).get("tracking_id") or (res or {}).get("data")
+            update_tracking.append({"batch": i // bs, "count": len(batch), "trackingId": tid,
+                                    "kind": "update", "raw": res})
+        except HBAktarimError as e:
+            update_errors.append({"batch": i // bs, "count": len(batch), "kind": "update", "error": str(e)})
+
     await db.hb_aktarim_config.update_one(
         {"_id": "last_publish"},
         {"$set": {"_id": "last_publish", "at": _now(), "items": len(all_items),
-                  "tracking": tracking, "errors": errors}}, upsert=True)
-    return {"sent": len(all_items), "batches": len(tracking) + len(errors),
-            "tracking_ids": tracking, "errors": errors,
+                  "created": len(new_items), "updated": len(update_items),
+                  "tracking": tracking + update_tracking, "errors": errors + update_errors}}, upsert=True)
+    return {"sent": len(all_items), "created": len(new_items), "updated": len(update_items),
+            "batches": len(tracking) + len(errors) + len(update_tracking) + len(update_errors),
+            "tracking_ids": tracking, "update_tracking_ids": update_tracking,
+            "errors": errors, "update_errors": update_errors,
             "env": "prod" if not client.test else "sandbox"}
 
 
 @router.get("/publish/status/{tracking_id}")
-async def publish_status(tracking_id: str, current_user: dict = Depends(require_admin)):
+async def publish_status(tracking_id: str, kind: str = "create", current_user: dict = Depends(require_admin)):
+    """kind='create' → products/import durumu; kind='update' → Ürün Güncelleme (ticket) durumu."""
     client, err = await _build_client()
     if err:
         raise HTTPException(400, err)
     try:
+        if kind == "update":
+            return await asyncio.to_thread(client.get_update_ticket_status, tracking_id)
         return await asyncio.to_thread(client.get_import_status, tracking_id)
     except HBAktarimError as e:
         raise HTTPException(502, str(e))

@@ -1036,13 +1036,27 @@ function GonderimTab({ auth, configured, cfg }) {
         {sendRes && (
           <div className="mt-3 text-sm bg-gray-50 border border-gray-200 rounded p-3">
             <div>Gönderilen kalem: <b>{sendRes.sent}</b> · ortam: <b>{sendRes.env}</b></div>
+            {(sendRes.created !== undefined || sendRes.updated !== undefined) && (
+              <div className="text-xs text-gray-600 mt-0.5">
+                Yeni ürün (katalog girişi): <b>{sendRes.created ?? 0}</b> ·
+                {" "}Var olan ürün (özellik güncelleme): <b>{sendRes.updated ?? 0}</b>
+              </div>
+            )}
             {sendRes.tracking_ids?.map((t, i) => (
-              <div key={i} className="text-xs text-gray-600 mt-1">
-                batch {t.batch}: {t.count} kalem · trackingId: <code>{String(t.trackingId)}</code>
+              <div key={`c${i}`} className="text-xs text-gray-600 mt-1">
+                [yeni] batch {t.batch}: {t.count} kalem · trackingId: <code>{String(t.trackingId)}</code>
+              </div>
+            ))}
+            {sendRes.update_tracking_ids?.map((t, i) => (
+              <div key={`u${i}`} className="text-xs text-blue-700 mt-1">
+                [güncelleme] batch {t.batch}: {t.count} kalem · trackingId: <code>{String(t.trackingId)}</code>
               </div>
             ))}
             {sendRes.errors?.length > 0 && (
-              <div className="text-xs text-red-600 mt-1">Hatalar: {sendRes.errors.length}</div>
+              <div className="text-xs text-red-600 mt-1">Hatalar (yeni ürün): {sendRes.errors.length}</div>
+            )}
+            {sendRes.update_errors?.length > 0 && (
+              <div className="text-xs text-red-600 mt-1">Hatalar (özellik güncelleme): {sendRes.update_errors.length}</div>
             )}
           </div>
         )}
