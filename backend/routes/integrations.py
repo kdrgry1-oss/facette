@@ -4350,10 +4350,12 @@ async def _hb_category_attributes_for(hb_cat):
     reddedilmiştir/tanımlı değildir"). Artık böyle bir boşluk varsa hedefli onarım denenir
     (yalnız boş kalan özellikler canlı çekilir — dolu olanlara dokunulmaz, hızlı); aynı
     kategori için 30 dakikada bir denenir (bulk gönderimde her ürün için tekrar tekrar
-    HB'ye gitmesin diye)."""
+    HB'ye gitmesin diye). Onarım denemesi SERT 8sn sınırlıdır — HB yavaş/yanıtsız kalırsa
+    isteği (ve gateway'i) asla bloklamaz, elindeki (boşluklu da olsa) cache ile devam eder."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
     from .category_mapping import _fetch_hb_category_attributes, _hb_schema_has_gaps
+    import asyncio
     if cad and cad.get("_v") == 10 and cad.get("attributes"):
         attrs = cad.get("attributes") or []
         if not _hb_schema_has_gaps(attrs):
@@ -4366,12 +4368,19 @@ async def _hb_category_attributes_for(hb_cat):
             stale = True
         if not stale:
             return attrs, None  # yakın zamanda denendi, hâlâ boşluk var (HB tarafında gerçekten yok olabilir) — bekleme
-        fresh, ferr = await _fetch_hb_category_attributes(hb_cat)
+        # Denemeyi ÖNCE damgala (sonucu beklemeden) — onarım zaman aşımına uğrasa/başarısız
+        # olsa bile aynı 30dk içinde tekrar tekrar denenip her seferinde yavaşlatmasın.
+        await db.hepsiburada_category_attributes.update_one(
+            {"category_id": key}, {"$set": {"_gap_refreshed_at": datetime.now(timezone.utc).isoformat()}})
+        try:
+            fresh, ferr = await asyncio.wait_for(_fetch_hb_category_attributes(hb_cat), timeout=8)
+        except (asyncio.TimeoutError, Exception):
+            return attrs, None  # yavaş/başarısız → elimizdekiyle devam (eski davranış)
         if fresh:
             await db.hepsiburada_category_attributes.update_one(
-                {"category_id": key}, {"$set": {"_gap_refreshed_at": datetime.now(timezone.utc).isoformat()}})
+                {"category_id": key}, {"$set": {"attributes": fresh}})
             return fresh, None
-        return attrs, None  # canlı çekim de başarısızsa elimizdekiyle devam (eski davranış)
+        return attrs, None
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
     if not attrs and ferr:
         return [], ferr
