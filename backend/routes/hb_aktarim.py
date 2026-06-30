@@ -37,6 +37,55 @@ _NOVALUE_TYPES = {
     "url", "link", "image", "media", "file", "video", "barcode",
 }
 
+# Gerçek "değer listesi" (enum) tipleri — sadece bunlar seçilebilir/eşleştirilebilir.
+# string/text gibi serbest-metin alanlar enum DEĞİLDİR (Sabit değer = metin kutusu).
+_ENUM_TYPES = {
+    "enum", "enumeration", "enumerated", "list", "valuelist", "value_list",
+    "select", "dropdown", "multiselect", "picklist", "predefined", "lookup",
+}
+
+# Kaynak alanların admin'de görünen Türkçe adları (sol taraf — okunabilirlik için).
+PRODUCT_FIELD_LABELS = {
+    "name": "Ürün Adı", "title": "Başlık", "description": "Ürün Açıklaması",
+    "brand": "Marka", "manufacturer": "Üretici", "barcode": "Barkod",
+    "barcode_note": "Barkod Notu", "sku": "Stok Kodu (SKU)", "stock_code": "Stok Kodu",
+    "stock": "Stok", "price": "Satış Fiyatı", "sale_price": "İndirimli Fiyat",
+    "list_price": "Liste Fiyatı", "market_price": "Piyasa Fiyatı",
+    "cost_price": "Maliyet Fiyatı", "member_price_1": "Üye Fiyatı",
+    "currency": "Para Birimi", "vat_rate": "KDV Oranı", "markup_rate": "Kâr Oranı",
+    "max_installment": "Maks. Taksit", "max_order_qty": "Maks. Sipariş Adedi",
+    "weight": "Ağırlık (kg)", "cargo_weight": "Kargo Ağırlığı (kg)",
+    "width": "Genişlik", "height": "Yükseklik", "depth": "Derinlik",
+    "color": "Renk", "size": "Beden", "material": "Materyal", "model": "Model",
+    "gender": "Cinsiyet", "season": "Sezon", "collection": "Koleksiyon",
+    "category_id": "Kategori ID", "category_name": "Kategori Adı",
+    "category_ids": "Kategori ID'leri", "categories": "Kategoriler",
+    "breadcrumb": "Kategori Yolu", "images": "Görseller", "slug": "URL (slug)",
+    "keywords": "Anahtar Kelimeler", "meta_description": "Meta Açıklama",
+    "meta_keywords": "Meta Anahtar Kelimeler", "gtip_code": "GTİP Kodu",
+    "estimated_delivery": "Tahmini Teslimat", "combine_products": "Kombin Ürünler",
+}
+VARIANT_FIELD_LABELS = {
+    "color": "Renk", "size": "Beden", "barcode": "Barkod", "sku": "Stok Kodu",
+    "stock_code": "Stok Kodu", "stock": "Stok", "price": "Fiyat",
+    "urun_id": "Ürün ID", "varyant_id": "Varyant ID",
+}
+# Genelde gönderimde işe yaramayan / sistem-içi alanlar — listede en sona ve "(sistem)" etiketiyle.
+_SYSTEM_FIELDS = {
+    "attr_ticimax_synced_at", "barcode_uncertain", "csv_card_id", "deleted_at",
+    "is_active", "is_deleted", "is_featured", "is_new", "is_opportunity",
+    "is_showcase", "is_free_shipping", "csv_id", "row_id",
+}
+
+
+def _field_label(key: str) -> str:
+    if key.startswith("variant."):
+        k = key.split(".", 1)[1]
+        return "Varyant · " + (VARIANT_FIELD_LABELS.get(k) or k)
+    if key.startswith("teknik."):
+        return "Teknik · " + key.split(".", 1)[1]
+    return PRODUCT_FIELD_LABELS.get(key) or key
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -280,14 +329,17 @@ async def list_categories(
 # ===================================================================== #
 def _norm_attribute(a: Dict[str, Any]) -> Dict[str, Any]:
     typ = str(a.get("type") or "string").lower()
+    # "değer listesi" yalnızca gerçek enum tiplerinde (ya da HB değer ucu olduğunu
+    # belirten flag'lerde). string/text serbest metindir → Sabit değer = metin kutusu.
+    has_values = bool(a.get("hasValues") or a.get("valueListId") or a.get("enumValues"))
+    selectable = (typ in _ENUM_TYPES) or has_values or (bool(a.get("multiValue")) and typ not in _NOVALUE_TYPES and typ not in ("string", "text", ""))
     return {
         "id": a.get("id") or a.get("name"),
         "name": a.get("name") or a.get("id"),
         "mandatory": bool(a.get("mandatory", False)),
         "multiValue": bool(a.get("multiValue", False)),
         "type": typ,
-        # değer-eşleştirme yapılabilir mi? (enum benzeri tipler)
-        "selectable": typ not in _NOVALUE_TYPES,
+        "selectable": bool(selectable),
     }
 
 
@@ -506,8 +558,9 @@ async def source_fields(current_user: dict = Depends(require_admin)):
             elif isinstance(v, list) and (not v or isinstance(v[0], str)):
                 note(k, (v[0] if v else ""))
 
-    out = [{"key": k, "label": k, "sample": s} for k, s in fields.items()]
-    out.sort(key=lambda x: x["key"].lower())
+    out = [{"key": k, "label": _field_label(k), "sample": s,
+            "system": (k in _SYSTEM_FIELDS)} for k, s in fields.items()]
+    out.sort(key=lambda x: (1 if x["system"] else 0, x["label"].lower()))
     return {"count": len(out), "fields": out, "scanned": len(docs)}
 
 

@@ -611,37 +611,38 @@ function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
 
         {source === "field" && (
           <select value={field} onChange={(e) => mark(setField)(e.target.value)}
-            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
+            className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[200px]">
             <option value="">— ürün alanı seç —</option>
             {sourceFields.map((f) => (
-              <option key={f.key} value={f.key}>{f.key}{f.sample ? ` (örn: ${f.sample})` : ""}</option>
+              <option key={f.key} value={f.key}>
+                {f.label}{f.system ? " (sistem)" : ""}{f.sample ? ` · örn: ${f.sample}` : ""}
+              </option>
             ))}
           </select>
         )}
 
         {source === "fixed" && (
-          attr.selectable ? (
-            <select value={fixed || ""} onChange={(e) => mark(setFixed)(e.target.value)}
-              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
-              <option value="">{hbValues ? "— HB değeri seç —" : "yükleniyor…"}</option>
-              {(hbValues || []).map((v) => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
-          ) : (
-            <input value={fixed || ""} onChange={(e) => mark(setFixed)(e.target.value)}
-              placeholder="sabit değer"
+          <div className="flex items-center gap-2">
+            <input value={fixed ?? ""} onChange={(e) => mark(setFixed)(e.target.value)}
+              placeholder="sabit değer gir"
               className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]" />
-          )
+            {attr.selectable && hbValues && hbValues.length > 0 && (
+              <select value="" onChange={(e) => { if (e.target.value) mark(setFixed)(e.target.value); }}
+                className="border border-gray-300 rounded-md px-2 py-1.5 text-sm">
+                <option value="">↳ listeden seç</option>
+                {hbValues.map((v) => (<option key={v.id} value={v.name}>{v.name}</option>))}
+              </select>
+            )}
+          </div>
         )}
 
         {source === "valuemap" && (
           <>
             <select value={field} onChange={(e) => mark(setField)(e.target.value)}
-              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[160px]">
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
               <option value="">— kaynak ürün alanı —</option>
               {sourceFields.map((f) => (
-                <option key={f.key} value={f.key}>{f.key}</option>
+                <option key={f.key} value={f.key}>{f.label}{f.system ? " (sistem)" : ""}</option>
               ))}
             </select>
             <button onClick={() => setShowVM((s) => !s)} disabled={!field}
@@ -781,7 +782,7 @@ function AlanFiyatTab({ auth, configured }) {
   if (!cfg) return <HbLoading />;
 
   const opts = sourceFields.map((f) => (
-    <option key={f.key} value={f.key}>{f.key}{f.sample ? ` (örn: ${f.sample})` : ""}</option>
+    <option key={f.key} value={f.key}>{f.label}{f.system ? " (sistem)" : ""}{f.sample ? ` · örn: ${f.sample}` : ""}</option>
   ));
 
   return (
@@ -826,9 +827,9 @@ function AlanFiyatTab({ auth, configured }) {
         <div className="flex flex-wrap items-center gap-3">
           <select value={(cfg.price || {}).field || "price"} onChange={(e) => setPrice({ field: e.target.value })}
             className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[220px]">
-            <option value="price">price</option>
-            <option value="sale_price">sale_price</option>
-            <option value="market_price">market_price</option>
+            <option value="price">Satış Fiyatı</option>
+            <option value="sale_price">İndirimli Fiyat</option>
+            <option value="market_price">Piyasa Fiyatı</option>
             {opts}
           </select>
           <label className="text-sm text-gray-600">Marj %</label>
@@ -845,8 +846,8 @@ function AlanFiyatTab({ auth, configured }) {
       <Section title="Stok" desc="Stok adedi kaynağı (genelde variant.stock).">
         <select value={(cfg.stock || {}).field || "variant.stock"} onChange={(e) => setStock({ field: e.target.value })}
           className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[260px]">
-          <option value="variant.stock">variant.stock</option>
-          <option value="stock">stock</option>
+          <option value="variant.stock">Varyant · Stok</option>
+          <option value="stock">Stok</option>
           {opts}
         </select>
       </Section>
