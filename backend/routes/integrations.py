@@ -4725,31 +4725,35 @@ async def _hb_poll_import(client, tracking_id, attempts=8, delay=2.0):
     return last or {"done": False, "items": [], "success": 0, "failed": 0, "processing": 0}
 
 
-async def _hb_build_sku_to_hbsku_map(client, max_pages=25, page_size=1000):
-    """Mağazadaki TÜM ürünleri (katalog) tarar, merchantSku -> hepsiburadaSku haritası
-    çıkarır (hb_reconcile_preview ile AYNI alan-isim toleransı). SALT-OKUNUR.
-    Amaç: 'tekrar aktar' edilen bir ürün HB'de ZATEN var mı (→ ÖZELLİK GÜNCELLE) yoksa
-    YENİ mi (→ KATALOG GİRİŞİ) ayrımını yapmak."""
+async def _hb_build_sku_to_hbsku_map(client, merchant_skus, chunk=100):
+    """SADECE gonderilen merchantSku'lari HB'de arar (Listing sorgusu, scoped) ve
+    merchantSku -> hepsiburadaSku haritasi doner. SALT-OKUNUR.
+    ONEMLI -- performans: tum katalogu sayfalayip taramak YERINE (eski/yavas yaklasim,
+    25 sayfa x 1000 urune kadar HTTP) yalniz ilgilenilen SKU'lari sorgular -> tek urun
+    'tekrar aktar'inda bile tum magaza taranmasin diye.
+    Amac: 'tekrar aktar' edilen bir urun HB'de ZATEN var mi (-> OZELLIK GUNCELLE) yoksa
+    YENI mi (-> KATALOG GIRISI) ayrimini yapmak."""
     import asyncio
     out = {}
-    try:
-        for page in range(max_pages):
-            d = await asyncio.to_thread(client.get_all_products, page, page_size)
-            rows = (d.get("data") if isinstance(d, dict) else d) or []
-            if not rows:
-                break
+    uniq = sorted({str(s).strip().upper() for s in (merchant_skus or []) if s})
+    if not uniq:
+        return out
+    for i in range(0, len(uniq), chunk):
+        batch = uniq[i:i + chunk]
+        try:
+            d = await asyncio.to_thread(client.get_listings, 0, len(batch), batch, None)
+            rows = (d.get("listings") if isinstance(d, dict) else d) or []
+            if isinstance(d, dict) and not rows:
+                rows = d.get("data") or []
             for r in rows:
                 if not isinstance(r, dict):
                     continue
-                ms = str(r.get("merchantSku") or r.get("merchantSKU") or r.get("sku") or "").strip().upper()
-                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("hepsiburadaSKU")
+                ms = str(r.get("merchantSku") or r.get("MerchantSku") or r.get("merchantSKU") or "").strip().upper()
+                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("HepsiburadaSku") or r.get("hepsiburadaSKU")
                 if ms and hb:
                     out[ms] = str(hb)
-            if isinstance(d, dict) and d.get("last") is True:
-                break
-    except Exception:
-        pass  # çözülemezse tüm kalemler 'yeni' kabul edilip create_products'a düşer (eski davranış)
-    return out
+        except Exception:
+            continue  # bu batch cozulemezse o kalemler 'yeni' kabul edilip create_products'a duser
 
 
 def _hb_split_ticket_item(attrs: dict) -> dict:
@@ -4835,7 +4839,8 @@ async def hb_sync_products(request: Request, current_user: dict = Depends(requir
     # değişikliklerini HB'ye yansıtmayı GARANTİ ETMEZ. HB'nin resmi "Ürün Güncelleme
     # Servisi" (ticket-api, hbSku ile) bunun için var. Burada her kalemin merchantSku'sunu
     # HB katalogunda arar: zaten varsa GÜNCELLE (update_products), yoksa YENİ GİRİŞ (create_products).
-    sku_to_hb = await _hb_build_sku_to_hbsku_map(client)
+    _send_skus = [str((it.get("attributes") or {}).get("merchantSku") or "") for it in items]
+    sku_to_hb = await _hb_build_sku_to_hbsku_map(client, _send_skus)
     new_items, update_items, update_src = [], [], []
     for it in items:
         ms = str((it.get("attributes") or {}).get("merchantSku") or "").strip().upper()

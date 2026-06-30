@@ -883,28 +883,33 @@ async def _select_mapped_products(sys_to_hb, limit=None):
     return await cur.to_list(length=(limit or 5000))
 
 
-async def _hb_aktarim_sku_to_hbsku_map(client, max_pages=25, page_size=1000):
-    """Mağazadaki TÜM ürünleri (katalog) tarar, merchantSku -> hepsiburadaSku haritası
-    çıkarır. SALT-OKUNUR. Amaç: publish_send'de 'tekrar gönderilen' bir ürün HB'de
-    ZATEN var mı (→ ÖZELLİK GÜNCELLE/ticket-api) yoksa YENİ mi (→ katalog girişi) ayrımı."""
+async def _hb_aktarim_sku_to_hbsku_map(client, merchant_skus, chunk=100):
+    """SADECE gonderilen merchantSku'lari HB'de arar (Listing sorgusu, scoped) ve
+    merchantSku -> hepsiburadaSku haritasi doner. SALT-OKUNUR.
+    ONEMLI -- performans: tum katalogu sayfalayip taramak YERINE yalniz ilgilenilen
+    SKU'lari sorgular -> tek urun 'tekrar gonder'inde bile tum magaza taranmaz.
+    Amac: publish_send'de 'tekrar gonderilen' bir urun HB'de ZATEN var mi (-> OZELLIK
+    GUNCELLE/ticket-api) yoksa YENI mi (-> katalog girisi) ayrimi."""
     out = {}
-    try:
-        for page in range(max_pages):
-            d = await asyncio.to_thread(client.all_products, page, page_size)
-            rows = (d.get("data") if isinstance(d, dict) else d) or []
-            if not rows:
-                break
+    uniq = sorted({str(s).strip().upper() for s in (merchant_skus or []) if s})
+    if not uniq:
+        return out
+    for i in range(0, len(uniq), chunk):
+        batch = uniq[i:i + chunk]
+        try:
+            d = await asyncio.to_thread(client.get_listings, 0, len(batch), batch, None)
+            rows = (d.get("listings") if isinstance(d, dict) else d) or []
+            if isinstance(d, dict) and not rows:
+                rows = d.get("data") or []
             for r in rows:
                 if not isinstance(r, dict):
                     continue
-                ms = str(r.get("merchantSku") or r.get("merchantSKU") or r.get("sku") or "").strip().upper()
-                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("hepsiburadaSKU")
+                ms = str(r.get("merchantSku") or r.get("MerchantSku") or r.get("merchantSKU") or "").strip().upper()
+                hb = r.get("hepsiburadaSku") or r.get("hbSku") or r.get("HepsiburadaSku") or r.get("hepsiburadaSKU")
                 if ms and hb:
                     out[ms] = str(hb)
-            if isinstance(d, dict) and d.get("last") is True:
-                break
-    except Exception:
-        pass  # çözülemezse tüm kalemler 'yeni' kabul edilir (eski davranış: hepsi import_products'a)
+        except Exception:
+            continue  # bu batch cozulemezse o kalemler 'yeni' kabul edilir (eski davranis)
     return out
 
 
@@ -1009,7 +1014,8 @@ async def publish_send(
         return {"sent": 0, "tracking_ids": [], "note": "Gönderilecek kalem bulunamadı."}
 
     # 🔁 YENİ vs ZATEN-LİSTELİ ayrımı (bkz. fonksiyon docstring'i).
-    sku_to_hb = await _hb_aktarim_sku_to_hbsku_map(client)
+    _send_skus = [str((it.get("attributes") or {}).get("merchantSku") or "") for it in all_items]
+    sku_to_hb = await _hb_aktarim_sku_to_hbsku_map(client, _send_skus)
     new_items, update_items = [], []
     for it in all_items:
         ms = str((it.get("attributes") or {}).get("merchantSku") or "").strip().upper()
