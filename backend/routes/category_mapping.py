@@ -395,29 +395,50 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
     for a in base_list:
         await _add(a)
 
-    # İSİM BAZLI DEDUP: HB bazı kategorilerde aynı adı taşıyan iki ayrı attribute döndürebilir
-    # (ör. Elbise'de "Renk" → hem `renk_variant_property` [varyant ekseni, zorunlu, ~1999 değer]
-    #  hem de `renk` [opsiyonel katalog, ~1042 değer]). UI'da mükerrer görünür, kafa karıştırır.
-    # Aynı normalize adlı attribute'lardan EN İYİsini tut (varyant > zorunlu > en çok değer),
-    # diğerlerini at. Varyant Renk korunduğundan renk eksenine gönderim ETKİLENMEZ.
+    # İSİM BAZLI BİRLEŞTİRME: HB bazı kategorilerde aynı adı taşıyan İKİ ayrı attribute döndürür
+    # (ör. Elbise'de "Renk" → varyant ekseni `renk_variant_property` [~1999 değer, satıcı-custom
+    #  KİRLİ havuz: "00411-Ekru","Altın - Ekru"... ama düz "Ekru" gibi TEMİZ baz renkler EKSİK]
+    #  + katalog `renk` [~1042 değer, HB'nin TEMİZ listesi: düz "Ekru","Sarı"... MEVCUT]).
+    # Tek attribute'a indiriyoruz AMA değerleri ATMADAN birleştiriyoruz: en iyi attribute'u
+    # (varyant > zorunlu > en çok değer) taşıyıcı seç; aynı adlı diğer attribute'ların değerlerinden
+    # taşıyıcıda OLMAYAN (normalize ad bazında) temiz değerleri ekle. Eklenen değerlerin id'si None
+    # yapılır → gönderimde temiz ad (ör. "Ekru") string olarak gider (HB varyant rengi satıcı-custom
+    # kabul ettiğinden — 1999 custom değer bunun kanıtı — sorunsuz). Böylece kullanıcı varyant Renk
+    # dropdown'ında düz "Ekru"yu da görüp seçebilir; submit'te _hb_resolve_value tam-ad ile eşler.
     if out:
-        _best_by_name = {}
+        def _vscore(a):
+            return (1 if a.get("variant") else 0,
+                    1 if a.get("required") else 0,
+                    len(a.get("attributeValues") or []))
+        _groups = {}
         for _a in out:
-            _k = _sysnorm(_a.get("name"))
-            _score = (1 if _a.get("variant") else 0,
-                      1 if _a.get("required") else 0,
-                      len(_a.get("attributeValues") or []))
-            _cur = _best_by_name.get(_k)
-            if _cur is None or _score > _cur[0]:
-                _best_by_name[_k] = (_score, id(_a))
-        _keep_ids = {v[1] for v in _best_by_name.values()}
-        out = [_a for _a in out if id(_a) in _keep_ids]
+            _groups.setdefault(_sysnorm(_a.get("name")), []).append(_a)
+        _merged = []
+        for _grp in _groups.values():
+            if len(_grp) == 1:
+                _merged.append(_grp[0])
+                continue
+            _grp.sort(key=_vscore, reverse=True)
+            _primary = _grp[0]
+            _have = {_sysnorm(v.get("name")) for v in (_primary.get("attributeValues") or [])
+                     if v.get("name")}
+            _extra = []
+            for _other in _grp[1:]:
+                for _v in (_other.get("attributeValues") or []):
+                    _vn = _sysnorm(_v.get("name"))
+                    if _vn and _vn not in _have:
+                        _have.add(_vn)
+                        _extra.append({"id": None, "name": _v.get("name")})
+            if _extra:
+                _primary["attributeValues"] = list(_primary.get("attributeValues") or []) + _extra
+            _merged.append(_primary)
+        out = _merged
 
     try:
         key = int(mp_cat_id) if str(mp_cat_id).isdigit() else str(mp_cat_id)
         await db.hepsiburada_category_attributes.update_one(
             {"category_id": key},
-            {"$set": {"category_id": key, "attributes": out, "_v": 8,
+            {"$set": {"category_id": key, "attributes": out, "_v": 9,
                       "media_attributes": media_attrs,
                       "base_attributes": base_list,
                       "raw_structure": raw_struct,
@@ -1931,9 +1952,9 @@ async def get_advanced_attributes(
         # Beden 414 ...). Frontend değer-eşleştirme ekranı her açılışta refresh=1 gönderiyordu →
         # her seferinde canlı çekim → tarayıcı HTTP timeout → ekran boş ("Hepsiburada için
         # eşleştiremiyorum"). Artık: cache TAZE & DEĞERLİYSE anında servis et; yalnız cache
-        # yok/eski(_v!=8)/değersizse VEYA açıkça force=1 ile istenirse canlı çek.
+        # yok/eski(_v!=9)/değersizse VEYA açıkça force=1 ile istenirse canlı çek.
         no_values = bool(attrs) and not any((x.get("attributeValues") or []) for x in attrs)
-        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 8 and not no_values
+        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 9 and not no_values
         if force or not cache_fresh:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
             if hb_err:
