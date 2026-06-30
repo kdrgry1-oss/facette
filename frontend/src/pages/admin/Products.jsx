@@ -381,6 +381,8 @@ export default function AdminProducts() {
   const [multiSizes, setMultiSizes] = useState([]);
   const [multiColors, setMultiColors] = useState([]);
   const [fetchingAttributes, setFetchingAttributes] = useState(false);
+  // HB kategori şeması canlı çekilirken true; modal şema gelmeden 9 sabite düşmesin diye guard.
+  const [hbAttrsLoading, setHbAttrsLoading] = useState(false);
   const [attrSearch, setAttrSearch] = useState({});
 
   useEffect(() => {
@@ -431,11 +433,13 @@ export default function AdminProducts() {
     const byCat = () => hbCatId
       ? axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, auth).then(r => r.data.attributes || [])
       : Promise.resolve([]);
+    setHbAttrsLoading(true);
     byProduct()
       .then(list => (list && list.length) ? list : byLocalCat())
       .then(list => (list && list.length) ? list : byCat())
       .then(list => setHepsiburadaAttributesList(list || []))
-      .catch(() => setHepsiburadaAttributesList([]));
+      .catch(() => setHepsiburadaAttributesList([]))
+      .finally(() => setHbAttrsLoading(false));
   }, [formData.hepsiburada_category_id, formData.id, formData.category_id, formData.category_name, modalOpen, categories]);
 
   // HB OTOMATİK DOLUM (yaklaşım A): Varsayılan özellikler (genel `attributes` + Teknik Detay)
@@ -2854,6 +2858,10 @@ export default function AdminProducts() {
                       if (score(cand) > score(prev)) _hbMap.set(nk, cand);
                     });
                     const hbSource = [..._hbMap.values()];
+                    // HB şeması boş mu? (kategori eşli değil/seçilmedi VEYA canlı çekim sürüyor).
+                    // Boşsa aşağıda Dolu/Zorunlu/Diğer grupları RENDER EDİLMEZ → "Dolu Özellikler (9)"
+                    // yanıltıcı flicker'ı engellenir; yerine yükleniyor / eşli değil kutusu gösterilir.
+                    const hbSchemaMissing = marketplace === 'hepsiburada' && hbSource.length === 0;
 
                     // TRENDYOL: kendi kategori özelliklerinin TÜM izin verilen değerlerini
                     // (attributeValues) global kütüphaneyle BİRLEŞTİR ve global'de olmayan
@@ -2989,7 +2997,21 @@ export default function AdminProducts() {
                           )}
                         </div>
 
-                        {filledAttrs.length > 0 && (
+                        {hbSchemaMissing && (
+                          hbAttrsLoading ? (
+                            <div className="py-16 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                              <div className="animate-pulse text-sm font-bold uppercase tracking-widest text-gray-400">Hepsiburada kategori özellikleri yükleniyor…</div>
+                              <p className="text-xs mt-2 text-gray-400">İlk açılışta canlı çekiliyor; birkaç saniye sürebilir.</p>
+                            </div>
+                          ) : (
+                            <div className="py-12 text-center bg-amber-50 rounded-2xl border-2 border-dashed border-amber-200">
+                              <div className="text-sm font-bold text-amber-700">Bu kategori Hepsiburada'ya eşli değil (ya da kategori seçilmedi).</div>
+                              <p className="text-xs mt-2 text-amber-600">Kategori Eşleştirme'den HB'ye eşle → Renk, Beden, Kumaş ve tüm HB özellikleri burada görünür.</p>
+                            </div>
+                          )
+                        )}
+
+                        {filledAttrs.length > 0 && !hbSchemaMissing && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
                               <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -3001,7 +3023,7 @@ export default function AdminProducts() {
                           </div>
                         )}
 
-                        {requiredEmpty.length > 0 && (
+                        {requiredEmpty.length > 0 && !hbSchemaMissing && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
                               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
@@ -3013,7 +3035,7 @@ export default function AdminProducts() {
                           </div>
                         )}
 
-                        {otherEmpty.length > 0 && (isSearching || showAllAttributes || marketplace !== 'trendyol') && (
+                        {otherEmpty.length > 0 && !hbSchemaMissing && (isSearching || showAllAttributes || marketplace !== 'trendyol') && (
                           <div className="mb-6">
                             <div className="flex items-center gap-2 mb-4">
                               <div className="w-3 h-3 bg-gray-300 rounded-full"></div>
