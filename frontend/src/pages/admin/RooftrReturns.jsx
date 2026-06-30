@@ -504,6 +504,11 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
+                        {r.gider_pusulasi_no && (
+                          <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
+                            #{r.gider_pusulasi_no}
+                          </span>
+                        )}
                         {can("returns.expense_note") && (
                           <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
                             className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">

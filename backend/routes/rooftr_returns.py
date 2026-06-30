@@ -190,7 +190,8 @@ async def list_rooftr_return_orders(
             {"order_id": {"$in": _oids}},
             {"_id": 0, "order_id": 1, "return_code": 1, "barcode_url": 1, "cargo_provider_name": 1,
              "iade_no": 1, "gonderi_no": 1, "mng_ref": 1, "contract_no": 1,
-             "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1},
+             "reship_code": 1, "reshipped_at": 1, "refund_payment": 1, "reason": 1,
+             "has_gider_pusulasi": 1, "gider_pusulasi_no": 1},
         ):
             _cr_map[cr.get("order_id")] = cr
     for r in rows:
@@ -205,6 +206,8 @@ async def list_rooftr_return_orders(
         r["return_cargo_provider"] = cr.get("cargo_provider_name") or r.get("cargo_provider_name") or ""
         r["reship_code"] = cr.get("reship_code") or ""
         r["reshipped_at"] = cr.get("reshipped_at") or ""
+        r["has_gider_pusulasi"] = bool(cr.get("has_gider_pusulasi"))
+        r["gider_pusulasi_no"] = cr.get("gider_pusulasi_no") or ""
         # İade ödeme tarihi: sipariş damgası > köprü ödeme zamanı > (refunded ise) updated_at
         if not r.get("refund_paid_at"):
             _rp = (cr.get("refund_payment") or {}).get("at")
