@@ -4346,6 +4346,11 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                       for m in saved_maps if (m.get("mp_attr_id") or m.get("trendyol_attr_id"))}
     vmaps = (cm or {}).get("value_mappings") or {}
     defaults = (cm or {}).get("default_mappings") or {}
+    # default_mappings anahtarları üç biçimde gelebilir: tam HB attribute ADı ("Yaka Stili"),
+    # HB attribute ID'si ("000002C") veya küçük-harf alias ("yaka_stili"). Ad/ID eşleşmesini
+    # ana döngü zaten yakalar; alias'ları yakalamak için NORMALİZE anahtar haritası kurarız →
+    # böylece her default DOĞRU özelliğe (resolve edilerek) gider, payload'a ham çöp ANAHTAR basılmaz.
+    defaults_norm = {_hb_norm(k): v for k, v in defaults.items() if v not in (None, "")}
     # Global ortak-özellik default'ları (panel: "Ortak Özellikler", ör. Cinsiyet=Kadın).
     # Her kategoride geçerli; o kategorinin enum'una ada göre çözülür.
     _hbset = await db.settings.find_one({"id": "hepsiburada"}, {"_id": 0}) or {}
@@ -4465,7 +4470,7 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 #   FACETTE sabit varsayılan (Menşei/Cinsiyet/Yaş Grubu/…, Üretici/İthalatçı) → alan-eşleştirme
                 raw = (v_hb.get(aname) or hb_attrs_for_product.get(aname)
                        or local.get(anorm)
-                       or defaults.get(aname) or defaults.get(aid)
+                       or defaults.get(aname) or defaults.get(aid) or defaults_norm.get(anorm)
                        or gad.get(anorm)
                        or facette_fixed_value_for(aname))
                 if not raw:
@@ -4571,10 +4576,23 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             for i, u in enumerate(imgs, 1):
                 attrs.setdefault(f"Image{i}", u)
         attrs.setdefault("kg", str(_base_val("kg", variant) or "1"))
-        # Kategori-özelliği olmayan şirket default'larını da ekle
+        # Şirket default'ları artık YALNIZ ana döngüde, DOĞRU HB özellik adına (resolve edilerek)
+        # uygulanır. Eskiden buradaki dökme döngüsü, gerçek özellik adı olmayan default
+        # anahtarlarını (HB attribute-ID "000002C" ve küçük-harf alias "yaka_stili") da payload'a
+        # basıyordu → HB tanımadığı bu anahtarlar yüzünden ürünün ÖZELLİK BLOĞUNU reddedip
+        # adıyla doğru gönderdiklerimizi de boş bırakıyordu. Güvenlik için yalnız GERÇEK HB
+        # özellik adına denk gelen ve henüz set edilmemiş default'ları, attribute üzerinden
+        # RESOLVE ederek ekleriz; ham ID/alias anahtar ASLA payload'a girmez.
+        _valid_attr = {a.get("name"): a for a in hb_attrs_list if a.get("name")}
         for k, v in defaults.items():
-            if v not in (None, "") and not str(k).isdigit():
-                attrs.setdefault(k, v)
+            if v in (None, "") or k in attrs:
+                continue
+            a = _valid_attr.get(k)
+            if not a:
+                continue  # gerçek HB özellik adı değil (ID/alias) → payload'a basma
+            rv = _hb_resolve_with_fallback(a, v, v)
+            if rv not in (None, ""):
+                attrs[k] = rv
 
         if missing_req:
             errors.add("zorunlu HB özellikleri eksik: " + ", ".join(sorted(set(missing_req))))
