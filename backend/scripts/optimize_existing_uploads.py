@@ -38,8 +38,8 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 from services import r2_storage as r2  # noqa: E402
 
-MAX_LONG_EDGE = 1600
-QUALITY = 82
+MAX_LONG_EDGE = 2000
+QUALITY = 88
 KEY_PREFIX = "uploads/"
 
 

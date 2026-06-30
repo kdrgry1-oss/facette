@@ -25,8 +25,8 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 # Yüklemede maksimum uzun kenar (px) — ürün görsel ızgarası + PDP zoom için yeterli,
 # eskiden olduğu gibi 1700-2500px ham görselleri (yavaş decode/paint → "boş çıkıyor"
 # şikayeti) önler. PNG/JPG → WebP'e çevrilir, format başına ortalama %60-80 küçülür.
-MAX_UPLOAD_LONG_EDGE = 1600
-UPLOAD_WEBP_QUALITY = 82
+MAX_UPLOAD_LONG_EDGE = 2000
+UPLOAD_WEBP_QUALITY = 88
 
 
 def _optimize_for_upload(data: bytes, content_type: str):
