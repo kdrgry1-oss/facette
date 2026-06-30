@@ -723,8 +723,11 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
       // olarak gider (backend dirty-pool'da zaten kendi değerini geçirir). Yalnız BİREBİR ad
       // eşleşmeleri korunur. Temiz/küçük havuzlar (≤200) DOKUNULMAZ → manuel/alias maplar güvende.
       const rawVM = v.data?.value_mappings || {};
+      // KİRLİ HAVUZ (>200) GÖSTERİM temizliği (SESSİZ): birebir-OLMAYAN eski/kodlu bağları
+      // EKRANDA eşlenmemiş göster (ör. "Sarı→00Sarı" yerine "ürün değeri: Sarı"). Backend bu
+      // havuzlarda kodlu bağı ZATEN yok sayıp ürünün kendi değerini gönderdiği için bu yalnız
+      // görsel netliktir → kullanıcıyı "çöp temizlendi" diye rahatsız eden uyarı KALDIRILDI.
       const cleanVM = { ...rawVM };
-      let _dropped = 0;
       for (const at of attrs) {
         const mpv = at.attributeValues || [];
         if (mpv.length <= 200) continue;
@@ -736,16 +739,12 @@ export function AdvancedValueMatchModal({ open, onClose, marketplace, category }
           const selN = byId.get(String(cleanVM[key])) || "";
           if (selN && selN === _normVal(localVal)) continue; // birebir doğru → koru
           delete cleanVM[key];
-          _dropped++;
         }
       }
       setMpAttrs(attrs);
       setLocalValues(lv);
       setValueMappings(cleanVM);
       setDefaults(a.data?.default_mappings || {});
-      if (_dropped) {
-        toast.info(`${_dropped} kodlu çöp renk eşleşmesi temizlendi — bunlarda ürünün kendi değeri gönderilecek`);
-      }
       setHint(a.data?.hint || "");
       // Seçili özelliği KORU (yeni kategoride yoksa ilkine düş) — sekme değişiminde reload YOK,
       // bu yüzden buraya yalnız modal/kategori ilk açıldığında gelinir.

@@ -4485,7 +4485,18 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
                 if not mapped and isinstance(vmaps.get(aid), dict):
                     mapped = vmaps[aid].get(str(raw))
                 if mapped:
-                    raw = mapped
+                    # KİRLİ HAVUZ (>200 satıcı-girdisi: Renk ~1999, Beden ~414): eski/kodlu
+                    # value_mapping bağı (ör. "Sarı"→"00Sarı", "Beyaz"→"0002- Beyaz") gönderimde
+                    # YANLIŞ değer basar. Böyle havuzlarda binding'i YALNIZ çözümü ürünün KENDİ
+                    # değeriyle BİREBİR aynı ada denk geliyorsa onurlandır; aksi halde YOK SAY →
+                    # ürünün kendi temiz değeri (orig_raw) serbest-metin olarak geçer. Temiz/küçük
+                    # enum'larda (≤200) binding aynen uygulanır (Kırmızı↔Red gibi kasıtlı çeviri korunur).
+                    if len(a.get("attributeValues") or []) > _HB_DIRTY_POOL_MIN:
+                        _mr = _hb_resolve_value(a, mapped)
+                        if _mr and _hb_norm(_mr) == _hb_norm(orig_raw):
+                            raw = mapped
+                    else:
+                        raw = mapped
             # enum'a/serbest metne çöz (çözülemeyen sayısal ID → orijinal etikete düş, çöp filtrelenir)
             if raw not in (None, ""):
                 rv = _hb_resolve_with_fallback(a, raw, orig_raw)
