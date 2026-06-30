@@ -87,6 +87,17 @@ const CLAIM_STATUS_OPTS = [
   { value: "Cancelled", label: "İptal" },
 ];
 
+// Manuel (sipariş-durumu kaynaklı) satırlar için sipariş iade durumları.
+const ORDER_RETURN_STATUS_OPTS = [
+  { value: "return_requested", label: "İade Talebi Oluşturuldu" },
+  { value: "return_approved", label: "İade Onaylandı" },
+  { value: "return_in_transit", label: "İade Kargoda" },
+  { value: "returned", label: "İade Tamamlandı" },
+  { value: "refunded", label: "İade Bedeli Ödendi" },
+  { value: "partial_refunded", label: "Kısmi İade" },
+  { value: "return_rejected", label: "İade Reddedildi" },
+];
+
 function ActionBadge({ action }) {
   if (action === "approved") return <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">Onaylandı</span>;
   if (action === "issued") return <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full">İtiraz Edildi</span>;
@@ -298,6 +309,43 @@ export default function Returns() {
     } finally {
       setGpLoading(false);
     }
+  };
+
+  // ── Manuel (sipariş-durumu kaynaklı) satır aksiyonları ──────────────────
+  // Durum: doğrudan sipariş durumunu ilerlet (kaynak sipariştir, Trendyol claim değil).
+  const changeManualStatus = async (orderId, newStatus) => {
+    if (!orderId) return;
+    setStatusBusyId("ord:" + orderId);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.put(`${API}/orders/${orderId}/status?status=${encodeURIComponent(newStatus)}`, {},
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Durum güncellendi");
+      fetchClaims();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Durum güncellenemedi");
+    } finally { setStatusBusyId(null); }
+  };
+  // Gider pusulası: önce siparişi customer_returns'e köprüle (idempotent), sonra GP üret.
+  const handleManualGiderPusulasi = async (claim) => {
+    if (!claim.order_id) { toast.error("Sipariş bulunamadı"); return; }
+    setGpLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const trackingNo = pad6(gpStart);
+      const br = await axios.post(`${API}/admin/rooftr/returns/${claim.order_id}/open`, {},
+        { headers: { Authorization: `Bearer ${token}` } });
+      const returnId = br.data?.return_id;
+      if (!returnId) throw new Error("bridge");
+      const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`,
+        { tracking_no: trackingNo }, { headers: { Authorization: `Bearer ${token}` } });
+      setGpData({ ...res.data.gider_pusulasi, assigned_no: trackingNo });
+      setGpModalOpen(true);
+      advanceGpNo(1);
+      fetchClaims();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Gider pusulası oluşturulamadı");
+    } finally { setGpLoading(false); }
   };
 
   // Modaldan tek pusula yazdır: aynı 4'lü A4 mekanizmasını kullanır
@@ -611,9 +659,15 @@ export default function Returns() {
                     <td className="px-3 py-3 text-center">
                       <div className="flex flex-col items-center gap-1">
                         {claim.manual ? (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200" title="Sipariş durumundan — durumu Siparişler sayfasından değiştirin">
-                            {claim.bucket_label || "—"}
-                          </span>
+                          <select
+                            value={claim.order_status || ""}
+                            onChange={(e) => changeManualStatus(claim.order_id, e.target.value)}
+                            disabled={statusBusyId === ("ord:" + claim.order_id)}
+                            title="Sipariş durumunu ilerlet (kaynak: sipariş)"
+                            className="text-[11px] border border-gray-200 rounded-md px-1.5 py-0.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                          >
+                            {ORDER_RETURN_STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
                         ) : (<>
                         <ActionBadge action={claim.panel_action} />
                         <select
@@ -639,7 +693,22 @@ export default function Returns() {
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
                         {claim.manual ? (
-                          <span className="text-[10px] text-gray-400 italic px-1" title="Sipariş durumundan türetilmiş iade">Manuel</span>
+                          <>
+                            {claim.gider_pusulasi_no && (
+                              <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
+                                #{claim.gider_pusulasi_no}
+                              </span>
+                            )}
+                            <button onClick={() => handleManualGiderPusulasi(claim)}
+                              disabled={gpLoading}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                claim.has_gider_pusulasi
+                                  ? "bg-purple-100 text-purple-700 hover:bg-purple-200"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`} title="Gider Pusulası">
+                              <FileText size={14} />
+                            </button>
+                          </>
                         ) : (<>
                         {claim.gider_pusulasi_no && (
                           <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">

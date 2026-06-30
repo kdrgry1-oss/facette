@@ -7357,6 +7357,22 @@ async def _order_derived_trendyol_returns(search: str = "", claim_type: str = ""
             if not _rx.search(hay):
                 continue
         out.append(row)
+    # GP bilgisini ekle: bu siparişlere ait customer_returns köprü kaydı varsa
+    # (gider pusulası kesildiyse) numarayı/işaretini satıra taşı (tek toplu sorgu).
+    _oids = [r["order_id"] for r in out if r.get("order_id")]
+    if _oids:
+        _gp = {}
+        async for cr in db.customer_returns.find(
+            {"order_id": {"$in": _oids}},
+            {"_id": 0, "order_id": 1, "id": 1, "has_gider_pusulasi": 1, "gider_pusulasi_no": 1}
+        ).sort("created_at", -1):
+            _gp.setdefault(cr.get("order_id"), cr)
+        for r in out:
+            _c = _gp.get(r.get("order_id"))
+            if _c:
+                r["return_id"] = _c.get("id")
+                r["has_gider_pusulasi"] = bool(_c.get("has_gider_pusulasi"))
+                r["gider_pusulasi_no"] = _c.get("gider_pusulasi_no") or ""
     return out
 
 
