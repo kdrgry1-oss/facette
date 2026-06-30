@@ -4451,6 +4451,8 @@ async def _compute_refund_breakdown(rec: dict, order: dict, fault: str,
         "campaign_note": campaign_note,
         "return_cargo_fee": return_cargo_fee,
         "auto_refund": auto_refund,
+        "vade_farki": round(_vf, 2),
+        "installment": int(_inst or 1),
     }
 
 

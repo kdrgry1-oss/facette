@@ -612,6 +612,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             <span>Genel toplam: <b className="text-gray-900">{fmtTL(r.total)}</b></span>
                           </div>
                         )}
+                        {/* Taksit farkı: gerçekten tahsil edilen (iyzico paidPrice) genel toplamdan
+                            yüksekse — tam iadede ONAY EKRANINDA bu tutar baz alınır, burada da
+                            gösteriyoruz ki admin onaya girmeden önce gerçek iade tutarını görsün. */}
+                        {r.vade_farki > 0 && (
+                          <div className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 inline-flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                            <span>Taksit farkı (+{r.installment} taksit): <b>+{fmtTL(r.vade_farki)}</b></span>
+                            <span>Gerçek tahsilat — iade onayında baz alınacak tutar: <b>{fmtTL(r.charged_total)}</b></span>
+                          </div>
+                        )}
 
                         {/* İade/iptal durumu açıklaması */}
                         {(r.status === "partial_refunded" || r.status === "cancelled") && (
@@ -680,6 +689,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                     Kargo: {wf.fault === "customer" ? <b className="text-amber-700">müşteriden kesildi</b> : <b className="text-gray-700">mağazadan (tam iade)</b>}
                   </div>
                   <div className="space-y-1 text-xs text-gray-600">
+                    {wf.preview.vade_farki > 0 && <div className="flex justify-between text-emerald-700"><span>Taksit farkı dahil ({wf.preview.installment} taksit)</span><b>+ {fmtTL(wf.preview.vade_farki)}</b></div>}
                     <div className="flex justify-between"><span>İade edilen ürün tutarı</span><b>{fmtTL(wf.preview.returned_net)}</b></div>
                     {wf.preview.campaign_deduction > 0 && <div className="flex justify-between text-amber-700"><span>Kargo bedeli (müşteriden tahsil)</span><b>− {fmtTL(wf.preview.campaign_deduction)}</b></div>}
                     {wf.preview.return_cargo_fee > 0 && <div className="flex justify-between text-amber-700"><span>İade kargo bedeli</span><b>− {fmtTL(wf.preview.return_cargo_fee)}</b></div>}

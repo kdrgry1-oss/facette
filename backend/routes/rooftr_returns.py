@@ -19,6 +19,7 @@ from typing import Optional
 import re
 
 from .deps import db, logger, require_admin, generate_id
+from .orders import _order_vade_farki
 
 router = APIRouter(prefix="/admin/rooftr", tags=["rooftr-returns"])
 
@@ -106,6 +107,7 @@ async def list_rooftr_return_orders(
         "created_at": 1, "updated_at": 1, "channel_source": 1, "invoice_number": 1,
         "return_approved_at": 1, "refund_paid_at": 1, "return_request": 1,
         "cargo_tracking_number": 1, "cargo_tracking_url": 1, "cargo_provider_name": 1,
+        "iyzico_retrieve_response": 1, "installment": 1,
     }
 
     cursor = (
@@ -135,6 +137,12 @@ async def list_rooftr_return_orders(
         _r_total = _o_total if _o_total > 0 else round(_calc_net, 2)
         _r_subtotal = _o_sub if _o_sub > 0 else round(_calc_gross, 2)
         _r_discount = _o_disc if _o_disc > 0 else (round(_calc_idisc, 2) if _calc_idisc > 0 else round(max(0.0, _r_subtotal - _r_total), 2))
+        # Taksitli ödemede iyzico'ya gerçekte tahsil edilen tutar (vade farkı DAHİL) `total`'dan
+        # yüksek olabilir — iade onayında baz alınan budur (bkz. orders.py _compute_refund_breakdown).
+        # Burada da gösterip admin'in panelde önceden göreceği rakamla onay sırasında hesaplanan
+        # rakam tutarlı olsun diye sunuyoruz (Kadir talebi: taksitli siparişte tüm tahsilat iade edilmeli).
+        _vf, _charged, _inst = _order_vade_farki(o)
+        _charged_total = round(_charged, 2) if _charged > _r_total + 0.01 else _r_total
         rows.append({
             "id": o.get("id"),
             "order_number": o.get("order_number"),
@@ -152,6 +160,9 @@ async def list_rooftr_return_orders(
             "payment_status": o.get("payment_status") or "",
             "total": _r_total,
             "paid_amount": o.get("paid_amount") or 0,
+            "charged_total": _charged_total,
+            "vade_farki": round(max(0.0, _charged_total - _r_total), 2),
+            "installment": int(_inst or 1),
             "subtotal": _r_subtotal,
             "shipping_cost": o.get("shipping_cost") or 0,
             "discount": _r_discount,
