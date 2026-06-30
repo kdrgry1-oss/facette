@@ -151,7 +151,12 @@ function LocalAttrAutoComplete({ value, onChange, options, placeholder, testId }
 function SearchableValueSelect({ value, options, onChange, placeholder, testId, color = "orange", seed = "" }) {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
-  const selected = (options || []).find((o) => String(o.id) === String(value));
+  // ⚠️ id=null seçenekler (kategori birleştirmesinden gelen "temiz ad" değerleri — bkz.
+  // backend _fetch_hb_category_attributes "İSİM BAZLI BİRLEŞTİRME") String(null)="null" olduğu
+  // için TÜMÜ aynı dize ile eşleşip birbirine karışıyordu (Ekru/Gri/Haki hepsi aynı seçimi
+  // gösteriyordu). id yoksa NAME ile eşle/sakla — gerçek HB id'li seçenekler etkilenmez.
+  const selected = (options || []).find((o) =>
+    o.id != null ? String(o.id) === String(value) : o.name === value);
   // Büyük listelerde (Renk ~1999, Menşei ~285) TÜM seçenekleri DOM'a basmak donmaya yol açar.
   // Aramaya göre filtrele ve en fazla 250 seçenek göster; seçili olanı her zaman dahil et.
   const nq = _normVal(q);
@@ -160,7 +165,7 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
       ? (options || []).filter((o) => _normVal(o.name).includes(nq))
       : (options || []);
     const top = base.slice(0, 250);
-    if (selected && !top.some((o) => String(o.id) === String(selected.id))) top.unshift(selected);
+    if (selected && !top.some((o) => (selected.id != null ? String(o.id) === String(selected.id) : o.name === selected.name))) top.unshift(selected);
     return top;
   }, [options, nq, selected]);
   const moreCount = Math.max(0, (nq ? (options || []).filter((o) => _normVal(o.name).includes(nq)).length : (options || []).length) - 250);
@@ -196,12 +201,12 @@ function SearchableValueSelect({ value, options, onChange, placeholder, testId, 
               </CommandItem>
               {filtered.map((opt) => (
                 <CommandItem
-                  key={opt.id}
-                  value={`${opt.name} ${opt.id}`}
-                  onSelect={() => { onChange(String(opt.id)); setOpen(false); setQ(""); }}
-                  data-testid={`${testId}-opt-${opt.id}`}
+                  key={opt.id ?? `n:${opt.name}`}
+                  value={`${opt.name} ${opt.id ?? ""}`}
+                  onSelect={() => { onChange(opt.id != null ? String(opt.id) : opt.name); setOpen(false); setQ(""); }}
+                  data-testid={`${testId}-opt-${opt.id ?? opt.name}`}
                 >
-                  <Check size={14} className={String(opt.id) === String(value) ? "opacity-100 text-green-600" : "opacity-0"} />
+                  <Check size={14} className={(opt.id != null ? String(opt.id) === String(value) : opt.name === value) ? "opacity-100 text-green-600" : "opacity-0"} />
                   <span className="truncate">{opt.name}</span>
                 </CommandItem>
               ))}
@@ -620,7 +625,11 @@ export function AdvancedAttributeMatchModal({ open, onClose, marketplace, catego
                                 <option value="">Varsayılan Seçilmedi</option>
                                 {attr.attributeValues
                                   .filter((v) => v.name.toLowerCase().includes((searchTerms[id] || "").toLowerCase()))
-                                  .map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                                  .map((v) => (
+                                    <option key={v.id ?? `n:${v.name}`} value={v.id != null ? v.id : v.name}>
+                                      {v.name}
+                                    </option>
+                                  ))}
                               </select>
                             </div>
                         )}

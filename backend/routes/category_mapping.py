@@ -2208,3 +2208,55 @@ async def get_advanced_values(
         "local_values": out,
         "value_mappings": mapping.get("value_mappings", {}),
     }
+
+
+# ===================================================================== #
+#  TEMİZLİK — bozuk "null" değer eşleştirmeleri (frontend bug, düzeltildi)
+# ===================================================================== #
+@router.get("/cleanup/null-value-mappings-scan")
+async def scan_null_value_mappings(current_user: dict = Depends(require_admin)):
+    """SALT-OKUNUR. Değer Eşleştirme ekranındaki bir önceki frontend hatası
+    (kategori-birleştirmeden gelen id=null seçenekler React/select'te birbirine
+    karışıyordu — bkz. MarketplaceAdvancedMatch.jsx fix) yüzünden bazı value_mappings
+    kayıtlarına literal "null" dizesi yazılmış olabilir. Bunlar HB'ye gönderimde
+    çözülemeyen, anlamsız "null" metni olarak gidip reddediliyordu. Bu uç hangi
+    kategori eşleştirmelerinde böyle bozuk kayıt var, listeler."""
+    findings = []
+    async for cm in db.category_mappings.find(
+        {"value_mappings": {"$exists": True, "$ne": {}}},
+        {"_id": 0, "category_id": 1, "category_name": 1, "marketplace": 1, "value_mappings": 1}):
+        vm = cm.get("value_mappings") or {}
+        bad = {k: v for k, v in vm.items() if str(v).strip().lower() in ("null", "none", "undefined")}
+        if bad:
+            findings.append({
+                "category_id": cm.get("category_id"),
+                "category_name": cm.get("category_name"),
+                "marketplace": cm.get("marketplace"),
+                "bad_keys": list(bad.keys()),
+                "count": len(bad),
+            })
+    return {"categories_affected": len(findings), "total_bad_entries": sum(f["count"] for f in findings),
+            "findings": findings}
+
+
+@router.post("/cleanup/null-value-mappings-fix")
+async def fix_null_value_mappings(current_user: dict = Depends(require_admin)):
+    """Scan ile AYNI tespit. Bozuk "null" değer eşleştirme kayıtlarını SİLER (yazar) —
+    silinince o değer otomatik çözüme (temiz ad eşleşmesi) düşer, artık doğru çalışır."""
+    fixed_categories = fixed_entries = 0
+    async for cm in db.category_mappings.find(
+        {"value_mappings": {"$exists": True, "$ne": {}}},
+        {"_id": 0, "category_id": 1, "marketplace": 1, "value_mappings": 1}):
+        vm = dict(cm.get("value_mappings") or {})
+        bad_keys = [k for k, v in vm.items() if str(v).strip().lower() in ("null", "none", "undefined")]
+        if not bad_keys:
+            continue
+        for k in bad_keys:
+            vm.pop(k, None)
+        await db.category_mappings.update_one(
+            {"category_id": cm.get("category_id"), "marketplace": cm.get("marketplace")},
+            {"$set": {"value_mappings": vm, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        fixed_categories += 1
+        fixed_entries += len(bad_keys)
+    return {"fixed_categories": fixed_categories, "fixed_entries": fixed_entries}
