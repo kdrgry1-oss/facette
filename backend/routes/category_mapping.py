@@ -241,6 +241,27 @@ _HB_NOVALUE_TYPES = {
     "url", "link", "image", "media", "file", "video", "barcode",
 }
 
+
+def _hb_schema_has_gaps(attrs) -> bool:
+    """Cache'lenmis kategori ozellik semasinda DEGER LISTESI EKSIK kalmis bir enum-tipi
+    ozellik var mi? (HB satici panelinde dropdown/"Secin" olarak gorunen ama bizim
+    cache'te attributeValues=[] olan ozellikler -- tipik sebep: ilk cekimde tek bir
+    ozellik icin HB'nin deger-listesi ucu gecici hata/timeout vermis, o ozellik kalici
+    bos kalmis.) True donerse: bu ozellik icin ne mapping ekrani dogru dropdown
+    gosterebilir, ne de otomatik gonderim dogru degeri cozebilir -- ham/ID deger cop
+    olarak HB'ye gider ve reddedilir. Tum ozellikler bossa (kategori gercekten hic
+    cekilememis) zaten ayri bir kontrolle (no_values) yakalaniyordu; bu fonksiyon KISMI
+    eksiklik (bazilari dolu, bazilari bos) durumunu da yakalar."""
+    for a in (attrs or []):
+        if not isinstance(a, dict):
+            continue
+        atype = (a.get("type") or "").lower()
+        if atype in _HB_NOVALUE_TYPES:
+            continue  # gercekten deger-listesiz tip (sayisal/tarih/medya/serbest-metin vb.)
+        if not (a.get("attributeValues") or []):
+            return True
+    return False
+
 # Ürün kartı kaynak seçenekleri (UI dropdown'u için).
 HB_PRODUCT_SOURCES = [
     {"value": "name", "label": "Ürün Adı"},
@@ -296,6 +317,25 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
         data = await asyncio.to_thread(client.get_category_attributes, cid)
     except Exception as e:
         return [], f"HB özellik çekme hatası: {e}"
+
+    # ⚡ KISMİ-ONARIM OPTİMİZASYONU: cache'te bu kategori için ZATEN dolu (≥3 değerli) bir
+    # özellik varsa, o özelliğin değer listesini TEKRAR canlı çekmeyiz (Renk 1999/Beden 414
+    # gibi büyük listeler saniyeler sürebilir — her "gap onarımı" TÜM kategoriyi yeniden
+    # çekerse eski "her refresh = timeout" sorunu geri döner). Yalnız BOŞ/eksik kalan
+    # özellikler için canlı çekim yapılır → hızlı, hedefli onarım.
+    _existing_good: dict = {}
+    try:
+        _prev_doc = await db.hepsiburada_category_attributes.find_one(
+            {"category_id": int(cid) if str(cid).isdigit() else str(cid)}, {"_id": 0, "attributes": 1})
+        for _pa in (_prev_doc or {}).get("attributes", []):
+            _pv = _pa.get("attributeValues") or []
+            if len(_pv) >= 3:
+                if _pa.get("id") is not None:
+                    _existing_good["id:" + str(_pa.get("id"))] = _pv
+                if _pa.get("name"):
+                    _existing_good["nm:" + _hb_sysnorm(_pa.get("name"))] = _pv
+    except Exception:
+        _existing_good = {}
 
     def _sysnorm(s):
         return _hb_sysnorm(s)
@@ -370,12 +410,26 @@ async def _fetch_hb_category_attributes(mp_cat_id, with_values=True):
                 elif isinstance(v, str):
                     vals.append({"id": None, "name": v})
         elif with_values and aid is not None and atype not in _HB_NOVALUE_TYPES:
-            try:
-                got = await asyncio.to_thread(client.iter_attribute_values, cid, aid)
-                vals = [{"id": v.get("id"), "name": v.get("value") or v.get("name")}
-                        for v in (got or []) if isinstance(v, dict)]
-            except Exception:
-                vals = []
+            _good = _existing_good.get("id:" + str(aid)) or _existing_good.get("nm:" + _sysnorm(aname))
+            if _good:
+                vals = _good  # zaten dolu (≥3 değer) — tekrar canlı çekme, hızlı onarım
+            else:
+                # 🔁 RETRY: HB'nin değer-listesi ucu zaman zaman tek bir özellik için boş/timeout
+                # dönüyor (geçici). Eskiden TEK denemede vazgeçilip kalıcı boş cache yazılıyordu →
+                # o özellik HİÇ değer eşleştirilemiyor, satıcı panelinde "Seçin" boş kalıyor, gönderimde
+                # ham değer/ID çöp olarak gidip reddediliyordu. 3 deneme + kısa bekleme ile geçici
+                # hataların kalıcı boş cache'e dönüşmesi engellenir.
+                for _attempt in range(3):
+                    try:
+                        got = await asyncio.to_thread(client.iter_attribute_values, cid, aid)
+                        vals = [{"id": v.get("id"), "name": v.get("value") or v.get("name")}
+                                for v in (got or []) if isinstance(v, dict)]
+                        if vals:
+                            break
+                    except Exception:
+                        vals = []
+                    if _attempt < 2:
+                        await asyncio.sleep(0.6 * (_attempt + 1))
         norm = {
             "id": aid,
             "name": aname,
@@ -1981,7 +2035,8 @@ async def get_advanced_attributes(
         # eşleştiremiyorum"). Artık: cache TAZE & DEĞERLİYSE anında servis et; yalnız cache
         # yok/eski(_v!=9)/değersizse VEYA açıkça force=1 ile istenirse canlı çek.
         no_values = bool(attrs) and not any((x.get("attributeValues") or []) for x in attrs)
-        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 10 and not no_values
+        has_gaps = bool(attrs) and _hb_schema_has_gaps(attrs)
+        cache_fresh = bool(attrs) and (cached or {}).get("_v") == 10 and not no_values and not has_gaps
         if force or not cache_fresh:
             attrs, hb_err = await _fetch_hb_category_attributes(mp_cat_id, with_values=True)
             if hb_err:

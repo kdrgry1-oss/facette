@@ -4193,6 +4193,31 @@ def _hb_is_junk_value(raw) -> bool:
     return False
 
 
+_HB_ID_SHAPE_RE = re.compile(r'^[0-9A-Za-z]{3,14}$')
+
+
+def _hb_looks_like_leaked_id(raw) -> bool:
+    """vals (enum) BOS geldiginde (HB deger listesi cache'te eksik/cekilememis) ham
+    deger cop bir HB ic value-ID'sine mi benziyor -- gercek bir insan tarafindan girilmis
+    serbest metne mi? Sezgisel: cok kisa (<=2 karakter, ornek 'r') VEYA harf+rakam karisik,
+    bosluksuz, Turkce karaktersiz, 3-14 karakter (ornek '0004TYN', '11287', '0002ULK',
+    '0000O5LW') -- bunlar SATICI PANELINDE 'ozellik degeri reddedildi/tanimli degil' diye
+    geri donen TAM OLARAK bu sekildeki degerler. HB'ye GONDERME (bos birak) -- cop degerden
+    HER ZAMAN iyidir: zorunlu degilse sorun yaratmaz, zorunluysa 'eksik' diye raporlanir."""
+    s = str(raw or "").strip()
+    if not s:
+        return False
+    if len(s) <= 2:
+        return True
+    if " " in s or any(ch in "çğıöşüÇĞİÖŞÜ" for ch in s):
+        return False  # gercek Turkce metin (boslukla veya Turkce harfle) -- dokunma
+    if _HB_ID_SHAPE_RE.match(s) and any(c.isdigit() for c in s) and any(c.isalpha() for c in s):
+        return True  # harf+rakam karisik kod -- ID gorunumlu
+    if s.isdigit() and len(s) >= 3:
+        return True  # saf sayisal ID gorunumlu (11287, 15212, 4939, 20503 gibi)
+    return False
+
+
 def _hb_resolve_value(attr: dict, raw):
     """raw değeri HB özelliğinin izin verdiği değerlerden (enum) birine çözer.
     raw bir değer ADı veya değer ID'si olabilir (Özel Değer dropdown'u id kaydediyor).
@@ -4201,6 +4226,15 @@ def _hb_resolve_value(attr: dict, raw):
         return None  # çöp/sahte değer → hiç gönderme (HB zorunlu alanı boş ister, çöp değil)
     vals = attr.get("attributeValues") or []
     if not vals:
+        # ⚠️ HB değer listesi BOŞ (cache'te eksik/çekilememiş) — bu durumda eskiden raw
+        # OLDUĞU GİBİ gönderiliyordu. Eğer raw aslında başka bir kategoriden/eski bir
+        # cache'ten sızmış bir HB iç value-ID'siyse ("0004TYN", "11287", "r" gibi —
+        # satıcı panelinde "özellik değer öneriniz reddedilmiştir/tanımlı değildir" diye
+        # dönen TAM OLARAK bu görünüm), HB onu reddediyordu. Artık ID-görünümlü/anlamsız
+        # değerler HİÇ GÖNDERİLMEZ (boş = HB zorunlu değilse sorunsuz; zorunluysa "eksik"
+        # diye raporlanır) — çöp değer her zaman reddedilen değerden iyidir.
+        if _hb_looks_like_leaked_id(raw):
+            return None
         return str(raw)  # serbest metin / varchar
     nr = _hb_norm(raw)
     if not nr:
@@ -4308,12 +4342,36 @@ def _hb_match_fabric_from_desc(attr, desc):
 
 
 async def _hb_category_attributes_for(hb_cat):
-    """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
+    """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error).
+    ⚠️ KISMİ CACHE BOŞLUĞU KORUMASI: eskiden yalnız '_v==10 ve attributes dolu mu' bakılırdı —
+    bazı özelliklerin (ör. Ortam/Stil/Koleksiyon) attributeValues'u BOŞ olsa bile cache
+    'taze' sayılıyordu. Bu, gönderimde o özelliklerin HAM/ID değerinin (çözülemeden) HB'ye
+    gidip reddedilmesine yol açıyordu (satıcı panelinde "özellik değer öneriniz
+    reddedilmiştir/tanımlı değildir"). Artık böyle bir boşluk varsa hedefli onarım denenir
+    (yalnız boş kalan özellikler canlı çekilir — dolu olanlara dokunulmaz, hızlı); aynı
+    kategori için 30 dakikada bir denenir (bulk gönderimde her ürün için tekrar tekrar
+    HB'ye gitmesin diye)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
+    from .category_mapping import _fetch_hb_category_attributes, _hb_schema_has_gaps
     if cad and cad.get("_v") == 10 and cad.get("attributes"):
-        return cad.get("attributes") or [], None
-    from .category_mapping import _fetch_hb_category_attributes
+        attrs = cad.get("attributes") or []
+        if not _hb_schema_has_gaps(attrs):
+            return attrs, None
+        last_try = cad.get("_gap_refreshed_at")
+        try:
+            stale = (not last_try) or (
+                (datetime.now(timezone.utc) - datetime.fromisoformat(last_try)).total_seconds() > 1800)
+        except Exception:
+            stale = True
+        if not stale:
+            return attrs, None  # yakın zamanda denendi, hâlâ boşluk var (HB tarafında gerçekten yok olabilir) — bekleme
+        fresh, ferr = await _fetch_hb_category_attributes(hb_cat)
+        if fresh:
+            await db.hepsiburada_category_attributes.update_one(
+                {"category_id": key}, {"$set": {"_gap_refreshed_at": datetime.now(timezone.utc).isoformat()}})
+            return fresh, None
+        return attrs, None  # canlı çekim de başarısızsa elimizdekiyle devam (eski davranış)
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
     if not attrs and ferr:
         return [], ferr
@@ -4475,8 +4533,18 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
             is_variant_axis = bool(a.get("variant")) or any(
                 w in anorm for w in ("renk", "color", "beden", "size", "numara"))
             if is_variant_axis:
-                # KATMAN 1 — VARYANT EKSENİ: yalnız varyant/ürün alanından (Renk/Beden).
+                # KATMAN 1 — VARYANT EKSENİ: önce varyant/ürün alanından (Renk/Beden) — otomatik
+                # tespit çoğu üründe doğru çalışır. Bulamazsa, kullanıcının Kategori Eşleştirme
+                # ekranındaki "Özellik Eşleştirme"de bu HB özelliği için AÇIKÇA seçtiği yerel
+                # özelliğe düşülür (eskiden bu adım YALNIZ varyant-dışı özelliklerde çalışıyordu —
+                # Renk/Beden gibi en sık eşleştirilen alanlarda kullanıcının kaydettiği eşleştirme
+                # sessizce YOK SAYILIYORDU). Manuel eşleştirme her zaman otomatik tespitten SONRA
+                # denenir → doğru otomatik eşleşmeyi asla ezmez, yalnız boşluğu doldurur.
                 raw = _hb_local_for_attr(aname, local) or v_hb.get(aname) or hb_attrs_for_product.get(aname)
+                if not raw:
+                    m = map_by_attr_id.get(aid)
+                    if m and m.get("local_attr"):
+                        raw = local.get(_hb_norm(m["local_attr"]))
             else:
                 # KATMAN 2 — BİREBİR eşleşen açık kaynak (ad-kazıma / fuzzy tahmin YOK):
                 #   kart(HB) → TRENDYOL aynı-adlı özellik → kategori sabiti → ortak default →
@@ -5198,8 +5266,11 @@ async def _hb_resolve_local_to_hb(category_id, category_name):
 
 async def _hb_numeric_id_findings():
     """Tüm ürünlerin hepsiburada_attributes'ında DEĞER ADI yerine sızmış HB value-id'lerini
-    (tamamen sayısal, kategori şemasında value-id'ye karşılık gelen ama geçerli değer ADI
-    OLMAYAN) bulur. Beden '36' gibi gerçekten sayısal değer adlarına DOKUNMAZ. Salt-okunur."""
+    bulur: kategori şemasında value-id'ye karşılık gelen ama geçerli değer ADI OLMAYAN
+    herhangi bir değer — yalnız SAYISAL değil, "0004TYN"/"0002ULK" gibi ALFANÜMERİK HB
+    value-id'leri de dahil (satıcı panelinde "özellik değer öneriniz reddedilmiştir/tanımlı
+    değildir" diye dönen değerler tam olarak bunlardır). Beden '36' gibi gerçekten sayısal
+    değer adlarına DOKUNMAZ (id_map'te karşılığı yoksa fix önerilmez). Salt-okunur."""
     findings = []
     schema_cache = {}
     map_cache = {}
@@ -5237,47 +5308,58 @@ async def _hb_numeric_id_findings():
             for v in (a.get("attributeValues") or []):
                 vid, vn = v.get("id"), v.get("name")
                 if vid is not None:
-                    id_map[str(vid)] = vn
+                    id_map[str(vid).strip().upper()] = vn
                 if vn:
                     name_set.add(_hb_norm(vn))
             by_attr[an] = (id_map, name_set)
-        prod_fix = {}
+        prod_fix, prod_clear = {}, []
         for aname, val in ha.items():
             if val is None or val == "":
                 continue
             sval = str(val).strip()
-            if not sval.isdigit():
-                continue
             info = by_attr.get(_hb_norm(aname))
             if not info:
                 continue
             id_map, name_set = info
             if _hb_norm(sval) in name_set:
-                continue  # zaten geçerli (sayısal) değer adı → dokunma
-            if sval in id_map and id_map[sval]:
-                prod_fix[aname] = {"old": sval, "new": id_map[sval]}
-        if prod_fix:
+                continue  # zaten geçerli değer adı → dokunma
+            sval_key = sval.upper()
+            if sval_key in id_map and id_map[sval_key]:
+                prod_fix[aname] = {"old": sval, "new": id_map[sval_key]}
+            elif _hb_looks_like_leaked_id(sval):
+                # ID-görünümlü ama BU şemada karşılığı yok (yanlış kategoriden sızmış/eski
+                # cache) → isim'e çeviremeyiz, ama HB'ye ÇÖP olarak da gitmemeli. "clear"
+                # listesine alınır (fix ile None'a çekilir, bir daha gönderilmez).
+                prod_clear.append(aname)
+        if prod_fix or prod_clear:
             findings.append({
                 "product_id": p.get("id"),
                 "name": (p.get("name") or "")[:60],
                 "category": p.get("category_name"),
-                "fixes": prod_fix})
+                "fixes": prod_fix,
+                "clear": prod_clear})
     return findings
 
 
 @router.get("/hepsiburada/attributes/numeric-id-scan")
 async def hb_numeric_id_scan(current_user: dict = Depends(require_admin)):
-    """SALT-OKUNUR. hepsiburada_attributes'ta değer adı yerine sızmış HB value-id'lerini raporlar."""
+    """SALT-OKUNUR. hepsiburada_attributes'ta değer adı yerine sızmış HB value-id'lerini
+    raporlar — hem isme çevrilebilenler (fixes) hem de şemada karşılığı bulunamayıp
+    temizlenmesi gerekenler (clear, ör. 'Renk: r' gibi anlamsız kalıntılar)."""
     f = await _hb_numeric_id_findings()
-    total = sum(len(x["fixes"]) for x in f)
-    return {"products_affected": len(f), "values_to_fix": total, "findings": f}
+    total_fix = sum(len(x["fixes"]) for x in f)
+    total_clear = sum(len(x["clear"]) for x in f)
+    return {"products_affected": len(f), "values_to_fix": total_fix,
+            "values_to_clear": total_clear, "findings": f}
 
 
 @router.post("/hepsiburada/attributes/numeric-id-fix")
 async def hb_numeric_id_fix(current_user: dict = Depends(require_admin)):
-    """Sızmış HB value-id'lerini doğru değer ADINA çevirir (scan ile AYNI tespit). Yazar."""
+    """Sızmış HB value-id'lerini doğru değer ADINA çevirir; şemada karşılığı bulunamayan
+    ID-görünümlü/anlamsız değerleri (ör. 'r', '0002ULK') TEMİZLER (None'a çeker — bir daha
+    HB'ye çöp olarak gitmesinler). Scan ile AYNI tespit. Yazar."""
     f = await _hb_numeric_id_findings()
-    fixed_products = fixed_values = 0
+    fixed_products = fixed_values = cleared_values = 0
     for x in f:
         pid = x["product_id"]
         prod = await db.products.find_one({"id": pid}, {"_id": 0, "hepsiburada_attributes": 1})
@@ -5290,10 +5372,16 @@ async def hb_numeric_id_fix(current_user: dict = Depends(require_admin)):
                 ha[aname] = fx["new"]
                 changed = True
                 fixed_values += 1
+        for aname in x.get("clear", []):
+            if aname in ha and ha.get(aname) not in (None, ""):
+                ha.pop(aname, None)
+                changed = True
+                cleared_values += 1
         if changed:
             await db.products.update_one({"id": pid}, {"$set": {"hepsiburada_attributes": ha}})
             fixed_products += 1
-    return {"fixed_products": fixed_products, "fixed_values": fixed_values}
+    return {"fixed_products": fixed_products, "fixed_values": fixed_values,
+            "cleared_values": cleared_values}
 
 
 @router.get("/hepsiburada/category-mapping-audit")
