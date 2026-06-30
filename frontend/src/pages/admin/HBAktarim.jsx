@@ -554,12 +554,11 @@ function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
   const [fixed, setFixed] = useState(initial?.fixed ?? "");
   const [valueMap, setValueMap] = useState(initial?.value_map || {});
   const [hbValues, setHbValues] = useState(null);
-  const [showVM, setShowVM] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  const loadHbValues = useCallback(async () => {
-    if (hbValues || !attr.selectable) return;
+  const loadHbValues = useCallback(async (force = false) => {
+    if (!force && (hbValues || !attr.selectable)) return;
     try {
       const r = await axios.get(
         `${API}/hb-aktarim/categories/${hbCatId}/attributes/${encodeURIComponent(attr.id)}/values`, auth);
@@ -586,7 +585,6 @@ function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
     finally { setSaving(false); }
   };
 
-  const mappedCount = Object.values(valueMap || {}).filter(Boolean).length;
 
   return (
     <div className="px-4 py-3">
@@ -637,19 +635,11 @@ function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
         )}
 
         {source === "valuemap" && (
-          <>
-            <select value={field} onChange={(e) => mark(setField)(e.target.value)}
-              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[180px]">
-              <option value="">— kaynak ürün alanı —</option>
-              {sourceFields.map((f) => (
-                <option key={f.key} value={f.key}>{f.label}{f.system ? " (sistem)" : ""}</option>
-              ))}
-            </select>
-            <button onClick={() => setShowVM((s) => !s)} disabled={!field}
-              className="text-sm px-2.5 py-1.5 border border-orange-300 rounded-md text-orange-700 hover:bg-orange-50 disabled:opacity-40">
-              Değerleri eşle ({mappedCount})
-            </button>
-          </>
+          <span className="text-xs text-gray-500 inline-flex items-center gap-1">
+            <ListChecks size={13} className="text-orange-600" />
+            {hbValues == null ? "HB değerleri yükleniyor…"
+              : `${hbValues.length} HB değeri · aşağıdan eşle`}
+          </span>
         )}
 
         <button onClick={save} disabled={saving}
@@ -660,9 +650,11 @@ function AttrRow({ attr, hbCatId, sourceFields, initial, auth, onSaved }) {
         </button>
       </div>
 
-      {source === "valuemap" && showVM && field && (
+      {source === "valuemap" && (
         <ValueMapEditor hbCatId={hbCatId} attr={attr} field={field}
-          hbValues={hbValues} valueMap={valueMap}
+          setField={(v) => mark(setField)(v)} sourceFields={sourceFields}
+          hbValues={hbValues} onReloadHb={() => loadHbValues(true)}
+          valueMap={valueMap}
           onChange={(m) => { setValueMap(m); setDirty(true); }}
           auth={auth} />
       )}
@@ -678,11 +670,13 @@ function Badge({ color, children }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded ${map[color] || map.gray}`}>{children}</span>;
 }
 
-function ValueMapEditor({ hbCatId, attr, field, hbValues, valueMap, onChange, auth }) {
+function ValueMapEditor({ hbCatId, attr, field, setField, sourceFields, hbValues, onReloadHb, valueMap, onChange, auth }) {
   const [sysVals, setSysVals] = useState(null);
 
   useEffect(() => {
+    if (!field) { setSysVals(null); return; }
     let on = true;
+    setSysVals(null);
     axios.get(`${API}/hb-aktarim/source-fields/values?field=${encodeURIComponent(field)}`, auth)
       .then((r) => { if (on) setSysVals(r.data?.values || []); })
       .catch(() => { if (on) setSysVals([]); });
@@ -690,30 +684,63 @@ function ValueMapEditor({ hbCatId, attr, field, hbValues, valueMap, onChange, au
   }, [field, auth]);
 
   const setVal = (sv, hbId) => onChange({ ...valueMap, [sv]: hbId });
+  const hbEmpty = Array.isArray(hbValues) && hbValues.length === 0;
 
   return (
-    <div className="mt-3 ml-1 border border-orange-200 rounded-md bg-orange-50/40 p-3">
-      <div className="text-xs text-gray-500 mb-2">
-        <b>{field}</b> ürün alanındaki değerler → Hepsiburada "{attr.name}" değerleri
+    <div className="mt-3 border border-orange-200 rounded-md bg-orange-50/40 p-3">
+      {/* Kaynak alan seçimi + HB karşılık özeti */}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-xs text-gray-600">Kaynak ürün alanı:</span>
+        <select value={field || ""} onChange={(e) => setField(e.target.value)}
+          className="border border-gray-300 rounded-md px-2 py-1.5 text-sm min-w-[200px]">
+          <option value="">— seç (ör. Varyant · Renk) —</option>
+          {sourceFields.map((f) => (
+            <option key={f.key} value={f.key}>{f.label}{f.system ? " (sistem)" : ""}</option>
+          ))}
+        </select>
+        <span className="text-xs text-gray-400">
+          → HB "{attr.name}": {hbValues == null ? "yükleniyor…" : `${hbValues.length} değer`}
+        </span>
+        {hbEmpty && (
+          <button onClick={onReloadHb}
+            className="text-xs inline-flex items-center gap-1 px-2 py-1 border border-orange-300 rounded text-orange-700 hover:bg-orange-50">
+            <RefreshCw size={12} /> HB değerlerini yenile
+          </button>
+        )}
       </div>
-      {sysVals === null && <div className="text-xs text-gray-400">değerler yükleniyor…</div>}
-      {sysVals && sysVals.length === 0 && (
+
+      {!field && (
+        <div className="text-xs text-gray-400">
+          Eşlemek için önce yukarıdan bir kaynak ürün alanı seç; ardından senin değerlerin
+          Hepsiburada karşılıklarıyla eşlenecek.
+        </div>
+      )}
+      {field && sysVals === null && <div className="text-xs text-gray-400">değerler yükleniyor…</div>}
+      {field && sysVals && sysVals.length === 0 && (
         <div className="text-xs text-gray-400">Bu alan için üründe değer bulunamadı.</div>
       )}
-      <div className="max-h-72 overflow-auto divide-y divide-orange-100">
-        {(sysVals || []).map((sv) => (
-          <div key={sv} className="flex items-center gap-3 py-1.5">
-            <span className="text-sm text-gray-700 w-1/2 truncate" title={sv}>{sv}</span>
-            <select value={valueMap[sv] || ""} onChange={(e) => setVal(sv, e.target.value)}
-              className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm">
-              <option value="">— HB değeri —</option>
-              {(hbValues || []).map((v) => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
-          </div>
-        ))}
-      </div>
+      {hbEmpty && field && (
+        <div className="text-xs text-amber-700 mb-1">
+          Hepsiburada değer listesi boş geldi — "HB değerlerini yenile"yi dene.
+        </div>
+      )}
+
+      {field && sysVals && sysVals.length > 0 && (
+        <div className="max-h-72 overflow-auto divide-y divide-orange-100">
+          {sysVals.map((sv) => (
+            <div key={sv} className="flex items-center gap-3 py-1.5">
+              <span className="text-sm text-gray-700 w-1/2 truncate" title={sv}>{sv}</span>
+              <select value={valueMap[sv] || ""} onChange={(e) => setVal(sv, e.target.value)}
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm">
+                <option value="">— HB değeri —</option>
+                {(hbValues || []).map((v) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
       <p className="text-[11px] text-gray-400 mt-2">
         Eşleştirmeyi kalıcı yapmak için satırın sağındaki <b>Kaydet</b>'e bas.
       </p>
