@@ -256,21 +256,29 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const br = await axios.post(`${API}/admin/rooftr/returns/${row.id}/open`, {}, auth());
       const returnId = br.data?.return_id;
       if (!returnId) throw new Error("bridge");
-      // Açılır detayda seçili kalem(ler) varsa iade tutarını onların NET toplamından
-      // hesapla ve backend'e gönder (kısmi iade → kalan sepet ücretsiz-kargo eşiğinin
-      // altına düşerse, müşteri kusurunda kargo bedeli otomatik düşülür).
-      const selAmount = Math.round((row.items || []).reduce(
-        (a, it, i) => (selItems[`${row.id}::${i}`] ? a + (Number(it.qty) || 1) * (Number(it.price) || 0) : a), 0
-      ) * 100) / 100;
+      // Açılır detayda seçili kalem(ler) varsa iade tutarını onların NET toplamından hesapla.
+      // ÖNEMLİ: TÜM kalemler seçiliyse bu TAM İADE'dir → override GÖNDERME; backend ödenen
+      // tutarı (kargo DAHİL gerçek genel toplam) baz alır. Override sadece GERÇEK kısmi
+      // seçimde (bazı kalemler, bazıları değil) gönderilir — yoksa kargo iki kez düşer.
+      const itemCount = (row.items || []).length;
+      const selIdx = (row.items || []).map((_, i) => i).filter((i) => selItems[`${row.id}::${i}`]);
+      const isPartialSelection = selIdx.length > 0 && selIdx.length < itemCount;
+      const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
+        (a, i) => a + (Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0), 0
+      ) * 100) / 100 : 0;
       const returnedNet = selAmount > 0 ? selAmount : null;
+      // Kargo: liste ekranındaki "Kargoyu müşteriden kes" işaretliyse kargo bedeli iade
+      // tutarından mahsup edilir (kusur müşteride); işaretli değilse kargo da tam iade edilir
+      // (mağaza üstlenir). Elle "kusur" seçimi yok — bu checkbox tek karar noktasıdır.
+      const fault = cargoSel[row.id] ? "customer" : "store";
       let preview = null;
       try {
-        const q = `fault=customer${returnedNet != null ? `&returned_net=${returnedNet}` : ""}`;
+        const q = `fault=${fault}${returnedNet != null ? `&returned_net=${returnedNet}` : ""}`;
         const pv = await axios.get(`${API}/orders/returns/${returnId}/refund-preview?${q}`, auth());
         preview = pv.data?.breakdown || null;
       } catch { /* önizleme alınamazsa modal yine açılır */ }
       setWf({
-        row, returnId, status: br.data?.status || "created", fault: "customer",
+        row, returnId, status: br.data?.status || "created", fault,
         preview, returnedNet,
         finalAmount: preview ? preview.auto_refund : (returnedNet ?? 0),
         edited: false, note: "",
@@ -280,16 +288,6 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     } catch (e) {
       toast.error(e.response?.data?.detail || "İade işlem akışı açılamadı");
     } finally { setBusyId(""); }
-  };
-  const wfFault = async (fault) => {
-    if (!wf) return;
-    setWf((m) => ({ ...m, loading: true }));
-    try {
-      const q = `fault=${fault}${wf.returnedNet != null ? `&returned_net=${wf.returnedNet}` : ""}`;
-      const pv = await axios.get(`${API}/orders/returns/${wf.returnId}/refund-preview?${q}`, auth());
-      const bd = pv.data?.breakdown || null;
-      setWf((m) => ({ ...m, fault, preview: bd, loading: false, finalAmount: m.edited ? m.finalAmount : (bd?.auto_refund ?? 0) }));
-    } catch { toast.error("Önizleme alınamadı"); setWf((m) => ({ ...m, loading: false })); }
   };
   const wfApprove = async () => {
     if (!wf) return;
@@ -678,12 +676,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
 
               {wf.preview ? (
                 <div className="border rounded-xl p-3 text-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs text-gray-500">Kusur:</span>
-                    {[["customer", "Müşteri (kargo müşteriden)"], ["store", "Mağaza (kargo bizden)"]].map(([v, l]) => (
-                      <button key={v} onClick={() => wfFault(v)} disabled={wf.loading}
-                        className={`text-xs px-2 py-1 rounded-md border ${wf.fault === v ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-600 border-gray-200"}`}>{l}</button>
-                    ))}
+                  <div className="text-xs text-gray-500 mb-2">
+                    Kargo: {wf.fault === "customer" ? <b className="text-amber-700">müşteriden kesildi</b> : <b className="text-gray-700">mağazadan (tam iade)</b>}
                   </div>
                   <div className="space-y-1 text-xs text-gray-600">
                     <div className="flex justify-between"><span>İade edilen ürün tutarı</span><b>{fmtTL(wf.preview.returned_net)}</b></div>
