@@ -412,19 +412,31 @@ export default function AdminProducts() {
     const token = localStorage.getItem('token');
     const auth = { headers: { Authorization: `Bearer ${token}` } };
     const hbCatId = formData.hepsiburada_category_id;
+    // Yerel kategori (id + ad) — KAYDEDİLMEMİŞ üründe HB kategorisini buradan çözeriz
+    // (push çekirdeği ile aynı: category_mappings üzerinden). Böylece yeni üründe de
+    // HB'nin tüm kategori özellikleri gelir, 9 sabite düşmez.
+    const selCat = (categories || []).find(c =>
+      c.name === formData.category_name || c.id === formData.category_name || c.id === formData.category_id);
+    const locId = formData.category_id || selCat?.id || "";
+    const locName = formData.category_name || selCat?.name || "";
     // Once urunun kategori eslemesinden coz (en guvenilir, mapping uzerinden);
-    // bos donerse formData.hepsiburada_category_id ile dene.
+    // bos donerse yerel kategoriden, o da bossa formData.hepsiburada_category_id ile dene.
     const byProduct = () => formData.id
       ? axios.get(`${API}/integrations/hepsiburada/products/${formData.id}/category-attributes`, auth).then(r => r.data.attributes || [])
+      : Promise.resolve([]);
+    const byLocalCat = () => (locId || locName)
+      ? axios.get(`${API}/integrations/hepsiburada/category-attributes/by-local`,
+          { ...auth, params: { category_id: locId, category_name: locName } }).then(r => r.data.attributes || [])
       : Promise.resolve([]);
     const byCat = () => hbCatId
       ? axios.get(`${API}/integrations/hepsiburada/categories/${hbCatId}/attributes`, auth).then(r => r.data.attributes || [])
       : Promise.resolve([]);
     byProduct()
+      .then(list => (list && list.length) ? list : byLocalCat())
       .then(list => (list && list.length) ? list : byCat())
       .then(list => setHepsiburadaAttributesList(list || []))
       .catch(() => setHepsiburadaAttributesList([]));
-  }, [formData.hepsiburada_category_id, formData.id, formData.category_name, modalOpen]);
+  }, [formData.hepsiburada_category_id, formData.id, formData.category_id, formData.category_name, modalOpen, categories]);
 
   // HB OTOMATİK DOLUM (yaklaşım A): Varsayılan özellikler (genel `attributes` + Teknik Detay)
   // HB kategori şemasına normalize ad + değer eşlemesiyle yazılır. Sadece BOŞ HB alanları doldurulur;
@@ -2794,6 +2806,24 @@ export default function AdminProducts() {
                     "Ek Özellik": "Yok", "Kutu Durumu": "Kutu Yok",
                     "Persona": "Fashion Forward", "Performans": "Cool & Comfort",
                   };
+                  // 🏭 GPSR üretici/ithalatçı — backend facette_defaults.company_field_for_attr AYNASI.
+                  // TEK otorite backend'dir (push'ta facette_company_value uygular); bu yalnız KARTTA
+                  // dolu göstermek içindir — formData'ya YAZMAZ, push'a karışmaz. Üretici/İthalatçı
+                  // Adı→firma, ...Mail→e-posta, ...Adres→adres.
+                  const FACETTE_COMPANY = {
+                    company_name: "FACETTE DIŞ TİCARET A.Ş.",
+                    email: "info@facette.com.tr",
+                    address: "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
+                  };
+                  const _companyValFor = (name) => {
+                    const nm = _attrNorm(name);
+                    if (!/uretici|ithalatc|imalatc/.test(nm)) return "";
+                    if (/mail|posta|email/.test(nm)) return FACETTE_COMPANY.email;
+                    if (/adres/.test(nm)) return FACETTE_COMPANY.address;
+                    if (/\bad[i]?\b|ism|unvan|firma/.test(nm) || nm === "uretici" || nm === "ithalatci")
+                      return FACETTE_COMPANY.company_name;
+                    return "";
+                  };
 
                   const renderSection = (marketplace, title, accent, logo) => {
                     const mapKey = marketplace === 'trendyol' ? 'attributes'
@@ -2865,9 +2895,10 @@ export default function AdminProducts() {
                       : baseList;
 
                     // 🎯 Değer çözümü: önce pazaryerine-özel harita, yoksa NÖTR formData.attributes,
-                    // yoksa sabit varsayılan → 9 ortak sabit HER bölümde DOLU görünür.
+                    // yoksa sabit varsayılan, yoksa GPSR üretici/ithalatçı sabiti → DOLU görünür.
                     const _effVal = (name) =>
-                      valuesMap[name] || (formData.attributes || {})[name] || FIXED_DEFAULT_ATTRS[name] || "";
+                      valuesMap[name] || (formData.attributes || {})[name] || FIXED_DEFAULT_ATTRS[name]
+                      || _companyValFor(name) || "";
                     // Sabit varsayılanları bu bölümün listesinde yoksa DOLU satır olarak ekle
                     // (özellikle HB: kategori seçilmeden liste boş kalıyordu).
                     const _present = new Set((sourceList || []).map(a => (a.name || "").toLocaleLowerCase("tr")));
@@ -2894,7 +2925,10 @@ export default function AdminProducts() {
                     })
                     // Beden ürün kartından gizlenir: pazaryeri varyant (beden) alanından eşleştiriliyor.
                     .filter(x => (x.attr.name || '').toLocaleLowerCase('tr').trim() !== 'beden')
-                    .filter(x => !_techNames.has((x.attr.name || '').toLocaleLowerCase('tr').trim()));
+                    // Mükerrer dedup YALNIZ opsiyonel alanlara: ZORUNLU pazaryeri alanı Teknik Detay
+                    // etiketiyle çakışsa bile GİZLENMEZ (gizli+boş = sessiz red riski). Değer tek
+                    // kaynaktan (_effVal) dolar; satır görünür kalır → kullanıcı görüp doğrular.
+                    .filter(x => x.isRequired || !_techNames.has((x.attr.name || '').toLocaleLowerCase('tr').trim()));
                     const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const otherEmpty = processed.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));

@@ -349,7 +349,7 @@ async def get_hepsiburada_category_attributes(category_id: str, current_user: di
     Once cache, yoksa canli cekip cache'ler."""
     key = int(category_id) if str(category_id).isdigit() else str(category_id)
     cached = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cached and cached.get("_v") == 8 and cached.get("attributes") is not None:
+    if cached and cached.get("_v") == 9 and cached.get("attributes") is not None:
         return {"success": True, "attributes": cached.get("attributes", []),
                 "media_attributes": cached.get("media_attributes", []),
                 "base_attributes": cached.get("base_attributes", []),
@@ -4311,7 +4311,7 @@ async def _hb_category_attributes_for(hb_cat):
     """HB kategori özelliklerini (cache → yoksa canlı) getirir. (attrs_list, error)."""
     key = int(hb_cat) if str(hb_cat).isdigit() else str(hb_cat)
     cad = await db.hepsiburada_category_attributes.find_one({"category_id": key}, {"_id": 0})
-    if cad and cad.get("_v") == 8 and cad.get("attributes"):
+    if cad and cad.get("_v") == 9 and cad.get("attributes"):
         return cad.get("attributes") or [], None
     from .category_mapping import _fetch_hb_category_attributes
     attrs, ferr = await _fetch_hb_category_attributes(hb_cat)
@@ -5006,6 +5006,29 @@ async def hb_product_category_attributes(product_id: str, current_user: dict = D
     if not cm and p.get("category_name"):
         cm = await db.category_mappings.find_one(
             {"marketplace": "hepsiburada", "category_name": p.get("category_name")}, {"_id": 0})
+    hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
+    if not hb_cat:
+        return {"attributes": [], "hb_category_id": None, "has_mapping": False}
+    attrs, err = await _hb_category_attributes_for(hb_cat)
+    return {"attributes": attrs or [], "hb_category_id": hb_cat, "has_mapping": True, "error": err}
+
+
+@router.get("/hepsiburada/category-attributes/by-local")
+async def hb_category_attributes_by_local(
+    category_id: str = "", category_name: str = "",
+    current_user: dict = Depends(require_admin)):
+    """Ürün modalının 'Hepsiburada için Özellikler' bölümünü KAYDEDİLMEMİŞ üründe de besler.
+    HB kategorisi üründe durmaz (category_mappings'te durur); burada onu YEREL kategoriden
+    (id veya ad) çözeriz — push çekirdeği (_build_hb_product_item) ile AYNI kaynak. Böylece
+    yeni üründe de HB'nin GERÇEK tüm kategori özellikleri (zorunlu + enum değerleri) gelir,
+    yalnız 9 sabite düşmez. product.id gerektirmez."""
+    cm = None
+    if category_id:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_id": category_id}, {"_id": 0})
+    if not cm and category_name:
+        cm = await db.category_mappings.find_one(
+            {"marketplace": "hepsiburada", "category_name": category_name}, {"_id": 0})
     hb_cat = (cm or {}).get("marketplace_category_id") or (cm or {}).get("hepsiburada_category_id")
     if not hb_cat:
         return {"attributes": [], "hb_category_id": None, "has_mapping": False}
