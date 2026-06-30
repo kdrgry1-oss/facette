@@ -109,3 +109,20 @@ Her ajan için bir tane doldur:
 - **Adım 3 — Ölçeklenince (P2):** İçerik/SEO, Yorum, CRM otomasyonu.
 
 Mevcut panel formatın (🏗️🔒🔌⚡🚢) bu haritanın "özet görünümü"dür — günlük çalışırken paneli, derinlemesine bölerken bu dokümanı kullan.
+
+---
+
+## 8. Guardrail — `integrations.py` regresyon dersi (2026-06-30)
+
+**Olay:** `e052c7f` (HB kart fix: cache `_v` 8→9 + `by-local` endpoint) main'e girdi; sonra `74fd7d0` (returns) **eski base'den** yazıldığı için `backend/routes/integrations.py`'yi toptan ezdi → `_v` 9→8 geri döndü, `by-local` silindi. Frontend sağ kaldı, backend fix uçtu. Prod'da sonuç: kart cache'i her açılışta çöp sayıldı → canlı HB çekildi → flaky/rate-limit'te boş → **ürün özellikleri rastgele "9 sabite" düştü** (kategoriye değil, o anki çekme şansına bağlı tutarsızlık).
+
+**Kural (zorunlu):**
+1. `integrations.py` gibi **büyük, çok-sahipli** dosyalara dokunan HER commit, **güncel `origin/main`'den** türetilmeli. Eski base'den yazılmış bir dosyayı asla toptan üzerine yazma.
+2. Deploy paketi üretmeden önce **fetch + diff**: `git fetch origin main && git diff origin/main -- <dosya>`. Diff yalnız amaçlanan satırları içermeli; başka bir özelliğin satırlarını eksiye düşürüyorsa **dur** (clobber).
+3. Bir özellik commit'i başka bir özelliğin satırlarını siliyorsa (örn returns commit'i HB `_v`/endpoint'ini eksiltiyor) → o commit **stale base** demektir; rebase/yeniden uygula.
+4. Kritik davranış işaretçileri (sözleşmeler) — bunlar bir deploy'da kaybolursa regresyon var demektir:
+   - HB kart cache okuyucuları: `cached.get("_v") == 9` (iki yer: ~352 ve ~4314).
+   - `GET /hepsiburada/category-attributes/by-local` endpoint'i mevcut.
+   - Returns köprüleri: `customer_returns`, `trendyol_claims`, gider pusulası satırları mevcut.
+
+**DoD eki:** integrations.py değişikliği içeren her pakette son adım: `python3 -c "import ast; ast.parse(...)"` **+** yukarıdaki 4 sözleşme işaretçisinin `grep` ile mevcudiyet teyidi.
