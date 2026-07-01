@@ -231,7 +231,7 @@ export default function Header({ hideMenu = false }) {
         <div className="max-w-screen-2xl mx-auto px-3 md:px-6">
           <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
-            <div className="flex-1 flex items-center">
+            <div className="flex-1 flex items-center gap-2.5">
               {!isCheckout && (
                 <>
                   <button
@@ -246,6 +246,12 @@ export default function Header({ hideMenu = false }) {
                       <line x1="0" y1="8.5" x2="22" y2="8.5" stroke="currentColor" strokeWidth="1.1" />
                     </svg>
                   </button>
+
+                  {/* Mobil logo — Mango tarzı: hamburger'ın hemen yanında, sol hizalı, küçük.
+                      Masaüstünde gizli; masaüstü logosu aşağıdaki ortalanmış Link'te. */}
+                  <Link to="/" className="lg:hidden flex-shrink-0" data-testid="header-logo-mobile" aria-label="FACETTE">
+                    <img src="/logo.webp" alt="FACETTE" className="h-4" />
+                  </Link>
 
                   <nav className="hidden lg:flex items-center gap-5">
                     {/* YENİ KOLEKSİYON — premium flagship menü (Seçenek A: elmas işareti + animasyonlu hairline) */}
@@ -299,24 +305,24 @@ export default function Header({ hideMenu = false }) {
               )}
             </div>
 
-            {/* Center: Logo (image on every breakpoint — mobil dahil) */}
-            <Link to="/" className="flex-shrink-0 absolute left-1/2 -translate-x-1/2 lg:static lg:translate-x-0" data-testid="header-logo">
-              <img src="/logo.webp" alt="FACETTE" className="h-5 md:h-6" />
+            {/* Center: Logo — sadece masaüstünde (mobil logo yukarıda, sol blokta) */}
+            <Link to="/" className="hidden lg:block flex-shrink-0" data-testid="header-logo">
+              <img src="/logo.webp" alt="FACETTE" className="h-6" />
             </Link>
 
-            {/* Right: Icons (mobile: search + cart only; desktop: full set) */}
+            {/* Right: Icons (mobile: search icon + account + favorites + cart, Mango tarzı; desktop: full set) */}
             <div className="flex-1 flex items-center justify-end gap-0.5 md:gap-2">
               {!isCheckout && (
                 <>
-                  <button onClick={() => setSearchOpen(true)} className="inline-flex flex-col items-start justify-center py-1.5 pr-1 md:pr-4 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
+                  <button onClick={() => setSearchOpen(true)} className="inline-flex flex-col items-center md:items-start justify-center p-2 md:p-0 md:py-1.5 md:pr-4 opacity-80 hover:opacity-100 transition-opacity" aria-label="Ara" data-testid="search-btn">
                     <span className="inline-flex items-center gap-1.5">
-                      <Search size={15} strokeWidth={1.4} />
-                      <span className="text-[11px] tracking-[0.2em] uppercase leading-none">Ara</span>
+                      <Search size={17} strokeWidth={1.4} />
+                      <span className="hidden md:inline text-[11px] tracking-[0.2em] uppercase leading-none">Ara</span>
                     </span>
-                    <span className="mt-1.5 h-px bg-current w-24 md:w-32"></span>
+                    <span className="hidden md:block mt-1.5 h-px bg-current w-24 md:w-32"></span>
                   </button>
                   {user && (
-                    <Link to="/hesabim?tab=favorites" className="hidden lg:inline-flex p-2 hover:opacity-60 relative" aria-label="Kaydedilenler" data-testid="favorites-btn">
+                    <Link to="/hesabim?tab=favorites" className="inline-flex p-2 hover:opacity-60 relative" aria-label="Kaydedilenler" data-testid="favorites-btn">
                       <Bookmark size={17} strokeWidth={1.4} />
                       {favCount > 0 && (
                         <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 bg-black text-white text-[8px] font-light rounded-full flex items-center justify-center">
@@ -325,7 +331,7 @@ export default function Header({ hideMenu = false }) {
                       )}
                     </Link>
                   )}
-                  <Link to={user ? "/hesabim" : "/giris"} className="hidden lg:inline-flex p-2 hover:opacity-60" aria-label="Hesap">
+                  <Link to={user ? "/hesabim" : "/giris"} className="inline-flex p-2 hover:opacity-60" aria-label="Hesap">
                     <User size={17} strokeWidth={1.4} />
                   </Link>
                   <button onClick={() => setIsOpen(true)} className="p-2 hover:opacity-60 relative" aria-label="Sepet" data-testid="cart-btn">
