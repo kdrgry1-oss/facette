@@ -109,7 +109,7 @@ export default function AbandonedCarts() {
       </div>
 
       <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 p-4 rounded-xl">
-        <strong>İpucu:</strong> Terkedilmiş sepetleri geri kazanmak için mail atın veya bir kupon gönderin. Yakında otomatik e-posta hatırlatma entegrasyonu eklenecek.
+        <strong>İpucu:</strong> Terkedilmiş sepetleri geri kazanmak için mail atın veya bir kupon gönderin. Sistem her gün 10:00'da (UTC), 2-48 saat önce aktif olup sipariş vermemiş e-posta sahibi sepetlere otomatik bir hatırlatma maili gönderir (her sepete yalnızca 1 kez).
       </div>
     </div>
   );

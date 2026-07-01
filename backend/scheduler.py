@@ -680,6 +680,74 @@ async def _send_abandoned_cart_reminders():
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
 
 
+async def _send_daily_stock_alert(threshold: int = 3):
+    """Her gün, stoğu `threshold` (varsayılan 3) veya altına düşmüş ürün-varyant
+    kombinasyonlarını bulup admin kullanıcılara (is_admin=True) özet e-posta gönderir.
+
+    2026-07-02: notification_service.py'de 'stock_alert' bildirim tipi tanımlıydı
+    ('Stok Uyarısı (Admin)') ama hiçbir yerde tetiklenmiyordu. Sorgu mantığı
+    routes/bulk_ops.py:GET /stock-alerts ile aynı (kopyalandı, davranış korunuyor).
+    """
+    from routes.deps import db
+    try:
+        from routes.catalog_extras import _send_email_via_resend  # lazy
+    except Exception as e:
+        logger.warning(f"[scheduler] stock alert mail skip (import): {e}")
+        return
+    from email_smtp import get_smtp_config, is_configured
+    if not is_configured(await get_smtp_config(db)):
+        return  # E-posta (SMTP/Zoho) yapılandırılmamış → sessizce atla
+    try:
+        alerts = []
+        async for p in db.products.find(
+            {"status": {"$ne": "archived"}},
+            {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "variants": 1, "stock": 1},
+        ):
+            variants = p.get("variants") or []
+            if variants:
+                for v in variants:
+                    s = v.get("stock")
+                    if s is not None and s <= threshold:
+                        alerts.append({
+                            "name": p.get("name", ""),
+                            "variant": f"{v.get('size','')} {v.get('color','')}".strip(),
+                            "stock_code": v.get("stock_code") or p.get("stock_code"),
+                            "stock": s,
+                        })
+            else:
+                s = p.get("stock")
+                if s is not None and s <= threshold:
+                    alerts.append({
+                        "name": p.get("name", ""), "variant": "—",
+                        "stock_code": p.get("stock_code"), "stock": s,
+                    })
+        if not alerts:
+            return
+        admins = await db.users.find(
+            {"is_admin": True, "is_active": {"$ne": False}}, {"_id": 0, "email": 1}
+        ).to_list(50)
+        recipients = list({a.get("email") for a in admins if a.get("email")})
+        if not recipients:
+            return
+        rows = "".join(
+            f"<tr><td>{a['name']}</td><td>{a['variant']}</td>"
+            f"<td>{a['stock_code'] or ''}</td><td>{a['stock']}</td></tr>"
+            for a in alerts[:200]  # e-posta boyutu için sınırla
+        )
+        subject = f"Stok Uyarısı: {len(alerts)} ürün-varyant eşik altında (≤{threshold})"
+        html = (
+            f"<h2>Düşük Stok Uyarısı</h2>"
+            f"<p>{len(alerts)} ürün-varyant kombinasyonu {threshold} veya altında stoğa sahip.</p>"
+            f"<table border='1' cellpadding='6' style='border-collapse:collapse'>"
+            f"<tr><th>Ürün</th><th>Varyant</th><th>Stok Kodu</th><th>Stok</th></tr>{rows}</table>"
+            f"<p style='font-size:12px;color:#888;margin-top:24px'>Bu e-posta otomatik gönderilmiştir.</p>"
+        )
+        ok, failed, errs = await _send_email_via_resend(recipients, subject, html)
+        logger.info(f"[scheduler] Stock alert: {len(alerts)} items, sent={ok} failed={failed} errs={errs[:1]}")
+    except Exception as e:
+        logger.exception(f"[scheduler] stock alert failed: {e}")
+
+
 
 
 async def _ticimax_sync_stock():
@@ -1328,6 +1396,16 @@ def start_scheduler():
         hours=24,
         id="abandoned_cart_reminders",
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Günde bir, düşük stoklu ürün-varyantlar için admin'lere özet e-posta.
+    _scheduler.add_job(
+        _send_daily_stock_alert,
+        "interval",
+        hours=24,
+        id="daily_stock_alert",
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1,
         coalesce=True,
     )
