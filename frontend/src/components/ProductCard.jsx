@@ -89,21 +89,50 @@ export default function ProductCard({ product, listId = "", listName = "", index
     } catch (_) { /* silent */ }
   };
 
-  // Görseller yatay kaydırma: fare sağa gittikçe sonraki görsel (Mango usulü).
-  const handleMouseMove = (e) => {
+  // Görseller yatay kaydırma: fare/parmak sağa gittikçe sonraki görsel (Mango usulü).
+  // Ortak mantık — hem masaüstü mouse hem mobil touch bunu kullanır.
+  const updateImageFromX = (clientX) => {
     if (activeSib || !hasMultipleImages || !imageContainerRef.current) return;
     const rect = imageContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+    const x = clientX - rect.left;
     const width = rect.width;
     const segmentWidth = width / images.length;
-    const newIndex = Math.min(Math.floor(x / segmentWidth), images.length - 1);
-    if (newIndex !== currentImageIndex && newIndex >= 0) {
-      setCurrentImageIndex(newIndex);
-    }
+    const newIndex = Math.min(Math.max(Math.floor(x / segmentWidth), 0), images.length - 1);
+    setCurrentImageIndex((prev) => (newIndex !== prev ? newIndex : prev));
+  };
+
+  const handleMouseMove = (e) => {
+    updateImageFromX(e.clientX);
   };
 
   const handleMouseLeave = () => {
     setCurrentImageIndex(0);
+  };
+
+  // Mobil dokunmatik kaydırma — yatay parmak hareketi resmi değiştirir (mouse hover'ın
+  // dokunmatik karşılığı); dikey hareket baskınsa sayfa scroll'una karışmaz.
+  const touchRef = useRef({ x: 0, y: 0, swiping: false });
+
+  const handleTouchStart = (e) => {
+    if (activeSib || !hasMultipleImages) return;
+    const t = e.touches[0];
+    touchRef.current = { x: t.clientX, y: t.clientY, swiping: false };
+  };
+
+  const handleTouchMove = (e) => {
+    if (activeSib || !hasMultipleImages) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchRef.current.x;
+    const dy = t.clientY - touchRef.current.y;
+    if (touchRef.current.swiping || (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy))) {
+      touchRef.current.swiping = true;
+      e.preventDefault(); // yatay galeri kaydırması — sayfanın dikey scroll'unu engelle
+      updateImageFromX(t.clientX);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchRef.current.swiping = false;
   };
 
   return (
@@ -115,6 +144,9 @@ export default function ProductCard({ product, listId = "", listName = "", index
           className="relative aspect-[2/3] bg-white overflow-hidden"
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
           <img
             src={optimizeImg(displayedImage, 700)}
