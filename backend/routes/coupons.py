@@ -135,6 +135,7 @@ async def available_coupons(payload: dict):
     cart_total = float(payload.get("cart_total") or 0)
     user_id = payload.get("user_id")
     items = payload.get("items") or []
+    items = await _enrich_items_category_ids(items)
     now_iso = datetime.now(timezone.utc).isoformat()
 
     q: dict = {"is_active": True}
@@ -179,9 +180,7 @@ async def available_coupons(payload: dict):
         if allowed_cats or allowed_pids:
             eligible_total = 0.0
             for it in items:
-                pid = it.get("product_id")
-                cid_ = it.get("category_id")
-                if (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats):
+                if _item_in_scope(it, allowed_cats, allowed_pids):
                     eligible_total += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
             base = eligible_total
             if base <= 0:
@@ -226,6 +225,53 @@ def _norm_pm(pm) -> str:
     return s  # taninmayan ama dolu deger: oldugu gibi (esitlik yine de calisir)
 
 
+def _item_category_set(it: dict) -> set:
+    """Bir sepet kaleminin ait oldugu TUM kategori id'leri (coklu uyelik dahil,
+    'En Yeniler' gibi ikincil kategoriler dahil). 'category_ids' enrich edilmisse
+    (bkz. _enrich_items_category_ids) onu kullanir; yoksa eski tekil 'category_id'ye
+    duser (geriye donuk uyumluluk)."""
+    cids = it.get("category_ids")
+    if cids:
+        return set(cids)
+    single = it.get("category_id")
+    return {single} if single else set()
+
+
+def _item_in_scope(it: dict, allowed_cats: set, allowed_pids: set) -> bool:
+    pid = it.get("product_id")
+    if pid and pid in allowed_pids:
+        return True
+    if allowed_cats and _item_category_set(it) & allowed_cats:
+        return True
+    return False
+
+
+async def _enrich_items_category_ids(items: list) -> list:
+    """Sepet kalemlerine urunun TAM kategori uyelik listesini (category_ids, atalar
+    dahil) ekler. KOK SEBEP DUZELTMESI: kampanya kapsam eslestirmesi onceden sadece
+    urunun tekil birincil 'category_id' alanina bakiyordu. 'En Yeniler' gibi kategoriler
+    ise urunun birincil kategorisi DEGIL, ayri bir 'category_ids' dizisiyle (coklu
+    uyelik) temsil ediliyor -> o kategoriye ozel kampanyalar hicbir zaman eslesmiyordu.
+    Bu fonksiyon her sepet kalemini gercek urun dokumanindaki category_ids ile zenginlestirir."""
+    pids = list({it.get("product_id") for it in items if it.get("product_id")})
+    if not pids:
+        return items
+    cat_map = {}
+    async for p in db.products.find({"id": {"$in": pids}}, {"_id": 0, "id": 1, "category_ids": 1, "category_id": 1}):
+        cids = set(p.get("category_ids") or [])
+        if p.get("category_id"):
+            cids.add(p["category_id"])
+        cat_map[p["id"]] = list(cids)
+    out = []
+    for it in items:
+        pid = it.get("product_id")
+        if pid and pid in cat_map:
+            out.append({**it, "category_ids": cat_map[pid]})
+        else:
+            out.append(it)
+    return out
+
+
 def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     """Saf indirim matematigi (dogrulama YOK). Kapsam(scope) + tip(nth/percent/fixed).
     items fiyatlari olceklenmis verilirse (stacking) sonuc kalan tabana gore otomatik cikar."""
@@ -234,8 +280,7 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     if allowed_cats or allowed_pids:
         base = 0.0
         for it in items:
-            pid = it.get("product_id"); cid_ = it.get("category_id")
-            if (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats):
+            if _item_in_scope(it, allowed_cats, allowed_pids):
                 base += float(it.get("price", 0)) * int(it.get("qty", 0) or 0)
     else:
         base = cart_total
@@ -247,8 +292,7 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
         gd = float(c.get("get_discount") or 0)
         units = []
         for it in items:
-            pid = it.get("product_id"); cid_ = it.get("category_id")
-            inscope = (not allowed_cats and not allowed_pids) or (pid and pid in allowed_pids) or (cid_ and cid_ in allowed_cats)
+            inscope = (not allowed_cats and not allowed_pids) or _item_in_scope(it, allowed_cats, allowed_pids)
             if inscope:
                 for _ in range(int(it.get("qty", 0) or 0)):
                     units.append(float(it.get("price", 0) or 0))
@@ -331,6 +375,7 @@ async def apply_coupon(payload: dict):
         return {"valid": False, "reason": "Kupon bulunamadı", "discount": 0}
     cart_total = float(payload.get("cart_total") or 0)
     items = payload.get("items") or []
+    items = await _enrich_items_category_ids(items)
     email = payload.get("email") or payload.get("customer_email") or ""
     return await _evaluate_single(c, cart_total, items, payload.get("user_id"), email,
                                   payload.get("payment_method") or "")
@@ -513,18 +558,24 @@ async def evaluate_cart_promotions(cart_total: float, items: list,
     excluded_ids: musterinin X ile kaldirdigi kampanya id'leri -> uygulanmaz (ama eligible'da
     yine gorunur ki geri eklenebilsin). Boylece motor 'en yuksegi zorla' DEGIL, musteri secer."""
     entered = (entered_code or "").strip().upper()
+    # KOK SEBEP DUZELTMESI: items'i gercek urun kategori uyelikleriyle zenginlestir
+    # ('En Yeniler' gibi ikincil kategoriye ozel kampanyalar bunsuz hic eslesmiyordu).
+    items = await _enrich_items_category_ids(items)
 
     # 1) Adaylar: aktif auto_apply kampanyalar + girilen kod
     candidates = {}
-    # OTO-UYGULAMA VARSAYILAN KAPALI: müşteri kupon kodunu KENDİSİ girer.
-    # Eski davranışı geri açmak için settings.promo_auto_apply_enabled = True.
-    _auto_on = False
+    # OTO-UYGULAMA VARSAYILAN AÇIK: admin panelindeki "Otomatik uygula (kod gerekmez)"
+    # onay kutusu işaretlendiğinde kampanya doğrudan uygulanır. Ayar dokümanında
+    # promo_auto_apply_enabled alanı yoksa (varsayılan durum) açık kabul edilir;
+    # acil durumda kapatmak istenirse settings.promo_auto_apply_enabled = False yazılabilir.
+    _auto_on = True
     try:
         _s = await db.settings.find_one({"id": "main"},
                                         {"_id": 0, "promo_auto_apply_enabled": 1}) or {}
-        _auto_on = bool(_s.get("promo_auto_apply_enabled", False))
+        if "promo_auto_apply_enabled" in _s:
+            _auto_on = bool(_s.get("promo_auto_apply_enabled"))
     except Exception:
-        _auto_on = False
+        _auto_on = True
     if _auto_on:
         async for c in db.coupons.find({"is_active": True, "auto_apply": True}, {"_id": 0}):
             candidates[c["id"]] = c
