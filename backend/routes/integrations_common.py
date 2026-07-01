@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import hashlib
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, _search_tr_regex
 from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations-Common"])
@@ -1710,17 +1710,6 @@ def _claim_is_site_order(claim: dict) -> bool:
     if plt in _MARKETPLACES:
         return False
     return True
-def _search_tr_regex(s: str) -> str:
-    """İade aramasında Türkçe duyarsız, regex-güvenli desen (İ/ı/ş/ç/ğ/ö/ü dahil)."""
-    cls = {
-        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
-        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
-        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
-        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
-        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
-        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
-    }
-    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
 async def restock_claim_once(claim_id: str, source: str, by_email: str = "") -> list:
     """İade kalemlerini ürün stoğuna BİR KEZ geri ekler (idempotent: claim.stock_restored).
     Eşleşme: variant.barcode -> variant.stock; yoksa product.barcode -> product.stock."""

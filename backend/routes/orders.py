@@ -8,27 +8,11 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
-
-
-def _search_tr_regex(s: str) -> str:
-    """Serbest metin arama için Türkçe duyarsız, regex-güvenli desen.
-    MongoDB $options:'i' Türkçe İ↔i / ı↔I eşlemesini yapmadığından her Türkçe
-    harf ailesini kapsayan karakter sınıfına çeviririz; diğer karakterler
-    re.escape ile kaçırılır (kullanıcı +, (, . girince regex bozulmaz)."""
-    cls = {
-        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
-        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
-        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
-        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
-        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
-        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
-    }
-    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
 
 
 def _order_search_or(search: str) -> list:
@@ -324,10 +308,6 @@ def _item_kdv(it: dict, vat_map: dict, default: float = 10.0) -> float:
                 pass
     return float(default)
 
-
-def generate_order_number() -> str:
-    import secrets
-    return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
 
 async def next_order_number() -> str:
     """Kısa, sıralı site sipariş numarası: W10001, W10002, ...

@@ -9,6 +9,7 @@ import jwt
 import bcrypt
 import os
 import logging
+import re
 import uuid
 import random
 
@@ -400,11 +401,6 @@ async def generate_short_id(collection_name: str) -> str:
     # Fallback if somehow 9000 IDs are exhausted or we get extremely unlucky
     return str(uuid.uuid4())[:4]
 
-def generate_order_number() -> str:
-    """Generate order number (collision-resistant)"""
-    import time, secrets
-    return f"FC{int(time.time())}{secrets.token_hex(2).upper()}"
-
 def serialize_doc(doc):
     """Serialize MongoDB document for JSON response"""
     if not doc:
@@ -567,3 +563,25 @@ def validate_strong_password(password: str) -> None:
             status_code=400,
             detail="Personel şifresi şu kuralları sağlamalı: " + ", ".join(errors) + ".",
         )
+
+
+def _search_tr_regex(s: str) -> str:
+    """Serbest metin arama için Türkçe duyarsız, regex-güvenli desen.
+    MongoDB $options:'i' Türkçe İ↔i / ı↔I eşlemesini yapmadığından her Türkçe
+    harf ailesini kapsayan bir karakter sınıfına çeviririz (ör. 'büstiyer',
+    'Büstiyer' ve 'BÜSTİYER' hepsi aynı sonucu verir); diğer karakterler
+    re.escape ile kaçırılır (kullanıcı +, (, . girince regex bozulmaz).
+
+    2026-07-01 temizlik: integrations_common.py / orders.py / products.py
+    içinde birebir aynı mantıkla üç kez kopyalanmıştı, buraya (deps.py —
+    zaten tüm route modüllerinin import ettiği ortak yer) taşındı.
+    """
+    cls = {
+        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
+        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
+        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
+        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
+        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
+        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
+    }
+    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())

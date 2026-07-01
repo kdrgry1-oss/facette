@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex
 from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
@@ -334,21 +334,6 @@ def _slug_to_diacritic_regex(slug: str) -> str:
             parts.append(re.escape(ch))
     return ''.join(parts)
 
-
-def _search_tr_regex(s: str) -> str:
-    """Serbest metin arama için Türkçe duyarsız regex.
-    MongoDB $options:'i' Türkçe İ↔i / ı↔I eşlemesini yapmadığından her Türkçe
-    harf ailesini kapsayan bir karakter sınıfına çeviririz → 'büstiyer',
-    'Büstiyer' ve 'BÜSTİYER' hepsi aynı sonucu verir."""
-    cls = {
-        'i': '[iıİI]', 'ı': '[iıİI]', 'İ': '[iıİI]', 'I': '[iıİI]',
-        'o': '[oöÖO]', 'ö': '[oöÖO]', 'O': '[oöÖO]', 'Ö': '[oöÖO]',
-        'u': '[uüÜU]', 'ü': '[uüÜU]', 'U': '[uüÜU]', 'Ü': '[uüÜU]',
-        's': '[sşŞS]', 'ş': '[sşŞS]', 'S': '[sşŞS]', 'Ş': '[sşŞS]',
-        'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
-        'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
-    }
-    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
 
 def _fuzzy_tr_regex(s: str) -> str:
     """Typo toleranslı (subsequence) Türkçe-duyarsız arama deseni.
