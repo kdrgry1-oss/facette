@@ -1629,6 +1629,7 @@ async def _hb_build_sku_to_hbsku_map(client, merchant_skus, chunk=100):
                     out[ms] = str(hb)
         except Exception:
             continue  # bu batch cozulemezse o kalemler 'yeni' kabul edilip create_products'a duser
+    return out
 def _hb_split_ticket_item(attrs: dict) -> dict:
     """create-shape 'attributes' (UrunAdi/UrunAciklamasi/Image1../tax/kg/...) sözlüğünü
     Ürün Güncelleme Servisi şemasına (productName/productDescription/image1../attributes)
