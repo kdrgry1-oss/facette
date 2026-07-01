@@ -37,9 +37,12 @@ export default function Category() {
   const [filterOpen, setFilterOpen] = useState(false);
 
   // Grid sütun tercihi localStorage'a kaydedilir. Seçenekler: 1 / 2 / 4
+  // Mobilde ilk yüklemede 2'li (Mango usulü); desktop'ta 4'lü varsayılan.
+  // Kullanıcı daha önce bilinçli seçim yaptıysa (localStorage) o korunur.
   const [gridCols, setGridColsState] = useState(() => {
     const saved = parseInt(localStorage.getItem("facette_plp_grid") || "", 10);
-    return [1, 2, 4].includes(saved) ? saved : 4;
+    if ([1, 2, 4].includes(saved)) return saved;
+    return typeof window !== "undefined" && window.innerWidth < 768 ? 2 : 4;
   });
   const setGridCols = (n) => {
     setGridColsState(n);

@@ -6,6 +6,7 @@ import { useShipping } from "../lib/shipping";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
 import { optimizeImg } from "../lib/img";
 import { trackViewCart } from "../utils/pixelEvents";
 
@@ -14,11 +15,40 @@ const PLACEHOLDER = "/placeholder.jpg";
 
 export default function Cart() {
   const { items, removeItem, updateQuantity, total, itemCount } = useCart();
+  const { user } = useAuth();
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
   const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
   const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
-  const grandTotal = total + shippingCost;
+
+  // Madde 4 — Kampanya motoru: sepet sayfası da checkout ile AYNI motoru çağırır.
+  // Önceden sadece Checkout.jsx çağırıyordu; bu yüzden "sepette otomatik %10" kampanyaları
+  // sepet ekranında hiç görünmüyor/uygulanmıyordu (checkout'a geçilince aniden çıkıyordu).
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  const [appliedPromotions, setAppliedPromotions] = useState([]);
+
+  useEffect(() => {
+    if (items.length === 0) { setPromoDiscount(0); setAppliedPromotions([]); return; }
+    let cancel = false;
+    axios.post(`${API}/coupons/evaluate`, {
+      cart_total: total,
+      items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
+      user_id: user?.id || null,
+      email: user?.email || "",
+      code: "",
+    }).then((res) => {
+      if (cancel) return;
+      const d = res.data || {};
+      setPromoDiscount(Number(d.total_discount || 0));
+      setAppliedPromotions(d.applied || []);
+    }).catch(() => {
+      if (!cancel) { setPromoDiscount(0); setAppliedPromotions([]); }
+    });
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, total, user?.id]);
+
+  const grandTotal = Math.max(0, total - promoDiscount) + shippingCost;
 
   // Kombin / sale öneriler
   const [suggestions, setSuggestions] = useState([]);
@@ -198,6 +228,15 @@ export default function Cart() {
                   <span className="text-black/60">Ara toplam</span>
                   <span className="tabular-nums">{total.toFixed(2)} TL</span>
                 </div>
+                {promoDiscount > 0 && (
+                  <div className="flex justify-between text-emerald-700" data-testid="cart-promo-discount">
+                    <span>
+                      Kampanya indirimi
+                      {appliedPromotions.length > 0 && appliedPromotions[0]?.title ? ` (${appliedPromotions[0].title})` : ""}
+                    </span>
+                    <span className="tabular-nums">-{promoDiscount.toFixed(2)} TL</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-black/60">Kargo</span>
                   <span className={shippingCost === 0 ? "text-emerald-700" : "tabular-nums"}>
