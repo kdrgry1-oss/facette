@@ -26,9 +26,9 @@ router = APIRouter(tags=["Integrations"])
 from .integrations_common import router as _common_router
 from .integrations_trendyol import router as _trendyol_router
 from .integrations_hepsiburada import router as _hb_router
-router.include_router(_common_router)
 router.include_router(_trendyol_router)
 router.include_router(_hb_router)
+router.include_router(_common_router)
 
 
 # ---- Geriye dönük uyumluluk: scheduler.py, orders.py, category_mapping.py vb.
