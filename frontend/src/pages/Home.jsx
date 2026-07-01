@@ -43,13 +43,26 @@ function HeroSlider({ block }) {
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % images.length);
   const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + images.length) % images.length);
 
-  const dims = block?.settings?.img_dims?.[0]
-    || (block?.settings?.img_width ? [block.settings.img_width, block.settings.img_height] : null);
-  const aspect = aspectFromDims(dims, "16 / 9");
+  // Görselin gerçek en-boy oranı: admin panelinde kaydedilmiş img_dims varsa onu
+  // kullan; yoksa tarayıcıda <img> yüklenince gerçek pikseli oku (loadedDims) —
+  // hangi ölçüde görsel yüklendiyse container o orana göre şekillenir, kırpma olmaz.
+  const [loadedDims, setLoadedDims] = useState({}); // { [index]: [w, h] }
+  const handleImgLoad = (index) => (e) => {
+    const { naturalWidth: w, naturalHeight: h } = e.target;
+    if (w && h) {
+      setLoadedDims((prev) => (prev[index] ? prev : { ...prev, [index]: [w, h] }));
+    }
+  };
+
+  const savedDims = block?.settings?.img_dims;
+  const dimsFor = (index) => (savedDims && savedDims[index]) || loadedDims[index] || null;
+  const fallbackDims = (block?.settings?.img_width ? [block.settings.img_width, block.settings.img_height] : null);
+  const activeDims = dimsFor(currentSlide) || fallbackDims;
+  const aspect = aspectFromDims(activeDims, "16 / 9");
 
   return (
     <section className="relative" data-testid="hero-slider">
-      <div className="relative overflow-hidden w-full bg-stone-100" style={{ aspectRatio: aspect }}>
+      <div className="relative overflow-hidden w-full bg-stone-100 transition-[aspect-ratio] duration-300" style={{ aspectRatio: aspect }}>
         {images.map((img, index) => (
           <Link
             key={index}
@@ -71,8 +84,9 @@ function HeroSlider({ block }) {
               fetchPriority={index === 0 ? "high" : "auto"}
               loading={index === 0 ? "eager" : "lazy"}
               decoding="async"
-              width={dims?.[0]}
-              height={dims?.[1]}
+              width={dimsFor(index)?.[0]}
+              height={dimsFor(index)?.[1]}
+              onLoad={handleImgLoad(index)}
             />
           </Link>
         ))}

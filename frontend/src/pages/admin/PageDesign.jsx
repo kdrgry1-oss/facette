@@ -309,6 +309,16 @@ export default function PageDesign() {
 
     setUploading(true);
     try {
+      // Görselin gerçek piksel boyutunu client-side oku — kaydedilince storefront'ta
+      // (HeroSlider/FullBanner) doğru en-boy oranında, kırpılmadan gösterilsin.
+      const dims = await new Promise((resolve) => {
+        const probe = new Image();
+        const objUrl = URL.createObjectURL(file);
+        probe.onload = () => { resolve([probe.naturalWidth, probe.naturalHeight]); URL.revokeObjectURL(objUrl); };
+        probe.onerror = () => { resolve(null); URL.revokeObjectURL(objUrl); };
+        probe.src = objUrl;
+      });
+
       const token = localStorage.getItem('token');
       const fd = new FormData();
       fd.append('file', file);
@@ -324,6 +334,7 @@ export default function PageDesign() {
         const url = raw.startsWith('http') ? raw : `${BACKEND_ORIGIN}${raw}`;
         const newImages = [...formData.images];
         const newLinks = [...formData.links];
+        const targetIndex = index !== null ? index : newImages.length;
         
         if (index !== null) {
           newImages[index] = url;
@@ -331,8 +342,19 @@ export default function PageDesign() {
           newImages.push(url);
           newLinks.push("/");
         }
+
+        const newSettings = { ...formData.settings };
+        if (dims) {
+          const imgDims = Array.isArray(newSettings.img_dims) ? [...newSettings.img_dims] : [];
+          imgDims[targetIndex] = dims;
+          newSettings.img_dims = imgDims;
+          if (targetIndex === 0) {
+            newSettings.img_width = dims[0];
+            newSettings.img_height = dims[1];
+          }
+        }
         
-        setFormData({ ...formData, images: newImages, links: newLinks });
+        setFormData({ ...formData, images: newImages, links: newLinks, settings: newSettings });
         toast.success("Görsel yüklendi");
       }
     } catch (err) {
@@ -347,7 +369,13 @@ export default function PageDesign() {
     const newLinks = [...formData.links];
     newImages.splice(index, 1);
     newLinks.splice(index, 1);
-    setFormData({ ...formData, images: newImages, links: newLinks });
+    const newSettings = { ...formData.settings };
+    if (Array.isArray(newSettings.img_dims)) {
+      const imgDims = [...newSettings.img_dims];
+      imgDims.splice(index, 1);
+      newSettings.img_dims = imgDims;
+    }
+    setFormData({ ...formData, images: newImages, links: newLinks, settings: newSettings });
   };
 
   const [productSearch, setProductSearch] = useState("");
