@@ -26,6 +26,7 @@ from .integrations_common import (
     _dedupe_products_by_stock_code,
     _facette_match_for_codes,
     _facette_product_image,
+    _hb_norm,
     _resolve_stock_code,
     _to_float_tr,
     log_integration_event,
@@ -420,7 +421,7 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
         p["_already_imported"] = p["order_number"] in existing
     return {"success": True, "count": len(preview), "orders": grouped, "preview": preview,
             "attempted_url": attempted,
-            "raw_sample": (lines[:2] if isinstance(lines, list) else lines)}
+            "raw_sample": (grouped[:2] if isinstance(grouped, list) else grouped)}
 @router.get("/hepsiburada/oms-diag")
 async def hepsiburada_oms_diag(on: str = "", key: str = ""):
     """GEÇİCİ TEŞHİS UCU: Railway backend'inden HB OMS-SIT'e bağlantıyı ölçer. HER ZAMAN 200 döner.
