@@ -224,9 +224,23 @@ async def register_failed_login_ip(ip: str) -> None:
 
 
 def client_ip_from_request(request) -> str:
-    """Return the real client IP, honouring X-Forwarded-For (first hop)."""
+    """Return the real client IP.
+
+    Öncelik sırası (2026-07-01 teşhisi sonucu düzeltildi):
+    1. CF-Connecting-IP — Cloudflare'in kendi tarafında set ettiği, spoof
+       edilemez gerçek client IP header'ı. Bu deploy'da doğrulandı: Railway'e
+       ulaşan X-Forwarded-For zinciri gerçek client IP'yi İÇERMİYOR (sadece
+       ara-katman/Cloudflare edge IP'leri taşıyor, ör. 'xff_raw=104.22.64.117,
+       152.233.47.68' iken gerçek client cf_connecting_ip=136.113.108.52 idi).
+    2. X-Forwarded-For ilk hop — Cloudflare arkasında olmayan istekler için
+       (ör. doğrudan health-check) fallback.
+    3. TCP bağlantısının kaynağı — hiçbiri yoksa son çare.
+    """
     if not request:
         return ""
+    cf_ip = request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
     xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
     if xff:
         return xff.split(",")[0].strip()
@@ -242,26 +256,16 @@ try:
     from slowapi.util import get_remote_address as _gra
 
     def _rate_key(request):
-        xff = request.headers.get("x-forwarded-for") if request else None
+        # CF-Connecting-IP öncelikli — bkz. client_ip_from_request docstring'i.
+        # 2026-07-01: X-Forwarded-For ilk hop'un Railway'de Cloudflare edge IP'si
+        # taşıdığı (gerçek client değil) canlı loglarla kanıtlandıktan sonra düzeltildi.
         cf_ip = request.headers.get("cf-connecting-ip") if request else None
-        tcp_src = None
-        try:
-            tcp_src = request.client.host if request and request.client else None
-        except Exception:
-            pass
-        computed = xff.split(",")[0].strip() if xff else _gra(request)
-        # [GEÇİCİ DEBUG - 2026-07-01] Rate-limit IP zincirini teşhis için loglanıyor.
-        # Railway loglarında bir kaç istek sonrası bu satırları görüp gerçek
-        # değerleri karşılaştırdıktan sonra bu bloğu KALDIR (veya logger.debug'a indir).
-        try:
-            logging.getLogger("rate_limit_debug").warning(
-                "RATE_KEY_DEBUG path=%s xff_raw=%r cf_connecting_ip=%r tcp_client=%r computed_key=%r",
-                getattr(request, "url", None) and request.url.path,
-                xff, cf_ip, tcp_src, computed,
-            )
-        except Exception:
-            pass
-        return computed
+        if cf_ip:
+            return cf_ip.strip()
+        xff = request.headers.get("x-forwarded-for") if request else None
+        if xff:
+            return xff.split(",")[0].strip()
+        return _gra(request)
 
     limiter = Limiter(key_func=_rate_key, default_limits=[])
 except Exception as _limiter_init_exc:  # pragma: no cover
