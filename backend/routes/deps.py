@@ -243,13 +243,35 @@ try:
 
     def _rate_key(request):
         xff = request.headers.get("x-forwarded-for") if request else None
-        if xff:
-            return xff.split(",")[0].strip()
-        return _gra(request)
+        cf_ip = request.headers.get("cf-connecting-ip") if request else None
+        tcp_src = None
+        try:
+            tcp_src = request.client.host if request and request.client else None
+        except Exception:
+            pass
+        computed = xff.split(",")[0].strip() if xff else _gra(request)
+        # [GEÇİCİ DEBUG - 2026-07-01] Rate-limit IP zincirini teşhis için loglanıyor.
+        # Railway loglarında bir kaç istek sonrası bu satırları görüp gerçek
+        # değerleri karşılaştırdıktan sonra bu bloğu KALDIR (veya logger.debug'a indir).
+        try:
+            logging.getLogger("rate_limit_debug").warning(
+                "RATE_KEY_DEBUG path=%s xff_raw=%r cf_connecting_ip=%r tcp_client=%r computed_key=%r",
+                getattr(request, "url", None) and request.url.path,
+                xff, cf_ip, tcp_src, computed,
+            )
+        except Exception:
+            pass
+        return computed
 
     limiter = Limiter(key_func=_rate_key, default_limits=[])
-except Exception:  # pragma: no cover
+except Exception as _limiter_init_exc:  # pragma: no cover
     limiter = None
+    try:
+        logging.getLogger("rate_limit_debug").warning(
+            "RATE_LIMITER_INIT_FAILED: %r", _limiter_init_exc
+        )
+    except Exception:
+        pass
 
 
 # Password helpers
