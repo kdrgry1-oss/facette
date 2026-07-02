@@ -60,16 +60,23 @@ export function collectClickIds() {
     sc_click_id: readCookie("sc_click_id"),
     sc_cookie1: readCookie("_scid"),
   };
-  // URL parameters also seed click IDs (first-touch attribution)
+  // URL parameters also seed click IDs (first-touch attribution) — ve 90 gün
+  // cookie'ye YAZILIR ki sonraki sayfalarda/günlerde de erişilebilsin
+  // (TikTok ttclid atıf kalitesi için şart: reklam tıklaması → satın alma
+  // arasında saatler/günler geçebilir).
   if (typeof window !== "undefined") {
+    const persist = (k, v) => {
+      try { document.cookie = `${k}=${encodeURIComponent(v)};path=/;max-age=${60 * 60 * 24 * 90};SameSite=Lax`; } catch { /* no-op */ }
+    };
     const usp = new URLSearchParams(window.location.search);
     ["gclid", "wbraid", "gbraid", "ttclid", "epik"].forEach((k) => {
-      if (usp.get(k)) ids[k] = usp.get(k);
+      if (usp.get(k)) { ids[k] = usp.get(k); persist(k, ids[k]); }
     });
     // _fbc'yi sentetik olarak fbclid'den üret (Meta önerisi)
     const fbclid = usp.get("fbclid");
     if (fbclid && !ids.fbc) {
       ids.fbc = `fb.1.${Date.now()}.${fbclid}`;
+      persist("_fbc", ids.fbc);
     }
   }
   return ids;
@@ -361,6 +368,10 @@ export const trackPurchase = ({ orderNumber, items, value, currency = "TRY", cou
                                 original_value = 0, shipping = 0, tax = 0, shipping_tier = "",
                                 payment_type = "", user = {} }) =>
   pushEvent("purchase", {
+    // event_id = SİPARİŞ NUMARASI: hem tarayıcı pixel'i (GTM/ttq/fbq) hem
+    // backend'in sunucu-taraflı purchase'ı (iyzico webhook/callback) aynı
+    // anahtarı kullanır → TikTok/Meta iki kaydı tekilleştirir, çift sayım olmaz.
+    event_id: orderNumber ? String(orderNumber) : undefined,
     order_id: orderNumber, currency, value, items, coupon, discount, original_value,
     shipping, tax, shipping_tier, payment_type,
   }, user);

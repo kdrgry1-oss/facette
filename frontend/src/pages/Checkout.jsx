@@ -10,6 +10,7 @@ import ProvinceDistrictSelect from "../components/ProvinceDistrictSelect";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { trackInitiateCheckout, trackPurchase, trackAddPaymentInfo, trackAddShippingInfo } from "../utils/pixelEvents";
+import { collectClickIds } from "../lib/dataLayer";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -517,6 +518,10 @@ export default function Checkout() {
         payment_method: paymentMethod,
         attribution_session_id:
           (typeof window !== "undefined" && (window.__FACETTE_SID__ || localStorage.getItem("facette_sid"))) || null,
+        // Reklam tıklama kimlikleri (ttclid/fbc/gclid …) siparişe kaydedilir:
+        // ödeme onayı iyzico webhook'undan (tarayıcısız) geldiğinde CAPI
+        // purchase event'inde atıf için kullanılır.
+        click_ids: (typeof window !== "undefined" ? collectClickIds() : {}),
       };
 
       // Üye girişliyse token'ı gönder ki sipariş user_id'ye bağlansın (misafirde token yok → eskisi gibi).

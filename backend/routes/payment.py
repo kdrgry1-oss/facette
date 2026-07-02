@@ -349,6 +349,13 @@ async def _retrieve_and_finalize(token: str) -> dict:
     logger.info(f"iyzico payment {'PAID' if paid else 'FAILED'} order={order.get('order_number')} pid={data.get('paymentId')}")
     if paid:
         await _notify_paid_order_confirmed(order.get("id"))
+        # CAPI purchase (TikTok CompletePayment / Meta Purchase …) — sunucudan,
+        # idempotent (tek event), event_id = sipariş no (pixel'le dedup).
+        try:
+            from .orders import dispatch_purchase_capi
+            await dispatch_purchase_capi(order.get("id"), source="iyzico_callback")
+        except Exception as _ce:
+            logger.warning(f"CAPI purchase (callback) hata: {_ce}")
     return {"ok": paid, "order": order, "return_url": order.get("iyzico_return_url") or ""}
 
 
@@ -464,6 +471,11 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
     logger.info(f"iyzico kart odeme {'PAID' if paid else 'FAILED'} order_id={order_id} pid={data.get('paymentId')}")
     if paid:
         await _notify_paid_order_confirmed(order_id)
+        try:
+            from .orders import dispatch_purchase_capi
+            await dispatch_purchase_capi(order_id, source="iyzico_card")
+        except Exception as _ce:
+            logger.warning(f"CAPI purchase (kart) hata: {_ce}")
     return paid
 
 
@@ -644,3 +656,101 @@ async def get_installments(payload: dict):
         "bankName": det.get("bankName") or "",
         "force3ds": bool(det.get("force3ds")),
     }
+
+
+# =============================================================================
+# İYZİCO WEBHOOK (İşyeri Bildirimleri) — sunucudan sunucuya ödeme onayı
+# Kurulum (iyzico paneli): Ayarlar → Firma Ayarları → İşyeri Bildirimleri →
+#   URL: https://api.facette.com.tr/api/payment/webhook
+# Müşteri ödeme sonrası sekmeyi kapatsa bile onay buraya düşer: sipariş
+# iyzico'dan retrieve ile DOĞRULANARAK finalize edilir ve CAPI purchase
+# (TikTok CompletePayment, Meta Purchase …) sunucudan gönderilir.
+# 200 dönülmezse iyzico 15 dk arayla 3 kez daha dener (doğal retry ağı).
+# =============================================================================
+def _webhook_signature_ok(secret: str, headers, payload: dict) -> bool:
+    """X-IYZ-SIGNATURE-V3 doğrulaması. İmza = HMAC-SHA256(secretKey,
+    secretKey+iyziEventType+iyziPaymentId+token+paymentConversationId+status).
+    Alan adı/birleşim varyasyonlarına karşı iki aday hesaplanır; eksik alanlar
+    boş string sayılır. Eşleşmezse istek REDDEDİLİR (sahte çağrı koruması)."""
+    sig = ""
+    for k, v in headers.items():
+        if k.lower() == "x-iyz-signature-v3":
+            sig = (v or "").strip()
+            break
+    if not sig or not secret:
+        return False
+    evt = str(payload.get("iyziEventType") or "")
+    pid = str(payload.get("iyziPaymentId") or payload.get("paymentId") or "")
+    tok = str(payload.get("token") or "")
+    conv = str(payload.get("paymentConversationId") or payload.get("conversationId") or "")
+    status = str(payload.get("status") or payload.get("paymentStatus") or "")
+    candidates = set()
+    for msg in (secret + evt + pid + tok + conv + status,   # dokümandaki birleşim
+                evt + pid + tok + conv + status):           # secret yalnız key ise
+        candidates.add(hmac.new(secret.encode("utf-8"), msg.encode("utf-8"),
+                                hashlib.sha256).hexdigest().lower())
+    return sig.lower() in candidates
+
+
+@router.post("/webhook")
+async def iyzico_webhook(request: Request):
+    """iyzico İşyeri Bildirimleri webhook'u. İmza doğrulanır; SUCCESS ödemede
+    sipariş finalize edilir + CAPI purchase tetiklenir. Idempotent: aynı
+    bildirim tekrar gelirse (retry) ikinci event ÇIKMAZ (capi_purchase_sent)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    settings = await _get_iyzico_settings()
+    if not _webhook_signature_ok(settings.get("api_secret") or "", request.headers, payload):
+        logger.warning(f"iyzico webhook imza doğrulanamadı; alanlar={sorted(payload.keys())}")
+        raise HTTPException(status_code=401, detail="signature")
+
+    # Denetim izi (hassas alan yok — sadece kimlik/durum alanları)
+    try:
+        await db.iyzico_webhook_logs.insert_one({
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "payload": {k: payload.get(k) for k in (
+                "iyziEventType", "iyziPaymentId", "paymentId", "token",
+                "paymentConversationId", "conversationId", "status", "paymentStatus")},
+        })
+    except Exception:
+        pass
+
+    status = str(payload.get("status") or payload.get("paymentStatus") or "").upper()
+    if status != "SUCCESS":
+        return {"ok": True, "ignored": status or "no-status"}
+
+    token = str(payload.get("token") or "").strip()
+    conv = str(payload.get("paymentConversationId") or payload.get("conversationId") or "").strip()
+    order = None
+    if token:
+        order = await db.orders.find_one({"iyzico_token": token},
+                                         {"_id": 0, "id": 1, "payment_status": 1})
+    if not order and conv:
+        order = await db.orders.find_one({"id": conv},
+                                         {"_id": 0, "id": 1, "payment_status": 1, "iyzico_token": 1})
+        token = token or str((order or {}).get("iyzico_token") or "")
+    if not order:
+        return {"ok": True, "ignored": "order-not-found"}
+
+    # Henüz paid değilse webhook verisine körü körüne güvenme — iyzico'dan
+    # retrieve ile doğrulayıp finalize et (bildirim + CAPI purchase içeride tetiklenir).
+    if (order.get("payment_status") or "") != "paid" and token:
+        try:
+            await _retrieve_and_finalize(token)
+        except Exception as e:
+            logger.warning(f"iyzico webhook finalize hata order={order.get('id')}: {e}")
+
+    # Paid ise purchase'ı garanti et (daha önce gittiyse no-op)
+    fresh = await db.orders.find_one({"id": order["id"]}, {"_id": 0, "payment_status": 1})
+    if (fresh or {}).get("payment_status") == "paid":
+        try:
+            from .orders import dispatch_purchase_capi
+            await dispatch_purchase_capi(order["id"], source="iyzico_webhook")
+        except Exception as e:
+            logger.warning(f"CAPI purchase (webhook) hata: {e}")
+    return {"ok": True}

@@ -686,6 +686,9 @@ async def create_order(
         # FAZ 6 — müşteri izleri
         "customer_ip": client_ip,
         "user_agent": request.headers.get("user-agent", "")[:300],
+        # Reklam tıklama kimlikleri (ttclid/fbc/gclid …) — CAPI purchase'ta
+        # webhook/tarayıcısız akışta atıf için kullanılır.
+        "click_ids": _sanitize_click_ids(order_data.get("click_ids")),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -969,6 +972,102 @@ async def update_order(
     
     return {"message": "Sipariş güncellendi"}
 
+def _sanitize_click_ids(raw) -> dict:
+    """Storefront'tan sipariş oluştururken gelen reklam tıklama kimliklerini
+    (ttclid, fbc, gclid …) beyaz-listeyle süzer. Siparişe kaydedilir; ödeme
+    onayı tarayıcısız geldiğinde (iyzico webhook) CAPI purchase event'ine
+    buradan eklenir — TikTok/Meta atıf (attribution) kalitesi için şart."""
+    if not isinstance(raw, dict):
+        return {}
+    allowed = ("ttclid", "ttp", "fbp", "fbc", "gclid", "wbraid", "gbraid",
+               "epik", "sc_click_id", "sc_cookie1")
+    out = {}
+    for k in allowed:
+        v = raw.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()[:500]
+    return out
+
+
+async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
+    """Sipariş için CAPI 'purchase' event'ini (TikTok CompletePayment, Meta
+    Purchase, …) TÜM aktif sağlayıcılara BİR KEZ gönderir.
+
+    event_id = SİPARİŞ NUMARASI — tarayıcı pixel'i (GTM/ttq/fbq) aynı
+    event_id'yi kullandığından platformlar iki kaydı tekilleştirir (dedup),
+    çift sayım olmaz.
+
+    Idempotent: orders.capi_purchase_sent bayrağı ATOMİK set edilir; ödeme
+    callback'i + iyzico webhook'u + admin onayı aynı anda tetiklense bile
+    tek event çıkar. Kullanıcı verisi (email/telefon hash'i, IP, UA, ttclid)
+    sipariş kaydından okunur — tarayıcı gerekmez."""
+    try:
+        prev = await db.orders.find_one_and_update(
+            {"id": order_id, "capi_purchase_sent": {"$ne": True}},
+            {"$set": {"capi_purchase_sent": True,
+                      "capi_purchase_source": source or "",
+                      "capi_purchase_at": datetime.now(timezone.utc).isoformat()}},
+            projection={"_id": 0},
+        )
+        if not prev:
+            return False  # zaten gönderilmiş (veya sipariş yok) — çift sayım engellendi
+        order_doc = prev
+        from services.capi.orchestrator import dispatch_event
+        from services.capi.hash_utils import build_user_data
+        addr = order_doc.get("shipping_address") or {}
+        cids = order_doc.get("click_ids") or {}
+        user_data = build_user_data(
+            email=addr.get("email") or order_doc.get("email"),
+            phone=addr.get("phone") or order_doc.get("phone"),
+            first_name=addr.get("first_name") or (addr.get("full_name") or "").split(" ")[0],
+            last_name=addr.get("last_name") or " ".join((addr.get("full_name") or "").split(" ")[1:]),
+            city=addr.get("city"),
+            state=addr.get("district") or addr.get("state"),
+            country=addr.get("country") or "TR",
+            zipcode=addr.get("zipcode") or addr.get("postal_code"),
+            street=addr.get("address") or addr.get("address_line1"),
+            external_id=order_doc.get("customer_id") or order_doc.get("user_id"),
+            client_ip=order_doc.get("customer_ip"),
+            user_agent=order_doc.get("user_agent"),
+            ttclid=cids.get("ttclid"), ttp=cids.get("ttp"),
+            fbp=cids.get("fbp"), fbc=cids.get("fbc"),
+            gclid=cids.get("gclid"), wbraid=cids.get("wbraid"), gbraid=cids.get("gbraid"),
+            epik=cids.get("epik"),
+            sc_click_id=cids.get("sc_click_id"), sc_cookie1=cids.get("sc_cookie1"),
+        )
+        items_payload = [{
+            "item_id": str(it.get("product_id") or it.get("sku") or ""),
+            "item_name": it.get("name") or "",
+            "item_brand": it.get("brand") or "FACETTE",
+            "item_variant": f"{it.get('size','')} {it.get('color','')}".strip(),
+            "price": float(it.get("unit_price") or it.get("price") or 0),
+            "quantity": int(it.get("quantity") or 1),
+        } for it in (order_doc.get("items") or [])]
+        order_number = str(order_doc.get("order_number") or order_id)
+        await dispatch_event(
+            db,
+            event_name="purchase",
+            event_id=order_number,   # tarayıcı pixel'iyle dedup anahtarı (sipariş no)
+            user_data=user_data,
+            event_payload={
+                "currency": order_doc.get("currency") or "TRY",
+                "value": float(order_doc.get("total") or 0),
+                "items": items_payload,
+                "order_id": order_number,
+                "coupon": order_doc.get("coupon_code"),
+                "shipping": float(order_doc.get("shipping_cost") or 0),
+                "discount": float(order_doc.get("discount") or 0),
+                "payment_type": order_doc.get("payment_method") or "",
+            },
+            event_source_url="https://www.facette.com.tr",
+        )
+        logger.info(f"CAPI purchase gönderildi order={order_number} src={source}")
+        return True
+    except Exception as e:
+        logger.warning(f"CAPI purchase dispatch hata order={order_id} src={source}: {e}")
+        return False
+
+
 @router.put("/{order_id}/status")
 async def update_order_status(
     order_id: str,
@@ -1134,7 +1233,10 @@ async def update_order_status(
             capi_event = None
             value_multiplier = 1.0
             if status == "confirmed" and order_doc.get("payment_status") == "paid":
-                capi_event = "purchase"
+                # Purchase TEK merkezden gönderilir (idempotent bayrak +
+                # event_id = sipariş no → tarayıcı pixel'iyle dedup).
+                await dispatch_purchase_capi(order_id, source="admin_status_confirmed")
+                return
             elif status == "cancelled" and order_doc.get("payment_status") == "paid":
                 capi_event = "refund"
                 value_multiplier = -1.0
@@ -1269,52 +1371,10 @@ async def mark_order_paid(
                 logger.warning(f"confirmed notif failed: {e}")
         _spawn(_notify_confirmed())
 
-    # CAPI offline conversion (purchase event) — fire-and-forget
-    import asyncio as _asyncio
+    # CAPI offline conversion (purchase) — merkezi helper (idempotent,
+    # event_id = sipariş no; havale/EFT onayında da tek purchase çıkar)
     async def _capi_offline_purchase():
-        try:
-            from services.capi.orchestrator import dispatch_event
-            from services.capi.hash_utils import build_user_data
-            addr = order_doc.get("shipping_address") or {}
-            user_data = build_user_data(
-                email=addr.get("email") or order_doc.get("email"),
-                phone=addr.get("phone") or order_doc.get("phone"),
-                first_name=addr.get("first_name") or (addr.get("full_name") or "").split(" ")[0],
-                last_name=addr.get("last_name") or " ".join((addr.get("full_name") or "").split(" ")[1:]),
-                city=addr.get("city"),
-                state=addr.get("district") or addr.get("state"),
-                country=addr.get("country") or "TR",
-                zipcode=addr.get("zipcode") or addr.get("postal_code"),
-                street=addr.get("address") or addr.get("address_line1"),
-                date_of_birth=(order_doc.get("customer") or {}).get("date_of_birth"),
-                gender=(order_doc.get("customer") or {}).get("gender"),
-                external_id=order_doc.get("customer_id") or order_doc.get("user_id"),
-            )
-            items_payload = []
-            for it in (order_doc.get("items") or []):
-                items_payload.append({
-                    "item_id": str(it.get("product_id") or it.get("sku") or ""),
-                    "item_name": it.get("name") or "",
-                    "item_variant": f"{it.get('size','')} {it.get('color','')}".strip(),
-                    "price": float(it.get("unit_price") or it.get("price") or 0),
-                    "quantity": int(it.get("quantity") or 1),
-                })
-            await dispatch_event(
-                db,
-                event_name="purchase",
-                event_id=f"{order_id}-offline-purchase",
-                user_data=user_data,
-                event_payload={
-                    "currency": order_doc.get("currency") or "TRY",
-                    "value": float(order_doc.get("total") or 0),
-                    "items": items_payload,
-                    "order_id": order_doc.get("order_number") or order_id,
-                    "coupon": order_doc.get("coupon_code"),
-                },
-                event_source_url="https://www.facette.com.tr",
-            )
-        except Exception as e:
-            logger.warning(f"CAPI offline-purchase failed: {e}")
+        await dispatch_purchase_capi(order_id, source="offline_payment_confirm")
 
     _spawn(_capi_offline_purchase())
 
