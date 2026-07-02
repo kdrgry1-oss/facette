@@ -4342,6 +4342,47 @@ async def _resolve_shipping_cost(cart_total: float):
     return None
 
 
+def _resolve_return_selection(all_items, sel_items, sel_idx):
+    """Kısmi iade kalem seçimini rec.items index listesine çevirir.
+    Öncelik: sel_items kalem KİMLİKLERİ [{barcode,name,size,color}] — index kaymasına
+    dayanıklı (barcode↔product_id öncelikli, yoksa ad+beden+renk). Geriye uyum: sel_idx
+    index listesi. Seçim GÖNDERİLDİYSE ama hiçbir kalem eşleşmediyse ValueError (sessizce
+    tam iadeye düşülmez). Seçim hiç gönderilmediyse [] döner (= tam sipariş)."""
+    def _inorm(v):
+        return " ".join(str(v or "").strip().lower().split())
+    _sel = []
+    if isinstance(sel_items, list) and sel_items:
+        for want in sel_items:
+            if not isinstance(want, dict):
+                continue
+            w_bar = _inorm(want.get("barcode") or want.get("product_id"))
+            w_key = (_inorm(want.get("name")), _inorm(want.get("size")), _inorm(want.get("color")))
+            for i, it in enumerate(all_items):
+                if i in _sel:
+                    continue
+                it_bar = _inorm(it.get("product_id") or it.get("barcode"))
+                if w_bar and it_bar and w_bar == it_bar:
+                    _sel.append(i)
+                    break
+                it_key = (_inorm(it.get("name")), _inorm(it.get("size")), _inorm(it.get("color")))
+                if w_key[0] and w_key == it_key:
+                    _sel.append(i)
+                    break
+        if not _sel:
+            raise ValueError("Seçilen kalemler iade kaydında bulunamadı — sayfayı yenileyip tekrar deneyin")
+    elif isinstance(sel_idx, list) and sel_idx:
+        for _i in sel_idx:
+            try:
+                _i = int(_i)
+            except Exception:
+                continue
+            if 0 <= _i < len(all_items):
+                _sel.append(_i)
+        if not _sel:
+            raise ValueError("Seçilen kalemler iade kaydıyla eşleşmedi — sayfayı yenileyip tekrar deneyin")
+    return sorted(set(_sel))
+
+
 def _round2(x):
     try:
         return round(float(x or 0) + 1e-9, 2)
@@ -4505,6 +4546,17 @@ async def approve_return(return_id: str, payload: dict,
     cargo_override = None if cargo_override in (None, "") else cargo_override
     returned_net_in = payload.get("returned_net")
     returned_net_in = None if returned_net_in in (None, "") else returned_net_in
+
+    # KISMİ ONAY: ekranda seçilen kalemler onay kaydına YAZILIR ki gider pusulası
+    # (payload'sız/seçimsiz çağrıldığında bile) tüm siparişe değil onaylanan kalemlere
+    # kesilsin. Kimlik (selected_items) öncelikli, index geriye uyum.
+    _all_items = rec.get("items") or []
+    try:
+        _ap_sel = _resolve_return_selection(_all_items, payload.get("selected_items"), payload.get("item_indexes"))
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail=str(_e))
+    _ap_partial = bool(_ap_sel) and len(_ap_sel) < len(_all_items)
+
     bd = await _compute_refund_breakdown(rec, order, fault, return_cargo_fee_override=cargo_override,
                                          returned_net_override=returned_net_in)
 
@@ -4528,11 +4580,28 @@ async def approve_return(return_id: str, payload: dict,
         "manual_override": manual_override,
         "note": (payload.get("note") or "")[:500],
     }
-    await db.customer_returns.update_one({"id": return_id}, {"$set": {
+    if _ap_partial:
+        approval["item_indexes"] = _ap_sel
+    _set = {
         "status": "approved", "fault": fault,
         "refund_breakdown": bd, "refund_amount": final_amount,
         "approval": approval, "updated_at": now_iso,
-    }})
+    }
+    _upd = {"$set": _set}
+    if _ap_partial:
+        # Kimlik snapshot'ı da saklanır: GP anında items sırası değişse bile
+        # barcode/ad+beden+renk ile eşlenir (index kaymasına dayanıklı).
+        _set["approved_item_indexes"] = _ap_sel
+        _set["approved_items"] = [{
+            "barcode": (_all_items[i].get("barcode") or _all_items[i].get("product_id") or ""),
+            "name": _all_items[i].get("name") or "",
+            "size": _all_items[i].get("size") or "",
+            "color": _all_items[i].get("color") or "",
+        } for i in _ap_sel]
+    else:
+        # Tam onay: eski kısmi onay artıkları kalmasın
+        _upd["$unset"] = {"approved_item_indexes": "", "approved_items": ""}
+    await db.customer_returns.update_one({"id": return_id}, _upd)
     await db.orders.update_one({"id": rec.get("order_id")}, {"$set": {
         "status": "return_approved", "return_request.status": "approved", "updated_at": now_iso,
         "return_approved_at": now_iso,
@@ -4763,50 +4832,26 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     all_items = rec.get("items", []) or []
     # Seçili kalemler (kısmi iade). Öncelik sırası:
     #   1) payload.selected_items: kalem KİMLİKLERİ [{barcode, name, size, color}] — index
-    #      kaymasına dayanıklı (ekrandaki liste ile customer_returns.items farklı olabilir:
-    #      idempotent bridge eski kaydı döndürür). barcode↔product_id öncelikli eşleşir.
+    #      kaymasına dayanıklı. barcode↔product_id öncelikli eşleşir.
     #   2) payload.item_indexes: rec.items index'leri (geriye uyum).
-    # İkisi de yoksa => TÜM sipariş (tam iade).
+    #   3) Payload'da seçim YOKSA → onayda kaydedilen kısmi kalemler (approved_items /
+    #      approved_item_indexes). Böylece "İade Onay (N kalem)" sonrası sayfa yenilense
+    #      ya da GP sonradan kesilse bile pusula ONAYLANAN kalemlere düzenlenir.
+    #   4) O da yoksa => TÜM sipariş (tam iade).
     # GÜVENLİK: seçim GÖNDERİLDİYSE ama hiçbir kalem eşleşmediyse SESSİZCE tam iadeye
-    # DÜŞMEYİZ — 400 döneriz. (Eski davranış: uyumsuz index'ler elenip "seçim yok"
-    # sayılıyor, tüm siparişe gider pusulası kesiliyordu.)
-    def _inorm(v):
-        return " ".join(str(v or "").strip().lower().split())
-
-    _sel_items = (payload or {}).get("selected_items")
-    _sel_idx = (payload or {}).get("item_indexes")
-    _sel = []
-    if isinstance(_sel_items, list) and _sel_items:
-        for want in _sel_items:
-            if not isinstance(want, dict):
-                continue
-            w_bar = _inorm(want.get("barcode") or want.get("product_id"))
-            w_key = (_inorm(want.get("name")), _inorm(want.get("size")), _inorm(want.get("color")))
-            for i, it in enumerate(all_items):
-                if i in _sel:
-                    continue
-                it_bar = _inorm(it.get("product_id") or it.get("barcode"))
-                if w_bar and it_bar and w_bar == it_bar:
-                    _sel.append(i)
-                    break
-                it_key = (_inorm(it.get("name")), _inorm(it.get("size")), _inorm(it.get("color")))
-                if w_key[0] and w_key == it_key:
-                    _sel.append(i)
-                    break
-        if not _sel:
-            raise HTTPException(status_code=400,
-                                detail="Seçilen kalemler iade kaydında bulunamadı — sayfayı yenileyip tekrar deneyin")
-    elif isinstance(_sel_idx, list) and _sel_idx:
-        for _i in _sel_idx:
-            try:
-                _i = int(_i)
-            except Exception:
-                continue
-            if 0 <= _i < len(all_items):
-                _sel.append(_i)
-        if not _sel:
-            raise HTTPException(status_code=400,
-                                detail="Seçilen kalemler iade kaydıyla eşleşmedi — sayfayı yenileyip tekrar deneyin")
+    # DÜŞMEYİZ — 400 döneriz.
+    try:
+        _sel = _resolve_return_selection(all_items,
+                                         (payload or {}).get("selected_items"),
+                                         (payload or {}).get("item_indexes"))
+    except ValueError as _e:
+        raise HTTPException(status_code=400, detail=str(_e))
+    if not _sel:
+        try:
+            _sel = _resolve_return_selection(all_items, rec.get("approved_items"),
+                                             rec.get("approved_item_indexes"))
+        except ValueError:
+            _sel = []  # onay kaydı items ile eşleşmiyorsa tam iadeye düş (kullanıcı seçimi değil)
     if _sel:
         _sel = sorted(set(_sel))
         items = [all_items[i] for i in _sel]

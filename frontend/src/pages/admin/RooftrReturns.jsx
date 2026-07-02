@@ -267,6 +267,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
         (a, i) => a + (Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0), 0
       ) * 100) / 100 : 0;
       const returnedNet = selAmount > 0 ? selAmount : null;
+      // Kısmi onayda seçilen kalemler backend'e KİMLİKLERİYLE gönderilir (approve kaydına
+      // yazılır) ki gider pusulası sonradan kesilse bile onaylanan kalemlere düzenlensin.
+      const selIdents = isPartialSelection
+        ? selIdx.map((i) => row.items[i]).filter(Boolean)
+            .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }))
+        : [];
       // Kargo: liste ekranındaki "Kargoyu müşteriden kes" işaretliyse kargo bedeli iade
       // tutarından mahsup edilir (kusur müşteride); işaretli değilse kargo da tam iade edilir
       // (mağaza üstlenir). Elle "kusur" seçimi yok — bu checkbox tek karar noktasıdır.
@@ -280,6 +286,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       setWf({
         row, returnId, status: br.data?.status || "created", fault,
         preview, returnedNet,
+        selIdx: isPartialSelection ? selIdx : [], selIdents,
         finalAmount: preview ? preview.auto_refund : (returnedNet ?? 0),
         edited: false, note: "",
         loading: false, rejectReason: "", reship: false,
@@ -296,6 +303,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const body = { fault: wf.fault, note: wf.note };
       if (wf.returnedNet != null) body.returned_net = wf.returnedNet;
       if (wf.edited) body.refund_amount = Number(wf.finalAmount);
+      if (wf.selIdx?.length) {
+        body.item_indexes = wf.selIdx;
+        body.selected_items = wf.selIdents || [];
+      }
       const res = await axios.post(`${API}/orders/returns/${wf.returnId}/approve`, body, auth());
       toast.success(`İade onaylandı · ${fmtTL(res.data?.refund_amount)}`);
       setWf((m) => ({ ...m, status: "approved", loading: false }));
