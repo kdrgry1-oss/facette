@@ -2955,6 +2955,38 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     if err:
         await log_integration_event("hepsiburada", "backfill", "job", "", "failed", f"HB kimliği yok: {err}")
         return
+    # Önceki koşulardan sızmış bozuk kayıtlar (sipariş no çözülemeyen "HB?") temizlenir
+    try:
+        await db.orders.delete_many({"order_number": {"$in": ["HB?", "?", "HB"]},
+                                     "platform": "hepsiburada"})
+    except Exception:
+        pass
+
+    def _deep_find(d, names, depth=0):
+        """Sözlükte (nested dahil, 4 seviye) adı names kümesine uyan ilk dolu değeri döner.
+        HB'nin shipped/delivered paket şemaları alan adlarını farklı/nested taşıyabiliyor."""
+        if depth > 4 or not isinstance(d, dict):
+            return ""
+        for k, v in d.items():
+            kl = str(k).lower().replace("_", "").replace("-", "")
+            if kl in names and v not in (None, "", []) and not isinstance(v, (dict, list)):
+                return v
+        for v in d.values():
+            if isinstance(v, dict):
+                r = _deep_find(v, names, depth + 1)
+                if r not in (None, ""):
+                    return r
+            elif isinstance(v, list):
+                for it in v[:5]:
+                    if isinstance(it, dict):
+                        r = _deep_find(it, names, depth + 1)
+                        if r not in (None, ""):
+                            return r
+        return ""
+
+    _ORDNO_KEYS = {"ordernumber", "orderno", "ordernum"}
+    _CUST_KEYS = {"customername", "recipientname", "receivername", "fullname"}
+    _ODATE_KEYS = {"orderdate", "ordercreatedate", "ordercreatedat"}
 
     async def _upsert_groups(grouped, forced_status=None, allow_decrement=False):
         imported = updated = 0
@@ -2964,8 +2996,8 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
             try:
                 data = await _hb_enrich_items(map_hepsiburada_order(g))
                 number = data.get("order_number")
-                if not number:
-                    continue
+                if not number or str(number).rstrip("?") in ("", "HB"):
+                    continue  # sipariş no çözülemedi — çöp kayıt üretme
                 if forced_status:
                     data["status"] = forced_status
                 existing = await db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
@@ -3038,9 +3070,31 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                                "packageNumber", "cargoCompany", "trackingNumber", "barcode"):
                         if m.get(ck) in (None, "") and r.get(ck) not in (None, ""):
                             m[ck] = r.get(ck)
+                    # Alan adları paket şemasında farklı/nested olabilir — derin tarayıcı tamamlar
+                    if m.get("orderNumber") in (None, ""):
+                        v = _deep_find(ln, _ORDNO_KEYS) or _deep_find(r, _ORDNO_KEYS)
+                        if v:
+                            m["orderNumber"] = str(v)
+                    if m.get("customerName") in (None, ""):
+                        v = _deep_find(ln, _CUST_KEYS) or _deep_find(r, _CUST_KEYS)
+                        if v:
+                            m["customerName"] = str(v)
+                    if m.get("orderDate") in (None, ""):
+                        v = _deep_find(ln, _ODATE_KEYS) or _deep_find(r, _ODATE_KEYS)
+                        if v:
+                            m["orderDate"] = v
                     out.append(m)
             else:
-                out.append(r)
+                m = dict(r)
+                if m.get("orderNumber") in (None, ""):
+                    v = _deep_find(r, _ORDNO_KEYS)
+                    if v:
+                        m["orderNumber"] = str(v)
+                if m.get("customerName") in (None, ""):
+                    v = _deep_find(r, _CUST_KEYS)
+                    if v:
+                        m["customerName"] = str(v)
+                out.append(m)
         return out
 
     # Paket kaynak adayları: güncel liste kargolananları DÜŞÜRDÜĞÜ için geçmiş siparişler
@@ -3056,10 +3110,17 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
             r = await _aio.to_thread(fn, 0, 5, _pb, _pe)
             if isinstance(r, dict) and str(r.get("success", "")).lower() == "false":
                 raise RuntimeError(str(r.get("message") or "success=false"))
-            n = len(_hb_normalize_lines(r) or [])
+            _rows = _hb_normalize_lines(r) or []
             pkg_sources.append((label, fn))
+            _sample = {}
+            try:
+                import json as _json
+                _sample = {"sample_row": _json.loads(_json.dumps(_rows[0], default=str))} if _rows else {}
+            except Exception:
+                _sample = {}
             await log_integration_event("hepsiburada", "backfill", "probe", label, "success",
-                                        f"Paket ucu kullanılabilir: {label} ({n} örnek satır)")
+                                        f"Paket ucu kullanılabilir: {label} ({len(_rows)} örnek satır)",
+                                        details=_sample)
         except Exception as pe_:
             await log_integration_event("hepsiburada", "backfill", "probe", label, "info",
                                         f"Paket ucu yok/erişilemedi: {label}: {str(pe_)[:140]}")
@@ -3070,10 +3131,18 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
         b, e = begin.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
         for label, fn in pkg_sources:
             try:
-                resp = await _aio.to_thread(fn, 0, 100, b, e)
-                lines = _flatten_pkg_lines(_hb_normalize_lines(resp))
-                i, u = await _upsert_groups(_hb_orders_from_response(lines))
-                pkg_imp += i; pkg_upd += u
+                off = 0
+                for _pg in range(4):  # dilim başına en çok 200 paket (HB limit tavanı 50)
+                    resp = await _aio.to_thread(fn, off, 50, b, e)
+                    rows_ = _hb_normalize_lines(resp) or []
+                    if not rows_:
+                        break
+                    lines = _flatten_pkg_lines(rows_)
+                    i, u = await _upsert_groups(_hb_orders_from_response(lines))
+                    pkg_imp += i; pkg_upd += u
+                    if len(rows_) < 50:
+                        break
+                    off += 50
             except Exception as ex:
                 await log_integration_event("hepsiburada", "backfill", "packages", f"{label} {b}", "error",
                                             f"Paket dilimi {label} {b}: {ex}")
