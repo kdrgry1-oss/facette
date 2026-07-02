@@ -415,6 +415,16 @@ async def _run_trendyol_claims_sync():
         logger.error(f"[cron] Trendyol claims senkron hatası: {e}")
 
 
+async def _run_hepsiburada_claims_sync():
+    """Hepsiburada iade (claims) senkronu — periyodik. HB iade talepleri Trendyol'la
+    ortak iade/GP ekranına (db.trendyol_claims, platform=hepsiburada) yazılır."""
+    try:
+        from routes.integrations_hepsiburada import _sync_hepsiburada_claims_core
+        await _sync_hepsiburada_claims_core(days_back=60)
+    except Exception as e:
+        logger.error(f"[cron] Hepsiburada claims senkron hatası: {e}")
+
+
 async def _run_trendyol_claims_deep_backfill_once():
     """TEK SEFERLİK derin claims backfill — geçmişteki TÜM Trendyol iadelerini (3 yıl)
     çeker; eski onaylı/reddedilen claim'ler de sekme sayılarına yansısın. Ayrı flag
@@ -468,11 +478,11 @@ async def _run_hepsiburada_auto_orders_pull():
             # Kimlik (özellikle OMS) yoksa gürültü yapma — sessiz geç.
             return
 
-        now_ = _dt.now()
-        begin = (now_ - _td(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
-        end = now_.strftime("%Y-%m-%dT%H:%M:%S")
+        # TARİHSİZ çağrı: HB OMS tüm AÇIK (Open/Unpacked) siparişleri döner — yeni
+        # sipariş 2 dk'lık turda buradan yakalanır. (Tarihli sorgu HB'de yalnız
+        # 24 saatlik pencere kabul eder ve format hatasında HTTP 400 üretiyordu.)
         try:
-            resp = await _aio.to_thread(client.get_orders, begin, end, 0, 200)
+            resp = await _aio.to_thread(client.get_orders, None, None, 0, 200)
         except Exception as e:
             await log_integration_event(
                 marketplace="hepsiburada", action="order_pull", status="failed",
@@ -1363,6 +1373,16 @@ def start_scheduler():
         minutes=30,
         id="trendyol_claims_sync_30m",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Hepsiburada claims (iade) senkronu — her 30 DK (Trendyol ile simetrik).
+    _scheduler.add_job(
+        _run_hepsiburada_claims_sync,
+        "interval",
+        minutes=30,
+        id="hepsiburada_claims_sync_30m",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=150),
         max_instances=1,
         coalesce=True,
     )

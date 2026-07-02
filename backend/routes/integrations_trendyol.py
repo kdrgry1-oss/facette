@@ -3461,12 +3461,20 @@ async def get_trendyol_claims(
         search=search, claim_type=claim_type, exclude_order_numbers=_seen_orders)
     deduped = deduped + _manual_rows
 
-    # (b) trendyol_claims koleksiyonu TAMAMEN pazaryeri (Trendyol) kayitlaridir.
-    # Site iadeleri ayri koleksiyonda (customer_returns) ve ayri sekmede (Web Sitesi)
-    # gosterilir. Bu yuzden burada site/pazaryeri ayrimi YAPILMAZ; mikro ihracat dahil
-    # TUM claim'ler dondurulur. (`platform` parametresi geriye-donuk uyumluluk icin
-    # kabul edilir ama bu endpoint'te artik filtreleme yapmaz.)
-    platform_scoped = deduped
+    # (b) trendyol_claims koleksiyonu pazaryeri iade kayıtlarını tutar; HB iadeleri de
+    # buraya platform="hepsiburada" ile yazılır (ortak ekran/GP akışı). Site iadeleri
+    # ayrı koleksiyonda (customer_returns) ve ayrı sekmede (Web Sitesi) gösterilir.
+    # `platform` paramı: "hepsiburada" -> yalnız HB kayıtları; "trendyol"/boş -> HB
+    # OLMAYANLAR (eski kayıtlarda platform alanı yok -> Trendyol'da kalırlar).
+    _plt = str(platform or "trendyol").strip().lower()
+    if _plt == "hepsiburada":
+        platform_scoped = [c for c in deduped
+                           if str(c.get("platform") or "").lower() == "hepsiburada"]
+    elif _plt in ("trendyol", ""):
+        platform_scoped = [c for c in deduped
+                           if str(c.get("platform") or "").lower() != "hepsiburada"]
+    else:
+        platform_scoped = deduped
 
     # İptal (Cancelled iade statüsü) bu iade ekranından TAMAMEN dışlanır; iptaller
     # ayrı bir alandan yönetilir. Böylece "Tüm İadeler" sekmesi ve "Toplam İade"
@@ -3532,6 +3540,7 @@ async def get_trendyol_claims(
 async def export_trendyol_claims(
     status: str = "",
     search: str = "",
+    platform: str = "trendyol",
     current_user: dict = Depends(require_admin),
 ):
     """Trendyol iadelerini bulunulan sekme (status) + arama filtresiyle Excel'e aktarır.
@@ -3570,6 +3579,12 @@ async def export_trendyol_claims(
     _seen_orders = {c.get("order_number") for c in deduped if c.get("order_number")}
     _manual_rows = await _order_derived_trendyol_returns(search=search, exclude_order_numbers=_seen_orders)
     deduped = deduped + _manual_rows
+    # Platform süzmesi (liste ucuyla aynı kural): hepsiburada -> yalnız HB; trendyol/boş -> HB olmayanlar.
+    _plt = str(platform or "trendyol").strip().lower()
+    if _plt == "hepsiburada":
+        deduped = [c for c in deduped if str(c.get("platform") or "").lower() == "hepsiburada"]
+    elif _plt in ("trendyol", ""):
+        deduped = [c for c in deduped if str(c.get("platform") or "").lower() != "hepsiburada"]
     iade_scoped = [c for c in deduped if _claim_bucket(c) != "iptal"]
     iade_scoped.sort(key=lambda c: (c.get("created_date") or ""), reverse=True)
     if want_tab == "acik_iade":

@@ -335,7 +335,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
         .filter((n) => !Number.isNaN(n));
       const includeCargo = !!cargoSel[r.id];
       const body = { tracking_no: trackingNo };
-      if (selIdx.length) body.item_indexes = selIdx;
+      if (selIdx.length) {
+        body.item_indexes = selIdx;
+        // Index kaymasına dayanıklı kimlik eşlemesi: customer_returns kaydı (idempotent
+        // bridge) ekrandaki listeden farklıysa backend barcode/ad+beden+renk ile eşler.
+        body.selected_items = selIdx
+          .map((i) => (r.items || [])[i])
+          .filter(Boolean)
+          .map((it) => ({ barcode: it.barcode || "", name: it.name || "", size: it.size || "", color: it.color || "" }));
+      }
       if (includeCargo) body.include_cargo = true;
       const res = await axios.post(`${API}/orders/returns/${returnId}/gider-pusulasi`, body, auth());
       const gp = res.data?.gider_pusulasi;

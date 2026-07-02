@@ -84,6 +84,32 @@ export default function ReturnRequest() {
     const vu = ret.valid_until ? new Date(ret.valid_until).toLocaleString("tr-TR") : "";
     const contractNo = ret.contract_no || "490059279";
     const iadeNo = ret.iade_no || "";
+    // Süresi dolan kod: barkod gizlenir, müşteri (14 gün penceresi açıksa) yeni kod üretir.
+    if (ret.status === "expired") {
+      return (
+        <div className="max-w-xl mx-auto px-4 py-10 md:py-16">
+          <div className="flex items-center gap-2 mb-6">
+            <AlertTriangle className="text-amber-500" size={22} />
+            <h1 className="text-2xl font-medium tracking-wide">İade Kodunun Süresi Doldu</h1>
+          </div>
+          <div className="border border-amber-200 bg-amber-50 p-5 space-y-4">
+            <p className="text-sm text-amber-900">
+              <b className="font-mono">{ret.return_code}</b> kodlu iade kargo kodunun 3 günlük
+              geçerlilik süresi doldu (son geçerlilik: <b>{vu}</b>). Bu barkod artık şubede okutulamaz.
+            </p>
+            <p className="text-sm text-amber-900">
+              Teslimattan itibaren <b>14 günlük</b> iade süreniz devam ediyorsa aşağıdan yeni bir kod oluşturabilirsiniz.
+            </p>
+            <button
+              onClick={() => setRet(null)}
+              className="w-full bg-black text-white py-3 text-sm tracking-widest uppercase hover:bg-gray-800"
+            >
+              Yeni İade Kodu Oluştur
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="max-w-xl mx-auto px-4 py-10 md:py-16">
         <div className="flex items-center gap-2 mb-6">

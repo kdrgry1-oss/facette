@@ -2682,3 +2682,329 @@ async def hb_reject_claim(claim_number: str, req: HbClaimRejectReq, current_user
         return {"success": True, "data": data}
     except HepsiburadaError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# =====================================================================
+#  HB CLAIMS (İADE) DB SENKRONU + GİDER PUSULASI KÖPRÜSÜ + 30 GÜN BACKFILL
+#
+#  TASARIM: HB iade talepleri Trendyol'la AYNI iade/GP ekranını kullanır.
+#  Kayıtlar db.trendyol_claims koleksiyonuna platform="hepsiburada" ile
+#  upsert edilir; böylece GP üretimi (/trendyol/claims/{id}/gider-pusulasi),
+#  onay/ret, restock_claim_once ve Excel export uçları DEĞİŞİKSİZ çalışır.
+#  Liste ucu (GET /trendyol/claims) platform paramına göre süzer.
+# =====================================================================
+
+_HB_CLAIM_STATUS_TO_TY = {
+    # HB claim statüsü -> ekran kovalarının beklediği Trendyol statü seti
+    "accepted": "Accepted", "refunded": "Accepted", "refund": "Accepted",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled", "canceled": "Cancelled",
+    "awaitingaction": "WaitingInAction", "indispute": "WaitingInAction",
+    "waitingaction": "WaitingInAction", "inreview": "WaitingInAction",
+}
+
+
+def _hb_claim_status(raw: str) -> str:
+    key = str(raw or "").replace(" ", "").replace("_", "").lower()
+    return _HB_CLAIM_STATUS_TO_TY.get(key, "Created")
+
+
+def _hb_claim_items_raw(claim: dict) -> list:
+    for k in ("items", "claimItems", "lineItems", "details", "claimLineItems"):
+        v = claim.get(k)
+        if isinstance(v, list) and v:
+            return v
+    return [claim]  # tek kalemlik talep: alanlar claim kökünde
+
+
+async def _hb_claim_norm(claim: dict) -> dict | None:
+    """HB claim JSON'unu Trendyol claim şemasına normalize eder.
+    Alan adları HB tarafında değişkenlik gösterebildiği için savunmacıdır;
+    ham yanıt her zaman raw_data'da saklanır (gerekirse map buradan inceltilir)."""
+    cid = str(_hb_g(claim, "claimNumber", "claimId", "number", "id") or "").strip()
+    if not cid:
+        return None
+    onum = str(_hb_g(claim, "orderNumber", "orderId") or "").strip()
+    st = _hb_claim_status(_hb_g(claim, "status", "claimStatus", "state"))
+    ctype_raw = str(_hb_g(claim, "type", "claimType", "requestType") or "").lower()
+    ctype = "CANCEL" if ("cancel" in ctype_raw or "iptal" in ctype_raw) else "RETURN"
+
+    # Sipariş kaydı (2 dk cron'la panelde) — müşteri adı + kalem barkod/fiyat zenginleştirme
+    order = {}
+    if onum:
+        order = await db.orders.find_one(
+            {"order_number": onum, "platform": "hepsiburada"}, {"_id": 0}) or {}
+    o_items = order.get("items") or []
+
+    def _order_match(sku: str, name: str) -> dict:
+        s = str(sku or "").strip()
+        for it in o_items:
+            for k in ("barcode", "sku", "merchant_sku", "product_id", "hb_sku"):
+                if s and str(it.get(k) or "").strip() == s:
+                    return it
+        if name:
+            n = str(name).strip().lower()
+            for it in o_items:
+                if n and n in str(it.get("name") or "").lower():
+                    return it
+        return {}
+
+    items, refund = [], 0.0
+    reason_txt = str(_hb_g(claim, "reason", "claimReason", "customerReason") or "")
+    if isinstance(claim.get("reason"), dict):
+        reason_txt = str(_hb_g(claim["reason"], "name", "description", "text") or reason_txt)
+    for ci in _hb_claim_items_raw(claim):
+        if not isinstance(ci, dict):
+            continue
+        sku = str(_hb_g(ci, "merchantSku", "sku", "merchantSKU", "hbSku") or "")
+        name = str(_hb_g(ci, "productName", "name", "product") or "")
+        qty = int(_hb_g(ci, "quantity", "qty", default=1) or 1)
+        price = _hb_money(_hb_g(ci, "price", "unitPrice", "totalPrice", "amount", default=0))
+        r = _hb_g(ci, "reason", "claimReason")
+        if isinstance(r, dict):
+            r = _hb_g(r, "name", "description", "text")
+        oi = _order_match(sku, name)
+        barcode = str(_hb_g(ci, "barcode", "productBarcode") or oi.get("barcode") or "")
+        if not price:
+            price = float(oi.get("price") or oi.get("unit_price") or 0)
+        if not name:
+            name = str(oi.get("name") or "")
+        items.append({
+            "claim_item_id": str(_hb_g(ci, "id", "lineItemId", "claimItemId") or ""),
+            "productName": name, "barcode": barcode, "merchantSku": sku,
+            "unit_price": price, "discount_amount": 0, "price": price,
+            "quantity": qty, "reason": str(r or reason_txt or ""),
+        })
+        refund += price * qty
+    if not reason_txt and items:
+        reason_txt = items[0].get("reason", "")
+
+    created_raw = _hb_g(claim, "createdDate", "createdAt", "claimDate", "date")
+    created_iso = ""
+    if created_raw:
+        try:
+            if isinstance(created_raw, (int, float)):
+                created_iso = datetime.fromtimestamp(
+                    (created_raw / 1000 if created_raw > 10**11 else created_raw),
+                    tz=timezone.utc).isoformat()
+            else:
+                created_iso = datetime.fromisoformat(
+                    str(created_raw).replace("Z", "+00:00")).isoformat()
+        except Exception:
+            created_iso = str(created_raw)
+
+    ship = order.get("shipping_address") or {}
+    cust = str(_hb_g(claim, "customerName", "customer") or "").strip()
+    if isinstance(claim.get("customer"), dict):
+        cust = str(_hb_g(claim["customer"], "name", "fullName") or cust)
+    if not cust:
+        cust = f"{ship.get('first_name', '')} {ship.get('last_name', '')}".strip() \
+               or str(order.get("customer_name") or "")
+
+    return {
+        "claim_id": f"HB-{cid}",          # TY claim id'leriyle çakışmasın
+        "hb_claim_number": cid,           # HB accept/reject uçları bu numarayı kullanır
+        "platform": "hepsiburada",
+        "order_number": onum,
+        "claim_type": ctype,
+        "claim_reason": reason_txt,
+        "claim_status": st,
+        "customer_name": cust,
+        "created_date": created_iso or datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "refund_amount": round(refund, 2),
+        "invoice_number": str(order.get("invoice_number") or ""),
+        "cargo_tracking_number": str(_hb_g(claim, "cargoTrackingNumber", "trackingNumber") or ""),
+        "cargo_provider_name": str(_hb_g(claim, "cargoCompany", "cargoProviderName") or "Hepsiburada Marketplace"),
+        "raw_data": claim,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _sync_hepsiburada_claims_core(days_back: int = 60) -> dict:
+    """HB OMS claims -> db.trendyol_claims (platform=hepsiburada) upsert.
+    Endpoint + scheduler ortak çekirdeği. Durum geçişleri her turda tazelenir;
+    admin manuel kilit (manual_locked) koyduysa durum EZİLMEZ (TY ile aynı kural)."""
+    import asyncio as _aio
+    import uuid as _uuid
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        return {"success": False, "error": err, "synced": 0}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days_back or 60)))
+    synced, offset, limit = 0, 0, 50
+    for _page in range(20):  # emniyet: en çok 1000 kayıt/tur
+        try:
+            resp = await _aio.to_thread(client.get_claims, offset, limit)
+        except Exception as e:
+            return {"success": False, "error": str(e), "synced": synced}
+        rows = _hb_normalize_lines(resp)
+        if not isinstance(rows, list) or not rows:
+            break
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            doc = await _hb_claim_norm(raw)
+            if not doc:
+                continue
+            # days_back süzgeci (tarih parse edilebildiyse)
+            try:
+                cd = datetime.fromisoformat(doc["created_date"].replace("Z", "+00:00"))
+                if cd.tzinfo is None:
+                    cd = cd.replace(tzinfo=timezone.utc)
+                if cd < cutoff:
+                    continue
+            except Exception:
+                pass
+            existing = await db.trendyol_claims.find_one(
+                {"claim_id": doc["claim_id"]},
+                {"_id": 0, "manual_locked": 1, "return_approved_at": 1, "return_rejected_at": 1})
+            if existing and existing.get("manual_locked"):
+                doc.pop("claim_status", None)  # manuel durum korunur; kalan alanlar tazelenir
+            else:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if doc.get("claim_status") == "Accepted" and not (existing or {}).get("return_approved_at"):
+                    doc["return_approved_at"] = now_iso
+                if doc.get("claim_status") in ("Rejected", "Cancelled") and not (existing or {}).get("return_rejected_at"):
+                    doc["return_rejected_at"] = now_iso
+            await db.trendyol_claims.update_one(
+                {"claim_id": doc["claim_id"]},
+                {"$set": doc, "$setOnInsert": {"id": str(_uuid.uuid4()),
+                                               "created_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True)
+            synced += 1
+        if len(rows) < limit:
+            break
+        offset += limit
+    return {"success": True, "synced": synced}
+
+
+@router.get("/hepsiburada/claims/sync")
+async def hb_claims_sync(days_back: int = 60, current_user: dict = Depends(require_admin)):
+    """HB iade taleplerini yerel iade ekranına (Trendyol ile ortak) senkronlar."""
+    res = await _sync_hepsiburada_claims_core(days_back=days_back)
+    if not res.get("success"):
+        raise HTTPException(status_code=502, detail=res.get("error") or "HB claims senkron hatası")
+    await log_integration_event("hepsiburada", "claims_sync", "claim", "", "success",
+                                f"HB iade senkronu: {res['synced']} kayıt")
+    return {"success": True, "message": f"{res['synced']} HB iade kaydı senkronlandı", **res}
+
+
+# ---------------------------------------------------------------------
+#  TEK SEFERLİK BACKFILL — son N günün HB siparişleri + iptalleri + iadeleri
+# ---------------------------------------------------------------------
+async def _hb_backfill_run(days: int, decrement_stock: bool):
+    """Arka planda çalışır; ilerleme integration_logs'a düşer.
+    Kaynaklar: (1) açık siparişler (tarihsiz open/unpacked listesi),
+    (2) paketler — 24 saatlik dilimlerle (paketlenmiş/kargolanmış geçmiş siparişler),
+    (3) iptaller — 24 saatlik dilimlerle (HB yalnız son 1 aylık iptali verir),
+    (4) iadeler (claims senkronu)."""
+    import asyncio as _aio
+    from .category_mapping import _get_hb_client
+    days = max(1, min(int(days or 30), 30))
+    client, err = await _get_hb_client()
+    if err:
+        await log_integration_event("hepsiburada", "backfill", "job", "", "failed", f"HB kimliği yok: {err}")
+        return
+
+    async def _upsert_groups(grouped, forced_status=None, allow_decrement=False):
+        imported = updated = 0
+        for g in grouped:
+            try:
+                data = await _hb_enrich_items(map_hepsiburada_order(g))
+                number = data.get("order_number")
+                if not number:
+                    continue
+                if forced_status:
+                    data["status"] = forced_status
+                existing = await db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
+                if existing:
+                    upd = {k: v for k, v in data.items() if k != "status"}
+                    if forced_status and existing.get("status") not in ("cancelled", "returned"):
+                        upd["status"] = forced_status
+                        if forced_status == "cancelled":
+                            upd.setdefault("cancelled_at", datetime.now(timezone.utc).isoformat())
+                            upd.setdefault("cancel_source", "hepsiburada_backfill")
+                    await db.orders.update_one({"_id": existing["_id"]}, {"$set": upd})
+                    updated += 1
+                else:
+                    data["id"] = generate_id()
+                    data["created_at"] = _hb_created_at(data)
+                    if forced_status == "cancelled":
+                        data.setdefault("cancelled_at", datetime.now(timezone.utc).isoformat())
+                        data.setdefault("cancel_source", "hepsiburada_backfill")
+                    await db.orders.insert_one(data)
+                    imported += 1
+                    if allow_decrement and data.get("status") not in ("cancelled", "returned"):
+                        await _decrement_stock_for_imported_order(data, "hepsiburada")
+            except Exception as e:
+                await log_integration_event("hepsiburada", "backfill", "order",
+                                            str(g)[:40], "error", f"Backfill kalem hatası: {e}")
+        return imported, updated
+
+    tot_imp = tot_upd = 0
+    # (1) Açık siparişler — tarihsiz liste, offset sayfalama
+    try:
+        offset = 0
+        for _p in range(10):
+            resp = await _aio.to_thread(client.get_orders, None, None, offset, 100)
+            grouped = _hb_orders_from_response(resp)
+            if not grouped:
+                break
+            i, u = await _upsert_groups(grouped, allow_decrement=decrement_stock)
+            tot_imp += i; tot_upd += u
+            if len(_hb_normalize_lines(resp)) < 100:
+                break
+            offset += 100
+    except Exception as e:
+        await log_integration_event("hepsiburada", "backfill", "open_orders", "", "error", f"Açık sipariş taraması: {e}")
+
+    # (2) Paketler + (3) İptaller — 24 saatlik dilimler (bugünden geriye)
+    now_ = datetime.now(timezone.utc)
+    pkg_imp = pkg_upd = cn_imp = cn_upd = 0
+    for d in range(days):
+        end = now_ - timedelta(days=d)
+        begin = end - timedelta(days=1)
+        b, e = begin.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
+        try:
+            resp = await _aio.to_thread(client.get_packages, 0, 100, b, e)
+            i, u = await _upsert_groups(_hb_orders_from_response(resp))
+            pkg_imp += i; pkg_upd += u
+        except Exception as ex:
+            await log_integration_event("hepsiburada", "backfill", "packages", b, "error", f"Paket dilimi {b}: {ex}")
+        try:
+            resp = await _aio.to_thread(client.get_cancelled_orders, 0, 50, b, e)
+            i, u = await _upsert_groups(_hb_orders_from_response(resp), forced_status="cancelled")
+            cn_imp += i; cn_upd += u
+        except Exception as ex:
+            await log_integration_event("hepsiburada", "backfill", "cancelled", b, "error", f"İptal dilimi {b}: {ex}")
+        await _aio.sleep(0.3)  # OMS rate limit nezaketi
+
+    # (4) İadeler
+    claims = await _sync_hepsiburada_claims_core(days_back=days)
+
+    await log_integration_event(
+        "hepsiburada", "backfill", "job", "", "success",
+        f"HB {days} gün backfill bitti — açık: +{tot_imp}/{tot_upd} · paket: +{pkg_imp}/{pkg_upd} · "
+        f"iptal: +{cn_imp}/{cn_upd} · iade: {claims.get('synced', 0)}"
+        + (" · stok düşümü: AÇIK" if decrement_stock else " · stok düşümü: kapalı"))
+
+
+@router.post("/hepsiburada/backfill")
+async def hb_backfill(payload: Optional[dict] = Body(default=None),
+                      current_user: dict = Depends(require_admin)):
+    """Tek seferlik: son N günün HB siparişleri + iptalleri + iadelerini sisteme çeker.
+    Arka planda çalışır; ilerleme/sonuç Entegrasyon Logları'na (hepsiburada/backfill) düşer.
+    body: {"days": 30, "decrement_stock": false}
+    NOT: Geçmiş siparişlerde stok düşümü VARSAYILAN KAPALI (çift düşüm riski —
+    bu siparişler büyük olasılıkla fiilen işlendi)."""
+    import asyncio as _aio
+    p = payload or {}
+    days = int(p.get("days") or 30)
+    dec = bool(p.get("decrement_stock") or False)
+    _aio.create_task(_hb_backfill_run(days, dec))
+    await log_integration_event("hepsiburada", "backfill", "job", "", "queued",
+                                f"HB {days} gün backfill başlatıldı (stok düşümü: {'açık' if dec else 'kapalı'})")
+    return {"success": True, "started": True, "days": days, "decrement_stock": dec,
+            "message": f"Son {days} günün HB siparişleri/iptalleri/iadeleri arka planda çekiliyor — sonuç Entegrasyon Logları'nda."}

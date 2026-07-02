@@ -214,6 +214,7 @@ export default function AdminProducts() {
   // "toplu durum değişikliği / toplu Trendyol push" için kullanılır.
   // ---------------------------------------------------------------------------
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [barcodeSizeModal, setBarcodeSizeModal] = useState(null); // barkod yazdırma beden seçimi
   const toggleSelectProduct = (id) =>
     setSelectedProducts((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -1440,28 +1441,77 @@ export default function AdminProducts() {
    *   (giyim firmalarındaki gibi: ürün adı, stok kodu, GTIN barkod, beden, renk).
    *   BACKEND: GET /api/products/{id}/barcode-card
    */
-  const handlePrintBarcode = (productId) => {
+  const handlePrintBarcode = (productId, sizes = null) => {
     const token = localStorage.getItem('token');
-    const url = `${API}/products/${productId}/barcode-card?token=${token}`;
+    const q = sizes && sizes.length ? `&sizes=${encodeURIComponent(sizes.join(','))}` : '';
+    const url = `${API}/products/${productId}/barcode-card?token=${token}${q}`;
     const w = window.open(url, '_blank', 'width=820,height=1000');
     if (w) { w.focus(); } // otomatik yazdirma yok: kopya adedini secip "Yazdir"a bas
   };
 
   /**
+   * openBarcodeSizePicker — Barkod yazdırmadan önce beden seçimi sunar.
+   *   mode:'single' → tek ürün (product objesi), mode:'bulk' → seçili ürünler.
+   *   Default: TÜM bedenler işaretli (tek tık "Yazdır" = eski davranış).
+   */
+  const openBarcodeSizePicker = (mode, product = null) => {
+    let sizeList = [];
+    if (mode === 'single') {
+      sizeList = [...new Set((product?.variants || []).map(v => (v.size || '').trim()).filter(Boolean))];
+      if (sizeList.length <= 1) { handlePrintBarcode(product.id); return; } // tek/0 beden → direkt yazdır
+    } else {
+      const chosen = products.filter(p => selectedProducts.includes(p.id));
+      sizeList = [...new Set(chosen.flatMap(p => (p.variants || []).map(v => (v.size || '').trim())).filter(Boolean))];
+      if (sizeList.length <= 1) { handleBulkPrintBarcodes(); return; }
+    }
+    // Bedenleri mantıklı sırala (XS→XXL, sonra sayısal/diğer alfabetik)
+    const ORDER = ['XXS','XS','S','M','L','XL','XXL','3XL','4XL'];
+    sizeList.sort((a, b) => {
+      const ia = ORDER.indexOf(a.toUpperCase()), ib = ORDER.indexOf(b.toUpperCase());
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return a.localeCompare(b, 'tr', { numeric: true });
+    });
+    setBarcodeSizeModal({
+      mode,
+      productId: product?.id || null,
+      sizes: sizeList,
+      selected: Object.fromEntries(sizeList.map(s => [s, true])),
+    });
+  };
+
+  const confirmBarcodeSizePrint = () => {
+    if (!barcodeSizeModal) return;
+    const picked = barcodeSizeModal.sizes.filter(s => barcodeSizeModal.selected[s]);
+    if (picked.length === 0) { toast.error("En az bir beden seçiniz"); return; }
+    const all = picked.length === barcodeSizeModal.sizes.length;
+    const sizes = all ? null : picked; // hepsi seçiliyse filtre gönderme
+    if (barcodeSizeModal.mode === 'single') {
+      handlePrintBarcode(barcodeSizeModal.productId, sizes);
+    } else {
+      handleBulkPrintBarcodes(sizes);
+    }
+    setBarcodeSizeModal(null);
+  };
+
+  /**
    * handleBulkPrintBarcodes — Seçili ürünlerin barkod kartlarını TEK bir
    *   yazdırılabilir sayfada gösterir. A4'e sığacak şekilde 2-4 kart/satır.
-   *   BACKEND: POST /api/products/barcode-cards/bulk (body: { ids: [...] })
+   *   BACKEND: POST /api/products/barcode-cards/bulk (body: { ids: [...], sizes?: [...] })
    */
-  const handleBulkPrintBarcodes = async () => {
+  const handleBulkPrintBarcodes = async (sizes = null) => {
     if (selectedProducts.length === 0) {
       toast.error("Lütfen ürün seçiniz");
       return;
     }
     try {
       const token = localStorage.getItem('token');
+      const body = { ids: selectedProducts };
+      if (sizes && sizes.length) body.sizes = sizes;
       const res = await axios.post(
         `${API}/products/barcode-cards/bulk`,
-        { ids: selectedProducts },
+        body,
         { headers: { Authorization: `Bearer ${token}` }, responseType: 'text' }
       );
       const w = window.open('', '_blank', 'width=900,height=1100');
@@ -2000,7 +2050,7 @@ export default function AdminProducts() {
           </span>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleBulkPrintBarcodes}
+              onClick={() => openBarcodeSizePicker('bulk')}
               className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
               data-testid="products-bulk-print-barcode-btn"
             >
@@ -2188,7 +2238,7 @@ export default function AdminProducts() {
                           <Layers size={16} />
                         </button>
                         <button
-                          onClick={() => handlePrintBarcode(product.id)}
+                          onClick={() => openBarcodeSizePicker('single', product)}
                           className="p-1.5 hover:bg-purple-50 rounded text-purple-600 transition-colors"
                           title="Barkod Kartı Yazdır"
                           data-testid={`product-print-barcode-${product.id}`}
@@ -4122,6 +4172,58 @@ export default function AdminProducts() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Barkod Yazdırma: Beden Seçimi ─────────────────────────────── */}
+      {barcodeSizeModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
+             onClick={() => setBarcodeSizeModal(null)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-5"
+               onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-gray-800 mb-1">Barkod Yazdır — Beden Seçimi</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              {barcodeSizeModal.mode === 'bulk'
+                ? `${selectedProducts.length} üründe bulunan bedenler. Yalnız işaretli bedenlerin kartları basılır.`
+                : 'Yalnız işaretli bedenlerin kartları basılır.'}
+            </p>
+            <label className="flex items-center gap-2 py-1.5 border-b border-gray-100 mb-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={barcodeSizeModal.sizes.every(s => barcodeSizeModal.selected[s])}
+                onChange={(e) => {
+                  const all = e.target.checked;
+                  setBarcodeSizeModal(m => ({ ...m, selected: Object.fromEntries(m.sizes.map(s => [s, all])) }));
+                }}
+                className="rounded border-gray-300"
+              />
+              <span className="text-sm font-medium text-gray-800">Tüm Bedenler</span>
+            </label>
+            <div className="max-h-52 overflow-y-auto grid grid-cols-3 gap-x-3">
+              {barcodeSizeModal.sizes.map(s => (
+                <label key={s} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!barcodeSizeModal.selected[s]}
+                    onChange={(e) => setBarcodeSizeModal(m => ({ ...m, selected: { ...m.selected, [s]: e.target.checked } }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm text-gray-700">{s}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setBarcodeSizeModal(null)}
+                      className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded">
+                Vazgeç
+              </button>
+              <button onClick={confirmBarcodeSizePrint}
+                      className="flex items-center gap-1 px-4 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                      data-testid="barcode-size-print-confirm">
+                <Printer size={14} /> Yazdır
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

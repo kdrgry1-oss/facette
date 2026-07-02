@@ -14,6 +14,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const PLATFORMS = [
   { key: "facette", label: "Web Sitesi", badge: "W", color: "bg-gray-800" },
   { key: "trendyol", label: "Trendyol", badge: "T", color: "bg-orange-500" },
+  { key: "hepsiburada", label: "Hepsiburada", badge: "H", color: "bg-amber-600" },
 ];
 
 const STATUS_TABS = [
@@ -183,10 +184,13 @@ export default function Returns() {
   // Auto-refresh every 5 minutes
   useEffect(() => {
     const syncAndRefresh = async () => {
-      if (platform !== "trendyol") return;
+      if (platform !== "trendyol" && platform !== "hepsiburada") return;
       try {
         const token = localStorage.getItem("token");
-        await axios.get(`${API}/integrations/trendyol/claims/sync`, {
+        const syncUrl = platform === "hepsiburada"
+          ? `${API}/integrations/hepsiburada/claims/sync`
+          : `${API}/integrations/trendyol/claims/sync`;
+        await axios.get(syncUrl, {
           headers: { Authorization: `Bearer ${token}` }
         });
         await fetchClaims();
@@ -200,7 +204,10 @@ export default function Returns() {
     setSyncing(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/integrations/trendyol/claims/sync`, {
+      const syncUrl = platform === "hepsiburada"
+        ? `${API}/integrations/hepsiburada/claims/sync`
+        : `${API}/integrations/trendyol/claims/sync`;
+      const res = await axios.get(syncUrl, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success(res.data.message || "Senkronizasyon tamamlandı");
@@ -219,6 +226,7 @@ export default function Returns() {
       const params = new URLSearchParams();
       if (statusTab && statusTab !== "all") params.append("status", statusTab);
       if (debouncedSearch) params.append("search", debouncedSearch);
+      params.append("platform", platform);
       const res = await fetch(`${API}/integrations/trendyol/claims/export?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
@@ -227,7 +235,7 @@ export default function Returns() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `trendyol-iadeleri-${statusTab || "tum"}.xlsx`;
+      a.download = `${platform === "hepsiburada" ? "hepsiburada" : "trendyol"}-iadeleri-${statusTab || "tum"}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -499,7 +507,7 @@ export default function Returns() {
         {platform === "facette" && <RooftrReturns embedded gpStart={gpStart} onGiderCreated={(gp) => { setGpData(gp); setGpModalOpen(true); advanceGpNo(1); }} />}
 
         {/* Trendyol (pazaryeri) sekmesi gövdesi */}
-        {platform === "trendyol" && (<>
+        {(platform === "trendyol" || platform === "hepsiburada") && (<>
         {/* Durum sekmeleri */}
         <div className="flex items-center gap-2 overflow-x-auto mb-4">
           {STATUS_TABS.map((t) => (

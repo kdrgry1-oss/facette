@@ -402,10 +402,27 @@ async def open_rooftr_return(order_id: str, current_user: dict = Depends(require
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
-    # İdempotent: bu siparişe ait köprü kaydı zaten varsa onu döndür
+    # İdempotent: bu siparişe ait köprü kaydı zaten varsa onu döndür.
+    # ONARIM: eski kayıtta items hiç yazılmamışsa (boş) sipariş kalemleriyle doldur —
+    # gider pusulası/iade akışları kalemleri bu kayıttan okur, boş kayıt kısmi seçimi bozar.
     existing = await db.customer_returns.find_one(
-        {"order_id": order_id}, {"_id": 0, "id": 1, "status": 1})
+        {"order_id": order_id, "status": {"$ne": "expired"}},
+        {"_id": 0, "id": 1, "status": 1, "items": 1})
     if existing:
+        if not (existing.get("items") or []):
+            _src = order.get("items") or []
+            _fix = [{
+                "name": it.get("product_name") or it.get("name") or "Ürün",
+                "size": it.get("size", "") or "",
+                "color": it.get("color", "") or "",
+                "quantity": int(it.get("quantity", 1) or 1),
+                "price": float(it.get("price") or it.get("unit_price") or 0),
+                "unit_price": float(it.get("unit_price") or it.get("price") or 0),
+                "product_id": it.get("barcode") or it.get("product_id") or it.get("sku") or "",
+            } for it in _src]
+            if _fix:
+                await db.customer_returns.update_one(
+                    {"id": existing.get("id")}, {"$set": {"items": _fix}})
         return {"success": True, "return_id": existing.get("id"),
                 "status": existing.get("status"), "created": False}
 

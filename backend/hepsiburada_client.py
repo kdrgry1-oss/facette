@@ -512,11 +512,36 @@ class HepsiburadaClient:
         return {"_orderNumber": b["OrderNumber"], "raw": resp}
 
     # ---------- Sipariş listesi / detay ----------
+    @staticmethod
+    def _oms_date(v):
+        """OMS tarih paramı: HB 'yyyy-MM-dd HH:mm' bekler (küçük harf begindate/enddate).
+        ISO/'T'li/saniyeli/datetime girişleri bu formata normalize eder; None→None."""
+        if v is None or v == "":
+            return None
+        from datetime import datetime as _dt
+        if isinstance(v, _dt):
+            return v.strftime("%Y-%m-%d %H:%M")
+        s = str(v).strip().replace("T", " ")
+        try:
+            return _dt.fromisoformat(s).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return s[:16]  # 'yyyy-MM-dd HH:mm' uzunluğuna kırp — en azından saniyeyi at
+
     def get_orders(self, begin_date=None, end_date=None, offset=0, limit=100, read_timeout=12):
-        """Geçmiş sipariş kalemlerini tarih aralığına göre listeler (OMS line-item bazlı).
+        """Ödemesi tamamlanmış (Open/Unpacked) sipariş kalemlerini listeler.
+        DİKKAT (HB kuralı): begindate/enddate yalnız 24 SAATLİK pencere kabul eder;
+        daha genişse enddate ignore edilir. Tarihsiz çağrı tüm açık siparişleri döner.
         read_timeout: gateway 503 eşiğinin (≈20s) ALTINDA kalmak için kısa tutulur."""
-        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        params = {"offset": offset, "limit": limit,
+                  "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
         return self._oms_get(f"/orders/merchantid/{self.merchant_id}", params, read_timeout=read_timeout)
+
+    def get_cancelled_orders(self, offset=0, limit=50, begin_date=None, end_date=None, read_timeout=12):
+        """İptal edilmiş siparişleri listeler (son 1 aylık veri, limit max 50)."""
+        params = {"offset": offset, "limit": min(int(limit or 50), 50),
+                  "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
+        return self._oms_get(f"/orders/merchantid/{self.merchant_id}/cancelled", params,
+                             read_timeout=read_timeout)
 
     def get_order_by_number(self, order_number):
         """Tek bir siparişi numarasına göre getirir (özet)."""
@@ -561,8 +586,9 @@ class HepsiburadaClient:
                              {"offset": offset, "limit": limit})
 
     def get_packages(self, offset=0, limit=100, begin_date=None, end_date=None):
-        """Paket listesini döner."""
-        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        """Paket listesini döner (begindate/enddate: 'yyyy-MM-dd HH:mm')."""
+        params = {"offset": offset, "limit": limit,
+                  "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
         return self._oms_get(f"/packages/merchantid/{self.merchant_id}", params)
 
     def get_package_cargo(self, package_number):
@@ -623,8 +649,9 @@ class HepsiburadaClient:
     #  İADE / TALEP (OMS claim)
     # ====================================================================
     def get_claims(self, offset=0, limit=100, begin_date=None, end_date=None):
-        """Tüm talep (iade) detaylarını listeler."""
-        params = {"offset": offset, "limit": limit, "beginDate": begin_date, "endDate": end_date}
+        """Tüm talep (iade) detaylarını listeler (begindate/enddate: 'yyyy-MM-dd HH:mm')."""
+        params = {"offset": offset, "limit": limit,
+                  "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
         return self._oms_get(f"/claims/merchantid/{self.merchant_id}", params)
 
     def get_claims_by_status(self, status, offset=0, limit=100):

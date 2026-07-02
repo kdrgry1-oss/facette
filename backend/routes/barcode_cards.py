@@ -196,10 +196,12 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     )
 
 
-def _product_cards_html(product: dict) -> str:
+def _product_cards_html(product: dict, sizes: list | None = None) -> str:
     """
-    Bir ürünün tüm varyantları için kart HTML üretir. Varyant yoksa ürün
+    Bir ürünün varyantları için kart HTML üretir. Varyant yoksa ürün
     seviyesinde tek kart üretilir (stock_code + barcode).
+    `sizes` verilirse yalnız o bedenlerdeki varyantlar basılır
+    (büyük/küçük harf ve boşluk duyarsız). Boş/None => tüm bedenler.
     """
     variants = product.get("variants") or []
     if not variants:
@@ -211,6 +213,11 @@ def _product_cards_html(product: dict) -> str:
             "color": "",
         }
         return _card_html_for_variant(product, fake)
+    if sizes:
+        want = {str(s or "").strip().upper() for s in sizes if str(s or "").strip()}
+        if want:
+            variants = [v for v in variants
+                        if str(v.get("size") or "").strip().upper() in want]
     return "".join(_card_html_for_variant(product, v) for v in variants)
 
 
@@ -221,11 +228,12 @@ def _product_cards_html(product: dict) -> str:
 async def get_product_barcode_card(
     product_id: str,
     token: str = Query(None),
+    sizes: str = Query(None, description="Virgülle ayrık beden filtresi (örn. 'S,M'). Boş = tüm bedenler."),
     current_user: dict = Depends(get_current_user),
 ):
     """
     Tek ürün için yazdırılabilir barkod kartı sayfası döner.
-    Ürünün her varyantı için ayrı kart.
+    Ürünün her varyantı için ayrı kart; `sizes` verilirse yalnız o bedenler.
     Query `token` parametresi frontend'de window.open içinde kimlik
     doğrulama için kullanılabilsin diye gevşek tutuldu — asıl kontrol
     `get_current_user` dependency'sinde.
@@ -234,7 +242,10 @@ async def get_product_barcode_card(
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
 
-    cards = _product_cards_html(product)
+    _sizes = [s for s in (sizes or "").split(",") if s.strip()] or None
+    cards = _product_cards_html(product, sizes=_sizes)
+    if not cards:
+        raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{product.get('name', 'Ürün')} — Barkod Kartı")
     return Response(content=html, media_type="text/html; charset=utf-8")
 
@@ -248,12 +259,16 @@ async def get_bulk_barcode_cards(
     current_user: dict = Depends(require_admin),
 ):
     """
-    {"ids": [...]} → Gönderilen ürün id'lerinin hepsi için tek yazdırılabilir
-    HTML dokümanı. Seçilen her ürünün tüm varyantları için ayrı kart basar.
+    {"ids": [...], "sizes": ["S","M"]} → Gönderilen ürün id'lerinin hepsi için tek
+    yazdırılabilir HTML dokümanı. `sizes` verilirse her üründe yalnız o bedenlerin
+    kartları basılır; boşsa tüm varyantlar.
     """
     ids = payload.get("ids") or []
     if not ids:
         raise HTTPException(status_code=400, detail="Ürün seçilmedi")
+    _sizes = payload.get("sizes") or None
+    if isinstance(_sizes, str):
+        _sizes = [s for s in _sizes.split(",") if s.strip()]
 
     cursor = db.products.find({"id": {"$in": ids}}, {"_id": 0})
     products = await cursor.to_list(length=len(ids))
@@ -261,6 +276,8 @@ async def get_bulk_barcode_cards(
     if not products:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
 
-    cards = "".join(_product_cards_html(p) for p in products)
+    cards = "".join(_product_cards_html(p, sizes=_sizes) for p in products)
+    if not cards:
+        raise HTTPException(status_code=404, detail="Seçilen bedenlerde varyant bulunamadı")
     html = _build_html(cards, title=f"{len(products)} Ürün — Barkod Kartları")
     return Response(content=html, media_type="text/html; charset=utf-8")

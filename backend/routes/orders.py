@@ -3896,6 +3896,20 @@ def _render_return_barcode_png_b64(code: str) -> str:
 
 def _public_return(rec: dict) -> dict:
     png = rec.get("barcode_png_b64") or ""
+    status = rec.get("status")
+    # Süresi dolan iade kodu: 'created' + valid_until geçmiş → müşteriye 'expired' görünür,
+    # barkod GÖSTERİLMEZ (şubede okutulamaz). 14 gün penceresi hâlâ açıksa müşteri yeni kod üretir.
+    expired = False
+    if status == "created":
+        try:
+            vu = datetime.fromisoformat(str(rec.get("valid_until") or "").replace("Z", "+00:00"))
+            if vu.tzinfo is None:
+                vu = vu.replace(tzinfo=timezone.utc)
+            expired = datetime.now(timezone.utc) > vu
+        except Exception:
+            expired = False
+    if expired:
+        status, png = "expired", ""
     return {
         "id": rec.get("id"),
         "order_number": rec.get("order_number"),
@@ -3904,7 +3918,7 @@ def _public_return(rec: dict) -> dict:
         "gonderi_no": rec.get("gonderi_no") or "",
         "contract_no": rec.get("contract_no") or RETURN_CONTRACT_NO,
         "company_address": rec.get("company_address") or "",
-        "status": rec.get("status"),
+        "status": status,
         "valid_until": rec.get("valid_until"),
         "cargo_provider_name": rec.get("cargo_provider_name"),
         "mng_ok": rec.get("mng_ok", False),
@@ -4010,11 +4024,32 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         raise HTTPException(status_code=400, detail="İade süresi (teslimden itibaren 14 gün) dolmuştur.")
 
     # Zaten aktif iade var mı?
+    #   in_transit → kargoya verilmiş, mevcut kaydı döndür.
+    #   created + kod SÜRESİ GEÇMEMİŞ → aynı kodu döndür (mükerrer üretme).
+    #   created + kod SÜRESİ GEÇMİŞ → kaydı 'expired' yap; müşteri 14 gün penceresinde
+    #     olduğu (yukarıda doğrulandı) için YENİ kod üretimine devam et.
     existing = await db.customer_returns.find_one(
         {"order_id": order["id"], "status": {"$in": ["created", "in_transit"]}}, {"_id": 0}
     )
     if existing:
-        return {"success": True, "already": True, "return": _public_return(existing)}
+        _still_valid = True
+        if existing.get("status") == "created":
+            try:
+                _vu = datetime.fromisoformat(str(existing.get("valid_until") or "").replace("Z", "+00:00"))
+                if _vu.tzinfo is None:
+                    _vu = _vu.replace(tzinfo=timezone.utc)
+                _still_valid = now <= _vu
+            except Exception:
+                _still_valid = True
+        if _still_valid:
+            return {"success": True, "already": True, "return": _public_return(existing)}
+        await db.customer_returns.update_one(
+            {"id": existing.get("id")},
+            {"$set": {"status": "expired", "expired_at": now.isoformat()}})
+        await _log_order_event(order["id"], "return", "İade kodu süresi doldu — yeni kod üretiliyor",
+                               current_user, {"return_id": existing.get("id"),
+                                              "old_return_code": existing.get("return_code")},
+                               order_number=order.get("order_number", ""))
 
     # Seçilen kalemler (index listesi) — boşsa tüm sipariş
     src_items = order.get("items") or []
@@ -4726,10 +4761,42 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
                  or ship.get("full_name", "") or "Müşteri")
 
     all_items = rec.get("items", []) or []
-    # Seçili kalemler (kısmi iade). item_indexes verilmezse => TÜM sipariş (tam iade).
+    # Seçili kalemler (kısmi iade). Öncelik sırası:
+    #   1) payload.selected_items: kalem KİMLİKLERİ [{barcode, name, size, color}] — index
+    #      kaymasına dayanıklı (ekrandaki liste ile customer_returns.items farklı olabilir:
+    #      idempotent bridge eski kaydı döndürür). barcode↔product_id öncelikli eşleşir.
+    #   2) payload.item_indexes: rec.items index'leri (geriye uyum).
+    # İkisi de yoksa => TÜM sipariş (tam iade).
+    # GÜVENLİK: seçim GÖNDERİLDİYSE ama hiçbir kalem eşleşmediyse SESSİZCE tam iadeye
+    # DÜŞMEYİZ — 400 döneriz. (Eski davranış: uyumsuz index'ler elenip "seçim yok"
+    # sayılıyor, tüm siparişe gider pusulası kesiliyordu.)
+    def _inorm(v):
+        return " ".join(str(v or "").strip().lower().split())
+
+    _sel_items = (payload or {}).get("selected_items")
     _sel_idx = (payload or {}).get("item_indexes")
     _sel = []
-    if isinstance(_sel_idx, list) and _sel_idx:
+    if isinstance(_sel_items, list) and _sel_items:
+        for want in _sel_items:
+            if not isinstance(want, dict):
+                continue
+            w_bar = _inorm(want.get("barcode") or want.get("product_id"))
+            w_key = (_inorm(want.get("name")), _inorm(want.get("size")), _inorm(want.get("color")))
+            for i, it in enumerate(all_items):
+                if i in _sel:
+                    continue
+                it_bar = _inorm(it.get("product_id") or it.get("barcode"))
+                if w_bar and it_bar and w_bar == it_bar:
+                    _sel.append(i)
+                    break
+                it_key = (_inorm(it.get("name")), _inorm(it.get("size")), _inorm(it.get("color")))
+                if w_key[0] and w_key == it_key:
+                    _sel.append(i)
+                    break
+        if not _sel:
+            raise HTTPException(status_code=400,
+                                detail="Seçilen kalemler iade kaydında bulunamadı — sayfayı yenileyip tekrar deneyin")
+    elif isinstance(_sel_idx, list) and _sel_idx:
         for _i in _sel_idx:
             try:
                 _i = int(_i)
@@ -4737,6 +4804,9 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
                 continue
             if 0 <= _i < len(all_items):
                 _sel.append(_i)
+        if not _sel:
+            raise HTTPException(status_code=400,
+                                detail="Seçilen kalemler iade kaydıyla eşleşmedi — sayfayı yenileyip tekrar deneyin")
     if _sel:
         _sel = sorted(set(_sel))
         items = [all_items[i] for i in _sel]

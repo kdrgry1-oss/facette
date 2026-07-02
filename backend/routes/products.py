@@ -2721,3 +2721,87 @@ async def apply_technical_details(payload: dict, current_user: dict = Depends(re
             })
 
     return {"success": True, "updated": updated, "message": f"{updated} ürünün özellikleri güncellendi"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HAYALET-DUPLİKE TEMİZLİĞİ — aynı `id` alanına sahip birden çok products dökümanı
+# ─────────────────────────────────────────────────────────────────────────────
+@router.post("/cleanup/ghost-duplicates")
+async def cleanup_ghost_duplicates(
+    dry_run: bool = Query(True, description="True → yalnız rapor (YAZMAZ/SİLMEZ). False → hayaletleri siler."),
+    current_user: dict = Depends(require_admin),
+):
+    """Aynı `id` değerine sahip BİRDEN ÇOK products dökümanını bulur; en sağlıklı
+    KOPYAYI KORUR, diğer (hayalet/iskelet) kopyaları siler.
+
+    NEDEN VAR: Ticimax migrasyonundan aynı `id`'li ikiz dökümanlar kaldı. Liste
+    endpoint'i `is_active: True` filtresiyle hayaleti GİZLİYOR, ama filtresiz
+    `find_one({"id": ...})` çağrıları (HB motoru, debug-payload) İLK eşleşen olarak
+    HAYALETİ buluyor → ürün kartına yazılan özellikler motor tarafında GÖRÜNMÜYOR
+    ("Kalıp eksik" hatasının kökü). update_one ile find_one aynı id'de FARKLI
+    dökümanlara gidebildiği için yazma-okuma tutarsızlığı oluşuyor.
+
+    KORUNACAK kopya seçimi (yüksek skor kazanır):
+      is_deleted != True  → +8   (çöpteki asla korunmaz, aktif dururken)
+      is_active == True   → +4
+      variants dolu       → +2
+      stock_code dolu     → +1
+      eşitlikte: updated_at en yeni olan.
+
+    `id` string/int karışıklığına dayanıklıdır ($toString ile gruplar).
+    Her zaman ÖNCE dry_run=true ile raporu gör, sonra dry_run=false uygula.
+    """
+    pipeline = [
+        {"$group": {
+            "_id": {"$toString": {"$ifNull": ["$id", "$_id"]}},
+            "n": {"$sum": 1},
+            "docs": {"$push": {
+                "oid": "$_id",
+                "name": "$name",
+                "is_active": "$is_active",
+                "is_deleted": "$is_deleted",
+                "stock_code": "$stock_code",
+                "updated_at": "$updated_at",
+                "variants_n": {"$cond": [{"$isArray": "$variants"}, {"$size": "$variants"}, 0]},
+                "attrs_n": {"$cond": [{"$isArray": "$attributes"}, {"$size": "$attributes"}, 0]},
+            }},
+        }},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    groups = await db.products.aggregate(pipeline).to_list(length=5000)
+
+    def _score(doc: dict):
+        s = 0
+        if doc.get("is_deleted") is not True:
+            s += 8
+        if doc.get("is_active") is True:
+            s += 4
+        if (doc.get("variants_n") or 0) > 0:
+            s += 2
+        if doc.get("stock_code"):
+            s += 1
+        return (s, str(doc.get("updated_at") or ""))
+
+    report, delete_oids = [], []
+    for g in groups:
+        docs = sorted(g.get("docs") or [], key=_score, reverse=True)
+        keep, ghosts = docs[0], docs[1:]
+        delete_oids.extend(d["oid"] for d in ghosts)
+        report.append({
+            "id": g["_id"], "count": g["n"],
+            "keep": {k: keep.get(k) for k in ("name", "is_active", "stock_code", "variants_n", "attrs_n", "updated_at")},
+            "ghosts": [{k: d.get(k) for k in ("name", "is_active", "is_deleted", "stock_code", "variants_n", "attrs_n", "updated_at")} for d in ghosts],
+        })
+
+    deleted = 0
+    if not dry_run and delete_oids:
+        res = await db.products.delete_many({"_id": {"$in": delete_oids}})
+        deleted = res.deleted_count
+
+    return {
+        "success": True, "dry_run": dry_run,
+        "duplicate_groups": len(groups), "ghost_docs": len(delete_oids), "deleted": deleted,
+        "message": (f"{len(groups)} duplike id grubu, {len(delete_oids)} hayalet döküman bulundu"
+                    + ("" if dry_run else f"; {deleted} silindi")),
+        "report": report[:200],
+    }
