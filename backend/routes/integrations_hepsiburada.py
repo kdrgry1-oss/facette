@@ -2729,17 +2729,24 @@ async def _hb_claim_norm(claim: dict) -> dict | None:
     ctype_raw = str(_hb_g(claim, "type", "claimType", "requestType") or "").lower()
     ctype = "CANCEL" if ("cancel" in ctype_raw or "iptal" in ctype_raw) else "RETURN"
 
-    # Sipariş kaydı (2 dk cron'la panelde) — müşteri adı + kalem barkod/fiyat zenginleştirme
+    # Sipariş kaydı (2 dk cron'la panelde) — müşteri adı + kalem barkod/fiyat zenginleştirme.
+    # DİKKAT: claim'deki orderNumber HB PREFIXSİZ gelir ("4600095398"), yerel kayıt ise
+    # map_hepsiburada_order ile "HB4600095398" yazılır — her iki biçim (ve baştaki sıfırlar
+    # atılmış hali) denenir, yoksa join hiçbir zaman tutmaz.
     order = {}
     if onum:
+        cands = [onum, f"HB{onum}"]
+        stripped = onum.lstrip("0")
+        if stripped and stripped != onum:
+            cands += [stripped, f"HB{stripped}"]
         order = await db.orders.find_one(
-            {"order_number": onum, "platform": "hepsiburada"}, {"_id": 0}) or {}
+            {"order_number": {"$in": cands}, "platform": "hepsiburada"}, {"_id": 0}) or {}
     o_items = order.get("items") or []
 
     def _order_match(sku: str, name: str) -> dict:
         s = str(sku or "").strip()
         for it in o_items:
-            for k in ("barcode", "sku", "merchant_sku", "product_id", "hb_sku"):
+            for k in ("barcode", "sku", "merchant_sku", "product_id", "urun_id", "hb_sku", "hbSku"):
                 if s and str(it.get(k) or "").strip() == s:
                     return it
         if name:
@@ -2750,28 +2757,58 @@ async def _hb_claim_norm(claim: dict) -> dict | None:
         return {}
 
     items, refund = [], 0.0
-    reason_txt = str(_hb_g(claim, "reason", "claimReason", "customerReason") or "")
+    reason_txt = str(_hb_g(claim, "reason", "claimReason", "customerReason", "Reason", "explanation") or "")
     if isinstance(claim.get("reason"), dict):
         reason_txt = str(_hb_g(claim["reason"], "name", "description", "text") or reason_txt)
     for ci in _hb_claim_items_raw(claim):
         if not isinstance(ci, dict):
             continue
-        sku = str(_hb_g(ci, "merchantSku", "sku", "merchantSKU", "hbSku") or "")
+        # HB claim'i DÜZ yapıdadır: 'sku' = HB katalog kodu (HBCV...), 'MerchantSku' (büyük M)
+        # = bizim varyant urun_id'miz; fiyat 'priceAmount'/'totalPriceAmount' anahtarındadır
+        # ve ürün ADI alanı hiç yoktur — ad/barkod yerel katalogdan çözülür.
+        hb_sku = str(_hb_g(ci, "sku", "hbSku", "listingId") or "")
+        ms = str(_hb_g(ci, "MerchantSku", "merchantSku", "merchantSKU") or "")
+        sku = ms or hb_sku
         name = str(_hb_g(ci, "productName", "name", "product") or "")
         qty = int(_hb_g(ci, "quantity", "qty", default=1) or 1)
-        price = _hb_money(_hb_g(ci, "price", "unitPrice", "totalPrice", "amount", default=0))
-        r = _hb_g(ci, "reason", "claimReason")
+        price = _hb_money(_hb_g(ci, "price", "unitPrice", "priceAmount",
+                                "totalPriceAmount", "totalPrice", "amount", default=0))
+        r = _hb_g(ci, "reason", "claimReason", "Reason", "explanation")
         if isinstance(r, dict):
             r = _hb_g(r, "name", "description", "text")
-        oi = _order_match(sku, name)
+        oi = _order_match(ms, name) or _order_match(hb_sku, name)
         barcode = str(_hb_g(ci, "barcode", "productBarcode") or oi.get("barcode") or "")
         if not price:
             price = float(oi.get("price") or oi.get("unit_price") or 0)
         if not name:
             name = str(oi.get("name") or "")
+        # Sipariş yerelde yoksa: MerchantSku (varyant urun_id) üzerinden katalogdan çöz —
+        # ad + barkod + beden siparişten bağımsız gelir.
+        v_size = str(oi.get("size") or "")
+        if ms and (not name or not barcode):
+            _mk = [ms]
+            _msr = ms.lstrip("0")
+            if _msr and _msr != ms:
+                _mk.append(_msr)
+            prod = await db.products.find_one(
+                {"variants.urun_id": {"$in": _mk}}, {"_id": 0, "name": 1, "variants": 1})
+            if not prod:
+                try:
+                    prod = await db.products.find_one(
+                        {"variants.urun_id": int(ms)}, {"_id": 0, "name": 1, "variants": 1})
+                except Exception:
+                    prod = None
+            if prod:
+                name = name or str(prod.get("name") or "")
+                for vv in (prod.get("variants") or []):
+                    if str(vv.get("urun_id") or "") in (_mk + ([str(int(ms))] if ms.isdigit() else [])):
+                        barcode = barcode or str(vv.get("barcode") or "")
+                        v_size = v_size or str(vv.get("size") or vv.get("beden") or "")
+                        break
         items.append({
             "claim_item_id": str(_hb_g(ci, "id", "lineItemId", "claimItemId") or ""),
             "productName": name, "barcode": barcode, "merchantSku": sku,
+            "hb_sku": hb_sku, "size": v_size,
             "unit_price": price, "discount_amount": 0, "price": price,
             "quantity": qty, "reason": str(r or reason_txt or ""),
         })
@@ -2801,6 +2838,17 @@ async def _hb_claim_norm(claim: dict) -> dict | None:
         cust = f"{ship.get('first_name', '')} {ship.get('last_name', '')}".strip() \
                or str(order.get("customer_name") or "")
 
+    # Kargo: HB claim'de takip bilgisi kökte değil Deliveries[] altındadır
+    dels = claim.get("Deliveries") or claim.get("deliveries") or []
+    d0 = dels[0] if isinstance(dels, list) and dels and isinstance(dels[0], dict) else {}
+    cc = d0.get("CargoCompany") if isinstance(d0.get("CargoCompany"), dict) else {}
+    cargo_no = str(_hb_g(claim, "cargoTrackingNumber", "trackingNumber")
+                   or _hb_g(d0, "TrackingNumber", "DeliveryCode") or "")
+    cargo_name = str(_hb_g(claim, "cargoCompany", "cargoProviderName")
+                     or _hb_g(cc, "Name", "Alias") or "Hepsiburada Marketplace")
+    # İade tutarı: HB gerçek refundAmount verirse onu kullan (kalem toplamı yedek)
+    raw_refund = _hb_money(_hb_g(claim, "refundAmount", "refundedAmount", default=0))
+
     return {
         "claim_id": f"HB-{cid}",          # TY claim id'leriyle çakışmasın
         "hb_claim_number": cid,           # HB accept/reject uçları bu numarayı kullanır
@@ -2812,10 +2860,10 @@ async def _hb_claim_norm(claim: dict) -> dict | None:
         "customer_name": cust,
         "created_date": created_iso or datetime.now(timezone.utc).isoformat(),
         "items": items,
-        "refund_amount": round(refund, 2),
+        "refund_amount": round(raw_refund or refund, 2),
         "invoice_number": str(order.get("invoice_number") or ""),
-        "cargo_tracking_number": str(_hb_g(claim, "cargoTrackingNumber", "trackingNumber") or ""),
-        "cargo_provider_name": str(_hb_g(claim, "cargoCompany", "cargoProviderName") or "Hepsiburada Marketplace"),
+        "cargo_tracking_number": cargo_no,
+        "cargo_provider_name": cargo_name,
         "raw_data": claim,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -2911,6 +2959,8 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     async def _upsert_groups(grouped, forced_status=None, allow_decrement=False):
         imported = updated = 0
         for g in grouped:
+            if not isinstance(g, dict):
+                continue  # OMS bazen düz string satırlar sızdırıyor ('str' has no attribute 'get')
             try:
                 data = await _hb_enrich_items(map_hepsiburada_order(g))
                 number = data.get("order_number")
@@ -2963,16 +3013,74 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     # (2) Paketler + (3) İptaller — 24 saatlik dilimler (bugünden geriye)
     now_ = datetime.now(timezone.utc)
     pkg_imp = pkg_upd = cn_imp = cn_upd = 0
+
+    def _flatten_pkg_lines(rows):
+        """Paket objeleri kalemleri nested taşıyabilir ({items|lineItems:[...]}) —
+        sipariş gruplayıcı düz kalem listesi beklediğinden nested kalemler paket
+        üstbilgisiyle (orderNumber/müşteri/kargo) zenginleştirilerek düzleştirilir."""
+        out = []
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            nested = None
+            for k in ("items", "lineItems", "details", "orderItems"):
+                v = r.get(k)
+                if isinstance(v, list) and v:
+                    nested = v
+                    break
+            if nested:
+                for ln in nested:
+                    if not isinstance(ln, dict):
+                        continue
+                    m = dict(ln)
+                    for ck in ("orderNumber", "orderId", "orderDate", "customerName", "customer",
+                               "shippingAddress", "deliveryAddress", "recipientName",
+                               "packageNumber", "cargoCompany", "trackingNumber", "barcode"):
+                        if m.get(ck) in (None, "") and r.get(ck) not in (None, ""):
+                            m[ck] = r.get(ck)
+                    out.append(m)
+            else:
+                out.append(r)
+        return out
+
+    # Paket kaynak adayları: güncel liste kargolananları DÜŞÜRDÜĞÜ için geçmiş siparişler
+    # teslim/kargo uçlarından gelir. Uçlar hesaba göre değişebildiğinden bir kez problanır.
+    pkg_sources = [("packages", client.get_packages)]
+    _pb = (now_ - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    _pe = now_.strftime("%Y-%m-%d %H:%M")
+    for label, fn in (
+        ("delivered", client.get_packages_delivered),
+        ("status/shipped", lambda o, l, b, e: client.get_packages_by_status("shipped", o, l, b, e)),
+        ("status/intransit", lambda o, l, b, e: client.get_packages_by_status("intransit", o, l, b, e)),
+        ("status/delivered", lambda o, l, b, e: client.get_packages_by_status("delivered", o, l, b, e)),
+    ):
+        if label == "status/delivered" and any(l_ == "delivered" for l_, _ in pkg_sources):
+            continue  # aynı verinin ikinci kopyası — gereksiz OMS çağrısı
+        try:
+            r = await _aio.to_thread(fn, 0, 5, _pb, _pe)
+            if isinstance(r, dict) and str(r.get("success", "")).lower() == "false":
+                raise RuntimeError(str(r.get("message") or "success=false"))
+            n = len(_hb_normalize_lines(r) or [])
+            pkg_sources.append((label, fn))
+            await log_integration_event("hepsiburada", "backfill", "probe", label, "success",
+                                        f"Paket ucu kullanılabilir: {label} ({n} örnek satır)")
+        except Exception as pe_:
+            await log_integration_event("hepsiburada", "backfill", "probe", label, "info",
+                                        f"Paket ucu yok/erişilemedi: {label}: {str(pe_)[:140]}")
+
     for d in range(days):
         end = now_ - timedelta(days=d)
         begin = end - timedelta(days=1)
         b, e = begin.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
-        try:
-            resp = await _aio.to_thread(client.get_packages, 0, 100, b, e)
-            i, u = await _upsert_groups(_hb_orders_from_response(resp))
-            pkg_imp += i; pkg_upd += u
-        except Exception as ex:
-            await log_integration_event("hepsiburada", "backfill", "packages", b, "error", f"Paket dilimi {b}: {ex}")
+        for label, fn in pkg_sources:
+            try:
+                resp = await _aio.to_thread(fn, 0, 100, b, e)
+                lines = _flatten_pkg_lines(_hb_normalize_lines(resp))
+                i, u = await _upsert_groups(_hb_orders_from_response(lines))
+                pkg_imp += i; pkg_upd += u
+            except Exception as ex:
+                await log_integration_event("hepsiburada", "backfill", "packages", f"{label} {b}", "error",
+                                            f"Paket dilimi {label} {b}: {ex}")
         try:
             resp = await _aio.to_thread(client.get_cancelled_orders, 0, 50, b, e)
             i, u = await _upsert_groups(_hb_orders_from_response(resp), forced_status="cancelled")
@@ -3003,7 +3111,15 @@ async def hb_backfill(payload: Optional[dict] = Body(default=None),
     p = payload or {}
     days = int(p.get("days") or 30)
     dec = bool(p.get("decrement_stock") or False)
-    _aio.create_task(_hb_backfill_run(days, dec))
+    # Çıplak create_task GC'ye gidebilir (bilinen weakref davranışı) — güçlü referansla tut
+    global _HB_BACKFILL_TASKS
+    try:
+        _HB_BACKFILL_TASKS
+    except NameError:
+        _HB_BACKFILL_TASKS = set()
+    _t = _aio.create_task(_hb_backfill_run(days, dec))
+    _HB_BACKFILL_TASKS.add(_t)
+    _t.add_done_callback(_HB_BACKFILL_TASKS.discard)
     await log_integration_event("hepsiburada", "backfill", "job", "", "queued",
                                 f"HB {days} gün backfill başlatıldı (stok düşümü: {'açık' if dec else 'kapalı'})")
     return {"success": True, "started": True, "days": days, "decrement_stock": dec,
