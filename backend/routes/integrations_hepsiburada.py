@@ -3049,13 +3049,9 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     _pb = (now_ - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
     _pe = now_.strftime("%Y-%m-%d %H:%M")
     for label, fn in (
-        ("delivered", client.get_packages_delivered),
-        ("status/shipped", lambda o, l, b, e: client.get_packages_by_status("shipped", o, l, b, e)),
-        ("status/intransit", lambda o, l, b, e: client.get_packages_by_status("intransit", o, l, b, e)),
-        ("status/delivered", lambda o, l, b, e: client.get_packages_by_status("delivered", o, l, b, e)),
+        ("shipped", client.get_packages_shipped),      # resmî uç: kargoya verilenler
+        ("delivered", client.get_packages_delivered),  # resmî uç: teslim edilenler
     ):
-        if label == "status/delivered" and any(l_ == "delivered" for l_, _ in pkg_sources):
-            continue  # aynı verinin ikinci kopyası — gereksiz OMS çağrısı
         try:
             r = await _aio.to_thread(fn, 0, 5, _pb, _pe)
             if isinstance(r, dict) and str(r.get("success", "")).lower() == "false":

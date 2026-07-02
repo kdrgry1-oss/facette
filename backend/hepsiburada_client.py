@@ -598,6 +598,13 @@ class HepsiburadaClient:
                   "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
         return self._oms_get(f"/packages/merchantid/{self.merchant_id}/delivered", params)
 
+    def get_packages_shipped(self, offset=0, limit=100, begin_date=None, end_date=None):
+        """Kargoya verilen paketler (resmî uç: /packages/merchantid/{mid}/shipped).
+        HB dokümanı: limit–offset ya da beginDate–endDate zorunlu, yalnız son 1 aylık veri."""
+        params = {"offset": offset, "limit": limit,
+                  "begindate": self._oms_date(begin_date), "enddate": self._oms_date(end_date)}
+        return self._oms_get(f"/packages/merchantid/{self.merchant_id}/shipped", params)
+
     def get_packages_by_status(self, status, offset=0, limit=100, begin_date=None, end_date=None):
         """Durum bazlı paket listesi (get_unpacked_items'ın /status/{x} kalıbının
         genellemesi): shipped / intransit / delivered vb. Uç HB tarafında yoksa
