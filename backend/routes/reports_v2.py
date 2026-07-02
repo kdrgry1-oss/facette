@@ -294,7 +294,7 @@ async def _velocity_aggregate(days: int):
         {"$unwind": "$items"},
         {"$group": {
             "_id": "$items.product_id",
-            "name": {"$first": "$items.name"},
+            "name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
             "sold_qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
             "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.quantity", 1]},
                                                  {"$ifNull": ["$items.price", 0]}]}},
@@ -329,10 +329,23 @@ async def fast_movers(
     # Stok bilgisini ekle
     ids = [i["product_id"] for i in items]
     stock_map = {}
-    async for p in db.products.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "stock": 1, "stock_code": 1, "price": 1, "brand": 1, "category": 1}):
+    _proj = {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1, "price": 1,
+             "brand": 1, "category": 1, "variants.urun_id": 1}
+    async for p in db.products.find({"id": {"$in": ids}}, _proj):
         stock_map[str(p["id"])] = p
+    # Eski (Ticimax/pazaryeri) siparişlerde product_id yerel UUID değil varyant urun_id'si
+    # olabilir — çözülemeyenler varyant numarasından eşlenir ki ad/SKU boş kalmasın.
+    missing = [pid for pid in ids if pid not in stock_map]
+    if missing:
+        async for p in db.products.find({"variants.urun_id": {"$in": missing}}, _proj):
+            for vv in (p.get("variants") or []):
+                u = str(vv.get("urun_id") or "")
+                if u in missing:
+                    stock_map.setdefault(u, p)
     for it in items:
         p = stock_map.get(it["product_id"]) or {}
+        if p.get("name") and (not it.get("name") or it["name"] == "—"):
+            it["name"] = p["name"]
         it["stock"] = int(p.get("stock") or 0)
         it["stock_code"] = p.get("stock_code")
         it["price"] = float(p.get("price") or 0)

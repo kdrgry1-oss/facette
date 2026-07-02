@@ -2998,6 +2998,16 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                 number = data.get("order_number")
                 if not number or str(number).rstrip("?") in ("", "HB"):
                     continue  # sipariş no çözülemedi — çöp kayıt üretme
+                # Koruma: içeriği boş (0 TL / adsız kalem) gelen satır, dolu mevcut kaydı ezmesin
+                try:
+                    if float(data.get("total") or 0) <= 0:
+                        _ex = await db.orders.find_one(
+                            {"order_number": number, "platform": "hepsiburada"},
+                            {"_id": 0, "total": 1})
+                        if _ex and float(_ex.get("total") or 0) > 0:
+                            continue
+                except Exception:
+                    pass
                 if forced_status:
                     data["status"] = forced_status
                 existing = await db.orders.find_one({"order_number": number, "platform": "hepsiburada"})
@@ -3045,6 +3055,7 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
     # (2) Paketler + (3) İptaller — 24 saatlik dilimler (bugünden geriye)
     now_ = datetime.now(timezone.utc)
     pkg_imp = pkg_upd = cn_imp = cn_upd = 0
+    detail_numbers: set = set()  # shipped/delivered künyelerinden toplanan sipariş noları
 
     def _flatten_pkg_lines(rows):
         """Paket objeleri kalemleri nested taşıyabilir ({items|lineItems:[...]}) —
@@ -3137,9 +3148,23 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
                     rows_ = _hb_normalize_lines(resp) or []
                     if not rows_:
                         break
-                    lines = _flatten_pkg_lines(rows_)
-                    i, u = await _upsert_groups(_hb_orders_from_response(lines))
-                    pkg_imp += i; pkg_upd += u
+                    if label in ("shipped", "delivered"):
+                        # Bu uçlar KÜNYE döner (OrderNumber/paket no/tarih — kalem-tutar yok).
+                        # Stub'ı upsert etmek dolu kaydı ezer; numaraları toplayıp detay
+                        # aşağıda ordernumber ucundan tam çekilir.
+                        for _r in rows_:
+                            if not isinstance(_r, dict):
+                                continue
+                            _ns = _r.get("OrderNumbers") if isinstance(_r.get("OrderNumbers"), list) else []
+                            _n1 = _deep_find(_r, _ORDNO_KEYS)
+                            for _n in ([_n1] + _ns):
+                                _n = str(_n or "").strip()
+                                if _n:
+                                    detail_numbers.add(_n)
+                    else:
+                        lines = _flatten_pkg_lines(rows_)
+                        i, u = await _upsert_groups(_hb_orders_from_response(lines))
+                        pkg_imp += i; pkg_upd += u
                     if len(rows_) < 50:
                         break
                     off += 50
@@ -3153,6 +3178,18 @@ async def _hb_backfill_run(days: int, decrement_stock: bool):
         except Exception as ex:
             await log_integration_event("hepsiburada", "backfill", "cancelled", b, "error", f"İptal dilimi {b}: {ex}")
         await _aio.sleep(0.3)  # OMS rate limit nezaketi
+
+    # (3.5) Künyelerden toplanan numaraların TAM detayı (kalem/tutar/müşteri)
+    if detail_numbers:
+        for _on in sorted(detail_numbers):
+            try:
+                resp = await _aio.to_thread(client.get_order_by_number, _on)
+                i, u = await _upsert_groups(_hb_orders_from_response(resp))
+                pkg_imp += i; pkg_upd += u
+            except Exception as ex:
+                await log_integration_event("hepsiburada", "backfill", "order_detail", _on, "error",
+                                            f"Sipariş detayı çekilemedi {_on}: {ex}")
+            await _aio.sleep(0.15)
 
     # (4) İadeler
     claims = await _sync_hepsiburada_claims_core(days_back=days)

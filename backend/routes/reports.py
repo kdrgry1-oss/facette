@@ -287,7 +287,7 @@ async def returns_by_product(
         {"$group": {
             "_id": "$items.product_id",
             "returned": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "product_name": {"$first": "$items.name"},
+            "product_name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
         }},
         {"$sort": {"returned": -1}},
         {"$limit": limit},
@@ -362,7 +362,7 @@ async def fast_selling_products(
         {"$group": {
             "_id": "$items.product_id",
             "sold": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-            "product_name": {"$first": "$items.name"},
+            "product_name": {"$first": {"$ifNull": ["$items.name", "$items.product_name"]}},
             "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
         }},
         {"$match": {"sold": {"$gte": min_sold}}},
