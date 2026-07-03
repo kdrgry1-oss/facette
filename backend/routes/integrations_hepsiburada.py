@@ -284,12 +284,38 @@ def map_hepsiburada_order(o: dict) -> dict:
         except Exception:
             qty = 1
         unit = _hb_money(_hb_g(ln, "price", "unitPrice", "totalPrice", "amount", default=0))
+        # HB alan adları: merchantSKU (SKU büyük!) = bizim varyant urun_id'miz;
+        # productBarcode = GERÇEK ürün barkodu; 'barcode' ise KARGO barkodu —
+        # eşleşme için asla kullanılmamalı. properties[] Beden/Renk taşır,
+        # productImageUrlFormat HB görselidir ({size} yer tutucusu).
+        m_sku = _hb_g(ln, "merchantSKU", "merchantSku", "MerchantSku", "merchantsku")
+        p_bar = _hb_g(ln, "productBarcode", "ProductBarcode")
+        _size = _color = ""
+        for pr in (ln.get("properties") or []):
+            nm = str((pr or {}).get("name") or "").strip().lower()
+            if nm == "beden":
+                _size = (pr or {}).get("value") or _size
+            elif nm == "renk":
+                _color = (pr or {}).get("value") or _color
+        img_fmt = _hb_g(ln, "productImageUrlFormat")
+        hb_img = ""
+        if img_fmt and "{size}" in str(img_fmt):
+            hb_img = str(img_fmt).replace("{size}", "424")
+        elif img_fmt:
+            hb_img = str(img_fmt)
+        _pname = _hb_g(ln, "productName", "name", "lineItemName")
         items.append({
-            "product_id": _hb_g(ln, "merchantSku", "MerchantSku", "sku", "hbSku", "productBarcode"),
-            "product_name": _hb_g(ln, "productName", "name", "lineItemName"),
+            "product_id": m_sku or _hb_g(ln, "sku", "hbSku") or p_bar,
+            "merchant_sku": m_sku,
+            "hb_sku": _hb_g(ln, "sku", "hbSku"),
+            "product_name": _pname,
+            "name": _pname,
             "quantity": qty, "unit_price": unit, "price": unit,
-            "barcode": _hb_g(ln, "barcode", "productBarcode"),
-            "size": _hb_g(ln, "size", "variantValue"), "color": _hb_g(ln, "color"),
+            "barcode": p_bar or _hb_g(ln, "barcode"),
+            "cargo_barcode": _hb_g(ln, "barcode"),
+            "size": _size or _hb_g(ln, "size", "variantValue"),
+            "color": _color or _hb_g(ln, "color"),
+            "image": hb_img or None,
             "currency": "TRY",
         })
         subtotal += unit * qty
