@@ -19,7 +19,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # Yeni yüklemeler Cloudflare R2'ye (S3 uyumlu) gider ve doğrudan R2 CDN'den
 # sunulur. Bu, MongoDB'yi base64 görsel yükünden kurtarır ve yüklemeyi hızlandırır.
 # R2 yapılandırılmamışsa eski davranışa (MongoDB + disk) düşer.
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB — DSLR çıkışı hero görselleri 10MB'ı aşıyor; Pillow zaten resize+WebP ile küçültüyor
 
 
 # Yüklemede maksimum uzun kenar (px) — ürün görsel ızgarası + PDP zoom için yeterli,
@@ -78,7 +78,7 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
 
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 10MB)")
+        raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 25MB)")
 
     content_type = file.content_type
     opt_data, opt_type, opt_ext = _optimize_for_upload(data, content_type)

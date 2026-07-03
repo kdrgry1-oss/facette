@@ -182,6 +182,16 @@ export default function PageDesign() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState(null);
   const [uploading, setUploading] = useState(false);
+  // Ürün slider "kategori" kaynağı için kategori listesi (bir kez çekilir)
+  const [sliderCategories, setSliderCategories] = useState([]);
+  useEffect(() => {
+    axios.get(`${API}/categories`)
+      .then((r) => {
+        const rows = Array.isArray(r.data) ? r.data : (r.data?.categories || []);
+        setSliderCategories(rows.map((c) => ({ id: String(c.id), name: c.name || c.title || c.slug })));
+      })
+      .catch(() => setSliderCategories([]));
+  }, []);
   const [hasChanges, setHasChanges] = useState(false);
   const [previewMode, setPreviewMode] = useState("mobile"); // "mobile" | "desktop"
   
@@ -303,12 +313,43 @@ export default function PageDesign() {
     }
   };
 
+  // Büyük dosyaları (DSLR çıkışı 10-25MB) yüklemeden önce tarayıcıda küçült:
+  // uzun kenar 2400px, JPEG 0.86 — hem limit aşımını hem yavaş yüklemeyi önler.
+  // HEIC gibi canvas'ın decode edemediği formatlar olduğu gibi gönderilir.
+  const shrinkImageFile = (file) =>
+    new Promise((resolve) => {
+      if (!file.type.startsWith("image/") || file.type === "image/gif") return resolve(file);
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        const MAXW = 2400;
+        const scale = Math.min(1, MAXW / Math.max(img.naturalWidth, img.naturalHeight));
+        if (scale >= 1 && file.size < 4 * 1024 * 1024) return resolve(file); // zaten küçük
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return resolve(file);
+            resolve(new File([blob], (file.name || "gorsel").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+          },
+          "image/jpeg",
+          0.86
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(file); }; // HEIC vb. → olduğu gibi
+      img.src = objUrl;
+    });
+
   const handleImageUpload = async (e, index = null) => {
-    const file = e.target.files[0];
+    let file = e.target.files[0];
     if (!file) return;
 
     setUploading(true);
     try {
+      file = await shrinkImageFile(file);
       // Görselin gerçek piksel boyutunu client-side oku — kaydedilince storefront'ta
       // (HeroSlider/FullBanner) doğru en-boy oranında, kırpılmadan gösterilsin.
       const dims = await new Promise((resolve) => {
@@ -358,7 +399,8 @@ export default function PageDesign() {
         toast.success("Görsel yüklendi");
       }
     } catch (err) {
-      toast.error("Görsel yüklenemedi");
+      const detail = err?.response?.data?.detail;
+      toast.error(detail ? `Görsel yüklenemedi: ${detail}` : "Görsel yüklenemedi (ağ/limit hatası)");
     } finally {
       setUploading(false);
     }
@@ -564,7 +606,9 @@ export default function PageDesign() {
     return BLOCK_TYPES.find(t => t.value === type) || { label: type, icon: "📦" };
   };
 
-  const needsImages = ["hero_slider", "full_banner", "half_banners", "instashop", "video_banner"].includes(formData.type);
+  // text_block'a görsel eklenebilir (görsel + yazı kompozisyonu); rotating_text ve
+  // countdown salt metin barları olduğundan görsel alanı almaz.
+  const needsImages = ["hero_slider", "full_banner", "half_banners", "instashop", "video_banner", "text_block"].includes(formData.type);
 
 
   return (
@@ -1141,6 +1185,55 @@ export default function PageDesign() {
 
             {formData.type === "product_slider" && (
               <div>
+                {/* Kaynak seçimi: elle seçim yerine dinamik listeler (favori/indirim/kategori) */}
+                <label className="block text-sm font-medium mb-2">Ürün Kaynağı</label>
+                <select
+                  value={formData.settings?.source || "manual"}
+                  onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, source: e.target.value } })}
+                  className="w-full border px-3 py-2 rounded text-sm mb-3"
+                  data-testid="slider-source-select"
+                >
+                  <option value="manual">Elle Seçim (aşağıdan ürün ekle)</option>
+                  <option value="newest">En Yeni Ürünler (otomatik)</option>
+                  <option value="favorites">En Çok Favorilenenler (otomatik)</option>
+                  <option value="discounted">İndirimdeki Ürünler (sale + kampanya, otomatik)</option>
+                  <option value="category">Seçili Kategorilerden (otomatik)</option>
+                </select>
+
+                <div className="flex gap-3 mb-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium mb-1 text-gray-600">Gösterilecek Ürün Adedi</label>
+                    <input
+                      type="number" min={1} max={24}
+                      value={formData.settings?.limit || 8}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, limit: Math.max(1, Math.min(24, Number(e.target.value) || 8)) } })}
+                      className="w-full border px-3 py-2 rounded text-sm"
+                    />
+                  </div>
+                </div>
+
+                {(formData.settings?.source === "category") && (
+                  <div className="mb-4">
+                    <label className="block text-xs font-medium mb-1 text-gray-600">Kategoriler (çoklu seçim: ⌘/Ctrl ile)</label>
+                    <select
+                      multiple
+                      value={formData.settings?.category_ids || []}
+                      onChange={(e) => {
+                        const vals = Array.from(e.target.selectedOptions).map((o) => o.value);
+                        setFormData({ ...formData, settings: { ...formData.settings, category_ids: vals } });
+                      }}
+                      className="w-full border px-3 py-2 rounded text-sm h-40"
+                      data-testid="slider-category-select"
+                    >
+                      {sliderCategories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {(formData.settings?.source || "manual") === "manual" && (
+                <>
                 <label className="block text-sm font-medium mb-2">Ürün Seçimi</label>
                 <div className="bg-gray-50 p-4 rounded-lg border">
                   
@@ -1212,6 +1305,8 @@ export default function PageDesign() {
                   </div>
                   
                 </div>
+                </>
+                )}
               </div>
             )}
 

@@ -1028,6 +1028,71 @@ async def get_products(
         "pages": (total + limit - 1) // limit
     }
 
+@router.get("/slider-feed")
+async def slider_feed(
+    source: str = Query("newest"),
+    category_ids: Optional[str] = None,
+    limit: int = Query(8, ge=1, le=24),
+):
+    """Sayfa Tasarımı ürün slider'ı için kaynak beslemesi.
+    source: favorites (en çok favorilenen) | discounted (indirimde: sale_price
+    veya aktif otomatik kampanya kapsamı) | category (category_ids CSV) | newest.
+    Yalnız aktif+silinmemiş ürünler; kampanya rozet alanları işlenir."""
+    base_q = {"is_active": True, "is_deleted": {"$ne": True}}
+    prods: list = []
+
+    if source == "favorites":
+        pipeline = [
+            {"$group": {"_id": "$product_id", "cnt": {"$sum": 1}}},
+            {"$sort": {"cnt": -1}},
+            {"$limit": limit * 3},
+        ]
+        fav_ids = [str(r["_id"]) async for r in db.favorites.aggregate(pipeline) if r.get("_id")]
+        if fav_ids:
+            found = await db.products.find({**base_q, "id": {"$in": fav_ids}}, {"_id": 0}).to_list(limit * 3)
+            by_id = {str(x.get("id")): x for x in found}
+            prods = [by_id[i] for i in fav_ids if i in by_id][:limit]
+
+    elif source == "discounted":
+        camps = await _auto_campaigns_for_badges()
+        ors = [{"$expr": {"$and": [{"$gt": [{"$ifNull": ["$sale_price", 0]}, 0]},
+                                   {"$lt": ["$sale_price", "$price"]}]}}]
+        for c in camps:
+            ac = [str(x) for x in (c.get("categories") or []) if x]
+            ap = [str(x) for x in (c.get("products") or []) if x]
+            if ac:
+                ors.append({"category_ids": {"$in": ac}})
+            if ap:
+                ors.append({"id": {"$in": ap}})
+            if not ac and not ap:
+                ors.append({})  # genel kampanya → tüm ürünler indirimde
+        q = {**base_q, "$or": [o for o in ors if o] or ors}
+        if any(o == {} for o in ors):
+            q = dict(base_q)  # genel kampanya varsa filtreye gerek yok
+        prods = await db.products.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+    elif source == "category":
+        cids = [c.strip() for c in (category_ids or "").split(",") if c.strip()]
+        if cids:
+            q = {**base_q, "$or": [{"category_ids": {"$in": cids}}, {"category_id": {"$in": cids}}]}
+            prods = await db.products.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+    if not prods and source not in ("category",):
+        prods = await db.products.find(base_q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+    try:
+        camps = await _auto_campaigns_for_badges()
+        if camps:
+            for pp in prods:
+                pct, label = _campaign_pct_for_product(pp, camps)
+                if pct > 0:
+                    pp["campaign_discount_percent"] = pct
+                    pp["campaign_label"] = label
+    except Exception:
+        pass
+    return {"products": prods, "source": source}
+
+
 @router.get("/meta/ticimax-schema")
 async def get_ticimax_schema(current_user: dict = Depends(require_admin)):
     """Ürün kartında tüm Ticimax (113) alanını gruplu render etmek için şema."""

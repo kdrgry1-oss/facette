@@ -141,18 +141,39 @@ function HalfBanners({ block }) {
 
 function ProductSlider({ block, products }) {
   const selectedIds = block?.settings?.product_ids;
+  const source = block?.settings?.source || (selectedIds?.length > 0 ? "manual" : "newest");
+  const limit = block?.settings?.limit || 8;
+  const [feed, setFeed] = useState(null); // kaynak bazlı çekilen ürünler
+
+  // Favoriler / indirim / kategori kaynakları ana sayfa listesinde olmayabilir —
+  // backend slider-feed ucundan kendi verisini çeker. manual/newest eski davranış.
+  useEffect(() => {
+    if (source === "manual" || source === "newest") { setFeed(null); return; }
+    let alive = true;
+    const cids = (block?.settings?.category_ids || []).join(",");
+    axios
+      .get(`${API}/products/slider-feed?source=${source}&limit=${limit}${cids ? `&category_ids=${encodeURIComponent(cids)}` : ""}`)
+      .then((r) => { if (alive) setFeed(r.data?.products || []); })
+      .catch(() => { if (alive) setFeed([]); });
+    return () => { alive = false; };
+  }, [source, limit, JSON.stringify(block?.settings?.category_ids || [])]);
+
   let displayProducts;
-  if (selectedIds && selectedIds.length > 0) {
+  if (source !== "manual" && source !== "newest") {
+    displayProducts = feed || [];
+  } else if (selectedIds && selectedIds.length > 0) {
     // Show only the selected products in the configured order
     displayProducts = selectedIds
       .map(id => products?.find(p => p._id === id || p.id === id))
       .filter(Boolean);
   } else {
-    displayProducts = dedupeColorGroups(products?.slice(0, (block?.settings?.limit || 8) * 2) || [])
-      .slice(0, block?.settings?.limit || 8);
+    displayProducts = dedupeColorGroups(products?.slice(0, limit * 2) || [])
+      .slice(0, limit);
   }
   
   if (displayProducts.length === 0) return null;
+
+  const ctaLink = source === "discounted" ? "/sale" : "/en-yeniler";
 
   return (
     <section className="w-full px-2 md:px-4 py-10" data-testid="product-slider">
@@ -165,7 +186,7 @@ function ProductSlider({ block, products }) {
         ))}
       </div>
       <div className="text-center mt-12">
-        <Link to="/en-yeniler" className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
+        <Link to={ctaLink} className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
           Tümünü Gör
         </Link>
       </div>
@@ -203,11 +224,21 @@ function InstaShop({ block }) {
 }
 
 function TextBlock({ block }) {
-  if (!block?.title && !block?.settings?.text) return null;
+  const img = block?.images?.[0];
+  if (!block?.title && !block?.settings?.text && !img) return null;
 
   return (
     <section className="py-16 text-center" data-testid="text-block">
       <div className="max-w-2xl mx-auto px-4">
+        {img && (
+          block.links?.[0] ? (
+            <Link to={block.links[0]} className="block mb-8">
+              <img src={optimizeImg(img, 1200)} alt={block.title || ""} className="w-full object-cover" loading="lazy" decoding="async" />
+            </Link>
+          ) : (
+            <img src={optimizeImg(img, 1200)} alt={block.title || ""} className="w-full object-cover mb-8" loading="lazy" decoding="async" />
+          )
+        )}
         {block.title && (
           <h2 className="text-2xl md:text-3xl font-light tracking-wide mb-4">{block.title}</h2>
         )}
