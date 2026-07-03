@@ -419,8 +419,14 @@ export default function ProductDetail() {
     );
   }
 
-  const hasDiscount = Boolean(product.sale_price && product.sale_price < product.price);
-  const basePrice = product.sale_price || product.price;
+  // İndirim: sale_price + aktif otomatik kampanya (campaign_discount_percent, backend işler).
+  // Kampanya sale_price üzerine uygulanır — sepet motorunun hesap sırasıyla aynı.
+  const salePriceBase = product.sale_price && product.sale_price < product.price ? product.sale_price : null;
+  const campPct = Number(product.campaign_discount_percent || 0);
+  const hasDiscount = Boolean(salePriceBase) || campPct > 0;
+  const basePrice = campPct > 0
+    ? (salePriceBase ?? product.price) * (1 - campPct / 100)
+    : (salePriceBase ?? product.price);
   const variantPriceDiff = selectedVariant?.price_diff || 0;
   const displayPrice = basePrice + variantPriceDiff;
 

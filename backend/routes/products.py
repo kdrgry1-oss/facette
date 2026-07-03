@@ -1007,7 +1007,20 @@ async def get_products(
         else:
             products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
     total = await db.products.count_documents(query)
-    
+
+    # Otomatik kampanya rozeti: aktif auto_apply yüzde kampanyaları kapsama giren
+    # ürünlere işlenir ki vitrin kartları indirim oranını sepete girmeden gösterebilsin.
+    try:
+        camps = await _auto_campaigns_for_badges()
+        if camps:
+            for p in products:
+                pct, label = _campaign_pct_for_product(p, camps)
+                if pct > 0:
+                    p["campaign_discount_percent"] = pct
+                    p["campaign_label"] = label
+    except Exception as _ce:
+        logger.warning(f"Kampanya rozeti işlenemedi: {_ce}")
+
     return {
         "products": products,
         "total": total,
@@ -1121,7 +1134,66 @@ async def get_product(product_id: str, request: Request):
     # Varyantları global Beden Havuzu (variant_options) sırasına göre diz —
     # böylece storefront'ta XS, S, M, L, XL... admin'in tanımladığı sırayla görünür.
     product["variants"] = await _sort_variants_by_pool(product.get("variants") or [])
+    # Otomatik kampanya rozeti (vitrin kartlarıyla aynı mantık — detayda da görünsün)
+    try:
+        camps = await _auto_campaigns_for_badges()
+        if camps:
+            pct, label = _campaign_pct_for_product(product, camps)
+            if pct > 0:
+                product["campaign_discount_percent"] = pct
+                product["campaign_label"] = label
+    except Exception:
+        pass
     return product
+
+
+# ── Otomatik kampanya rozeti yardımcıları ─────────────────────────────────────
+# Sepet motoru (coupons.evaluate) indirimi sepette uygular; vitrinde oranın
+# görünmesi için ürünün kapsam eşleşmesi burada hesaplanır. YALNIZ koşulsuz
+# kampanyalar rozet olur: auto_apply + percent + min_cart_total yok +
+# first_order_only değil — aksi hâlde rozet yanıltıcı olur (koşullu indirim).
+_CAMP_BADGE_CACHE: dict = {"t": 0.0, "rows": []}
+
+
+async def _auto_campaigns_for_badges() -> list:
+    import time as _time
+    if _time.time() - _CAMP_BADGE_CACHE["t"] < 30:
+        return _CAMP_BADGE_CACHE["rows"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    q = {
+        "is_active": True, "auto_apply": True, "type": "percent",
+        "$and": [
+            {"$or": [{"start_at": None}, {"start_at": {"$lte": now_iso}}, {"start_at": {"$exists": False}}]},
+            {"$or": [{"end_at": None}, {"end_at": {"$gte": now_iso}}, {"end_at": {"$exists": False}}]},
+        ],
+    }
+    rows = await db.coupons.find(q, {"_id": 0, "id": 1, "name": 1, "code": 1, "value": 1,
+                                     "categories": 1, "products": 1,
+                                     "min_cart_total": 1, "first_order_only": 1}).to_list(50)
+    rows = [r for r in rows
+            if not r.get("first_order_only")
+            and float(r.get("min_cart_total") or 0) <= 0
+            and float(r.get("value") or 0) > 0]
+    _CAMP_BADGE_CACHE["t"] = _time.time()
+    _CAMP_BADGE_CACHE["rows"] = rows
+    return rows
+
+
+def _campaign_pct_for_product(p: dict, camps: list):
+    """Ürünün kapsama girdiği en yüksek yüzdeli kampanyayı döner -> (pct, label)."""
+    pid = str(p.get("id") or "")
+    cats = {str(c) for c in (p.get("category_ids") or []) if c}
+    if p.get("category_id"):
+        cats.add(str(p["category_id"]))
+    best, label = 0.0, ""
+    for c in camps:
+        ac = {str(x) for x in (c.get("categories") or []) if x}
+        ap = {str(x) for x in (c.get("products") or []) if x}
+        in_scope = (not ac and not ap) or (pid in ap) or bool(cats & ac)
+        if in_scope and float(c.get("value") or 0) > best:
+            best = float(c["value"])
+            label = c.get("name") or c.get("code") or ""
+    return best, label
 
 
 async def _sort_variants_by_pool(variants: list) -> list:
