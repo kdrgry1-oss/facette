@@ -285,7 +285,7 @@ def map_hepsiburada_order(o: dict) -> dict:
             qty = 1
         unit = _hb_money(_hb_g(ln, "price", "unitPrice", "totalPrice", "amount", default=0))
         items.append({
-            "product_id": _hb_g(ln, "merchantSku", "sku", "hbSku", "productBarcode"),
+            "product_id": _hb_g(ln, "merchantSku", "MerchantSku", "sku", "hbSku", "productBarcode"),
             "product_name": _hb_g(ln, "productName", "name", "lineItemName"),
             "quantity": qty, "unit_price": unit, "price": unit,
             "barcode": _hb_g(ln, "barcode", "productBarcode"),

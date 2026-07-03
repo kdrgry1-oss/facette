@@ -21,11 +21,26 @@ from .deps import db, require_admin, hash_password, generate_id, logger
 router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 
 
+def _member_order_match(user: dict) -> dict:
+    """Üyenin siparişlerini yakalayan koşul: user_id VE e-posta.
+    Misafirken verilen (user_id=null) siparişler yalnız user_id ile aranınca
+    üye detayında hiç görünmez — e-posta eşleşmesi aynı kişinin geçmiş
+    siparişlerini güvenle kapsar (customer.py'deki _owner_or_clauses ile aynı ilke)."""
+    import re as _re
+    uid = user.get("id")
+    ors = [{"user_id": uid}]
+    email = (user.get("email") or "").strip()
+    if email:
+        rx = {"$regex": f"^{_re.escape(email)}$", "$options": "i"}
+        ors += [{"shipping_address.email": rx}, {"email": rx}, {"billing_address.email": rx}]
+    return {"$or": ors}
+
+
 async def _annotate(user: dict) -> dict:
     uid = user.get("id")
     # Aggregate order stats
     pipeline = [
-        {"$match": {"user_id": uid, "status": {"$ne": "cancelled"}}},
+        {"$match": {"$and": [_member_order_match(user), {"status": {"$ne": "cancelled"}}]}},
         {
             "$group": {
                 "_id": None,
@@ -141,8 +156,27 @@ async def detail(mid: str, current_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Üye bulunamadı")
 
     u = await _annotate(u)
-    orders = await db.orders.find({"user_id": mid}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    orders = await db.orders.find(_member_order_match(u), {"_id": 0}).sort("created_at", -1).to_list(200)
     addresses = await db.addresses.find({"user_id": mid}, {"_id": 0}).to_list(20)
+    # Adres defteri boşsa geçmiş siparişlerin teslimat adreslerinden türet (görüntüleme amaçlı)
+    if not addresses and orders:
+        seen = set()
+        for o in orders:
+            sa = o.get("shipping_address") or {}
+            key = ((sa.get("address") or "").strip().lower(), (sa.get("city") or "").strip().lower())
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            addresses.append({
+                "id": "", "user_id": mid, "title": f"Sipariş Adresi ({o.get('order_number','')})",
+                "first_name": sa.get("first_name", ""), "last_name": sa.get("last_name", ""),
+                "phone": sa.get("phone", ""), "address": sa.get("address", ""),
+                "city": sa.get("city", ""), "district": sa.get("district", ""),
+                "postal_code": sa.get("postal_code", ""), "is_default": False,
+                "source": "order",
+            })
+            if len(addresses) >= 5:
+                break
 
     # Attribution breakdown from orders
     ch_map: dict = {}

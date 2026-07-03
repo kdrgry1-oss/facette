@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Search, User, ShoppingBag, X, Bookmark } from "lucide-react";
 import { useCart } from "../context/CartContext";
@@ -140,18 +140,23 @@ export default function Header({ hideMenu = false }) {
   // Henüz fetch tamamlanmadıysa (undefined) yükleniyor → iskelet göster, fallback görsel flash etme
   const megaLoading = Boolean(activeMegaSlug) && megaProducts[activeMegaSlug] === undefined;
 
-  // Mega menü kapanma timer'ı — fare üzerine geldiğinde anında kapanmasın, 200ms gecikme
-  const [closeTimer, setCloseTimer] = useState(null);
+  // Mega menü kapanma timer'ı — REF tabanlı. Önceki state tabanlı sürümde scheduleClose
+  // mevcut timer'ı temizlemeden yenisini kuruyordu: tetikleyiciden panele geçerken sızan
+  // eski timer, imleç panelin ÜZERİNDEYKEN menüyü kapatıyordu ("kategoriye tıklayamadan
+  // kayboluyor"). Ref + her kurulumda temizlik yarışı bitirir; gecikme 1sn'ye çıkarıldı.
+  const closeTimerRef = useRef(null);
   const openMenu = (m) => {
-    if (closeTimer) { clearTimeout(closeTimer); setCloseTimer(null); }
+    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
     setActiveMenu(m);
   };
   const scheduleClose = () => {
-    const t = setTimeout(() => { setActiveMenu(null); setHoveredCategory(null); }, 650);
-    setCloseTimer(t);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      setActiveMenu(null); setHoveredCategory(null); closeTimerRef.current = null;
+    }, 1000);
   };
   const cancelClose = () => {
-    if (closeTimer) { clearTimeout(closeTimer); setCloseTimer(null); }
+    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
   };
 
   useEffect(() => {
@@ -358,7 +363,7 @@ export default function Header({ hideMenu = false }) {
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
-                <div className="grid grid-cols-3 gap-x-6 max-w-lg">
+                <div className="grid grid-cols-3 gap-x-10 max-w-xl">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
                       <Link
@@ -422,7 +427,7 @@ export default function Header({ hideMenu = false }) {
                 {/* Categories */}
                 <div className="flex-1">
                   <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
-                  <ul className="grid grid-cols-2 gap-x-12 gap-y-1">
+                  <ul className="grid grid-cols-2 gap-x-10 gap-y-1">
                     {AKSESUAR_MENU.map((item) => (
                       <li key={item.slug}>
                         <Link

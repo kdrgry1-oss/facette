@@ -259,7 +259,7 @@ export default function Category() {
         {/* Products Grid */}
         <div className="py-8">
           {loading ? (
-            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-3 gap-y-8 md:gap-y-10`}>
+            <div className={`grid ${gridClass[gridCols]} gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8`}>
               {[...Array(8)].map((_, i) => (
                 <div key={i} className="animate-pulse">
                   <div className="aspect-[2/3] bg-gray-100 mb-3" />
@@ -282,7 +282,7 @@ export default function Category() {
               )}
             </div>
           ) : (
-            <div className={`grid ${gridClass[gridCols]} gap-x-2 md:gap-x-3 gap-y-8 md:gap-y-10`}>
+            <div className={`grid ${gridClass[gridCols]} gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8`}>
               {dedupeColorGroups(products).map((product, idx) => (
                 <ProductCard key={product.id} product={product} listName={slug || "all"} index={idx} />
               ))}

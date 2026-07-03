@@ -805,6 +805,11 @@ async def create_order(
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
                 logger.info(f"[adres defteri] sipariş adresi üyeye kaydedildi user={_uid} order={order.get('order_number')}")
+        # Profil telefonu boşsa sipariş telefonundan doldur (üye detay/iletişim için)
+        if _uid and (_sa.get("phone") or "").strip():
+            _u = await db.users.find_one({"id": _uid}, {"_id": 0, "phone": 1})
+            if _u is not None and not (_u.get("phone") or "").strip():
+                await db.users.update_one({"id": _uid}, {"$set": {"phone": _sa["phone"]}})
     except Exception as _addr_err:
         logger.warning(f"Üye adres defteri kaydı başarısız (sipariş etkilenmedi): {_addr_err}")
 

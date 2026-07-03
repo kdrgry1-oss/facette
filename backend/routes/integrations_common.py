@@ -412,6 +412,24 @@ async def _facette_match_for_codes(codes):
         prod = await db.products.find_one({"$or": [{"stock_code": c}, {"sku": c}]}, {"_id": 0})
         if prod:
             return (prod, c, "product_stock_code")
+    # HB merchantSku = bizim varyant urun_id'miz ("8165"), eski Ticimax kayıtlarında ise
+    # numaralı ÜRÜN id'si ("7758") — bu tier'lar olmadan HB kalemleri hiç eşleşmiyordu.
+    for c in clean:
+        cands = [c]
+        if c.isdigit():
+            try:
+                cands.append(int(c))
+            except Exception:
+                pass
+        prod = await db.products.find_one({"variants.urun_id": {"$in": cands}}, {"_id": 0})
+        if prod:
+            return (prod, c, "variant_urun_id")
+    for c in clean:
+        if c.isdigit():
+            prod = await db.products.find_one(
+                {"$or": [{"id": c}, {"urun_id": c}, {"urun_kart_id": c}]}, {"_id": 0})
+            if prod:
+                return (prod, c, "product_urun_id")
     return None
 def _to_float_tr(v) -> float:
     """Türkçe/karışık sayı biçimlerini güvenle float'a çevirir.

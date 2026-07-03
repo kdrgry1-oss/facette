@@ -517,9 +517,14 @@ export default function ProductDetail() {
                 {displayImages.map((img, index) => (
                   <div
                     key={index}
-                    className="snap-center shrink-0 w-screen aspect-[2/3] bg-stone-50"
+                    className="snap-center shrink-0 w-screen aspect-[2/3] bg-stone-50 relative"
                     style={{ scrollSnapStop: "always" }}
                   >
+                    {hasDiscount && index === 0 && (
+                      <div className="absolute top-3 left-3 z-10 bg-red-600 text-white text-[11px] font-medium px-2 py-1 leading-none">
+                        -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                      </div>
+                    )}
                     <img
                       src={optimizeImg(img, 1200)}
                       alt={`${product.name} ${index + 1}`}
@@ -571,6 +576,11 @@ export default function ProductDetail() {
               )}
               <div className="flex-1 min-w-0">
                 <div className="relative aspect-[2/3] bg-stone-50">
+                  {hasDiscount && (
+                    <div className="absolute top-3 left-3 z-10 bg-red-600 text-white text-[11px] font-medium px-2 py-1 leading-none">
+                      -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                    </div>
+                  )}
                   <img
                     src={optimizeImg(displayImages[selectedImage] || displayImages[0], 1400)}
                     alt={product.name}
@@ -609,11 +619,16 @@ export default function ProductDetail() {
             {/* Price */}
             <div className="mb-6">
               <div className="flex items-center gap-3">
-                <span className={`text-lg ${hasDiscount ? "text-red-600" : ""}`}>
+                {hasDiscount && (
+                  <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+                )}
+                <span className={`text-lg ${hasDiscount ? "text-red-600 font-medium" : ""}`}>
                   {displayPrice.toFixed(2).replace('.', ',')} TL
                 </span>
                 {hasDiscount && (
-                  <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+                  <span className="bg-red-600 text-white text-[11px] font-medium px-1.5 py-0.5 leading-none">
+                    -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                  </span>
                 )}
               </div>
 

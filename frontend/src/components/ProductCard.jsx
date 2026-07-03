@@ -163,6 +163,16 @@ export default function ProductCard({ product, listId = "", listName = "", index
             </div>
           )}
 
+          {/* İndirim oranı rozeti — sol üst (tükendi rozeti varsa onun altına düşer) */}
+          {hasDiscount && (
+            <div
+              className={`absolute ${isSoldOut ? "top-10" : "top-3"} left-3 z-10 bg-red-600 text-white text-[11px] font-medium px-2 py-1 leading-none`}
+              data-testid={`discount-badge-${product.id}`}
+            >
+              -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+            </div>
+          )}
+
           {/* Favorite Button */}
           <button
             onClick={handleFavorite}
@@ -244,8 +254,8 @@ export default function ProductCard({ product, listId = "", listName = "", index
           <div className="mt-1.5 flex items-center gap-2">
             {hasDiscount ? (
               <>
-                <span className="text-sm text-red-600">{displayPrice.toFixed(2).replace('.', ',')} TL</span>
                 <span className="text-xs text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+                <span className="text-sm text-red-600 font-medium">{displayPrice.toFixed(2).replace('.', ',')} TL</span>
               </>
             ) : (
               <span className="text-sm">{(displayPrice || 0).toFixed(2).replace('.', ',')} TL</span>

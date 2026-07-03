@@ -159,7 +159,7 @@ function ProductSlider({ block, products }) {
       {block?.title && (
         <h2 className="text-center text-lg font-medium tracking-wide mb-8">{block.title}</h2>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8">
         {displayProducts.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}
@@ -310,7 +310,7 @@ function HomeSkeleton() {
     <div data-testid="home-skeleton">
       <div className="w-full aspect-[16/7] bg-stone-100 animate-pulse" />
       <section className="w-full px-2 md:px-4 py-10">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="animate-pulse">
               <div className="aspect-[2/3] bg-stone-100 mb-3" />
@@ -411,7 +411,7 @@ export default function Home() {
           {/* Add default product grid if no product_slider block */}
           {!hasProductSlider && products.length > 0 && (
             <section className="w-full px-2 md:px-4 py-10">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8">
                 {dedupeColorGroups(products).slice(0, 8).map((product) => (
                   <ProductCard key={product.id} product={product} />
                 ))}
@@ -463,7 +463,7 @@ export default function Home() {
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-2 md:gap-x-3 gap-y-6 md:gap-y-8">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-[3px] md:gap-x-1 gap-y-6 md:gap-y-8">
                 {dedupeColorGroups(products).map((product) => (
                   <ProductCard key={product.id} product={product} />
                 ))}
