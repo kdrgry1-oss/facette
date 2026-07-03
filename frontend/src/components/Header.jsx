@@ -61,8 +61,8 @@ const MENU_IMAGES = {
 function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNavigate }) {
   if (loading) {
     return [0, 1, 2].map((i) => (
-      <div key={i} className="w-44" data-testid="mega-product-skeleton">
-        <div className="w-44 h-56 bg-stone-100 animate-pulse" />
+      <div key={i} className="w-52" data-testid="mega-product-skeleton">
+        <div className="w-52 aspect-[2/3] bg-stone-100 animate-pulse" />
         <div className="h-2.5 bg-stone-100 mt-2 w-3/4 animate-pulse" />
         <div className="h-2.5 bg-stone-100 mt-1 w-1/3 animate-pulse" />
       </div>
@@ -73,14 +73,14 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
       <Link
         key={p.id}
         to={`/${p.slug || p.id}`}
-        className="block w-44 group"
+        className="block w-52 group"
         onClick={onNavigate}
       >
-        <div className="w-44 h-56 overflow-hidden bg-stone-100">
+        <div className="w-52 aspect-[2/3] overflow-hidden">
           <img
-            src={optimizeImg((p.images && p.images[0]) || p.image || "", 400)}
+            src={optimizeImg((p.images && p.images[0]) || p.image || "", 500)}
             alt={p.name}
-            className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-500"
+            className="w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-500"
             loading="lazy"
             decoding="async"
           />
@@ -91,7 +91,7 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
     ));
   }
   return fallback.map((img, i) => (
-    <Link key={i} to={fallbackLink} className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={onNavigate}>
+    <Link key={i} to={fallbackLink} className="block w-52 aspect-[2/3] overflow-hidden" onClick={onNavigate}>
       <img src={optimizeImg(img, 400)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
     </Link>
   ));
@@ -363,7 +363,7 @@ export default function Header({ hideMenu = false }) {
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
-                <div className="grid grid-cols-3 gap-x-10 max-w-xl">
+                <div className="grid grid-cols-3 gap-x-14 max-w-2xl">
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
                       <Link
@@ -427,7 +427,7 @@ export default function Header({ hideMenu = false }) {
                 {/* Categories */}
                 <div className="flex-1">
                   <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
-                  <ul className="grid grid-cols-2 gap-x-10 gap-y-1">
+                  <ul className="grid grid-cols-2 gap-x-14 gap-y-1">
                     {AKSESUAR_MENU.map((item) => (
                       <li key={item.slug}>
                         <Link
