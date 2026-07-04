@@ -658,14 +658,8 @@ export default function ProductDetail() {
                     <span className="text-red-600 ml-2">Tükendi</span>
                   )}
                 </span>
-                {/* Beden Tablosu — başlık satırında; mobil dahil her ekranda garantili görünür */}
-                {(sizeTableData || sizeTableImg) && (
-                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap" data-testid="show-size-table-btn">
-                    Beden Tablosu
-                  </button>
-                )}
               </div>
-              <div>
+              <div className="flex items-end justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
                   const isSelected = selectedSize === variant.size;
@@ -690,6 +684,12 @@ export default function ProductDetail() {
                   );
                 })}
                 </div>
+                {/* Beden Tablosu — beden butonlarıyla aynı satırda, alt hizada sağda */}
+                {(sizeTableData || sizeTableImg) && (
+                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid="show-size-table-btn">
+                    Beden Tablosu
+                  </button>
+                )}
               </div>
             </div>
 
