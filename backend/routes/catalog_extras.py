@@ -375,7 +375,7 @@ async def hourly_sales(days: int = Query(7, ge=1, le=90), current_user: dict = D
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     pipeline = [
         {"$match": {"created_at": {"$gte": cutoff}, "status": {"$ne": "cancelled"}}},
-        {"$group": {"_id": {"$hour": {"$dateFromString": {"dateString": "$created_at"}}}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$group": {"_id": {"$hour": {"date": {"$dateFromString": {"dateString": "$created_at"}}, "timezone": "Europe/Istanbul"}}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"_id": 1}},
     ]
     rows = []

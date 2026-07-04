@@ -1452,23 +1452,23 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Günde bir, terkedilmiş sepet mail hatırlatmaları (Resend key varsa çalışır).
+    # O12: "Günde bir" işleri SABİT SAATLİ cron ile çalıştır (07:00 UTC ≈ 10:00 İstanbul).
+    # Önceki `interval hours=24 + next_run_time=now+2dk` her PROCESS RESTART'ında çalışıyor ve
+    # düşük-stok e-postası sent-flag'i olmadığından her deploy'da MÜKERRER mail gidiyordu; ayrıca
+    # "günlük" saat her restart'ta kayıyordu. cron ile gün içinde tam olarak bir kez tetiklenir.
     _scheduler.add_job(
         _send_abandoned_cart_reminders,
-        "interval",
-        hours=24,
+        "cron",
+        hour=7, minute=0,
         id="abandoned_cart_reminders",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         max_instances=1,
         coalesce=True,
     )
-    # Günde bir, düşük stoklu ürün-varyantlar için admin'lere özet e-posta.
     _scheduler.add_job(
         _send_daily_stock_alert,
-        "interval",
-        hours=24,
+        "cron",
+        hour=7, minute=10,
         id="daily_stock_alert",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1,
         coalesce=True,
     )

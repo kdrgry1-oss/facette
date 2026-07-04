@@ -16,7 +16,7 @@ EVENT_MAP = {
     "view_item":        "VIEW_CONTENT",
     "view_item_list":   "LIST_VIEW",
     "add_to_cart":      "ADD_CART",
-    "remove_from_cart": "ADD_CART",
+    "remove_from_cart": "CUSTOM_EVENT_1",
     "begin_checkout":   "START_CHECKOUT",
     "add_payment_info": "ADD_BILLING",
     "add_to_wishlist":  "ADD_TO_WISHLIST",
