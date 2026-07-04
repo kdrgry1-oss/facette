@@ -1270,10 +1270,16 @@ async def _build_hb_product_item(product: dict, merchant_id: str):
     brand = product.get("brand") or product.get("brand_name")
     desc = re.sub(r"<[^>]+>", " ", product.get("description") or "").strip()
     imgs = []
-    for img in (product.get("images") or [])[:5]:
+    for img in (product.get("images") or []):
+        # Beden tablosu görselleri ({url, is_size_table:true}) ÜRÜN GÖRSELİ DEĞİLDİR —
+        # HB'ye Image1..5 olarak gidince görsel standardı ihlali/aksiyon üretiyor.
+        if isinstance(img, dict) and img.get("is_size_table"):
+            continue
         u = img.get("url") if isinstance(img, dict) else img
         if u:
             imgs.append(u)
+        if len(imgs) >= 5:
+            break
     if not imgs and product.get("image"):
         imgs.append(product["image"])
 
