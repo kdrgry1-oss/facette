@@ -622,11 +622,6 @@ export default function ProductDetail() {
                 <span className={`text-lg ${hasDiscount ? "text-red-600 font-medium" : ""}`}>
                   {displayPrice.toFixed(2).replace('.', ',')} TL
                 </span>
-                {hasDiscount && (
-                  <span className="bg-[#6b6b64] text-white text-xs font-normal px-2 py-1 leading-none">
-                    %{Math.round(((product.price - displayPrice) / product.price) * 100)}
-                  </span>
-                )}
               </div>
 
             {/* Yıldız derecelendirme — fiyatın altında; tıkla → yorumlara git */}
@@ -648,11 +643,6 @@ export default function ProductDetail() {
             </button>
 
 
-              {displayPrice > 0 && (
-                <p className="text-xs text-gray-500 mt-2" data-testid="installment-hint">
-                  💳 9 taksite kadar · <span className="font-medium text-gray-700">{(displayPrice / 9).toFixed(2).replace('.', ',')} TL</span>/ay'dan başlayan taksitlerle
-                </p>
-              )}
             </div>
 
 
