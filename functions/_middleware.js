@@ -25,6 +25,19 @@ const CONFIG = {
   CATEGORY_PREFIX: "/kategori/",
 };
 
+// Y27: Gerçek mağaza rotaları KÖK seviyededir (/<slug>) — ürün ve kategori aynı seviyede.
+// Middleware yalnızca /urun/ ve /kategori/ öneklerini eşliyordu → adres çubuğundan
+// kopyalanan kök-slug linki hiç SEO almıyor, paylaşımda jenerik anasayfa kartı çıkıyordu.
+// Bu statik/işlevsel kök yolları ürün/kategori denemesinden HARİÇ tutarız.
+const RESERVED_ROOTS = new Set([
+  "", "sepet", "odeme", "checkout", "cart", "hesap", "account", "giris", "login",
+  "kayit", "register", "sifremi-unuttum", "favoriler", "kaydedilenler", "siparis-takip",
+  "iletisim", "hakkimizda", "kurumsal", "sss", "kvkk", "gizlilik", "gizlilik-politikasi",
+  "iade", "iade-degisim", "kargo", "kargo-takip", "teslimat", "blog", "arama", "search",
+  "admin", "odeme-bildirimi", "urun", "kategori", "kategoriler", "urunler", "sepetim",
+  "mesafeli-satis", "cerez-politikasi", "sartlar", "sozlesme",
+]);
+
 export async function onRequest(context) {
   const { request, next } = context;
 
@@ -52,13 +65,26 @@ export async function onRequest(context) {
 async function buildSeo(url) {
   const path = decodeURIComponent(url.pathname.replace(/\/+$/, "")) || "/";
 
+  // Eski önekli yollar (geriye uyum) — canonical öneki korur.
   if (path.startsWith(CONFIG.PRODUCT_PREFIX)) {
     const slug = path.slice(CONFIG.PRODUCT_PREFIX.length).split("/")[0];
-    return slug ? productSeo(slug) : null;
+    return slug ? productSeo(slug, CONFIG.ORIGIN + CONFIG.PRODUCT_PREFIX + slug) : null;
   }
   if (path.startsWith(CONFIG.CATEGORY_PREFIX)) {
     const slug = path.slice(CONFIG.CATEGORY_PREFIX.length).split("/")[0];
-    return slug ? categorySeo(slug) : null;
+    return slug ? categorySeo(slug, CONFIG.ORIGIN + CONFIG.CATEGORY_PREFIX + slug) : null;
+  }
+
+  // Y27: Kök-seviye tek segmentli yol (/<slug>) — gerçek ürün/kategori URL'leri.
+  const segments = path.replace(/^\/+/, "").split("/");
+  if (segments.length === 1) {
+    const slug = segments[0];
+    if (!slug || RESERVED_ROOTS.has(slug.toLowerCase()) || slug.includes(".")) return null;
+    const canonical = CONFIG.ORIGIN + "/" + slug;
+    // Önce ürün dene; bulunamazsa kategori dene.
+    const prod = await productSeo(slug, canonical);
+    if (prod) return prod;
+    return await categorySeo(slug, canonical);
   }
   return null;
 }
@@ -72,15 +98,18 @@ async function apiGet(pathname) {
   return r.json();
 }
 
-async function productSeo(slug) {
+async function productSeo(slug, canonical) {
   const j = await apiGet("/products/" + encodeURIComponent(slug));
   const p = j && (j.data || j.product || j);
   if (!p || !p.name) return null;
 
-  const canonical = CONFIG.ORIGIN + CONFIG.PRODUCT_PREFIX + slug;
+  canonical = canonical || (CONFIG.ORIGIN + CONFIG.PRODUCT_PREFIX + slug);
   const price = p.sale_price && p.sale_price > 0 ? p.sale_price : p.price;
   const image = abs(firstImage(p)) || CONFIG.DEFAULT_IMAGE;
-  const inStock = p.in_stock !== false && (p.stock == null || Number(p.stock) > 0);
+  // Y14 (edge): varyant-farkında stok — varyantlı üründe parent `stock` bayat olabilir.
+  const inStock = Array.isArray(p.variants) && p.variants.length > 0
+    ? p.variants.some((v) => Number(v.stock || 0) > 0)
+    : (p.in_stock !== false && (p.stock == null || Number(p.stock) > 0));
 
   const productLd = {
     "@context": "https://schema.org/",
@@ -122,7 +151,7 @@ async function productSeo(slug) {
   };
 }
 
-async function categorySeo(slug) {
+async function categorySeo(slug, canonical) {
   const j = await apiGet("/categories");
   const arr = Array.isArray(j) ? j : (j && j.categories) || [];
   const cat = arr.find(
@@ -131,9 +160,11 @@ async function categorySeo(slug) {
       (String(c.slug || "").toLowerCase() === slug.toLowerCase() ||
         slugify(c.name) === slug.toLowerCase())
   );
-  const name = (cat && cat.name) || titleCase(slug.replace(/-/g, " "));
-  const canonical = CONFIG.ORIGIN + CONFIG.CATEGORY_PREFIX + slug;
-  const image = abs(cat && (cat.image || cat.image_url)) || CONFIG.DEFAULT_IMAGE;
+  // Y27: Kök-slug denemesinde ürün de kategori de değilse SEO üretme (uydurma kategori kartı çıkmasın).
+  if (!cat) return null;
+  const name = cat.name || titleCase(slug.replace(/-/g, " "));
+  canonical = canonical || (CONFIG.ORIGIN + CONFIG.CATEGORY_PREFIX + slug);
+  const image = abs(cat.image || cat.image_url) || CONFIG.DEFAULT_IMAGE;
 
   return {
     title: name + " | " + CONFIG.SITE_NAME,

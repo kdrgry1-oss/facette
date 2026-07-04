@@ -28,7 +28,8 @@ export function AuthProvider({ children }) {
   };
 
   const login = async (email, password) => {
-    const res = await axios.post(`${API}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`);
+    // O19: Şifreyi URL query yerine istek GÖVDESİNDE gönder (log/geçmiş/Referer sızıntısı olmasın).
+    const res = await axios.post(`${API}/auth/login`, { email, password });
     if (res.data?.mfa_required) {
       return { mfaRequired: true, mfaToken: res.data.mfa_token };
     }
@@ -60,14 +61,14 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (data) => {
-    const qs = new URLSearchParams({
+    // O19: Kimlik bilgilerini gövdede gönder (şifre query'de sızmasın).
+    const res = await axios.post(`${API}/auth/register`, {
       email: data.email || "",
       password: data.password || "",
       first_name: data.first_name || "",
       last_name: data.last_name || "",
       phone: data.phone || "",
-    }).toString();
-    const res = await axios.post(`${API}/auth/register?${qs}`);
+    });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);
     axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;

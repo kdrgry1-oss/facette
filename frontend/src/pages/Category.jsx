@@ -69,6 +69,13 @@ export default function Category() {
   const [facetColors, setFacetColors] = useState([]);
   const facetCacheRef = useRef({}); // slug -> { sizes, colors }
 
+  // O15: Kategori (slug) değişince sayfayı 1'e sıfırla — aksi halde başka kategoriye geçince
+  // yeni kategori ESKİ sayfa numarasında açılıp boş/eksik liste (stok yokmuş gibi) gösteriyordu.
+  useEffect(() => {
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
   useEffect(() => {
     fetchProducts();
     fetchCategories();

@@ -26,15 +26,27 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 @(limiter.limit("5/minute") if limiter else (lambda f: f))
 async def register(
     request: Request,
-    email: str = Query(...),
-    password: str = Query(...),
+    email: str = Query(None),
+    password: str = Query(None),
     first_name: str = Query(None),
     last_name: str = Query(None),
     phone: str = Query(None)
 ):
-    """Register new user"""
-    email = safe_str(email, 256).lower().strip()
-    password = safe_str(password, 200)
+    """Register new user.
+    O19: Kimlik bilgileri öncelikle GÖVDEDEN okunur (şifre query'de log'a sızmasın); query geriye uyumlu."""
+    if not email or not password:
+        try:
+            _b = await request.json()
+        except Exception:
+            _b = {}
+        if isinstance(_b, dict):
+            email = email or _b.get("email")
+            password = password or _b.get("password")
+            first_name = first_name or _b.get("first_name")
+            last_name = last_name or _b.get("last_name")
+            phone = phone or _b.get("phone")
+    email = safe_str(email or "", 256).lower().strip()
+    password = safe_str(password or "", 200)
     if not is_safe_email(email):
         raise HTTPException(status_code=400, detail="Geçersiz e-posta adresi")
     if len(password) < 6:
@@ -139,12 +151,22 @@ async def register(
 @(limiter.limit("10/minute") if limiter else (lambda f: f))
 async def login(
     request: Request,
-    email: str = Query(...),
-    password: str = Query(...)
+    email: str = Query(None),
+    password: str = Query(None)
 ):
-    """Login with email and password (rate-limited + lockout-protected)."""
-    email = safe_str(email, 256).lower().strip()
-    password = safe_str(password, 200)
+    """Login with email and password (rate-limited + lockout-protected).
+    O19: Kimlik bilgileri artık öncelikle istek GÖVDESİNDEN okunur — şifre URL query
+    parametresi olarak access log / tarayıcı geçmişi / Referer'a sızmasın. Geriye uyum
+    için query hâlâ kabul edilir."""
+    if not email or not password:
+        try:
+            _b = await request.json()
+        except Exception:
+            _b = {}
+        email = email or (_b.get("email") if isinstance(_b, dict) else None)
+        password = password or (_b.get("password") if isinstance(_b, dict) else None)
+    email = safe_str(email or "", 256).lower().strip()
+    password = safe_str(password or "", 200)
     ip = client_ip_from_request(request)
     ua = request.headers.get("user-agent")
 

@@ -116,7 +116,10 @@ export default function Checkout() {
   // Sipariş tutarları (türetilmiş) — useEffect'lerden ÖNCE tanımlanmalı (TDZ hatası önlenir)
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
-  const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
+  // Y25: Ücretsiz kargo kuponu uygulandıysa kargo 0 gösterilir (önceden etiket "Ücretsiz Kargo"
+  // yazsa da tutara kargo ekleniyordu). Eşik ya da kupon → kargo bedava.
+  const hasFreeShippingPromo = (appliedPromotions || []).some((p) => p && p.free_shipping);
+  const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : shippingFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
