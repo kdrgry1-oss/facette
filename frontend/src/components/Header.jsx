@@ -58,6 +58,14 @@ const MENU_IMAGES = {
 };
 
 // Mega menü sağ panel — ürünler yüklenirken iskelet gösterir (eski/yanlış görsel flash'ını önler).
+// ── MEGA MENÜ ORTAK AYARLARI ─────────────────────────────────────────────
+// Tüm bölümler (GİYİM, AKSESUAR ve İLERİDE eklenecek her yeni bölüm) kolon
+// düzenini ve görsel kartını BURADAN alır — bölümler arası fark oluşmaz.
+const MEGA_LINK_GRID = "grid gap-x-14 gap-y-1";
+const megaCols = (n) => ({ gridTemplateColumns: `repeat(${n}, 180px)` });
+const MEGA_IMG_BOX = "w-52 aspect-[2/3] overflow-hidden";
+const MEGA_IMG = "w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-500";
+
 function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNavigate }) {
   if (loading) {
     return [0, 1, 2].map((i) => (
@@ -76,11 +84,11 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
         className="block w-52 group"
         onClick={onNavigate}
       >
-        <div className="w-52 aspect-[2/3] overflow-hidden">
+        <div className={MEGA_IMG_BOX}>
           <img
             src={optimizeImg((p.images && p.images[0]) || p.image || "", 500)}
             alt={p.name}
-            className="w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-500"
+            className={MEGA_IMG}
             loading="lazy"
             decoding="async"
           />
@@ -363,7 +371,7 @@ export default function Header({ hideMenu = false }) {
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
-                <div className="grid grid-cols-3 gap-x-14 max-w-2xl">
+                <div className={MEGA_LINK_GRID} style={megaCols(3)}>
                   {Object.entries(GIYIM_MENU).map(([category, items]) => (
                     <div key={category}>
                       <Link
@@ -427,7 +435,7 @@ export default function Header({ hideMenu = false }) {
                 {/* Categories */}
                 <div className="flex-1">
                   <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
-                  <ul className="grid grid-cols-2 gap-x-14 gap-y-1">
+                  <ul className={MEGA_LINK_GRID} style={megaCols(2)}>
                     {AKSESUAR_MENU.map((item) => (
                       <li key={item.slug}>
                         <Link
@@ -457,14 +465,14 @@ export default function Header({ hideMenu = false }) {
                       <Link
                         key={p.id}
                         to={`/${p.slug || p.id}`}
-                        className="block w-44 group"
+                        className="block w-52 group"
                         onClick={() => setActiveMenu(null)}
                       >
-                        <div className="w-44 h-56 overflow-hidden bg-stone-100">
+                        <div className={MEGA_IMG_BOX}>
                           <img
-                            src={(p.images && p.images[0]) || p.image || ""}
+                            src={optimizeImg((p.images && p.images[0]) || p.image || "", 500)}
                             alt={p.name}
-                            className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-500"
+                            className={MEGA_IMG}
                           />
                         </div>
                         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
@@ -472,7 +480,7 @@ export default function Header({ hideMenu = false }) {
                       </Link>
                     ))
                   ) : (
-                    <Link to="/aksesuar" className="block w-44 h-56 overflow-hidden bg-stone-100" onClick={() => setActiveMenu(null)}>
+                    <Link to="/aksesuar" className={`block ${MEGA_IMG_BOX}`} onClick={() => setActiveMenu(null)}>
                       <img src={MENU_IMAGES.aksesuar[0]} alt="" className="w-full h-full object-cover" />
                     </Link>
                   )}

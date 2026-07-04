@@ -527,8 +527,8 @@ export default function ProductDetail() {
                     style={{ scrollSnapStop: "always" }}
                   >
                     {hasDiscount && index === 0 && (
-                      <div className="absolute top-3 left-3 z-10 bg-red-600 text-white text-[11px] font-medium px-2 py-1 leading-none">
-                        -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                      <div className="absolute top-3 left-3 z-10 bg-[#6b6b64] text-white text-xs font-normal px-2.5 py-1.5 leading-none">
+                        %{Math.round(((product.price - displayPrice) / product.price) * 100)}
                       </div>
                     )}
                     <img
@@ -583,8 +583,8 @@ export default function ProductDetail() {
               <div className="flex-1 min-w-0">
                 <div className="relative aspect-[2/3] bg-stone-50">
                   {hasDiscount && (
-                    <div className="absolute top-3 left-3 z-10 bg-red-600 text-white text-[11px] font-medium px-2 py-1 leading-none">
-                      -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                    <div className="absolute top-3 left-3 z-10 bg-[#6b6b64] text-white text-xs font-normal px-2.5 py-1.5 leading-none">
+                      %{Math.round(((product.price - displayPrice) / product.price) * 100)}
                     </div>
                   )}
                   <img
@@ -632,8 +632,8 @@ export default function ProductDetail() {
                   {displayPrice.toFixed(2).replace('.', ',')} TL
                 </span>
                 {hasDiscount && (
-                  <span className="bg-red-600 text-white text-[11px] font-medium px-1.5 py-0.5 leading-none">
-                    -%{Math.round(((product.price - displayPrice) / product.price) * 100)}
+                  <span className="bg-[#6b6b64] text-white text-xs font-normal px-2 py-1 leading-none">
+                    %{Math.round(((product.price - displayPrice) / product.price) * 100)}
                   </span>
                 )}
               </div>

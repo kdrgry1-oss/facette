@@ -364,10 +364,8 @@ export default function PageDesign() {
       const fd = new FormData();
       fd.append('file', file);
       const res = await axios.post(`${API}/upload/image`, fd, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+        headers: { Authorization: `Bearer ${token}` }, // Content-Type + boundary'yi tarayıcı koyar
+        timeout: 90000,
       });
       
       if (res.data.url || res.data.path) {
@@ -400,7 +398,9 @@ export default function PageDesign() {
       }
     } catch (err) {
       const detail = err?.response?.data?.detail;
-      toast.error(detail ? `Görsel yüklenemedi: ${detail}` : "Görsel yüklenemedi (ağ/limit hatası)");
+      const code = err?.response?.status || err?.code || err?.message || "";
+      toast.error(detail ? `Görsel yüklenemedi: ${detail}` : `Görsel yüklenemedi (${code || "ağ hatası"})`);
+      console.error("[upload]", err);
     } finally {
       setUploading(false);
     }
