@@ -2319,10 +2319,19 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
             _wide = int((datetime.now(timezone.utc) - timedelta(days=45)).timestamp() * 1000)
             _start = min(start_date_ms, _wide) if start_date_ms else _wide
         try:
+            # Y8: Trendyol orders ucu ~14 gunluk startDate/endDate araligina izin verir.
+            # Onceden Cancelled icin 45 gunluk TEK istek atiliyordu → 400 → except yutuyor →
+            # TUM iptal senkronu sessizce hicbir sey yapmiyordu. Artik aralik 14 gunluk
+            # pencerelere bolunur ve her pencere ayri sayfalanir.
+            _WIN = 14 * 24 * 3600 * 1000
+            _win_s = _start or (end_date_ms - _WIN)
+            _win_e = min(_win_s + _WIN, end_date_ms)
             page = 0
-            while page < 25:
+            _guard = 0
+            while _guard < 400:
+                _guard += 1
                 resp = await client.get_orders(
-                    start_date_ms=_start, end_date_ms=end_date_ms,
+                    start_date_ms=_win_s, end_date_ms=_win_e,
                     status=st, size=200, page=page,
                 )
                 chunk = resp.get("content", []) or []
@@ -2429,8 +2438,14 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                             logger.error(f"[trendyol cancel restock {onum}] {_re}")
                 total_pages = resp.get("totalPages") or 0
                 page += 1
-                if not chunk or page >= total_pages:
+                if chunk and page < total_pages:
+                    continue
+                # Bu 14 gunluk pencere bitti → varsa sonraki pencereye gec (Y8).
+                if _win_e >= end_date_ms:
                     break
+                _win_s = _win_e
+                _win_e = min(_win_s + _WIN, end_date_ms)
+                page = 0
         except Exception as e:
             logger.error(f"[trendyol status pass {st}] {e}")
     return updated
@@ -4055,13 +4070,16 @@ async def update_trendyol_stock_price(
     # Varyantlı ürün mü?
     items = []
     variants = product.get("variants", [])
-    trendyol_multiplier = float(config.get("default_markup", 0) or 0)
-    base_price = product.get("price", 0)
+    # O10: Toplu senkron _mp_base_price (üye fiyatı) + ürün-özel trendyol_multiplier kullanır;
+    # tekil uç ise product.price + yalnızca config markup kullanıyordu → aynı barkoda tekil vs
+    # toplu farklı fiyat gidip Trendyol'da fiyat oynuyordu. Aynı taban ve çarpan mantığı uygulanır.
+    _default_markup = float(config.get("default_markup", 0) or 0)
+    _mult = product.get("trendyol_multiplier")
+    _markup = float(_mult) if (_mult is not None and float(_mult) > 0) else _default_markup
+    _factor = 1 + _markup / 100.0
+    trendyol_multiplier = _markup  # geri uyumluluk (aşağıda kullanılıyorsa)
+    base_price = _mp_base_price(product) * _factor
     sale_price = base_price  # Trendyol: indirimsiz satis fiyati
-    
-    if trendyol_multiplier > 0:
-        sale_price = sale_price * (1 + trendyol_multiplier / 100)
-        base_price = base_price * (1 + trendyol_multiplier / 100)
 
     if variants:
         for v in variants:
@@ -4146,14 +4164,14 @@ async def update_trendyol_category_stock_price(
     )
 
     items = []
+    _default_markup = float(config.get("default_markup", 0) or 0)
     for product in products:
-        trendyol_multiplier = float(config.get("default_markup", 0) or 0)
-        base_price = product.get("price", 0)
+        # O10: toplu senkronla aynı taban (_mp_base_price) + ürün-özel çarpan.
+        _mult = product.get("trendyol_multiplier")
+        _markup = float(_mult) if (_mult is not None and float(_mult) > 0) else _default_markup
+        _factor = 1 + _markup / 100.0
+        base_price = _mp_base_price(product) * _factor
         sale_price = base_price  # Trendyol: indirimsiz satis fiyati
-        
-        if trendyol_multiplier > 0:
-            sale_price = sale_price * (1 + trendyol_multiplier / 100)
-            base_price = base_price * (1 + trendyol_multiplier / 100)
 
         variants = product.get("variants", [])
         if variants:
@@ -4436,14 +4454,17 @@ async def upload_invoice_to_trendyol(order_number: str, payload: dict, current_u
 
     supplier_id = config["supplier_id"]
     headers = await get_trendyol_headers()
-    base_url = config["base_url"]
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            url = f"{base_url}/sapigw/suppliers/{supplier_id}/shipment-packages/{package_id}/invoices"
+            # O9: Legacy `sapigw` gateway kapatildi (client apigw.trendyol.com/integration'a
+            # tasindi). Fatura linki gonderimi guncel `seller-invoice-links` ucunu kullanir.
+            url = f"https://apigw.trendyol.com/integration/sellers/{supplier_id}/seller-invoice-links"
             body = {
+                "invoiceLink": invoice_link,
+                "shipmentPackageId": int(package_id) if str(package_id).isdigit() else package_id,
                 "invoiceNumber": invoice_number or f"FAT-{order_number}",
-                "invoiceLink": invoice_link
+                "invoiceDateTime": int(datetime.now(timezone.utc).timestamp() * 1000),
             }
             resp = await client.post(url, headers=headers, json=body)
             resp.raise_for_status()
@@ -4490,8 +4511,22 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
             else:
                 raise Exception("Ürün için Trendyol kategorisi seçilmemiş")
 
-        # Fetch mapping details from category
-        mapping_cat = await db.categories.find_one({"trendyol_category_id": ty_cat_id})
+        # O7: Mapping'i CANONICAL kaynaktan (db.category_mappings) oku — diğer tüm yol/yazıcılar
+        # burayı kullanır ve value_mappings anahtarları `attrId|value` (pipe) formatındadır.
+        # Önceki kod db.categories'ten okuyup `attrId:value` (kolon) arıyordu → eşleşme HİÇ tutmaz,
+        # enum değerleri hep customAttributeValue gider ve allowCustom=false attribute'larda reddedilir.
+        mapping_cat = None
+        _pcat_id = product.get("category_id")
+        if _pcat_id:
+            mapping_cat = await db.category_mappings.find_one(
+                {"category_id": str(_pcat_id), "marketplace": "trendyol"}, {"_id": 0})
+        if not mapping_cat and product.get("category_name"):
+            _sys = await db.categories.find_one({"name": product.get("category_name")}, {"_id": 0, "id": 1})
+            if _sys and _sys.get("id"):
+                mapping_cat = await db.category_mappings.find_one(
+                    {"category_id": str(_sys["id"]), "marketplace": "trendyol"}, {"_id": 0})
+        if not mapping_cat:  # legacy fallback
+            mapping_cat = await db.categories.find_one({"trendyol_category_id": ty_cat_id}, {"_id": 0})
         attr_mappings = mapping_cat.get("attribute_mappings", []) if mapping_cat else []
         val_mappings = mapping_cat.get("value_mappings", {}) if mapping_cat else {}
         default_mappings = mapping_cat.get("default_mappings", {}) if mapping_cat else {}
@@ -4525,7 +4560,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                 val = default_mappings.get(str(ty_attr_id))
                 
             if val:
-                mapping_key = f"{ty_attr_id}:{val}"
+                mapping_key = f"{ty_attr_id}|{val}"  # O7: pipe (canonical)
                 ty_val_id = val_mappings.get(mapping_key)
                 if ty_val_id:
                     common_attrs.append({"attributeId": ty_attr_id, "attributeValueId": int(ty_val_id)})
@@ -4545,7 +4580,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                     if local_name.lower() == "beden":
                         sz = v.get("size")
                         if sz:
-                            m_key = f"{ty_attr_id}:{sz}"
+                            m_key = f"{ty_attr_id}|{sz}"  # O7: pipe (canonical)
                             v_id = val_mappings.get(m_key)
                             if v_id:
                                 v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
@@ -4555,7 +4590,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                     elif local_name.lower() == "renk":
                         clr = v.get("color")
                         if clr:
-                            m_key = f"{ty_attr_id}:{clr}"
+                            m_key = f"{ty_attr_id}|{clr}"  # O7: pipe (canonical)
                             v_id = val_mappings.get(m_key)
                             if v_id:
                                 v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})

@@ -514,10 +514,23 @@ async def temu_webhook(request: Request):
     if event in ("order.created", "order.updated"):
         oid = data.get("order_id")
         if oid:
+            # O5: Pipeline kanalı `platform` alanında tutar (marketplace değil) ve durumlar
+            # dahili katalogla eşlenmeli — aksi halde Temu siparişleri platform filtrelerinde
+            # görünmez ve tanınmayan ham durum stringi taşırdı.
+            _raw_status = str(data.get("status") or "").lower().strip()
+            _status_map = {
+                "pending": "pending", "created": "pending", "unpaid": "awaiting_payment",
+                "paid": "confirmed", "confirmed": "confirmed", "processing": "confirmed",
+                "shipped": "shipped", "in_transit": "shipped", "delivered": "delivered",
+                "completed": "delivered", "cancelled": "cancelled", "canceled": "cancelled",
+                "refunded": "refunded", "returned": "returned",
+            }
+            _internal = _status_map.get(_raw_status, "pending")
             await db.orders.update_one(
-                {"marketplace": "temu", "marketplace_order_id": oid},
-                {"$set": {"marketplace": "temu", "marketplace_order_id": oid, "raw_data": data,
-                          "status": data.get("status", "pending"),
+                {"platform": "temu", "marketplace_order_id": oid},
+                {"$set": {"platform": "temu", "marketplace": "temu",
+                          "marketplace_order_id": oid, "raw_data": data,
+                          "status": _internal, "marketplace_status_raw": _raw_status,
                           "updated_at": datetime.now(timezone.utc).isoformat()}},
                 upsert=True,
             )

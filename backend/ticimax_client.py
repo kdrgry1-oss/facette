@@ -298,8 +298,10 @@ def get_products(page: int = 1, page_size: int = 50,
         f_kwargs["UrunID"] = urun_karti_id
     f = ff(**f_kwargs)
 
-    start = (page - 1) * page_size
-    s = sf(BaslangicIndex=start, KayitSayisi=page_size, KayitSayisinaGoreGetir=True)
+    # Y11: BaslangicIndex 0-tabanlı PAGE INDEX'tir (get_orders'ta doğrulandı — aynı sayfalama
+    # fabrikası). Önceki `(page-1)*page_size` offset formülü her sayfada page_size kadar SAYFA
+    # atlıyordu → katalogun çoğu hiç çekilmiyor ama senkron "başarılı" raporluyordu.
+    s = sf(BaslangicIndex=(page - 1), KayitSayisi=page_size, KayitSayisinaGoreGetir=True)
 
     result = c.service.SelectUrun(UyeKodu=wscode, f=f, s=s)
     prods = _unwrap_list(result)
