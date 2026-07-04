@@ -433,6 +433,15 @@ export default function ProductDetail() {
   // Remove duplicate images and hide size-table images from customer view
   const allImages = product.images || [];
   const uniqueImages = allImages.length > 1 && allImages[0] === allImages[1] ? allImages.slice(1) : allImages;
+  // Ölçü tablosu görseli: tablo VERİSİ girilmemiş ürünlerde modal bu görseli gösterir
+  // (aksi hâlde beden tablosuna hiçbir cihazdan erişilemiyordu).
+  const sizeTableImg = (() => {
+    for (const img of allImages) {
+      if (typeof img === "object" && img !== null && img.is_size_table && img.url) return img.url;
+    }
+    return null;
+  })();
+
   // Ölçü tablosu görselleri {url, is_size_table:true} dict'i olarak işaretli — müşteriden gizle.
   // Kalanları URL string'e normalize et (dict gelse bile <img src> kırılmasın).
   const displayImages = uniqueImages
@@ -659,8 +668,14 @@ export default function ProductDetail() {
                     <span className="text-red-600 ml-2">Tükendi</span>
                   )}
                 </span>
+                {/* Beden Tablosu — başlık satırında; mobil dahil her ekranda garantili görünür */}
+                {(sizeTableData || sizeTableImg) && (
+                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap" data-testid="show-size-table-btn">
+                    Beden Tablosu
+                  </button>
+                )}
               </div>
-              <div className="flex items-end justify-between gap-3">
+              <div>
                 <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
                   const isSelected = selectedSize === variant.size;
@@ -685,12 +700,6 @@ export default function ProductDetail() {
                   );
                 })}
                 </div>
-                {/* Beden Tablosu — bedenlerin alt hizasında, sağda */}
-                {sizeTableData && (
-                  <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid="show-size-table-btn">
-                    Beden Tablosu
-                  </button>
-                )}
               </div>
             </div>
 
@@ -1083,13 +1092,19 @@ export default function ProductDetail() {
       </div>
 
       {/* Size Chart Modal – HTML table */}
-      {showSizeChart && sizeTableData && (
+      {showSizeChart && (sizeTableData || sizeTableImg) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowSizeChart(false)}>
           <div className="bg-white max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-white flex justify-between items-center p-4 border-b">
               <h3 className="text-sm font-bold uppercase tracking-wider">Beden Tablosu</h3>
               <button onClick={() => setShowSizeChart(false)} className="p-1"><X size={18} /></button>
             </div>
+            {!sizeTableData && sizeTableImg && (
+              <div className="p-4" data-testid="size-table-image">
+                <img src={optimizeImg(sizeTableImg, 1000)} alt="Beden Tablosu" className="w-full h-auto" />
+              </div>
+            )}
+            {sizeTableData && (
             <div className="p-6" data-testid="size-table-html">
               <p className="text-xs text-gray-500 mb-4">Tüm ölçüler cm cinsindendir.</p>
               <div className="overflow-x-auto border rounded-lg">
@@ -1116,6 +1131,7 @@ export default function ProductDetail() {
               </div>
               <p className="text-xs text-gray-400 mt-4">Değerler ± 1-2 cm tolerans taşıyabilir.</p>
             </div>
+            )}
           </div>
         </div>
       )}
