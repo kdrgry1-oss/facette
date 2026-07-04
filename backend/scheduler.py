@@ -705,16 +705,20 @@ async def _send_abandoned_cart_reminders():
         html = (
             "<h2>Sepetinizdeki ürünler tükeniyor!</h2>"
             "<p>Seçtiğiniz ürünleri tamamlamak için hazır bir alışveriş sepetiniz var.</p>"
-            "<p><a href=\"https://facette.com\" style=\"background:#000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Sepete Dön</a></p>"
+            "<p><a href=\"https://facette.com.tr\" style=\"background:#000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Sepete Dön</a></p>"
             "<p style=\"font-size:12px;color:#888;margin-top:24px\">Bu e-posta otomatik gönderilmiştir.</p>"
         )
         ok, failed, errs = await _send_email_via_resend(recipients, subject, html)
-        # işaretle
-        for c in carts:
-            await db.cart_sessions.update_one(
-                {"session_id": c.get("session_id")},
-                {"$set": {"abandoned_reminder_sent": True, "abandoned_reminder_at": now.isoformat()}},
-            )
+        # O13: Gönderim BAŞARISIZ olduysa sepetleri "hatırlatıldı" işaretleme — aksi halde
+        # SMTP hatasında bu sepetler bir daha ASLA hatırlatılmıyordu. Yalnızca hiç hata yoksa işaretle.
+        if failed == 0 and ok > 0:
+            for c in carts:
+                await db.cart_sessions.update_one(
+                    {"session_id": c.get("session_id")},
+                    {"$set": {"abandoned_reminder_sent": True, "abandoned_reminder_at": now.isoformat()}},
+                )
+        else:
+            logger.warning(f"[scheduler] Abandoned cart mail kismen/tamamen basarisiz (sent={ok} failed={failed}) — işaretlenmedi, sonraki turda tekrar denenecek")
         logger.info(f"[scheduler] Abandoned cart reminders: sent={ok} failed={failed} errs={errs[:1]}")
     except Exception as e:
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")

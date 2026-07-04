@@ -200,6 +200,26 @@ async def retry_queue_once(db, batch_size: int = 100) -> dict:
             continue
         access_token = await _resolve_access_token(px)
         if not access_token:
+            # O4: Token yoksa eskiden attempts artmadan/next_try_at ilerlemeden `continue`
+            # ediliyordu → bu öğe HER 30 dk'da SONSUZA dek yeniden işleniyordu. Artık başarısız
+            # gönderim gibi attempts artırılır, backoff uygulanır ve MAX_ATTEMPTS'te dead-letter olur.
+            fail_count += 1
+            attempt = int(it.get("attempts") or 0) + 1
+            if attempt >= MAX_ATTEMPTS:
+                await db.capi_event_queue.update_one(
+                    {"id": it["id"]},
+                    {"$set": {"attempts": attempt, "dead": True,
+                              "last_error": "access_token yok",
+                              "updated_at": now.isoformat()}},
+                )
+            else:
+                backoff = BACKOFF_MINUTES[min(attempt - 1, len(BACKOFF_MINUTES) - 1)]
+                await db.capi_event_queue.update_one(
+                    {"id": it["id"]},
+                    {"$set": {"attempts": attempt, "last_error": "access_token yok",
+                              "next_try_at": (now + timedelta(minutes=backoff)).isoformat(),
+                              "updated_at": now.isoformat()}},
+                )
             continue
         res = await mod.send(
             pixel_id=(px.get("tag_id") or "").strip(),
