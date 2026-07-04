@@ -309,6 +309,34 @@ def _item_kdv(it: dict, vat_map: dict, default: float = 10.0) -> float:
     return float(default)
 
 
+def _eff_unit_price(prod: dict, variant_id: str = None) -> float:
+    """Bir ürün (ve varsa varyant) için SUNUCU-OTORİTER birim fiyat.
+    Taban = geçerli indirimli fiyat (0 < sale_price < price ise), yoksa liste fiyatı.
+    Varyantın price_adjustment (veya eski alias price_diff) farkı eklenir.
+    İstemcinin gönderdiği fiyat ASLA kullanılmaz — sahte fiyatla ödeme (K1) buradan kapanır."""
+    try:
+        base = float(prod.get("price") or 0)
+    except Exception:
+        base = 0.0
+    sp = prod.get("sale_price")
+    try:
+        sp = float(sp) if sp not in (None, "") else None
+    except Exception:
+        sp = None
+    if sp is not None and 0 < sp < base:
+        base = sp
+    adj = 0.0
+    if variant_id:
+        for v in (prod.get("variants") or []):
+            if v.get("id") == variant_id:
+                try:
+                    adj = float(v.get("price_adjustment") or v.get("price_diff") or 0)
+                except Exception:
+                    adj = 0.0
+                break
+    return round(base + adj, 2)
+
+
 async def next_order_number() -> str:
     """Kısa, sıralı site sipariş numarası: W10001, W10002, ...
     Atomik sayaç (db.counters) ile çakışma imkânsız. Sayaç başarısız olursa
@@ -543,7 +571,8 @@ async def get_order_by_number(order_number: str):
     order = await db.orders.find_one(
         {"order_number": order_number},
         {"_id": 0, "admin_notes": 0, "payment_id": 0, "user_id": 0, "customer_ip": 0, "user_agent": 0,
-         "billing_address": 0, "attribution": 0}
+         "billing_address": 0, "billing_info": 0, "attribution": 0, "payment_receipt": 0,
+         "iyzico_retrieve_response": 0, "iyzico_init_response": 0, "iyzico_response": 0}
     )
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -604,15 +633,21 @@ async def get_order(
     current_user: dict = Depends(get_current_user)
 ):
     """Get single order"""
+    # K3: Bu uç TAM (maskesiz) sipariş döndürür — dekont, vergi no, adres, iyzico yanıtı.
+    # Anonim erişim YASAK; aksi halde sıralı sipariş numaralarıyla tüm müşteri veritabanı
+    # sıyrılabiliyordu. Misafir/başarı sayfası maskeli `/orders/by-number/{n}` ucunu kullanır.
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    
-    # Check access - admin can see all, users can see only their own
-    if current_user and not current_user.get("is_admin"):
+
+    # Admin tümünü görür; normal kullanıcı yalnızca kendi siparişini.
+    if not current_user.get("is_admin"):
         if order.get("user_id") != current_user.get("id"):
             raise HTTPException(status_code=403, detail="Bu siparişi görüntüleme yetkiniz yok")
-    
+
     order["items"] = await _enrich_items_with_products(order.get("items") or [])
     return order
 
@@ -726,41 +761,80 @@ async def create_order(
         if not _cod_on:
             raise HTTPException(status_code=400, detail="Kapıda ödeme şu anda kullanılamıyor. Lütfen başka bir ödeme yöntemi seçin.")
 
-    # Madde 4 — SUNUCU-OTORITER GUVENLI KELEPCE (tek yonlu). Sunucu indirimi odeme yontemiyle
-    # birlikte yeniden hesaplar; istemcinin gonderdigi indirim sunucununkini ASAMAZ. Mesru
-    # siparis degismez (iki deger esit). Sismis/sahte indirim (orn. havale indirimini kapip
-    # kartla odeme) kirpilir; karta yansiyan tutar INSERT'ten ONCE duzeltilir (cunku
-    # /payment/card/pay siparisin kayitli total'ini ceker). Hata olsa bile siparis bozulmaz.
+    # ============ SUNUCU-OTORİTER FİYATLAMA (K1) ============
+    # Güvenlik: istemcinin gönderdiği birim fiyat / subtotal / shipping_cost / total ASLA
+    # doğrudan kullanılmaz. Her kalemin birim fiyatı üründen (sale_price/price + varyant
+    # price_adjustment) sunucuda yeniden hesaplanır; subtotal, indirim (promo motoru), kargo
+    # (ayarlardan) ve toplam sunucuda kurulur. Böylece "price:1 ile 1 TL'ye sipariş" imkânsız.
+    _items = order.get("items") or []
+    _pids = list({it.get("product_id") for it in _items if it.get("product_id")})
+    _pmap = {}
+    if _pids:
+        async for _p in db.products.find({"id": {"$in": _pids}}, {"_id": 0}):
+            _pmap[_p["id"]] = _p
+    _subtotal = 0.0
+    for it in _items:
+        pid = it.get("product_id")
+        prod = _pmap.get(pid) if pid else None
+        if pid and not prod:
+            raise HTTPException(status_code=400, detail="Sipariş kaleminde geçersiz ürün")
+        if prod:
+            it["price"] = _eff_unit_price(prod, it.get("variant_id"))  # istemci fiyatını ez
+        qty = int(it.get("quantity", it.get("qty", 1)) or 1)
+        if qty < 1:
+            qty = 1
+        it["quantity"] = qty
+        _subtotal += float(it.get("price", 0) or 0) * qty
+    _subtotal = round(_subtotal, 2)
+    order["subtotal"] = _subtotal
+
+    # İndirim: promo motoru (SUNUCU fiyatlarıyla); ödeme yöntemi de dikkate alınır.
+    _server_discount = 0.0
+    _free_shipping = False
     try:
         from .coupons import evaluate_cart_promotions as _eval_promos
         _eng_items = [{
             "product_id": it.get("product_id"),
             "category_id": it.get("category_id"),
-            "qty": it.get("quantity", it.get("qty", 1)),
-            "price": it.get("price", 0),
-        } for it in (order.get("items") or [])]
+            "qty": int(it.get("quantity", it.get("qty", 1)) or 1),
+            "price": float(it.get("price", 0) or 0),
+        } for it in _items]
         _ev = await _eval_promos(
-            cart_total=float(order.get("subtotal", 0) or 0),
+            cart_total=_subtotal,
             items=_eng_items,
             user_id=order.get("user_id"),
             email=(order.get("shipping_address") or {}).get("email", ""),
             entered_code=order.get("coupon_code", ""),
             payment_method=order.get("payment_method", ""),
         )
-        _srv = round(float(_ev.get("total_discount", 0) or 0), 2)
-        _cli = round(float(order.get("discount", 0) or 0), 2)
-        if _cli - _srv > 0.01:  # istemci fazla indirim iddia etmis -> sunucu degerine kirp
-            _delta = round(_cli - _srv, 2)
-            order["discount"] = _srv
-            order["total"] = round(float(order.get("total", 0) or 0) + _delta, 2)
-            order["applied_promotions"] = _ev.get("applied") or []
-            order["promo_clamped"] = {"client": _cli, "server": _srv, "delta": _delta,
-                                      "payment_method": order.get("payment_method")}
-            logger.warning(f"[PROMO KELEPCE] siparis={order['order_number']} istemci={_cli} "
-                           f"sunucu={_srv} -> indirim {_srv}'e kirpildi, total +{_delta} "
-                           f"(odeme={order.get('payment_method')})")
-    except Exception as _clamp_err:
-        logger.warning(f"Promo kelepce hatasi (siparis etkilenmedi): {_clamp_err}")
+        _server_discount = round(float(_ev.get("total_discount", 0) or 0), 2)
+        _free_shipping = bool(_ev.get("free_shipping"))
+        order["applied_promotions"] = _ev.get("applied") or []
+    except Exception as _promo_err:
+        logger.warning(f"Promo değerlendirme hatası (indirim 0 kabul edildi): {_promo_err}")
+        _server_discount = 0.0
+    if _server_discount > _subtotal:
+        _server_discount = _subtotal
+    order["discount"] = _server_discount
+
+    # Kargo: sunucu ayarından (ücretsiz kargo eşiği VEYA kupon free_shipping). Y25 de burada çözülür.
+    try:
+        _sset = await db.settings.find_one(
+            {"id": "main"}, {"_id": 0, "shipping_fee": 1, "free_shipping_threshold": 1}) or {}
+        _ship_fee = float(_sset.get("shipping_fee") or 0)
+        _thr = _sset.get("free_shipping_threshold")
+        _thr = float(_thr) if _thr not in (None, "") else None
+    except Exception:
+        _ship_fee, _thr = 0.0, None
+    _shipping = 0.0 if _free_shipping else _ship_fee
+    if _thr is not None and (_subtotal - _server_discount) >= _thr:
+        _shipping = 0.0
+    order["shipping_cost"] = round(_shipping, 2)
+
+    # Toplam = subtotal - indirim + kargo + hediye paketi (hediye paketi negatif olamaz).
+    _gift = max(0.0, float(order.get("gift_wrap_price", 0) or 0))
+    order["gift_wrap_price"] = round(_gift, 2)
+    order["total"] = round(_subtotal - _server_discount + _shipping + _gift, 2)
 
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
