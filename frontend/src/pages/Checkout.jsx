@@ -717,7 +717,6 @@ export default function Checkout() {
               <ChevronLeft size={16} strokeWidth={2} />
             </button>
             <div>
-              <p className="text-[10px] tracking-[0.3em] uppercase text-black/60 mb-1.5">Ödeme</p>
               <h1 className="text-xl md:text-2xl font-light tracking-tight text-black">Sipariş Onayı</h1>
             </div>
           </div>

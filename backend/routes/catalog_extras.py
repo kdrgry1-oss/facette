@@ -12,7 +12,7 @@ import uuid
 import os
 import httpx
 
-from .deps import db, require_admin, require_auth, generate_id, logger
+from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger
 
 
 def _now() -> str:
@@ -454,7 +454,9 @@ tickets_admin_router = APIRouter(prefix="/admin/tickets", tags=["admin-tickets"]
 
 
 @tickets_public_router.post("")
-async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(require_auth)):
+async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(get_current_user)):
+    # O18: Önceden require_auth (401) yüzünden misafirler talep AÇAMIYORDU; guest fallback'ları
+    # ölü koddu. get_current_user anonimde None döner → misafir de destek talebi açabilir.
     doc = {
         "id": str(uuid.uuid4()),
         "ticket_number": f"TKT-{str(uuid.uuid4())[:8].upper()}",
@@ -470,6 +472,8 @@ async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(re
     }
     if not doc["subject"] or not doc["message"]:
         raise HTTPException(status_code=400, detail="Konu ve mesaj zorunlu")
+    if not doc["email"]:
+        raise HTTPException(status_code=400, detail="E-posta adresi zorunlu")
     await db.tickets.insert_one(doc)
     doc.pop("_id", None)
     return {"success": True, "ticket": doc}
