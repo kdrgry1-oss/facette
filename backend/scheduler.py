@@ -17,7 +17,7 @@ _scheduler: AsyncIOScheduler | None = None
 async def auto_cancel_unpaid_havale_orders():
     """Cancel havale/transfer orders that remain unpaid after 72 hours and restock."""
     from routes.deps import db  # lazy import
-    from routes.orders import _stock_delta_for_order
+    from routes.orders import _restock_order_once
 
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
@@ -31,7 +31,9 @@ async def auto_cancel_unpaid_havale_orders():
         cancelled = 0
         async for order in db.orders.find(query, {"_id": 0}):
             try:
-                moves = await _stock_delta_for_order(order, +1)
+                # O16: Önce durumu güncelle, SONRA idempotent iade yap. Önceki sıra (önce restock,
+                # sonra status) update hata verirse bir sonraki turda stoğu TEKRAR ekliyordu.
+                # _restock_order_once zaten iade hareketi varsa ikinci kez eklemez.
                 await db.orders.update_one(
                     {"id": order["id"]},
                     {"$set": {
@@ -43,14 +45,7 @@ async def auto_cancel_unpaid_havale_orders():
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }}
                 )
-                await db.stock_movements.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "type": "auto_cancel_havale_72h",
-                    "order_id": order["id"],
-                    "order_number": order.get("order_number", ""),
-                    "items": moves,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                await _restock_order_once(order, "havale_auto_cancel")
                 cancelled += 1
             except Exception as e_item:
                 logger.error(f"Failed to cancel order {order.get('order_number')}: {e_item}")

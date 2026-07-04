@@ -73,7 +73,7 @@ export default function CartDrawer() {
         {remaining > 0 && items.length > 0 && (
           <div className="px-5 py-3 bg-stone-50 border-b border-black/5">
             <p className="text-[11px] text-center mb-2 text-black/70">
-              Ücretsiz kargo için <span className="font-medium text-black">{remaining.toFixed(2)} TL</span> daha
+              Ücretsiz kargo için <span className="font-semibold text-emerald-600">{remaining.toFixed(2)} TL</span> daha
             </p>
             <div className="h-[2px] bg-black/10 overflow-hidden">
               <div
