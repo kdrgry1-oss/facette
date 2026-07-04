@@ -89,6 +89,36 @@ def _is_paid(data: dict) -> bool:
     return ps in (None, "", "SUCCESS")
 
 
+def _payment_matches_order(data: dict, order: dict) -> bool:
+    """Y1: iyzico yanıtının GERÇEKTEN bu siparişe ve tutara ait olduğunu doğrular.
+    - conversationId (bizim gönderdiğimiz = sipariş id'si) yanıtta eşleşmeli
+    - ödenen tutar sipariş toplamıyla uyuşmalı (taksitte vade farkı ile >= olabilir)
+    Böylece başka/ucuz bir siparişin paymentId'siyle pahalı siparişi 'ödendi' işaretlemek
+    (cross-order paymentId reuse) engellenir."""
+    try:
+        oid = str(order.get("id") or "")
+        conv = str(data.get("conversationId") or "")
+        if conv and oid and conv != oid:
+            logger.warning(f"[ODEME DOGRULAMA] conversationId uyusmuyor: yanit={conv} siparis={oid}")
+            return False
+        total = round(float(order.get("total") or 0), 2)
+        price = data.get("price")
+        paid = data.get("paidPrice")
+        price = round(float(price), 2) if price not in (None, "") else None
+        paid = round(float(paid), 2) if paid not in (None, "") else None
+        # Taban fiyat (price) siparişin toplamına eşit olmalı; taksitte paidPrice >= total.
+        if price is not None and abs(price - total) > 0.02:
+            logger.warning(f"[ODEME DOGRULAMA] tutar uyusmuyor: yanit_price={price} siparis_total={total}")
+            return False
+        if price is None and paid is not None and paid + 0.02 < total:
+            logger.warning(f"[ODEME DOGRULAMA] paidPrice<total: {paid} < {total}")
+            return False
+        return True
+    except Exception as _e:
+        logger.warning(f"[ODEME DOGRULAMA] hata: {_e}")
+        return False
+
+
 def _format_gsm(phone: str) -> str:
     digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
     if not digits:
@@ -289,7 +319,16 @@ async def _notify_paid_order_confirmed(order_id: str) -> None:
     bozmaz (fire-and-forget mantığı; yalnızca loglar)."""
     try:
         order = await db.orders.find_one({"id": order_id}, {"_id": 0})
-        if not order or order.get("order_confirmed_notified"):
+        if not order:
+            return
+        # Y6: Kupon kullanımını ÖDEME ONAYINDAN sonra kaydet (başarısız ödemede kupon yanmaz).
+        # İdempotent; ikinci callback'te tekrar yazmaz.
+        try:
+            from .orders import record_order_redemptions
+            await record_order_redemptions(order)
+        except Exception as _re:
+            logger.warning(f"Odeme sonrasi kupon kaydi hatasi order_id={order_id}: {_re}")
+        if order.get("order_confirmed_notified"):
             return
         # Önce işaretle (tek mail garantisi), sonra gönder.
         await db.orders.update_one(
@@ -332,6 +371,11 @@ async def _retrieve_and_finalize(token: str) -> dict:
     data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure"}
 
     paid = _is_paid(data)
+    # Y1: tutar/sipariş eşleşmesini doğrula (token ile bulunduğu için conversationId zaten eşleşir,
+    # ama tutar doğrulaması cross-order paymentId'ye karşı korur).
+    if paid and not _payment_matches_order(data, order):
+        logger.warning(f"[ODEME] retrieve dogrulama basarisiz order={order.get('order_number')}")
+        paid = False
     update = {
         "iyzico_retrieve_response": _payment_snapshot(data),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -342,10 +386,11 @@ async def _retrieve_and_finalize(token: str) -> dict:
         update["iyzico_payment_id"] = data.get("paymentId")
         update["paid_at"] = datetime.now(timezone.utc).isoformat()
         update["status"] = "confirmed"
+        await db.orders.update_one({"id": order.get("id")}, {"$set": update})
     else:
         update["payment_status"] = "failed"
-
-    await db.orders.update_one({"id": order.get("id")}, {"$set": update})
+        await db.orders.update_one(
+            {"id": order.get("id"), "payment_status": {"$ne": "paid"}}, {"$set": update})
     logger.info(f"iyzico payment {'PAID' if paid else 'FAILED'} order={order.get('order_number')} pid={data.get('paymentId')}")
     if paid:
         await _notify_paid_order_confirmed(order.get("id"))
@@ -455,6 +500,12 @@ def _build_card_payment_payload(order: dict, card: dict, installment: int,
 async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
     """iyzico ödeme/3ds-auth yanıtına göre siparişi günceller. Döner: paid(bool)."""
     paid = _is_paid(data)
+    # Y1: iyzico başarı dese bile tutar/sipariş eşleşmesini doğrula.
+    if paid:
+        _ord = await db.orders.find_one({"id": order_id}, {"_id": 0, "id": 1, "total": 1, "order_number": 1})
+        if not _ord or not _payment_matches_order(data, _ord):
+            logger.warning(f"[ODEME] dogrulama basarisiz, PAID iptal edildi order_id={order_id}")
+            paid = False
     update = {
         "iyzico_retrieve_response": _payment_snapshot(data),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -465,9 +516,12 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         update["iyzico_payment_id"] = data.get("paymentId")
         update["paid_at"] = datetime.now(timezone.utc).isoformat()
         update["status"] = "confirmed"
+        await db.orders.update_one({"id": order_id}, {"$set": update})
     else:
+        # Y1: ZATEN ödenmiş bir siparişi 'failed'a düşürme (replay / sahte failure koruması).
         update["payment_status"] = "failed"
-    await db.orders.update_one({"id": order_id}, {"$set": update})
+        await db.orders.update_one(
+            {"id": order_id, "payment_status": {"$ne": "paid"}}, {"$set": update})
     logger.info(f"iyzico kart odeme {'PAID' if paid else 'FAILED'} order_id={order_id} pid={data.get('paymentId')}")
     if paid:
         await _notify_paid_order_confirmed(order_id)
@@ -562,7 +616,10 @@ async def callback_3ds(request: Request):
         if order:
             ok = await _mark_order_from_payment(order.get("id"), data)
     elif order:
-        await db.orders.update_one({"id": order.get("id")}, {"$set": {"payment_status": "failed", "updated_at": datetime.now(timezone.utc).isoformat()}})
+        # Y1: ödenmiş siparişi 'failed'a düşürme — sahte failure callback'i koruması.
+        await db.orders.update_one(
+            {"id": order.get("id"), "payment_status": {"$ne": "paid"}},
+            {"$set": {"payment_status": "failed", "updated_at": datetime.now(timezone.utc).isoformat()}})
 
     onum = (order or {}).get("order_number") or ""
     sep = "&" if "?" in return_base else "?"

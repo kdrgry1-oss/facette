@@ -887,34 +887,19 @@ async def create_order(
     except Exception as _addr_err:
         logger.warning(f"Üye adres defteri kaydı başarısız (sipariş etkilenmedi): {_addr_err}")
 
-    # Madde 4 — Promosyon kullanım kaydı (usage_limit / usage_limit_per_user'ın ÇALIŞMASI için).
-    # FIYATA DOKUNMAZ; sadece coupon_redemptions'a yazar. Hata olsa bile sipariş bozulmaz.
-    try:
-        _email = (order.get("shipping_address") or {}).get("email", "")
-        _redeem_ids = []
-        _applied = order.get("applied_promotions") or []
-        if _applied:
-            for _a in _applied:
-                _cid = _a.get("coupon_id")
-                if _cid:
-                    _redeem_ids.append((_cid, float(_a.get("discount", 0) or 0)))
-        elif order.get("coupon_code"):
-            _c = await db.coupons.find_one({"code": order["coupon_code"]}, {"_id": 0, "id": 1})
-            if _c:
-                _redeem_ids.append((_c["id"], float(order.get("discount", 0) or 0)))
-        for _cid, _disc in _redeem_ids:
-            _exists = await db.coupon_redemptions.find_one({"coupon_id": _cid, "order_id": order["id"]})
-            if not _exists:
-                await db.coupon_redemptions.insert_one({
-                    "coupon_id": _cid,
-                    "order_id": order["id"],
-                    "user_id": order.get("user_id"),
-                    "customer_email": _email,
-                    "discount": _disc,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
-    except Exception as _redeem_err:
-        logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
+    # Y6 — Promosyon kullanım kaydı ödeme durumuna göre yapılır. Önceden kupon, ödeme
+    # BAŞARISIZ olsa bile sipariş oluşturma anında "yakılıyordu"; müşteri tekrar denediğinde
+    # indirim düşüyor ve fark sessizce ücretlendiriliyordu. Artık ön-ödemeli (kart) siparişte
+    # redemption yalnızca ödeme onaylandıktan sonra (_notify_paid_order_confirmed → record_order_
+    # redemptions) kaydedilir. Kapıda ödeme / havale / zaten ödenmiş siparişlerde hemen kaydedilir.
+    _pm_now = (order.get("payment_method") or "").lower()
+    _commit_now = (
+        _pm_now in ("cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                    "bank_transfer", "havale", "eft", "havale_eft", "banka_havale")
+        or (order.get("payment_status") or "").lower() == "paid"
+    )
+    if _commit_now:
+        await record_order_redemptions(order)
 
     # NOT: Sunucu-otoriter promosyon yeniden-hesabi artik INSERT'ten ONCE "guvenli kelepce"
     # blogunda yapiliyor (yukari bkz). Bu yuzden eski post-insert [PROMO SHADOW] gozlem blogu
@@ -1373,20 +1358,10 @@ async def update_order_status(
         order_doc = await db.orders.find_one({"id": order_id}, {"_id": 0})
         prev_status = None  # we don't have a before-value; rely on status flip idempotence
         if status == "cancelled":
-            # Only increment once – guard with stock_movements presence
-            already = await db.stock_movements.find_one({"order_id": order_id, "type": "order_cancelled"}, {"_id": 1})
-            if not already:
-                moves = await _stock_delta_for_order(order_doc, +1)
-                if moves:
-                    await db.stock_movements.insert_one({
-                        "id": str(uuid.uuid4()),
-                        "type": "order_cancelled",
-                        "order_id": order_id,
-                        "order_number": order_doc.get("order_number", ""),
-                        "items": moves,
-                        "created_by": current_user.get("email", ""),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    })
+            # Y5: Hareket-tipi bağımsız idempotent iade — auto-cancel ya da havale-auto-cancel
+            # daha önce iade ettiyse ikinci kez stok EKLENMEZ (önceden yalnızca 'order_cancelled'
+            # tipine bakıldığı için çift iade oluyordu).
+            await _restock_order_once(order_doc, "order_cancelled")
     except Exception as stock_err:
         logger.error(f"Stock restore on cancel failed: {stock_err}")
 
@@ -1517,17 +1492,26 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
         qty = int(it.get("quantity", 1) or 1)
         if not barcode:
             continue
-        # Try variant match first
-        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "variants": 1})
+        # Y4: ATOMİK varyant stok düşümü. Önceki kod tüm varyant dizisini Python'da okuyup
+        # $set ile geri yazıyordu → eşzamanlı iki sipariş birbirinin düşüşünü eziyordu (oversell).
+        # Artık yalnızca eşleşen varyanta arrayFilters ile atomik $inc uygulanır; max(0,..) kelepçesi
+        # de kaldırıldı (düşüş/iade simetrik olsun, negatif stok bir sinyaldir — sürüklenme olmaz).
+        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
         if prod:
-            for v in (prod.get("variants") or []):
-                if v.get("barcode") == barcode:
-                    v["stock"] = max(0, int(v.get("stock", 0) or 0) + (delta * qty))
-                    break
-            new_total = sum(int(v.get("stock", 0) or 0) for v in prod.get("variants", []))
+            await db.products.update_one(
+                {"id": prod["id"], "variants.barcode": barcode},
+                {"$inc": {"variants.$[v].stock": delta * qty},
+                 "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+                array_filters=[{"v.barcode": barcode}],
+            )
+            # Ana (parent) stok = varyant stoklarının toplamı — tek atomik pipeline update ile.
             await db.products.update_one(
                 {"id": prod["id"]},
-                {"$set": {"variants": prod["variants"], "stock": new_total, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]},
+                    "as": "vv",
+                    "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}},
+                }}}}}],
             )
             movements.append({"barcode": barcode, "delta": delta * qty, "product_id": prod["id"]})
         else:
@@ -1540,6 +1524,64 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
                 )
                 movements.append({"barcode": barcode, "delta": delta * qty, "product_id": p2["id"]})
     return movements
+
+
+# Y5: Stok iadesini (restock) idempotent yapan yardımcı. Bir sipariş için birden çok
+# iptal yolu (auto-cancel + elle iptal + havale auto-cancel) tetiklenebildiğinden, iade
+# hareketi zaten varsa stok TEKRAR eklenmez. Hareket-tipi bağımsız guard.
+_RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increment",
+                       "backfill_increment", "havale_auto_cancel", "order_returned"]
+
+
+async def record_order_redemptions(order: dict) -> None:
+    """Siparişin kuponlarını coupon_redemptions'a yazar (usage_limit / per_user sayımı için).
+    İdempotent: aynı (coupon_id, order_id) için ikinci kez yazmaz. FİYATA DOKUNMAZ.
+    Y6: Kart siparişlerinde ÖDEME ONAYINDAN sonra çağrılır; başarısız ödemede kupon yanmaz."""
+    try:
+        _email = (order.get("shipping_address") or {}).get("email", "")
+        _redeem_ids = []
+        _applied = order.get("applied_promotions") or []
+        if _applied:
+            for _a in _applied:
+                _cid = _a.get("coupon_id")
+                if _cid:
+                    _redeem_ids.append((_cid, float(_a.get("discount", 0) or 0)))
+        elif order.get("coupon_code"):
+            _c = await db.coupons.find_one({"code": order["coupon_code"]}, {"_id": 0, "id": 1})
+            if _c:
+                _redeem_ids.append((_c["id"], float(order.get("discount", 0) or 0)))
+        for _cid, _disc in _redeem_ids:
+            _exists = await db.coupon_redemptions.find_one({"coupon_id": _cid, "order_id": order["id"]})
+            if not _exists:
+                await db.coupon_redemptions.insert_one({
+                    "coupon_id": _cid,
+                    "order_id": order["id"],
+                    "user_id": order.get("user_id"),
+                    "customer_email": _email,
+                    "discount": _disc,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+    except Exception as _redeem_err:
+        logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
+
+
+async def _restock_order_once(order: dict, move_type: str) -> list:
+    """Sipariş kalemlerini stoğa GERİ ekler — ama yalnızca daha önce iade edilmediyse.
+    İade hareketi zaten kayıtlıysa hiçbir şey yapmaz (çift iade engellenir)."""
+    oid = order.get("id")
+    if oid and await db.stock_movements.find_one(
+            {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
+        return []  # zaten iade edilmiş
+    moves = await _stock_delta_for_order(order, +1)
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": move_type,
+        "order_id": oid,
+        "order_number": order.get("order_number", ""),
+        "items": moves,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return moves
 
 
 @router.post("/{order_id}/apply-stock")
@@ -1630,17 +1672,26 @@ async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
     current_user: dict = Depends(require_admin)
 ):
-    """Cancel orders that have been unpaid for more than N hours and restock."""
+    """Cancel orders that have been unpaid for more than N hours and restock.
+
+    Y2: Başarısız kart ödemeleri (payment_status='failed') de kapsanır — aksi halde her
+        iptal edilen/reddedilen kart denemesi stoğu kalıcı sızdırıyordu.
+    Y3: Kapıda ödeme (COD) ve havale siparişleri HARİÇ tutulur — bunlar teslimata/ödemeye
+        kadar meşru şekilde 'pending' kalır; havalenin kendi auto-cancel'ı vardır.
+    Y5: İade (restock) idempotenttir — sipariş için daha önce iade hareketi varsa tekrar
+        stok eklenmez (auto-cancel + elle iptal çift iade sorununu kapatır)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    # Only cancel pending/unpaid orders
+    _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                 "bank_transfer", "havale", "eft", "havale_eft", "banka_havale"]
     query = {
-        "payment_status": "pending",
-        "status": {"$in": ["pending", "confirmed"]},
+        "payment_status": {"$in": ["pending", "failed"]},
+        "status": {"$in": ["pending", "awaiting_payment"]},
+        "payment_method": {"$nin": _cod_bank},
         "created_at": {"$lt": cutoff},
     }
     cancelled = 0
     async for order in db.orders.find(query, {"_id": 0}):
-        moves = await _stock_delta_for_order(order, +1)
+        moves = await _restock_order_once(order, "auto_cancel_expired")
         await db.orders.update_one(
             {"id": order["id"]},
             {"$set": {
@@ -1651,14 +1702,6 @@ async def auto_cancel_expired_orders(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }}
         )
-        await db.stock_movements.insert_one({
-            "id": str(uuid.uuid4()),
-            "type": "auto_cancel_expired",
-            "order_id": order["id"],
-            "order_number": order.get("order_number", ""),
-            "items": moves,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
         cancelled += 1
     return {"success": True, "cancelled": cancelled, "hours": hours}
 
@@ -3490,7 +3533,7 @@ async def bulk_create_invoice(
 
 # ═══════════════════ MNG KARGO WEBHOOK ═══════════════════════════════
 @router.post("/cargo/mng-webhook")
-async def mng_cargo_webhook(payload: dict):
+async def mng_cargo_webhook(payload: dict, request: Request):
     """MNG Kargo'dan gelen kargo durum güncelleme webhook'u.
 
     MNG Kargo, gönderi durumu değiştikçe önceden tanımlanmış URL'e bu yapıda
@@ -3504,7 +3547,24 @@ async def mng_cargo_webhook(payload: dict):
       - 300: Dağıtıma çıktı
       - 400: Teslim edildi
       - 500: İade
-    """
+
+    GÜVENLİK (Y7): Bu uç önceden KİMLİKSİZDİ — sipariş numarasını bilen biri herhangi
+    bir siparişi 'teslim edildi' (iade penceresi açar) ya da 'iade' işaretleyebiliyordu.
+    Artık paylaşılan bir gizli anahtar zorunludur: X-Webhook-Secret başlığı veya ?key=
+    parametresi, MNG'ye tanımlı URL'deki gizli anahtarla eşleşmeli. Anahtar hem env
+    (MNG_WEBHOOK_SECRET) hem de settings(mng_kargo).webhook_secret üzerinden okunur."""
+    import hmac as _hmac
+    _secret = (os.environ.get("MNG_WEBHOOK_SECRET") or "").strip()
+    if not _secret:
+        _mset = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0, "webhook_secret": 1}) or {}
+        _secret = (_mset.get("webhook_secret") or "").strip()
+    _provided = (request.headers.get("x-webhook-secret")
+                 or request.query_params.get("key")
+                 or (payload.get("secret") if isinstance(payload, dict) else "") or "").strip()
+    if not _secret or not _provided or not _hmac.compare_digest(_provided, _secret):
+        logger.warning("MNG webhook reddedildi: gizli anahtar eksik/yanlış")
+        raise HTTPException(status_code=401, detail="Yetkisiz webhook")
+
     barkod = (payload.get("BARKOD") or payload.get("barcode") or "").strip()
     islem_kodu = str(payload.get("ISLEM_KODU") or payload.get("status_code") or "")
     islem_adi = (payload.get("ISLEM_ADI") or payload.get("status_text") or "").strip()
