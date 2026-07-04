@@ -423,8 +423,12 @@ def create_shipment(
             parts = result_str.split("~", 1)
             code = parts[0].strip()
             payload = parts[1].strip() if len(parts) > 1 else ""
-            if code == "0":
-                return {"ok": True, "barkod": payload, "raw": result_str}
+            # Y22: Protokol "1"=başarı, "0"=hata (bkz. yukarıdaki not). Önceki kod TERSTİ:
+            # "0~mesaj" (HATA) başarı sayılıp hata mesajını barkod olarak yazıyor, "1~mesaj"
+            # (BAŞARI) başarısız sanılıp tekrar deneniyor → çift gönderi oluşuyordu.
+            if code == "1":
+                return {"ok": True, "barkod": "", "raw": result_str,
+                        "note": payload or "Sipariş MNG'ye kaydedildi; barkod FaturaSiparisListesi ile alınabilir."}
             return {"ok": False, "barkod": "", "hata": payload, "raw": result_str}
         # 0 veya bilinmeyen → hata
         return {"ok": False, "barkod": "", "hata": result_str or "Boş cevap", "raw": result_str}

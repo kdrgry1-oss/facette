@@ -565,6 +565,43 @@ async def _run_hepsiburada_auto_stock_sync():
             pass
 
 
+# Y21: Fire-and-forget senkron task'ları için kilit + referans havuzu.
+# Önceden create_task referanssız çağrılıyordu → (a) 2 dk aralıkta >2 dk süren pull ardılıyla
+# ÇAKIŞIP çift sipariş insert + çift stok düşümü yapabiliyor, (b) referans tutulmadığı için GC
+# task'ı yarıda öldürebiliyordu. Artık aynı iş bitmeden ikincisi başlamaz ve _last_*_sync
+# zaman damgası spawn'da değil TAMAMLANINCA yazılır.
+_RUNNING_SYNCS: set = set()
+_SYNC_TASKS: set = set()
+
+
+def _spawn_guarded_sync(coro_factory, lock_key: str, account_key: str, stamp_field: str):
+    """Kilitli, referanslı arka plan senkron başlatır. Zaten çalışıyorsa atlar."""
+    if lock_key in _RUNNING_SYNCS:
+        logger.info(f"[scheduler] {lock_key} zaten çalışıyor — bu tur atlandı (çakışma önlendi)")
+        return
+    _RUNNING_SYNCS.add(lock_key)
+
+    async def _wrapper():
+        try:
+            await coro_factory()
+        except Exception as _e:
+            logger.exception(f"[scheduler] {lock_key} senkron hata: {_e}")
+        finally:
+            try:
+                from routes.deps import db as _db
+                from datetime import datetime as _dt, timezone as _tz
+                await _db.marketplace_accounts.update_one(
+                    {"key": account_key}, {"$set": {stamp_field: _dt.now(_tz.utc).isoformat()}}
+                )
+            except Exception:
+                pass
+            _RUNNING_SYNCS.discard(lock_key)
+
+    t = asyncio.create_task(_wrapper())
+    _SYNC_TASKS.add(t)
+    t.add_done_callback(_SYNC_TASKS.discard)
+
+
 async def _marketplace_sync_tick():
     """
     Her dk'da bir çalışır; her marketplace_account'un auto_sync ayarlarına
@@ -604,14 +641,13 @@ async def _marketplace_sync_tick():
                         direction="outbound",
                         message=f"[cron] Otomatik ürün senkron tetiklendi (her {interval} dk)"
                     )
-                    # Trendyol için gerçek push'u arka planda kuyruğa al
+                    # Trendyol için gerçek push'u arka planda kuyruğa al (Y21: kilitli + damga bitişte)
                     if key == "trendyol":
-                        asyncio.create_task(_run_trendyol_auto_products_sync())
+                        _spawn_guarded_sync(_run_trendyol_auto_products_sync,
+                                             f"products:{key}", key, "_last_products_sync")
                     elif key == "hepsiburada":
-                        asyncio.create_task(_run_hepsiburada_auto_stock_sync())
-                    await db.marketplace_accounts.update_one(
-                        {"key": key}, {"$set": {"_last_products_sync": now.isoformat()}}
-                    )
+                        _spawn_guarded_sync(_run_hepsiburada_auto_stock_sync,
+                                             f"products:{key}", key, "_last_products_sync")
 
             # --- Siparişler ------------------------------------------------
             if sync.get("orders_enabled"):
@@ -630,12 +666,11 @@ async def _marketplace_sync_tick():
                         message=f"[cron] Otomatik sipariş çek tetiklendi (her {interval} dk, son {lookback} saat)"
                     )
                     if key == "trendyol":
-                        asyncio.create_task(_run_trendyol_auto_orders_pull())
+                        _spawn_guarded_sync(_run_trendyol_auto_orders_pull,
+                                             f"orders:{key}", key, "_last_orders_sync")
                     elif key == "hepsiburada":
-                        asyncio.create_task(_run_hepsiburada_auto_orders_pull())
-                    await db.marketplace_accounts.update_one(
-                        {"key": key}, {"$set": {"_last_orders_sync": now.isoformat()}}
-                    )
+                        _spawn_guarded_sync(_run_hepsiburada_auto_orders_pull,
+                                             f"orders:{key}", key, "_last_orders_sync")
     except Exception as e:
         logger.exception(f"[scheduler] marketplace sync tick failed: {e}")
 
@@ -1014,7 +1049,13 @@ async def _dhl_cargo_poll_tick():
             aciklama = (info.get("kargo_statu_aciklama") or "")
             cur = order.get("status")
 
-            delivered = bool(teslim) or ("teslim" in aciklama.lower() and "edilemedi" not in aciklama.lower())
+            # Y20: "teslim alın(dı)" / "şubeden teslim" = ŞUBE/KABUL hareketi, TESLİMAT DEĞİL.
+            # "teslim" substring'i bunları da eşleyip siparişi ilk taramada yanlış 'delivered'
+            # yapıyor, müşteriye erken "Teslim Edildi" bildirimi gidiyordu.
+            _dl_aç = aciklama.lower()
+            _pickup = any(k in _dl_aç for k in ("teslim alın", "teslim alin", "şubeden teslim",
+                                                "subeden teslim", "şubede teslim", "subede teslim"))
+            delivered = (not _pickup) and (bool(teslim) or ("teslim" in _dl_aç and "edilemedi" not in _dl_aç))
             # İLK OKUTMA tespiti — sadece kargocu/şube siparişi fiilen okuttuğunda "Kargoya Verildi".
             # Barkod oluşturulurken gönderi_no/takip url'i dolabildiği için onlar TEK BAŞINA tetik DEĞİL;
             # yalnızca MNG/DHL bir HAREKET statüsü (kargo_statu ≠ 0) ya da kabul/şube/okutma açıklaması
@@ -1161,7 +1202,10 @@ async def _return_cargo_poll_tick():
                 statu = (info.get("kargo_statu") or "0").strip()
                 aciklama = (info.get("kargo_statu_aciklama") or "")
                 _alow = aciklama.lower()
-                delivered = bool(teslim) or ("teslim" in _alow and "edilemedi" not in _alow)
+                # Y20: şube/kabul "teslim alındı" hareketini teslimat sayma (iade akışını erken tetikler).
+                _pickup2 = any(k in _alow for k in ("teslim alın", "teslim alin", "şubeden teslim",
+                                                    "subeden teslim", "şubede teslim", "subede teslim"))
+                delivered = (not _pickup2) and (bool(teslim) or ("teslim" in _alow and "edilemedi" not in _alow))
                 _acc_kw = ("kabul", "şube", "sube", "okut", "teslim alın", "teslim alin",
                            "işleme", "isleme", "çıkış", "cikis", "girdi", "transfer",
                            "dağıt", "dagit", "yola")

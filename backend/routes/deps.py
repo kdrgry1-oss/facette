@@ -30,13 +30,48 @@ db = client[db_name]
 
 # Security
 security = HTTPBearer(auto_error=False)
-# JWT_SECRET MUST come from env. A weak default is allowed only as a hard last
-# resort but will trigger a noisy warning. Production must set a strong secret.
-JWT_SECRET = os.environ.get('JWT_SECRET') or 'facette-secure-secret-key-2024-extended-32bytes!'
-if len(JWT_SECRET) < 32:
-    logging.getLogger(__name__).warning(
-        "JWT_SECRET is too short (<32 bytes). Set a strong secret in /app/backend/.env"
-    )
+
+
+def _load_jwt_secret() -> str:
+    """Y12: JWT_SECRET önce ortamdan okunur. Ortamda yoksa, kaynak koduna GÖMÜLÜ sabit bir
+    anahtar KULLANILMAZ (yayınlanmış anahtarla token sahtelenebiliyordu). Bunun yerine kalıcı
+    bir dosyada (backend/data/.jwt_secret) rastgele güçlü bir anahtar üretilip saklanır; böylece
+    hem restart'lar hem de birden fazla worker arasında STABİL kalır. Dosya yazılamazsa (salt-okunur
+    fs) süreç-ömürlü rastgele anahtara düşülür ve KRİTİK uyarı loglanır."""
+    env_secret = (os.environ.get("JWT_SECRET") or "").strip()
+    if len(env_secret) >= 32:
+        return env_secret
+    _log = logging.getLogger(__name__)
+    if env_secret:
+        _log.warning("JWT_SECRET <32 bayt; env değeri yok sayıldı, kalıcı dosya kullanılıyor.")
+    try:
+        import secrets as _secrets
+        _dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        os.makedirs(_dir, exist_ok=True)
+        _path = os.path.join(_dir, ".jwt_secret")
+        if os.path.exists(_path):
+            with open(_path, "r") as fh:
+                val = fh.read().strip()
+            if len(val) >= 32:
+                return val
+        val = _secrets.token_urlsafe(48)
+        with open(_path, "w") as fh:
+            fh.write(val)
+        try:
+            os.chmod(_path, 0o600)
+        except Exception:
+            pass
+        _log.critical("JWT_SECRET ortamda ayarlı değil — kalıcı dosyada yeni rastgele anahtar üretildi. "
+                      "Üretimde JWT_SECRET ortam değişkenini ayarlayın.")
+        return val
+    except Exception as _e:
+        import secrets as _secrets
+        _log.critical(f"JWT_SECRET dosyaya yazılamadı ({_e}); süreç-ömürlü rastgele anahtar kullanılıyor "
+                      "(restart'ta tüm oturumlar düşer). JWT_SECRET ortam değişkenini ayarlayın.")
+        return _secrets.token_urlsafe(48)
+
+
+JWT_SECRET = _load_jwt_secret()
 JWT_ALGORITHM = "HS256"  # strict — prevents 'alg=none' attacks
 JWT_ISSUER = "facette-api"
 

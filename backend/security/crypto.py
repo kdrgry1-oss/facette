@@ -45,7 +45,21 @@ def _load_master_key() -> bytes:
         # Allow user-provided key padded to 32 bytes
         digest = hashlib.sha256(raw.encode()).digest()
         return base64.urlsafe_b64encode(digest)
-    jwt_secret = os.environ.get("JWT_SECRET") or "facette-secure-secret-key-2024-extended-32bytes!"
+    # Y12: Gömülü sabit anahtar KULLANILMAZ. JWT_SECRET'i deps ile AYNI kaynaktan
+    # (ortam ya da kalıcı backend/data/.jwt_secret dosyası) türetiriz — böylece vault
+    # şifre çözümü restart/worker'lar arasında tutarlı kalır.
+    try:
+        from routes.deps import JWT_SECRET as jwt_secret
+    except Exception:
+        jwt_secret = (os.environ.get("JWT_SECRET") or "").strip()
+        if len(jwt_secret) < 32:
+            try:
+                _p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", ".jwt_secret")
+                if os.path.exists(_p):
+                    with open(_p) as _fh:
+                        jwt_secret = _fh.read().strip()
+            except Exception:
+                pass
     logger.warning(
         "SECRETS_MASTER_KEY missing. Deriving from JWT_SECRET (NOT recommended for production). "
         "Generate a strong key with: python -c \"from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())\""

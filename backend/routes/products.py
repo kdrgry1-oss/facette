@@ -2191,26 +2191,27 @@ async def get_cart_suggestions(payload: dict):
         if combine_ids:
             async for p in db.products.find(
                 {"id": {"$in": combine_ids[:limit]}, "is_active": {"$ne": False}},
-                {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+                {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
                  "images": 1, "image": 1, "stock": 1, "category_id": 1}
             ):
                 suggestions.append({**p, "_source": "combine"})
 
-    # 2) Yetersizse → sale/discount kategorisindeki aktif ürünlerle doldur
+    # 2) Yetersizse → indirimli aktif ürünlerle doldur
+    # Y15: discount_price/is_on_sale/sale_active alanları HİÇBİR YERE yazılmıyor. Gerçek indirim
+    # alanı sale_price'tir (0 < sale_price < price). Önceki sorgu her zaman boş dönüyordu.
     needed = max(0, limit - len(suggestions))
     if needed > 0:
         sale_query = {
             "is_active": {"$ne": False},
             "id": {"$nin": list(seen)},
-            "$or": [
-                {"discount_price": {"$gt": 0}},
-                {"is_on_sale": True},
-                {"sale_active": True},
-            ],
+            "$expr": {"$and": [
+                {"$gt": [{"$ifNull": ["$sale_price", 0]}, 0]},
+                {"$lt": [{"$ifNull": ["$sale_price", 0]}, {"$ifNull": ["$price", 0]}]},
+            ]},
         }
         async for p in db.products.find(
             sale_query,
-            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
              "images": 1, "image": 1, "stock": 1, "category_id": 1}
         ).limit(needed):
             suggestions.append({**p, "_source": "sale"})
@@ -2221,7 +2222,7 @@ async def get_cart_suggestions(payload: dict):
     if needed > 0:
         async for p in db.products.find(
             {"is_active": {"$ne": False}, "id": {"$nin": list(seen)}},
-            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
              "images": 1, "image": 1, "stock": 1, "category_id": 1}
         ).sort("created_at", -1).limit(needed):
             suggestions.append({**p, "_source": "new"})
@@ -2238,26 +2239,26 @@ async def get_checkout_deals(payload: dict):
     cart_product_ids = payload.get("product_ids") or []
     limit = int(payload.get("limit", 8))
 
+    # Y15: Gerçek indirim alanı sale_price'tir (0 < sale_price < price). Önceki sorgu
+    # hiç yazılmayan discount_price/is_on_sale/sale_active alanlarına baktığı için "Kasa Önü
+    # Fırsatları" HER ZAMAN boştu.
     sale_query = {
         "is_active": {"$ne": False},
         "id": {"$nin": cart_product_ids},
-        "$or": [
-            {"discount_price": {"$gt": 0}},
-            {"is_on_sale": True},
-            {"sale_active": True},
-        ],
+        "$expr": {"$and": [
+            {"$gt": [{"$ifNull": ["$sale_price", 0]}, 0]},
+            {"$lt": [{"$ifNull": ["$sale_price", 0]}, {"$ifNull": ["$price", 0]}]},
+        ]},
     }
 
     deals = []
     async for p in db.products.find(
         sale_query,
-        {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
+        {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
          "images": 1, "image": 1, "stock": 1, "category_id": 1}
     ).limit(limit * 2):
-        # Yalnızca gerçekten indirimi olanları kabul et
-        if (p.get("discount_price") or 0) > 0 and p["discount_price"] < (p.get("price") or 0):
-            deals.append(p)
-        elif p.get("is_on_sale") or p.get("sale_active"):
+        sp = p.get("sale_price") or 0
+        if sp > 0 and sp < (p.get("price") or 0):
             deals.append(p)
         if len(deals) >= limit:
             break

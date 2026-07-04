@@ -2067,8 +2067,11 @@ async def create_invoice_for_order(
         await db.counters.update_one(
             {"_id": seq_key}, {"$setOnInsert": {"seq": base_start - 1}}, upsert=True
         )
-    await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
-    _seq_doc = await db.counters.find_one({"_id": seq_key}) or {}
+    # O2: Atomik artır-ve-oku. Önceki $inc + ayrı find_one, eşzamanlı iki fatura isteğinde aynı
+    # seq'i okuyup AYNI fatura numarasını üretebiliyordu. find_one_and_update tekilliği garanti eder.
+    _seq_doc = await db.counters.find_one_and_update(
+        {"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER
+    ) or {}
     seq = int(_seq_doc.get("seq", 1))
     invoice_number = f"{prefix}{year_str}{seq:09d}"
     invoice_uuid = generate_id()  # UUID-like

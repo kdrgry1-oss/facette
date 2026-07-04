@@ -222,13 +222,53 @@ async def create_manual_order(payload: dict, current_user: dict = Depends(requir
         "created_at": _now(),
         "updated_at": _now(),
     }
-    # Decrement stock
-    for it in items:
-        pid = it.get("product_id")
-        qty = int(it.get("quantity", 1) or 1)
-        if pid and qty > 0:
-            await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
     await db.orders.insert_one(doc)
+
+    # Y17: Stok düşümü VARYANT-farkında olmalı. Önceden yalnızca parent `stock` düşürülüyordu →
+    # varyantlı üründe (beden) vitrin oversell yapıyor, parent negatife düşüyor ve stok_movements
+    # yazılmıyordu. Artık barkod/variant_id ile atomik varyant düşümü + parent yeniden hesap +
+    # hareket kaydı yapan ortak yardımcı kullanılır (siparişteki mantıkla birebir).
+    try:
+        from routes.orders import _stock_delta_for_order
+        _now_iso = _now()
+        _moves = []
+        for it in items:
+            qty = int(it.get("quantity", 1) or 1)
+            if qty <= 0:
+                continue
+            barcode = it.get("barcode") or it.get("sku") or ""
+            variant_id = it.get("variant_id")
+            pid = it.get("product_id")
+            if barcode:
+                _moves += await _stock_delta_for_order({"items": [it]}, -1)
+            elif pid and variant_id:
+                # variant_id ile atomik düşüm + parent = varyant toplamı
+                await db.products.update_one(
+                    {"id": pid, "variants.id": variant_id},
+                    {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": _now_iso}},
+                    array_filters=[{"v.id": variant_id}],
+                )
+                await db.products.update_one(
+                    {"id": pid},
+                    [{"$set": {"stock": {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                        "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}],
+                )
+                _moves.append({"variant_id": variant_id, "delta": -qty, "product_id": pid})
+            elif pid:
+                await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
+                _moves.append({"product_id": pid, "delta": -qty})
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()), "type": "manual_decrement",
+            "order_id": doc["id"], "order_number": order_number,
+            "items": _moves, "created_by": current_user.get("email", ""),
+            "created_at": _now_iso,
+        })
+    except Exception as _se:
+        # Stok düşümü hata verse bile sipariş oluşturuldu; loglayıp devam et.
+        import logging as _lg
+        _lg.getLogger(__name__).error(f"Manuel siparis stok dususu hatasi: {_se}")
+
     doc.pop("_id", None)
     return {"success": True, "order": doc}
 
