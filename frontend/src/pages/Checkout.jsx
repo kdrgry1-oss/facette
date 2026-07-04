@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
+import { CreditCard, Building, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import { toast } from "sonner";
@@ -727,13 +727,6 @@ export default function Checkout() {
           </div>
         </div>
 
-        {/* Güven şeridi — tüm sayfa boyunca güven çıpası (SHEIN mantığı) */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 -mt-4 mb-7 text-[11px] text-black/60" data-testid="trust-bar">
-          <span className="inline-flex items-center gap-1"><Lock size={12} strokeWidth={1.8} /> Güvenli ödeme · 3D Secure</span>
-          <span className="inline-flex items-center gap-1"><ShieldCheck size={12} strokeWidth={1.8} /> 14 gün kolay iade</span>
-          <span className="inline-flex items-center gap-1"><Truck size={12} strokeWidth={1.8} /> Gizli ücret yok</span>
-        </div>
-
         <form onSubmit={handleSubmit}>
           <div className="grid lg:grid-cols-12 gap-8">
             {/* SOL — numaralı akış */}
@@ -1049,21 +1042,21 @@ export default function Checkout() {
               <section data-testid="gift-options-section">
                 <Step n={sBase + 3} title="Hediye Seçenekleri" hint="opsiyonel" />
                 <div className="space-y-3">
-                  <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
-                    <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
-                      className="mt-1 accent-black" data-testid="gift-wrap-toggle" />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">Hediye paketi</span>
-                        <span className="text-sm font-semibold text-black">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajı + kurdele + el yazılı kart ile gönderilir.</p>
-                    </div>
+                  {/* Sadeleştirildi (Zara/Mango): tek satır onay; not yalnızca paket seçilince görünür. */}
+                  <label className="flex items-center justify-between gap-3 cursor-pointer">
+                    <span className="inline-flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
+                        className="accent-black" data-testid="gift-wrap-toggle" />
+                      Hediye paketi
+                    </span>
+                    <span className="text-sm text-gray-500">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
                   </label>
-                  <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
-                    rows={2} placeholder="Hediye Notu (opsiyonel) — kart üzerine yazılır, max 300 karakter"
-                    className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
-                    data-testid="gift-note-input" />
+                  {giftWrap && (
+                    <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
+                      rows={2} placeholder="Hediye notu (opsiyonel)"
+                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
+                      data-testid="gift-note-input" />
+                  )}
                 </div>
               </section>
             </div>
