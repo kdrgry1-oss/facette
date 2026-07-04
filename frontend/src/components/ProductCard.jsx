@@ -169,10 +169,10 @@ export default function ProductCard({ product, listId = "", listName = "", index
             </div>
           )}
 
-          {/* İndirim oranı rozeti — sol üst (tükendi rozeti varsa onun altına düşer) */}
+          {/* İndirim oranı rozeti — tam sol üst köşeye yapışık (tükendi rozeti varsa altına düşer) */}
           {hasDiscount && (
             <div
-              className={`absolute ${isSoldOut ? "top-10" : "top-3"} left-3 z-10 bg-[#6b6b64] text-white text-xs font-normal px-2.5 py-1.5 leading-none`}
+              className={`absolute ${isSoldOut ? "top-8" : "top-0"} left-0 z-10 bg-[#6b6b64] text-white text-xs font-normal px-2.5 py-1.5 leading-none`}
               data-testid={`discount-badge-${product.id}`}
             >
               %{Math.round(((product.price - displayPrice) / product.price) * 100)}
