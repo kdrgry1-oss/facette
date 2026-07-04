@@ -96,6 +96,7 @@ export default function Checkout() {
   // Aktif ödeme yöntemleri — admin "Ödeme Yöntemleri" ayarından gelir (public /settings).
   // Varsayılan: kart & havale AÇIK, kapıda ödeme KAPALI.
   const [enabledPM, setEnabledPM] = useState({ credit_card: true, bank_transfer: true, cash_on_delivery: false });
+  const [bankPct, setBankPct] = useState(5); // Havale/EFT teşvik indirimi (%) — ayardan gelir
 
   // Gift options + terms + quick signup
   const GIFT_WRAP_PRICE = 130;
@@ -123,7 +124,12 @@ export default function Checkout() {
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
-  const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+  // Havale/EFT indirimi — kupon indiriminden SONRAKİ tutar üzerinden (sunucu ile aynı mantık).
+  const isBankTransfer = paymentMethod === "bank_transfer";
+  const bankTransferDiscount = (isBankTransfer && bankPct > 0)
+    ? Math.round((total - discount) * (bankPct / 100) * 100) / 100
+    : 0;
+  const grandTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - pointsDeduction + giftWrapTotal + codFee);
 
   // Seçili taksitin GERÇEK ödeme değerleri — özet "Toplam" ve "Ödeme Yap" butonu
   // peşin grandTotal'ı değil, seçilen taksitin totalPrice/installmentPrice'ını yansıtır.
@@ -149,6 +155,9 @@ export default function Checkout() {
           bank_transfer: pm.bank_transfer !== false,      // varsayılan AÇIK
           cash_on_delivery: false, // Kapıda ödeme tamamen kapalı
         });
+        // Havale/EFT teşvik indirimi yüzdesi (ayardan; varsayılan %5)
+        const bp = r.data?.bank_transfer_discount_pct;
+        setBankPct(bp === null || bp === undefined || bp === "" ? 5 : Number(bp) || 0);
       })
       .catch(() => { /* sessiz: varsayılan değerlerde kal */ });
     return () => { alive = false; };
@@ -948,8 +957,21 @@ export default function Checkout() {
                           <Icon size={18} />
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold text-stone-900">{label}</span>
-                          <span className="block text-xs text-stone-500">{key === "credit_card" ? "Tek çekim veya taksit imkânı" : "Sipariş sonrası IBAN paylaşılır"}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-stone-900">{label}</span>
+                            {key === "bank_transfer" && bankPct > 0 && (
+                              <span className="text-[10px] font-bold tracking-wide text-[#7b1e2b] bg-[#7b1e2b]/10 border border-[#7b1e2b]/25 px-1.5 py-0.5 rounded-full">
+                                %{bankPct} İNDİRİM
+                              </span>
+                            )}
+                          </span>
+                          <span className="block text-xs text-stone-500">
+                            {key === "credit_card"
+                              ? "Tek çekim veya taksit imkânı"
+                              : (bankPct > 0
+                                  ? <>Havale/EFT'de <span className="text-[#7b1e2b] font-semibold">%{bankPct} indirim</span> · IBAN sipariş sonrası paylaşılır</>
+                                  : "Sipariş sonrası IBAN paylaşılır")}
+                          </span>
                         </span>
                         <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${paymentMethod === key ? "border-stone-900" : "border-stone-300"}`}>
                           {paymentMethod === key && <span className="w-2 h-2 rounded-full bg-stone-900" />}
@@ -1114,6 +1136,7 @@ export default function Checkout() {
                     <span>{estimateDelivery()} <span className="text-gray-400">· 2-4 iş günü</span></span>
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
+                  {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}

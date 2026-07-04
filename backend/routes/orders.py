@@ -817,6 +817,23 @@ async def create_order(
         _server_discount = _subtotal
     order["discount"] = _server_discount
 
+    # Havale/EFT indirimi: müşteriyi banka havalesine teşvik için, kupon indiriminden SONRAKİ
+    # tutar üzerinden ayar-tabanlı yüzde (varsayılan %5). Sunucu-otoriter: istemci değil sunucu
+    # hesaplar. Yalnızca havale/eft ödeme yönteminde uygulanır.
+    _pm_disc = 0.0
+    _pm_lc = (order.get("payment_method") or "").lower()
+    if _pm_lc in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
+        try:
+            _pmset = await db.settings.find_one(
+                {"id": "main"}, {"_id": 0, "bank_transfer_discount_pct": 1}) or {}
+            _pm_pct = float(_pmset.get("bank_transfer_discount_pct", 5) or 0)
+        except Exception:
+            _pm_pct = 5.0
+        if _pm_pct > 0:
+            _pm_disc = round((_subtotal - _server_discount) * _pm_pct / 100.0, 2)
+    order["payment_discount"] = _pm_disc
+    order["bank_transfer_discount_pct"] = (_pm_pct if _pm_disc > 0 else 0)
+
     # Kargo: sunucu ayarından (ücretsiz kargo eşiği VEYA kupon free_shipping). Y25 de burada çözülür.
     try:
         _sset = await db.settings.find_one(
@@ -831,10 +848,10 @@ async def create_order(
         _shipping = 0.0
     order["shipping_cost"] = round(_shipping, 2)
 
-    # Toplam = subtotal - indirim + kargo + hediye paketi (hediye paketi negatif olamaz).
+    # Toplam = subtotal - kupon indirimi - havale indirimi + kargo + hediye paketi.
     _gift = max(0.0, float(order.get("gift_wrap_price", 0) or 0))
     order["gift_wrap_price"] = round(_gift, 2)
-    order["total"] = round(_subtotal - _server_discount + _shipping + _gift, 2)
+    order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
 
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
