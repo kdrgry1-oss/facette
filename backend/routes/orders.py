@@ -1746,8 +1746,21 @@ async def recover_charged_orders(
     payload = payload or {}
     days = int(payload.get("days", 5) or 5)
     apply = bool(payload.get("apply", False))
+    notify = bool(payload.get("notify", True))  # False → SMS/e-posta/CAPI GÖNDERME (sessiz kurtar)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"payment_status": {"$in": ["failed", "pending"]}, "created_at": {"$gte": cutoff}}
+
+    # Zaten kurtarılmış siparişlerin listesi (rapor için — 18'i geri görebilmek adına).
+    already_recovered = []
+    async for o in db.orders.find(
+        {"recovered_at": {"$exists": True}, "created_at": {"$gte": cutoff}},
+        {"_id": 0, "order_number": 1, "total": 1, "shipping_address": 1, "email": 1,
+         "recovered_at": 1, "created_at": 1}):
+        already_recovered.append({
+            "order_number": o.get("order_number"), "total": round(float(o.get("total") or 0), 2),
+            "email": (o.get("shipping_address") or {}).get("email") or o.get("email"),
+            "created_at": o.get("created_at"), "recovered_at": o.get("recovered_at"),
+        })
 
     recoverable, undercharge = [], []
     async for o in db.orders.find(query, {"_id": 0}):
@@ -1774,11 +1787,13 @@ async def recover_charged_orders(
             undercharge.append(row)
 
     result = {
-        "days": days, "apply": apply,
+        "days": days, "apply": apply, "notify": notify,
         "recoverable_count": len(recoverable),
         "undercharge_count": len(undercharge),
+        "already_recovered_count": len(already_recovered),
         "recoverable": [r for _o, r in recoverable],
         "undercharge": undercharge,
+        "already_recovered": already_recovered,
         "applied": 0,
     }
     if not apply:
@@ -1799,14 +1814,18 @@ async def recover_charged_orders(
                 "updated_at": now_iso,
             }},
         )
-        try:
-            await _notify_paid_order_confirmed(oid)
-        except Exception as _e:
-            logger.warning(f"[KURTARMA] bildirim hatasi {r['order_number']}: {_e}")
-        try:
-            await dispatch_purchase_capi(oid, source="recovery_admin")
-        except Exception:
-            pass
+        # notify=False → SESSİZ kurtarma: SMS/e-posta/CAPI gönderme (eski siparişlerde
+        # müşteriyi rahatsız etmemek için). Yalnızca kupon kaydını (idempotent) tutmak istersek
+        # bile, notify kapalıyken hiçbir dış bildirim çıkmaz.
+        if notify:
+            try:
+                await _notify_paid_order_confirmed(oid)
+            except Exception as _e:
+                logger.warning(f"[KURTARMA] bildirim hatasi {r['order_number']}: {_e}")
+            try:
+                await dispatch_purchase_capi(oid, source="recovery_admin")
+            except Exception:
+                pass
         fixed += 1
     result["applied"] = fixed
     return result
