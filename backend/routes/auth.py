@@ -26,15 +26,27 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 @(limiter.limit("5/minute") if limiter else (lambda f: f))
 async def register(
     request: Request,
-    email: str = Query(...),
-    password: str = Query(...),
+    email: str = Query(None),
+    password: str = Query(None),
     first_name: str = Query(None),
     last_name: str = Query(None),
     phone: str = Query(None)
 ):
-    """Register new user"""
-    email = safe_str(email, 256).lower().strip()
-    password = safe_str(password, 200)
+    """Register new user.
+    O19: Kimlik bilgileri öncelikle GÖVDEDEN okunur (şifre query'de log'a sızmasın); query geriye uyumlu."""
+    if not email or not password:
+        try:
+            _b = await request.json()
+        except Exception:
+            _b = {}
+        if isinstance(_b, dict):
+            email = email or _b.get("email")
+            password = password or _b.get("password")
+            first_name = first_name or _b.get("first_name")
+            last_name = last_name or _b.get("last_name")
+            phone = phone or _b.get("phone")
+    email = safe_str(email or "", 256).lower().strip()
+    password = safe_str(password or "", 200)
     if not is_safe_email(email):
         raise HTTPException(status_code=400, detail="Geçersiz e-posta adresi")
     if len(password) < 6:
@@ -139,12 +151,22 @@ async def register(
 @(limiter.limit("10/minute") if limiter else (lambda f: f))
 async def login(
     request: Request,
-    email: str = Query(...),
-    password: str = Query(...)
+    email: str = Query(None),
+    password: str = Query(None)
 ):
-    """Login with email and password (rate-limited + lockout-protected)."""
-    email = safe_str(email, 256).lower().strip()
-    password = safe_str(password, 200)
+    """Login with email and password (rate-limited + lockout-protected).
+    O19: Kimlik bilgileri artık öncelikle istek GÖVDESİNDEN okunur — şifre URL query
+    parametresi olarak access log / tarayıcı geçmişi / Referer'a sızmasın. Geriye uyum
+    için query hâlâ kabul edilir."""
+    if not email or not password:
+        try:
+            _b = await request.json()
+        except Exception:
+            _b = {}
+        email = email or (_b.get("email") if isinstance(_b, dict) else None)
+        password = password or (_b.get("password") if isinstance(_b, dict) else None)
+    email = safe_str(email or "", 256).lower().strip()
+    password = safe_str(password or "", 200)
     ip = client_ip_from_request(request)
     ua = request.headers.get("user-agent")
 
@@ -215,11 +237,20 @@ async def login(
     }
 
 @router.post("/convert-guest-order")
-async def convert_guest_order(payload: dict):
+@(limiter.limit("5/minute") if limiter else (lambda f: f))
+async def convert_guest_order(payload: dict, request: Request):
     """Checkout sonrası guest sipariş veren kullanıcı için hızlı hesap oluşturma.
     payload: {order_id: str, password: str}
     Sipariş bilgilerinden email + first_name + last_name otomatik alınır.
-    Eğer email'de mevcut kullanıcı varsa hesap oluşturulmaz, sadece sipariş bağlanır.
+
+    GÜVENLİK (K2): Sipariş numaraları ardışık ve tahmin edilebilir olduğundan bu uç
+    HESAP ELE GEÇİRME için istismar edilebiliyordu. Artık:
+      - Eğer bu e-posta ile ZATEN bir hesap varsa TOKEN VERİLMEZ ve otomatik bağlama
+        yapılmaz — kullanıcı giriş yapmaya yönlendirilir (aksi halde saldırgan kurbanın
+        oturumunu ele geçirebiliyordu).
+      - Yalnızca YENİ ve TAZE (son birkaç saat içinde oluşturulmuş) misafir siparişleri
+        için hesap açılabilir; eski siparişlerin numarasını tarayarak istismar engellenir.
+      - Rate-limit uygulanır.
     """
     order_id = (payload or {}).get("order_id", "").strip()
     password = (payload or {}).get("password", "")
@@ -234,6 +265,23 @@ async def convert_guest_order(payload: dict):
 
     if order.get("user_id"):
         raise HTTPException(status_code=400, detail="Bu sipariş zaten bir hesaba bağlı")
+
+    # Tazelik penceresi: yalnızca yakın zamanda oluşturulmuş siparişler dönüştürülebilir.
+    # Böylece eski sipariş numaralarını tarayarak yapılan ön-kayıt kaçırma saldırısı kapanır.
+    try:
+        _created = order.get("created_at") or ""
+        _cdt = datetime.fromisoformat(_created.replace("Z", "+00:00")) if _created else None
+        if _cdt is not None:
+            if _cdt.tzinfo is None:
+                _cdt = _cdt.replace(tzinfo=timezone.utc)
+            _age_h = (datetime.now(timezone.utc) - _cdt).total_seconds() / 3600.0
+            if _age_h > 12:
+                raise HTTPException(status_code=400,
+                                    detail="Bu sipariş hesaba dönüştürme için çok eski. Lütfen giriş yapın.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     addr = order.get("shipping_address") or {}
     email = (addr.get("email") or order.get("email") or "").lower().strip()
@@ -279,13 +327,14 @@ async def convert_guest_order(payload: dict):
         existing = await db.users.find_one({"phone": {"$regex": _last10}}, {"_id": 0, "id": 1})
 
     if existing:
-        # Var olan hesaba bagla (mukerrer hesap olusturma)
-        user_id = existing["id"]
-        await db.orders.update_one({"id": order["id"]}, {"$set": {"user_id": user_id}})
-        await _save_guest_address(user_id, order)
-        from .deps import create_token as _ct
-        token = _ct(user_id, is_admin=False)
-        return {"token": token, "existing_account": True, "message": "Sipariş mevcut hesabınıza bağlandı"}
+        # GÜVENLİK (K2): Bu e-posta/telefon ile zaten bir hesap var. TOKEN VERME ve otomatik
+        # bağlama YAPMA — aksi halde sipariş numarasını bilen biri kurbanın oturumunu alırdı.
+        # Kullanıcıyı giriş yapmaya yönlendir; girişten sonra siparişini kendisi ilişkilendirir.
+        return {
+            "existing_account": True,
+            "token": None,
+            "message": "Bu e-posta ile zaten bir hesabınız var. Lütfen giriş yapın; siparişiniz hesabınızda görünecektir.",
+        }
 
     # Yeni hesap oluştur
     user = {

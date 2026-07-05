@@ -129,19 +129,25 @@ async def send(
     # Optional user_id (CRM identifier - cross-device tracking)
     if user_data.get("external_id"):
         payload["user_id"] = user_data["external_id"]
-    # Enhanced Conversions — hashed PII as user properties + user_data
-    user_props = {}
-    if user_data.get("em"): user_props["sha256_email_address"] = {"value": user_data["em"]}
-    if user_data.get("ph"): user_props["sha256_phone_number"] = {"value": user_data["ph"]}
-    if user_data.get("fn"): user_props["sha256_first_name"] = {"value": user_data["fn"]}
-    if user_data.get("ln"): user_props["sha256_last_name"] = {"value": user_data["ln"]}
-    if user_data.get("street"): user_props["sha256_street"] = {"value": user_data["street"]}
-    if user_data.get("ct"): user_props["sha256_city"] = {"value": user_data["ct"]}
-    if user_data.get("st"): user_props["region"] = {"value": user_data["st"]}
-    if user_data.get("zp"): user_props["postal_code"] = {"value": user_data["zp"]}
-    if user_data.get("country"): user_props["country_code"] = {"value": user_data["country"]}
-    if user_props:
-        payload["user_properties"] = user_props
+    # Y24: Enhanced Conversions doğru yapı: PII `user_data` altında olmalı (user_properties DEĞİL);
+    # e-posta/telefon/ad/soyad/sokak SHA-256 HASH'Lİ, şehir/bölge/posta/ülke ise HASH'SİZ (ham).
+    # Önceki kod hepsini user_properties'e koyup adres bileşenlerini hash'li gönderdiği için
+    # Google eşleştirme oranı sıfırdı.
+    ud = {}
+    if user_data.get("em"): ud["sha256_email_address"] = user_data["em"]
+    if user_data.get("ph"): ud["sha256_phone_number"] = user_data["ph"]
+    address = {}
+    if user_data.get("fn"): address["sha256_first_name"] = user_data["fn"]
+    if user_data.get("ln"): address["sha256_last_name"] = user_data["ln"]
+    if user_data.get("street"): address["sha256_street"] = user_data["street"]
+    if user_data.get("ct_raw"): address["city"] = user_data["ct_raw"]
+    if user_data.get("st_raw"): address["region"] = user_data["st_raw"]
+    if user_data.get("zp_raw"): address["postal_code"] = user_data["zp_raw"]
+    if user_data.get("country_raw"): address["country"] = user_data["country_raw"]
+    if address:
+        ud["address"] = [address]
+    if ud:
+        payload["user_data"] = ud
     # Google Ads click ID propagation (GA4 ↔ Ads attribution)
     if user_data.get("gclid") or user_data.get("wbraid") or user_data.get("gbraid"):
         params_body["gclid"] = user_data.get("gclid") or ""
@@ -152,7 +158,8 @@ async def send(
     if test_event_code:
         params["debug_mode"] = "true"
 
-    url = GA4_BASE + ("/debug" if test_event_code else "")
+    # O11: Doğru validation ucu `/debug/mp/collect`'tir (`/mp/collect/debug` DEĞİL).
+    url = ("https://www.google-analytics.com/debug/mp/collect" if test_event_code else GA4_BASE)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(url, params=params, json=payload)

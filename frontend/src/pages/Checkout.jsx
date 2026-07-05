@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CreditCard, Building, Truck, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
+import { CreditCard, Building, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronLeft, MapPin, Mail, Plus, ShieldCheck, Lock, X, Pencil } from "lucide-react";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import { toast } from "sonner";
@@ -96,6 +96,7 @@ export default function Checkout() {
   // Aktif ödeme yöntemleri — admin "Ödeme Yöntemleri" ayarından gelir (public /settings).
   // Varsayılan: kart & havale AÇIK, kapıda ödeme KAPALI.
   const [enabledPM, setEnabledPM] = useState({ credit_card: true, bank_transfer: true, cash_on_delivery: false });
+  const [bankPct, setBankPct] = useState(5); // Havale/EFT teşvik indirimi (%) — ayardan gelir
 
   // Gift options + terms + quick signup
   const GIFT_WRAP_PRICE = 130;
@@ -116,11 +117,19 @@ export default function Checkout() {
   // Sipariş tutarları (türetilmiş) — useEffect'lerden ÖNCE tanımlanmalı (TDZ hatası önlenir)
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
-  const shippingCost = (freeShippingThreshold != null && total >= freeShippingThreshold) ? 0 : shippingFee;
+  // Y25: Ücretsiz kargo kuponu uygulandıysa kargo 0 gösterilir (önceden etiket "Ücretsiz Kargo"
+  // yazsa da tutara kargo ekleniyordu). Eşik ya da kupon → kargo bedava.
+  const hasFreeShippingPromo = (appliedPromotions || []).some((p) => p && p.free_shipping);
+  const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : shippingFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
-  const grandTotal = Math.max(0, total + shippingCost - discount - pointsDeduction + giftWrapTotal + codFee);
+  // Havale/EFT indirimi — kupon indiriminden SONRAKİ tutar üzerinden (sunucu ile aynı mantık).
+  const isBankTransfer = paymentMethod === "bank_transfer";
+  const bankTransferDiscount = (isBankTransfer && bankPct > 0)
+    ? Math.round((total - discount) * (bankPct / 100) * 100) / 100
+    : 0;
+  const grandTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - pointsDeduction + giftWrapTotal + codFee);
 
   // Seçili taksitin GERÇEK ödeme değerleri — özet "Toplam" ve "Ödeme Yap" butonu
   // peşin grandTotal'ı değil, seçilen taksitin totalPrice/installmentPrice'ını yansıtır.
@@ -146,6 +155,9 @@ export default function Checkout() {
           bank_transfer: pm.bank_transfer !== false,      // varsayılan AÇIK
           cash_on_delivery: false, // Kapıda ödeme tamamen kapalı
         });
+        // Havale/EFT teşvik indirimi yüzdesi (ayardan; varsayılan %5)
+        const bp = r.data?.bank_transfer_discount_pct;
+        setBankPct(bp === null || bp === undefined || bp === "" ? 5 : Number(bp) || 0);
       })
       .catch(() => { /* sessiz: varsayılan değerlerde kal */ });
     return () => { alive = false; };
@@ -705,7 +717,6 @@ export default function Checkout() {
               <ChevronLeft size={16} strokeWidth={2} />
             </button>
             <div>
-              <p className="text-[10px] tracking-[0.3em] uppercase text-black/60 mb-1.5">Ödeme</p>
               <h1 className="text-xl md:text-2xl font-light tracking-tight text-black">Sipariş Onayı</h1>
             </div>
           </div>
@@ -713,13 +724,6 @@ export default function Checkout() {
             <ShieldCheck size={13} className="text-black" strokeWidth={1.6} />
             <span>SSL Güvenli</span>
           </div>
-        </div>
-
-        {/* Güven şeridi — tüm sayfa boyunca güven çıpası (SHEIN mantığı) */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 -mt-4 mb-7 text-[11px] text-black/60" data-testid="trust-bar">
-          <span className="inline-flex items-center gap-1"><Lock size={12} strokeWidth={1.8} /> Güvenli ödeme · 3D Secure</span>
-          <span className="inline-flex items-center gap-1"><ShieldCheck size={12} strokeWidth={1.8} /> 14 gün kolay iade</span>
-          <span className="inline-flex items-center gap-1"><Truck size={12} strokeWidth={1.8} /> Gizli ücret yok</span>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -945,8 +949,21 @@ export default function Checkout() {
                           <Icon size={18} />
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold text-stone-900">{label}</span>
-                          <span className="block text-xs text-stone-500">{key === "credit_card" ? "Tek çekim veya taksit imkânı" : "Sipariş sonrası IBAN paylaşılır"}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-stone-900">{label}</span>
+                            {key === "bank_transfer" && bankPct > 0 && (
+                              <span className="text-[10px] font-bold tracking-wide text-[#7b1e2b] bg-[#7b1e2b]/10 border border-[#7b1e2b]/25 px-1.5 py-0.5 rounded-full">
+                                %{bankPct} İNDİRİM
+                              </span>
+                            )}
+                          </span>
+                          <span className="block text-xs text-stone-500">
+                            {key === "credit_card"
+                              ? "Tek çekim veya taksit imkânı"
+                              : (bankPct > 0
+                                  ? <>Havale/EFT'de <span className="text-[#7b1e2b] font-semibold">%{bankPct} indirim</span> · IBAN sipariş sonrası paylaşılır</>
+                                  : "Sipariş sonrası IBAN paylaşılır")}
+                          </span>
                         </span>
                         <span className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${paymentMethod === key ? "border-stone-900" : "border-stone-300"}`}>
                           {paymentMethod === key && <span className="w-2 h-2 rounded-full bg-stone-900" />}
@@ -1024,21 +1041,21 @@ export default function Checkout() {
               <section data-testid="gift-options-section">
                 <Step n={sBase + 3} title="Hediye Seçenekleri" hint="opsiyonel" />
                 <div className="space-y-3">
-                  <label className={`flex items-start gap-3 cursor-pointer border rounded p-3 transition-colors ${giftWrap ? "border-stone-900 bg-stone-50" : "border-gray-200 hover:border-gray-400"}`}>
-                    <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
-                      className="mt-1 accent-black" data-testid="gift-wrap-toggle" />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">Hediye paketi</span>
-                        <span className="text-sm font-semibold text-black">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Siparişiniz özel hediye ambalajı + kurdele + el yazılı kart ile gönderilir.</p>
-                    </div>
+                  {/* Sadeleştirildi (Zara/Mango): tek satır onay; not yalnızca paket seçilince görünür. */}
+                  <label className="flex items-center justify-between gap-3 cursor-pointer">
+                    <span className="inline-flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={giftWrap} onChange={(e) => setGiftWrap(e.target.checked)}
+                        className="accent-black" data-testid="gift-wrap-toggle" />
+                      Hediye paketi
+                    </span>
+                    <span className="text-sm text-gray-500">+{GIFT_WRAP_PRICE.toFixed(2)} TL</span>
                   </label>
-                  <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
-                    rows={2} placeholder="Hediye Notu (opsiyonel) — kart üzerine yazılır, max 300 karakter"
-                    className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
-                    data-testid="gift-note-input" />
+                  {giftWrap && (
+                    <textarea value={giftNote} onChange={(e) => setGiftNote(e.target.value.slice(0, 300))}
+                      rows={2} placeholder="Hediye notu (opsiyonel)"
+                      className="w-full border px-3 py-2 text-sm focus:outline-none focus:border-stone-900 resize-none"
+                      data-testid="gift-note-input" />
+                  )}
                 </div>
               </section>
             </div>
@@ -1111,6 +1128,7 @@ export default function Checkout() {
                     <span>{estimateDelivery()} <span className="text-gray-400">· 2-4 iş günü</span></span>
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
+                  {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}

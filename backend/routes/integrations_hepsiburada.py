@@ -687,10 +687,25 @@ def _hb_variant_sku(product: dict, variant, vi: int, source: str = "stock_code",
     src = source or "stock_code"
     local = _hb_collect_local(product, variant)
 
+    def _var_token():
+        # Y10: STABİL varyant kimliği — dizi konumundan (vi) BAĞIMSIZ. merchantSku HB'nin
+        # stok/fiyat join anahtarıdır; sonek konuma bağlı olursa (örn. Excel re-import ile
+        # variants yeniden sıralanınca) beden 38'in stoğu 40'ın ilanına gidiyordu. Artık sonek
+        # varyantın kendi barkod/sku/urun_id'sinden ya da beden-renk kombinasyonundan türetilir.
+        raw = str((variant or {}).get("barcode") or (variant or {}).get("sku")
+                  or (variant or {}).get("urun_id") or (variant or {}).get("id") or "").strip()
+        if raw:
+            return raw.replace(" ", "").upper()[-10:]
+        sx = (local.get("beden") or local.get("size") or local.get("numara") or "")
+        cx = (local.get("renk") or local.get("color") or "")
+        combo = "-".join([p for p in [sx, cx] if p])
+        return _hb_norm(combo).replace(" ", "").upper() if combo else f"V{vi + 1}"
+
     def _suffix():
-        sx = (local.get("beden") or local.get("size") or local.get("numara")
-              or local.get("renk") or local.get("color") or "")
-        return _hb_norm(sx).replace(" ", "").upper() if sx else f"V{vi + 1}"
+        sx = (local.get("beden") or local.get("size") or local.get("numara") or "")
+        cx = (local.get("renk") or local.get("color") or "")
+        combo = "-".join([p for p in [sx, cx] if p])
+        return _hb_norm(combo).replace(" ", "").upper() if combo else _var_token()
 
     # KULLANICI "Ürün ID" seçtiyse: her bedenin KENDİ urun_id'si varyantta (variants[].urun_id)
     # duruyor → doğrudan onu merchantSku yap. Uydurma sonek YOK; her beden zaten benzersiz.
@@ -699,7 +714,7 @@ def _hb_variant_sku(product: dict, variant, vi: int, source: str = "stock_code",
         if vid:
             if used is not None:
                 if vid in used:
-                    vid = f"{vid}-V{vi + 1}"
+                    vid = f"{vid}-{_var_token()}"
                 used.add(vid)
             return vid
 
@@ -718,7 +733,7 @@ def _hb_variant_sku(product: dict, variant, vi: int, source: str = "stock_code",
     sku = (sku or "").strip()
     if used is not None and sku:
         if sku in used:
-            sku = f"{sku}-V{vi + 1}"
+            sku = f"{sku}-{_var_token()}"  # Y10: konumsal değil, stabil sonek
         used.add(sku)
     return sku
 async def _hb_sku_source() -> str:

@@ -94,7 +94,7 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
           />
         </div>
         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+        <p className="text-[11px] tabular-nums text-black/65">{(p.sale_price && p.sale_price > 0 ? p.sale_price : p.price || 0).toFixed(2)} TL</p>
       </Link>
     ));
   }
@@ -476,7 +476,7 @@ export default function Header({ hideMenu = false }) {
                           />
                         </div>
                         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                        <p className="text-[11px] tabular-nums text-black/65">{(p.discount_price && p.discount_price > 0 ? p.discount_price : p.price || 0).toFixed(2)} TL</p>
+                        <p className="text-[11px] tabular-nums text-black/65">{(p.sale_price && p.sale_price > 0 ? p.sale_price : p.price || 0).toFixed(2)} TL</p>
                       </Link>
                     ))
                   ) : (

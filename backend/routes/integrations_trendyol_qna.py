@@ -107,16 +107,24 @@ async def sync_trendyol_questions(
                         "customer_name": q.get("userName", "") if q.get("showUserName") else "Gizli Kullanıcı",
                         "status": q.get("status", "WAITING_FOR_ANSWER"),
                         "created_date": created_date_iso,
-                        "answer": q.get("answers", [{}])[0].get("text", "") if q.get("answers") else "",
                         "image_url": q.get("imageUrl", ""),
                         "synced_at": datetime.now(timezone.utc).isoformat(),
                     }
+                    # Y9: Filter API cogu zaman answers[] DONDURMEZ. Bos cevabi $set ile yazarsak
+                    # sync-answers ile geri doldurulmus ya da panelden verilmis cevaplar SILINIYORDU.
+                    # Bu yuzden cevap yalnizca API gercekten bir cevap dondurdugunde guncellenir.
+                    _ans = ""
+                    if q.get("answers"):
+                        _ans = (q.get("answers", [{}])[0] or {}).get("text", "") or ""
                     if existing:
+                        if _ans:
+                            doc["answer"] = _ans
                         await db.trendyol_questions.update_one({"question_id": q_id}, {"$set": doc})
                         updated += 1
                     else:
                         doc["id"] = generate_id()
                         doc["created_at"] = datetime.now(timezone.utc).isoformat()
+                        doc["answer"] = _ans
                         await db.trendyol_questions.insert_one(doc)
                         synced += 1
 

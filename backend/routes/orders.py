@@ -309,6 +309,34 @@ def _item_kdv(it: dict, vat_map: dict, default: float = 10.0) -> float:
     return float(default)
 
 
+def _eff_unit_price(prod: dict, variant_id: str = None) -> float:
+    """Bir ürün (ve varsa varyant) için SUNUCU-OTORİTER birim fiyat.
+    Taban = geçerli indirimli fiyat (0 < sale_price < price ise), yoksa liste fiyatı.
+    Varyantın price_adjustment (veya eski alias price_diff) farkı eklenir.
+    İstemcinin gönderdiği fiyat ASLA kullanılmaz — sahte fiyatla ödeme (K1) buradan kapanır."""
+    try:
+        base = float(prod.get("price") or 0)
+    except Exception:
+        base = 0.0
+    sp = prod.get("sale_price")
+    try:
+        sp = float(sp) if sp not in (None, "") else None
+    except Exception:
+        sp = None
+    if sp is not None and 0 < sp < base:
+        base = sp
+    adj = 0.0
+    if variant_id:
+        for v in (prod.get("variants") or []):
+            if v.get("id") == variant_id:
+                try:
+                    adj = float(v.get("price_adjustment") or v.get("price_diff") or 0)
+                except Exception:
+                    adj = 0.0
+                break
+    return round(base + adj, 2)
+
+
 async def next_order_number() -> str:
     """Kısa, sıralı site sipariş numarası: W10001, W10002, ...
     Atomik sayaç (db.counters) ile çakışma imkânsız. Sayaç başarısız olursa
@@ -543,7 +571,8 @@ async def get_order_by_number(order_number: str):
     order = await db.orders.find_one(
         {"order_number": order_number},
         {"_id": 0, "admin_notes": 0, "payment_id": 0, "user_id": 0, "customer_ip": 0, "user_agent": 0,
-         "billing_address": 0, "attribution": 0}
+         "billing_address": 0, "billing_info": 0, "attribution": 0, "payment_receipt": 0,
+         "iyzico_retrieve_response": 0, "iyzico_init_response": 0, "iyzico_response": 0}
     )
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -604,15 +633,21 @@ async def get_order(
     current_user: dict = Depends(get_current_user)
 ):
     """Get single order"""
+    # K3: Bu uç TAM (maskesiz) sipariş döndürür — dekont, vergi no, adres, iyzico yanıtı.
+    # Anonim erişim YASAK; aksi halde sıralı sipariş numaralarıyla tüm müşteri veritabanı
+    # sıyrılabiliyordu. Misafir/başarı sayfası maskeli `/orders/by-number/{n}` ucunu kullanır.
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    
-    # Check access - admin can see all, users can see only their own
-    if current_user and not current_user.get("is_admin"):
+
+    # Admin tümünü görür; normal kullanıcı yalnızca kendi siparişini.
+    if not current_user.get("is_admin"):
         if order.get("user_id") != current_user.get("id"):
             raise HTTPException(status_code=403, detail="Bu siparişi görüntüleme yetkiniz yok")
-    
+
     order["items"] = await _enrich_items_with_products(order.get("items") or [])
     return order
 
@@ -726,41 +761,97 @@ async def create_order(
         if not _cod_on:
             raise HTTPException(status_code=400, detail="Kapıda ödeme şu anda kullanılamıyor. Lütfen başka bir ödeme yöntemi seçin.")
 
-    # Madde 4 — SUNUCU-OTORITER GUVENLI KELEPCE (tek yonlu). Sunucu indirimi odeme yontemiyle
-    # birlikte yeniden hesaplar; istemcinin gonderdigi indirim sunucununkini ASAMAZ. Mesru
-    # siparis degismez (iki deger esit). Sismis/sahte indirim (orn. havale indirimini kapip
-    # kartla odeme) kirpilir; karta yansiyan tutar INSERT'ten ONCE duzeltilir (cunku
-    # /payment/card/pay siparisin kayitli total'ini ceker). Hata olsa bile siparis bozulmaz.
+    # ============ SUNUCU-OTORİTER FİYATLAMA (K1) ============
+    # Güvenlik: istemcinin gönderdiği birim fiyat / subtotal / shipping_cost / total ASLA
+    # doğrudan kullanılmaz. Her kalemin birim fiyatı üründen (sale_price/price + varyant
+    # price_adjustment) sunucuda yeniden hesaplanır; subtotal, indirim (promo motoru), kargo
+    # (ayarlardan) ve toplam sunucuda kurulur. Böylece "price:1 ile 1 TL'ye sipariş" imkânsız.
+    _items = order.get("items") or []
+    _pids = list({it.get("product_id") for it in _items if it.get("product_id")})
+    _pmap = {}
+    if _pids:
+        async for _p in db.products.find({"id": {"$in": _pids}}, {"_id": 0}):
+            _pmap[_p["id"]] = _p
+    _subtotal = 0.0
+    for it in _items:
+        pid = it.get("product_id")
+        prod = _pmap.get(pid) if pid else None
+        if pid and not prod:
+            raise HTTPException(status_code=400, detail="Sipariş kaleminde geçersiz ürün")
+        if prod:
+            it["price"] = _eff_unit_price(prod, it.get("variant_id"))  # istemci fiyatını ez
+        qty = int(it.get("quantity", it.get("qty", 1)) or 1)
+        if qty < 1:
+            qty = 1
+        it["quantity"] = qty
+        _subtotal += float(it.get("price", 0) or 0) * qty
+    _subtotal = round(_subtotal, 2)
+    order["subtotal"] = _subtotal
+
+    # İndirim: promo motoru (SUNUCU fiyatlarıyla); ödeme yöntemi de dikkate alınır.
+    _server_discount = 0.0
+    _free_shipping = False
     try:
         from .coupons import evaluate_cart_promotions as _eval_promos
         _eng_items = [{
             "product_id": it.get("product_id"),
             "category_id": it.get("category_id"),
-            "qty": it.get("quantity", it.get("qty", 1)),
-            "price": it.get("price", 0),
-        } for it in (order.get("items") or [])]
+            "qty": int(it.get("quantity", it.get("qty", 1)) or 1),
+            "price": float(it.get("price", 0) or 0),
+        } for it in _items]
         _ev = await _eval_promos(
-            cart_total=float(order.get("subtotal", 0) or 0),
+            cart_total=_subtotal,
             items=_eng_items,
             user_id=order.get("user_id"),
             email=(order.get("shipping_address") or {}).get("email", ""),
             entered_code=order.get("coupon_code", ""),
             payment_method=order.get("payment_method", ""),
         )
-        _srv = round(float(_ev.get("total_discount", 0) or 0), 2)
-        _cli = round(float(order.get("discount", 0) or 0), 2)
-        if _cli - _srv > 0.01:  # istemci fazla indirim iddia etmis -> sunucu degerine kirp
-            _delta = round(_cli - _srv, 2)
-            order["discount"] = _srv
-            order["total"] = round(float(order.get("total", 0) or 0) + _delta, 2)
-            order["applied_promotions"] = _ev.get("applied") or []
-            order["promo_clamped"] = {"client": _cli, "server": _srv, "delta": _delta,
-                                      "payment_method": order.get("payment_method")}
-            logger.warning(f"[PROMO KELEPCE] siparis={order['order_number']} istemci={_cli} "
-                           f"sunucu={_srv} -> indirim {_srv}'e kirpildi, total +{_delta} "
-                           f"(odeme={order.get('payment_method')})")
-    except Exception as _clamp_err:
-        logger.warning(f"Promo kelepce hatasi (siparis etkilenmedi): {_clamp_err}")
+        _server_discount = round(float(_ev.get("total_discount", 0) or 0), 2)
+        _free_shipping = bool(_ev.get("free_shipping"))
+        order["applied_promotions"] = _ev.get("applied") or []
+    except Exception as _promo_err:
+        logger.warning(f"Promo değerlendirme hatası (indirim 0 kabul edildi): {_promo_err}")
+        _server_discount = 0.0
+    if _server_discount > _subtotal:
+        _server_discount = _subtotal
+    order["discount"] = _server_discount
+
+    # Havale/EFT indirimi: müşteriyi banka havalesine teşvik için, kupon indiriminden SONRAKİ
+    # tutar üzerinden ayar-tabanlı yüzde (varsayılan %5). Sunucu-otoriter: istemci değil sunucu
+    # hesaplar. Yalnızca havale/eft ödeme yönteminde uygulanır.
+    _pm_disc = 0.0
+    _pm_lc = (order.get("payment_method") or "").lower()
+    if _pm_lc in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
+        try:
+            _pmset = await db.settings.find_one(
+                {"id": "main"}, {"_id": 0, "bank_transfer_discount_pct": 1}) or {}
+            _pm_pct = float(_pmset.get("bank_transfer_discount_pct", 5) or 0)
+        except Exception:
+            _pm_pct = 5.0
+        if _pm_pct > 0:
+            _pm_disc = round((_subtotal - _server_discount) * _pm_pct / 100.0, 2)
+    order["payment_discount"] = _pm_disc
+    order["bank_transfer_discount_pct"] = (_pm_pct if _pm_disc > 0 else 0)
+
+    # Kargo: sunucu ayarından (ücretsiz kargo eşiği VEYA kupon free_shipping). Y25 de burada çözülür.
+    try:
+        _sset = await db.settings.find_one(
+            {"id": "main"}, {"_id": 0, "shipping_fee": 1, "free_shipping_threshold": 1}) or {}
+        _ship_fee = float(_sset.get("shipping_fee") or 0)
+        _thr = _sset.get("free_shipping_threshold")
+        _thr = float(_thr) if _thr not in (None, "") else None
+    except Exception:
+        _ship_fee, _thr = 0.0, None
+    _shipping = 0.0 if _free_shipping else _ship_fee
+    if _thr is not None and (_subtotal - _server_discount) >= _thr:
+        _shipping = 0.0
+    order["shipping_cost"] = round(_shipping, 2)
+
+    # Toplam = subtotal - kupon indirimi - havale indirimi + kargo + hediye paketi.
+    _gift = max(0.0, float(order.get("gift_wrap_price", 0) or 0))
+    order["gift_wrap_price"] = round(_gift, 2)
+    order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
 
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
@@ -813,34 +904,19 @@ async def create_order(
     except Exception as _addr_err:
         logger.warning(f"Üye adres defteri kaydı başarısız (sipariş etkilenmedi): {_addr_err}")
 
-    # Madde 4 — Promosyon kullanım kaydı (usage_limit / usage_limit_per_user'ın ÇALIŞMASI için).
-    # FIYATA DOKUNMAZ; sadece coupon_redemptions'a yazar. Hata olsa bile sipariş bozulmaz.
-    try:
-        _email = (order.get("shipping_address") or {}).get("email", "")
-        _redeem_ids = []
-        _applied = order.get("applied_promotions") or []
-        if _applied:
-            for _a in _applied:
-                _cid = _a.get("coupon_id")
-                if _cid:
-                    _redeem_ids.append((_cid, float(_a.get("discount", 0) or 0)))
-        elif order.get("coupon_code"):
-            _c = await db.coupons.find_one({"code": order["coupon_code"]}, {"_id": 0, "id": 1})
-            if _c:
-                _redeem_ids.append((_c["id"], float(order.get("discount", 0) or 0)))
-        for _cid, _disc in _redeem_ids:
-            _exists = await db.coupon_redemptions.find_one({"coupon_id": _cid, "order_id": order["id"]})
-            if not _exists:
-                await db.coupon_redemptions.insert_one({
-                    "coupon_id": _cid,
-                    "order_id": order["id"],
-                    "user_id": order.get("user_id"),
-                    "customer_email": _email,
-                    "discount": _disc,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
-    except Exception as _redeem_err:
-        logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
+    # Y6 — Promosyon kullanım kaydı ödeme durumuna göre yapılır. Önceden kupon, ödeme
+    # BAŞARISIZ olsa bile sipariş oluşturma anında "yakılıyordu"; müşteri tekrar denediğinde
+    # indirim düşüyor ve fark sessizce ücretlendiriliyordu. Artık ön-ödemeli (kart) siparişte
+    # redemption yalnızca ödeme onaylandıktan sonra (_notify_paid_order_confirmed → record_order_
+    # redemptions) kaydedilir. Kapıda ödeme / havale / zaten ödenmiş siparişlerde hemen kaydedilir.
+    _pm_now = (order.get("payment_method") or "").lower()
+    _commit_now = (
+        _pm_now in ("cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                    "bank_transfer", "havale", "eft", "havale_eft", "banka_havale")
+        or (order.get("payment_status") or "").lower() == "paid"
+    )
+    if _commit_now:
+        await record_order_redemptions(order)
 
     # NOT: Sunucu-otoriter promosyon yeniden-hesabi artik INSERT'ten ONCE "guvenli kelepce"
     # blogunda yapiliyor (yukari bkz). Bu yuzden eski post-insert [PROMO SHADOW] gozlem blogu
@@ -1299,20 +1375,10 @@ async def update_order_status(
         order_doc = await db.orders.find_one({"id": order_id}, {"_id": 0})
         prev_status = None  # we don't have a before-value; rely on status flip idempotence
         if status == "cancelled":
-            # Only increment once – guard with stock_movements presence
-            already = await db.stock_movements.find_one({"order_id": order_id, "type": "order_cancelled"}, {"_id": 1})
-            if not already:
-                moves = await _stock_delta_for_order(order_doc, +1)
-                if moves:
-                    await db.stock_movements.insert_one({
-                        "id": str(uuid.uuid4()),
-                        "type": "order_cancelled",
-                        "order_id": order_id,
-                        "order_number": order_doc.get("order_number", ""),
-                        "items": moves,
-                        "created_by": current_user.get("email", ""),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    })
+            # Y5: Hareket-tipi bağımsız idempotent iade — auto-cancel ya da havale-auto-cancel
+            # daha önce iade ettiyse ikinci kez stok EKLENMEZ (önceden yalnızca 'order_cancelled'
+            # tipine bakıldığı için çift iade oluyordu).
+            await _restock_order_once(order_doc, "order_cancelled")
     except Exception as stock_err:
         logger.error(f"Stock restore on cancel failed: {stock_err}")
 
@@ -1443,17 +1509,26 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
         qty = int(it.get("quantity", 1) or 1)
         if not barcode:
             continue
-        # Try variant match first
-        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "variants": 1})
+        # Y4: ATOMİK varyant stok düşümü. Önceki kod tüm varyant dizisini Python'da okuyup
+        # $set ile geri yazıyordu → eşzamanlı iki sipariş birbirinin düşüşünü eziyordu (oversell).
+        # Artık yalnızca eşleşen varyanta arrayFilters ile atomik $inc uygulanır; max(0,..) kelepçesi
+        # de kaldırıldı (düşüş/iade simetrik olsun, negatif stok bir sinyaldir — sürüklenme olmaz).
+        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
         if prod:
-            for v in (prod.get("variants") or []):
-                if v.get("barcode") == barcode:
-                    v["stock"] = max(0, int(v.get("stock", 0) or 0) + (delta * qty))
-                    break
-            new_total = sum(int(v.get("stock", 0) or 0) for v in prod.get("variants", []))
+            await db.products.update_one(
+                {"id": prod["id"], "variants.barcode": barcode},
+                {"$inc": {"variants.$[v].stock": delta * qty},
+                 "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+                array_filters=[{"v.barcode": barcode}],
+            )
+            # Ana (parent) stok = varyant stoklarının toplamı — tek atomik pipeline update ile.
             await db.products.update_one(
                 {"id": prod["id"]},
-                {"$set": {"variants": prod["variants"], "stock": new_total, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]},
+                    "as": "vv",
+                    "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}},
+                }}}}}],
             )
             movements.append({"barcode": barcode, "delta": delta * qty, "product_id": prod["id"]})
         else:
@@ -1466,6 +1541,64 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
                 )
                 movements.append({"barcode": barcode, "delta": delta * qty, "product_id": p2["id"]})
     return movements
+
+
+# Y5: Stok iadesini (restock) idempotent yapan yardımcı. Bir sipariş için birden çok
+# iptal yolu (auto-cancel + elle iptal + havale auto-cancel) tetiklenebildiğinden, iade
+# hareketi zaten varsa stok TEKRAR eklenmez. Hareket-tipi bağımsız guard.
+_RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increment",
+                       "backfill_increment", "havale_auto_cancel", "order_returned"]
+
+
+async def record_order_redemptions(order: dict) -> None:
+    """Siparişin kuponlarını coupon_redemptions'a yazar (usage_limit / per_user sayımı için).
+    İdempotent: aynı (coupon_id, order_id) için ikinci kez yazmaz. FİYATA DOKUNMAZ.
+    Y6: Kart siparişlerinde ÖDEME ONAYINDAN sonra çağrılır; başarısız ödemede kupon yanmaz."""
+    try:
+        _email = (order.get("shipping_address") or {}).get("email", "")
+        _redeem_ids = []
+        _applied = order.get("applied_promotions") or []
+        if _applied:
+            for _a in _applied:
+                _cid = _a.get("coupon_id")
+                if _cid:
+                    _redeem_ids.append((_cid, float(_a.get("discount", 0) or 0)))
+        elif order.get("coupon_code"):
+            _c = await db.coupons.find_one({"code": order["coupon_code"]}, {"_id": 0, "id": 1})
+            if _c:
+                _redeem_ids.append((_c["id"], float(order.get("discount", 0) or 0)))
+        for _cid, _disc in _redeem_ids:
+            _exists = await db.coupon_redemptions.find_one({"coupon_id": _cid, "order_id": order["id"]})
+            if not _exists:
+                await db.coupon_redemptions.insert_one({
+                    "coupon_id": _cid,
+                    "order_id": order["id"],
+                    "user_id": order.get("user_id"),
+                    "customer_email": _email,
+                    "discount": _disc,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+    except Exception as _redeem_err:
+        logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
+
+
+async def _restock_order_once(order: dict, move_type: str) -> list:
+    """Sipariş kalemlerini stoğa GERİ ekler — ama yalnızca daha önce iade edilmediyse.
+    İade hareketi zaten kayıtlıysa hiçbir şey yapmaz (çift iade engellenir)."""
+    oid = order.get("id")
+    if oid and await db.stock_movements.find_one(
+            {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
+        return []  # zaten iade edilmiş
+    moves = await _stock_delta_for_order(order, +1)
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": move_type,
+        "order_id": oid,
+        "order_number": order.get("order_number", ""),
+        "items": moves,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return moves
 
 
 @router.post("/{order_id}/apply-stock")
@@ -1556,17 +1689,26 @@ async def auto_cancel_expired_orders(
     hours: int = Query(48, ge=1),
     current_user: dict = Depends(require_admin)
 ):
-    """Cancel orders that have been unpaid for more than N hours and restock."""
+    """Cancel orders that have been unpaid for more than N hours and restock.
+
+    Y2: Başarısız kart ödemeleri (payment_status='failed') de kapsanır — aksi halde her
+        iptal edilen/reddedilen kart denemesi stoğu kalıcı sızdırıyordu.
+    Y3: Kapıda ödeme (COD) ve havale siparişleri HARİÇ tutulur — bunlar teslimata/ödemeye
+        kadar meşru şekilde 'pending' kalır; havalenin kendi auto-cancel'ı vardır.
+    Y5: İade (restock) idempotenttir — sipariş için daha önce iade hareketi varsa tekrar
+        stok eklenmez (auto-cancel + elle iptal çift iade sorununu kapatır)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    # Only cancel pending/unpaid orders
+    _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                 "bank_transfer", "havale", "eft", "havale_eft", "banka_havale"]
     query = {
-        "payment_status": "pending",
-        "status": {"$in": ["pending", "confirmed"]},
+        "payment_status": {"$in": ["pending", "failed"]},
+        "status": {"$in": ["pending", "awaiting_payment"]},
+        "payment_method": {"$nin": _cod_bank},
         "created_at": {"$lt": cutoff},
     }
     cancelled = 0
     async for order in db.orders.find(query, {"_id": 0}):
-        moves = await _stock_delta_for_order(order, +1)
+        moves = await _restock_order_once(order, "auto_cancel_expired")
         await db.orders.update_one(
             {"id": order["id"]},
             {"$set": {
@@ -1577,14 +1719,6 @@ async def auto_cancel_expired_orders(
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }}
         )
-        await db.stock_movements.insert_one({
-            "id": str(uuid.uuid4()),
-            "type": "auto_cancel_expired",
-            "order_id": order["id"],
-            "order_number": order.get("order_number", ""),
-            "items": moves,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
         cancelled += 1
     return {"success": True, "cancelled": cancelled, "hours": hours}
 
@@ -1950,8 +2084,11 @@ async def create_invoice_for_order(
         await db.counters.update_one(
             {"_id": seq_key}, {"$setOnInsert": {"seq": base_start - 1}}, upsert=True
         )
-    await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
-    _seq_doc = await db.counters.find_one({"_id": seq_key}) or {}
+    # O2: Atomik artır-ve-oku. Önceki $inc + ayrı find_one, eşzamanlı iki fatura isteğinde aynı
+    # seq'i okuyup AYNI fatura numarasını üretebiliyordu. find_one_and_update tekilliği garanti eder.
+    _seq_doc = await db.counters.find_one_and_update(
+        {"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER
+    ) or {}
     seq = int(_seq_doc.get("seq", 1))
     invoice_number = f"{prefix}{year_str}{seq:09d}"
     invoice_uuid = generate_id()  # UUID-like
@@ -3416,7 +3553,7 @@ async def bulk_create_invoice(
 
 # ═══════════════════ MNG KARGO WEBHOOK ═══════════════════════════════
 @router.post("/cargo/mng-webhook")
-async def mng_cargo_webhook(payload: dict):
+async def mng_cargo_webhook(payload: dict, request: Request):
     """MNG Kargo'dan gelen kargo durum güncelleme webhook'u.
 
     MNG Kargo, gönderi durumu değiştikçe önceden tanımlanmış URL'e bu yapıda
@@ -3430,7 +3567,24 @@ async def mng_cargo_webhook(payload: dict):
       - 300: Dağıtıma çıktı
       - 400: Teslim edildi
       - 500: İade
-    """
+
+    GÜVENLİK (Y7): Bu uç önceden KİMLİKSİZDİ — sipariş numarasını bilen biri herhangi
+    bir siparişi 'teslim edildi' (iade penceresi açar) ya da 'iade' işaretleyebiliyordu.
+    Artık paylaşılan bir gizli anahtar zorunludur: X-Webhook-Secret başlığı veya ?key=
+    parametresi, MNG'ye tanımlı URL'deki gizli anahtarla eşleşmeli. Anahtar hem env
+    (MNG_WEBHOOK_SECRET) hem de settings(mng_kargo).webhook_secret üzerinden okunur."""
+    import hmac as _hmac
+    _secret = (os.environ.get("MNG_WEBHOOK_SECRET") or "").strip()
+    if not _secret:
+        _mset = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0, "webhook_secret": 1}) or {}
+        _secret = (_mset.get("webhook_secret") or "").strip()
+    _provided = (request.headers.get("x-webhook-secret")
+                 or request.query_params.get("key")
+                 or (payload.get("secret") if isinstance(payload, dict) else "") or "").strip()
+    if not _secret or not _provided or not _hmac.compare_digest(_provided, _secret):
+        logger.warning("MNG webhook reddedildi: gizli anahtar eksik/yanlış")
+        raise HTTPException(status_code=401, detail="Yetkisiz webhook")
+
     barkod = (payload.get("BARKOD") or payload.get("barcode") or "").strip()
     islem_kodu = str(payload.get("ISLEM_KODU") or payload.get("status_code") or "")
     islem_adi = (payload.get("ISLEM_ADI") or payload.get("status_text") or "").strip()

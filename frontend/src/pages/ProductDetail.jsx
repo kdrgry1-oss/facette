@@ -236,7 +236,7 @@ export default function ProductDetail() {
             slug: _p.slug || _p.id,
             image: (_p.images && _p.images[0]) || _p.image || "",
             price: _p.price,
-            discount_price: _p.discount_price,
+            sale_price: _p.sale_price,
             sale_price: _p.sale_price,
           });
         } catch { /* sessiz */ }
@@ -384,9 +384,12 @@ export default function ProductDetail() {
     }
   };
 
-  const sizes = product?.variants?.length > 0 
-    ? sortLikeSize(product.variants, v => v.size) 
-    : ["XS", "S", "M", "L", "XL"].map(s => ({ size: s, stock: 10 }));
+  // Y28: Varyantsız ürünlere UYDURMA beden (XS–XL) ve sahte stok (10) üretilmez — bu sahte
+  // varyantlar sepete gerçek dışı beden/stok yazıp mükerrer satır ve yanlış sipariş oluşturuyordu.
+  // Varyantsız ürün beden seçici göstermez; ekleme varyantsız (tek ürün) olarak yapılır.
+  const sizes = product?.variants?.length > 0
+    ? sortLikeSize(product.variants, v => v.size)
+    : [];
 
   if (loading) {
     return (
@@ -823,7 +826,7 @@ export default function ProductDetail() {
                           <img src={optimizeImg(img, 200)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-[9px] text-black/50 tabular-nums mt-1 truncate">
-                          {((p.discount_price && p.discount_price > 0) ? p.discount_price : p.price || 0).toFixed(0)} TL
+                          {((p.sale_price && p.sale_price > 0) ? p.sale_price : p.price || 0).toFixed(0)} TL
                         </p>
                       </Link>
                     );
@@ -891,7 +894,7 @@ export default function ProductDetail() {
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>
                 {comboProducts.map((p) => {
                   const img = (p.images && p.images[0]) || p.image || "";
-                  const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                  const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
                   return (
                     <div
                       key={p.id}
@@ -917,7 +920,7 @@ export default function ProductDetail() {
                           {hasDiscount ? (
                             <>
                               <span className="text-[11px] text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                              <span className="text-[12px] font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                              <span className="text-[12px] font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
                             </>
                           ) : (
                             <span className="text-[12px] font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
@@ -933,7 +936,7 @@ export default function ProductDetail() {
             <div className="hidden md:grid grid-cols-4 gap-5">
               {comboProducts.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
-                const hasDiscount = p.discount_price && p.discount_price > 0 && p.discount_price < p.price;
+                const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
                 return (
                   <div key={p.id} className="group relative">
                     <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
@@ -953,7 +956,7 @@ export default function ProductDetail() {
                         {hasDiscount ? (
                           <>
                             <span className="text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                            <span className="text-sm font-medium tabular-nums">{p.discount_price.toFixed(2)} TL</span>
+                            <span className="text-sm font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
                           </>
                         ) : (
                           <span className="text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
@@ -1064,7 +1067,7 @@ export default function ProductDetail() {
             <h2 className="text-base font-light mb-6">Son Gezdiklerin</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {recentItems.slice(0, 4).map((p) => {
-                const disc = (p.discount_price && p.discount_price > 0) ? p.discount_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
+                const disc = (p.sale_price && p.sale_price > 0) ? p.sale_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
                 const shown = disc || p.price || 0;
                 return (
                   <Link key={p.id} to={`/${p.slug || p.id}`} className="group" data-testid={`recent-${p.id}`}>

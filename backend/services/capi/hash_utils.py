@@ -219,6 +219,13 @@ def build_user_data(
         "madid": hash_madid(madid),
         "idfa": hash_madid(idfa),
         "idfv": hash_madid(idfv),
+        # Y24: Ham (hash'siz) adres bileşenleri — Google GA4 Enhanced Conversions şehir/bölge/
+        # posta/ülkeyi HASH'SİZ ister (yalnızca ad/soyad/sokak hash'lidir). Meta vb. hash'li
+        # ct/st/country/zp kullanmaya devam eder; bu alanlar yalnızca Google tarafında kullanılır.
+        "ct_raw": (city or "").strip(),
+        "st_raw": (state or "").strip(),
+        "country_raw": (country or "TR").strip(),
+        "zp_raw": (zipcode or "").strip(),
         # Raw (server-side context)
         "client_ip_address": client_ip,
         "client_user_agent": user_agent,

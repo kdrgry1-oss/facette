@@ -12,7 +12,7 @@ import uuid
 import os
 import httpx
 
-from .deps import db, require_admin, require_auth, generate_id, logger
+from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger
 
 
 def _now() -> str:
@@ -222,13 +222,53 @@ async def create_manual_order(payload: dict, current_user: dict = Depends(requir
         "created_at": _now(),
         "updated_at": _now(),
     }
-    # Decrement stock
-    for it in items:
-        pid = it.get("product_id")
-        qty = int(it.get("quantity", 1) or 1)
-        if pid and qty > 0:
-            await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
     await db.orders.insert_one(doc)
+
+    # Y17: Stok düşümü VARYANT-farkında olmalı. Önceden yalnızca parent `stock` düşürülüyordu →
+    # varyantlı üründe (beden) vitrin oversell yapıyor, parent negatife düşüyor ve stok_movements
+    # yazılmıyordu. Artık barkod/variant_id ile atomik varyant düşümü + parent yeniden hesap +
+    # hareket kaydı yapan ortak yardımcı kullanılır (siparişteki mantıkla birebir).
+    try:
+        from routes.orders import _stock_delta_for_order
+        _now_iso = _now()
+        _moves = []
+        for it in items:
+            qty = int(it.get("quantity", 1) or 1)
+            if qty <= 0:
+                continue
+            barcode = it.get("barcode") or it.get("sku") or ""
+            variant_id = it.get("variant_id")
+            pid = it.get("product_id")
+            if barcode:
+                _moves += await _stock_delta_for_order({"items": [it]}, -1)
+            elif pid and variant_id:
+                # variant_id ile atomik düşüm + parent = varyant toplamı
+                await db.products.update_one(
+                    {"id": pid, "variants.id": variant_id},
+                    {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": _now_iso}},
+                    array_filters=[{"v.id": variant_id}],
+                )
+                await db.products.update_one(
+                    {"id": pid},
+                    [{"$set": {"stock": {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                        "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}],
+                )
+                _moves.append({"variant_id": variant_id, "delta": -qty, "product_id": pid})
+            elif pid:
+                await db.products.update_one({"id": pid}, {"$inc": {"stock": -qty}})
+                _moves.append({"product_id": pid, "delta": -qty})
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()), "type": "manual_decrement",
+            "order_id": doc["id"], "order_number": order_number,
+            "items": _moves, "created_by": current_user.get("email", ""),
+            "created_at": _now_iso,
+        })
+    except Exception as _se:
+        # Stok düşümü hata verse bile sipariş oluşturuldu; loglayıp devam et.
+        import logging as _lg
+        _lg.getLogger(__name__).error(f"Manuel siparis stok dususu hatasi: {_se}")
+
     doc.pop("_id", None)
     return {"success": True, "order": doc}
 
@@ -335,7 +375,7 @@ async def hourly_sales(days: int = Query(7, ge=1, le=90), current_user: dict = D
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     pipeline = [
         {"$match": {"created_at": {"$gte": cutoff}, "status": {"$ne": "cancelled"}}},
-        {"$group": {"_id": {"$hour": {"$dateFromString": {"dateString": "$created_at"}}}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$group": {"_id": {"$hour": {"date": {"$dateFromString": {"dateString": "$created_at"}}, "timezone": "Europe/Istanbul"}}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"_id": 1}},
     ]
     rows = []
@@ -414,7 +454,9 @@ tickets_admin_router = APIRouter(prefix="/admin/tickets", tags=["admin-tickets"]
 
 
 @tickets_public_router.post("")
-async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(require_auth)):
+async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(get_current_user)):
+    # O18: Önceden require_auth (401) yüzünden misafirler talep AÇAMIYORDU; guest fallback'ları
+    # ölü koddu. get_current_user anonimde None döner → misafir de destek talebi açabilir.
     doc = {
         "id": str(uuid.uuid4()),
         "ticket_number": f"TKT-{str(uuid.uuid4())[:8].upper()}",
@@ -430,6 +472,8 @@ async def create_ticket(payload: dict, current_user: Optional[dict] = Depends(re
     }
     if not doc["subject"] or not doc["message"]:
         raise HTTPException(status_code=400, detail="Konu ve mesaj zorunlu")
+    if not doc["email"]:
+        raise HTTPException(status_code=400, detail="E-posta adresi zorunlu")
     await db.tickets.insert_one(doc)
     doc.pop("_id", None)
     return {"success": True, "ticket": doc}

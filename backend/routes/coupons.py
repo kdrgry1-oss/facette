@@ -350,7 +350,13 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
             ors.append({"customer_email": em})
         if not ors:
             return {"valid": False, "reason": "İlk siparişe özel kupon için giriş yapın", "discount": 0}
-        prior = await db.orders.count_documents({"$or": ors, "status": {"$ne": "cancelled"}})
+        # Y6: İptal/başarısız/expired siparişleri "önceki sipariş" saymayız; aksi halde ödemesi
+        # başarısız olan bir deneme müşteriyi "ilk sipariş" hakkından mahrum bırakıyordu.
+        prior = await db.orders.count_documents({
+            "$or": ors,
+            "status": {"$nin": ["cancelled"]},
+            "payment_status": {"$nin": ["failed", "expired"]},
+        })
         if prior > 0:
             return {"valid": False, "reason": "Kupon sadece ilk siparişe özeldir", "discount": 0}
     if c.get("min_quantity"):

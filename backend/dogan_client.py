@@ -395,7 +395,9 @@ class DoganClient:
             li_kdv_rate = float(it.get("kdv_rate") if it.get("kdv_rate") is not None else kdv_rate)
             gross_line = round(qty * unit_price, 2)
             line_amount = round(gross_line / (1.0 + li_kdv_rate / 100.0), 2)
-            line_kdv = round(line_amount * li_kdv_rate / 100.0, 2)
+            # O1: KDV'yi gross−net olarak al (e-Fatura builder ile aynı). round(net×oran) çok satırlı
+            # faturada ±0.01 sürükleniyor ve PayableAmount tahsil edilen tutarla tutmuyordu.
+            line_kdv = round(gross_line - line_amount, 2)
             net_unit_price = round(line_amount / qty, 4) if qty else line_amount
             line_subtotal += line_amount
             kdv_total += line_kdv

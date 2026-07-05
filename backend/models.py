@@ -185,7 +185,9 @@ class OrderCreate(OrderBase):
 class Order(OrderBase):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=generate_id)
-    order_number: str = Field(default_factory=lambda: f"FC{int(datetime.now().timestamp())}")
+    # O14: Saniye çözünürlüklü timestamp aynı saniyede iki siparişte ÇAKIŞIYORDU (order_number
+    # idempotency/upsert anahtarıdır → iki müşteri çapraz bağlanabilir). Kısa rastgele sonek eklendi.
+    order_number: str = Field(default_factory=lambda: f"FC{int(datetime.now().timestamp())}{uuid.uuid4().hex[:5].upper()}")
     status: str = "pending"  # pending, confirmed, preparing, shipped, delivered, cancelled
     payment_status: str = "pending"  # pending, paid, failed, refunded
     cargo_tracking: Optional[str] = None

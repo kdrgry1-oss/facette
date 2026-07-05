@@ -16,7 +16,7 @@ EVENT_MAP = {
     "view_item":        "VIEW_CONTENT",
     "view_item_list":   "LIST_VIEW",
     "add_to_cart":      "ADD_CART",
-    "remove_from_cart": "ADD_CART",
+    "remove_from_cart": "CUSTOM_EVENT_1",
     "begin_checkout":   "START_CHECKOUT",
     "add_payment_info": "ADD_BILLING",
     "add_to_wishlist":  "ADD_TO_WISHLIST",
@@ -87,14 +87,21 @@ async def send(
 ) -> dict:
     snap_event = EVENT_MAP.get(event_name, event_name.upper())
     if not event_time:
-        event_time = int(datetime.now(timezone.utc).timestamp() * 1000)  # ms
+        event_time = int(datetime.now(timezone.utc).timestamp())  # saniye (orchestrator ile tutarlı)
+
+    # Y23: Snapchat CAPI timestamp'i MİLİSANİYE bekler. Orchestrator event_time'ı SANİYE olarak
+    # verdiğinden ham gönderilince Snap değeri ms sanıp 1970'e düşürüyor ve tüm eventleri düşürüyordu.
+    # Değeri normalize et: saniye görünüyorsa (< 10^12) ms'e çevir.
+    _ts = int(event_time)
+    if _ts < 1_000_000_000_000:
+        _ts *= 1000
 
     payload = {
         "pixel_id": pixel_id,
         "event_type": snap_event,
         "event_conversion_type": "WEB",
         "event_tag": event_name,
-        "timestamp": int(event_time),
+        "timestamp": _ts,
         "event_id": event_id,
         "page_url": event_source_url or "https://www.facette.com.tr",
         **_build_user(user_data),

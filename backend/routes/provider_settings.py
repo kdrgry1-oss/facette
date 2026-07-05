@@ -419,6 +419,42 @@ async def _get_config_doc(kind: str) -> dict:
     return doc
 
 
+# Y14: Gizli alanlar (şifre/api anahtarı) frontend'e DÜZ METİN dönmemeli.
+_SECRET_MASK = "********"
+
+
+def _secret_fields_for(kind: str, provider_key: str) -> set:
+    """Bir provider'ın şemasında type=password olan (gizli) alan anahtarları + yaygın sır adları."""
+    keys = set()
+    try:
+        for f in (PROVIDERS_BY_KIND.get(kind, {}).get(provider_key, {}).get("fields") or []):
+            if f.get("type") == "password":
+                keys.add(f.get("key"))
+    except Exception:
+        pass
+    # Şemada password işaretlenmemiş olsa bile bilinen sır alanlarını maskele.
+    for k in ("password", "api_secret", "api_key", "secret", "token", "apiKey", "apiSecret"):
+        keys.add(k)
+    return keys
+
+
+def _mask_config_doc(kind: str, doc: dict) -> dict:
+    """providers.<key>.<secret_field> değerlerini maskele (varlığını koru, değeri gizle)."""
+    out = dict(doc or {})
+    providers = {}
+    for pkey, pval in (out.get("providers") or {}).items():
+        secrets_keys = _secret_fields_for(kind, pkey)
+        masked = {}
+        for fk, fv in (pval or {}).items():
+            if fk in secrets_keys and fv not in (None, "", False):
+                masked[fk] = _SECRET_MASK
+            else:
+                masked[fk] = fv
+        providers[pkey] = masked
+    out["providers"] = providers
+    return out
+
+
 # ---------------------------------------------------------------------------
 # SCHEMAS
 # ---------------------------------------------------------------------------
@@ -443,9 +479,10 @@ async def get_schemas(kind: str, current_user: dict = Depends(require_admin)):
 # ---------------------------------------------------------------------------
 @router.get("/{kind}/config")
 async def get_config(kind: str, current_user: dict = Depends(require_admin)):
-    """Kayıtlı active_provider + per-provider credential map döner."""
+    """Kayıtlı active_provider + per-provider credential map döner.
+    Y14: Gizli alanlar (şifre/api anahtarı) maskelenir ('********'); düz metin sızmaz."""
     doc = await _get_config_doc(kind)
-    return doc
+    return _mask_config_doc(kind, doc)
 
 
 @router.post("/{kind}/config")
@@ -464,6 +501,20 @@ async def save_config(kind: str, payload: dict,
 
     # Yalnızca tanınan provider'ların verisini saklıyoruz (diğerlerini at)
     providers = {k: v for k, v in providers.items() if k in valid_keys}
+
+    # Y14: Frontend gizli alanları maskeli ('********') geri gönderir. Maskeli değer GELİRSE
+    # (kullanıcı değiştirmediyse) mevcut kayıtlı sırrı KORU — maske ile ezme.
+    _existing = await _get_config_doc(kind)
+    _existing_providers = _existing.get("providers") or {}
+    for pkey, pval in providers.items():
+        secrets_keys = _secret_fields_for(kind, pkey)
+        cur = _existing_providers.get(pkey) or {}
+        for fk in list((pval or {}).keys()):
+            if fk in secrets_keys and pval.get(fk) == _SECRET_MASK:
+                if cur.get(fk) not in (None, ""):
+                    pval[fk] = cur.get(fk)
+                else:
+                    pval.pop(fk, None)
 
     update_doc = {
         "kind": kind,

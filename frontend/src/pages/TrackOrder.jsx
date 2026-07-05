@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Package, Truck, CheckCircle, Clock, MapPin, Search, ExternalLink } from "lucide-react";
 import axios from "axios";
@@ -37,11 +37,13 @@ export default function TrackOrder() {
     }
   };
 
-  // Auto-search if code provided in URL
-  useState(() => {
+  // O15: Otomatik arama useState ile YANLIŞ yapılmıştı (render sırasında setState, StrictMode'da
+  // çift tetik, initialCode değişince tekrar ÇALIŞMIYOR). Doğrusu useEffect.
+  useEffect(() => {
     if (initialCode) {
       handleSearch();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCode]);
 
   const getStatusIcon = (status, completed) => {

@@ -17,7 +17,7 @@ _scheduler: AsyncIOScheduler | None = None
 async def auto_cancel_unpaid_havale_orders():
     """Cancel havale/transfer orders that remain unpaid after 72 hours and restock."""
     from routes.deps import db  # lazy import
-    from routes.orders import _stock_delta_for_order
+    from routes.orders import _restock_order_once
 
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
@@ -31,7 +31,9 @@ async def auto_cancel_unpaid_havale_orders():
         cancelled = 0
         async for order in db.orders.find(query, {"_id": 0}):
             try:
-                moves = await _stock_delta_for_order(order, +1)
+                # O16: Önce durumu güncelle, SONRA idempotent iade yap. Önceki sıra (önce restock,
+                # sonra status) update hata verirse bir sonraki turda stoğu TEKRAR ekliyordu.
+                # _restock_order_once zaten iade hareketi varsa ikinci kez eklemez.
                 await db.orders.update_one(
                     {"id": order["id"]},
                     {"$set": {
@@ -43,14 +45,7 @@ async def auto_cancel_unpaid_havale_orders():
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }}
                 )
-                await db.stock_movements.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "type": "auto_cancel_havale_72h",
-                    "order_id": order["id"],
-                    "order_number": order.get("order_number", ""),
-                    "items": moves,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
+                await _restock_order_once(order, "havale_auto_cancel")
                 cancelled += 1
             except Exception as e_item:
                 logger.error(f"Failed to cancel order {order.get('order_number')}: {e_item}")
@@ -565,6 +560,43 @@ async def _run_hepsiburada_auto_stock_sync():
             pass
 
 
+# Y21: Fire-and-forget senkron task'ları için kilit + referans havuzu.
+# Önceden create_task referanssız çağrılıyordu → (a) 2 dk aralıkta >2 dk süren pull ardılıyla
+# ÇAKIŞIP çift sipariş insert + çift stok düşümü yapabiliyor, (b) referans tutulmadığı için GC
+# task'ı yarıda öldürebiliyordu. Artık aynı iş bitmeden ikincisi başlamaz ve _last_*_sync
+# zaman damgası spawn'da değil TAMAMLANINCA yazılır.
+_RUNNING_SYNCS: set = set()
+_SYNC_TASKS: set = set()
+
+
+def _spawn_guarded_sync(coro_factory, lock_key: str, account_key: str, stamp_field: str):
+    """Kilitli, referanslı arka plan senkron başlatır. Zaten çalışıyorsa atlar."""
+    if lock_key in _RUNNING_SYNCS:
+        logger.info(f"[scheduler] {lock_key} zaten çalışıyor — bu tur atlandı (çakışma önlendi)")
+        return
+    _RUNNING_SYNCS.add(lock_key)
+
+    async def _wrapper():
+        try:
+            await coro_factory()
+        except Exception as _e:
+            logger.exception(f"[scheduler] {lock_key} senkron hata: {_e}")
+        finally:
+            try:
+                from routes.deps import db as _db
+                from datetime import datetime as _dt, timezone as _tz
+                await _db.marketplace_accounts.update_one(
+                    {"key": account_key}, {"$set": {stamp_field: _dt.now(_tz.utc).isoformat()}}
+                )
+            except Exception:
+                pass
+            _RUNNING_SYNCS.discard(lock_key)
+
+    t = asyncio.create_task(_wrapper())
+    _SYNC_TASKS.add(t)
+    t.add_done_callback(_SYNC_TASKS.discard)
+
+
 async def _marketplace_sync_tick():
     """
     Her dk'da bir çalışır; her marketplace_account'un auto_sync ayarlarına
@@ -604,14 +636,13 @@ async def _marketplace_sync_tick():
                         direction="outbound",
                         message=f"[cron] Otomatik ürün senkron tetiklendi (her {interval} dk)"
                     )
-                    # Trendyol için gerçek push'u arka planda kuyruğa al
+                    # Trendyol için gerçek push'u arka planda kuyruğa al (Y21: kilitli + damga bitişte)
                     if key == "trendyol":
-                        asyncio.create_task(_run_trendyol_auto_products_sync())
+                        _spawn_guarded_sync(_run_trendyol_auto_products_sync,
+                                             f"products:{key}", key, "_last_products_sync")
                     elif key == "hepsiburada":
-                        asyncio.create_task(_run_hepsiburada_auto_stock_sync())
-                    await db.marketplace_accounts.update_one(
-                        {"key": key}, {"$set": {"_last_products_sync": now.isoformat()}}
-                    )
+                        _spawn_guarded_sync(_run_hepsiburada_auto_stock_sync,
+                                             f"products:{key}", key, "_last_products_sync")
 
             # --- Siparişler ------------------------------------------------
             if sync.get("orders_enabled"):
@@ -630,12 +661,11 @@ async def _marketplace_sync_tick():
                         message=f"[cron] Otomatik sipariş çek tetiklendi (her {interval} dk, son {lookback} saat)"
                     )
                     if key == "trendyol":
-                        asyncio.create_task(_run_trendyol_auto_orders_pull())
+                        _spawn_guarded_sync(_run_trendyol_auto_orders_pull,
+                                             f"orders:{key}", key, "_last_orders_sync")
                     elif key == "hepsiburada":
-                        asyncio.create_task(_run_hepsiburada_auto_orders_pull())
-                    await db.marketplace_accounts.update_one(
-                        {"key": key}, {"$set": {"_last_orders_sync": now.isoformat()}}
-                    )
+                        _spawn_guarded_sync(_run_hepsiburada_auto_orders_pull,
+                                             f"orders:{key}", key, "_last_orders_sync")
     except Exception as e:
         logger.exception(f"[scheduler] marketplace sync tick failed: {e}")
 
@@ -675,16 +705,20 @@ async def _send_abandoned_cart_reminders():
         html = (
             "<h2>Sepetinizdeki ürünler tükeniyor!</h2>"
             "<p>Seçtiğiniz ürünleri tamamlamak için hazır bir alışveriş sepetiniz var.</p>"
-            "<p><a href=\"https://facette.com\" style=\"background:#000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Sepete Dön</a></p>"
+            "<p><a href=\"https://facette.com.tr\" style=\"background:#000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none\">Sepete Dön</a></p>"
             "<p style=\"font-size:12px;color:#888;margin-top:24px\">Bu e-posta otomatik gönderilmiştir.</p>"
         )
         ok, failed, errs = await _send_email_via_resend(recipients, subject, html)
-        # işaretle
-        for c in carts:
-            await db.cart_sessions.update_one(
-                {"session_id": c.get("session_id")},
-                {"$set": {"abandoned_reminder_sent": True, "abandoned_reminder_at": now.isoformat()}},
-            )
+        # O13: Gönderim BAŞARISIZ olduysa sepetleri "hatırlatıldı" işaretleme — aksi halde
+        # SMTP hatasında bu sepetler bir daha ASLA hatırlatılmıyordu. Yalnızca hiç hata yoksa işaretle.
+        if failed == 0 and ok > 0:
+            for c in carts:
+                await db.cart_sessions.update_one(
+                    {"session_id": c.get("session_id")},
+                    {"$set": {"abandoned_reminder_sent": True, "abandoned_reminder_at": now.isoformat()}},
+                )
+        else:
+            logger.warning(f"[scheduler] Abandoned cart mail kismen/tamamen basarisiz (sent={ok} failed={failed}) — işaretlenmedi, sonraki turda tekrar denenecek")
         logger.info(f"[scheduler] Abandoned cart reminders: sent={ok} failed={failed} errs={errs[:1]}")
     except Exception as e:
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
@@ -1014,7 +1048,13 @@ async def _dhl_cargo_poll_tick():
             aciklama = (info.get("kargo_statu_aciklama") or "")
             cur = order.get("status")
 
-            delivered = bool(teslim) or ("teslim" in aciklama.lower() and "edilemedi" not in aciklama.lower())
+            # Y20: "teslim alın(dı)" / "şubeden teslim" = ŞUBE/KABUL hareketi, TESLİMAT DEĞİL.
+            # "teslim" substring'i bunları da eşleyip siparişi ilk taramada yanlış 'delivered'
+            # yapıyor, müşteriye erken "Teslim Edildi" bildirimi gidiyordu.
+            _dl_aç = aciklama.lower()
+            _pickup = any(k in _dl_aç for k in ("teslim alın", "teslim alin", "şubeden teslim",
+                                                "subeden teslim", "şubede teslim", "subede teslim"))
+            delivered = (not _pickup) and (bool(teslim) or ("teslim" in _dl_aç and "edilemedi" not in _dl_aç))
             # İLK OKUTMA tespiti — sadece kargocu/şube siparişi fiilen okuttuğunda "Kargoya Verildi".
             # Barkod oluşturulurken gönderi_no/takip url'i dolabildiği için onlar TEK BAŞINA tetik DEĞİL;
             # yalnızca MNG/DHL bir HAREKET statüsü (kargo_statu ≠ 0) ya da kabul/şube/okutma açıklaması
@@ -1161,7 +1201,10 @@ async def _return_cargo_poll_tick():
                 statu = (info.get("kargo_statu") or "0").strip()
                 aciklama = (info.get("kargo_statu_aciklama") or "")
                 _alow = aciklama.lower()
-                delivered = bool(teslim) or ("teslim" in _alow and "edilemedi" not in _alow)
+                # Y20: şube/kabul "teslim alındı" hareketini teslimat sayma (iade akışını erken tetikler).
+                _pickup2 = any(k in _alow for k in ("teslim alın", "teslim alin", "şubeden teslim",
+                                                    "subeden teslim", "şubede teslim", "subede teslim"))
+                delivered = (not _pickup2) and (bool(teslim) or ("teslim" in _alow and "edilemedi" not in _alow))
                 _acc_kw = ("kabul", "şube", "sube", "okut", "teslim alın", "teslim alin",
                            "işleme", "isleme", "çıkış", "cikis", "girdi", "transfer",
                            "dağıt", "dagit", "yola")
@@ -1409,23 +1452,23 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Günde bir, terkedilmiş sepet mail hatırlatmaları (Resend key varsa çalışır).
+    # O12: "Günde bir" işleri SABİT SAATLİ cron ile çalıştır (07:00 UTC ≈ 10:00 İstanbul).
+    # Önceki `interval hours=24 + next_run_time=now+2dk` her PROCESS RESTART'ında çalışıyor ve
+    # düşük-stok e-postası sent-flag'i olmadığından her deploy'da MÜKERRER mail gidiyordu; ayrıca
+    # "günlük" saat her restart'ta kayıyordu. cron ile gün içinde tam olarak bir kez tetiklenir.
     _scheduler.add_job(
         _send_abandoned_cart_reminders,
-        "interval",
-        hours=24,
+        "cron",
+        hour=7, minute=0,
         id="abandoned_cart_reminders",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
         max_instances=1,
         coalesce=True,
     )
-    # Günde bir, düşük stoklu ürün-varyantlar için admin'lere özet e-posta.
     _scheduler.add_job(
         _send_daily_stock_alert,
-        "interval",
-        hours=24,
+        "cron",
+        hour=7, minute=10,
         id="daily_stock_alert",
-        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3),
         max_instances=1,
         coalesce=True,
     )

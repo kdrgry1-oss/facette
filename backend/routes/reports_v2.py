@@ -71,7 +71,7 @@ async def stock_valuation(
     """
     q: dict = {"$or": [{"stock": {"$gt": 0}}, {"variants.stock": {"$gt": 0}}]}
     if brand: q["brand"] = brand
-    if category: q["category"] = category
+    if category: q["category_name"] = category  # Y18: ürünler category değil category_name tutar
     if manufacturer: q["manufacturer"] = manufacturer
 
     cost_map = await _build_cost_map()  # product_costs (ikincil kaynak)
@@ -85,7 +85,7 @@ async def stock_valuation(
     missing: list = []
     cursor = db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
                                     "sale_price": 1, "purchase_price": 1, "brand": 1,
-                                    "category": 1, "stock_code": 1, "variants": 1})
+                                    "category_name": 1, "stock_code": 1, "variants": 1})
     async for p in cursor:
         variants = p.get("variants") or []
         units = (sum(int(v.get("stock") or 0) for v in variants) if variants
@@ -99,7 +99,7 @@ async def stock_valuation(
         total_units += units
         total_sale_value += units * sale
         b = p.get("brand") or "—"
-        c = p.get("category") or "—"
+        c = p.get("category_name") or "—"
         by_brand[b]["units"] += units
         by_brand[b]["sale"] += units * sale
         by_category[c]["units"] += units
@@ -152,7 +152,7 @@ async def _build_product_lookup() -> dict:
     products = []
     async for p in db.products.find({"stock": {"$gt": 0}},
                                        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1,
-                                        "stock_code": 1, "barcode": 1, "brand": 1, "category": 1,
+                                        "stock_code": 1, "barcode": 1, "brand": 1, "category_name": 1,
                                         "manufacturer": 1}):
         nm = (p.get("name") or "").lower()
         # Kelime tokenize + filtre
@@ -254,7 +254,7 @@ async def stockout_forecast(
             "name": p.get("name") or "—",
             "stock_code": p.get("stock_code"),
             "brand": p.get("brand"),
-            "category": p.get("category"),
+            "category": p.get("category_name"),
             "manufacturer": p.get("manufacturer"),
             "current_stock": stock,
             "daily_velocity": round(velocity, 3),
@@ -330,7 +330,7 @@ async def fast_movers(
     ids = [i["product_id"] for i in items]
     stock_map = {}
     _proj = {"_id": 0, "id": 1, "name": 1, "stock": 1, "stock_code": 1, "price": 1,
-             "brand": 1, "category": 1, "variants.urun_id": 1}
+             "brand": 1, "category_name": 1, "variants.urun_id": 1}
     async for p in db.products.find({"id": {"$in": ids}}, _proj):
         stock_map[str(p["id"])] = p
     # Eski (Ticimax/pazaryeri) siparişlerde product_id yerel UUID değil varyant urun_id'si
@@ -350,7 +350,7 @@ async def fast_movers(
         it["stock_code"] = p.get("stock_code")
         it["price"] = float(p.get("price") or 0)
         it["brand"] = p.get("brand")
-        it["category"] = p.get("category")
+        it["category"] = p.get("category_name")
         # Stok tükenme tahmini (gün)
         it["days_until_stockout"] = int(it["stock"] / it["daily_velocity"]) if it["daily_velocity"] > 0 else None
     return {"days": days, "items": items}
@@ -371,7 +371,7 @@ async def slow_movers(
     items = []
     cursor = db.products.find({"stock": {"$gte": min_stock}},
                                {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "stock_code": 1,
-                                "brand": 1, "category": 1, "created_at": 1})
+                                "brand": 1, "category_name": 1, "created_at": 1})
     async for p in cursor:
         pid = str(p["id"])
         sold_info = sold.get(pid)
@@ -388,7 +388,7 @@ async def slow_movers(
                 "daily_velocity": round(velocity, 3),
                 "price": float(p.get("price") or 0),
                 "brand": p.get("brand"),
-                "category": p.get("category"),
+                "category": p.get("category_name"),
                 "tied_value": round(int(p.get("stock") or 0) * float(p.get("price") or 0), 2),
             })
     items.sort(key=lambda x: -x["tied_value"])
@@ -497,20 +497,27 @@ async def profit_by_channel(
     pipeline = [
         {"$match": {"created_at": {"$gte": since}, "status": {"$ne": "cancelled"}}},
         {"$project": {
-            "channel": {"$ifNull": ["$marketplace", "$source", "site"]},
-            "status": 1, "items": 1, "total": 1, "shipping_total": 1,
+            # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
+            # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).
+            "channel": {"$ifNull": ["$platform", "site"]},
+            "status": 1, "items": 1, "total": 1, "shipping_cost": 1,
         }},
     ]
+    # Kanal adı normalizasyonu: mağaza siparişleri platform='facette' taşır → komisyon
+    # haritasındaki 'site'; admin manuel siparişler → 'manual'.
+    _CH_ALIAS = {"facette": "site", "": "site", "web": "site",
+                 "admin_manual": "manual", "admin": "manual", "manuel": "manual"}
     rows: dict = defaultdict(lambda: {
         "orders": 0, "revenue": 0.0, "cost": 0.0, "shipping": 0.0,
         "commission": 0.0, "refunds": 0.0,
     })
     async for o in db.orders.aggregate(pipeline):
         ch = (o.get("channel") or "site").lower()
+        ch = _CH_ALIAS.get(ch, ch)
         rows[ch]["orders"] += 1
         rev = float(o.get("total") or 0)
         rows[ch]["revenue"] += rev
-        rows[ch]["shipping"] += float(o.get("shipping_total") or 0)
+        rows[ch]["shipping"] += float(o.get("shipping_cost") or 0)
         # Maliyet: items üzerinden cost_map ile çarpım
         for it in (o.get("items") or []):
             pid = str(it.get("product_id") or "")
@@ -588,7 +595,7 @@ async def list_costs(
         ]
     skip = (page - 1) * limit
     cursor = db.products.find(pq, {"_id": 0, "id": 1, "name": 1, "stock_code": 1,
-                                    "price": 1, "stock": 1, "brand": 1, "category": 1}) \
+                                    "price": 1, "stock": 1, "brand": 1, "category_name": 1}) \
                        .skip(skip).limit(limit if not only_missing else limit * 3)
     items = []
     async for p in cursor:
@@ -605,7 +612,7 @@ async def list_costs(
             "price": price,
             "cost_price": cost,
             "brand": p.get("brand"),
-            "category": p.get("category"),
+            "category": p.get("category_name"),
             "margin_pct": round((price - cost) / price * 100, 2) if (cost and price) else None,
         })
         if len(items) >= limit:

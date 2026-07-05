@@ -4,8 +4,16 @@ const CartContext = createContext();
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => {
-    const saved = localStorage.getItem("cart");
-    return saved ? JSON.parse(saved) : [];
+    // Y26: Bozuk/eski bir "cart" değeri (ör. "null") JSON.parse'ta hataya ya da items=null'a
+    // yol açıp items.reduce'u patlatarak TÜM mağazayı beyaz ekran yapıyordu. Güvenli parse.
+    try {
+      const saved = localStorage.getItem("cart");
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      try { localStorage.removeItem("cart"); } catch {}
+      return [];
+    }
   });
   const [isOpen, setIsOpen] = useState(false);
 
@@ -14,9 +22,12 @@ export function CartProvider({ children }) {
   }, [items]);
 
   const addItem = (product, variant = null, quantity = 1) => {
+    // Y28: Kimliksiz (uydurma) varyantı varyantsız gibi işle — aksi halde variantId=null ile
+    // her ekleme yeni satır oluşturup birleşmiyordu.
+    if (variant && !variant.id) variant = null;
     setItems((prev) => {
       const key = variant ? `${product.id}-${variant.id}` : product.id;
-      const existing = prev.find((item) => 
+      const existing = prev.find((item) =>
         variant ? item.variantId === variant.id : item.productId === product.id && !item.variantId
       );
 

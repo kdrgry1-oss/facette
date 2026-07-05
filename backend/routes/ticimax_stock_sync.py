@@ -144,10 +144,14 @@ async def sync_ticimax_stock(
         variants_raw = _unwrap_variants(d.get("Varyasyonlar"))
 
         # ÖNCELİK 1: csv_card_id eşleşmesi
+        # O6: csv_card_id ürünlerde STRING olarak saklanıyor (bkz. dedupe_card_ids / products.py
+        # str-cast). int ile sorgulanınca Mongo hiç eşleşmiyordu → kart-ID eşleşmesi hep düşer,
+        # ürünler not_found'a düşer ama senkron "başarılı" raporlardı. Her iki tipi de sorgula.
         product_doc = None
         if tc_card_id:
             product_doc = await db.products.find_one(
-                {"csv_card_id": tc_card_id}, {"_id": 0, "id": 1, "variants": 1}
+                {"csv_card_id": {"$in": [tc_card_id, str(tc_card_id)]}},
+                {"_id": 0, "id": 1, "variants": 1}
             )
 
         # ÖNCELİK 2: ticimax variant barkod/stock_code'larından bizdeki ürünü bul
@@ -617,8 +621,9 @@ async def sync_ticimax_categories(
         # --- bizdeki ürünü bul (stok-sync ile aynı 3 öncelik) ---
         product_doc = None
         if tc_card_id:
+            # O6: csv_card_id string saklanır — int ve string birlikte sorgula.
             product_doc = await db.products.find_one(
-                {"csv_card_id": tc_card_id},
+                {"csv_card_id": {"$in": [tc_card_id, str(tc_card_id)]}},
                 {"_id": 0, "id": 1, "name": 1, "categories": 1, "is_new": 1})
         if not product_doc and variants_raw:
             tv_codes = [str(v.get("StokKodu") or "").strip() for v in variants_raw if v.get("StokKodu")]

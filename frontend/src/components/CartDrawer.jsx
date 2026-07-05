@@ -20,10 +20,13 @@ export default function CartDrawer() {
   // Sepet ürünlerine göre kombin önerisi (cart-suggestions API)
   useEffect(() => {
     if (!isOpen || items.length === 0) return;
-    const productIds = items.map((i) => i.product_id || i.id).filter(Boolean);
+    // Y30: Sepet kalemleri camelCase `productId` taşır; `id` ise "productId-variantId" bileşiğidir.
+    // Önceden `i.product_id || i.id` bileşik id gönderiyor, hiçbir ürünle eşleşmiyordu. Ayrıca
+    // endpoint {items:[...]} döner (suggestions değil).
+    const productIds = items.map((i) => i.productId || i.product_id).filter(Boolean);
     if (!productIds.length) return;
     axios.post(`${API}/products/cart-suggestions`, { product_ids: productIds, limit: 4 })
-      .then((r) => setSuggestions((r.data?.suggestions || []).slice(0, 4)))
+      .then((r) => setSuggestions((r.data?.items || r.data?.suggestions || []).slice(0, 4)))
       .catch(() => setSuggestions([]));
   }, [isOpen, items.length]);
 
@@ -70,7 +73,7 @@ export default function CartDrawer() {
         {remaining > 0 && items.length > 0 && (
           <div className="px-5 py-3 bg-stone-50 border-b border-black/5">
             <p className="text-[11px] text-center mb-2 text-black/70">
-              Ücretsiz kargo için <span className="font-medium text-black">{remaining.toFixed(2)} TL</span> daha
+              Ücretsiz kargo için <span className="font-semibold text-emerald-600">{remaining.toFixed(2)} TL</span> daha
             </p>
             <div className="h-[2px] bg-black/10 overflow-hidden">
               <div
@@ -149,7 +152,7 @@ export default function CartDrawer() {
                           try {
                             trackRemoveFromCart({
                               product: {
-                                id: item.product_id || item.id,
+                                id: item.productId || item.product_id || item.id,
                                 name: item.name,
                                 sale_price: item.price,
                                 price: item.price,
