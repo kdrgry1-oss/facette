@@ -1727,6 +1727,91 @@ async def auto_cancel_expired_orders(
     return {"success": True, "cancelled": cancelled, "hours": hours}
 
 
+@router.post("/recover-charged")
+async def recover_charged_orders(
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Parası çekilip siparişi ONAYLANMAYAN müşterileri kurtarır (admin, tarayıcıdan çağrılabilir).
+
+    Ödeme doğrulaması bir dönem iyzico 'price' (indirim öncesi) ile order.total'ı karşılaştırıp
+    indirimli siparişleri yanlışlıkla 'failed' yapıyordu; ama iyzico'nun GERÇEK yanıtı
+    (iyzico_retrieve_response) kaydedildiği için gerçekten ödenmiş siparişler tespit edilebilir.
+
+    payload: {days?: int=5, apply?: bool=false}
+      - apply=false (varsayılan): YALNIZCA RAPOR — hiçbir şey değişmez.
+      - apply=true: uygun siparişleri paid/confirmed yapar + onay bildirimi/kupon/CAPI (idempotent).
+    Yalnızca iyzico yanıtı BAŞARILI (paymentId + status=success + FAILURE değil) VE tahsil edilen
+    tutar (paidPrice) sipariş toplamına eşit/fazla olanlar kurtarılır; eksik tahsilat ayrı listelenir."""
+    payload = payload or {}
+    days = int(payload.get("days", 5) or 5)
+    apply = bool(payload.get("apply", False))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    query = {"payment_status": {"$in": ["failed", "pending"]}, "created_at": {"$gte": cutoff}}
+
+    recoverable, undercharge = [], []
+    async for o in db.orders.find(query, {"_id": 0}):
+        snap = o.get("iyzico_retrieve_response") or {}
+        if not snap.get("paymentId"):
+            continue
+        if str(snap.get("status") or "").lower() != "success":
+            continue
+        _ps = str(snap.get("paymentStatus") or "").upper()
+        if _ps and _ps != "SUCCESS":
+            continue
+        total = round(float(o.get("total") or 0), 2)
+        paid = round(float(snap.get("paidPrice") or 0), 2)
+        row = {
+            "order_number": o.get("order_number"), "id": o.get("id"),
+            "total": total, "paid": paid, "paymentId": snap.get("paymentId"),
+            "payment_status": o.get("payment_status"), "status": o.get("status"),
+            "email": (o.get("shipping_address") or {}).get("email") or o.get("email"),
+            "created_at": o.get("created_at"),
+        }
+        if paid + 0.02 >= total and total > 0:
+            recoverable.append((o, row))
+        else:
+            undercharge.append(row)
+
+    result = {
+        "days": days, "apply": apply,
+        "recoverable_count": len(recoverable),
+        "undercharge_count": len(undercharge),
+        "recoverable": [r for _o, r in recoverable],
+        "undercharge": undercharge,
+        "applied": 0,
+    }
+    if not apply:
+        return result
+
+    from .payment import _notify_paid_order_confirmed
+    now_iso = datetime.now(timezone.utc).isoformat()
+    fixed = 0
+    for o, r in recoverable:
+        oid = o["id"]
+        snap = o.get("iyzico_retrieve_response") or {}
+        await db.orders.update_one(
+            {"id": oid, "payment_status": {"$ne": "paid"}},
+            {"$set": {
+                "payment_status": "paid", "status": "confirmed", "paid_at": now_iso,
+                "payment_id": snap.get("paymentId"), "iyzico_payment_id": snap.get("paymentId"),
+                "recovered_by": current_user.get("email", ""), "recovered_at": now_iso,
+                "updated_at": now_iso,
+            }},
+        )
+        try:
+            await _notify_paid_order_confirmed(oid)
+        except Exception as _e:
+            logger.warning(f"[KURTARMA] bildirim hatasi {r['order_number']}: {_e}")
+        try:
+            await dispatch_purchase_capi(oid, source="recovery_admin")
+        except Exception:
+            pass
+        fixed += 1
+    result["applied"] = fixed
+    return result
+
+
 @router.post("/{order_id}/note")
 async def add_order_note(
     order_id: str,
