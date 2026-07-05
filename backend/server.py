@@ -371,10 +371,17 @@ if not _origins_list:
     logger.warning("CORS_ORIGINS env is missing/empty — defaulting to localhost only. "
                    "Set explicit whitelist in /app/backend/.env for production.")
     _origins_list = ["http://localhost:3000"]
+# Güvenlik: wildcard origin ("*") ile allow_credentials=True BİRLİKTE kullanılamaz — Starlette
+# çağıranın Origin'ini yansıtıp kimlik-bilgili (cookie/Authorization) çapraz-origin isteğe izin
+# verirdi. Wildcard varsa credentials KAPATILIR (spec gereği zaten geçersiz kombinasyon).
+_allow_credentials = _origins_list != ["*"]
+if not _allow_credentials:
+    logger.warning("CORS_ORIGINS=* ile credentials devre dışı bırakıldı. Üretimde açık bir "
+                   "origin whitelist'i tanımlayın.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins_list,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
     expose_headers=["Content-Disposition"],

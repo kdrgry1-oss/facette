@@ -322,8 +322,15 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
     now = datetime.now(timezone.utc)
     if c.get("start_at") and c["start_at"] > now.isoformat():
         return {"valid": False, "reason": "Kupon henüz başlamadı", "discount": 0}
-    if c.get("end_at") and c["end_at"] < now.isoformat():
-        return {"valid": False, "reason": "Kupon süresi dolmuş", "discount": 0}
+    # L1: end_at yalnızca tarih (YYYY-MM-DD) olarak kaydedilmişse, o günün SONUNA kadar geçerli
+    # sayılır. Aksi halde ham string karşılaştırması ("2026-07-10" < "2026-07-10T08:..") kuponu
+    # bitiş gününün başında öldürüyor, kullanıcı bir gün erken kaybediyordu.
+    _end = c.get("end_at")
+    if _end:
+        if len(str(_end)) == 10 and "T" not in str(_end):
+            _end = f"{_end}T23:59:59+00:00"
+        if _end < now.isoformat():
+            return {"valid": False, "reason": "Kupon süresi dolmuş", "discount": 0}
     if c.get("min_cart_total", 0) and cart_total < c["min_cart_total"]:
         return {"valid": False, "reason": f"Minimum sepet tutarı ₺{c['min_cart_total']:.2f}", "discount": 0}
     if c.get("usage_limit"):

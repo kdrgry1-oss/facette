@@ -797,59 +797,54 @@ export default function Checkout() {
               </section>
               )}
 
-              {/* 2) Teslimat & Fatura */}
+              {/* 2) Teslimat Adresi — Zara/Mango sadeliği: tek adres. Fatura varsayılan olarak
+                  teslimatla aynı; ayrı fatura adresi YALNIZCA istenirse açılır (tekrar eden alan yok). */}
               <section data-testid="address-block">
-                <Step n={sBase + 1} title="Teslimat & Fatura Adresi" icon={MapPin} />
-                <div className="grid md:grid-cols-2 gap-4">
-                  {/* Teslimat */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-700">Teslimat Adresi</span>
-                      <button type="button" onClick={() => openAddressModal("shipping")}
-                        data-testid="edit-shipping-addr-btn"
-                        className="inline-flex items-center gap-1 text-xs text-black border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
-                        <Plus size={14} /> Adres Ekle / Değiştir
-                      </button>
-                    </div>
-                    <button type="button" onClick={() => openAddressModal("shipping")}
-                      className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
-                      {shippingAddress.first_name
-                        ? addressCardContent(shippingAddress, "Teslimat Adresi")
-                        : <span className="text-xs text-gray-500">Henüz teslimat adresi seçilmedi. Eklemek için tıklayın.</span>}
-                    </button>
-                  </div>
-                  {/* Fatura */}
-                  <div>
+                <div className="flex items-center justify-between">
+                  <Step n={sBase + 1} title="Teslimat Adresi" icon={MapPin} />
+                  <button type="button" onClick={() => openAddressModal("shipping")}
+                    data-testid="edit-shipping-addr-btn"
+                    className="inline-flex items-center gap-1 text-xs text-black border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
+                    <Plus size={14} /> {shippingAddress.first_name ? "Değiştir" : "Adres Ekle"}
+                  </button>
+                </div>
+                <button type="button" onClick={() => openAddressModal("shipping")}
+                  className={`w-full text-left rounded p-3 transition-colors border ${shippingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
+                  {shippingAddress.first_name
+                    ? addressCardContent(shippingAddress, "Teslimat Adresi")
+                    : <span className="text-xs text-gray-500">Henüz teslimat adresi seçilmedi. Eklemek için tıklayın.</span>}
+                </button>
+
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer pt-3">
+                  <input type="checkbox" checked={billingSameAsShipping}
+                    onChange={(e) => {
+                      setBillingSameAsShipping(e.target.checked);
+                      if (e.target.checked) setBillingAddress({ ...shippingAddress });
+                    }}
+                    className="accent-black"
+                    data-testid="same-billing-checkbox" />
+                  <span>Fatura adresim teslimat adresimle aynı</span>
+                </label>
+
+                {/* Ayrı fatura adresi — yalnızca kutu işaretsizken görünür */}
+                {!billingSameAsShipping && (
+                  <div className="pt-2">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium text-gray-700">Fatura Adresi</span>
                       <button type="button" onClick={() => openAddressModal("billing")}
                         data-testid="edit-billing-addr-btn"
-                        disabled={billingSameAsShipping}
-                        className={`inline-flex items-center gap-1 text-xs rounded px-3 py-1 transition ${billingSameAsShipping ? "border border-gray-200 text-gray-300 cursor-not-allowed" : "text-black border border-stone-900 hover:bg-stone-50"}`}>
-                        <Plus size={14} /> Adres Ekle / Değiştir
+                        className="inline-flex items-center gap-1 text-xs text-black border border-stone-900 px-3 py-1 hover:bg-stone-50 transition">
+                        <Plus size={14} /> {billingAddress.first_name ? "Değiştir" : "Adres Ekle"}
                       </button>
                     </div>
-                    <div className={`rounded p-3 border ${billingSameAsShipping ? "bg-stone-50 border-gray-200" : (billingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300")}`}>
-                      {billingSameAsShipping
-                        ? <span className="text-xs text-gray-500 italic">Teslimat adresi ile aynı</span>
-                        : (billingAddress.first_name
-                            ? addressCardContent(billingAddress, "Fatura Adresi")
-                            : <span className="text-xs text-gray-500">Fatura adresi seçilmedi</span>)}
-                    </div>
+                    <button type="button" onClick={() => openAddressModal("billing")}
+                      className={`w-full text-left rounded p-3 border ${billingAddress.first_name ? "bg-stone-50 border-stone-200" : "bg-stone-50 border-dashed border-gray-300 hover:border-stone-400"}`}>
+                      {billingAddress.first_name
+                        ? addressCardContent(billingAddress, "Fatura Adresi")
+                        : <span className="text-xs text-gray-500">Fatura adresi seçilmedi. Eklemek için tıklayın.</span>}
+                    </button>
                   </div>
-                </div>
-                <div className="pt-1">
-                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={billingSameAsShipping}
-                      onChange={(e) => {
-                        setBillingSameAsShipping(e.target.checked);
-                        if (e.target.checked) setBillingAddress({ ...shippingAddress });
-                      }}
-                      className="accent-black"
-                      data-testid="same-billing-checkbox" />
-                    <span>Faturamı Aynı Adrese Gönder</span>
-                  </label>
-                </div>
+                )}
               </section>
 
               {/* 2.b) Kurumsal Fatura */}

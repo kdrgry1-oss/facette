@@ -102,16 +102,18 @@ def _payment_matches_order(data: dict, order: dict) -> bool:
             logger.warning(f"[ODEME DOGRULAMA] conversationId uyusmuyor: yanit={conv} siparis={oid}")
             return False
         total = round(float(order.get("total") or 0), 2)
-        price = data.get("price")
         paid = data.get("paidPrice")
-        price = round(float(price), 2) if price not in (None, "") else None
+        price = data.get("price")
         paid = round(float(paid), 2) if paid not in (None, "") else None
-        # Taban fiyat (price) siparişin toplamına eşit olmalı; taksitte paidPrice >= total.
-        if price is not None and abs(price - total) > 0.02:
-            logger.warning(f"[ODEME DOGRULAMA] tutar uyusmuyor: yanit_price={price} siparis_total={total}")
-            return False
-        if price is None and paid is not None and paid + 0.02 < total:
-            logger.warning(f"[ODEME DOGRULAMA] paidPrice<total: {paid} < {total}")
+        price = round(float(price), 2) if price not in (None, "") else None
+        # ÖNEMLİ: iyzico 'price' = sepet BRÜTÜ (indirim öncesi), 'paidPrice' = TAHSİL EDİLEN
+        # (= order.total; taksitte vade farkıyla daha fazla). İndirim (kupon/havale) olan siparişte
+        # price != total olur — bu NORMALDİR, reddedilmemeli. Yalnızca gerçek EKSİK-TAHSİLAT
+        # (charged < total) reddedilir; böylece "1 TL'ye pahalı ürün" engellenir ama meşru
+        # indirimli/tam ödemeler geçer.
+        charged = paid if paid is not None else price
+        if charged is not None and charged + 0.02 < total:
+            logger.warning(f"[ODEME DOGRULAMA] eksik tahsilat: tahsil={charged} < siparis_total={total}")
             return False
         return True
     except Exception as _e:

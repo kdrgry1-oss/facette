@@ -524,7 +524,8 @@ async def forgot_password_verify_otp(request: Request, req: OTPVerifyReq):
 
     await db.password_reset_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
 
-    if _hash_otp(req.code) != rec.get("code_hash"):
+    import hmac as _hmac
+    if not _hmac.compare_digest(_hash_otp(req.code), str(rec.get("code_hash") or "")):
         raise HTTPException(status_code=400, detail="Kod hatalı")
 
     if not rec.get("user_id"):
@@ -892,14 +893,18 @@ async def google_callback(code: str, request: Request):
                 "avatar": google_user.get("picture"),
             }}
         )
-        user = await db.users.find_one({"email": email}, {"_id": 0})
-    
+        user = await db.users.find_one({"email": email}, {"_id": 0, "password": 0})
+
     token = create_token(user["id"], user.get("is_admin", False))
-    
+
+    # Güvenlik: yanıt gövdesinde bcrypt şifre hash'i ASLA dönmemeli.
+    user.pop("password", None)
+    user.pop("_id", None)
+
     # Redirect to frontend with token
     frontend_url = os.environ.get("FRONTEND_URL", "")
     if frontend_url:
         from fastapi.responses import RedirectResponse
         return RedirectResponse(f"{frontend_url}/auth/callback?token={token}")
-    
+
     return {"token": token, "user": user}

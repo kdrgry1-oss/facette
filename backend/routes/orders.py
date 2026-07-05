@@ -776,10 +776,14 @@ async def create_order(
     for it in _items:
         pid = it.get("product_id")
         prod = _pmap.get(pid) if pid else None
-        if pid and not prod:
-            raise HTTPException(status_code=400, detail="Sipariş kaleminde geçersiz ürün")
+        # ÜrÜn bulunursa fiyatı SUNUCUDAN al (istemci fiyatını ez). Bulunamazsa siparişi TÜMDEN
+        # reddetme — aksi halde silinmiş/farklı-id'li tek bir kalem yüzünden müşteri hiç sipariş
+        # veremiyordu. Bulunamayan (gerçek olmayan) kalem için istemci fiyatı korunur; loglanır.
         if prod:
-            it["price"] = _eff_unit_price(prod, it.get("variant_id"))  # istemci fiyatını ez
+            it["price"] = _eff_unit_price(prod, it.get("variant_id"))
+        elif pid:
+            logger.warning(f"[FIYAT] urun bulunamadi, istemci fiyati korundu pid={pid} "
+                           f"fiyat={it.get('price')}")
         qty = int(it.get("quantity", it.get("qty", 1)) or 1)
         if qty < 1:
             qty = 1
