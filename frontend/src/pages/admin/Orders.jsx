@@ -1891,16 +1891,26 @@ export default function AdminOrders({ unpaidView = false }) {
                       <span>Ara Toplam</span>
                       <span>{selectedOrder.subtotal?.toFixed(2)} TL</span>
                     </div>
+                    {/* İndirimler AYRI AYRI — kampanya / kupon / havale (hangi indirim uygulandı görünsün) */}
+                    {Array.isArray(selectedOrder.discount_breakdown) && selectedOrder.discount_breakdown.length > 0 ? (
+                      selectedOrder.discount_breakdown.map((d, i) => (
+                        <div key={i} className="flex justify-between text-sm text-green-600">
+                          <span>{d.label}{d.code ? ` · ${d.code}` : ""}</span>
+                          <span>-{Number(d.amount || 0).toFixed(2)} TL</span>
+                        </div>
+                      ))
+                    ) : (
+                      selectedOrder.discount > 0 && (
+                        <div className="flex justify-between text-sm text-green-600">
+                          <span>İndirim{selectedOrder.coupon_code ? ` · ${selectedOrder.coupon_code}` : ""}</span>
+                          <span>-{selectedOrder.discount?.toFixed(2)} TL</span>
+                        </div>
+                      )
+                    )}
                     <div className="flex justify-between text-sm">
                       <span>Kargo</span>
-                      <span>{selectedOrder.shipping_cost?.toFixed(2)} TL</span>
+                      <span>{Number(selectedOrder.shipping_cost || 0) === 0 ? "Ücretsiz" : `${selectedOrder.shipping_cost?.toFixed(2)} TL`}</span>
                     </div>
-                    {selectedOrder.discount > 0 && (
-                      <div className="flex justify-between text-sm text-green-600">
-                        <span>İndirim</span>
-                        <span>-{selectedOrder.discount?.toFixed(2)} TL</span>
-                      </div>
-                    )}
                     <div className="flex justify-between font-medium text-lg pt-2 border-t">
                       <span>Toplam</span>
                       <span>{selectedOrder.total?.toFixed(2)} TL</span>

@@ -8,6 +8,7 @@ import Footer from "../components/Footer";
 import ProductCard from "../components/ProductCard";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
+import { priceView } from "../lib/price";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { useShipping } from "../lib/shipping";
@@ -825,8 +826,15 @@ export default function ProductDetail() {
                         <div className="relative w-16 h-20 bg-stone-100 overflow-hidden">
                           <img src={optimizeImg(img, 200)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.05] transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
-                        <p className="text-[9px] text-black/50 tabular-nums mt-1 truncate">
-                          {((p.sale_price && p.sale_price > 0) ? p.sale_price : p.price || 0).toFixed(0)} TL
+                        <p className="text-[9px] tabular-nums mt-1 truncate">
+                          {priceView(p).hasDiscount ? (
+                            <>
+                              <span className="text-black/35 line-through mr-1">{priceView(p).list.toFixed(0)}</span>
+                              <span className="text-red-600">{priceView(p).display.toFixed(0)} TL</span>
+                            </>
+                          ) : (
+                            <span className="text-black/50">{priceView(p).display.toFixed(0)} TL</span>
+                          )}
                         </p>
                       </Link>
                     );
@@ -894,7 +902,7 @@ export default function ProductDetail() {
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>
                 {comboProducts.map((p) => {
                   const img = (p.images && p.images[0]) || p.image || "";
-                  const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
+                  const pv = priceView(p);
                   return (
                     <div
                       key={p.id}
@@ -917,13 +925,13 @@ export default function ProductDetail() {
                           {p.name}
                         </Link>
                         <div className="flex items-baseline gap-1.5 mt-0.5">
-                          {hasDiscount ? (
+                          {pv.hasDiscount ? (
                             <>
-                              <span className="text-[11px] text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                              <span className="text-[12px] font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
+                              <span className="text-[11px] text-black/40 line-through tabular-nums">{pv.list.toFixed(2)} TL</span>
+                              <span className="text-[12px] font-medium text-red-600 tabular-nums">{pv.display.toFixed(2)} TL</span>
                             </>
                           ) : (
-                            <span className="text-[12px] font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                            <span className="text-[12px] font-light tabular-nums">{pv.display.toFixed(2)} TL</span>
                           )}
                         </div>
                       </div>
@@ -936,7 +944,7 @@ export default function ProductDetail() {
             <div className="hidden md:grid grid-cols-4 gap-5">
               {comboProducts.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
-                const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
+                const pv = priceView(p);
                 return (
                   <div key={p.id} className="group relative">
                     <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
@@ -953,13 +961,13 @@ export default function ProductDetail() {
                     <div className="mt-2.5">
                       <Link to={`/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
-                        {hasDiscount ? (
+                        {pv.hasDiscount ? (
                           <>
-                            <span className="text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                            <span className="text-sm font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
+                            <span className="text-sm text-black/40 line-through tabular-nums">{pv.list.toFixed(2)} TL</span>
+                            <span className="text-sm font-medium text-red-600 tabular-nums">{pv.display.toFixed(2)} TL</span>
                           </>
                         ) : (
-                          <span className="text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          <span className="text-sm font-light tabular-nums">{pv.display.toFixed(2)} TL</span>
                         )}
                       </div>
                     </div>
@@ -1067,15 +1075,23 @@ export default function ProductDetail() {
             <h2 className="text-base font-light mb-6">Son Gezdiklerin</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {recentItems.slice(0, 4).map((p) => {
-                const disc = (p.sale_price && p.sale_price > 0) ? p.sale_price : (p.sale_price && p.sale_price > 0 ? p.sale_price : null);
-                const shown = disc || p.price || 0;
+                const pv = priceView(p);
                 return (
                   <Link key={p.id} to={`/${p.slug || p.id}`} className="group" data-testid={`recent-${p.id}`}>
                     <div className="aspect-[2/3] bg-stone-100 overflow-hidden">
                       <img src={optimizeImg(p.image, 500)} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500" loading="lazy" decoding="async" />
                     </div>
                     <p className="text-[12px] md:text-sm font-light text-black/85 line-clamp-1 mt-2">{p.name}</p>
-                    <p className="text-[12px] md:text-sm tabular-nums mt-0.5">{(shown).toFixed(2).replace('.', ',')} TL</p>
+                    <p className="text-[12px] md:text-sm tabular-nums mt-0.5">
+                      {pv.hasDiscount ? (
+                        <>
+                          <span className="text-black/40 line-through mr-1">{pv.list.toFixed(2).replace('.', ',')}</span>
+                          <span className="text-red-600">{pv.display.toFixed(2).replace('.', ',')} TL</span>
+                        </>
+                      ) : (
+                        <span>{pv.display.toFixed(2).replace('.', ',')} TL</span>
+                      )}
+                    </p>
                   </Link>
                 );
               })}

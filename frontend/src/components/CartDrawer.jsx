@@ -4,7 +4,22 @@ import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
 import { useCart } from "../context/CartContext";
+import { priceView } from "../lib/price";
 import { trackRemoveFromCart } from "../lib/dataLayer";
+
+// Çekmece öneri fiyatı — indirim varsa üstü çizili liste + indirimli (tutarlı).
+function MiniPrice({ p }) {
+  const pv = priceView(p);
+  if (pv.hasDiscount) {
+    return (
+      <p className="text-[10px] tabular-nums">
+        <span className="text-black/40 line-through mr-1">{pv.list.toFixed(0)}</span>
+        <span className="text-red-600">{pv.display.toFixed(0)} TL</span>
+      </p>
+    );
+  }
+  return <p className="text-[10px] tabular-nums text-black/70">{pv.display.toFixed(0)} TL</p>;
+}
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -212,7 +227,7 @@ export default function CartDrawer() {
                         <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                       </div>
                       <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
-                      <p className="text-[10px] tabular-nums text-black/70">{((s.sale_price && s.sale_price > 0) ? s.sale_price : s.price || 0).toFixed(0)} TL</p>
+                      <MiniPrice p={s} />
                     </Link>
                   ))}
                 </div>
@@ -238,7 +253,7 @@ export default function CartDrawer() {
                         <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                       </div>
                       <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
-                      <p className="text-[10px] tabular-nums text-black/70">{((s.sale_price && s.sale_price > 0) ? s.sale_price : s.price || 0).toFixed(0)} TL</p>
+                      <MiniPrice p={s} />
                     </Link>
                   ))}
                 </div>

@@ -8,7 +8,22 @@ import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
+import { priceView } from "../lib/price";
 import axios from "axios";
+
+// Menü/öneri kartı fiyatı — indirim varsa üstü çizili liste + indirimli (tutarlı görünüm).
+function MegaPrice({ p }) {
+  const pv = priceView(p);
+  if (pv.hasDiscount) {
+    return (
+      <p className="text-[11px] tabular-nums">
+        <span className="text-black/40 line-through mr-1">{pv.list.toFixed(2)}</span>
+        <span className="text-red-600">{pv.display.toFixed(2)} TL</span>
+      </p>
+    );
+  }
+  return <p className="text-[11px] tabular-nums text-black/65">{pv.display.toFixed(2)} TL</p>;
+}
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -94,7 +109,7 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
           />
         </div>
         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-        <p className="text-[11px] tabular-nums text-black/65">{(p.sale_price && p.sale_price > 0 ? p.sale_price : p.price || 0).toFixed(2)} TL</p>
+        <MegaPrice p={p} />
       </Link>
     ));
   }
@@ -476,7 +491,7 @@ export default function Header({ hideMenu = false }) {
                           />
                         </div>
                         <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                        <p className="text-[11px] tabular-nums text-black/65">{(p.sale_price && p.sale_price > 0 ? p.sale_price : p.price || 0).toFixed(2)} TL</p>
+                        <MegaPrice p={p} />
                       </Link>
                     ))
                   ) : (

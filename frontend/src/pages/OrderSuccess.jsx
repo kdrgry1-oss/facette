@@ -149,10 +149,20 @@ export default function OrderSuccess() {
         <div className="mb-12 pb-12 border-b border-gray-100">
           <div className="space-y-2 text-sm">
             <div className="flex justify-between text-gray-700"><span>Ara Toplam</span><span>{(order?.subtotal || 0).toFixed(2)} TL</span></div>
-            <div className="flex justify-between text-gray-700"><span>Kargo</span><span>{(order?.shipping_cost || 0) === 0 ? "Ücretsiz" : `${(order?.shipping_cost || 0).toFixed(2)} TL`}</span></div>
-            {(order?.discount || 0) > 0 && (
-              <div className="flex justify-between text-stone-700"><span>İndirim{order.coupon_code ? ` · ${order.coupon_code}` : ""}</span><span>-{order.discount.toFixed(2)} TL</span></div>
+            {/* İndirimler AYRI AYRI — kampanya / kupon / havale her biri kendi satırı */}
+            {Array.isArray(order?.discount_breakdown) && order.discount_breakdown.length > 0 ? (
+              order.discount_breakdown.map((d, i) => (
+                <div key={i} className="flex justify-between text-emerald-700">
+                  <span>{d.label}{d.code ? ` · ${d.code}` : ""}</span>
+                  <span>-{Number(d.amount || 0).toFixed(2)} TL</span>
+                </div>
+              ))
+            ) : (
+              (order?.discount || 0) > 0 && (
+                <div className="flex justify-between text-emerald-700"><span>İndirim{order.coupon_code ? ` · ${order.coupon_code}` : ""}</span><span>-{order.discount.toFixed(2)} TL</span></div>
+              )
             )}
+            <div className="flex justify-between text-gray-700"><span>Kargo</span><span>{(order?.shipping_cost || 0) === 0 ? "Ücretsiz" : `${(order?.shipping_cost || 0).toFixed(2)} TL`}</span></div>
             <div className="flex justify-between pt-3 mt-3 border-t border-gray-200 text-black font-medium">
               <span>Toplam</span><span>{(order?.total || 0).toFixed(2)} TL</span>
             </div>

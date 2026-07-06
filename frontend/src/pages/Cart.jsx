@@ -8,6 +8,7 @@ import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { optimizeImg } from "../lib/img";
+import { priceView } from "../lib/price";
 import { trackViewCart } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -281,7 +282,7 @@ export default function Cart() {
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>
                 {suggestions.map((p) => {
                   const img = optimizeImg((p.images && p.images[0]) || p.image, 500) || PLACEHOLDER;
-                  const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
+                  const pv = priceView(p);
                   return (
                     <div key={p.id} className="snap-start shrink-0 w-[44vw]" data-testid={`cart-suggestion-${p.id}`}>
                       <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
@@ -290,13 +291,13 @@ export default function Cart() {
                       <div className="mt-2">
                         <Link to={`/${p.slug || p.id}`} className="block text-[12px] font-light text-black/85 line-clamp-1">{p.name}</Link>
                         <div className="flex items-baseline gap-1.5 mt-0.5">
-                          {hasDiscount ? (
+                          {pv.hasDiscount ? (
                             <>
-                              <span className="text-[11px] text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                              <span className="text-[12px] font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
+                              <span className="text-[11px] text-black/40 line-through tabular-nums">{pv.list.toFixed(2)} TL</span>
+                              <span className="text-[12px] font-medium text-red-600 tabular-nums">{pv.display.toFixed(2)} TL</span>
                             </>
                           ) : (
-                            <span className="text-[12px] font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                            <span className="text-[12px] font-light tabular-nums">{pv.display.toFixed(2)} TL</span>
                           )}
                         </div>
                       </div>
@@ -309,7 +310,7 @@ export default function Cart() {
             <div className="hidden md:grid grid-cols-4 gap-5">
               {suggestions.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
-                const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
+                const pv = priceView(p);
                 return (
                   <div key={p.id} className="group relative">
                     <Link to={`/${p.slug || p.id}`} className="block relative overflow-hidden bg-stone-100 aspect-[2/3]" aria-label={p.name}>
@@ -318,13 +319,13 @@ export default function Cart() {
                     <div className="mt-2.5">
                       <Link to={`/${p.slug || p.id}`} className="block text-sm font-light text-black/85 line-clamp-1 hover:underline">{p.name}</Link>
                       <div className="flex items-baseline gap-2 mt-1">
-                        {hasDiscount ? (
+                        {pv.hasDiscount ? (
                           <>
-                            <span className="text-sm text-black/40 line-through tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
-                            <span className="text-sm font-medium tabular-nums">{p.sale_price.toFixed(2)} TL</span>
+                            <span className="text-sm text-black/40 line-through tabular-nums">{pv.list.toFixed(2)} TL</span>
+                            <span className="text-sm font-medium text-red-600 tabular-nums">{pv.display.toFixed(2)} TL</span>
                           </>
                         ) : (
-                          <span className="text-sm font-light tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                          <span className="text-sm font-light tabular-nums">{pv.display.toFixed(2)} TL</span>
                         )}
                       </div>
                     </div>
@@ -350,8 +351,8 @@ export default function Cart() {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
               {deals.map((p) => {
                 const img = (p.images && p.images[0]) || p.image || "";
-                const hasDiscount = p.sale_price && p.sale_price > 0 && p.sale_price < p.price;
-                const off = hasDiscount ? Math.round(((p.price - p.sale_price) / p.price) * 100) : 0;
+                const pv = priceView(p);
+                const off = pv.discountPct;
                 return (
                   <Link
                     key={p.id}
@@ -374,13 +375,13 @@ export default function Cart() {
                     </div>
                     <h3 className="text-[11px] sm:text-xs text-black/85 leading-tight line-clamp-1 group-hover:underline">{p.name}</h3>
                     <div className="flex items-baseline gap-2 mt-0.5">
-                      {hasDiscount ? (
+                      {pv.hasDiscount ? (
                         <>
-                          <span className="text-xs font-medium text-red-700 tabular-nums">{p.sale_price.toFixed(2)} TL</span>
-                          <span className="text-[10px] text-black/40 line-through tabular-nums">{p.price.toFixed(2)} TL</span>
+                          <span className="text-xs font-medium text-red-700 tabular-nums">{pv.display.toFixed(2)} TL</span>
+                          <span className="text-[10px] text-black/40 line-through tabular-nums">{pv.list.toFixed(2)} TL</span>
                         </>
                       ) : (
-                        <span className="text-xs text-black/85 tabular-nums">{(p.price || 0).toFixed(2)} TL</span>
+                        <span className="text-xs text-black/85 tabular-nums">{pv.display.toFixed(2)} TL</span>
                       )}
                     </div>
                   </Link>

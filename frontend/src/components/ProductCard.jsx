@@ -6,6 +6,7 @@ import { useFavorites } from "../context/FavoritesContext";
 import { optimizeImg } from "../lib/img";
 import { resolveColor, needsBorder, MULTI_GRADIENT } from "../lib/colorMap";
 import { sortLikeSize } from "../utils/sizeSort";
+import { priceView } from "../lib/price";
 import { trackSelectItem } from "../lib/dataLayer";
 import { toast } from "sonner";
 
@@ -25,14 +26,10 @@ export default function ProductCard({ product, listId = "", listName = "", index
     : allImages;
 
   const hasMultipleImages = images.length > 1;
-  // İndirim iki kaynaktan gelir: (1) ürünün kendi sale_price'ı, (2) aktif otomatik
-  // kampanya (backend campaign_discount_percent işler — örn. En Yeniler %10).
-  // Kampanya, sale_price varsa onun üzerine uygulanır (sepet motoruyla aynı sıra).
-  const salePrice = product.sale_price && product.sale_price < product.price ? product.sale_price : null;
-  const campPct = Number(product.campaign_discount_percent || 0);
-  const preCampaign = salePrice ?? product.price;
-  const displayPrice = campPct > 0 ? preCampaign * (1 - campPct / 100) : preCampaign;
-  const hasDiscount = Boolean(salePrice) || campPct > 0;
+  // İndirim görünümü TEK KAYNAK'tan (lib/price) — vitrin/arama/menü/kombin ile birebir tutarlı.
+  const pv = priceView(product);
+  const displayPrice = pv.display;
+  const hasDiscount = pv.hasDiscount;
 
   // Renk kardeşleri (aynı modelin diğer renkleri) — backend `color_siblings` döndürür.
   const siblings = Array.isArray(product.color_siblings) ? product.color_siblings : [];

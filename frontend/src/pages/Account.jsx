@@ -635,10 +635,30 @@ function OrderCard({ order, expanded, onToggle, onChanged }) {
             )}
           </div>
 
-          {/* Total */}
-          <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
-            <span className="text-xs uppercase tracking-[0.2em] text-gray-500">Toplam</span>
-            <span className="text-lg font-medium">{(order.total ?? 0).toFixed(2)} ₺</span>
+          {/* Özet — ara toplam, indirimler (ayrı ayrı), kargo, toplam */}
+          <div className="pt-4 border-t border-gray-200 space-y-1.5 text-sm">
+            {(order.subtotal != null) && (
+              <div className="flex justify-between text-gray-600"><span>Ara Toplam</span><span>{Number(order.subtotal || 0).toFixed(2)} ₺</span></div>
+            )}
+            {Array.isArray(order.discount_breakdown) && order.discount_breakdown.length > 0 ? (
+              order.discount_breakdown.map((d, i) => (
+                <div key={i} className="flex justify-between text-emerald-700">
+                  <span>{d.label}{d.code ? ` · ${d.code}` : ""}</span>
+                  <span>-{Number(d.amount || 0).toFixed(2)} ₺</span>
+                </div>
+              ))
+            ) : (
+              (order.discount || 0) > 0 && (
+                <div className="flex justify-between text-emerald-700"><span>İndirim{order.coupon_code ? ` · ${order.coupon_code}` : ""}</span><span>-{Number(order.discount).toFixed(2)} ₺</span></div>
+              )
+            )}
+            {(order.shipping_cost != null) && (
+              <div className="flex justify-between text-gray-600"><span>Kargo</span><span>{Number(order.shipping_cost || 0) === 0 ? "Ücretsiz" : `${Number(order.shipping_cost).toFixed(2)} ₺`}</span></div>
+            )}
+            <div className="pt-2 mt-1 border-t border-gray-200 flex items-center justify-between">
+              <span className="text-xs uppercase tracking-[0.2em] text-gray-500">Toplam</span>
+              <span className="text-lg font-medium">{(order.total ?? 0).toFixed(2)} ₺</span>
+            </div>
           </div>
         </div>
       )}

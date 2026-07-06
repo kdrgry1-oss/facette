@@ -1271,6 +1271,29 @@ def _campaign_pct_for_product(p: dict, camps: list):
     return best, label
 
 
+async def _attach_campaign_badges(prods: list) -> list:
+    """Bir ürün listesine SEPET otomatik kampanya rozetini (campaign_discount_percent +
+    campaign_label) ekler — vitrin, arama, kombin, öneri, kasa-önü HER YERDE aynı indirim
+    görünsün diye TEK kaynak. Kapsam (kategori/ürün) doğru eşleşsin diye category_ids gerekir;
+    çağıran uçlar projeksiyona category_ids/category_id eklemeli."""
+    if not prods:
+        return prods
+    try:
+        camps = await _auto_campaigns_for_badges()
+    except Exception:
+        camps = []
+    if not camps:
+        return prods
+    for p in prods:
+        if not isinstance(p, dict):
+            continue
+        pct, label = _campaign_pct_for_product(p, camps)
+        if pct > 0:
+            p["campaign_discount_percent"] = pct
+            p["campaign_label"] = label
+    return prods
+
+
 async def _sort_variants_by_pool(variants: list) -> list:
     """Ürün varyantlarını `variant_options` (type=size) sort_order'ına göre sıralar.
     Havuzda olmayan bedenler (kombinasyonlar/numeric) orijinal sırada en sona eklenir
@@ -2060,10 +2083,11 @@ async def get_combine_products(product_id: str):
     if combine_ids:
         async for p in db.products.find(
             {"id": {"$in": combine_ids}, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "discount_price": 1,
-             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+            {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
+             "images": 1, "image": 1, "stock": 1, "category_id": 1, "category_ids": 1}
         ):
             items.append(p)
+        await _attach_campaign_badges(items)
     return {"items": items, "source": "combine"}
 
 
@@ -2262,7 +2286,7 @@ async def get_cart_suggestions(payload: dict):
             async for p in db.products.find(
                 {"id": {"$in": combine_ids[:limit]}, "is_active": {"$ne": False}},
                 {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
-                 "images": 1, "image": 1, "stock": 1, "category_id": 1}
+                 "images": 1, "image": 1, "stock": 1, "category_id": 1, "category_ids": 1}
             ):
                 suggestions.append({**p, "_source": "combine"})
 
@@ -2282,7 +2306,7 @@ async def get_cart_suggestions(payload: dict):
         async for p in db.products.find(
             sale_query,
             {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
-             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+             "images": 1, "image": 1, "stock": 1, "category_id": 1, "category_ids": 1}
         ).limit(needed):
             suggestions.append({**p, "_source": "sale"})
             seen.add(p["id"])
@@ -2293,10 +2317,11 @@ async def get_cart_suggestions(payload: dict):
         async for p in db.products.find(
             {"is_active": {"$ne": False}, "id": {"$nin": list(seen)}},
             {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
-             "images": 1, "image": 1, "stock": 1, "category_id": 1}
+             "images": 1, "image": 1, "stock": 1, "category_id": 1, "category_ids": 1}
         ).sort("created_at", -1).limit(needed):
             suggestions.append({**p, "_source": "new"})
 
+    await _attach_campaign_badges(suggestions)
     return {"items": suggestions[:limit], "total": len(suggestions[:limit])}
 
 
@@ -2325,7 +2350,7 @@ async def get_checkout_deals(payload: dict):
     async for p in db.products.find(
         sale_query,
         {"_id": 0, "id": 1, "name": 1, "slug": 1, "price": 1, "sale_price": 1,
-         "images": 1, "image": 1, "stock": 1, "category_id": 1}
+         "images": 1, "image": 1, "stock": 1, "category_id": 1, "category_ids": 1}
     ).limit(limit * 2):
         sp = p.get("sale_price") or 0
         if sp > 0 and sp < (p.get("price") or 0):
@@ -2333,6 +2358,7 @@ async def get_checkout_deals(payload: dict):
         if len(deals) >= limit:
             break
 
+    await _attach_campaign_badges(deals)
     return {"items": deals[:limit], "total": len(deals[:limit])}
 
 

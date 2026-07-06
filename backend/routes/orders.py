@@ -857,6 +857,31 @@ async def create_order(
     order["gift_wrap_price"] = round(_gift, 2)
     order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
 
+    # 🧾 İNDİRİM DÖKÜMÜ — müşteri VE admin siparişte her indirimi AYRI AYRI görsün.
+    # Her kampanya/kupon ayrı satır (hoşgeldin, otomatik %10, kod…), havale ayrı satır.
+    _breakdown = []
+    for _ap in (order.get("applied_promotions") or []):
+        _amt = round(float(_ap.get("discount", 0) or 0), 2)
+        if _amt <= 0:
+            continue
+        _code = _ap.get("code") or ""
+        _breakdown.append({
+            "type": "coupon" if _code else "campaign",
+            "label": _ap.get("title") or _code or "Kampanya indirimi",
+            "code": _code,
+            "amount": _amt,
+        })
+    if _pm_disc > 0:
+        _pmpct = order.get("bank_transfer_discount_pct") or 0
+        _breakdown.append({
+            "type": "payment",
+            "label": f"Havale/EFT indirimi" + (f" (%{int(_pmpct)})" if _pmpct else ""),
+            "code": "",
+            "amount": round(_pm_disc, 2),
+        })
+    order["discount_breakdown"] = _breakdown
+    order["discount_total"] = round(_server_discount + _pm_disc, 2)
+
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
 
