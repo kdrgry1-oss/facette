@@ -3069,6 +3069,60 @@ async def get_trendyol_cargo_label(cargo_tracking_number: str, current_user: dic
     except Exception as e:
         logger.error(f"Error fetching Trendyol cargo label: {str(e)}")
         raise HTTPException(status_code=500, detail="Kargo etiketi alınırken hata oluştu.")
+
+
+def _claim_activity_key(c: dict) -> str:
+    """İade satırının EN GÜNCEL hareket tarihi (sıralama anahtarı).
+    Talep tarihi + onay/ret + son değişiklik alanlarının en yenisini döndürür ki
+    site/Trendyol/HB fark etmeksizin liste 'en yeni hareket en üstte' sıralanabilsin.
+    ISO string karşılaştırması (hepsi ISO olduğundan max güvenli)."""
+    cands = [
+        c.get("created_date"), c.get("updated_at"), c.get("updated_date"),
+        c.get("return_approved_at"), c.get("return_rejected_at"),
+        c.get("last_modified_date"), c.get("lastModifiedDate"),
+    ]
+    vals = [str(x) for x in cands if x]
+    return max(vals) if vals else ""
+
+
+def _claim_dup_signature(c: dict):
+    """AYNI iadeyi temsil eden çift kayıtları yakalamak için içerik imzası.
+    Sipariş no + tip + kalem (barkod, adet) kümesi + iade tutarı aynıysa bu kayıtlar
+    fiilen aynı iadedir (tekrar senkron/çift yazım). Farklı kalem/tutar → farklı iade
+    (müşteri gerçekten birden çok kez iade etmiş) → ayrı kalır. order_number yoksa
+    imza None (tekilleştirme uygulanmaz)."""
+    onum = str(c.get("order_number") or "").strip()
+    if not onum:
+        return None
+    plt = str(c.get("platform") or "").lower()
+    ctype = str(c.get("claim_type") or "RETURN")
+    items = c.get("items") or []
+    sig_items = tuple(sorted(
+        (str(i.get("barcode") or i.get("merchantSku") or i.get("productName") or i.get("product_name") or ""),
+         int(i.get("quantity") or 1))
+        for i in items
+    ))
+    refund = round(float(c.get("refund_amount") or 0), 2)
+    return (plt, onum, ctype, sig_items, refund)
+
+
+def _dedup_claims_by_content(claims: list) -> list:
+    """claim_id tekilleştirmesinden SONRA, içerik imzası aynı olan çift kayıtları
+    ayıklar. Giriş created_date'e göre yeniden→eskiye sıralı olduğundan ilk (en yeni)
+    kayıt tutulur. Böylece bir sipariş no yanlışlıkla 2-3 kez görünmez; gerçekten
+    farklı iadeler (farklı kalem/tutar) ayrı kalır."""
+    seen_sig = set()
+    out = []
+    for c in claims:
+        sig = _claim_dup_signature(c)
+        if sig is not None:
+            if sig in seen_sig:
+                continue
+            seen_sig.add(sig)
+        out.append(c)
+    return out
+
+
 async def _order_derived_trendyol_returns(search: str = "", claim_type: str = "",
                                           exclude_order_numbers=None):
     """İade durumundaki Trendyol siparişlerinden — senkron claim'i OLMAYANLARI —
@@ -3593,8 +3647,12 @@ async def get_trendyol_claims(
     # İptal (Cancelled iade statüsü) bu iade ekranından TAMAMEN dışlanır; iptaller
     # ayrı bir alandan yönetilir. Böylece "Tüm İadeler" sekmesi ve "Toplam İade"
     # kartı aynı evreni (iptal-hariç tekil iade) sayar.
+    # Aynı iadenin çift kaydını (tekrar senkron / farklı claim_id ile aynı içerik)
+    # ayıkla — bir sipariş no yanlışlıkla 2-3 kez görünmesin. Farklı kalem/tutar = ayrı iade.
+    platform_scoped = _dedup_claims_by_content(platform_scoped)
     iade_scoped = [c for c in platform_scoped if _claim_bucket(c) != "iptal"]
-    iade_scoped.sort(key=lambda c: (c.get("created_date") or ""), reverse=True)
+    # En yeni HAREKET en üstte (site/Trendyol/HB fark etmez) — talep/onay/ret/değişiklik en yenisi.
+    iade_scoped.sort(key=_claim_activity_key, reverse=True)
 
     # (c) status sekmesi filtresi (bellekte) — _claim_bucket ile
     if want_tab == "acik_iade":
@@ -3699,8 +3757,9 @@ async def export_trendyol_claims(
         deduped = [c for c in deduped if str(c.get("platform") or "").lower() == "hepsiburada"]
     elif _plt in ("trendyol", ""):
         deduped = [c for c in deduped if str(c.get("platform") or "").lower() != "hepsiburada"]
+    deduped = _dedup_claims_by_content(deduped)
     iade_scoped = [c for c in deduped if _claim_bucket(c) != "iptal"]
-    iade_scoped.sort(key=lambda c: (c.get("created_date") or ""), reverse=True)
+    iade_scoped.sort(key=_claim_activity_key, reverse=True)
     if want_tab == "acik_iade":
         rows = [c for c in iade_scoped if _claim_bucket(c) in ("talep_olusturulan", "kargoya_verilen")]
     elif want_tab is not None:

@@ -66,14 +66,11 @@ async def list_rooftr_return_orders(
     # "Web Sitesi" iadeleri = pazaryeri (Trendyol/Hepsiburada) DISI tum siparisler.
     # Eski hali yalnizca platform/source=ticimax idi -> yeni site siparisleri (platform=facette)
     # iade/iptal edilince hicbir sekmede gorunmuyordu. Pazaryeri disi her kaynak (facette + ticimax + bos) dahil.
-    # Web Sitesi iadeleri = pazaryeri (Trendyol/HB) DIŞI siparişler VEYA admin'in ELLE iade
-    # durumuna çektiği HER sipariş (manual_return=true). Böylece bir Trendyol siparişini elle
-    # 'İade Talebi'ne çekince İadeler ekranında görünür — 'manuel öncelik' kuralı.
+    # Web Sitesi iadeleri = YALNIZCA pazaryeri (Trendyol/HB) DIŞI siparişler.
+    # Pazaryeri siparişleri (elle iade durumuna çekilse bile) BURAYA DÜŞMEZ; kendi
+    # pazaryeri sekmesinde (Trendyol/Hepsiburada) listelenir — 'ait olduğu panel' kuralı.
     base_filter = {
-        "$or": [
-            {"platform": {"$nin": ["trendyol", "hepsiburada"]}},
-            {"manual_return": True},
-        ],
+        "platform": {"$nin": ["trendyol", "hepsiburada"]},
     }
 
     # Durum filtresi: tek durum verilmişse onu, yoksa tüm iade grubunu kullan
@@ -233,9 +230,8 @@ async def list_rooftr_return_orders(
 
     # İstatistik: tüm iade grubunda durum + ödeme dağılımı (mevcut filtreden bağımsız,
     # pazaryeri DISI tum site siparisleri) — sekmedeki rozetler için
-    stat_filter = {"status": {"$in": RETURN_STATUSES},
-                   "$or": [{"platform": {"$nin": ["trendyol", "hepsiburada"]}},
-                           {"manual_return": True}]}
+    stat_filter = {"platform": {"$nin": ["trendyol", "hepsiburada"]},
+                   "status": {"$in": RETURN_STATUSES}}
     status_counts = {}
     payment_counts = {}
     try:
