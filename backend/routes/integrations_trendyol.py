@@ -3622,9 +3622,14 @@ async def get_trendyol_claims(
         seen.add(cid)
         deduped.append(c)
 
-    # Sipariş-durumu köprüsü: Trendyol'da claim'i OLMAYAN ama elle iade durumuna
+    # Sipariş-durumu köprüsü: Trendyol'da GÖRÜNÜR claim'i OLMAYAN ama elle iade durumuna
     # alınmış Trendyol siparişlerini de ekle (Web Sitesi/Rooftr deseninin aynası).
-    _seen_orders = {c.get("order_number") for c in deduped if c.get("order_number")}
+    # DİKKAT: bastırma listesi yalnızca İADE ekranında GÖRÜNEN (iptal-DIŞI) claim'leri sayar.
+    # Aksi halde: siparişin tek claim'i İPTAL ise -> claim iptal sekmesine gider (burada gizli)
+    # AMA order_number _seen_orders'a girip manuel satırı da bastırır -> sipariş HİÇBİR YERDE
+    # görünmez ("kayıp"). Elle iade talebine çekilen böyle bir sipariş artık yüzeye çıkar.
+    _seen_orders = {c.get("order_number") for c in deduped
+                    if c.get("order_number") and _claim_bucket(c) != "iptal"}
     _manual_rows = await _order_derived_trendyol_returns(
         search=search, claim_type=claim_type, exclude_order_numbers=_seen_orders)
     deduped = deduped + _manual_rows
@@ -3748,7 +3753,9 @@ async def export_trendyol_claims(
         if cid in seen:
             continue
         seen.add(cid); deduped.append(c)
-    _seen_orders = {c.get("order_number") for c in deduped if c.get("order_number")}
+    # Bastırma listesi yalnızca iptal-DIŞI (İade ekranında görünen) claim'leri sayar (bkz. liste ucu).
+    _seen_orders = {c.get("order_number") for c in deduped
+                    if c.get("order_number") and _claim_bucket(c) != "iptal"}
     _manual_rows = await _order_derived_trendyol_returns(search=search, exclude_order_numbers=_seen_orders)
     deduped = deduped + _manual_rows
     # Platform süzmesi (liste ucuyla aynı kural): hepsiburada -> yalnız HB; trendyol/boş -> HB olmayanlar.
@@ -3975,6 +3982,42 @@ async def unlock_trendyol_claim(claim_id: str, current_user: dict = Depends(requ
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="İade (claim) bulunamadı")
     return {"success": True, "claim_id": claim_id, "manual_locked": False}
+@router.post("/trendyol/claims/{claim_id}/set-amount")
+async def set_trendyol_claim_amount(claim_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+    """İade tutarını MANUEL düzeltir (sistemdeki tutar Trendyol'un gerçek tutarıyla örtüşmüyorsa).
+
+    refund_amount hedefe çekilir; kalem net/brüt değerleri oransal ÖLÇEKLENİR (scale_items=false
+    ile kapatılabilir) ki gider pusulası kalemleri de yeni toplamla birebir örtüşsün.
+    Mevcut pusula varsa 'gider pusulası oluştur'a tekrar basılınca yeni tutarla güncellenir
+    (numara korunur — idempotent)."""
+    try:
+        amt = round(float(payload.get("refund_amount")), 2)
+    except Exception:
+        amt = 0.0
+    if amt <= 0:
+        raise HTTPException(status_code=400, detail="Geçerli bir tutar girin (refund_amount)")
+    claim = await db.trendyol_claims.find_one(
+        {"claim_id": claim_id}, {"_id": 0, "items": 1, "refund_amount": 1})
+    if not claim:
+        raise HTTPException(status_code=404, detail="İade (claim) bulunamadı")
+    now = datetime.now(timezone.utc).isoformat()
+    items = claim.get("items") or []
+    _old = round(float(claim.get("refund_amount") or 0), 2)
+    _set = {"refund_amount": amt, "amount_overridden": True,
+            "amount_overridden_by": current_user.get("email", ""), "amount_overridden_at": now,
+            "updated_at": now}
+    _cur = round(sum(float(i.get("price") or 0) * int(i.get("quantity") or 1) for i in items), 2)
+    if items and _cur > 0 and payload.get("scale_items", True):
+        ratio = amt / _cur
+        for it in items:
+            _old_unit = float(it.get("unit_price") or it.get("price") or 0)
+            it["price"] = round(float(it.get("price") or 0) * ratio, 2)
+            it["unit_price"] = round(_old_unit * ratio, 2)
+            it["discount_amount"] = round(max(0.0, float(it["unit_price"]) - float(it["price"])), 2)
+        _set["items"] = items
+    await db.trendyol_claims.update_one({"claim_id": claim_id}, {"$set": _set})
+    return {"success": True, "claim_id": claim_id, "refund_amount": amt, "old_refund_amount": _old,
+            "scaled_items": bool(items and _cur > 0 and payload.get("scale_items", True))}
 @router.get("/trendyol/claims/shipment-probe")
 async def trendyol_shipment_probe(order_number: str = "", current_user: dict = Depends(require_admin)):
     """GEÇİCİ ARAŞTIRMA: Trendyol sipariş paketi servisini (getShipmentPackages) bir iadenin
