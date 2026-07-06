@@ -1742,13 +1742,23 @@ async def update_product(
     
     # Auto-generate barcodes for variants if missing
     variants = product_data.get("variants", [])
-    used_barcodes_set = await build_used_barcode_set()
-    for v in variants:
-        if not v.get("barcode") or v.get("barcode") == "":
-            barcode = await generate_barcode_from_range(used_barcodes_set)
-            if barcode:
-                v["barcode"] = barcode
-    
+    if variants:
+        used_barcodes_set = await build_used_barcode_set()
+        # Mevcut ürüne SONRADAN eklenen varyantlara da id + urun_id (beden ID) ata.
+        # Önceden yalnızca create_product atıyordu; update_product yalnız barkod üretip
+        # id/urun_id'yi BOŞ bırakıyordu → yeni varyantlar id'siz kalıyor, varyant eşleşmesi
+        # (sepet/HB/Trendyol) ve stok işlemleri bozuluyordu.
+        used_uid_set = await build_used_urun_id_set()
+        for v in variants:
+            if not v.get("barcode") or v.get("barcode") == "":
+                barcode = await generate_barcode_from_range(used_barcodes_set)
+                if barcode:
+                    v["barcode"] = barcode
+            if not str(v.get("id") or "").strip():
+                v["id"] = generate_id()
+            if not str(v.get("urun_id") or "").strip():
+                v["urun_id"] = next_urun_id(used_uid_set)
+
     if ("categories" in product_data) or ("category_id" in product_data):
         _sel = product_data.get("categories")
         if _sel is None and product_data.get("category_id"):

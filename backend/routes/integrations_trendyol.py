@@ -4548,6 +4548,13 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
         items = []
         variants = product.get("variants", [])
         
+        def _vm(attr_id, value):
+            """value_mappings'ten Trendyol value-id'sini al. Hem YENİ pipe (`id|value`) hem
+            ESKİ kolon (`id:value`) anahtar formatını dener → veri hangi formatta olursa olsun
+            eşleşir (O7 sonrası eski verilerde bozulma olmaması için)."""
+            return (val_mappings.get(f"{attr_id}|{value}")
+                    or val_mappings.get(f"{attr_id}:{value}"))
+
         # Common attributes for all variants
         common_attrs = []
         for am in attr_mappings:
@@ -4558,10 +4565,9 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
             # Try default if not found
             if not val:
                 val = default_mappings.get(str(ty_attr_id))
-                
+
             if val:
-                mapping_key = f"{ty_attr_id}|{val}"  # O7: pipe (canonical)
-                ty_val_id = val_mappings.get(mapping_key)
+                ty_val_id = _vm(ty_attr_id, val)
                 if ty_val_id:
                     common_attrs.append({"attributeId": ty_attr_id, "attributeValueId": int(ty_val_id)})
                 else:
@@ -4580,8 +4586,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                     if local_name.lower() == "beden":
                         sz = v.get("size")
                         if sz:
-                            m_key = f"{ty_attr_id}|{sz}"  # O7: pipe (canonical)
-                            v_id = val_mappings.get(m_key)
+                            v_id = _vm(ty_attr_id, sz)  # pipe + kolon dener
                             if v_id:
                                 v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
                             else:
@@ -4590,8 +4595,7 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                     elif local_name.lower() == "renk":
                         clr = v.get("color")
                         if clr:
-                            m_key = f"{ty_attr_id}|{clr}"  # O7: pipe (canonical)
-                            v_id = val_mappings.get(m_key)
+                            v_id = _vm(ty_attr_id, clr)  # pipe + kolon dener
                             if v_id:
                                 v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
                             else:
