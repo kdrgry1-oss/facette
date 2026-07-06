@@ -3604,8 +3604,19 @@ async def bulk_mark_refunded_silent(payload: dict, current_user: dict = Depends(
     bu siparişler için müşteriye SMS/e-posta GİTMEZ. (Tek seferlik toplu işlem.)
     """
     order_ids = payload.get("order_ids") or []
+    # all_approved=true → WEB SİTESİ tarafındaki ONAYLANAN (return_approved) tüm iadeleri seç.
+    # Pazaryeri (Trendyol/HB) siparişleri hariç tutulur; yalnız site siparişleri.
+    if payload.get("all_approved"):
+        _MP = ["trendyol", "hepsiburada", "temu", "n11", "ciceksepeti", "amazon", "pazarama", "trendyol-ihracat"]
+        _q = {"status": "return_approved",
+              "$and": [
+                  {"$or": [{"platform": "facette"}, {"platform": {"$in": [None, ""]}}, {"platform": {"$exists": False}}]},
+                  {"$or": [{"marketplace": {"$in": [None, "", "facette"]}}, {"marketplace": {"$exists": False}}]},
+                  {"$or": [{"platform": {"$nin": _MP}}, {"platform": {"$exists": False}}]},
+              ]}
+        order_ids = await db.orders.distinct("id", _q)
     if not isinstance(order_ids, list) or not order_ids:
-        raise HTTPException(status_code=400, detail="order_ids (liste) gerekli")
+        raise HTTPException(status_code=400, detail="order_ids (liste) gerekli ya da all_approved ile onaylanan iade yok")
     now = datetime.now(timezone.utc).isoformat()
     done, missing = [], []
     for oid in order_ids:

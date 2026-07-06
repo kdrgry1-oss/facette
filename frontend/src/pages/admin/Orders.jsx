@@ -1227,14 +1227,15 @@ export default function AdminOrders({ unpaidView = false }) {
                       </div>
                     </td>
                     <td>
-                      <div className="flex flex-col gap-0.5 text-sm text-gray-900" data-testid={`amount-${order.id}`}>
+                      {/* Gider pusulası düzeni: Brüt(liste, üstü çizili gri) · İskonto(bordo) · Net(kalın) */}
+                      <div className="flex flex-col gap-0.5 tabular-nums" data-testid={`amount-${order.id}`}>
                         {(order.subtotal != null && ((order.discount_amount || order.discount || 0) > 0)) && (
                           <>
-                            <span>Liste: {order.subtotal?.toFixed(2)} TL</span>
-                            <span>İskonto: -{(order.discount_amount || order.discount || 0).toFixed(2)} TL</span>
+                            <span className="text-xs text-gray-400 line-through">{order.subtotal?.toFixed(2)} TL</span>
+                            <span className="text-xs font-medium text-[#8b1e3f]">İskonto -{(order.discount_amount || order.discount || 0).toFixed(2)} TL</span>
                           </>
                         )}
-                        <span>Fiyat: {order.total?.toFixed(2)} TL</span>
+                        <span className="text-sm font-semibold text-gray-900">{order.total?.toFixed(2)} TL</span>
                         {isUnpaidHavale && (
                           <span className="text-xs text-gray-500">Ödeme bekliyor</span>
                         )}
