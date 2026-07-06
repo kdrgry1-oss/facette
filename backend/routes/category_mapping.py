@@ -2282,6 +2282,24 @@ async def trendyol_attribute_audit(
         {"_id": 0, "category_id": 1, "marketplace_category_id": 1, "value_mappings": 1},
     ).to_list(None)
 
+    # Renk/Beden VARYANT ekseninde tutulur (product.attributes'ta değil); Trendyol'a push'ta
+    # varyanttan gider — 'zorunlu-boş' saymayalım (yanlış alarm olur).
+    _VARIANT_AXIS = {_hb_sysnorm("Beden"), _hb_sysnorm("Renk")}
+
+    def _cat_product_filter(cid):
+        # category_id bazı ürünlerde int, bazılarında string; ayrıca categories/category_ids
+        # dizilerinde de olabilir → tip-duyarlı ve çok-alanlı eşleştir.
+        cids = [cid]
+        if str(cid).isdigit():
+            try:
+                cids.append(int(cid))
+            except Exception:
+                pass
+        return {"is_deleted": {"$ne": True},
+                "$or": [{"category_id": {"$in": cids}},
+                        {"category_ids": {"$in": cids}},
+                        {"categories": {"$in": cids}}]}
+
     async def _ty_attrs(mp_cat_id):
         if not str(mp_cat_id).isdigit():
             return {}
@@ -2294,7 +2312,7 @@ async def trendyol_attribute_audit(
         for mp in mappings:
             lc, tyc = mp.get("category_id"), mp.get("marketplace_category_id")
             amap = await _ty_attrs(tyc)
-            pcount = await db.products.count_documents({"category_id": lc, "is_deleted": {"$ne": True}})
+            pcount = await db.products.count_documents(_cat_product_filter(lc))
             catdoc = await db.categories.find_one({"id": lc}, {"_id": 0, "name": 1})
             out.append({
                 "local_category_id": lc, "local_name": (catdoc or {}).get("name") or lc,
@@ -2315,7 +2333,7 @@ async def trendyol_attribute_audit(
                 "hint": "Trendyol öznitelikleri cache'de yok — önce kategori eşleştirme ekranında 'yenile' ile çekin."}
 
     prods = await db.products.find(
-        {"category_id": local_category_id, "is_deleted": {"$ne": True}},
+        _cat_product_filter(local_category_id),
         {"_id": 0, "id": 1, "name": 1, "attributes": 1},
     ).limit(max(1, min(product_limit, 5000))).to_list(None)
 
@@ -2334,7 +2352,7 @@ async def trendyol_attribute_audit(
                     if vv and _hb_sysnorm(str(vv)) not in info["value_norms"]:
                         invalid.append({"attr": k, "value": vv})
         for kn, info in amap.items():
-            if info["required"] and kn not in pa_norm_keys:
+            if info["required"] and kn not in _VARIANT_AXIS and kn not in pa_norm_keys:
                 missing_required.append(info["name"])
         if invalid or missing_required:
             issues.append({"id": p.get("id"), "name": p.get("name"),
