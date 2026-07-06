@@ -130,6 +130,7 @@ export default function AdminOrders({ unpaidView = false }) {
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [noteTargetOrder, setNoteTargetOrder] = useState(null);
   const [noteText, setNoteText] = useState("");
+  const [giftModalOrder, setGiftModalOrder] = useState(null); // 🎁 ayrı modal — notlarla karışmasın
   const [savingNote, setSavingNote] = useState(false);
 
   // Manuel (kısmi) iade pop-up — sipariş panelinde iade durumu seçilince açılır
@@ -402,25 +403,6 @@ export default function AdminOrders({ unpaidView = false }) {
     }
   };
 
-  const handleRefreshCargo = async (orderId) => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post(
-        `${API}/orders/${orderId}/cargo-refresh`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.data.success === false) {
-        // MNG'de kayıt yok / takip no henüz atanmadı → hata değil, bilgilendirme
-        toast(res.data.message || "Kargo durumu güncellenemedi", { icon: "ℹ️" });
-      } else {
-        toast.success(res.data.message || "Kargo durumu güncellendi");
-      }
-      fetchOrders();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Kargo durumu yenilenemedi");
-    }
-  };
 
   const handlePrintLabel = (orderId) => {
     const token = localStorage.getItem('token');
@@ -1161,10 +1143,13 @@ export default function AdminOrders({ unpaidView = false }) {
                 const isUnpaidHavale = isHavale && !paymentConfirmed && order.status !== 'cancelled';
                 const isUnpaidPending = !paymentConfirmed && !isHavale && order.status === 'pending';
                 const isInvoiceIssued = !!order.invoice_issued;
+                // row-unpaid-* marker sınıfları: hover'da .admin-table tr:hover td kuralı
+                // kırmızı/sarı vurguyu griyle eziyordu; index.css'te bu marker'lar hover'da
+                // rengi KORUR (karışıklık olmasın diye kırmızı şerit hover'da kaybolmaz).
                 const rowClass = isUnpaidHavale
-                  ? 'bg-red-50 border-l-4 border-red-400'
+                  ? 'bg-red-50 border-l-4 border-red-400 row-unpaid-havale'
                   : isUnpaidPending
-                  ? 'bg-yellow-50'
+                  ? 'bg-yellow-50 row-unpaid-pending'
                   : '';
                 return (
                   <tr key={order.id} className={rowClass} data-testid={`order-row-${order.id}`}>
@@ -1379,17 +1364,8 @@ export default function AdminOrders({ unpaidView = false }) {
                           );
                         })()}
                         {/* 5. (kaldırıldı) Kargo Etiketi → sipariş detayından / üst bardan yapılır */}
-                        {/* 5b. Kargo Durum Yenile (şube işlemi sonrası) */}
-                        {order.cargo?.tracking_number && order.cargo?.provider === 'MNG' && (
-                          <button
-                            onClick={() => handleRefreshCargo(order.id)}
-                            title="Kargo durumunu yenile"
-                            data-testid="refresh-cargo-btn"
-                            className="tci-btn tci-btn-blue"
-                          >
-                            <RefreshCw size={15} />
-                          </button>
-                        )}
+                        {/* 5b. (kaldırıldı) Kargo Durum Yenile — kargo verisi artık otomatik
+                            çekildiği için manuel yenile butonuna gerek kalmadı. */}
                         {/* 6. (kaldırıldı) SMS → sipariş detayından gönderilir */}
                         {/* Not butonu — admin notu + müşteri sipariş notu göstergesi (en sağda) */}
                         {(() => {
@@ -1415,20 +1391,21 @@ export default function AdminOrders({ unpaidView = false }) {
                             </button>
                           );
                         })()}
-                        {/* Hediye Notu butonu — 🎁; müşteri hediye notu/paketi girince belirteç (en sağda) */}
+                        {/* Hediye Paketi butonu — 🎁; ücretli paket alındıysa RENKLİ, hediye notu varsa belirteç */}
                         {(() => {
                           const giftNote = (order.gift_note || "").trim();
-                          const hasGift = !!giftNote || !!order.gift_wrap;
+                          const giftPaid = Number(order.gift_wrap_price || 0) > 0 || !!order.gift_wrap;
+                          const hasAny = giftPaid || !!giftNote;
                           return (
                             <button
-                              onClick={() => openNoteModal(order)}
-                              title={giftNote ? `Hediye notu: ${giftNote}` : (order.gift_wrap ? "Hediye paketi istendi" : "Hediye notu yok")}
+                              onClick={() => setGiftModalOrder(order)}
+                              title={giftPaid ? (giftNote ? `Hediye paketi (ücretli) · Not: ${giftNote}` : "Hediye paketi alındı (ücretli)") : (giftNote ? `Hediye notu: ${giftNote}` : "Hediye paketi yok")}
                               data-testid={`gift-btn-${order.id}`}
-                              className={`tci-btn ${hasGift ? 'tci-btn-pink-active' : 'tci-btn-gray'}`}
+                              className={`tci-btn ${giftPaid ? 'tci-btn-pink-active' : 'tci-btn-gray'}`}
                             >
-                              <span className={`text-[15px] leading-none ${hasGift ? '' : 'grayscale opacity-50'}`}>🎁</span>
-                              {hasGift && (
-                                <span className="absolute -top-1 -right-1 bg-pink-500 w-2.5 h-2.5 rounded-full border border-white" title="Hediye notu/paketi var" />
+                              <span className={`text-[15px] leading-none ${giftPaid ? '' : 'grayscale opacity-50'}`}>🎁</span>
+                              {giftNote && (
+                                <span className="absolute -top-1 -right-1 bg-pink-600 w-2.5 h-2.5 rounded-full border border-white" title="Hediye notu var" />
                               )}
                             </button>
                           );
@@ -1863,9 +1840,9 @@ export default function AdminOrders({ unpaidView = false }) {
                               <p className="text-gray-400 line-through text-xs">{item.unit_price.toFixed(2)} TL</p>
                             )}
                             {item.discount_amount > 0 && (
-                              <p className="text-orange-500 text-xs">İndirim: -{item.discount_amount.toFixed(2)} TL</p>
+                              <p className="text-[#8b1e3f] text-xs font-medium">İndirim: -{item.discount_amount.toFixed(2)} TL</p>
                             )}
-                            <p className="font-medium">
+                            <p className="font-semibold text-gray-900">
                               {((item.price || item.amount) * (item.quantity === 1 ? 1 : (item.price ? item.quantity : 1))).toFixed(2)} TL
                             </p>
                           </>
@@ -1981,34 +1958,33 @@ export default function AdminOrders({ unpaidView = false }) {
             <DialogTitle>Sipariş Notu {noteTargetOrder?.order_number ? `- ${noteTargetOrder.order_number}` : ""}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {/* Müşteri sipariş notu (checkout'ta girilen) — salt okunur */}
-            {noteTargetOrder?.notes && noteTargetOrder.notes.trim() && (
+            {/* MÜŞTERİ NOTU — müşterinin checkout'ta girdiği not (salt okunur).
+                NOT: Hediye paketi notu buraya AKTARILMAZ; o kendi 🎁 alanında gösterilir. */}
+            {noteTargetOrder?.notes && noteTargetOrder.notes.trim() ? (
               <div className="bg-blue-50 border-l-4 border-blue-400 p-3 rounded">
-                <p className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1">Müşteri Sipariş Notu</p>
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1">Müşteri Notu</p>
                 <p className="text-sm text-gray-800 whitespace-pre-wrap">{noteTargetOrder.notes}</p>
               </div>
-            )}
-            {/* Hediye notu / paketi — salt okunur */}
-            {(noteTargetOrder?.gift_note?.trim() || noteTargetOrder?.gift_wrap) && (
-              <div className="bg-pink-50 border-l-4 border-pink-400 p-3 rounded">
-                <p className="text-xs font-bold text-pink-700 uppercase tracking-wider mb-1">🎁 Hediye Notu</p>
-                {noteTargetOrder?.gift_wrap && <p className="text-[11px] text-pink-600 mb-1">Hediye paketi istendi</p>}
-                {noteTargetOrder?.gift_note?.trim() && <p className="text-sm text-gray-800 whitespace-pre-wrap">{noteTargetOrder.gift_note}</p>}
+            ) : (
+              <div className="bg-gray-50 border-l-4 border-gray-200 p-3 rounded">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Müşteri Notu</p>
+                <p className="text-sm text-gray-400">Müşteri not girmemiş.</p>
               </div>
             )}
+            {/* PERSONEL NOTLARI — kim, ne zaman girdiği görünür */}
             {noteTargetOrder?.admin_notes?.length > 0 && (
               <div className="space-y-2 max-h-[240px] overflow-y-auto">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Önceki Notlar</p>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Personel Notları</p>
                 {noteTargetOrder.admin_notes.map(n => (
                   <div key={n.id || n.at} className="bg-yellow-50 border-l-4 border-yellow-400 p-2 rounded text-sm">
                     <p className="text-gray-800">{n.text}</p>
-                    <p className="text-[10px] text-gray-500 mt-1">{n.by} · {new Date(n.at).toLocaleString('tr-TR')}</p>
+                    <p className="text-[10px] text-gray-500 mt-1">{n.by || "Personel"} · {new Date(n.at).toLocaleString('tr-TR')}</p>
                   </div>
                 ))}
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium mb-1">Yeni Not</label>
+              <label className="block text-sm font-medium mb-1">Personel Notu Ekle</label>
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
@@ -2028,6 +2004,38 @@ export default function AdminOrders({ unpaidView = false }) {
                 {savingNote ? "Kaydediliyor..." : "Not Ekle"}
               </button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 🎁 Hediye Paketi modal'ı — notlardan AYRI. Ücretli paket + hediye notu burada. */}
+      <Dialog open={!!giftModalOrder} onOpenChange={(o) => { if (!o) setGiftModalOrder(null); }}>
+        <DialogContent data-testid="order-gift-modal">
+          <DialogHeader>
+            <DialogTitle>🎁 Hediye Paketi {giftModalOrder?.order_number ? `- ${giftModalOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            {Number(giftModalOrder?.gift_wrap_price || 0) > 0 || giftModalOrder?.gift_wrap ? (
+              <div className="bg-pink-50 border-l-4 border-pink-500 p-3 rounded">
+                <p className="text-sm font-semibold text-pink-700">Hediye paketi alındı</p>
+                {Number(giftModalOrder?.gift_wrap_price || 0) > 0 && (
+                  <p className="text-xs text-pink-600 mt-0.5">Ücret: {Number(giftModalOrder.gift_wrap_price).toFixed(2)} TL</p>
+                )}
+              </div>
+            ) : (
+              <div className="bg-gray-50 border-l-4 border-gray-200 p-3 rounded">
+                <p className="text-sm text-gray-500">Bu siparişte hediye paketi yok.</p>
+              </div>
+            )}
+            {giftModalOrder?.gift_note?.trim() && (
+              <div className="border rounded p-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Hediye Notu (müşteri)</p>
+                <p className="text-sm text-gray-800 whitespace-pre-wrap">{giftModalOrder.gift_note}</p>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end pt-3 border-t mt-3">
+            <button onClick={() => setGiftModalOrder(null)} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Kapat</button>
           </div>
         </DialogContent>
       </Dialog>

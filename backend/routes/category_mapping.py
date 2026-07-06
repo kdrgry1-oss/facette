@@ -2003,11 +2003,42 @@ async def get_advanced_attributes(
                               "updated_at": datetime.now(timezone.utc).isoformat()}},
                     upsert=True,
                 )
+                # TEMİZLİK (kullanıcı isteği): Trendyol'da ARTIK OLMAYAN değer eşleştirmelerini sil.
+                # Canlı çekilen attrs'tan her attribute için geçerli value_id kümesini kur; kayıtlı
+                # value_mappings içinde bir Trendyol value_id'sine (rakam) işaret edip o küme dışında
+                # kalanları at. Serbest-metin (custom, rakam olmayan) eşleştirmeler KORUNUR; değer
+                # listesi boş dönen (allowCustom/serbest) attribute'lar da dokunulmaz (yanlış silme yok).
+                _vm = dict(mapping.get("value_mappings", {}) or {})
+                if attrs and _vm:
+                    valid_by_attr = {}
+                    for _a in attrs:
+                        _aid = str(_a.get("id") or (_a.get("attribute") or {}).get("id") or "")
+                        _vals = _a.get("attributeValues") or _a.get("values") or []
+                        if _aid and _vals:
+                            valid_by_attr[_aid] = {str(v.get("id")) for v in _vals if v.get("id") is not None}
+                    _pruned = {}
+                    _removed = 0
+                    for _k, _val in _vm.items():
+                        _sval = str(_val)
+                        _aid = str(_k).split("|", 1)[0]
+                        # rakam value_id + o attribute için geçerli liste VAR + listede YOK → sil
+                        if _sval.isdigit() and _aid in valid_by_attr and _sval not in valid_by_attr[_aid]:
+                            _removed += 1
+                            continue
+                        _pruned[_k] = _val
+                    if _removed:
+                        await db.category_mappings.update_one(
+                            {"category_id": local_category_id, "marketplace": "trendyol"},
+                            {"$set": {"value_mappings": _pruned}},
+                        )
+                        logger.info(f"[trendyol value temizlik] kategori={local_category_id} "
+                                    f"gecersiz {_removed} deger eslestirmesi silindi")
+                        _vm = _pruned
                 return {
                     "attributes": attrs,
                     "attribute_mappings": mapping.get("attribute_mappings", []),
                     "default_mappings": mapping.get("default_mappings", {}),
-                    "value_mappings": mapping.get("value_mappings", {}),
+                    "value_mappings": _vm,
                 }
         except Exception:
             # DB cache'den dene

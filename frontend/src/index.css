@@ -297,6 +297,15 @@ button { font-weight: 400; }
   @apply bg-gray-50;
 }
 
+/* Ödeme bekleyen havale (kırmızı) / pending (sarı) satırlar hover'da vurgusunu KORUR —
+   aksi halde genel gri hover kırmızı şeridi eziyor ve "ödeme bekliyor" ayrımı kayboluyordu. */
+.admin-table tr.row-unpaid-havale:hover td {
+  @apply bg-red-50;
+}
+.admin-table tr.row-unpaid-pending:hover td {
+  @apply bg-yellow-50;
+}
+
 /* Compact variant — daha sıkı satırlar, daha küçük görsel thumbnail hover'lı alanlar.
    Products.jsx ve Orders.jsx tablolarında uygulanır. Hücre içi padding düşer
    ancak hover ve çerçeve davranışı korunur. */

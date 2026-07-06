@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import { RotateCcw, CheckCircle2, AlertTriangle, Search } from "lucide-react";
+import { RETURN_REASONS } from "./ReturnRequest";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const MS_14D = 14 * 24 * 3600 * 1000;
@@ -13,7 +14,8 @@ export default function GuestReturn() {
   const [phone, setPhone] = useState("");
   const [order, setOrder] = useState(null);
   const [selected, setSelected] = useState({});
-  const [reason, setReason] = useState("");
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonDetail, setReasonDetail] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [ret, setRet] = useState(null);
@@ -40,11 +42,15 @@ export default function GuestReturn() {
 
   const submit = async () => {
     const idxs = Object.keys(selected).filter((k) => selected[k]).map(Number);
+    if (!reasonCode) { toast.error("Lütfen bir iade sebebi seçin"); return; }
+    const reason = reasonCode === "Diğer"
+      ? (reasonDetail.trim() ? `Diğer: ${reasonDetail.trim()}` : "Diğer")
+      : reasonCode;
     try {
       setSubmitting(true);
       const res = await axios.post(
         `${API}/orders/by-number/${encodeURIComponent(orderNumber.trim())}/return-request`,
-        { items: idxs, reason, email: email.trim(), phone: phone.trim() }
+        { items: idxs, reason, reason_code: reasonCode, email: email.trim(), phone: phone.trim() }
       );
       if (res.data?.return) {
         setRet(res.data.return);
@@ -184,17 +190,32 @@ export default function GuestReturn() {
               ))}
             </div>
 
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="İade nedeni (opsiyonel)"
-              rows={3}
-              className="w-full border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:border-gray-500 mb-4"
-            />
+            {/* İade sebebi — ZORUNLU */}
+            <label className="block text-xs uppercase tracking-[0.15em] text-gray-500 mb-1">
+              İade Sebebi <span className="text-red-600">*</span>
+            </label>
+            <select
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+              className="w-full border border-gray-200 p-3 text-sm bg-white focus:outline-none focus:border-gray-500 mb-3"
+              data-testid="guest-return-reason-select"
+            >
+              <option value="">— Sebep seçin —</option>
+              {RETURN_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {reasonCode === "Diğer" && (
+              <textarea
+                value={reasonDetail}
+                onChange={(e) => setReasonDetail(e.target.value)}
+                placeholder="Sebebinizi kısaca yazın"
+                rows={2}
+                className="w-full border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:border-gray-500 mb-4"
+              />
+            )}
 
             <button
               onClick={submit}
-              disabled={submitting}
+              disabled={submitting || !reasonCode}
               className="w-full bg-black text-white py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors disabled:opacity-40"
             >
               {submitting ? "Oluşturuluyor…" : "İade Talebi Oluştur"}

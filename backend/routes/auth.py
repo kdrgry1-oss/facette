@@ -45,6 +45,20 @@ async def register(
             first_name = first_name or _b.get("first_name")
             last_name = last_name or _b.get("last_name")
             phone = phone or _b.get("phone")
+    # Boy/kilo — beden önerisi için (opsiyonel). Gövdeden okunur.
+    _body = {}
+    try:
+        _body = await request.json()
+    except Exception:
+        _body = {}
+    def _num_or_none(v, lo, hi):
+        try:
+            n = float(v)
+            return n if lo <= n <= hi else None
+        except Exception:
+            return None
+    height_cm = _num_or_none((_body or {}).get("height_cm"), 100, 230)
+    weight_kg = _num_or_none((_body or {}).get("weight_kg"), 30, 250)
     email = safe_str(email or "", 256).lower().strip()
     password = safe_str(password or "", 200)
     if not is_safe_email(email):
@@ -72,6 +86,8 @@ async def register(
         "first_name": safe_str(first_name, 100) or "",
         "last_name": safe_str(last_name, 100) or "",
         "phone": phone_norm,
+        "height_cm": height_cm,
+        "weight_kg": weight_kg,
         "is_admin": False,
         "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),

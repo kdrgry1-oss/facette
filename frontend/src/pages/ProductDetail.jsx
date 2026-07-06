@@ -9,8 +9,10 @@ import ProductCard from "../components/ProductCard";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
 import { priceView } from "../lib/price";
+import { isRecommendedSize, recommendLetterSize } from "../lib/sizeRecommend";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
+import { useAuth } from "../context/AuthContext";
 import { useShipping } from "../lib/shipping";
 import { trackViewContent, trackAddToCart } from "../utils/pixelEvents";
 import { sortLikeSize } from "../utils/sizeSort";
@@ -89,6 +91,9 @@ export default function ProductDetail() {
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { freeShippingThreshold } = useShipping();
+  const { user } = useAuth();
+  // Üyenin boy/kilosuna göre önerilen beden (harf) — beden butonunda rozet gösterilir.
+  const recLetter = user ? recommendLetterSize(user.height_cm, user.weight_kg) : null;
   const [product, setProduct] = useState(null);
   const [similarProducts, setSimilarProducts] = useState([]);
   const [comboProducts, setComboProducts] = useState([]);
@@ -685,22 +690,29 @@ export default function ProductDetail() {
                 {sizes.map((variant, index) => {
                   const isSelected = selectedSize === variant.size;
                   const isOOS = variant.stock === 0;
+                  const isRec = recLetter && isRecommendedSize(variant.size, user?.height_cm, user?.weight_kg);
                   return (
                     <button
                       key={index}
                       onClick={() => handleSizeSelect(variant)}
                       data-testid={`size-btn-${variant.size}`}
-                      className={`min-w-[44px] h-9 px-3 border text-xs transition-all ${
+                      title={isRec ? "Boy/kilonuza göre sizin için öneriliyor" : undefined}
+                      className={`relative min-w-[44px] h-9 px-3 border text-xs transition-all ${
                         isSelected
                           ? isOOS
                             ? "border-red-500 bg-red-50 text-red-600 line-through"
                             : "border-black bg-black text-white"
                           : isOOS
                             ? "border-gray-200 text-gray-300 line-through bg-gray-50 hover:border-gray-400"
-                            : "border-gray-300 hover:border-black"
+                            : isRec
+                              ? "border-emerald-500 ring-1 ring-emerald-500 hover:border-emerald-600"
+                              : "border-gray-300 hover:border-black"
                       }`}
                     >
                       {variant.size}
+                      {isRec && !isSelected && (
+                        <span className="absolute -top-1.5 -right-1.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-white" />
+                      )}
                     </button>
                   );
                 })}
@@ -712,6 +724,17 @@ export default function ProductDetail() {
                   </button>
                 )}
               </div>
+              {/* Beden önerisi — üye boy/kilo girdiyse ve önerilen beden üründe varsa */}
+              {(() => {
+                const match = recLetter && sizes.find((v) => isRecommendedSize(v.size, user?.height_cm, user?.weight_kg));
+                if (!match) return null;
+                return (
+                  <p className="mt-2 text-xs text-emerald-700 flex items-center gap-1.5" data-testid="size-recommendation">
+                    <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full" />
+                    <span><b>{match.size}</b> bedeni sizin için öneriliyor (boy/kilonuza göre)</span>
+                  </p>
+                );
+              })()}
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}

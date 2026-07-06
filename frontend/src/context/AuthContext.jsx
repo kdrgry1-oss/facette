@@ -68,6 +68,8 @@ export function AuthProvider({ children }) {
       first_name: data.first_name || "",
       last_name: data.last_name || "",
       phone: data.phone || "",
+      height_cm: data.height_cm || null,
+      weight_kg: data.weight_kg || null,
     });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);

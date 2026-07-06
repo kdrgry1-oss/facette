@@ -4467,7 +4467,11 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
         "price": float(it.get("price") or it.get("unit_price") or 0),
         "product_id": it.get("product_id") or it.get("sku") or "",
     } for it in chosen]
+    # İade sebebi ZORUNLU — üye ve misafir tüm site iadelerinde. Panelde görünür.
     reason = (payload.get("reason") or "").strip()[:500]
+    if not reason:
+        raise HTTPException(status_code=400, detail="İade sebebi seçmek zorunludur.")
+    reason_code = (payload.get("reason_code") or "").strip()[:60]
 
     rid = generate_id()
     iade_no = f"IW{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
@@ -4484,7 +4488,7 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
     valid_until = (now + timedelta(days=3)).isoformat()
     rec = {
         "id": rid, "order_id": order["id"], "order_number": order.get("order_number", ""),
-        "user_id": order.get("user_id"), "items": items, "reason": reason,
+        "user_id": order.get("user_id"), "items": items, "reason": reason, "reason_code": reason_code,
         "return_code": return_code, "iade_no": iade_no, "gonderi_no": gonderi_no,
         "contract_no": RETURN_CONTRACT_NO,
         "company_address": _company_return_address(warehouse),
@@ -4501,7 +4505,7 @@ async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> di
         "return_request": {
             "return_id": rid, "return_code": return_code,
             "iade_no": iade_no, "gonderi_no": gonderi_no,
-            "valid_until": valid_until,
+            "valid_until": valid_until, "reason": reason, "reason_code": reason_code,
             "created_at": now_iso, "status": "created", "items_count": len(items),
         },
         "status": "return_requested", "updated_at": now_iso,

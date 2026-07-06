@@ -177,6 +177,32 @@ export default function Login() {
                     className="w-full border px-3 py-2.5 text-sm focus:outline-none focus:border-black"
                   />
                 </div>
+                {/* Boy & kilo — size en uygun bedeni önermek için (opsiyonel) */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs mb-1">Boy (cm)</label>
+                    <input
+                      type="number" min="100" max="230" inputMode="numeric"
+                      value={formData.height_cm || ""}
+                      onChange={(e) => setFormData({ ...formData, height_cm: e.target.value })}
+                      placeholder="örn. 168"
+                      className="w-full border px-3 py-2.5 text-sm focus:outline-none focus:border-black"
+                      data-testid="height-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1">Kilo (kg)</label>
+                    <input
+                      type="number" min="30" max="250" inputMode="numeric"
+                      value={formData.weight_kg || ""}
+                      onChange={(e) => setFormData({ ...formData, weight_kg: e.target.value })}
+                      placeholder="örn. 60"
+                      className="w-full border px-3 py-2.5 text-sm focus:outline-none focus:border-black"
+                      data-testid="weight-input"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400 -mt-1">Boy/kilo ile ürün sayfasında size en uygun bedeni öneririz. (opsiyonel)</p>
               </>
             )}
             

@@ -266,6 +266,19 @@ async def update_my_profile(
     """Update current user's profile"""
     allowed_fields = ["first_name", "last_name", "phone"]
     update_data = {k: v for k, v in profile_data.items() if k in allowed_fields}
+    # Boy/kilo — beden önerisi için (doğrulanmış aralık; boş bırakılırsa temizlenir).
+    def _num_or_none(v, lo, hi):
+        if v in (None, ""):
+            return None
+        try:
+            n = float(v)
+            return n if lo <= n <= hi else None
+        except Exception:
+            return None
+    if "height_cm" in profile_data:
+        update_data["height_cm"] = _num_or_none(profile_data.get("height_cm"), 100, 230)
+    if "weight_kg" in profile_data:
+        update_data["weight_kg"] = _num_or_none(profile_data.get("weight_kg"), 30, 250)
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.users.update_one(

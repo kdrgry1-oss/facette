@@ -40,8 +40,6 @@ const ALL_RETURN_STATUSES = ["return_requested", "return_in_transit", "returned"
 const RETURN_TABS = [
   { key: "",                          label: "Tüm İadeler",       statuses: ALL_RETURN_STATUSES },
   { key: "return_requested",          label: "Talep Oluşturulan", statuses: ["return_requested"] },
-  { key: "return_in_transit",         label: "İade Kargoda",      statuses: ["return_in_transit"] },
-  { key: "returned,return_requested", label: "Aksiyon Bekleyen",  statuses: ["returned", "return_requested"] },
   { key: "return_approved",           label: "Onaylananlar",      statuses: ["return_approved"] },
   { key: "refunded,partial_refunded", label: "İade Ödemeleri",    statuses: ["refunded", "partial_refunded"] },
   { key: "return_rejected",           label: "Reddedilenler",     statuses: ["return_rejected"] },
@@ -533,7 +531,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             #{r.gider_pusulasi_no}
                           </span>
                         )}
-                        {can("returns.expense_note") && (
+                        {/* Gider pusulası YALNIZCA onaylanan iadelerde oluşturulur (talep/kargoda
+                            aşamasında gösterilmez). Zaten pusulası olanlarda yeniden yazdırmak için kalır. */}
+                        {can("returns.expense_note") &&
+                          (["return_approved", "refunded", "partial_refunded"].includes(r.status) || r.has_gider_pusulasi) && (
                           <button onClick={() => handleSiteGider(r)} disabled={busyId === r.id}
                             className={`p-1.5 rounded-lg disabled:opacity-50 ${r.has_gider_pusulasi ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} title="Gider Pusulası">
                             <FileText size={14} />
@@ -598,11 +599,9 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           if (amt <= 0) return null;
                           const sel = !!cargoSel[r.id];
                           return (
-                            <label className={`mt-1 flex items-center gap-3 text-xs border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
+                            <label className={`mt-1 inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
                               <input type="checkbox" checked={sel} onChange={() => toggleCargo(r.id)} className="shrink-0" />
                               <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
-                              <span className="text-gray-500 whitespace-nowrap">{paid ? "(faturadaki kargo — mahsup)" : "(ücretsiz kargo iptali — mahsup)"}</span>
-                              <span className="flex-1" />
                               <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>
                             </label>
                           );
@@ -669,9 +668,6 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                   <XCircle size={14} /> İade Reddet
                                 </button>
                               )}
-                            </div>
-                            <div className="text-[11px] text-gray-700 mt-1">
-                              Onay/ret penceresi açılır: tutar + gider pusulası + iade ödemesi; müşteriye SMS/mail gider. Kalem seçiliyse iade tutarı seçili kalemlerden ön-dolar.
                             </div>
                           </div>
                         )}

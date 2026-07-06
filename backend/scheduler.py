@@ -21,11 +21,16 @@ async def auto_cancel_unpaid_havale_orders():
 
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
-        # Accept both payment_method names
+        # Accept both payment_method names.
+        # ÖNEMLİ: Havale siparişleri "awaiting_payment" durumunda bekler (create_order öyle set eder);
+        # eski sorgu yalnız pending/confirmed'e bakıyordu → awaiting_payment havaleler HİÇ iptal
+        # edilmiyordu. Güvenli kapsam: DEKONT BİLDİRİLMEMİŞ (payment_notified HARİÇ) ve ödemesi
+        # ONAYLANMAMIŞ (paid değil) havaleler 72 saatte iptal edilir. payment_notified (müşteri
+        # dekont iletmiş) otomatik iptal EDİLMEZ — admin kontrol etsin (yanlışlıkla ödeyeni iptal etme).
         query = {
-            "payment_status": "pending",
-            "status": {"$in": ["pending", "confirmed"]},
-            "payment_method": {"$in": ["transfer", "havale", "bank_transfer", "eft"]},
+            "payment_status": {"$nin": ["paid", "expired", "refunded"]},
+            "status": {"$in": ["pending", "awaiting_payment"]},
+            "payment_method": {"$in": ["transfer", "havale", "bank_transfer", "eft", "havale_eft", "banka_havale"]},
             "created_at": {"$lt": cutoff},
         }
         cancelled = 0

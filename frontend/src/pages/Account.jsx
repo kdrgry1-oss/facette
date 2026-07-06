@@ -88,7 +88,7 @@ const greeting = () => {
 };
 
 export default function Account() {
-  const { user, logout, loading: authLoading } = useAuth();
+  const { user, logout, loading: authLoading, setUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "profile");
 
@@ -99,7 +99,7 @@ export default function Account() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingAddress, setEditingAddress] = useState(null);
 
-  const [profileForm, setProfileForm] = useState({ first_name: "", last_name: "", phone: "" });
+  const [profileForm, setProfileForm] = useState({ first_name: "", last_name: "", phone: "", height_cm: "", weight_kg: "" });
   const [addressForm, setAddressForm] = useState({
     title: "", first_name: "", last_name: "", phone: "",
     address: "", city: "", district: "", postal_code: "", is_default: false,
@@ -112,6 +112,8 @@ export default function Account() {
         first_name: user.first_name || "",
         last_name:  user.last_name  || "",
         phone:      user.phone      || "",
+        height_cm:  user.height_cm  ?? "",
+        weight_kg:  user.weight_kg  ?? "",
       });
     }
   }, [user]);
@@ -169,6 +171,8 @@ export default function Account() {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast.success("Profil güncellendi");
+      // Context'i güncelle → beden önerisi anında yeni boy/kiloyla çalışır (yeniden yükleme gerekmez)
+      setUser?.((u) => ({ ...(u || {}), ...profileForm }));
       setEditingProfile(false);
     } catch {
       toast.error("Güncelleme başarısız");
@@ -334,7 +338,10 @@ function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit }) {
               <Field label="Soyad" value={form.last_name} onChange={(v) => setForm({ ...form, last_name: v })} />
               <Field label="E-posta" value={user.email} disabled />
               <Field label="Telefon" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} type="tel" />
+              <Field label="Boy (cm)" value={form.height_cm} onChange={(v) => setForm({ ...form, height_cm: v })} type="number" />
+              <Field label="Kilo (kg)" value={form.weight_kg} onChange={(v) => setForm({ ...form, weight_kg: v })} type="number" />
             </div>
+            <p className="text-[11px] text-gray-400 -mt-2">Boy/kilo, ürün sayfasında size en uygun bedeni önermek için kullanılır.</p>
             <div className="flex gap-3 pt-2">
               <button type="submit" data-testid="save-profile-btn"
                 className="bg-black text-white px-8 py-3 text-xs uppercase tracking-[0.2em] hover:bg-gray-800 transition-colors">
