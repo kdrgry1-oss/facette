@@ -110,7 +110,7 @@ async def list_rooftr_return_orders(
         "created_at": 1, "updated_at": 1, "channel_source": 1, "invoice_number": 1,
         "return_approved_at": 1, "refund_paid_at": 1, "return_request": 1,
         "cargo_tracking_number": 1, "cargo_tracking_url": 1, "cargo_provider_name": 1,
-        "iyzico_retrieve_response": 1, "installment": 1,
+        "iyzico_retrieve_response": 1, "installment": 1, "admin_notes": 1,
     }
 
     cursor = (
@@ -173,6 +173,11 @@ async def list_rooftr_return_orders(
             "reason": (o.get("return_request") or {}).get("reason") or "",
             "coupon_code": o.get("coupon_code") or "",
             "notes": o.get("notes") or "",
+            # Personel (admin) notlari — siparis ekranindan girilen notlar iade panelinde de gorunsun.
+            "staff_notes": [
+                {"text": (n or {}).get("text") or "", "by": (n or {}).get("by") or "", "at": (n or {}).get("at") or ""}
+                for n in (o.get("admin_notes") or []) if (n or {}).get("text")
+            ],
             "item_count": sum(int(i.get("quantity") or 1) for i in items),
             "items": [
                 {

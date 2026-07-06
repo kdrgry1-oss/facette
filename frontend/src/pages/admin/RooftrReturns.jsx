@@ -474,6 +474,12 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-sm font-bold text-blue-600">{r.order_number}</div>
                       {r.item_count > 0 && <div className="text-xs text-gray-400">{r.item_count} ürün</div>}
+                      {Array.isArray(r.staff_notes) && r.staff_notes.length > 0 && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-semibold border border-indigo-200 cursor-help"
+                             title={r.staff_notes.map((n) => `• ${n.text}${n.by ? `  — ${n.by}` : ""}`).join("\n")}>
+                          📝 Personel Notu{r.staff_notes.length > 1 ? ` (${r.staff_notes.length})` : ""}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
                       {r.iade_no

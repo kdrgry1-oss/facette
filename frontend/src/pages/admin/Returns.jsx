@@ -585,6 +585,18 @@ export default function Returns() {
                         {claim.order_number}
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>
+                      {claim.merged_count > 1 && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-semibold border border-amber-200"
+                             title={`Bu sipariş Hepsiburada'da ${claim.merged_count} ayrı kalem-claim olarak açılmış; tek iade olarak birleştirildi. İşlemler (onay/gider pusulası) hepsine birden uygulanır.`}>
+                          🔗 {claim.merged_count} kalem birleşik
+                        </div>
+                      )}
+                      {Array.isArray(claim.staff_notes) && claim.staff_notes.length > 0 && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[10px] font-semibold border border-indigo-200 cursor-help"
+                             title={claim.staff_notes.map((n) => `• ${n.text}${n.by ? `  — ${n.by}` : ""}`).join("\n")}>
+                          📝 Personel Notu{claim.staff_notes.length > 1 ? ` (${claim.staff_notes.length})` : ""}
+                        </div>
+                      )}
                       {isExpanded && (
                         <div className="mt-2 p-3 bg-gray-50 rounded-lg text-xs space-y-1">
                           <p className="mb-1">

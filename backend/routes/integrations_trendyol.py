@@ -3106,6 +3106,41 @@ def _claim_dup_signature(c: dict):
     return (plt, onum, ctype, sig_items, refund)
 
 
+def _group_hb_claims_by_order(rows: list) -> list:
+    """Hepsiburada'nın KALEM-BAZLI claim'lerini sipariş no'ya göre TEK satırda birleştirir.
+
+    HB, 3 kalemli tek bir iadeyi 3 ayrı claim (ayrı claim_id) olarak açar → ekranda 3 satır
+    görünüp 'müşteri 3 kez mi iade etti' karışıklığı olur. Bu fonksiyon aynı siparişin HB
+    claim'lerini tek satırda toplar: kalemler birleşir, iade tutarı toplanır, TÜM claim_id'ler
+    `merged_claim_ids`'te tutulur (gider pusulası/durum işlemleri bu satırda 3 claim'e birden
+    uygulanır — bkz. generate_gider_pusulasi / set-status fan-out). Trendyol satırları, manuel
+    satırlar ve tek-claim'li HB siparişleri DEĞİŞMEDEN geçer."""
+    out, hb_groups = [], {}
+    for c in rows:
+        if (str(c.get("platform") or "").lower() == "hepsiburada"
+                and c.get("order_number") and not c.get("manual")):
+            hb_groups.setdefault(str(c.get("order_number")), []).append(c)
+        else:
+            out.append(c)
+    for onum, grp in hb_groups.items():
+        if len(grp) == 1:
+            out.append(grp[0]); continue
+        grp_sorted = sorted(grp, key=lambda c: (c.get("created_date") or ""), reverse=True)
+        primary = dict(grp_sorted[0])
+        items, refund, cids = [], 0.0, []
+        for c in grp_sorted:
+            items.extend(c.get("items") or [])
+            refund += float(c.get("refund_amount") or 0)
+            if c.get("claim_id"):
+                cids.append(c.get("claim_id"))
+        primary["items"] = items
+        primary["refund_amount"] = round(refund, 2)
+        primary["merged_claim_ids"] = cids
+        primary["merged_count"] = len(grp)
+        out.append(primary)
+    return out
+
+
 def _dedup_claims_by_content(claims: list) -> list:
     """claim_id tekilleştirmesinden SONRA, içerik imzası aynı olan çift kayıtları
     ayıklar. Giriş created_date'e göre yeniden→eskiye sıralı olduğundan ilk (en yeni)
@@ -3669,6 +3704,8 @@ async def get_trendyol_claims(
     # Aynı iadenin çift kaydını (tekrar senkron / farklı claim_id ile aynı içerik)
     # ayıkla — bir sipariş no yanlışlıkla 2-3 kez görünmesin. Farklı kalem/tutar = ayrı iade.
     platform_scoped = _dedup_claims_by_content(platform_scoped)
+    # HB kalem-bazlı claim'leri sipariş no'ya göre tek satırda birleştir (4598214509 gibi).
+    platform_scoped = _group_hb_claims_by_order(platform_scoped)
     iade_scoped = [c for c in platform_scoped if _claim_bucket(c) != "iptal"]
     # En yeni HAREKET en üstte (site/Trendyol/HB fark etmez) — talep/onay/ret/değişiklik en yenisi.
     iade_scoped.sort(key=_claim_activity_key, reverse=True)
@@ -3701,6 +3738,23 @@ async def get_trendyol_claims(
         c["bucket_label"] = _BUCKET_LABEL.get(_b, "—")
         if c.get("manual") and c.get("order_status"):
             c["bucket_label"] = _ORDER_STATUS_TR.get(c.get("order_status"), c["bucket_label"])
+
+    # Personel (admin) notlari: bu sayfadaki claim'lerin siparislerinden admin_notes'u tek
+    # sorguyla cek, order_number'a gore iade satirina ekle (Siparisler'de girilen personel
+    # notu iade panelinde de gorunsun — ayirt edici sekilde gosterilir).
+    _onums = [str(c.get("order_number")) for c in claims if c.get("order_number")]
+    if _onums:
+        _notes_map = {}
+        async for _o in db.orders.find(
+            {"order_number": {"$in": _onums}, "admin_notes": {"$exists": True, "$ne": []}},
+            {"_id": 0, "order_number": 1, "admin_notes": 1},
+        ):
+            _sn = [{"text": (n or {}).get("text") or "", "by": (n or {}).get("by") or "", "at": (n or {}).get("at") or ""}
+                   for n in (_o.get("admin_notes") or []) if (n or {}).get("text")]
+            if _sn:
+                _notes_map[str(_o.get("order_number"))] = _sn
+        for c in claims:
+            c["staff_notes"] = _notes_map.get(str(c.get("order_number")), [])
 
     # Sekme adetleri — iade_scoped (iptal hariç) üzerinden, _claim_bucket ile.
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
@@ -3783,6 +3837,7 @@ async def export_trendyol_claims(
     elif _plt in ("trendyol", ""):
         deduped = [c for c in deduped if str(c.get("platform") or "").lower() != "hepsiburada"]
     deduped = _dedup_claims_by_content(deduped)
+    deduped = _group_hb_claims_by_order(deduped)
     iade_scoped = [c for c in deduped if _claim_bucket(c) != "iptal"]
     iade_scoped.sort(key=_claim_activity_key, reverse=True)
     if want_tab == "acik_iade":
@@ -3989,7 +4044,17 @@ async def set_trendyol_claim_status(claim_id: str, payload: dict, current_user: 
     res = await db.trendyol_claims.update_one({"claim_id": claim_id}, {"$set": _set})
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="İade (claim) bulunamadı")
-    return {"success": True, "claim_id": claim_id, "status": new_status, "manual_locked": True}
+    # HB KALEM-BAZLI BİRLEŞTİRME: tek satırda gösterilen HB claim'i için durum değişikliği,
+    # aynı siparişin tüm (iptal-dışı) HB kardeş claim'lerine uygulanır (ekranda tek satır → tek işlem).
+    _target = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0, "platform": 1, "order_number": 1})
+    fanned = 0
+    if _target and str(_target.get("platform") or "").lower() == "hepsiburada" and _target.get("order_number"):
+        _r = await db.trendyol_claims.update_many(
+            {"order_number": _target.get("order_number"), "platform": "hepsiburada",
+             "claim_id": {"$ne": claim_id}, "claim_status": {"$ne": "Cancelled"}},
+            {"$set": _set})
+        fanned = _r.modified_count
+    return {"success": True, "claim_id": claim_id, "status": new_status, "manual_locked": True, "fanned_siblings": fanned}
 @router.post("/trendyol/claims/{claim_id}/unlock")
 async def unlock_trendyol_claim(claim_id: str, current_user: dict = Depends(require_admin)):
     """Manuel kilidi kaldırır → durum tekrar Trendyol senkronundan güncellenmeye başlar."""
@@ -4126,6 +4191,25 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     if not claim:
         raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")
 
+    # HB KALEM-BAZLI BİRLEŞTİRME: Hepsiburada bir siparişin iadesini kalem kalem ayrı claim'lere
+    # böler. Ekranda tek satırda birleştiriyoruz (bkz. _group_hb_claims_by_order); gider pusulası
+    # da TÜM kardeş claim'lerin kalemlerini + tutarını kapsamalı ve hepsinin stoğunu geri eklemeli.
+    _gp_claim_ids = [claim_id]
+    if str(claim.get("platform") or "").lower() == "hepsiburada" and claim.get("order_number"):
+        _sibs = await db.trendyol_claims.find(
+            {"order_number": claim.get("order_number"), "platform": "hepsiburada"}, {"_id": 0}
+        ).to_list(None)
+        _sibs = [s for s in _sibs if _claim_bucket(s) != "iptal"]
+        if len(_sibs) > 1:
+            _m_items, _m_refund, _gp_claim_ids = [], 0.0, []
+            for s in _sibs:
+                _m_items.extend(s.get("items") or [])
+                _m_refund += float(s.get("refund_amount") or 0)
+                if s.get("claim_id"):
+                    _gp_claim_ids.append(s.get("claim_id"))
+            claim["items"] = _m_items
+            claim["refund_amount"] = round(_m_refund, 2)
+
     # Kurumsal/e-Fatura siparişinde gider pusulası DÜZENLENEMEZ — iade faturası gerekir.
     _onum = claim.get("order_number", "")
     if _onum:
@@ -4133,8 +4217,10 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
         if _ord and ((_ord.get("invoice_type") == "e-fatura") or bool((_ord.get("billing_info") or {}).get("is_corporate"))):
             raise HTTPException(status_code=400, detail="Bu sipariş kurumsal/e-Fatura siparişi — gider pusulası düzenlenemez. Müşteriden iade faturası gerekir (Doğan'dan panele düşecek, onaylayınca stok +1).")
 
-    # İade onayımız = gider pusulası oluşturmak. Stoğu BİR KEZ geri ekle (idempotent).
-    await restock_claim_once(claim_id, "gider_pusulasi", current_user.get("email", ""))
+    # İade onayımız = gider pusulası oluşturmak. Stoğu BİR KEZ geri ekle (idempotent) —
+    # HB birleştirmede tüm kardeş claim'lerin stoğu geri eklenir.
+    for _cid in _gp_claim_ids:
+        await restock_claim_once(_cid, "gider_pusulasi", current_user.get("email", ""))
 
     settings = await db.settings.find_one({"id": "main"}, {"_id": 0})
     company = settings.get("company_info", {}) if settings else {}
