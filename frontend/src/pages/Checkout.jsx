@@ -103,6 +103,37 @@ export default function Checkout() {
   const [giftNote, setGiftNote] = useState("");
   const [giftWrap, setGiftWrap] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
+  // İYS ticari ileti izni + OTP
+  const [mktEmail, setMktEmail] = useState(false);
+  const [mktSms, setMktSms] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpBusy, setOtpBusy] = useState(false);
+
+  const sendOtp = async () => {
+    const phone = (shippingAddress.phone || "").trim();
+    if (!phone) { toast.error("Önce teslimat telefonunuzu girin"); return; }
+    try {
+      setOtpBusy(true);
+      const res = await axios.post(`${API}/iys/otp/send`, { phone });
+      if (res.data?.success) { setOtpSent(true); toast.success("Doğrulama kodu SMS ile gönderildi"); }
+      else toast.error(res.data?.detail || "SMS gönderilemedi");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "SMS gönderilemedi");
+    } finally { setOtpBusy(false); }
+  };
+  const verifyOtp = async () => {
+    const phone = (shippingAddress.phone || "").trim();
+    if (!otpCode.trim()) { toast.error("Kodu girin"); return; }
+    try {
+      setOtpBusy(true);
+      const res = await axios.post(`${API}/iys/otp/verify`, { phone, code: otpCode.trim() });
+      if (res.data?.verified) { setOtpVerified(true); toast.success("Telefonunuz doğrulandı"); }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Kod doğrulanamadı");
+    } finally { setOtpBusy(false); }
+  };
   // Quick-signup state — OrderSuccess sayfasına taşındı, burada artık kullanılmıyor
 
   // KURUMSAL FATURA
@@ -534,6 +565,8 @@ export default function Checkout() {
         // ödeme onayı iyzico webhook'undan (tarayıcısız) geldiğinde CAPI
         // purchase event'inde atıf için kullanılır.
         click_ids: (typeof window !== "undefined" ? collectClickIds() : {}),
+        // İYS — ticari ileti izni (kutu işaretliyse). SMS izni OTP doğrulaması ister.
+        marketing_consent: { email: mktEmail, sms: mktSms, otp_verified: otpVerified },
       };
 
       // Üye girişliyse token'ı gönder ki sipariş user_id'ye bağlansın (misafirde token yok → eskisi gibi).
@@ -1163,6 +1196,50 @@ export default function Checkout() {
                       <a href="/sayfa/mesafeli-satis" target="_blank" rel="noreferrer" className="underline hover:text-black">Mesafeli Satış Sözleşmesi</a>{"'"}ni okudum, onaylıyorum.
                     </span>
                   </label>
+
+                  {/* İYS — ticari ileti (kampanya) izni. Opsiyonel; sipariş için ZORUNLU DEĞİL. */}
+                  <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
+                    <label className="flex items-start gap-2 text-[11px] text-gray-700 cursor-pointer leading-relaxed">
+                      <input type="checkbox" checked={mktEmail} onChange={(e) => setMktEmail(e.target.checked)}
+                        className="mt-0.5 accent-black" data-testid="consent-email" />
+                      <span>E-posta ile kampanya, indirim ve yeniliklerden haberdar olmak istiyorum.</span>
+                    </label>
+                    <label className="flex items-start gap-2 text-[11px] text-gray-700 cursor-pointer leading-relaxed">
+                      <input type="checkbox" checked={mktSms}
+                        onChange={(e) => { setMktSms(e.target.checked); if (!e.target.checked) { setOtpSent(false); setOtpVerified(false); setOtpCode(""); } }}
+                        className="mt-0.5 accent-black" data-testid="consent-sms" />
+                      <span>SMS ile kampanya almak istiyorum. {mktSms && !otpVerified && <b className="text-amber-700">(telefon doğrulaması gerekir)</b>}{otpVerified && <b className="text-emerald-700">✓ doğrulandı</b>}</span>
+                    </label>
+
+                    {/* SMS izni için OTP doğrulama */}
+                    {mktSms && !otpVerified && (
+                      <div className="ml-6 flex flex-wrap items-center gap-2">
+                        {!otpSent ? (
+                          <button type="button" onClick={sendOtp} disabled={otpBusy}
+                            className="px-3 py-1.5 text-[11px] border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50">
+                            {otpBusy ? "Gönderiliyor…" : "Doğrulama kodu gönder"}
+                          </button>
+                        ) : (
+                          <>
+                            <input value={otpCode} onChange={(e) => setOtpCode(e.target.value)} inputMode="numeric" maxLength={6}
+                              placeholder="6 haneli kod" className="w-28 border border-gray-300 rounded px-2 py-1.5 text-[11px]" />
+                            <button type="button" onClick={verifyOtp} disabled={otpBusy}
+                              className="px-3 py-1.5 text-[11px] bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50">
+                              {otpBusy ? "…" : "Doğrula"}
+                            </button>
+                            <button type="button" onClick={sendOtp} disabled={otpBusy}
+                              className="text-[11px] text-gray-500 underline">Tekrar gönder</button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-gray-400 leading-relaxed">
+                      İzniniz İYS'ye (İleti Yönetim Sistemi) kaydedilir. İstediğiniz zaman{" "}
+                      <a href="https://iys.org.tr" target="_blank" rel="noreferrer" className="underline">iys.org.tr</a>{" "}
+                      üzerinden, her e-postadaki "abonelikten çık" bağlantısından ya da SMS'e "RET" yazarak izni iptal edebilirsiniz.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

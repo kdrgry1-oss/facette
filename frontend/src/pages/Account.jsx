@@ -106,6 +106,7 @@ export default function Account() {
     is_corporate: false, company_name: "", tax_no: "", tax_office: "",
   });
 
+  const [mkt, setMkt] = useState({ email: false, sms: false });
   useEffect(() => {
     if (user) {
       setProfileForm({
@@ -115,8 +116,23 @@ export default function Account() {
         height_cm:  user.height_cm  ?? "",
         weight_kg:  user.weight_kg  ?? "",
       });
+      const mp = user.marketing_prefs || {};
+      setMkt({ email: !!mp.email, sms: !!mp.sms });
     }
   }, [user]);
+
+  // İYS pazarlama izni aç/kapa → backend hem kaydeder hem İYS'ye ONAY/RET bildirir.
+  const saveMkt = async (next) => {
+    setMkt(next);
+    try {
+      const token = localStorage.getItem("token");
+      await axios.post(`${API}/iys/consent/update`, next, { headers: { Authorization: `Bearer ${token}` } });
+      setUser?.((u) => ({ ...(u || {}), marketing_prefs: next, accepts_marketing: next.email || next.sms }));
+      toast.success("Tercihiniz güncellendi");
+    } catch {
+      toast.error("Güncellenemedi");
+    }
+  };
 
   useEffect(() => {
     if (activeTab === "orders") fetchOrders();
@@ -361,6 +377,24 @@ function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit }) {
             <Row k="Üyelik Tarihi" v={formatDate(user.created_at)} icon={Calendar} />
           </dl>
         )}
+
+        {/* Pazarlama İzinleri (İYS) — aç/kapa; kapatınca İYS'ye RED bildirilir */}
+        <div className="mt-6 pt-6 border-t border-gray-100">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-gray-500 mb-3">Pazarlama İzinleri</p>
+          <div className="space-y-2.5">
+            <label className="flex items-center justify-between text-sm cursor-pointer">
+              <span className="text-gray-700">E-posta ile kampanya/fırsat</span>
+              <input type="checkbox" checked={mkt.email} onChange={(e) => saveMkt({ ...mkt, email: e.target.checked })} className="accent-black w-4 h-4" data-testid="mkt-email" />
+            </label>
+            <label className="flex items-center justify-between text-sm cursor-pointer">
+              <span className="text-gray-700">SMS ile kampanya/fırsat</span>
+              <input type="checkbox" checked={mkt.sms} onChange={(e) => saveMkt({ ...mkt, sms: e.target.checked })} className="accent-black w-4 h-4" data-testid="mkt-sms" />
+            </label>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+            İzinleriniz İYS'ye işlenir. Kapattığınızda ticari ileti gönderimi durur.
+          </p>
+        </div>
       </div>
 
       <aside className="bg-black text-white p-6 md:p-8 flex flex-col justify-between">

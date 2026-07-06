@@ -381,23 +381,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
           İade / kısmi iade durumundaki siparişler.
           {totalReturns > 0 && <span className="ml-1 font-medium text-gray-800">Toplam {totalReturns} iade siparişi.</span>}
         </div>
-        <button
-          onClick={pullFromRooftr}
-          disabled={pulling}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 disabled:opacity-60"
-        >
-          <RefreshCw size={15} className={pulling ? "animate-spin" : ""} />
-          {pulling ? "Çekiliyor…" : "Siparişleri Çek"}
-        </button>
-        <button
-          onClick={refreshDates}
-          disabled={redating || pulling}
-          title="Tüm siparişlerin tarihini Rooftr'daki gerçek sipariş tarihine günceller"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-bold hover:bg-slate-700 disabled:opacity-60"
-        >
-          <RefreshCw size={15} className={redating ? "animate-spin" : ""} />
-          {redating ? "Tarihler düzeltiliyor…" : "Tarihleri Düzelt"}
-        </button>
+        {/* Manuel "Siparişleri Çek" / "Tarihleri Düzelt" kaldırıldı — veriler otomatik
+            (5 dk'da bir) güncelleniyor. Yalnız Excel dışa aktarım kaldı. */}
         <button
           onClick={exportExcel}
           disabled={exporting}

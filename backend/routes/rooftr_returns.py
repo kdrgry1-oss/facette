@@ -112,7 +112,8 @@ async def list_rooftr_return_orders(
 
     cursor = (
         db.orders.find(base_filter, proj)
-        .sort("created_at", -1)
+        # En güncel iade HAREKETİ en üstte: updated_at (son değişiklik) öncelikli, sonra created_at.
+        .sort([("updated_at", -1), ("created_at", -1)])
         .skip((page - 1) * limit)
         .limit(limit)
     )

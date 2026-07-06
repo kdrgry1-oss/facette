@@ -319,7 +319,9 @@ export default function PageDesign() {
   const shrinkImageFile = (file) =>
     new Promise((resolve) => {
       if (!file.type.startsWith("image/") || file.type === "image/gif") return resolve(file);
-      const img = new Image();
+      // DİKKAT: 'Image' burada lucide-react ikonu (new Image() → "is not a constructor").
+      // DOM görsel nesnesi için window.Image kullanılır.
+      const img = new window.Image();
       const objUrl = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(objUrl);
@@ -353,7 +355,7 @@ export default function PageDesign() {
       // Görselin gerçek piksel boyutunu client-side oku — kaydedilince storefront'ta
       // (HeroSlider/FullBanner) doğru en-boy oranında, kırpılmadan gösterilsin.
       const dims = await new Promise((resolve) => {
-        const probe = new Image();
+        const probe = new window.Image();
         const objUrl = URL.createObjectURL(file);
         probe.onload = () => { resolve([probe.naturalWidth, probe.naturalHeight]); URL.revokeObjectURL(objUrl); };
         probe.onerror = () => { resolve(null); URL.revokeObjectURL(objUrl); };

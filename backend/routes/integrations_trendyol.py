@@ -4027,9 +4027,11 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     _cust_city = _ship.get("city", "") or claim.get("shipping_city", "")
     _cust_country = _ship.get("country", "") or "Türkiye"
 
-    items = claim.get("items", [])
+    _all_items = claim.get("items", [])
+    items = _all_items
     # Kısmi gider pusulası: yalnızca seçili kalemler (item_indexes verilirse SADECE onlar hesaplanır)
     _sel_idx = (payload or {}).get("item_indexes")
+    _is_partial = False
     if isinstance(_sel_idx, list) and _sel_idx:
         _filtered = []
         for _i in _sel_idx:
@@ -4037,20 +4039,33 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
                 _filtered.append(items[int(_i)])
             except Exception:
                 continue
-        if _filtered:
+        if _filtered and len(_filtered) < len(_all_items):
             items = _filtered
-    total_net = sum(item.get("price", 0) * item.get("quantity", 1) for item in items)
+            _is_partial = True
+    _item_net_sum = round(sum(item.get("price", 0) * item.get("quantity", 1) for item in items), 2)
+    # TUTARLILIK (kullanıcı isteği): TAM iadede net, TRENDYOL'un verdiği gerçek iade tutarını
+    # (claim.refund_amount) baz alır — fatura/İYS/pusula hepsi Trendyol'un kuruşuyla ÖRTÜŞSÜN.
+    # Kalem toplamı yalnızca kısmi iadede ya da Trendyol tutarı yoksa kullanılır.
+    _ty_refund = round(float(claim.get("refund_amount") or 0), 2)
+    total_net = (_ty_refund if (not _is_partial and _ty_refund > 0) else _item_net_sum)
     total_discount = sum(item.get("discount_amount", 0) * item.get("quantity", 1) for item in items)
     total_gross = sum(item.get("unit_price", 0) * item.get("quantity", 1) for item in items)
     vat_rate = settings.get("default_vat_rate", 10) if settings else 10
     vat_amount = round(total_net * vat_rate / (100 + vat_rate), 2)
     net_without_vat = round(total_net - vat_amount, 2)
 
-    last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
-    gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
-    # Frontend'den gelen takip numarası (matbu form sıra no ile eşleşir). Verilirse display olarak kullan.
+    # İDEMPOTENT numara: bu claim için pusula zaten varsa numarayı KORU (yeniden düzenleme
+    # yeni numara yakmaz — tutar düzeltmesi mevcut pusulanın numarasını değiştirmez).
+    _existing_gp = await db.gider_pusulasi.find_one(
+        {"claim_id": claim_id}, {"_id": 0, "number": 1, "display_number": 1})
     tracking_no = str((payload or {}).get("tracking_no") or "").strip()
-    display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
+    if _existing_gp and _existing_gp.get("number"):
+        gp_number = _existing_gp["number"]
+        display_number = tracking_no or _existing_gp.get("display_number") or f"GP-{gp_number:06d}"
+    else:
+        last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
+        gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+        display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
 
     # Kalemleri ürün kataloğundaki beden ile zenginleştir (barkod -> variant.size)
     gp_items = []
@@ -4074,6 +4089,17 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
             "net_price": _it.get("price", 0),
             "reason": _it.get("reason", ""),
         })
+
+    # Yuvarlama mutabakatı: kalem net'leri toplamı, Trendyol'un tutarına (total_net) BİREBİR
+    # eşitlenir (kuruş farkı son ürün satırına yazılır) → pusula ↔ fatura ↔ Trendyol tutarı örtüşür.
+    if gp_items and total_net > 0:
+        _cur = round(sum(round(float(g.get("net_price", 0)), 2) * int(g.get("quantity", 1) or 1) for g in gp_items), 2)
+        _diff = round(total_net - _cur, 2)
+        if abs(_diff) >= 0.01:
+            _last = gp_items[-1]
+            _q = int(_last.get("quantity", 1) or 1)
+            _last["net_price"] = round(float(_last.get("net_price", 0)) + _diff / _q, 2)
+            _last["discount"] = round(max(0.0, float(_last.get("unit_price", 0)) - float(_last["net_price"])), 2)
 
     gider_pusulasi = {
         "number": gp_number,

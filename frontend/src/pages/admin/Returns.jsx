@@ -440,12 +440,7 @@ export default function Returns() {
                 {exporting ? "Hazırlanıyor..." : "Excel"}
               </button>
             )}
-            <button onClick={handleSync} disabled={syncing}
-              data-testid="sync-claims-btn"
-              className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition-colors disabled:opacity-50">
-              <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
-              {syncing ? "Güncelleniyor..." : "Güncelle"}
-            </button>
+            {/* Manuel "Güncelle" kaldırıldı — iadeler 5 dk'da bir otomatik güncelleniyor. */}
           </div>
         </div>
 

@@ -445,16 +445,13 @@ export default function ProductDetail() {
     );
   }
 
-  // İndirim: sale_price + aktif otomatik kampanya (campaign_discount_percent, backend işler).
-  // Kampanya sale_price üzerine uygulanır — sepet motorunun hesap sırasıyla aynı.
-  const salePriceBase = product.sale_price && product.sale_price < product.price ? product.sale_price : null;
-  const campPct = Number(product.campaign_discount_percent || 0);
-  const hasDiscount = Boolean(salePriceBase) || campPct > 0;
-  const basePrice = campPct > 0
-    ? (salePriceBase ?? product.price) * (1 - campPct / 100)
-    : (salePriceBase ?? product.price);
+  // İndirim görünümü TEK KAYNAK (lib/price) — vitrin kartlarıyla BİREBİR aynı; ürün detayı
+  // ile kartlar arasında "kartta indirimli ama detayda liste fiyatı" tutarsızlığı olmaz.
+  const _pv = priceView(product);
   const variantPriceDiff = selectedVariant?.price_diff || 0;
-  const displayPrice = basePrice + variantPriceDiff;
+  const hasDiscount = _pv.hasDiscount;
+  const listUnit = _pv.list + variantPriceDiff;
+  const displayPrice = _pv.display + variantPriceDiff;
 
   // Remove duplicate images and hide size-table images from customer view
   const allImages = product.images || [];
@@ -643,7 +640,7 @@ export default function ProductDetail() {
             <div className="mb-6">
               <div className="flex items-center gap-3">
                 {hasDiscount && (
-                  <span className="text-base text-gray-400 line-through">{product.price.toFixed(2).replace('.', ',')} TL</span>
+                  <span className="text-base text-gray-400 line-through">{listUnit.toFixed(2).replace('.', ',')} TL</span>
                 )}
                 <span className={`text-lg ${hasDiscount ? "text-red-600 font-medium" : ""}`}>
                   {displayPrice.toFixed(2).replace('.', ',')} TL

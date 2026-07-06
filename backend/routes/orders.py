@@ -718,6 +718,13 @@ async def create_order(
         "gift_wrap_price": float(order_data.get("gift_wrap_price", 0) or 0),
         "coupon_code": (order_data.get("coupon_code") or "").upper(),
         "applied_promotions": order_data.get("applied_promotions") or [],
+        # İYS — ticari ileti izni (ödeme adımında kutu işaretlenirse). SMS izni OTP ile doğrulanır.
+        "marketing_consent": {
+            "email": bool(((order_data.get("marketing_consent") or {}).get("email"))),
+            "sms": bool(((order_data.get("marketing_consent") or {}).get("sms"))),
+            "otp_verified": bool(((order_data.get("marketing_consent") or {}).get("otp_verified"))),
+            "at": datetime.now(timezone.utc).isoformat(),
+        },
         # FAZ 6 — müşteri izleri
         "customer_ip": client_ip,
         "user_agent": request.headers.get("user-agent", "")[:300],
@@ -884,6 +891,42 @@ async def create_order(
 
     await db.orders.insert_one(order)
     logger.info(f"Order created: {order['order_number']}")
+
+    # İYS — ticari ileti izni kaydı + dijital bildirim (arka planda). E-posta izni doğrudan;
+    # SMS izni YALNIZCA OTP doğrulaması yapıldıysa geçerli sayılır (numara sahipliği kanıtı).
+    try:
+        _mc = order.get("marketing_consent") or {}
+        _sa = order.get("shipping_address") or {}
+        _channels = []
+        if _mc.get("email"):
+            _channels.append("EPOSTA")
+        if _mc.get("sms"):
+            # SMS izni SUNUCU-otoriter: telefonun OTP ile doğrulandığını backend teyit eder.
+            from .iys import _phone_recently_verified as _otp_ok
+            _phone = _sa.get("phone") or order.get("phone") or ""
+            _verified = await _otp_ok(_phone)
+            order["marketing_consent"]["otp_verified"] = bool(_verified)
+            await db.orders.update_one({"id": order["id"]},
+                                       {"$set": {"marketing_consent.otp_verified": bool(_verified)}})
+            if _verified:
+                _channels.append("MESAJ")
+        if _channels:
+            from .iys import record_consent as _rec_consent
+            _spawn(_rec_consent(
+                recipient_email=_sa.get("email") or order.get("email") or "",
+                recipient_phone=_sa.get("phone") or order.get("phone") or "",
+                channels=_channels, status="ONAY", source="HS_WEB",
+                ip=order.get("customer_ip", ""), order_id=order["id"],
+                user_id=order.get("user_id"),
+            ))
+            # Üyeyse profildeki pazarlama tercihini de güncelle
+            if order.get("user_id"):
+                await db.users.update_one(
+                    {"id": order["user_id"]},
+                    {"$set": {"accepts_marketing": True,
+                              "marketing_consent_at": datetime.now(timezone.utc).isoformat()}})
+    except Exception as _iys_err:
+        logger.warning(f"İYS izin kaydı başarısız (sipariş etkilenmedi): {_iys_err}")
 
     # Üye adres defteri — giriş yapmış üyenin sipariş adresini "Adreslerim"e otomatik kaydet.
     # Önceden create_order adresi YALNIZCA sipariş belgesine yazıyordu; üyenin /my-addresses
@@ -5349,7 +5392,20 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
 
     order_total = _round2(order.get("total") or 0)
     order_sub = _round2(order.get("subtotal") or 0)
-    order_disc = _round2(order.get("discount") or 0)
+    # SİPARİŞ-SEVİYESİ indirim = kupon/kampanya (discount) + havale indirimi (payment_discount).
+    # Bunlar item.price'a YANSIMAZ (order.total'da uygulanır); pusula kalemleri müşterinin
+    # GERÇEKTE ödediğini göstersin diye bu indirim kalemlere oransal dağıtılır. Aksi halde
+    # pusula kalem tutarları faturadan/ödemeden farklı çıkar (Özge Yalçın tutarsızlığı).
+    order_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
+    _disc_ratio = (order_disc / order_sub) if order_sub > 0.009 else 0.0
+    if _disc_ratio < 0:
+        _disc_ratio = 0.0
+    if _disc_ratio > 1:
+        _disc_ratio = 1.0
+
+    def _eff_net_unit(it):
+        """Kalemin GERÇEK ödenen birim neti = item.price × (1 − sipariş-seviyesi indirim oranı)."""
+        return _round2(_round2(it.get("price", 0)) * (1 - _disc_ratio))
 
     cargo_line = None
     cargo_mode = "none"
@@ -5391,22 +5447,51 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     vat_amount = round(net_total * vat_rate / (100 + vat_rate), 2)
     net_without_vat = round(net_total - vat_amount, 2)
 
-    # ORTAK numara serisi (Trendyol + site)
-    last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
-    gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+    # ORTAK numara serisi (Trendyol + site). İDEMPOTENT: bu iade için pusula ZATEN varsa
+    # numarayı KORU (yeniden hesaplama yeni numara YAKMAZ) → mevcut pusulaları düzeltebiliriz.
+    _existing_gp = await db.gider_pusulasi.find_one(
+        {"return_id": return_id}, {"_id": 0, "number": 1, "display_number": 1})
     tracking_no = str((payload or {}).get("tracking_no") or "").strip()
-    display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
+    if _existing_gp and _existing_gp.get("number"):
+        gp_number = _existing_gp["number"]
+        display_number = tracking_no or _existing_gp.get("display_number") or f"GP-{gp_number:06d}"
+    else:
+        last_gp = await db.gider_pusulasi.find_one({}, sort=[("number", -1)])
+        gp_number = (last_gp.get("number", 0) + 1) if last_gp else 1
+        display_number = tracking_no if tracking_no else f"GP-{gp_number:06d}"
 
-    gp_items = [{
-        "name": it.get("name", ""),
-        "barcode": it.get("product_id", "") or it.get("barcode", ""),
-        "size": it.get("size", ""),
-        "quantity": it.get("quantity", 1),
-        "unit_price": it.get("unit_price", it.get("price", 0)),
-        "discount": it.get("discount_amount", 0),
-        "net_price": it.get("price", 0),
-        "reason": rec.get("reason", ""),
-    } for it in items]
+    # Kalem satırları GERÇEK ödeneni gösterir: net = item.price × (1 − sipariş indirim oranı).
+    # Böylece pusuladaki kalem tutarları TOPLAMI, faturayla/ödemeyle tutarlı olur.
+    gp_items = []
+    for it in items:
+        _list_unit = _round2(it.get("unit_price", it.get("price", 0)))
+        _net_unit = _eff_net_unit(it)
+        gp_items.append({
+            "name": it.get("name", ""),
+            "barcode": it.get("product_id", "") or it.get("barcode", ""),
+            "size": it.get("size", ""),
+            "quantity": int(it.get("quantity", 1) or 1),
+            "unit_price": _list_unit,
+            "discount": _round2(max(0.0, _list_unit - _net_unit)),
+            "net_price": _net_unit,
+            "reason": rec.get("reason", ""),
+        })
+
+    # 🎯 YUVARLAMA MUTABAKATI (Huriye): Kargo mahsubu YOKKEN pusula, faturayla/ödemeyle KURUŞU
+    # KURUŞUNA örtüşmeli. Kalem net'leri tek tek yuvarlandığı için toplam ±birkaç kuruş kayabilir;
+    # farkı SON ürün satırına yazarak ürün-satırları toplamını hedefe (net_total − kargo − vade)
+    # sabitleriz. Mahsup (deduct_cargo) durumunda tutar zaten faturadan farklıdır → dokunmayız.
+    if gp_items and not deduct_cargo:
+        _cargo_net = (cargo_line["net_price"] if cargo_line else 0.0)
+        _vade_net = (vade_line["net_price"] if vade_line else 0.0)
+        _target_prod = _round2(net_total - _cargo_net - _vade_net)
+        _cur_prod = _round2(sum(_round2(g["net_price"]) * int(g.get("quantity", 1) or 1) for g in gp_items))
+        _diff = _round2(_target_prod - _cur_prod)
+        if abs(_diff) >= 0.01:
+            _last = gp_items[-1]
+            _q = int(_last.get("quantity", 1) or 1)
+            _last["net_price"] = _round2(_last["net_price"] + _diff / _q)
+            _last["discount"] = _round2(max(0.0, _last["unit_price"] - _last["net_price"]))
 
     if cargo_line:
         gp_items.append({
@@ -5475,6 +5560,33 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         {"$set": {"has_gider_pusulasi": True, "gider_pusulasi_no": display_number}})
 
     return {"success": True, "gider_pusulasi": gider_pusulasi}
+
+
+@router.post("/returns/vouchers/recompute")
+async def recompute_site_vouchers(payload: Optional[dict] = Body(default=None),
+                                  current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """MEVCUT site gider pusulalarını DÜZELTİLMİŞ tutar mantığıyla (sipariş-seviyesi indirim
+    oransal dağıtımı + yuvarlama mutabakatı) yeniden hesaplar. Numara KORUNUR (idempotent).
+    Seçim orijinaldeki approved_items'a göre yeniden çözülür (kısmi iadeler korunur)."""
+    payload = payload or {}
+    limit = int(payload.get("limit", 5000) or 5000)
+    recomputed, failed = 0, 0
+    errors = []
+    async for gp in db.gider_pusulasi.find({"source": "site"}, {"_id": 0, "return_id": 1}).limit(limit):
+        rid = gp.get("return_id")
+        if not rid:
+            continue
+        try:
+            # Orijinal seçimi koru: payload verilmez → endpoint approved_items/tam iadeye düşer.
+            await site_return_gider_pusulasi(rid, payload=None, current_user=current_user)
+            recomputed += 1
+        except HTTPException as he:
+            failed += 1
+            errors.append({"return_id": rid, "detail": str(he.detail)})
+        except Exception as e:
+            failed += 1
+            errors.append({"return_id": rid, "detail": str(e)[:120]})
+    return {"success": True, "recomputed": recomputed, "failed": failed, "errors": errors[:50]}
 
 
 # ============================================================================
