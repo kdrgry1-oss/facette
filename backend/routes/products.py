@@ -2587,8 +2587,12 @@ async def export_products_excel(
             for v in variants:
                 if not isinstance(v, dict):
                     continue
+                # ID'ler METİN olarak yazılır (Excel uzun/sayısal id'yi 1.23E+15'e çevirmesin) ve
+                # her SATIR bir VARYANT olduğundan varyantın KENDİ id'si ayrı kolonda verilir —
+                # önceden tüm varyant satırlarına aynı ÜRÜN id'si basılıyordu (hatalı aktarım).
                 row = {
-                    "ID": p.get("id"),
+                    "Ürün ID": str(p.get("id") or ""),
+                    "Varyant ID": str(v.get("id") or v.get("urun_id") or ""),
                     "Ürün Adı": p.get("name"),
                     "Kategori": p.get("category_name"),
                     "Marka": p.get("brand"),

@@ -587,8 +587,10 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                             Kusur müşterideyse (bana uymadı vb.) işaretle → iade tutarından düşülür.
                             Tam iadede de tiklenebilir: işaretliyse net = ödenen − kargo. */}
                         {(() => {
+                          // FATURA NE İSE O: yalnız faturada ÖDENMİŞ kargo varsa mahsup gösterilir.
+                          // Ücretsiz kargoda uydurma 99 TL ÇEKİLMEZ (kutu hiç gösterilmez).
                           const paid = Number(r.shipping_cost) > 0;
-                          const amt = paid ? Number(r.shipping_cost) : Number(freeShipFee) || 0;
+                          const amt = paid ? Number(r.shipping_cost) : 0;
                           if (amt <= 0) return null;
                           const sel = !!cargoSel[r.id];
                           return (

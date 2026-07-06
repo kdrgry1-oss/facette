@@ -397,11 +397,13 @@ async def get_orders(
         # Açıkça "kapalı durumları da göster" istendi → durum filtresi uygulanmaz.
         pass
     else:
-        # VARSAYILAN: ana "Tüm Siparişler" görünümünde iptal/iade/iade-bedeli kapalı
-        # durumları GİZLE. Böylece iptal edilen sipariş ana listede KALMAZ; yalnızca
-        # İptaller / İade Edilenler sayfalarında (status= ile) listelenir.
-        # return_approved = iade onaylandı, "İade Bedeli Öde" aşamasında → buradan da çıkar.
-        query["status"] = {"$nin": ["cancelled", "returned", "refunded", "return_approved"]}
+        # VARSAYILAN: ana "Tüm Siparişler" görünümünde iptal/İADE grubu kapalı durumları GİZLE.
+        # Böylece iade TALEBİ oluşan sipariş de ana listede KALMAZ, İadeler sayfasına "gider".
+        # (return_requested/in_transit/rejected/partial_refunded dahil — hepsi İadeler'de listelenir.)
+        query["status"] = {"$nin": [
+            "cancelled", "returned", "refunded", "return_approved",
+            "return_requested", "return_in_transit", "return_rejected", "partial_refunded",
+        ]}
     if phone:
         query["shipping_address.phone"] = {"$regex": phone, "$options": "i"}
     if email:
@@ -1240,6 +1242,16 @@ async def update_order_status(
         _set["return_approved_at"] = _now
     if status in ("refunded", "partial_refunded"):
         _set["refund_paid_at"] = _now
+    # ELLE (admin) bir İADE durumuna çekilen sipariş: 'manuel öncelik' bayrağı → pazaryeri
+    # siparişi olsa bile İadeler sayfasında görünür (aksi halde Trendyol/HB filtrelenip kayboluyordu).
+    _RETURN_STS = {"return_requested", "return_approved", "return_rejected",
+                   "return_in_transit", "returned", "refunded", "partial_refunded"}
+    if status in _RETURN_STS:
+        _set["manual_return"] = True
+        _set["manual_return_at"] = _now
+    else:
+        # İade dışı bir duruma dönerse manuel iade bayrağı kalkar (tutarlılık).
+        _set["manual_return"] = False
 
     # "Sipariş Onaylandı" (confirmed) → havale/EFT siparişinde ödeme bildirimini de
     # OTOMATİK onayla: payment_status=paid. Sipariş içine girmeden listeden onaylayınca
@@ -5385,20 +5397,19 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     prod_gross = _round2(sum(_round2(it.get("unit_price", it.get("price", 0))) * _q(it) for it in items))
     prod_net = _round2(sum(_round2(it.get("price", 0)) * _q(it) for it in items))
 
-    # Kargo bedeli kaynağı:
-    #   faturada ücret VARSA (shipping_cost>0) → ödenmiş kargodur, iadeye + olarak EKLENİR;
-    #   YOKSA (ücretsiz kargo) → vitrindeki standart kargo ücreti, kısmi iadede müşteriye
-    #   yansıtılabilir (− mahsup). Standart ücret /api/settings ile aynı kaynaktan okunur.
+    # Kargo bedeli kaynağı — FATURA NE İSE O:
+    #   faturada ücret VARSA (shipping_cost>0) → ödenmiş kargodur, iadeye + olarak EKLENİR.
+    #   YOKSA (ücretsiz kargo) → faturada kargo YOK; iadede de UYDURMA bir 99 TL çekilmez.
+    #   (Operatör yine de kesmek isterse payload.cargo_override ile tutar geçebilir.)
     shipping_cost = _round2(order.get("shipping_cost") or 0)
     paid_shipping = shipping_cost > 0.009
     if paid_shipping:
         cargo_amount = shipping_cost
     else:
         try:
-            _thr, _fee = await _storefront_free_shipping()
+            cargo_amount = _round2(float((payload or {}).get("cargo_override") or 0))
         except Exception:
-            _fee = 0.0
-        cargo_amount = _round2(_fee or 0)
+            cargo_amount = 0.0
     include_cargo = bool((payload or {}).get("include_cargo"))
 
     order_total = _round2(order.get("total") or 0)
