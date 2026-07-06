@@ -3136,14 +3136,19 @@ async def _order_derived_trendyol_returns(search: str = "", claim_type: str = ""
         "shipping_address": 1, "billing_address": 1, "customer_name": 1, "full_name": 1,
         "total": 1, "subtotal": 1, "invoice_number": 1, "created_at": 1, "updated_at": 1,
         "payment_method": 1, "return_request": 1, "cargo_tracking_number": 1,
-        "cargo_provider_name": 1,
+        "cargo_provider_name": 1, "manual_return": 1, "manual_return_at": 1,
     }
     _rx = re.compile(_search_tr_regex(search.strip()), re.IGNORECASE) if search else None
     out = []
     async for o in db.orders.find(q, proj).sort("updated_at", -1):
         onum = str(o.get("order_number") or "")
-        if onum and onum in exclude:
-            continue  # Trendyol senkronundan gerçek claim zaten geldi → tekrarlama
+        # MANUEL ÖNCELİK (Kadir kuralı): admin bir siparişi elle iade durumuna çektiyse
+        # (manual_return=true) o satır claim'i ne olursa olsun HER ZAMAN gösterilir ve
+        # varsa gerçek claim'i EZER (aşağıda get_trendyol_claims o claim'i düşürür).
+        # Yalnızca elle-çekilmemiş siparişlerde 'senkron claim'i zaten var → tekrarlama'
+        # kuralı geçerli.
+        if onum and onum in exclude and not o.get("manual_return"):
+            continue
         addr = o.get("shipping_address") or {}
         bill = o.get("billing_address") or {}
         name = (" ".join([addr.get("first_name") or "", addr.get("last_name") or ""]).strip()
@@ -3173,7 +3178,10 @@ async def _order_derived_trendyol_returns(search: str = "", claim_type: str = ""
             "claim_status": st, "order_status": st,
             "manual": True, "source": "order_status",
             "customer_name": name,
-            "created_date": o.get("updated_at") or o.get("created_at") or "",
+            # Sıralama tarihi: elle iade işlemi tarihi (manual_return_at) öncelikli ki
+            # yeni çekilen manuel iade listenin EN ÜSTÜNde çıksın (eski sipariş tarihiyle
+            # sayfa sonuna düşüp "kaybolmasın").
+            "created_date": o.get("manual_return_at") or o.get("updated_at") or o.get("created_at") or "",
             "items": items, "refund_amount": net,
             "invoice_number": str(o.get("invoice_number") or ""),
             "cargo_tracking_number": str(o.get("cargo_tracking_number") or ""),
@@ -3632,6 +3640,12 @@ async def get_trendyol_claims(
                     if c.get("order_number") and _claim_bucket(c) != "iptal"}
     _manual_rows = await _order_derived_trendyol_returns(
         search=search, claim_type=claim_type, exclude_order_numbers=_seen_orders)
+    # MANUEL ÖNCELİK: elle iade durumuna çekilen sipariş için üretilen manuel satır,
+    # aynı sipariş no'ya ait gerçek claim'i EZER — o claim'i listeden düşür, manuel satır kalsın.
+    _manual_onums = {r.get("order_number") for r in _manual_rows if r.get("order_number")}
+    if _manual_onums:
+        deduped = [c for c in deduped
+                   if not (c.get("order_number") in _manual_onums and not c.get("manual"))]
     deduped = deduped + _manual_rows
 
     # (b) trendyol_claims koleksiyonu pazaryeri iade kayıtlarını tutar; HB iadeleri de
@@ -3757,6 +3771,10 @@ async def export_trendyol_claims(
     _seen_orders = {c.get("order_number") for c in deduped
                     if c.get("order_number") and _claim_bucket(c) != "iptal"}
     _manual_rows = await _order_derived_trendyol_returns(search=search, exclude_order_numbers=_seen_orders)
+    _manual_onums = {r.get("order_number") for r in _manual_rows if r.get("order_number")}
+    if _manual_onums:
+        deduped = [c for c in deduped
+                   if not (c.get("order_number") in _manual_onums and not c.get("manual"))]
     deduped = deduped + _manual_rows
     # Platform süzmesi (liste ucuyla aynı kural): hepsiburada -> yalnız HB; trendyol/boş -> HB olmayanlar.
     _plt = str(platform or "trendyol").strip().lower()
