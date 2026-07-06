@@ -230,6 +230,14 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
     try {
       await axios.put(`${API}/orders/${row.id}/status?status=${encodeURIComponent(newStatus)}`, {}, auth());
+      // Yeni durum İADE grubu DIŞINDAYSA (ör. 'İptal Edildi') sipariş artık iade sayfasına
+      // ait DEĞİL → satırı listeden düş. Böylece iptal edilen sipariş burada asılı kalmaz,
+      // İptaller sayfasında (status=cancelled) görünür. (Aktif filtre eşleşmiyorsa da düşür.)
+      const stillHere = ALL_RETURN_STATUSES.includes(newStatus)
+        && (!statusFilter || statusFilter.split(",").includes(newStatus));
+      if (!stillHere) {
+        setRows((rs) => rs.filter((r) => r.id !== row.id));
+      }
       toast.success(`Durum güncellendi: ${lbl(newStatus)}`);
     } catch (e) {
       setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: prev } : r)));
