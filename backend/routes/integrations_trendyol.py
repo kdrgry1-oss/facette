@@ -1158,6 +1158,14 @@ async def sync_products_to_trendyol(
 
         def _push(ty_id: int, value_id=None, custom=None):
             """Cache'e karşı doğrulayarak append."""
+            # Trendyol'un BU kategorisinde OLMAYAN attribute'ı GÖNDERME. Sistemde birden çok
+            # pazaryeri eşlemesi olduğundan HB (Hepsiburada) attribute id'leri veya eski/yanlış
+            # Trendyol id'leri sızabiliyor; bunlar Trendyol'da geçersizdir ve TÜM ürünü reddettirir.
+            # meta (Trendyol'dan çekilen gerçek kategori attribute'ları) doluyken yalnız geçerli
+            # id'ler geçer; meta boşsa (çekilemedi) over-filter yapma (eski davranış).
+            if meta and ty_id not in meta:
+                logger.info(f"[TY ATTR] kategori disi attribute atlandi id={ty_id} (Trendyol meta'da yok)")
+                return False
             am = meta.get(ty_id) or {}
             # Dosya linki / sertifika gerektiren attribute'ları skip (custom text kabul etmez)
             am_name = (am.get("name") or "").lower()

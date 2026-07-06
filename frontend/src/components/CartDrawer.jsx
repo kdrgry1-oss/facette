@@ -16,6 +16,20 @@ export default function CartDrawer() {
 
   const [suggestions, setSuggestions] = useState([]);
   const [bestsellers, setBestsellers] = useState([]);
+  // Kampanya/kupon indirimi — Sepet SAYFASI ile AYNI motor (evaluate). Önceden çekmece
+  // indirimi hiç hesaplamıyor, ürünleri tam fiyatla gösteriyordu ("sepete ekleyince ilk fiyat").
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  useEffect(() => {
+    if (!isOpen || items.length === 0) { setPromoDiscount(0); return; }
+    let cancel = false;
+    axios.post(`${API}/coupons/evaluate`, {
+      cart_total: total,
+      items: items.map((it) => ({ product_id: it.productId, category_id: it.categoryId, price: it.price, qty: it.quantity })),
+    })
+      .then((r) => { if (!cancel) setPromoDiscount(Number(r.data?.total_discount || 0)); })
+      .catch(() => { if (!cancel) setPromoDiscount(0); });
+    return () => { cancel = true; };
+  }, [isOpen, items, total]);
 
   // Sepet ürünlerine göre kombin önerisi (cart-suggestions API)
   useEffect(() => {
@@ -236,6 +250,18 @@ export default function CartDrawer() {
               <span className="text-xs tracking-[0.2em] uppercase text-black/60">Ara Toplam</span>
               <span className="text-base font-medium tabular-nums">{total.toFixed(2)} TL</span>
             </div>
+            {promoDiscount > 0 && (
+              <>
+                <div className="flex justify-between items-baseline text-emerald-700" data-testid="drawer-promo-discount">
+                  <span className="text-xs tracking-[0.15em] uppercase">İndirim</span>
+                  <span className="text-sm font-medium tabular-nums">-{promoDiscount.toFixed(2)} TL</span>
+                </div>
+                <div className="flex justify-between items-baseline pt-1 border-t border-black/10">
+                  <span className="text-xs tracking-[0.2em] uppercase text-black/70">Toplam</span>
+                  <span className="text-base font-semibold tabular-nums">{Math.max(0, total - promoDiscount).toFixed(2)} TL</span>
+                </div>
+              </>
+            )}
             {freeShippingThreshold != null && remaining <= 0 && (
               <p className="text-[11px] text-emerald-700 text-center">
                 Ücretsiz kargo kazandınız

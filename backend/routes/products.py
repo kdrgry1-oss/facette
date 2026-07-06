@@ -1224,6 +1224,16 @@ async def _auto_campaigns_for_badges() -> list:
     import time as _time
     if _time.time() - _CAMP_BADGE_CACHE["t"] < 30:
         return _CAMP_BADGE_CACHE["rows"]
+    # Rozet, promo motoruyla TUTARLI olmalı: otomatik uygulama kapalıysa motor indirimi
+    # uygulamaz → rozet de gösterilmemeli (aksi halde %10 rozet var ama sepette indirim yok).
+    try:
+        _s = await db.settings.find_one({"id": "main"}, {"_id": 0, "promo_auto_apply_enabled": 1}) or {}
+        if "promo_auto_apply_enabled" in _s and not bool(_s.get("promo_auto_apply_enabled")):
+            _CAMP_BADGE_CACHE["t"] = _time.time()
+            _CAMP_BADGE_CACHE["rows"] = []
+            return []
+    except Exception:
+        pass
     now_iso = datetime.now(timezone.utc).isoformat()
     q = {
         "is_active": True, "auto_apply": True, "type": "percent",
@@ -1712,6 +1722,56 @@ async def assign_variant_ids(payload: dict):
         "updated_variants": updated_variants,
         "products": touched,
         "map": size_map,
+    }
+
+
+@router.post("/backfill-variant-ids", dependencies=[Depends(require_admin)])
+async def backfill_variant_ids(payload: dict = None):
+    """id / urun_id'si EKSİK varyantlara OTOMATİK id + urun_id atar (elle map gerekmez).
+
+    Sonradan eklenen varyantlar (ör. XXS) id'siz kalmışsa toplu düzeltir. Yalnız BOŞ olanı
+    doldurur, dolu id/urun_id'yi EZMEZ.
+    Body (opsiyonel):
+      {}                          -> TÜM ürünler
+      {"product_id": "..."}       -> tek ürün
+      {"name": "keten elbise"}    -> isme göre (regex, birden çok ürün olabilir)
+    """
+    payload = payload or {}
+    pid = str(payload.get("product_id") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    if pid:
+        query = {"id": pid}
+    elif name:
+        query = {"name": {"$regex": re.escape(name), "$options": "i"}}
+    else:
+        query = {}
+
+    used_uid_set = await build_used_urun_id_set()
+    updated_products = 0
+    updated_variants = 0
+    touched = []
+    async for p in db.products.find(query):
+        variants = p.get("variants") or []
+        changed = False
+        for v in variants:
+            if not str(v.get("id") or "").strip():
+                v["id"] = generate_id()
+                changed = True
+            if not str(v.get("urun_id") or "").strip():
+                v["urun_id"] = next_urun_id(used_uid_set)
+                updated_variants += 1
+                changed = True
+        if changed:
+            await db.products.update_one(
+                {"id": p["id"]},
+                {"$set": {"variants": variants, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            updated_products += 1
+            touched.append({"id": p["id"], "name": p.get("name")})
+    return {
+        "updated_products": updated_products,
+        "updated_variants": updated_variants,
+        "products": touched[:100],
     }
 
 
