@@ -4,7 +4,7 @@ import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
 import { useCart } from "../context/CartContext";
-import { priceView } from "../lib/price";
+import { priceView, cartLineView } from "../lib/price";
 import { trackRemoveFromCart } from "../lib/dataLayer";
 
 // Çekmece öneri fiyatı — indirim varsa üstü çizili liste + indirimli (tutarlı).
@@ -153,7 +153,20 @@ export default function CartDrawer() {
                       {item.color && <p>Renk: {item.color}</p>}
                       {item.size && <p>Beden: {item.size}</p>}
                     </div>
-                    <p className="text-sm font-medium mt-2 tabular-nums">{item.price.toFixed(2)} TL</p>
+                    {(() => {
+                      const lv = cartLineView(item);
+                      return lv.hasDiscount ? (
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] text-black/40 line-through tabular-nums">{lv.listUnit.toFixed(2)} TL</span>
+                          <span className="text-sm font-medium text-red-600 tabular-nums">{lv.unit.toFixed(2)} TL</span>
+                          <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                            %{lv.discountPct} İNDİRİM
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-sm font-medium mt-2 tabular-nums">{lv.unit.toFixed(2)} TL</p>
+                      );
+                    })()}
 
                     <div className="flex items-center justify-between mt-3">
                       <div className="inline-flex items-center border border-black/15">
@@ -261,22 +274,35 @@ export default function CartDrawer() {
             )}
 
             <div className="border-t border-black/10 px-5 py-4 space-y-3">
-            <div className="flex justify-between items-baseline">
-              <span className="text-xs tracking-[0.2em] uppercase text-black/60">Ara Toplam</span>
-              <span className="text-base font-medium tabular-nums">{total.toFixed(2)} TL</span>
-            </div>
-            {promoDiscount > 0 && (
-              <>
-                <div className="flex justify-between items-baseline text-emerald-700" data-testid="drawer-promo-discount">
-                  <span className="text-xs tracking-[0.15em] uppercase">İndirim</span>
-                  <span className="text-sm font-medium tabular-nums">-{promoDiscount.toFixed(2)} TL</span>
-                </div>
-                <div className="flex justify-between items-baseline pt-1 border-t border-black/10">
-                  <span className="text-xs tracking-[0.2em] uppercase text-black/70">Toplam</span>
-                  <span className="text-base font-semibold tabular-nums">{Math.max(0, total - promoDiscount).toFixed(2)} TL</span>
-                </div>
-              </>
-            )}
+            {(() => {
+              // Ürün-seviyesi indirim (sale_price + otomatik kampanya) satırlardan hesaplanır →
+              // "Ara Toplam / İndirim / Toplam" kalemlerdeki üstü-çizili görünümle birebir tutarlı.
+              const listSum = items.reduce((s, it) => s + cartLineView(it).listUnit * it.quantity, 0);
+              const effSum = items.reduce((s, it) => s + cartLineView(it).unit * it.quantity, 0);
+              const productDisc = Math.max(0, listSum - effSum);
+              // Sepet-seviyesi ekstra indirim (kupon/koşullu kampanya) evaluate'ten gelebilir.
+              const extraDisc = Math.max(0, promoDiscount - productDisc);
+              const grand = Math.max(0, effSum - extraDisc);
+              const anyDisc = productDisc + extraDisc;
+              return (
+                <>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs tracking-[0.2em] uppercase text-black/60">Ara Toplam</span>
+                    <span className="text-base font-medium tabular-nums">{listSum.toFixed(2)} TL</span>
+                  </div>
+                  {anyDisc > 0.001 && (
+                    <div className="flex justify-between items-baseline text-emerald-700" data-testid="drawer-promo-discount">
+                      <span className="text-xs tracking-[0.15em] uppercase">İndirim</span>
+                      <span className="text-sm font-medium tabular-nums">-{anyDisc.toFixed(2)} TL</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-baseline pt-1 border-t border-black/10">
+                    <span className="text-xs tracking-[0.2em] uppercase text-black/70">Toplam</span>
+                    <span className="text-base font-semibold tabular-nums">{grand.toFixed(2)} TL</span>
+                  </div>
+                </>
+              );
+            })()}
             {freeShippingThreshold != null && remaining <= 0 && (
               <p className="text-[11px] text-emerald-700 text-center">
                 Ücretsiz kargo kazandınız

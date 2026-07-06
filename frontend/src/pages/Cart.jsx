@@ -8,7 +8,7 @@ import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { optimizeImg } from "../lib/img";
-import { priceView } from "../lib/price";
+import { priceView, cartLineView } from "../lib/price";
 import { trackViewCart } from "../utils/pixelEvents";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -49,7 +49,13 @@ export default function Cart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, total, user?.id]);
 
-  const grandTotal = Math.max(0, total - promoDiscount) + shippingCost;
+  // Ürün-seviyesi indirim (sale_price + otomatik kampanya) — satırlarla birebir tutarlı özet.
+  const listSum = items.reduce((s, it) => s + cartLineView(it).listUnit * it.quantity, 0);
+  const effSum = items.reduce((s, it) => s + cartLineView(it).unit * it.quantity, 0);
+  const productDisc = Math.max(0, listSum - effSum);
+  const extraDisc = Math.max(0, promoDiscount - productDisc);   // kupon/koşullu kampanya farkı
+  const totalDisc = productDisc + extraDisc;
+  const grandTotal = Math.max(0, effSum - extraDisc) + shippingCost;
 
   // Kombin / sale öneriler
   const [suggestions, setSuggestions] = useState([]);
@@ -209,9 +215,20 @@ export default function Cart() {
                           <Plus size={12} />
                         </button>
                       </div>
-                      <p className="text-sm sm:text-base font-medium tabular-nums">
-                        {(item.price * item.quantity).toFixed(2)} TL
-                      </p>
+                      {(() => {
+                        const lv = cartLineView(item);
+                        return lv.hasDiscount ? (
+                          <div className="text-right">
+                            <p className="text-[11px] text-black/40 line-through tabular-nums">{(lv.listUnit * item.quantity).toFixed(2)} TL</p>
+                            <p className="text-sm sm:text-base font-medium text-red-600 tabular-nums">{(lv.unit * item.quantity).toFixed(2)} TL</p>
+                            <span className="text-[9px] font-semibold text-emerald-700">%{lv.discountPct} indirim uygulandı</span>
+                          </div>
+                        ) : (
+                          <p className="text-sm sm:text-base font-medium tabular-nums">
+                            {(lv.unit * item.quantity).toFixed(2)} TL
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -227,15 +244,15 @@ export default function Cart() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-black/60">Ara toplam</span>
-                  <span className="tabular-nums">{total.toFixed(2)} TL</span>
+                  <span className="tabular-nums">{listSum.toFixed(2)} TL</span>
                 </div>
-                {promoDiscount > 0 && (
+                {totalDisc > 0.001 && (
                   <div className="flex justify-between text-emerald-700" data-testid="cart-promo-discount">
                     <span>
-                      Kampanya indirimi
+                      İndirim
                       {appliedPromotions.length > 0 && appliedPromotions[0]?.title ? ` (${appliedPromotions[0].title})` : ""}
                     </span>
-                    <span className="tabular-nums">-{promoDiscount.toFixed(2)} TL</span>
+                    <span className="tabular-nums">-{totalDisc.toFixed(2)} TL</span>
                   </div>
                 )}
                 <div className="flex justify-between">

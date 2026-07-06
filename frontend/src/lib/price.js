@@ -38,3 +38,19 @@ export function priceView(product) {
 export function fmtTL(n) {
   return (Number(n) || 0).toFixed(2).replace(".", ",") + " TL";
 }
+
+// SEPET KALEMİ görünümü — kalem eklenirken saklanan listPrice/price/campaignPct'ten
+// birim indirim durumunu çıkarır. Böylece sepete ekler eklemez "indirim uygulandı"
+// (üstü çizili liste + indirimli birim) satırda görünür.
+//   listUnit : üstü çizili liste birim fiyatı
+//   unit     : indirimli birim fiyat (sale_price + otomatik kampanya)
+export function cartLineView(item) {
+  const it = item || {};
+  const money = Number(it.price || 0);                 // sale_price tabanı (para hesabı)
+  const camp = Number(it.campaignPct || 0);
+  const unit = camp > 0 ? Math.round(money * (1 - camp / 100) * 100) / 100 : money;
+  const listUnit = Number(it.listPrice != null ? it.listPrice : money) || unit;
+  const hasDiscount = listUnit > unit + 0.001;
+  const discountPct = hasDiscount ? Math.round(((listUnit - unit) / listUnit) * 100) : 0;
+  return { listUnit, unit, hasDiscount, discountPct, campaignPct: camp };
+}

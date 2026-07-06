@@ -39,10 +39,12 @@ export function CartProvider({ children }) {
         );
       }
 
-      // Calculate price with variant adjustment
-      const basePrice = product.sale_price || product.price;
+      // Fiyat: para hesabı için sale_price tabanı (kampanya sepet/sunucu tarafında uygulanır).
+      // listPrice + campaignPct: sepette "indirim uygulandı" görünümü için (üstü çizili + indirimli).
+      const listBase = Number(product.price) || 0;
+      const saleBase = product.sale_price && product.sale_price < listBase ? product.sale_price : listBase;
       const priceDiff = variant?.price_diff || variant?.price_adjustment || 0;
-      const finalPrice = basePrice + priceDiff;
+      const finalPrice = saleBase + priceDiff;
 
       return [
         ...prev,
@@ -54,6 +56,8 @@ export function CartProvider({ children }) {
           variantId: variant?.id || null,
           name: product.name,
           price: finalPrice,
+          listPrice: listBase + priceDiff,
+          campaignPct: Number(product.campaign_discount_percent || 0),
           image: product.images?.[0] || "",
           size: variant?.size || null,
           color: variant?.color || null,
