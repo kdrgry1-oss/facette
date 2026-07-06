@@ -34,14 +34,19 @@ function estimateDelivery(minDays = 2, maxDays = 4) {
   return `${fmt(addBiz(now, minDays))} - ${fmt(addBiz(now, maxDays))}`;
 }
 
-// "xx saat içinde sipariş ver → bugün/yarın kargoda" aciliyet ibaresi.
-// Cutoff: hafta içi 16:00. Öncesinde → bugün kargoda; sonrasında/haftasonu → bir
-// sonraki iş günü kargoda.
-function shippingCutoff(cutoffHour = 16) {
+// "xx saat içinde sipariş ver → bugün/… kargoda" aciliyet ibaresi.
+// KURAL: Cumartesi/Pazar kargo YOK. Cutoff hafta içi 12:00.
+//  • Hafta içi ve 12:00'dan önce  → bugün kargoda (kalan süre sayacı)
+//  • Hafta içi 12:00'dan sonra     → bir sonraki İŞ GÜNÜ kargoda
+//  • Cumartesi/Pazar               → Pazartesi kargoda (hafta sonu atlanır)
+// Böylece hafta sonu asla "bugün/yarın (Cmt/Paz) kargoda" YAZMAZ; gerçek sevk günü gösterilir.
+const _TR_DAYS = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+function shippingCutoff(cutoffHour = 12) {
   const now = new Date();
-  const wd = now.getDay(); // 0 Paz, 6 Cmt
+  const wd = now.getDay(); // 0 Paz … 6 Cmt
   const isWeekend = wd === 0 || wd === 6;
   const beforeCutoff = now.getHours() < cutoffHour;
+
   if (!isWeekend && beforeCutoff) {
     const remMs = new Date(now).setHours(cutoffHour, 0, 0, 0) - now.getTime();
     const h = Math.floor(remMs / 3600000);
@@ -49,7 +54,19 @@ function shippingCutoff(cutoffHour = 16) {
     const left = h >= 1 ? `${h} saat ${m} dk` : `${m} dk`;
     return { urgent: true, text: `Sonraki ${left} içinde sipariş ver,`, strong: "bugün kargoda." };
   }
-  return { urgent: false, text: "Siparişin", strong: "yarın kargoda." };
+
+  // Sonraki iş günü (Cmt/Paz atlanır)
+  const next = new Date(now);
+  do { next.setDate(next.getDate() + 1); } while (next.getDay() === 0 || next.getDay() === 6);
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = next.toDateString() === tomorrow.toDateString();
+  const label = isTomorrow ? "yarın" : _TR_DAYS[next.getDay()];
+  // Hafta içi cutoff sonrası: yarın kargoda. Hafta sonu: "Pazartesi (12:00'a kadar) kargoda."
+  return {
+    urgent: false,
+    text: isWeekend ? `${label} 12:00'a kadar verilen siparişler` : "Siparişin",
+    strong: `${label} kargoda.`,
+  };
 }
 
 // Son gezilen ürünler — localStorage'da küçük anlık görüntü (snapshot) listesi.

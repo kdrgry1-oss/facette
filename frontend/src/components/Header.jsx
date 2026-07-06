@@ -681,7 +681,7 @@ export default function Header({ hideMenu = false }) {
                           <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                         </div>
                         <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
-                        <p className="text-xs font-light text-gray-600">{p.price?.toFixed(2).replace('.', ',')} TL</p>
+                        <MegaPrice p={p} />
                       </button>
                     ))}
                   </div>
@@ -697,7 +697,7 @@ export default function Header({ hideMenu = false }) {
                         <img src={optimizeImg(p.images?.[0], 500)} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
                       </div>
                       <p className="text-xs font-light line-clamp-1 mb-0.5">{p.name}</p>
-                      <p className="text-xs font-light text-gray-600">{p.price?.toFixed(2).replace('.', ',')} TL</p>
+                      <MegaPrice p={p} />
                     </button>
                   ))}
                 </div>
