@@ -2242,6 +2242,120 @@ async def get_advanced_values(
 
 
 # ===================================================================== #
+#  ÖZNİTELİK DENETİMİ — ürün/kategori değerleri Trendyol'a uyuyor mu? (SALT-OKUNUR)
+# ===================================================================== #
+def _ty_attr_map_from_cache(cached_attrs) -> dict:
+    """Trendyol cache attribute listesi -> {norm_ad: {name, value_norms(set), values[], required, allow_custom}}."""
+    m = {}
+    for a in (cached_attrs or []):
+        nm = ((a.get("attribute") or {}).get("name")) or a.get("name") or a.get("attributeName") or ""
+        if not nm:
+            continue
+        vals = a.get("attributeValues") or a.get("values") or []
+        vnames = [str((v or {}).get("name") if isinstance(v, dict) else v) for v in vals if v]
+        m[_hb_sysnorm(nm)] = {
+            "name": nm,
+            "value_norms": set(_hb_sysnorm(x) for x in vnames),
+            "values": vnames,
+            "required": bool(a.get("required")),
+            "allow_custom": bool(a.get("allowCustom") or a.get("allow_custom") or a.get("varianter")),
+        }
+    return m
+
+
+@router.get("/audit/trendyol-attributes")
+async def trendyol_attribute_audit(
+    local_category_id: str = "",
+    product_limit: int = 1000,
+    current_user: dict = Depends(require_admin),
+):
+    """SALT-OKUNUR öznitelik denetimi — hiçbir şeyi DEĞİŞTİRMEZ.
+
+    Parametresiz: Trendyol'a eşleşmiş her yerel kategori için özet (ürün sayısı, Trendyol
+    öznitelik sayısı, cache durumu).
+    local_category_id verilirse: o kategorinin Trendyol öznitelik+değerleri + o kategorideki
+    ürünlerin Trendyol'da KARŞILIĞI OLMAYAN (fazla) değerleri + zorunlu olup BOŞ (eksik)
+    öznitelikleri listelenir. Değerler kategoriye özel olduğundan denetim kategori bazlıdır.
+    """
+    mappings = await db.category_mappings.find(
+        {"marketplace": "trendyol", "marketplace_category_id": {"$nin": [None, ""]}},
+        {"_id": 0, "category_id": 1, "marketplace_category_id": 1, "value_mappings": 1},
+    ).to_list(None)
+
+    async def _ty_attrs(mp_cat_id):
+        if not str(mp_cat_id).isdigit():
+            return {}
+        cached = await db.trendyol_category_attributes.find_one(
+            {"category_id": int(mp_cat_id)}, {"_id": 0, "attributes": 1})
+        return _ty_attr_map_from_cache((cached or {}).get("attributes"))
+
+    if not local_category_id:
+        out = []
+        for mp in mappings:
+            lc, tyc = mp.get("category_id"), mp.get("marketplace_category_id")
+            amap = await _ty_attrs(tyc)
+            pcount = await db.products.count_documents({"category_id": lc, "is_deleted": {"$ne": True}})
+            catdoc = await db.categories.find_one({"id": lc}, {"_id": 0, "name": 1})
+            out.append({
+                "local_category_id": lc, "local_name": (catdoc or {}).get("name") or lc,
+                "trendyol_category_id": tyc, "trendyol_attr_count": len(amap),
+                "trendyol_cached": bool(amap), "product_count": pcount,
+            })
+        out.sort(key=lambda x: -x["product_count"])
+        return {"mode": "summary", "total_mapped": len(mappings),
+                "cache_missing": [o for o in out if not o["trendyol_cached"]][:50],
+                "categories": out}
+
+    mp = next((m for m in mappings if str(m.get("category_id")) == str(local_category_id)), None)
+    if not mp:
+        raise HTTPException(status_code=404, detail="Bu yerel kategori Trendyol'a eşleşmemiş")
+    amap = await _ty_attrs(mp.get("marketplace_category_id"))
+    if not amap:
+        return {"mode": "detail", "local_category_id": local_category_id,
+                "hint": "Trendyol öznitelikleri cache'de yok — önce kategori eşleştirme ekranında 'yenile' ile çekin."}
+
+    prods = await db.products.find(
+        {"category_id": local_category_id, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "attributes": 1},
+    ).limit(max(1, min(product_limit, 5000))).to_list(None)
+
+    issues = []
+    for p in prods:
+        pa = p.get("attributes") or {}
+        pa_norm_keys = {_hb_sysnorm(k) for k in pa.keys()}
+        invalid, missing_required = [], []
+        for k, v in pa.items():
+            if v in (None, "", []):
+                continue
+            kn = _hb_sysnorm(k)
+            info = amap.get(kn)
+            if info and not info["allow_custom"] and info["value_norms"]:
+                for vv in (v if isinstance(v, list) else [v]):
+                    if vv and _hb_sysnorm(str(vv)) not in info["value_norms"]:
+                        invalid.append({"attr": k, "value": vv})
+        for kn, info in amap.items():
+            if info["required"] and kn not in pa_norm_keys:
+                missing_required.append(info["name"])
+        if invalid or missing_required:
+            issues.append({"id": p.get("id"), "name": p.get("name"),
+                           "invalid": invalid[:12], "missing_required": missing_required[:12]})
+
+    return {
+        "mode": "detail",
+        "local_category_id": local_category_id,
+        "trendyol_category_id": mp.get("marketplace_category_id"),
+        "trendyol_attributes": [
+            {"name": i["name"], "value_count": len(i["values"]), "required": i["required"],
+             "allow_custom": i["allow_custom"]}
+            for i in sorted(amap.values(), key=lambda x: x["name"])
+        ],
+        "product_count": len(prods),
+        "products_with_issues": len(issues),
+        "issues": issues[:150],
+    }
+
+
+# ===================================================================== #
 #  TEMİZLİK — bozuk "null" değer eşleştirmeleri (frontend bug, düzeltildi)
 # ===================================================================== #
 @router.get("/cleanup/null-value-mappings-scan")
