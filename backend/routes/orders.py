@@ -1831,6 +1831,66 @@ async def recover_charged_orders(
     return result
 
 
+@router.post("/missing-size")
+async def find_missing_size_orders(
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Bedeni OLAN üründe kalemi BEDENSİZ kalmış siparişleri bulur (tanı — sadece rapor).
+
+    Ürün kartındaki '+' hızlı-ekleme, bedenli üründe beden seçtirmeden ekleyince siparişe
+    bedensiz kalem düşüyordu (ör. W10322 bermuda şort). Bu uç, düzeltme öncesi verilmiş bu
+    tür siparişleri listeler ki müşterilerine bedenini sorabilesiniz. Hiçbir şeyi DEĞİŞTİRMEZ.
+
+    payload: {days?: int=30}. İptal/expired siparişler hariç tutulur."""
+    payload = payload or {}
+    days = int(payload.get("days", 30) or 30)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    _has_size_cache = {}  # product_id -> bool (üründe beden-varyantı var mı)
+
+    async def _product_has_sizes(pid):
+        if pid in _has_size_cache:
+            return _has_size_cache[pid]
+        has = False
+        try:
+            p = await db.products.find_one({"id": pid}, {"_id": 0, "variants": 1})
+            for v in ((p or {}).get("variants") or []):
+                if (v.get("size") or "").strip():
+                    has = True
+                    break
+        except Exception:
+            has = False
+        _has_size_cache[pid] = has
+        return has
+
+    flagged = []
+    async for o in db.orders.find(
+        {"created_at": {"$gte": cutoff},
+         "status": {"$nin": ["cancelled", "returned", "refunded"]}},
+        {"_id": 0, "order_number": 1, "items": 1, "shipping_address": 1, "email": 1,
+         "created_at": 1, "status": 1}):
+        bad = []
+        for it in (o.get("items") or []):
+            if (it.get("size") or "").strip():
+                continue  # bedeni var, sorun yok
+            # beden boş — varyant_id/barkod ile beden çıkarılabilir mi?
+            if it.get("variant_id") or it.get("barcode"):
+                continue  # koddan beden bulunabilir; kritik değil
+            pid = it.get("product_id")
+            if pid and await _product_has_sizes(pid):
+                bad.append({"name": it.get("name"), "product_id": pid, "quantity": it.get("quantity")})
+        if bad:
+            flagged.append({
+                "order_number": o.get("order_number"), "status": o.get("status"),
+                "created_at": o.get("created_at"),
+                "email": (o.get("shipping_address") or {}).get("email") or o.get("email"),
+                "phone": (o.get("shipping_address") or {}).get("phone"),
+                "items_missing_size": bad,
+            })
+    return {"days": days, "count": len(flagged), "orders": flagged}
+
+
 @router.post("/{order_id}/note")
 async def add_order_note(
     order_id: str,
