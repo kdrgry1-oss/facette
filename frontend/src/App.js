@@ -24,6 +24,7 @@ const TrackOrder = lazy(() => import("./pages/TrackOrder"));
 const OrderSuccess = lazy(() => import("./pages/OrderSuccess"));
 const PaymentNotification = lazy(() => import("./pages/PaymentNotification"));
 const ReturnRequest = lazy(() => import("./pages/ReturnRequest"));
+const GuestReturn = lazy(() => import("./pages/GuestReturn"));
 const MiuMiuTheme = lazy(() => import("./pages/storefront/MiuMiuTheme"));
 
 import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
@@ -96,6 +97,7 @@ function App() {
                 <Route path="/siparis-tamamlandi/:orderNumber" element={<LegacyOrderRedirect />} />
                 <Route path="/odeme-bildirimi/:orderNumber" element={<PaymentNotification />} />
                 <Route path="/iade/:orderNumber" element={<ReturnRequest />} />
+                <Route path="/iade-islemleri" element={<GuestReturn />} />
 
                 {/* Tema önizleme */}
                 <Route path="/tema/:slug" element={<MiuMiuTheme />} />

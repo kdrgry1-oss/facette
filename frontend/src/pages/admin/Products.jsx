@@ -205,6 +205,8 @@ export default function AdminProducts() {
   const [barcodePushText, setBarcodePushText] = useState("");
   const [barcodePushLoading, setBarcodePushLoading] = useState(false);
   const [validationBlock, setValidationBlock] = useState(null);
+  const [vbSelections, setVbSelections] = useState({}); // {`${prodId}|${attrId}|${localVal}`: value_id|"__remove__"|""}
+  const [vbSaving, setVbSaving] = useState(false);
   // URL'den ürün ID'si — `/admin/urunler/{productId}` ile gelen direct link
   const { productId: urlProductId } = useParams();
   const navigate = useNavigate();
@@ -4076,18 +4078,48 @@ export default function AdminProducts() {
                   <div key={j} className="text-xs text-red-600">• {e}</div>
                 ))}
                 {(r.unmatched_values || []).length > 0 && (
-                  <div className="mt-1.5">
-                    <div className="text-xs font-medium text-gray-700 mb-1">Karşılığı olmayan değerler:</div>
-                    <ul className="text-xs text-gray-700 space-y-0.5">
-                      {r.unmatched_values.map((u, k) => (
-                        <li key={k} className="flex items-center gap-1.5" data-testid={`vblock-${r.stock_code}-${u.mp_attr_id}`}>
-                          <span className="px-1.5 py-0.5 bg-white border border-gray-300 rounded">{u.attr_name}</span>
-                          <span className="text-gray-400">=</span>
-                          <span className="font-semibold text-amber-700">{u.local_value}</span>
-                          {u.required && <span className="text-[10px] text-red-600 font-bold ml-1">(ZORUNLU)</span>}
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="mt-2">
+                    <div className="text-xs font-medium text-gray-700 mb-1.5">
+                      Değer eşleştirme — <span className="text-gray-500">Trendyol'un kabul ettiği değeri seçin</span>:
+                    </div>
+                    <div className="space-y-2">
+                      {r.unmatched_values.map((u, k) => {
+                        const key = `${r.id}|${u.mp_attr_id}|${u.local_value}`;
+                        const cur = vbSelections[key] !== undefined
+                          ? vbSelections[key]
+                          : (u.suggested_value?.id || "");
+                        const tyVals = u.trendyol_values || [];
+                        return (
+                          <div key={k} className="flex items-center gap-2 flex-wrap" data-testid={`vblock-${r.stock_code}-${u.mp_attr_id}`}>
+                            <span className="px-1.5 py-0.5 bg-white border border-gray-300 rounded text-xs">{u.attr_name}</span>
+                            <span className="text-gray-400 text-xs">:</span>
+                            <span className="font-semibold text-amber-700 text-xs">{u.local_value}</span>
+                            {u.required && <span className="text-[10px] text-red-600 font-bold">(ZORUNLU)</span>}
+                            <span className="text-gray-400 text-xs">→</span>
+                            <select
+                              value={cur}
+                              onChange={(e) => setVbSelections((s) => ({ ...s, [key]: e.target.value }))}
+                              className="text-xs border border-gray-300 rounded px-2 py-1 bg-white max-w-[220px]"
+                              data-testid={`vblock-select-${r.stock_code}-${u.mp_attr_id}`}
+                            >
+                              <option value="">— Trendyol değeri seçin —</option>
+                              {tyVals.map((tv) => (
+                                <option key={tv.id} value={tv.id}>
+                                  {tv.name}{u.suggested_value?.id === tv.id ? "  (önerilen)" : ""}
+                                </option>
+                              ))}
+                              {u.allow_custom && (
+                                <option value={`__custom__${u.local_value}`}>Serbest metin: {u.local_value}</option>
+                              )}
+                              <option value="__remove__">✕ Bu özelliği üründen kaldır</option>
+                            </select>
+                            {tyVals.length === 0 && (
+                              <span className="text-[10px] text-gray-500">Trendyol bu özellik için değer döndürmedi</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
                 {(r.missing_required_attrs || []).length > 0 && (
@@ -4108,10 +4140,71 @@ export default function AdminProducts() {
             </button>
             <button
               onClick={() => { setValidationBlock(null); navigate("/admin/kategori-eslestir"); }}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-black rounded hover:bg-gray-800"
+              className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded hover:bg-gray-50"
               data-testid="vblock-open-mapping-btn"
             >
-              <Store size={15} /> Eşleştirme Ekranını Aç
+              <Store size={15} /> Eşleştirme Ekranı
+            </button>
+            <button
+              disabled={vbSaving}
+              onClick={async () => {
+                // Seçimleri topla: kategori bazında value-mapping merge + üründen kaldır.
+                const byCat = {};       // category_id -> [{mp_attr_id, local_value, value_id}]
+                const removals = [];    // {product_id, attr_name}
+                let picked = 0;
+                for (const r of (validationBlock || [])) {
+                  for (const u of (r.unmatched_values || [])) {
+                    const key = `${r.id}|${u.mp_attr_id}|${u.local_value}`;
+                    const sel = vbSelections[key] !== undefined ? vbSelections[key] : (u.suggested_value?.id || "");
+                    if (!sel) continue;
+                    picked++;
+                    if (sel === "__remove__") {
+                      removals.push({ product_id: r.id, attr_name: u.attr_name });
+                    } else if (String(sel).startsWith("__custom__")) {
+                      const cat = r.category_id;
+                      (byCat[cat] = byCat[cat] || []).push({
+                        mp_attr_id: u.mp_attr_id, local_value: u.local_value,
+                        value_id: String(sel).replace("__custom__", ""),
+                      });
+                    } else {
+                      const cat = r.category_id;
+                      (byCat[cat] = byCat[cat] || []).push({
+                        mp_attr_id: u.mp_attr_id, local_value: u.local_value, value_id: sel,
+                      });
+                    }
+                  }
+                }
+                if (!picked) { toast.error("Önce en az bir değer için seçim yapın"); return; }
+                const token = localStorage.getItem("token");
+                const auth = { headers: { Authorization: `Bearer ${token}` } };
+                const t = toast.loading("Eşleştirmeler kaydediliyor…");
+                try {
+                  setVbSaving(true);
+                  for (const [cat, mappings] of Object.entries(byCat)) {
+                    if (!cat || cat === "undefined" || cat === "null") continue;
+                    await axios.post(`${API}/integrations/trendyol/value-mappings/merge`,
+                      { category_id: cat, mappings }, auth);
+                  }
+                  for (const rm of removals) {
+                    await axios.post(`${API}/integrations/trendyol/products/${rm.product_id}/remove-attribute`,
+                      { attr_name: rm.attr_name }, auth);
+                  }
+                  toast.dismiss(t);
+                  toast.success("Kaydedildi. Şimdi tekrar 'Trendyol'a Gönder' ile aktarabilirsiniz.");
+                  setVbSelections({});
+                  setValidationBlock(null);
+                } catch (e) {
+                  toast.dismiss(t);
+                  toast.error(e.response?.data?.detail || "Kaydetme başarısız");
+                } finally {
+                  setVbSaving(false);
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-black rounded hover:bg-gray-800 disabled:opacity-50"
+              data-testid="vblock-save-btn"
+            >
+              {vbSaving ? <RefreshCw className="animate-spin" size={15} /> : <Store size={15} />}
+              Kaydet
             </button>
           </div>
         </DialogContent>

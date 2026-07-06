@@ -22,6 +22,7 @@ const DEFAULT_COLUMNS = [
   ]},
   { title: "Müşteri Hizmetleri", links: [
     { to: "/siparis-takip", label: "Sipariş Takibi" },
+    { to: "/iade-islemleri", label: "İade İşlemleri" },
     { to: "/sayfa/hakkimizda", label: "Hakkımızda" },
     { to: "/sayfa/iade-kosullari", label: "İade & Değişim" },
     { to: "/sayfa/kvkk", label: "KVKK" },
@@ -92,7 +93,20 @@ export default function Footer() {
   }
 
   // Structured mode — admin sütunları/sosyal/copyright güncelledi
-  const columns = tpl?.columns || DEFAULT_COLUMNS;
+  let columns = tpl?.columns || DEFAULT_COLUMNS;
+  // "İade İşlemleri" linki her zaman görünür olsun (admin sütunları override etse bile)
+  try {
+    const hasReturn = columns.some((c) => (c.links || []).some((l) => l.to === "/iade-islemleri"));
+    if (!hasReturn) {
+      columns = columns.map((c) => c.links ? c : c); // shallow copy tetikleyici
+      const svc = columns.find((c) => /müşteri|hizmet|iade|customer/i.test(c.title || ""));
+      if (svc && svc.links) {
+        svc.links = [...svc.links, { to: "/iade-islemleri", label: "İade İşlemleri" }];
+      } else {
+        columns = [...columns, { title: "İade İşlemleri", links: [{ to: "/iade-islemleri", label: "İade İşlemleri" }] }];
+      }
+    }
+  } catch (_) { /* yoksay */ }
   const social = tpl?.social || { instagram: "https://instagram.com/facette" };
   const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette Dış. Tic. A.Ş. – Tüm hakları saklıdır.`;
 

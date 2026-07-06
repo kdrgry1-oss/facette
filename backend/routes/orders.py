@@ -4382,20 +4382,10 @@ async def _notify_return(order: dict, code: str, valid_until: str, barcode_img: 
         logger.warning(f"return notif failed: {e}")
 
 
-@router.post("/{order_id}/return-request")
-async def create_return_request(order_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
-    """Müşteri: teslimden itibaren 14 gün içinde iade talebi oluşturur (sipariş + ürün seçer).
-    3 gün geçerli DHL/MNG iade kargo kodu + barkod üretir, kaydeder ve bildirir."""
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
-    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
-    if not order:
-        order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    if order.get("user_id") and current_user.get("id") and order["user_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
-
+async def _build_return_for_order(order: dict, payload: dict, actor: dict) -> dict:
+    """İade talebi ÇEKİRDEĞİ — üye ve misafir uçları aynı mantığı kullanır.
+    14 gün penceresi (teslimden) + 3 gün kod geçerliliği + DHL/MNG iade kodu/barkod + kayıt + bildirim.
+    actor: log için {email,id,...} (üye current_user ya da misafir için sentetik)."""
     # --- 14 gün penceresi (teslim anından itibaren, 1 sn bile geçse engelle) ---
     delivered_at = order.get("delivered_at")
     if not delivered_at:
@@ -4410,11 +4400,6 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     if now > (d + timedelta(days=14)):
         raise HTTPException(status_code=400, detail="İade süresi (teslimden itibaren 14 gün) dolmuştur.")
 
-    # Zaten aktif iade var mı?
-    #   in_transit → kargoya verilmiş, mevcut kaydı döndür.
-    #   created + kod SÜRESİ GEÇMEMİŞ → aynı kodu döndür (mükerrer üretme).
-    #   created + kod SÜRESİ GEÇMİŞ → kaydı 'expired' yap; müşteri 14 gün penceresinde
-    #     olduğu (yukarıda doğrulandı) için YENİ kod üretimine devam et.
     existing = await db.customer_returns.find_one(
         {"order_id": order["id"], "status": {"$in": ["created", "in_transit"]}}, {"_id": 0}
     )
@@ -4434,11 +4419,10 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
             {"id": existing.get("id")},
             {"$set": {"status": "expired", "expired_at": now.isoformat()}})
         await _log_order_event(order["id"], "return", "İade kodu süresi doldu — yeni kod üretiliyor",
-                               current_user, {"return_id": existing.get("id"),
-                                              "old_return_code": existing.get("return_code")},
+                               actor, {"return_id": existing.get("id"),
+                                       "old_return_code": existing.get("return_code")},
                                order_number=order.get("order_number", ""))
 
-    # Seçilen kalemler (index listesi) — boşsa tüm sipariş
     src_items = order.get("items") or []
     sel = payload.get("items")
     chosen = []
@@ -4461,13 +4445,9 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     reason = (payload.get("reason") or "").strip()[:500]
 
     rid = generate_id()
-    # Müşteri iadesi = YENİ bir "IW" gönderisi gibi ele alınır; alıcı = ŞİRKET/depo adresi.
-    # iade_no  = IW referansı (ilgili siparişin "İade No"su, iade tablosunda sütun olarak görünür).
-    # gonderi_no = MNG/DHL'in ürettiği GERÇEK takip/barkod no (tüm iadeler bununla takip edilir).
-    # return_code (birincil/gösterilen barkod) = gonderi_no varsa O, yoksa iade_no — ASLA anlaşmalı no DEĞİL.
     iade_no = f"IW{order.get('order_number', '')}{rid[:6]}".replace(" ", "")
     icerik = "IADE - " + "; ".join(f"{i['quantity']}x {i['name']}" for i in items)
-    warehouse = await _get_sender_info()              # alıcı = şirket adresi
+    warehouse = await _get_sender_info()
     cargo_name = "DHL E-Commerce"
     gonderi_no, mng_ok = await _create_return_shipment(
         iade_no, float(order.get("total") or 0), icerik, warehouse
@@ -4486,9 +4466,10 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         "mng_ref": iade_no, "mng_ok": mng_ok, "cargo_provider_name": cargo_name,
         "barcode_png_b64": png_b64, "status": "created",
         "created_at": now_iso, "valid_until": valid_until,
+        "guest": bool(not (actor or {}).get("id")),
     }
     await db.customer_returns.insert_one({**rec})
-    await _log_order_event(order["id"], "return", "İade talebi oluşturuldu", current_user,
+    await _log_order_event(order["id"], "return", "İade talebi oluşturuldu", actor,
                            {"return_id": rid, "return_code": return_code},
                            order_number=order.get("order_number", ""))
     await db.orders.update_one({"id": order["id"]}, {"$set": {
@@ -4501,7 +4482,7 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         "status": "return_requested", "updated_at": now_iso,
     }})
 
-    import os as _os, asyncio as _aio2
+    import os as _os
     base = _os.environ.get("FRONTEND_PUBLIC_URL") or _os.environ.get("REACT_APP_BACKEND_URL") or ""
     barcode_img = (
         f'<div style="margin:14px 0"><img src="{base}/api/orders/returns/{rid}/barcode.png" '
@@ -4509,6 +4490,75 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
     )
     _spawn(_notify_return(order, return_code, valid_until, barcode_img, iade_no=iade_no))
     return {"success": True, "return": _public_return(rec)}
+
+
+@router.post("/{order_id}/return-request")
+async def create_return_request(order_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
+    """Müşteri (üye): teslimden itibaren 14 gün içinde iade talebi oluşturur."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("user_id") and current_user.get("id") and order["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    return await _build_return_for_order(order, payload, current_user)
+
+
+def _order_contact_matches(order: dict, email: str, phone: str) -> bool:
+    """Misafir doğrulaması: verilen e-posta VEYA telefon siparişteki ile eşleşiyor mu?
+    Siparişteki e-posta/telefon birden çok yerde tutulabilir (kök, shipping/billing)."""
+    def _digits(v):
+        return "".join(c for c in str(v or "") if c.isdigit())
+
+    ship = order.get("shipping_address") or {}
+    bill = order.get("billing_address") or order.get("billing_info") or {}
+    emails = {
+        str(order.get("email") or "").strip().lower(),
+        str(order.get("customer_email") or "").strip().lower(),
+        str(ship.get("email") or "").strip().lower(),
+        str(bill.get("email") or "").strip().lower(),
+    }
+    emails.discard("")
+    phones = set()
+    for v in (order.get("phone"), order.get("customer_phone"),
+              ship.get("phone"), bill.get("phone")):
+        d = _digits(v)
+        if d:
+            phones.add(d[-10:])  # son 10 hane (ülke kodu farklarına dayanıklı)
+
+    e = str(email or "").strip().lower()
+    p = _digits(phone)[-10:] if phone else ""
+    if e and e in emails:
+        return True
+    if p and p in phones:
+        return True
+    return False
+
+
+@router.post("/by-number/{order_number}/return-request")
+async def create_guest_return_request(order_number: str, payload: dict, request: Request):
+    """Misafir (üyeliksiz): sipariş no + e-posta/telefon doğrulaması ile iade talebi.
+    14 gün penceresi + 3 gün kod geçerliliği kuralları üye uçla aynıdır."""
+    order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
+    if not order:
+        order = await db.orders.find_one({"id": order_number}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+
+    email = (payload.get("email") or "").strip()
+    phone = (payload.get("phone") or "").strip()
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="Doğrulama için e-posta veya telefon giriniz.")
+    if not _order_contact_matches(order, email, phone):
+        raise HTTPException(status_code=403,
+                            detail="Girdiğiniz bilgiler sipariş kayıtları ile eşleşmiyor.")
+
+    actor = {"id": order.get("user_id"), "email": email or order.get("email") or "",
+             "name": "Misafir", "guest": True}
+    return await _build_return_for_order(order, payload, actor)
 
 
 @router.post("/{order_id}/admin-return")

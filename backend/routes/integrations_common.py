@@ -149,6 +149,32 @@ def _resolve_value_id(name_map: dict, local_val: str):
         if syn in name_map:
             return name_map[syn]
     return None
+def _closest_trendyol_value(local_val: str, ty_values: list):
+    """Yerel değere en yakın Trendyol değerini ÖNER (birebir yoksa alt-dizi/örtüşme skoru).
+    ty_values: [{"id","name"}]. Dönüş: {"id","name"} veya None.
+    Örn. yerel 'Fermuarlı' → Trendyol 'Fermuar'; 'Dar Kalıp' → 'Dar'."""
+    if not local_val or not ty_values:
+        return None
+    lv = _norm_val(str(local_val))
+    if not lv:
+        return None
+    best, best_score = None, 0.0
+    for v in ty_values:
+        tv = _norm_val(str(v.get("name") or ""))
+        if not tv:
+            continue
+        if tv == lv:
+            return {"id": str(v.get("id")), "name": str(v.get("name"))}
+        # biri diğerini içeriyorsa güçlü aday (Fermuar ⊂ Fermuarlı)
+        if lv in tv or tv in lv:
+            score = min(len(lv), len(tv)) / max(len(lv), len(tv))
+        else:
+            # ortak karakter kümesi oranı — kaba benzerlik
+            common = len(set(lv) & set(tv))
+            score = common / max(len(set(lv) | set(tv)), 1) * 0.6
+        if score > best_score:
+            best_score, best = score, {"id": str(v.get("id")), "name": str(v.get("name"))}
+    return best if best_score >= 0.5 else None
 _BAD_COMPOSITION_VALUES = {"yetişkin", "yetiskin", "genç", "genc", "çocuk", "cocuk", "bebek", "kadın", "kadin", "erkek", "unisex"}
 async def _build_product_query_from_payload(payload: dict) -> dict:
     """Trendyol sync/validate payload'undan products koleksiyon sorgusu üretir."""

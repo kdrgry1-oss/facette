@@ -25,6 +25,7 @@ from .integrations_common import (
     _RETURN_STATUS_KEYS,
     _build_product_query_from_payload,
     _claim_bucket,
+    _closest_trendyol_value,
     _decrement_stock_for_imported_order,
     _dedupe_products_by_stock_code,
     _derive_claim_status,
@@ -624,11 +625,24 @@ async def validate_products_for_trendyol(
                 }
                 if _resolve_value_id(vname_map, lval):
                     continue
+                # Trendyol'un bu özellik için KABUL ETTİĞİ değerler — kullanıcı buradan
+                # doğru karşılığı seçsin (yoksa hiç yoksa özelliği silsin). allowCustom değilse
+                # bu liste zorunlu; boşsa Trendyol serbest metne izin veriyordur.
+                _ty_vals = [
+                    {"id": str(v.get("id")), "name": str(v.get("name"))}
+                    for v in (a.get("attributeValues") or [])
+                    if v.get("id") is not None and v.get("name")
+                ]
+                # Kullanıcıya kolaylık: yazım/normalizasyon olarak en yakın Trendyol değeri öner
+                _suggest = _closest_trendyol_value(lval, _ty_vals)
                 unmatched_values.append({
                     "mp_attr_id": int(aid),
                     "attr_name": aname,
                     "local_value": lval,
                     "required": bool(a.get("required")),
+                    "allow_custom": bool(a.get("allowCustom") or a.get("attribute", {}).get("allowCustom")),
+                    "trendyol_values": _ty_vals,       # Trendyol'un kabul ettiği tüm değerler
+                    "suggested_value": _suggest,        # en olası eşleşme (yoksa None)
                 })
             if unmatched_values:
                 errors.append(f"{len(unmatched_values)} değerin Trendyol karşılığı yok (eşleştirme gerekli)")
@@ -644,6 +658,7 @@ async def validate_products_for_trendyol(
             "name": p.get("name"),
             "stock_code": _resolve_stock_code(p) or p.get("barcode") or "",
             "barcode": p.get("barcode"),
+            "category_id": cat_id,          # yerel kategori — value-mapping kaydı bu id'ye yazılır
             "category_name": cat_name,
             "marketplace_category_id": mp_cat_id,
             "is_valid": is_valid,
@@ -2794,6 +2809,82 @@ async def save_trendyol_category_value_mappings(local_category_id: str, req: Req
         {"$set": {"value_mappings": value_mappings}}
     )
     return {"success": True}
+
+
+@router.post("/trendyol/value-mappings/merge")
+async def merge_trendyol_value_mappings(req: Request, current_user: dict = Depends(require_admin)):
+    """Aktarım-doğrulama ekranından SEÇİLEN değer eşleştirmelerini KADEMELİ (merge) kaydeder.
+    Doğrulama VE sync `db.category_mappings` (marketplace=trendyol, category_id=<yerel>) dokümanının
+    `value_mappings` alanını okur — eski uç yanlışlıkla `db.categories`'e yazıyordu, bu yüzden
+    eşleştirmeler hiç etki etmiyordu. Bu uç DOĞRU koleksiyona yazar.
+    body: {category_id, mappings:[{mp_attr_id, local_value, value_id}]}
+      value_id rakamsa Trendyol value_id; değilse serbest metin (custom) olarak gider.
+    Anahtar formatı sync ile aynı: "<mp_attr_id>|<local_value>"."""
+    payload = await req.json()
+    local_cat = str(payload.get("category_id") or "").strip()
+    mappings = payload.get("mappings") or []
+    if not local_cat:
+        raise HTTPException(status_code=400, detail="category_id gerekli")
+    if not isinstance(mappings, list) or not mappings:
+        raise HTTPException(status_code=400, detail="mappings boş")
+
+    set_ops = {}
+    for m in mappings:
+        aid = str(m.get("mp_attr_id") or "").strip()
+        lval = str(m.get("local_value") or "").strip()
+        vid = str(m.get("value_id") or "").strip()
+        if not aid or not lval or not vid:
+            continue
+        # $set ile tek tek anahtar yaz → mevcut eşleştirmeler korunur (merge)
+        set_ops[f"value_mappings.{aid}|{lval}"] = vid
+
+    if not set_ops:
+        raise HTTPException(status_code=400, detail="Geçerli eşleştirme yok")
+
+    res = await db.category_mappings.update_one(
+        {"marketplace": "trendyol", "category_id": local_cat},
+        {"$set": set_ops,
+         "$setOnInsert": {"marketplace": "trendyol", "category_id": local_cat}},
+        upsert=True,
+    )
+    return {"success": True, "saved": len(set_ops),
+            "matched": res.matched_count, "upserted": bool(res.upserted_id)}
+
+
+@router.post("/trendyol/products/{product_id}/remove-attribute")
+async def remove_product_attribute(product_id: str, req: Request, current_user: dict = Depends(require_admin)):
+    """Ürün özelliğini (ör. Trendyol'da karşılığı olmayan 'Kapama Şekli: Fermuarlı') ÜRÜNDEN kaldırır.
+    body: {attr_name}. products.attributes içindeki eşleşen tip(ler) silinir; varyant attributes'ta da temizlenir."""
+    payload = await req.json()
+    attr_name = str(payload.get("attr_name") or "").strip()
+    if not attr_name:
+        raise HTTPException(status_code=400, detail="attr_name gerekli")
+    prod = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not prod:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+
+    def _norm(s):
+        return _normalize_attr_key(str(s or ""))
+    tgt = _norm(attr_name)
+
+    new_attrs = [a for a in (prod.get("attributes") or [])
+                 if _norm(a.get("type") or a.get("name") or a.get("attribute_name")) != tgt]
+    new_variants = []
+    for v in (prod.get("variants") or []):
+        if isinstance(v.get("attributes"), list):
+            v = {**v, "attributes": [a for a in v["attributes"]
+                                     if _norm(a.get("type") or a.get("name") or a.get("attribute_name")) != tgt]}
+        elif isinstance(v.get("attributes"), dict):
+            v = {**v, "attributes": {k: val for k, val in v["attributes"].items() if _norm(k) != tgt}}
+        new_variants.append(v)
+
+    await db.products.update_one(
+        {"id": product_id},
+        {"$set": {"attributes": new_attrs, "variants": new_variants}},
+    )
+    return {"success": True, "removed_attr": attr_name}
+
+
 @router.get("/trendyol/category-values/{local_category_id}")
 async def get_local_category_values(local_category_id: str, current_user: dict = Depends(require_admin)):
     from bson.objectid import ObjectId
