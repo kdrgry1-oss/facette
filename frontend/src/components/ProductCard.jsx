@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Bookmark, ShoppingBag } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
@@ -14,6 +14,7 @@ export default function ProductCard({ product, listId = "", listName = "", index
   const [activeSib, setActiveSib] = useState(null); // hover edilen renk kardeşi
   const { addItem } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
+  const navigate = useNavigate();
   const isFav = isFavorite(product.id);
   const imageContainerRef = useRef(null);
 
@@ -68,6 +69,13 @@ export default function ProductCard({ product, listId = "", listName = "", index
     e.stopPropagation();
     if (isSoldOut) {
       toast.error("Bu ürün tükendi");
+      return;
+    }
+    // KRİTİK: Bedenli üründe beden SEÇMEDEN sepete ekleme yapma. Aksi halde siparişe bedensiz
+    // kalem düşüyor ve hangi bedenin gönderileceği bilinemiyordu (ör. W10322 bermuda şort).
+    // Bedeni olan üründe "+" butonu, beden seçimi için ürün sayfasına yönlendirir.
+    if (sizeList.length > 0) {
+      navigate(`/${targetSlug}`);
       return;
     }
     addItem(product);
