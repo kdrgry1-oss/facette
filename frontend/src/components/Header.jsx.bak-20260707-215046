@@ -357,12 +357,11 @@ export default function Header({ hideMenu = false }) {
                   /* Çok kolonlu düzen (GİYİM stili): başlık + liste + Tümünü Gör */
                   <div className={MEGA_LINK_GRID} style={megaCols((activeTab.columns || []).length)}>
                     {(activeTab.columns || []).map((col, ci) => (
-                      <div key={ci} onMouseEnter={() => setHoveredCategory(slugFromLink(col.link || activeTab.link))}>
+                      <div key={ci}>
                         <Link
                           to={col.link || activeTab.link || "/"}
                           className="block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer"
                           onClick={() => setActiveMenu(null)}
-                          onMouseEnter={() => setHoveredCategory(slugFromLink(col.link || activeTab.link))}
                         >
                           {col.title}
                         </Link>
@@ -384,7 +383,6 @@ export default function Header({ hideMenu = false }) {
                               to={col.link || activeTab.link || "/"}
                               className="text-xs font-medium underline hover:no-underline"
                               onClick={() => setActiveMenu(null)}
-                              onMouseEnter={() => setHoveredCategory(slugFromLink(col.link || activeTab.link))}
                             >
                               Tümünü Gör
                             </Link>
@@ -396,10 +394,7 @@ export default function Header({ hideMenu = false }) {
                 ) : (
                   /* Tek kolonlu düzen (AKSESUAR stili): başlık + 2 kolonlu link gridi */
                   <div className="flex-1">
-                    <h3
-                      className="text-xs font-bold tracking-wider mb-3 text-gray-900"
-                      onMouseEnter={() => setHoveredCategory(slugFromLink(activeTab.columns?.[0]?.link || activeTab.link))}
-                    >
+                    <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">
                       {(activeTab.columns?.[0]?.title) || activeTab.label}
                     </h3>
                     <ul className={MEGA_LINK_GRID} style={megaCols(2)}>
@@ -420,7 +415,6 @@ export default function Header({ hideMenu = false }) {
                       to={(activeTab.columns?.[0]?.link) || activeTab.link || "/"}
                       className="inline-block mt-3 text-xs font-medium underline hover:no-underline"
                       onClick={() => setActiveMenu(null)}
-                      onMouseEnter={() => setHoveredCategory(slugFromLink(activeTab.columns?.[0]?.link || activeTab.link))}
                     >
                       Tümünü Gör
                     </Link>
