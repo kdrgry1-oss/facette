@@ -85,6 +85,13 @@ export default function Checkout() {
   const [eligiblePromotions, setEligiblePromotions] = useState([]); // tum uygulanabilirler (musteri secsin)
   const [excludedIds, setExcludedIds] = useState([]); // musterinin X ile kaldirdigi kampanyalar
 
+  // ÇİFT SİPARİŞ KORUMASI: checkout başına idempotency anahtarı. Sepet değişince yenilenir
+  // (farklı sepet = farklı sipariş); aynı sepette tekrar/çift gönderimde sunucu YENİ sipariş
+  // açmaz, mevcut olanı döndürür (bkz. create_order idempotency_key).
+  const _newIdemKey = () => (window.crypto?.randomUUID?.() || (String(Date.now()) + "-" + Math.random().toString(36).slice(2)));
+  const idemKeyRef = useRef(_newIdemKey());
+  useEffect(() => { idemKeyRef.current = _newIdemKey(); }, [items]);
+
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
   const [use3DSecure, setUse3DSecure] = useState(true);
@@ -567,6 +574,8 @@ export default function Checkout() {
         click_ids: (typeof window !== "undefined" ? collectClickIds() : {}),
         // İYS — ticari ileti izni (kutu işaretliyse). SMS izni OTP doğrulaması ister.
         marketing_consent: { email: mktEmail, sms: mktSms, otp_verified: otpVerified },
+        // Çift sipariş koruması: aynı sepetin tekrar gönderimi yeni sipariş açmaz.
+        idempotency_key: idemKeyRef.current,
       };
 
       // Üye girişliyse token'ı gönder ki sipariş user_id'ye bağlansın (misafirde token yok → eskisi gibi).
@@ -575,6 +584,15 @@ export default function Checkout() {
         _authToken ? { headers: { Authorization: `Bearer ${_authToken}` } } : undefined);
       const newOrderId = orderRes.data.order_id;
       setOrderId(newOrderId);
+
+      // İdempotency: aynı sepet zaten ÖDENMİŞ bir siparişe bağlıysa tekrar ödeme başlatma
+      // (çift çekim önlemi) — doğrudan başarı sayfasına götür.
+      if (orderRes.data.idempotent && orderRes.data.payment_status === "paid") {
+        setPaymentStep("success");
+        clearCart();
+        navigate(`/order-success/${orderRes.data.order_number}`, { replace: true });
+        return;
+      }
 
       if (paymentMethod === "credit_card") {
         const _num = card.number.replace(/\s/g, "");

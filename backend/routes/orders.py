@@ -690,9 +690,30 @@ async def create_order(
             logger.warning(f"Blocked order attempt: user={uid} ip={client_ip} reason={bl.get('reason')}")
             raise HTTPException(status_code=403, detail="Hesabınız sipariş veremez. Lütfen destek ile iletişime geçin.")
 
+    # ÇİFT SİPARİŞ KORUMASI (idempotency): müşteri ödeme onayını göremeyip formu TEKRAR
+    # gönderirse (ya da çift tıklarsa) aynı idempotency_key ile YENİ sipariş açılmaz; mevcut
+    # (iptal olmayan) sipariş döndürülür → çift sipariş + çift çekim önlenir. İstemci sepet/adres
+    # değişince yeni anahtar üretir, dolayısıyla farklı sepet farklı sipariş olur.
+    _idem = str(order_data.get("idempotency_key") or "").strip()
+    if _idem:
+        _ex = await db.orders.find_one(
+            {"idempotency_key": _idem, "status": {"$ne": "cancelled"}},
+            {"_id": 0, "id": 1, "order_number": 1, "payment_status": 1})
+        if _ex:
+            logger.info(f"[idempotency] tekrar POST /orders — mevcut siparis donduruldu "
+                        f"key={_idem} no={_ex.get('order_number')}")
+            return {
+                "order_id": _ex["id"],
+                "order_number": _ex["order_number"],
+                "payment_status": _ex.get("payment_status"),
+                "idempotent": True,
+                "message": "Mevcut sipariş kullanıldı",
+            }
+
     order = {
         "id": generate_id(),
         "order_number": await next_order_number(),
+        "idempotency_key": _idem or None,
         "user_id": current_user.get("id") if current_user else None,
         "items": order_data.get("items", []),
         "shipping_address": order_data.get("shipping_address", {}),
