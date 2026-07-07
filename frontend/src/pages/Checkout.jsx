@@ -586,7 +586,11 @@ export default function Checkout() {
           expireYear: (_exp[1] || "").trim(),
           cvc: card.cvc.trim(),
         };
-        if (use3DSecure) {
+        // İYZİCO 3D SECURE ZORUNLU (iyzico: "İşlemi 3dsecure olarak gerçekleştirmeniz
+        // gerekmektedir"). 3DS'siz (card/pay) yol KALDIRILDI — iyzico 3DS'siz denemeleri
+        // reddedip siparişi 'failed' bırakıyor, müşteri tekrar deneyip öksüz/çift sipariş
+        // üretiyordu. TÜM kart ödemeleri artık 3DS ile başlatılır.
+        {
           const res = await axios.post(`${API}/payment/3ds/initialize`, {
             order_id: newOrderId,
             callback_url: `${API}/payment/3ds/callback`,
@@ -603,20 +607,6 @@ export default function Checkout() {
           }
           setLoading(false);
           toast.error(res.data.error || "Ödeme başlatılamadı");
-          return;
-        } else {
-          const res = await axios.post(`${API}/payment/card/pay`, {
-            order_id: newOrderId,
-            card: cardPayload,
-            installment: selectedInstallment,
-          });
-          if (res.data.success) {
-            setPaymentStep("success");
-            handlePaymentSuccess(res.data.order_number);
-          } else {
-            setLoading(false);
-            toast.error(res.data.error || "Ödeme başarısız");
-          }
           return;
         }
       } else {
@@ -1047,10 +1037,10 @@ export default function Checkout() {
                           ))}
                         </div>
                       </div>
-                      <label className="inline-flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={use3DSecure} onChange={(e) => setUse3DSecure(e.target.checked)} className="accent-black" />
-                        <ShieldCheck size={14} className="text-green-600" /> 3D Secure ile öde (önerilir)
-                      </label>
+                      {/* 3D Secure ZORUNLU (iyzico kuralı) — kapatılamaz; bilgi amaçlı statik rozet. */}
+                      <div className="inline-flex items-center gap-2 text-sm text-green-700">
+                        <ShieldCheck size={14} className="text-green-600" /> Ödemeniz 3D Secure ile güvenle alınır
+                      </div>
                       <div className="text-[11px] text-gray-400 flex items-center gap-1">
                         <Lock size={11} /> Kart bilgileriniz şifreli olarak iyzico altyapısıyla işlenir, sitemizde saklanmaz.
                       </div>
