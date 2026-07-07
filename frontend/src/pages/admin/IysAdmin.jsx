@@ -93,7 +93,14 @@ export default function IysAdmin() {
     setTesting(true);
     try {
       const r = await axios.post(`${API}/admin/iys/test-connection`, {}, auth);
-      r.data.ok ? toast.success(r.data.message) : toast.error(r.data.message || "Bağlantı başarısız");
+      if (r.data.ok) toast.success(r.data.message);
+      else {
+        const detail = r.data.attempts
+          ? " · " + r.data.attempts.map(a => `${a.mode}→${a.code || a.error}`).join(", ")
+          : "";
+        toast.error((r.data.message || "Bağlantı başarısız") + detail, { duration: 12000 });
+        console.log("İYS test attempts:", r.data.attempts);
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || e.message);
     } finally { setTesting(false); }

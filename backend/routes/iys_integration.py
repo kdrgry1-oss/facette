@@ -96,18 +96,30 @@ def _mask(recipient: str) -> str:
     return f"{recipient[:6]}****{recipient[-2:]}" if len(recipient) > 8 else "****"
 
 
-async def _netgsm_search(items: List[dict], creds: dict) -> dict:
-    """NetGSM /iys/search — gövde header'ı + HTTP Basic Auth (iys.py'de kanıtlanan şart)."""
-    if creds["appkey"]:
-        items = [{**it, "appkey": creds["appkey"]} for it in items]
+async def _netgsm_search(items: List[dict], creds: dict, mode: str = "basic") -> dict:
+    """NetGSM /iys/search — gövde header'ı + HTTP Basic Auth (iys.py'de kanıtlanan şart).
+    DİKKAT: resmî SDK'da (netgsm/netiys) search data öğesi TAM 3 alandır
+    (type, recipient, recipientType) — add'den farklı olarak appkey EKLENMEZ,
+    fazladan alan istek reddine yol açabilir.
+
+    mode — NetGSM hesap yapılandırmasına göre değişebildiği için test-connection
+    çalışan biçimi bulur ve providers.netgsm.iys_search_mode'a kaydeder:
+      "basic"        → HTTP Basic Auth + sade data (varsayılan; add ucunda kanıtlı)
+      "plain"        → yalnız gövde header'ı (resmî SDK ile birebir)
+      "basic_appkey" → Basic Auth + data öğesinde appkey"""
+    base = [{"type": it["type"], "recipient": it["recipient"],
+             "recipientType": it.get("recipientType", "BIREYSEL")} for it in items]
+    if mode == "basic_appkey" and creds["appkey"]:
+        base = [{**it, "appkey": creds["appkey"]} for it in base]
     payload = {
         "header": {"username": creds["username"], "password": creds["password"],
                    "brandCode": creds["brand_code"]},
-        "body": {"data": items},
+        "body": {"data": base},
     }
-    auth = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
-    headers = {"Content-Type": "application/json; charset=utf-8",
-               "Authorization": "Basic " + auth}
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    if mode != "plain":
+        auth = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
+        headers["Authorization"] = "Basic " + auth
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
         r = await c.post(NETGSM_IYS_SEARCH_URL, json=payload, headers=headers)
     try:
@@ -213,22 +225,42 @@ async def iys_save_settings(payload: IYSSettings, _=Depends(require_admin)):
     return {"ok": True, "brand_code": payload.brand_code.strip()}
 
 
+async def _get_search_mode() -> str:
+    doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
+    return ((doc.get("providers") or {}).get("netgsm") or {}).get("iys_search_mode") or "basic"
+
+
 @router.post("/test-connection")
 async def iys_test_connection(_=Depends(require_admin)):
-    """NetGSM İYS bağlantısını gerçek bir arama ile test eder (dummy numara).
+    """NetGSM İYS bağlantısını test eder ve ÇALIŞAN istek biçimini otomatik bulur.
+    Üç biçim sırayla denenir (basic → plain → basic_appkey); başarılı olan
+    providers.netgsm.iys_search_mode'a kaydedilir, sorgular hep onu kullanır.
     'Kayıt bulunamadı' (50) yanıtı da BAŞARILI bağlantı demektir."""
     c = await _creds()
     if not (c["username"] and c["password"] and c["brand_code"]):
         return {"ok": False, "message": "Eksik yapılandırma — NetGSM kullanıcı/şifre veya marka kodu tanımlı değil"}
-    try:
-        res = await _netgsm_search(
-            [{"type": "MESAJ", "recipient": "+905000000000", "recipientType": "BIREYSEL"}], c)
+    probe = [{"type": "MESAJ", "recipient": "+905301234567", "recipientType": "BIREYSEL"}]
+    attempts = []
+    for mode in ("basic", "plain", "basic_appkey"):
+        try:
+            res = await _netgsm_search(probe, c, mode=mode)
+        except Exception as e:
+            attempts.append({"mode": mode, "error": str(e)[:200]})
+            continue
+        attempts.append({"mode": mode, "code": res["code"],
+                         "http_status": res["http_status"],
+                         "raw": res["raw"] if not (res["ok"] or res["code"] == "50") else None})
         if res["ok"] or res["code"] == "50":
-            return {"ok": True, "message": "NetGSM İYS bağlantısı başarılı", "code": res["code"]}
-        return {"ok": False, "message": res["error_message"], "code": res["code"],
-                "raw": res["raw"], "http_status": res["http_status"]}
-    except Exception as e:
-        return {"ok": False, "message": f"Bağlantı hatası: {e}"}
+            await db.settings.update_one(
+                {"id": "notification_providers"},
+                {"$set": {"providers.netgsm.iys_search_mode": mode}}, upsert=True)
+            return {"ok": True, "code": res["code"], "mode": mode,
+                    "message": f"NetGSM İYS bağlantısı başarılı (istek biçimi: {mode})"}
+    last = attempts[-1] if attempts else {}
+    return {"ok": False,
+            "message": NETGSM_IYS_ERROR_MAP.get(str(last.get("code")),
+                       "Hiçbir istek biçimi kabul edilmedi") + " — detay için 'attempts' alanına bakın",
+            "attempts": attempts}
 
 
 @router.post("/query")
@@ -254,7 +286,8 @@ async def iys_query(q: IYSQuery, _=Depends(require_admin)):
                 "message": "NetGSM/İYS yapılandırması eksik — /admin/iys sayfasındaki durumu kontrol edin"}
     try:
         res = await _netgsm_search(
-            [{"type": q.message_type, "recipient": rec, "recipientType": q.recipient_type}], c)
+            [{"type": q.message_type, "recipient": rec, "recipientType": q.recipient_type}],
+            c, mode=await _get_search_mode())
         if res["ok"]:
             query = res["raw"].get("query") or {}
             if isinstance(query, list):
