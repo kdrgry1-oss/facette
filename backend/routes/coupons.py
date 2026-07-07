@@ -230,16 +230,20 @@ def _item_category_set(it: dict) -> set:
     'En Yeniler' gibi ikincil kategoriler dahil). 'category_ids' enrich edilmisse
     (bkz. _enrich_items_category_ids) onu kullanir; yoksa eski tekil 'category_id'ye
     duser (geriye donuk uyumluluk)."""
+    # KRİTİK: kategori id'leri str'e normalize edilir. Kampanya.categories int, ürün
+    # category_ids string ("7022") olabiliyor; normalize edilmezse kesişim BOŞ kalır →
+    # kapsamlı kampanya sepette hiç uygulanmaz (rozet gösterir ama indirim düşmez). Rozet
+    # mantığı (_campaign_pct_for_product) da str normalize ediyor — motor onunla TUTARLI olsun.
     cids = it.get("category_ids")
     if cids:
-        return set(cids)
+        return {str(x) for x in cids if x is not None}
     single = it.get("category_id")
-    return {single} if single else set()
+    return {str(single)} if single not in (None, "") else set()
 
 
 def _item_in_scope(it: dict, allowed_cats: set, allowed_pids: set) -> bool:
     pid = it.get("product_id")
-    if pid and pid in allowed_pids:
+    if pid and str(pid) in allowed_pids:
         return True
     if allowed_cats and _item_category_set(it) & allowed_cats:
         return True
@@ -275,8 +279,10 @@ async def _enrich_items_category_ids(items: list) -> list:
 def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     """Saf indirim matematigi (dogrulama YOK). Kapsam(scope) + tip(nth/percent/fixed).
     items fiyatlari olceklenmis verilirse (stacking) sonuc kalan tabana gore otomatik cikar."""
-    allowed_cats = set(c.get("categories") or [])
-    allowed_pids = set(c.get("products") or [])
+    # str normalize (bkz. _item_category_set) — int/str kategori-id uyuşmazlığı kapsamı
+    # boşa düşürüp indirimi 0 yapıyordu.
+    allowed_cats = {str(x) for x in (c.get("categories") or []) if x is not None}
+    allowed_pids = {str(x) for x in (c.get("products") or []) if x is not None}
     if allowed_cats or allowed_pids:
         base = 0.0
         for it in items:
