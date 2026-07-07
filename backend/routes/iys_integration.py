@@ -96,7 +96,7 @@ def _mask(recipient: str) -> str:
     return f"{recipient[:6]}****{recipient[-2:]}" if len(recipient) > 8 else "****"
 
 
-async def _netgsm_search(items: List[dict], creds: dict, mode: str = "basic") -> dict:
+async def _netgsm_search(items: List[dict], creds: dict, mode: str = "basic_hdrkey") -> dict:
     """NetGSM /iys/search — gövde header'ı + HTTP Basic Auth (iys.py'de kanıtlanan şart).
     DİKKAT: resmî SDK'da (netgsm/netiys) search data öğesi TAM 3 alandır
     (type, recipient, recipientType) — add'den farklı olarak appkey EKLENMEZ,
@@ -104,20 +104,23 @@ async def _netgsm_search(items: List[dict], creds: dict, mode: str = "basic") ->
 
     mode — NetGSM hesap yapılandırmasına göre değişebildiği için test-connection
     çalışan biçimi bulur ve providers.netgsm.iys_search_mode'a kaydeder:
-      "basic"        → HTTP Basic Auth + sade data (varsayılan; add ucunda kanıtlı)
-      "plain"        → yalnız gövde header'ı (resmî SDK ile birebir)
-      "basic_appkey" → Basic Auth + data öğesinde appkey"""
+      "basic_hdrkey" → Basic Auth + appkey gövde HEADER'ında (resmî dokümandaki
+                       'JSON POST Adres Sorgula' örneğiyle birebir — appkey'li hesaplar)
+      "plain_hdrkey" → appkey gövde header'ında, Basic Auth yok
+      "basic"        → HTTP Basic Auth + sade istek
+      "plain"        → yalnız gövde header'ı (username/password/brandCode)
+      "basic_appkey" → Basic Auth + appkey data öğesinde"""
     base = [{"type": it["type"], "recipient": it["recipient"],
              "recipientType": it.get("recipientType", "BIREYSEL")} for it in items]
     if mode == "basic_appkey" and creds["appkey"]:
         base = [{**it, "appkey": creds["appkey"]} for it in base]
-    payload = {
-        "header": {"username": creds["username"], "password": creds["password"],
-                   "brandCode": creds["brand_code"]},
-        "body": {"data": base},
-    }
+    body_header = {"username": creds["username"], "password": creds["password"],
+                   "brandCode": creds["brand_code"]}
+    if mode in ("basic_hdrkey", "plain_hdrkey") and creds["appkey"]:
+        body_header["appkey"] = creds["appkey"]
+    payload = {"header": body_header, "body": {"data": base}}
     headers = {"Content-Type": "application/json; charset=utf-8"}
-    if mode != "plain":
+    if mode not in ("plain", "plain_hdrkey"):
         auth = base64.b64encode(f"{creds['username']}:{creds['password']}".encode()).decode()
         headers["Authorization"] = "Basic " + auth
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
@@ -227,7 +230,7 @@ async def iys_save_settings(payload: IYSSettings, _=Depends(require_admin)):
 
 async def _get_search_mode() -> str:
     doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
-    return ((doc.get("providers") or {}).get("netgsm") or {}).get("iys_search_mode") or "basic"
+    return ((doc.get("providers") or {}).get("netgsm") or {}).get("iys_search_mode") or "basic_hdrkey"
 
 
 @router.post("/test-connection")
@@ -241,7 +244,7 @@ async def iys_test_connection(_=Depends(require_admin)):
         return {"ok": False, "message": "Eksik yapılandırma — NetGSM kullanıcı/şifre veya marka kodu tanımlı değil"}
     probe = [{"type": "MESAJ", "recipient": "+905301234567", "recipientType": "BIREYSEL"}]
     attempts = []
-    for mode in ("basic", "plain", "basic_appkey"):
+    for mode in ("basic_hdrkey", "plain_hdrkey", "basic", "plain", "basic_appkey"):
         try:
             res = await _netgsm_search(probe, c, mode=mode)
         except Exception as e:

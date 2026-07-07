@@ -193,9 +193,12 @@ async def _report_to_netgsm_iys(consent: dict):
         data.append(item)
     if not data:
         return False
-    # Header: NetGSM resmî n8n koduyla birebir — {username, password, brandCode}.
-    # (appkey header'da DEĞİL; robustluk için varsa data öğesine yukarıda eklendi.)
+    # Header: NetGSM resmî formatı {username, password, brandCode} + appkey'li hesaplarda
+    # appkey HEADER'a da eklenir (resmî dokümandaki 'Adres Sorgula' örneği appkey'i header'da
+    # gösterir; add'de canlıda code 40 alındığı için her iki konuma da gönderilir).
     header = {"username": username, "password": password, "brandCode": brand_code}
+    if _appkey:
+        header["appkey"] = _appkey
     payload = {"header": header, "body": {"data": data}}
     url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
     # KRİTİK: NetGSM resmî n8n entegrasyonu İYS API'sini HTTP Basic Auth ile çağırır
@@ -368,6 +371,8 @@ async def iys_netgsm_probe(payload: dict, current_user: dict = Depends(get_curre
     password = (cfg.get("password") or "").strip()
     brand_code = (cfg.get("brand_code") or cfg.get("iys_code") or "").strip()
     header = {"username": username, "password": password, "brandCode": brand_code}
+    if appkey:
+        header["appkey"] = appkey
     data = []
     if recipient:
         if ch == "MESAJ" and not recipient.startswith("+"):
