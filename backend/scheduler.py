@@ -103,6 +103,39 @@ async def auto_cancel_unpaid_card_orders():
         logger.exception(f"[scheduler] auto_cancel_unpaid_card_orders failed: {e}")
 
 
+async def retry_pending_iys_consents():
+    """Bildirilmemiş (reported=false) İYS izinlerini NetGSM'e periyodik YENİDEN gönderir.
+
+    Neden: NetGSM İYS modülü aktivasyonu / İYS→NetGSM yetkilendirme yansıması gecikebilir
+    ('iys modulunuzu aktiflestirin', code 40). Bu iş, modül aktif olur olmaz bekleyen tüm
+    izinleri (W10427 vb.) KENDİLİĞİNDEN gönderir — kimsenin elle /iys/retry çalıştırması
+    gerekmez. Başarılı olan (reported=true) kayıtlar sorgudan düşer; sadece son 60 günün
+    bildirilmemişleri, her turda en çok 50 tanesi denenir (aşırı yüklenme olmaz)."""
+    from routes.deps import db  # lazy import
+    try:
+        from routes.iys import _report_to_netgsm_iys
+    except Exception as e:
+        logger.warning(f"[scheduler] iys retry import atlandı: {e}")
+        return
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        q = {"reported": {"$ne": True}, "created_at": {"$gte": cutoff}}
+        recs = await db.iys_consents.find(q, {"_id": 0}).sort("created_at", -1).limit(50).to_list(None)
+        if not recs:
+            return
+        ok = 0
+        for r in recs:
+            try:
+                if await _report_to_netgsm_iys(r):
+                    ok += 1
+            except Exception as e_item:
+                logger.warning(f"[scheduler] iys retry kayıt hata: {e_item}")
+        if ok:
+            logger.info(f"[scheduler] İYS: {ok}/{len(recs)} bekleyen izin NetGSM'e gönderildi")
+    except Exception as e:
+        logger.exception(f"[scheduler] retry_pending_iys_consents failed: {e}")
+
+
 async def _ensure_hb_2min_sync():
     """Tek seferlik: Hepsiburada hesabını 2 dk'da bir STOK + SİPARİŞ senkronuna ayarlar.
     settings.hb_sync_2min_v1 bayrağıyla yalnızca bir kez uygulanır; sonradan
@@ -1423,6 +1456,17 @@ def start_scheduler():
         minutes=30,
         id="auto_cancel_card_24h",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+        max_instances=1,
+        coalesce=True,
+    )
+    # İYS: bildirilmemiş izinleri her 30 dk'da NetGSM'e yeniden gönder. NetGSM modülü
+    # aktif olur olmaz (yansıma/aktivasyon gecikmesi sonrası) bekleyenler otomatik geçer.
+    _scheduler.add_job(
+        retry_pending_iys_consents,
+        "interval",
+        minutes=30,
+        id="iys_retry_pending",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
         max_instances=1,
         coalesce=True,
     )
