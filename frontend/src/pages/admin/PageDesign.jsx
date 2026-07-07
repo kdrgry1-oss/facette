@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, GripVertical, Image, Upload, X, Eye, EyeOff, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Film } from "lucide-react";
+import { Plus, Edit, Trash2, GripVertical, Image, Upload, X, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -16,7 +16,6 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
-  rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -27,9 +26,6 @@ import {
 } from "../../components/ui/dialog";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
-// Slayt medyasının video olup olmadığını URL uzantısından anla (R2/upload URL'leri uzantı taşır)
-const isVideoUrl = (u) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(u || ""));
 // Origin'i dogru turet (API.replace('/api','') ilk //api'yi silip bozuk URL uretirdi).
 const BACKEND_ORIGIN = String(process.env.REACT_APP_BACKEND_URL || "").replace(/\/+$/, "").replace(/\/api$/, "");
 
@@ -46,51 +42,6 @@ const BLOCK_TYPES = [
 ];
 
 // Sortable Block Item Component
-function SortableMediaItem({ id, url, index, total, link, onLinkChange, onRemove, onMove }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1, zIndex: isDragging ? 30 : undefined };
-  const video = isVideoUrl(url);
-  return (
-    <div ref={setNodeRef} style={style} className="relative group">
-      <div className="relative">
-        {video ? (
-          <video src={url} muted loop playsInline preload="metadata" className="w-full aspect-video object-cover rounded border bg-black"
-                 onMouseEnter={(e) => e.target.play().catch(() => {})} onMouseLeave={(e) => e.target.pause()} />
-        ) : (
-          <img src={url} alt="" className="w-full aspect-video object-cover rounded border" />
-        )}
-        {/* tutamaç */}
-        <button type="button" {...attributes} {...listeners}
-                className="absolute top-1 left-1 w-6 h-6 bg-black/60 text-white rounded flex items-center justify-center cursor-grab active:cursor-grabbing"
-                title="Sürükleyerek sırala">
-          <GripVertical size={13} />
-        </button>
-        {video && (
-          <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"><Film size={10} /> VİDEO</span>
-        )}
-        <span className="absolute bottom-1 right-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">{index + 1}/{total}</span>
-        <button type="button" onClick={onRemove}
-                className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <X size={14} />
-        </button>
-      </div>
-      {/* mobil/klavye için ok butonları */}
-      <div className="flex items-center gap-1 mt-1">
-        <button type="button" disabled={index === 0} onClick={() => onMove(index, index - 1)}
-                className="w-6 h-6 border rounded flex items-center justify-center disabled:opacity-30 hover:bg-gray-100" title="Sola taşı">
-          <ChevronLeft size={13} />
-        </button>
-        <button type="button" disabled={index === total - 1} onClick={() => onMove(index, index + 1)}
-                className="w-6 h-6 border rounded flex items-center justify-center disabled:opacity-30 hover:bg-gray-100" title="Sağa taşı">
-          <ChevronRight size={13} />
-        </button>
-        <input type="text" value={link || ""} onChange={onLinkChange} placeholder="/kategori/..."
-               className="flex-1 min-w-0 text-xs border px-2 py-1 rounded" />
-      </div>
-    </div>
-  );
-}
-
 function SortableBlockItem({ block, onEdit, onDelete, onToggleActive, getBlockTypeInfo }) {
   const {
     attributes,
@@ -131,11 +82,18 @@ function SortableBlockItem({ block, onEdit, onDelete, onToggleActive, getBlockTy
         {/* Preview */}
         <div className="flex-shrink-0 w-40">
           {block.images?.[0] ? (
-            <img 
-              src={block.images[0]} 
-              alt="" 
-              className="w-full h-20 object-cover rounded"
-            />
+            /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(block.images[0]) ? (
+              <div className="relative w-full h-20">
+                <video src={block.images[0]} className="w-full h-20 object-cover rounded" muted playsInline preload="metadata" />
+                <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] px-1 rounded">🎬</span>
+              </div>
+            ) : (
+              <img
+                src={block.images[0]}
+                alt=""
+                className="w-full h-20 object-cover rounded"
+              />
+            )
           ) : (
             <div className="w-full h-20 bg-gray-100 rounded flex items-center justify-center text-2xl">
               {typeInfo.icon || "📦"}
@@ -395,47 +353,60 @@ export default function PageDesign() {
     });
 
   const handleImageUpload = async (e, index = null) => {
-    let file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
-    const isVideo = (file.type || "").startsWith("video/");
-    if (isVideo && formData.type !== "hero_slider") {
-      toast.error("Video yalnızca Hero Slider bloğuna eklenebilir");
-      e.target.value = "";
-      return;
-    }
+    await uploadMediaFile(file, index);
+    try { e.target.value = ""; } catch (_) { /* aynı dosya tekrar seçilebilsin */ }
+  };
 
+  // Görsel VEYA video yükler. Video ise optimize edilmeden Cloudflare R2/CDN'e gider
+  // ve aynı images[] dizisine eklenir → sürükleyerek sıralama ikisi için de çalışır.
+  const uploadMediaFile = async (rawFile, index = null) => {
+    if (!rawFile) return;
+    const isVideo = (rawFile.type || "").startsWith("video/");
     setUploading(true);
     try {
-      let dims = null;
+      const token = localStorage.getItem('token');
       if (isVideo) {
-        // Videonun gerçek piksel boyutunu metadata'dan oku — slider doğru oranda açılsın
-        dims = await new Promise((resolve) => {
-          const v = document.createElement("video");
-          const objUrl = URL.createObjectURL(file);
-          v.preload = "metadata";
-          v.onloadedmetadata = () => { resolve(v.videoWidth && v.videoHeight ? [v.videoWidth, v.videoHeight] : null); URL.revokeObjectURL(objUrl); };
-          v.onerror = () => { resolve(null); URL.revokeObjectURL(objUrl); };
-          v.src = objUrl;
+        const fd = new FormData();
+        fd.append('file', rawFile);
+        const res = await axios.post(`${API}/upload/video`, fd, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 300000, // video büyük olabilir
         });
-      } else {
-        file = await shrinkImageFile(file);
-        // Görselin gerçek piksel boyutunu client-side oku — kaydedilince storefront'ta
-        // (HeroSlider/FullBanner) doğru en-boy oranında, kırpılmadan gösterilsin.
-        dims = await new Promise((resolve) => {
-          const probe = new window.Image();
-          const objUrl = URL.createObjectURL(file);
-          probe.onload = () => { resolve([probe.naturalWidth, probe.naturalHeight]); URL.revokeObjectURL(objUrl); };
-          probe.onerror = () => { resolve(null); URL.revokeObjectURL(objUrl); };
-          probe.src = objUrl;
-        });
+        if (res.data.url || res.data.path) {
+          const raw = res.data.url || `/api/upload/files/${res.data.path}`;
+          const url = raw.startsWith('http') ? raw : `${BACKEND_ORIGIN}${raw}`;
+          const newImages = [...formData.images];
+          const newLinks = [...formData.links];
+          if (index !== null) {
+            newImages[index] = url;
+          } else {
+            newImages.push(url);
+            newLinks.push("/");
+          }
+          setFormData({ ...formData, images: newImages, links: newLinks });
+          toast.success("Video yüklendi");
+        }
+        return;
       }
 
-      const token = localStorage.getItem('token');
+      let file = await shrinkImageFile(rawFile);
+      // Görselin gerçek piksel boyutunu client-side oku — kaydedilince storefront'ta
+      // (HeroSlider/FullBanner) doğru en-boy oranında, kırpılmadan gösterilsin.
+      const dims = await new Promise((resolve) => {
+        const probe = new window.Image();
+        const objUrl = URL.createObjectURL(file);
+        probe.onload = () => { resolve([probe.naturalWidth, probe.naturalHeight]); URL.revokeObjectURL(objUrl); };
+        probe.onerror = () => { resolve(null); URL.revokeObjectURL(objUrl); };
+        probe.src = objUrl;
+      });
+
       const fd = new FormData();
       fd.append('file', file);
-      const res = await axios.post(`${API}/upload/${isVideo ? "video" : "image"}`, fd, {
+      const res = await axios.post(`${API}/upload/image`, fd, {
         headers: { Authorization: `Bearer ${token}` }, // Content-Type + boundary'yi tarayıcı koyar
-        timeout: isVideo ? 300000 : 90000, // video 100MB'a kadar — 5dk pay
+        timeout: 90000,
       });
       
       if (res.data.url || res.data.path) {
@@ -464,34 +435,16 @@ export default function PageDesign() {
         }
         
         setFormData({ ...formData, images: newImages, links: newLinks, settings: newSettings });
-        toast.success(isVideo ? "Video yüklendi" : "Görsel yüklendi");
+        toast.success("Görsel yüklendi");
       }
     } catch (err) {
       const detail = err?.response?.data?.detail;
       const code = err?.response?.status || err?.code || err?.message || "";
-      toast.error(detail ? `Dosya yüklenemedi: ${detail}` : `Dosya yüklenemedi (${code || "ağ hatası"})`);
+      toast.error(detail ? `Görsel yüklenemedi: ${detail}` : `Görsel yüklenemedi (${code || "ağ hatası"})`);
       console.error("[upload]", err);
     } finally {
       setUploading(false);
     }
-  };
-
-  // Slaytı (görsel/video + linki + boyutu) birlikte taşır — sürükle-bırak ve ok butonları kullanır
-  const moveSlide = (from, to) => {
-    if (to < 0 || to >= formData.images.length || from === to) return;
-    const images = arrayMove([...formData.images], from, to);
-    const links = arrayMove([...formData.links], from, to);
-    const settings = { ...formData.settings };
-    if (Array.isArray(settings.img_dims)) {
-      const dims = [...settings.img_dims];
-      while (dims.length < formData.images.length) dims.push(null);
-      settings.img_dims = arrayMove(dims, from, to);
-      if (settings.img_dims[0]) {
-        settings.img_width = settings.img_dims[0][0];
-        settings.img_height = settings.img_dims[0][1];
-      }
-    }
-    setFormData({ ...formData, images, links, settings });
   };
 
   const removeImage = (index) => {
@@ -506,6 +459,23 @@ export default function PageDesign() {
       newSettings.img_dims = imgDims;
     }
     setFormData({ ...formData, images: newImages, links: newLinks, settings: newSettings });
+  };
+
+  // Slaytları SÜRÜKLEYEREK yeniden sırala (görsel + video birlikte). images/links/img_dims
+  // paralel taşınır ki her slaytın linki ve en-boy oranı doğru kalsın.
+  const [dragIdx, setDragIdx] = useState(null);
+  const isVideoUrl = (u) => typeof u === "string" && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(u);
+  const moveSlide = (from, to) => {
+    if (from == null || to == null || from === to) return;
+    const imgs = [...formData.images];
+    const lnks = formData.links && formData.links.length ? [...formData.links] : imgs.map(() => "/");
+    while (lnks.length < imgs.length) lnks.push("/");
+    const dims = Array.isArray(formData.settings?.img_dims) ? [...formData.settings.img_dims] : null;
+    const [mi] = imgs.splice(from, 1); imgs.splice(to, 0, mi);
+    const [ml] = lnks.splice(from, 1); lnks.splice(to, 0, ml);
+    const newSettings = { ...formData.settings };
+    if (dims) { const [md] = dims.splice(from, 1); dims.splice(to, 0, md); newSettings.img_dims = dims; }
+    setFormData({ ...formData, images: imgs, links: lnks, settings: newSettings });
   };
 
   const [productSearch, setProductSearch] = useState("");
@@ -959,60 +929,98 @@ export default function PageDesign() {
             
             {needsImages && (
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  {formData.type === "hero_slider" ? "Görseller & Videolar" : "Görseller"}
-                </label>
-                {formData.images.length > 1 && (
-                  <p className="text-xs text-gray-500 mb-2">Kartları sol üstteki tutamaçtan sürükleyerek ya da ‹ › oklarıyla sıralayın — slider bu sırayla döner.</p>
+                {formData.type === "hero_slider" && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-1">Slider Stili</label>
+                    <select
+                      value={formData.settings?.hero_style || "klasik"}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, hero_style: e.target.value } })}
+                      className="w-full border px-3 py-2 rounded text-sm"
+                    >
+                      <option value="klasik">Klasik — yatay geçiş (fade + oklar)</option>
+                      <option value="dikey">Dikey Editorial (Zara) — tam ekran, dikey kaydırma</option>
+                    </select>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Dikey Editorial'de her slayt ekranı doldurur; sayfa kaydırıldıkça slaytlar birbiri ardına gelir. Her slayta üst yazı + başlık girebilirsin (aşağıda).
+                    </p>
+                  </div>
                 )}
-                {formData.type === "hero_slider" && formData.images.some((u) => isVideoUrl(u)) && (
-                  <label className="flex items-start gap-2 mb-3 p-2.5 bg-gray-50 border rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={Boolean(formData.settings?.video_loop)}
-                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, video_loop: e.target.checked } })}
-                    />
-                    <span className="text-xs">
-                      <span className="font-medium">Video sürekli oynasın (döngü)</span>
-                      <span className="block text-gray-500 mt-0.5">İşaretliyse video bitince sonraki slayta geçmez, başa sarar; slider o slaytta kalır (ok ve noktalarla elle geçilebilir). Kapalıyken video bir kez oynar ve sıradaki slayta geçilir.</span>
-                    </span>
-                  </label>
-                )}
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={({ active, over }) => {
-                    if (!over || active.id === over.id) return;
-                    const ids = formData.images.map((u, i) => `slide-${i}-${u}`);
-                    moveSlide(ids.indexOf(active.id), ids.indexOf(over.id));
-                  }}
-                >
-                  <SortableContext items={formData.images.map((u, i) => `slide-${i}-${u}`)} strategy={rectSortingStrategy}>
+                <label className="block text-sm font-medium mb-2">Görseller</label>
+                <p className="text-[11px] text-gray-500 mb-2">Slaytları <b>sürükleyerek</b> sıralayabilirsin. Görsel veya <b>video</b> (mp4/webm) yükleyebilir, kutuya <b>sürükleyip bırakarak</b> da ekleyebilirsin.</p>
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                   {formData.images.map((img, index) => (
-                    <SortableMediaItem
-                      key={`slide-${index}-${img}`}
-                      id={`slide-${index}-${img}`}
-                      url={img}
-                      index={index}
-                      total={formData.images.length}
-                      link={formData.links[index]}
-                      onLinkChange={(e) => {
-                        const newLinks = [...formData.links];
-                        newLinks[index] = e.target.value;
-                        setFormData({ ...formData, links: newLinks });
-                      }}
-                      onRemove={() => removeImage(index)}
-                      onMove={moveSlide}
-                    />
+                    <div
+                      key={index}
+                      className={`relative group cursor-move ${dragIdx === index ? "opacity-40" : ""}`}
+                      draggable
+                      onDragStart={() => setDragIdx(index)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); moveSlide(dragIdx, index); setDragIdx(null); }}
+                      onDragEnd={() => setDragIdx(null)}
+                    >
+                      {isVideoUrl(img) ? (
+                        <div className="relative">
+                          <video src={img} className="w-full aspect-video object-cover rounded border" muted playsInline preload="metadata" />
+                          <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded flex items-center gap-1">🎬 Video</span>
+                        </div>
+                      ) : (
+                        <img src={img} alt="" className="w-full aspect-video object-cover rounded border" />
+                      )}
+                      <span className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">{index + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X size={14} />
+                      </button>
+                      <input
+                        type="text"
+                        value={formData.links[index] || ""}
+                        onChange={(e) => {
+                          const newLinks = [...formData.links];
+                          newLinks[index] = e.target.value;
+                          setFormData({ ...formData, links: newLinks });
+                        }}
+                        placeholder="/kategori/..."
+                        className="w-full text-xs border px-2 py-1.5 rounded mt-2"
+                      />
+                      {formData.type === "hero_slider" && formData.settings?.hero_style === "dikey" && (() => {
+                        const caps = Array.isArray(formData.settings?.captions) ? formData.settings.captions : [];
+                        const cap = caps[index] || {};
+                        const setCap = (patch) => {
+                          const next = [...(Array.isArray(formData.settings?.captions) ? formData.settings.captions : [])];
+                          while (next.length <= index) next.push({});
+                          next[index] = { ...next[index], ...patch };
+                          setFormData({ ...formData, settings: { ...formData.settings, captions: next } });
+                        };
+                        return (
+                          <div className="mt-1.5 space-y-1">
+                            <input type="text" value={cap.eyebrow || ""} onChange={(e) => setCap({ eyebrow: e.target.value })}
+                              placeholder="Üst yazı (ör. YENİ SEZON)" className="w-full text-[11px] border px-2 py-1 rounded" />
+                            <input type="text" value={cap.title || ""} onChange={(e) => setCap({ title: e.target.value })}
+                              placeholder="Başlık (ör. Deniz Kıyısı)" className="w-full text-[11px] border px-2 py-1 rounded" />
+                            <input type="text" value={cap.cta || ""} onChange={(e) => setCap({ cta: e.target.value })}
+                              placeholder="Buton yazısı (varsayılan: Keşfet)" className="w-full text-[11px] border px-2 py-1 rounded" />
+                          </div>
+                        );
+                      })()}
+                    </div>
                   ))}
-                  
-                  {/* Upload */}
-                  <label className="aspect-video border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-black hover:bg-gray-50 rounded transition-colors">
+
+                  {/* Upload — görsel VEYA video; sürükle-bırak destekli */}
+                  <label
+                    className="aspect-video border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-black hover:bg-gray-50 rounded transition-colors"
+                    onDragOver={(e) => { e.preventDefault(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const f = e.dataTransfer?.files?.[0];
+                      if (f) uploadMediaFile(f);
+                    }}
+                  >
                     <input
                       type="file"
-                      accept={formData.type === "hero_slider" ? "image/*,video/mp4,video/webm,video/quicktime" : "image/*"}
+                      accept="image/*,video/*"
                       onChange={(e) => handleImageUpload(e)}
                       className="hidden"
                     />
@@ -1024,13 +1032,12 @@ export default function PageDesign() {
                     ) : (
                       <>
                         <Upload size={24} className="text-gray-400 mb-1" />
-                        <span className="text-xs text-gray-500">{formData.type === "hero_slider" ? "Görsel / Video Ekle" : "Görsel Ekle"}</span>
+                        <span className="text-xs text-gray-500">Görsel / Video Ekle</span>
+                        <span className="text-[10px] text-gray-400 mt-0.5">sürükle-bırak</span>
                       </>
                     )}
                   </label>
                 </div>
-                  </SortableContext>
-                </DndContext>
               </div>
             )}
 

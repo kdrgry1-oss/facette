@@ -70,116 +70,6 @@ def _optimize_for_upload(data: bytes, content_type: str):
         return None, None, None
 
 
-MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100 MB — hero slider videoları (kısa mp4/webm)
-ALLOWED_VIDEO_TYPES = ("video/mp4", "video/webm", "video/quicktime")
-
-
-@router.post("/video")
-async def upload_video(file: UploadFile = File(...), user=Depends(get_current_user)):
-    """Video dosyasını (mp4/webm/mov) olduğu gibi Cloudflare R2'ye yükler;
-    R2 kapalıysa MongoDB+disk'e düşer. Hero slider video slaytları için."""
-    ct = (file.content_type or "").lower()
-    if ct not in ALLOWED_VIDEO_TYPES and not ct.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Sadece video dosyaları yüklenebilir (mp4/webm/mov)")
-
-    data = await file.read()
-    if len(data) > MAX_VIDEO_BYTES:
-        raise HTTPException(status_code=400, detail="Video çok büyük (maks 100MB). Hero için 10-20sn, 1080p, H.264 mp4 önerilir.")
-
-    ext = file.filename.split(".")[-1].lower() if "." in (file.filename or "") else "mp4"
-    if ext not in ("mp4", "webm", "mov", "m4v"):
-        ext = "mp4"
-    filename = f"{uuid.uuid4()}.{ext}"
-    content_type = ct or "video/mp4"
-
-    if r2.is_enabled():
-        key = f"uploads/{filename}"
-        try:
-            public_url = r2.put_object(key, data, content_type)
-            await db.files.insert_one({
-                "id": str(uuid.uuid4()),
-                "storage_path": filename,
-                "r2_key": key,
-                "r2_url": public_url,
-                "original_filename": file.filename,
-                "content_type": content_type,
-                "size": len(data),
-                "is_deleted": False,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            return {"success": True, "path": filename, "url": public_url}
-        except Exception as e:
-            logger.error(f"R2 video upload failed, falling back to db/disk: {e}")
-
-    try:
-        with open(os.path.join(UPLOAD_DIR, filename), "wb") as f:
-            f.write(data)
-    except Exception as e:
-        logger.warning(f"video disk write failed: {e}")
-
-    await db.files.insert_one({
-        "id": str(uuid.uuid4()),
-        "storage_path": filename,
-        "content_type": content_type,
-        "original_filename": file.filename,
-        "data_b64": base64.b64encode(data).decode("ascii"),
-        "size": len(data),
-        "is_deleted": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    return {"success": True, "path": filename, "url": f"/api/upload/files/{filename}"}
-
-
-MAX_DOC_BYTES = 15 * 1024 * 1024  # 15 MB — fatura/e-arşiv PDF'leri
-
-
-@router.post("/document")
-async def upload_document(file: UploadFile = File(...), user=Depends(get_current_user)):
-    """PDF belgesi (fatura vb.) yükler — R2'ye olduğu gibi, R2 kapalıysa DB+disk'e.
-    Dönen url kalıcıdır; HB fatura linki gibi dış paylaşımda kullanılabilir."""
-    ct = (file.content_type or "").lower()
-    name_ok = (file.filename or "").lower().endswith(".pdf")
-    if ct != "application/pdf" and not name_ok:
-        raise HTTPException(status_code=400, detail="Sadece PDF yüklenebilir")
-
-    data = await file.read()
-    if len(data) > MAX_DOC_BYTES:
-        raise HTTPException(status_code=400, detail="Dosya çok büyük (maks 15MB)")
-    if not data.startswith(b"%PDF"):
-        raise HTTPException(status_code=400, detail="Geçerli bir PDF değil")
-
-    filename = f"{uuid.uuid4()}.pdf"
-    content_type = "application/pdf"
-
-    if r2.is_enabled():
-        key = f"uploads/{filename}"
-        try:
-            public_url = r2.put_object(key, data, content_type)
-            await db.files.insert_one({
-                "id": str(uuid.uuid4()), "storage_path": filename,
-                "r2_key": key, "r2_url": public_url,
-                "original_filename": file.filename, "content_type": content_type,
-                "size": len(data), "is_deleted": False,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            return {"success": True, "path": filename, "url": public_url}
-        except Exception as e:
-            logger.error(f"R2 document upload failed, falling back to db/disk: {e}")
-
-    try:
-        with open(os.path.join(UPLOAD_DIR, filename), "wb") as f:
-            f.write(data)
-    except Exception as e:
-        logger.warning(f"document disk write failed: {e}")
-    await db.files.insert_one({
-        "id": str(uuid.uuid4()), "storage_path": filename,
-        "original_filename": file.filename, "content_type": content_type,
-        "size": len(data), "data_b64": base64.b64encode(data).decode("ascii"),
-        "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    return {"success": True, "path": filename, "url": f"/api/upload/files/{filename}"}
-
-
 @router.post("/image")
 async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
     """Görseli optimize edip (resize+WebP) Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
@@ -242,6 +132,54 @@ async def upload_image(file: UploadFile = File(...), user=Depends(get_current_us
         "path": filename,
         "url": f"/api/upload/files/{filename}",
     }
+
+
+MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100 MB — hero slider videoları
+
+
+@router.post("/video")
+async def upload_video(file: UploadFile = File(...), user=Depends(get_current_user)):
+    """Video yükler (hero slider slaytı için) → Cloudflare R2 CDN'e; optimize edilmez,
+    olduğu gibi CDN'den servis edilir (anasayfayı yormaz). R2 kapalıysa MongoDB+disk'e düşer."""
+    ct = (file.content_type or "").lower()
+    if not ct.startswith("video/"):
+        raise HTTPException(status_code=400, detail="Sadece video dosyaları yüklenebilir")
+    data = await file.read()
+    if len(data) > MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=400, detail="Video çok büyük (maks 100MB)")
+    ext = (file.filename.split(".")[-1].lower() if "." in (file.filename or "") else "mp4")
+    if ext not in ("mp4", "webm", "mov", "m4v", "ogg"):
+        ext = "mp4"
+    filename = f"{uuid.uuid4()}.{ext}"
+
+    # 1) Cloudflare R2 (tercih edilen — CDN'den doğrudan servis)
+    if r2.is_enabled():
+        key = f"uploads/{filename}"
+        try:
+            public_url = r2.put_object(key, data, ct)
+            await db.files.insert_one({
+                "id": str(uuid.uuid4()), "storage_path": filename, "r2_key": key,
+                "r2_url": public_url, "original_filename": file.filename,
+                "content_type": ct, "size": len(data), "is_video": True,
+                "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return {"success": True, "path": filename, "url": public_url, "is_video": True}
+        except Exception as e:
+            logger.error(f"R2 video upload failed, falling back to db/disk: {e}")
+
+    # 2) Fallback: disk + MongoDB
+    try:
+        with open(os.path.join(UPLOAD_DIR, filename), "wb") as f:
+            f.write(data)
+    except Exception as e:
+        logger.warning(f"video disk write failed: {e}")
+    await db.files.insert_one({
+        "id": str(uuid.uuid4()), "storage_path": filename,
+        "original_filename": file.filename, "content_type": ct, "size": len(data),
+        "data_b64": base64.b64encode(data).decode("ascii"), "is_video": True,
+        "is_deleted": False, "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "path": filename, "url": f"/api/upload/files/{filename}", "is_video": True}
 
 
 async def _serve(path: str, w: int = 0, q: int = 90):

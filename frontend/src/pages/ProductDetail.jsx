@@ -88,7 +88,7 @@ const pushRecentlyViewed = (snap) => {
 export default function ProductDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { addItem } = useCart();
+  const { addItem, isOpen: cartOpen } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { freeShippingThreshold } = useShipping();
   const { user } = useAuth();
@@ -485,8 +485,9 @@ export default function ProductDetail() {
     <div className="min-h-screen">
       <Header />
 
-      {/* Sticky Product Bar — mobile: bottom, desktop: top */}
-      {showStickyHeader && (
+      {/* Sticky Product Bar — mobile: bottom, desktop: top.
+          Sepet çekmecesi AÇIKKEN gizlenir: yoksa çekmecenin "Ödemeye Geç" butonunu örter. */}
+      {showStickyHeader && !cartOpen && (
         <div className="fixed left-0 right-0 z-50 bg-white border-t md:border-t-0 md:border-b shadow-[0_-4px_20px_rgba(0,0,0,0.05)] md:shadow-sm bottom-0 md:top-0 md:bottom-auto pb-[env(safe-area-inset-bottom)]" data-testid="sticky-product-bar">
           <div className="max-w-screen-2xl mx-auto px-3 md:px-4 py-2.5 md:py-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -710,7 +711,11 @@ export default function ProductDetail() {
 
 
             {/* Color Siblings (diğer renk) — varsa swatch'ler */}
-            <ColorSiblings productId={product.id} currentColor={product.attributes?.find?.((a) => (a.name || "").toLowerCase().includes("color") || (a.name || "").toLowerCase().includes("renk"))?.value} />
+            <ColorSiblings productId={product.id} currentColor={
+              product.color
+              || product.variants?.find?.((v) => v.color)?.color
+              || product.attributes?.find?.((a) => (a.name || "").toLowerCase().includes("color") || (a.name || "").toLowerCase().includes("renk"))?.value
+            } />
 
             {/* Size Selection */}
             <div className="mb-5">
@@ -1232,6 +1237,40 @@ export default function ProductDetail() {
  * miniatür kare swatch'lerle gösterir. Hover ile ürün adı tooltip, click ile
  * o renk varyantının ürün sayfasına yönlendirir.
  */
+// Türkçe renk adı → HEX. Ürün kartında/PDP'de renk kutuları GERÇEK renk gösterir (görsel değil).
+const TR_COLOR_HEX = {
+  siyah: "#111111", beyaz: "#ffffff", "kırmızı": "#d11f1f", kirmizi: "#d11f1f",
+  mavi: "#2454c7", lacivert: "#1a2a5e", "yeşil": "#2e8b45", yesil: "#2e8b45",
+  "sarı": "#f2c500", sari: "#f2c500", turuncu: "#ee7c1b", mor: "#7d3cb5",
+  pembe: "#e86ea3", gri: "#9a9a9a", kahverengi: "#6b4226", bej: "#d8c3a5",
+  ekru: "#e8e2d0", krem: "#efe7d3", bordo: "#6e1423", haki: "#6b6b3a",
+  turkuaz: "#1ab6b6", "gümüş": "#c0c0c0", gumus: "#c0c0c0", "altın": "#c9a227", altin: "#c9a227",
+  "füme": "#5a5a5a", fume: "#5a5a5a", antrasit: "#383838", vizon: "#9b7e6b",
+  taba: "#a9662e", hardal: "#c9a227", indigo: "#33427a", somon: "#f2a68c",
+  "fuşya": "#c81f76", fusya: "#c81f76", lila: "#c8a2d6", mint: "#a8e0c0",
+  petrol: "#1f5f6e", camel: "#c19a6b", ten: "#e6c8a8", nude: "#e3c2a8",
+  "yavruağzı": "#f2b8a2", yavruagzi: "#f2b8a2", "gül kurusu": "#b76e79", gulkurusu: "#b76e79",
+  mürdüm: "#5a2a4d", murdum: "#5a2a4d", "açık mavi": "#8fb8e0", "koyu mavi": "#1a2a5e",
+};
+function colorHexTR(name) {
+  if (!name) return null;
+  const n = String(name).toLocaleLowerCase("tr").trim();
+  if (TR_COLOR_HEX[n]) return TR_COLOR_HEX[n];
+  for (const key of Object.keys(TR_COLOR_HEX)) if (n.includes(key)) return TR_COLOR_HEX[key];
+  return null;
+}
+// Tek bir renk kutusu (yuvarlak). Beyaz/açık tonlarda görünürlük için ince kenarlık.
+function ColorDot({ color, selected }) {
+  const hex = colorHexTR(color) || "#e5e5e5";
+  return (
+    <span
+      className={`inline-block w-8 h-8 rounded-full transition-transform ${selected ? "ring-2 ring-black ring-offset-2" : "ring-1 ring-gray-300 hover:ring-black"}`}
+      style={{ backgroundColor: hex }}
+      title={color || ""}
+    />
+  );
+}
+
 function ColorSiblings({ productId, currentColor }) {
   const [siblings, setSiblings] = useState([]);
   useEffect(() => {
@@ -1247,25 +1286,19 @@ function ColorSiblings({ productId, currentColor }) {
     <div className="mb-5" data-testid="color-siblings">
       <p className="text-xs uppercase tracking-[0.18em] text-gray-700 mb-2">
         Renk: <span className="text-black font-medium">{currentColor || "—"}</span>
-        <span className="text-gray-400 ml-2">+ {siblings.length} renk daha</span>
       </p>
-      <div className="flex flex-wrap gap-2">
-        {/* Mevcut ürün ilk swatch — siyah border */}
-        <div className="w-12 h-12 border-2 border-black bg-gray-50 overflow-hidden flex-shrink-0" title={currentColor || ""}>
-          {/* Boş — bu mevcut ürün */}
-          <div className="w-full h-full flex items-center justify-center text-[10px] text-black font-bold">●</div>
-        </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Mevcut ürün — seçili renk noktası */}
+        <ColorDot color={currentColor} selected />
         {siblings.map((s) => (
           <a
             key={s.id}
             href={`/${s.slug || s.id}`}
-            className="w-12 h-12 border border-gray-300 hover:border-black bg-white overflow-hidden flex-shrink-0 transition-colors"
             title={`${s.color || s.name || ""}`}
             data-testid={`color-sibling-${s.id}`}
+            className="inline-flex"
           >
-            {s.image
-              ? <img src={optimizeImg(s.image, 150)} alt={s.color || ""} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-              : <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-300" />}
+            <ColorDot color={s.color || s.name} />
           </a>
         ))}
       </div>

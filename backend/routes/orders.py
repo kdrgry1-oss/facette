@@ -2899,20 +2899,6 @@ async def create_invoice_for_order(
         trendyol_upload = {"ok": False, "error": str(_te)}
         logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_te}")
 
-    # ─── Hepsiburada: fatura kesilir kesilmez linki HB paketine ANINDA ilet ──
-    # Trendyol'daki otomatik yüklemenin HB karşılığı — bu blok olmadığı için
-    # HB faturaları "kesildi ama gönderilmedi" kalıyordu. Hata olsa bile fatura
-    # kesimi başarılı sayılır (sadece siparişe/loga işlenir), akış kırılmaz.
-    hepsiburada_upload = None
-    try:
-        if order.get("platform") == "hepsiburada":
-            from .integrations_hepsiburada import hb_push_invoice_for_order
-            _fresh = await db.orders.find_one({"id": order_id}, {"_id": 0}) or order
-            hepsiburada_upload = await hb_push_invoice_for_order(_fresh, dogan_settings)
-    except Exception as _he:
-        hepsiburada_upload = {"ok": False, "error": str(_he)}
-        logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_he}")
-
     return {
         "success": True,
         "message": "Fatura oluşturuldu",
@@ -2920,7 +2906,6 @@ async def create_invoice_for_order(
         "invoice_type": invoice_type,
         "provider": active,
         "trendyol_upload": trendyol_upload,
-        "hepsiburada_upload": hepsiburada_upload,
     }
 
 

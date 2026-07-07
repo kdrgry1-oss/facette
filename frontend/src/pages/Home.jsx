@@ -25,44 +25,34 @@ const DEFAULT_INSTASHOP = [
   { id: 5, image: "https://cdn.facette.com.tr/pagedesign/orj-87d15ba0-0081-4b65-acc5-b12328de368b-1920.webp", link: "/elbise" }
 ];
 
-// Block Components
-// Hero slaytının video olup olmadığını URL uzantısından anla
-const isVideoUrl = (u) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(u || ""));
+// Bir slayt görsel mi video mu — uzantıdan belirlenir (aynı images[] dizisi ikisini de taşır).
+const isVideoUrl = (u) => typeof u === "string" && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(u);
 
+// Block Components
 function HeroSlider({ block }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
   const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
   const videoRefs = useRef({});
-  const activeIsVideo = isVideoUrl(images[currentSlide]);
-  // "Video sürekli oynasın" (admin > Blok Düzenle): video slayt döngüde kalır,
-  // otomatik geçiş o slaytta durur; ok/nokta ile elle geçilebilir.
-  const videoLoop = Boolean(block?.settings?.video_loop);
 
-  // Otomatik geçiş: görsel slaytlarda 5sn; video slaytta videonun bitmesini bekle
-  // (onEnded ilerletir), takılırsa 30sn emniyet süresi devreye girer.
-  // videoLoop açıkken aktif video slaytında zamanlayıcı kurulmaz.
   useEffect(() => {
-    if (images.length <= 1) return;
-    if (activeIsVideo && videoLoop) return;
-    const t = setTimeout(() => {
-      setCurrentSlide((prev) => (prev + 1) % images.length);
-    }, activeIsVideo ? 30000 : 5000);
-    return () => clearTimeout(t);
-  }, [images.length, currentSlide, activeIsVideo, videoLoop]);
+    if (images.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % images.length);
+      }, 6000);
+      return () => clearInterval(interval);
+    }
+  }, [images.length]);
 
-  // Yalnızca aktif video oynasın (pil/CPU); slayt değişince baştan başlat
+  // PERFORMANS: yalnızca AKTİF slaytın videosu oynatılır; diğerleri duraklatılır.
+  // Böylece birden çok video aynı anda decode edilip sistemi/anasayfayı yormaz.
   useEffect(() => {
     Object.entries(videoRefs.current).forEach(([i, v]) => {
       if (!v) return;
-      if (Number(i) === currentSlide) {
-        try { v.currentTime = 0; } catch (_) { /* noop */ }
-        v.play().catch(() => {});
-      } else {
-        v.pause();
-      }
+      if (Number(i) === currentSlide) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
+      else { try { v.pause?.(); } catch (_) { /* noop */ } }
     });
-  }, [currentSlide]);
+  }, [currentSlide, images.length]);
 
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % images.length);
   const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + images.length) % images.length);
@@ -107,34 +97,30 @@ function HeroSlider({ block }) {
                 src={img}
                 className="w-full h-full object-cover block"
                 muted
+                loop
                 playsInline
-                preload={index === 0 ? "auto" : "metadata"}
                 autoPlay={index === 0}
-                loop={videoLoop || images.length === 1}
+                // İlk slayt hazır olsun; diğer videolar yalnızca sıraları gelince yüklenir (bant genişliği + hız).
+                preload={index === 0 ? "auto" : "none"}
                 width={dimsFor(index)?.[0]}
                 height={dimsFor(index)?.[1]}
                 onLoadedMetadata={(e) => {
-                  const { videoWidth: w, videoHeight: h } = e.target;
+                  const w = e.target.videoWidth, h = e.target.videoHeight;
                   if (w && h) setLoadedDims((prev) => (prev[index] ? prev : { ...prev, [index]: [w, h] }));
-                }}
-                onEnded={() => {
-                  if (!videoLoop && images.length > 1 && index === currentSlide) {
-                    setCurrentSlide((prev) => (prev + 1) % images.length);
-                  }
                 }}
               />
             ) : (
-            <img
-              src={optimizeImg(img, 1920, 78)}
-              alt={block?.title || ""}
-              className="w-full h-full object-cover block"
-              fetchPriority={index === 0 ? "high" : "auto"}
-              loading={index === 0 ? "eager" : "lazy"}
-              decoding="async"
-              width={dimsFor(index)?.[0]}
-              height={dimsFor(index)?.[1]}
-              onLoad={handleImgLoad(index)}
-            />
+              <img
+                src={optimizeImg(img, 1920, 78)}
+                alt={block?.title || ""}
+                className="w-full h-full object-cover block"
+                fetchPriority={index === 0 ? "high" : "auto"}
+                loading={index === 0 ? "eager" : "lazy"}
+                decoding="async"
+                width={dimsFor(index)?.[0]}
+                height={dimsFor(index)?.[1]}
+                onLoad={handleImgLoad(index)}
+              />
             )}
           </Link>
         ))}
@@ -158,6 +144,72 @@ function HeroSlider({ block }) {
   );
 }
 
+// Dikey Editorial Akış (Zara mobil stili) — her slayt EKRANI doldurur, sayfa dikey kaydırıldıkça
+// slaytlar birbiri ardına gelir. Görsel + video destekler. PERFORMANS: video'lar yalnızca
+// ekrandayken (IntersectionObserver) oynatılır; diğerleri preload edilmez.
+function HeroEditorial({ block }) {
+  const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
+  const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
+  const captions = block?.settings?.captions || [];
+  const vids = useRef({});
+  useEffect(() => {
+    const els = Object.values(vids.current).filter(Boolean);
+    if (!els.length || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        const v = e.target;
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
+        else { try { v.pause?.(); } catch (_) { /* noop */ } }
+      });
+    }, { threshold: [0, 0.5, 1] });
+    els.forEach((v) => io.observe(v));
+    return () => io.disconnect();
+  }, [images.length]);
+
+  return (
+    <section data-testid="hero-editorial" className="w-full">
+      {images.map((img, i) => {
+        const cap = captions[i] || {};
+        return (
+          <Link
+            key={i}
+            to={links[i] || "/"}
+            onClick={() => { try { trackSelectPromotion({ promotionId: `hero_${i + 1}`, promotionName: cap.title || links[i] || `Hero ${i + 1}` }); } catch (_) { /* silent */ } }}
+            className="relative block w-full overflow-hidden bg-stone-100"
+            style={{ height: "100svh", minHeight: "80vh" }}
+          >
+            {isVideoUrl(img) ? (
+              <video
+                ref={(el) => { vids.current[i] = el; }}
+                src={img}
+                className="absolute inset-0 w-full h-full object-cover"
+                muted loop playsInline
+                autoPlay={i === 0}
+                preload={i === 0 ? "auto" : "none"}
+              />
+            ) : (
+              <img
+                src={optimizeImg(img, 1920, 80)}
+                alt={cap.title || block?.title || ""}
+                className="absolute inset-0 w-full h-full object-cover"
+                loading={i === 0 ? "eager" : "lazy"}
+                fetchPriority={i === 0 ? "high" : "auto"}
+                decoding="async"
+              />
+            )}
+            <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,.45), rgba(0,0,0,0) 42%)" }} />
+            <div className="absolute left-5 md:left-10 bottom-16 md:bottom-24 z-10 text-white max-w-[82%]">
+              {cap.eyebrow ? <div className="text-[11px] tracking-[0.32em] uppercase opacity-90 mb-2">{cap.eyebrow}</div> : null}
+              {cap.title ? <div className="text-3xl md:text-5xl font-light tracking-wide leading-tight">{cap.title}</div> : null}
+              <div className="mt-3 text-[11px] tracking-[0.24em] uppercase inline-block border-b border-white/70 pb-1">{cap.cta || "Keşfet"}</div>
+            </div>
+          </Link>
+        );
+      })}
+    </section>
+  );
+}
+
 function FullBanner({ block }) {
   if (!block?.images?.[0]) return null;
   const dims = block?.settings?.img_dims?.[0];
@@ -169,38 +221,18 @@ function FullBanner({ block }) {
 }
 
 function HalfBanners({ block }) {
-  // Her banner KENDİ yüklenme boyutunun oranında gösterilir (kırpma yok):
-  // 1) Admin yüklerken kaydedilen settings.img_dims[i] varsa onu kullan,
-  // 2) yoksa (eski kayıtlar) tarayıcı görsel yüklenince gerçek pikseli okur,
-  // 3) o da gelene dek 16/9 iskelet gösterilir (yerleşim zıplamasın).
-  // İstisna: settings.aspect elle girilmişse eski "tek sabit oran" davranışı korunur.
-  const [loadedDims, setLoadedDims] = useState({}); // { [index]: [w, h] }
   if (!block?.images || block.images.length < 2) return null;
-  const fixedAspect = block?.settings?.aspect || null;
-  const savedDims = block?.settings?.img_dims;
-  const dimsFor = (i) => (savedDims && savedDims[i]) || loadedDims[i] || null;
+  // İki banner için TEK ve tutarlı en-boy oranı. Yüklenen görselin piksel
+  // boyutundan bağımsız: hangi boyutta görsel eklenirse eklensin, ikisi de
+  // eşit boyutta ve sayfaya sığarak (object-cover ile) görünür. Eski/karışık
+  // kayıtlı boyutların yerleşimi bozmasını engeller. Admin isterse
+  // block.settings.aspect ("16 / 9" gibi) ile değiştirebilir.
+  const aspect = block?.settings?.aspect || "16 / 9";
   return (
-    <div className="grid grid-cols-2 items-start" data-testid="half-banners">
+    <div className="grid grid-cols-2" data-testid="half-banners">
       {block.images.slice(0, 2).map((img, index) => (
-        <Link
-          key={index}
-          to={block.links?.[index] || "/"}
-          className="block bg-stone-100 overflow-hidden"
-          style={{ aspectRatio: fixedAspect || aspectFromDims(dimsFor(index), "16 / 9") }}
-        >
-          <img
-            src={optimizeImg(img, 1000)}
-            alt=""
-            className="w-full h-full object-cover block"
-            loading="lazy"
-            decoding="async"
-            width={dimsFor(index)?.[0]}
-            height={dimsFor(index)?.[1]}
-            onLoad={(e) => {
-              const { naturalWidth: w, naturalHeight: h } = e.target;
-              if (w && h) setLoadedDims((prev) => (prev[index] ? prev : { ...prev, [index]: [w, h] }));
-            }}
-          />
+        <Link key={index} to={block.links?.[index] || "/"} className="block bg-stone-100 overflow-hidden" style={{ aspectRatio: aspect }}>
+          <img src={optimizeImg(img, 1000)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
         </Link>
       ))}
     </div>
@@ -427,7 +459,9 @@ function HomeSkeleton() {
 function BlockRenderer({ block, products }) {
   let component = null;
   switch (block.type) {
-    case "hero_slider":   component = <HeroSlider block={block} />; break;
+    case "hero_slider":   component = block?.settings?.hero_style === "dikey"
+                            ? <HeroEditorial block={block} />
+                            : <HeroSlider block={block} />; break;
     case "full_banner":   component = <FullBanner block={block} />; break;
     case "half_banners":  component = <HalfBanners block={block} />; break;
     case "product_slider":component = <ProductSlider block={block} products={products} />; break;
