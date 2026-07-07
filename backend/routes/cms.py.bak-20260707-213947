@@ -22,63 +22,6 @@ async def get_page_blocks(
     blocks = await db.page_blocks.find(query, {"_id": 0}).sort("sort_order", 1).to_list(50)
     return blocks
 
-# ── HEADER MENÜ (Menü Yönetimi) ─────────────────────────────────────────────
-# ÖNEMLİ: /{block_id} rotasından ÖNCE tanımlı olmalı, yoksa "header-menu"
-# block_id olarak yakalanır.
-
-@router.get("/header-menu")
-async def get_header_menu():
-    """Vitrin header menüsü (public). Kayıt yoksa boş döner — frontend
-    kendi varsayılanını (mevcut sabit menü) kullanır, görünüm bozulmaz."""
-    doc = await db.settings.find_one({"id": "header_menu"}, {"_id": 0})
-    return {"tabs": (doc or {}).get("tabs") or []}
-
-
-@router.put("/header-menu")
-async def save_header_menu(payload: dict, current_user: dict = Depends(require_admin)):
-    """Header menüsünü kaydeder. tabs: [{id,label,type,link,style,active,columns:[{title,link,items:[{name,link}]}]}]"""
-    tabs = payload.get("tabs")
-    if not isinstance(tabs, list) or not tabs:
-        raise HTTPException(status_code=400, detail="tabs boş olamaz")
-
-    def _s(v, maxlen=300):
-        return str(v or "").strip()[:maxlen]
-
-    clean = []
-    for i, t in enumerate(tabs):
-        if not isinstance(t, dict) or not _s(t.get("label")):
-            continue
-        tab = {
-            "id": _s(t.get("id")) or f"tab{i}",
-            "label": _s(t.get("label"), 60),
-            "type": "mega" if t.get("type") == "mega" else "link",
-            "link": _s(t.get("link")) or "/",
-            "style": t.get("style") if t.get("style") in ("accent", "sale") else "normal",
-            "active": t.get("active") is not False,
-        }
-        if tab["type"] == "mega":
-            cols = []
-            for c in (t.get("columns") or []):
-                if not isinstance(c, dict):
-                    continue
-                items = [{"name": _s(it.get("name"), 60), "link": _s(it.get("link")) or "/"}
-                         for it in (c.get("items") or [])
-                         if isinstance(it, dict) and _s(it.get("name"))]
-                cols.append({"title": _s(c.get("title"), 60), "link": _s(c.get("link")) or "/", "items": items})
-            tab["columns"] = cols
-        clean.append(tab)
-    if not clean:
-        raise HTTPException(status_code=400, detail="Geçerli sekme yok")
-
-    await db.settings.update_one(
-        {"id": "header_menu"},
-        {"$set": {"tabs": clean, "updated_at": datetime.now(timezone.utc).isoformat(),
-                  "updated_by": current_user.get("email") or current_user.get("id")}},
-        upsert=True,
-    )
-    return {"success": True, "tabs": clean}
-
-
 @router.get("/{block_id}")
 async def get_page_block(block_id: str):
     """Get single page block"""
