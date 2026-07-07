@@ -3273,3 +3273,140 @@ async def hb_backfill(payload: Optional[dict] = Body(default=None),
                                 f"HB {days} gün backfill başlatıldı (stok düşümü: {'açık' if dec else 'kapalı'})")
     return {"success": True, "started": True, "days": days, "decrement_stock": dec,
             "message": f"Son {days} günün HB siparişleri/iptalleri/iadeleri arka planda çekiliyor — sonuç Entegrasyon Logları'nda."}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FATURA → HEPSİBURADA GÖNDERİMİ
+# Sorun: fatura Doğan'da kesiliyor ama linki HB paketine iletilmiyordu
+# (otomatik yükleme yalnız Trendyol için yazılmıştı). Buradaki yardımcılar hem
+# fatura kesiminden sonraki otomatik gönderim (orders.py) hem de bekleyenleri
+# geriye dönük gönderen /hepsiburada/invoices/retry ucu tarafından kullanılır.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _hb_resolve_invoice_link(order: dict, dogan_settings: dict) -> str:
+    """Siparişteki fatura anahtarından tıklanabilir link üretir.
+    invoice_pdf_url http ile başlıyorsa aynen; değilse earsiv_link_template'e
+    {web_key} olarak gömülür (Trendyol otomatik yüklemesiyle aynı kural)."""
+    web = (order.get("invoice_pdf_url") or "").strip()
+    tmpl = ((dogan_settings or {}).get("earsiv_link_template") or "").strip()
+    if web.startswith("http"):
+        return web
+    if tmpl and web:
+        return tmpl.replace("{web_key}", web)
+    return ""
+
+
+async def hb_find_package_number(order_number: str, hb_order_number: str = "") -> str:
+    """Sipariş numarasından HB paket numarasını bulur.
+    Güncel paket listesi kargolananları düşürdüğü için sırayla
+    packages → shipped → delivered taranır. Bulunan ilk eşleşme döner."""
+    import asyncio as _aio
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        return ""
+    targets = {str(x).strip() for x in (order_number, hb_order_number) if x}
+    if not targets:
+        return ""
+
+    def _scan(rows):
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            onum = str(r.get("orderNumber") or r.get("orderId") or "").strip()
+            pn = r.get("packageNumber") or r.get("packageNo") or r.get("id")
+            if onum in targets and pn:
+                return str(pn)
+            for k in ("items", "lineItems", "details", "orderItems"):
+                for ln in (r.get(k) or []):
+                    if isinstance(ln, dict) and str(ln.get("orderNumber") or "").strip() in targets:
+                        pn2 = pn or ln.get("packageNumber")
+                        if pn2:
+                            return str(pn2)
+        return ""
+
+    for fn in (client.get_packages, client.get_packages_shipped, client.get_packages_delivered):
+        try:
+            data = await _aio.to_thread(fn, 0, 100)
+            rows = data if isinstance(data, list) else (
+                (data or {}).get("items") or (data or {}).get("packages")
+                or (data or {}).get("content") or (data or {}).get("data") or [])
+            pn = _scan(rows)
+            if pn:
+                return pn
+        except Exception as e:  # uç hesaba göre olmayabilir — sıradakine geç
+            logger.debug(f"[hb invoice] paket tarama ({getattr(fn,'__name__','?')}): {e}")
+    return ""
+
+
+async def hb_push_invoice_for_order(order: dict, dogan_settings: dict = None) -> dict:
+    """Faturası kesilmiş TEK HB siparişinin linkini HB paketine iletir ve
+    sonucu siparişe işler (hb_invoice_uploaded / hb_invoice_error /
+    hb_package_number). Fatura akışını asla kırmaz — hata yalnızca kaydedilir."""
+    import asyncio as _aio
+    from .category_mapping import _get_hb_client
+    onum = order.get("order_number") or ""
+    if dogan_settings is None:
+        dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+
+    async def _fail(msg: str) -> dict:
+        await db.orders.update_one(
+            {"id": order.get("id")},
+            {"$set": {"hb_invoice_uploaded": False, "hb_invoice_error": str(msg)[:1000]}})
+        await log_integration_event("hepsiburada", "send_invoice", "order", onum, "error", str(msg)[:300])
+        logger.warning(f"[hb invoice] {onum}: {msg}")
+        return {"order_number": onum, "ok": False, "error": str(msg)}
+
+    link = _hb_resolve_invoice_link(order, dogan_settings)
+    if not link:
+        return await _fail("Fatura linki üretilemedi: invoice_pdf_url URL değil ve "
+                           "earsiv_link_template ayarlı değil (Ayarlar > E-Arşiv/E-Fatura)")
+    pn = (order.get("hb_package_number") or "").strip() if order.get("hb_package_number") else ""
+    if not pn:
+        pn = await hb_find_package_number(onum, order.get("hepsiburada_order_number") or "")
+    if not pn:
+        return await _fail("HB paket numarası bulunamadı (paket henüz oluşmamış ya da 1 aydan eski olabilir)")
+
+    client, err = await _get_hb_client()
+    if err:
+        return await _fail(f"HB istemcisi: {err}")
+    try:
+        await _aio.to_thread(client.send_invoice, pn, link)
+    except Exception as e:
+        return await _fail(f"HB fatura gönderimi: {e}")
+
+    from datetime import datetime as _dt, timezone as _tz
+    await db.orders.update_one(
+        {"id": order.get("id")},
+        {"$set": {"hb_invoice_uploaded": True, "hb_invoice_error": "",
+                  "hb_package_number": pn,
+                  "hb_invoice_uploaded_at": _dt.now(_tz.utc).isoformat()}})
+    await log_integration_event("hepsiburada", "send_invoice", "package", pn, "success",
+                                f"Fatura HB'ye iletildi ({onum})")
+    return {"order_number": onum, "ok": True, "package_number": pn, "link": link}
+
+
+@router.post("/hepsiburada/invoices/retry")
+async def hb_invoices_retry(payload: dict = Body(default={}),
+                            current_user: dict = Depends(require_admin)):
+    """Faturası kesilmiş ama HB'ye İLETİLMEMİŞ siparişlerin linklerini toplu
+    gönderir. payload: {limit?: int=10, order_numbers?: [..]}.
+    order_numbers verilirse yalnız onlar; verilmezse en yeni bekleyenler."""
+    p = payload or {}
+    limit = max(1, min(int(p.get("limit") or 10), 50))
+    onums = [str(x).strip() for x in (p.get("order_numbers") or []) if str(x).strip()]
+    q = {"platform": "hepsiburada", "invoice_issued": True}
+    if onums:
+        q["order_number"] = {"$in": onums}
+    else:
+        q["hb_invoice_uploaded"] = {"$ne": True}
+    orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(None)
+    if not orders:
+        return {"total": 0, "ok": 0, "results": [],
+                "message": "Gönderilecek sipariş bulunamadı (fatura kesilmiş + HB'ye iletilmemiş)"}
+    dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    results = []
+    for o in orders:
+        results.append(await hb_push_invoice_for_order(o, dogan_settings))
+    ok = sum(1 for r in results if r.get("ok"))
+    return {"total": len(results), "ok": ok, "failed": len(results) - ok, "results": results}
