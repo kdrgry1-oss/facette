@@ -221,57 +221,9 @@ export default function CartDrawer() {
         {/* Footer */}
         {items.length > 0 && (
           <>
-            {/* Kombin Önerileri (cart-suggestions) */}
-            {suggestions.length > 0 && (
-              <div className="border-t border-black/5 px-5 py-3 bg-gray-50/60" data-testid="drawer-combo">
-                <p className="text-[10px] tracking-[0.25em] uppercase text-black/70 mb-2 flex items-center gap-1.5">
-                  <Sparkles size={11} /> Stilini Tamamla
-                </p>
-                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
-                  {suggestions.map((s) => (
-                    <Link
-                      key={s.id}
-                      to={`/${s.slug || s.id}`}
-                      className="flex-shrink-0 w-20 group"
-                      onClick={() => setIsOpen(false)}
-                      data-testid={`drawer-combo-${s.id}`}
-                    >
-                      <div className="w-20 h-24 bg-white border border-gray-100 overflow-hidden">
-                        <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      </div>
-                      <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
-                      <MiniPrice p={s} />
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Bu Ay En Çok Satanlar */}
-            {bestsellers.length > 0 && (
-              <div className="border-t border-black/5 px-5 py-3" data-testid="drawer-bestsellers">
-                <p className="text-[10px] tracking-[0.25em] uppercase text-black/70 mb-2">
-                  Bu Ay En Çok Satanlar
-                </p>
-                <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
-                  {bestsellers.map((s) => (
-                    <Link
-                      key={s.id}
-                      to={`/${s.slug || s.id}`}
-                      className="flex-shrink-0 w-20 group"
-                      onClick={() => setIsOpen(false)}
-                      data-testid={`drawer-bs-${s.id}`}
-                    >
-                      <div className="w-20 h-24 bg-gray-50 border border-gray-100 overflow-hidden">
-                        <img src={(s.images?.[0]) || s.thumbnail || ""} alt={s.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      </div>
-                      <p className="text-[10px] mt-1 line-clamp-1 leading-tight">{s.name}</p>
-                      <MiniPrice p={s} />
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* NOT (Kadir): "Stilini Tamamla" ve "Bu Ay En Çok Satanlar" önerileri çekmeceden
+                KALDIRILDI — çok yer kaplayıp sepetin kendisini gölgeliyordu. (Öneriler Sepet
+                sayfasında zaten var.) */}
 
             <div className="border-t border-black/10 px-5 py-4 space-y-3">
             {(() => {
