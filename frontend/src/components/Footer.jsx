@@ -8,29 +8,125 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
-import { Instagram, Facebook, Twitter, ChevronDown } from "lucide-react";
+import { Instagram, Facebook, Twitter, ChevronDown, ArrowRight, Check } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+const SERIF = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", serif' };
+
+/**
+ * NewsletterBand — footer'ın hemen üstünde "Facette Kulübü seni bekliyor" bandı.
+ * Metinler admin footer ayarındaki `newsletter` alanından okunur.
+ */
+function NewsletterBand({ nl }) {
+  const [email, setEmail] = useState("");
+  const [state, setState] = useState("idle"); // idle | loading | done | error
+  const [msg, setMsg] = useState("");
+
+  const title = nl?.title || "Facette Kulübü seni bekliyor";
+  const description =
+    nl?.description ||
+    "Yeni koleksiyonlar, özel kampanyalar ve sana özel fırsatlardan ilk sen haberdar ol.";
+  const placeholder = nl?.placeholder || "E-posta adresin";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = (email || "").trim();
+    if (!v || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) {
+      setState("error");
+      setMsg("Lütfen geçerli bir e-posta adresi girin.");
+      return;
+    }
+    setState("loading");
+    try {
+      const r = await axios.post(`${API}/newsletter/subscribe`, { email: v, source: "footer" });
+      setState("done");
+      setMsg(r?.data?.message || "Aramıza hoş geldin!");
+      setEmail("");
+    } catch (err) {
+      setState("error");
+      setMsg(err?.response?.data?.detail || "Bir sorun oluştu, tekrar dene.");
+    }
+  };
+
+  return (
+    <section className="bg-neutral-100 border-t border-neutral-200" data-testid="newsletter-band">
+      <div className="container-main py-14 md:py-20">
+        <div className="max-w-2xl mx-auto text-center">
+          <p className="text-[11px] tracking-[0.35em] uppercase text-neutral-400 mb-4">Facette Kulübü</p>
+          <h3 className="text-3xl md:text-5xl font-light tracking-tight text-neutral-900 leading-tight" style={SERIF}>
+            {title}
+          </h3>
+          <p className="text-sm md:text-base text-neutral-500 mt-4 leading-relaxed">{description}</p>
+
+          {state === "done" ? (
+            <div className="mt-8 inline-flex items-center gap-2 text-sm text-neutral-900" data-testid="newsletter-done">
+              <span className="w-6 h-6 rounded-full bg-neutral-900 text-white flex items-center justify-center">
+                <Check size={13} strokeWidth={2.5} />
+              </span>
+              {msg}
+            </div>
+          ) : (
+            <form onSubmit={submit} className="mt-8 max-w-md mx-auto" data-testid="newsletter-form">
+              <div className="flex items-stretch border-b border-neutral-400 focus-within:border-neutral-900 transition-colors">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); if (state === "error") setState("idle"); }}
+                  placeholder={placeholder}
+                  className="flex-1 bg-transparent px-1 py-3 text-sm text-neutral-900 placeholder-neutral-400 outline-none"
+                  aria-label="E-posta adresi"
+                  data-testid="newsletter-email"
+                />
+                <button
+                  type="submit"
+                  disabled={state === "loading"}
+                  className="px-2 text-neutral-900 hover:opacity-60 disabled:opacity-40 transition-opacity"
+                  aria-label="Abone ol"
+                  data-testid="newsletter-submit"
+                >
+                  <ArrowRight size={20} strokeWidth={1.5} />
+                </button>
+              </div>
+              {state === "error" && (
+                <p className="text-xs text-red-500 mt-3 text-left" data-testid="newsletter-error">{msg}</p>
+              )}
+              <p className="text-[11px] text-neutral-400 mt-3 leading-relaxed">
+                Abone olarak Facette'ten e-posta ile ticari ileti almayı kabul edersin. Dilediğin zaman
+                aboneliğinden çıkabilirsin.
+              </p>
+            </form>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const DEFAULT_COLUMNS = [
   { title: "Alışveriş", links: [
-    { to: "/en-yeniler", label: "En Yeniler" },
-    { to: "/elbise", label: "Elbise" },
-    { to: "/pantolon", label: "Pantolon" },
-    { to: "/ceket", label: "Ceket" },
-    { to: "/aksesuar", label: "Aksesuar" },
+    { to: "/kategori/en-yeniler", label: "En Yeniler" },
+    { to: "/kategori/elbise", label: "Elbise" },
+    { to: "/kategori/pantolon", label: "Pantolon" },
+    { to: "/kategori/ceket", label: "Ceket" },
+    { to: "/kategori/aksesuar", label: "Aksesuar" },
   ]},
-  { title: "Müşteri Hizmetleri", links: [
+  { title: "Yardım", links: [
     { to: "/siparis-takip", label: "Sipariş Takibi" },
     { to: "/iade-islemleri", label: "İade İşlemleri" },
-    { to: "/sayfa/hakkimizda", label: "Hakkımızda" },
     { to: "/sayfa/iade-kosullari", label: "İade & Değişim" },
-    { to: "/sayfa/kvkk", label: "KVKK" },
-    { to: "/sayfa/gizlilik", label: "Gizlilik Politikası" },
+    { to: "/sikca-sorulan-sorular", label: "Sıkça Sorulan Sorular" },
     { to: "/sayfa/iletisim", label: "İletişim" },
   ]},
+  { title: "Kurumsal", links: [
+    { to: "/sayfa/hakkimizda", label: "Hakkımızda" },
+    { to: "/sayfa/mesafeli-satis", label: "Mesafeli Satış Sözleşmesi" },
+    { to: "/sayfa/on-bilgilendirme", label: "Ön Bilgilendirme" },
+    { to: "/sayfa/kvkk", label: "KVKK Aydınlatma Metni" },
+    { to: "/sayfa/gizlilik", label: "Gizlilik Politikası" },
+  ]},
   { title: "İletişim", static: [
-    "info@facette.com.tr", "+90 850 000 00 00", "Pazartesi-Cumartesi 09:00 - 18:00",
+    "info@facette.com.tr", "+90 543 330 03 10", "Pazartesi-Cumartesi 09:00 - 18:00",
   ]},
 ];
 
@@ -83,12 +179,17 @@ export default function Footer() {
     return () => { cancel = true; };
   }, []);
 
+  const newsletter = tpl?.newsletter;
+
   // HTML mode — admin tam serbest HTML yazdı
   if (tpl?.mode === "html" && tpl?.custom_html) {
     return (
-      <footer className="bg-black text-white mt-16 md:mt-24" data-testid="footer-html">
-        <div dangerouslySetInnerHTML={{ __html: tpl.custom_html }} />
-      </footer>
+      <>
+        <NewsletterBand nl={newsletter} />
+        <footer className="bg-black text-white" data-testid="footer-html">
+          <div dangerouslySetInnerHTML={{ __html: tpl.custom_html }} />
+        </footer>
+      </>
     );
   }
 
@@ -111,7 +212,9 @@ export default function Footer() {
   const copyright = tpl?.copyright || `© ${new Date().getFullYear()} Facette Dış. Tic. A.Ş. – Tüm hakları saklıdır.`;
 
   return (
-    <footer className="bg-black text-white mt-16 md:mt-24" data-testid="footer-structured">
+    <>
+    <NewsletterBand nl={newsletter} />
+    <footer className="bg-black text-white" data-testid="footer-structured">
       <div className="container-main pt-14 md:pt-20 pb-8">
         {/* Brand strip */}
         <div className="md:flex md:items-end md:justify-between mb-12 md:mb-16">
@@ -143,7 +246,7 @@ export default function Footer() {
         </div>
 
         {/* Columns */}
-        <div className="grid md:grid-cols-3 gap-x-12 md:border-t md:border-white/10 md:pt-12">
+        <div className="grid md:grid-cols-4 gap-x-10 md:border-t md:border-white/10 md:pt-12">
           {columns.map((col, i) => (
             <FooterColumn key={col.title || i} col={col} defaultOpen={i === 0} />
           ))}
@@ -159,5 +262,6 @@ export default function Footer() {
         </div>
       </div>
     </footer>
+    </>
   );
 }

@@ -210,6 +210,39 @@ function StructuredEditor({ tpl, setTpl }) {
         </div>
       </div>
 
+      {/* Newsletter — "Facette Kulübü" bandı */}
+      <div className="bg-white border rounded-xl p-4" data-testid="newsletter-editor">
+        <h2 className="text-sm font-bold uppercase tracking-wider mb-1">Bülten Bandı (Facette Kulübü)</h2>
+        <p className="text-xs text-gray-500 mb-3">Footer'ın hemen üstünde görünen abonelik bandının metinleri.</p>
+        <div className="grid gap-3">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">Başlık</label>
+            <input
+              value={(tpl.newsletter || {}).title || ""}
+              onChange={(e) => setTpl({ ...tpl, newsletter: { ...(tpl.newsletter || {}), title: e.target.value } })}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              placeholder="Facette Kulübü seni bekliyor" />
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">Açıklama</label>
+            <textarea
+              value={(tpl.newsletter || {}).description || ""}
+              onChange={(e) => setTpl({ ...tpl, newsletter: { ...(tpl.newsletter || {}), description: e.target.value } })}
+              rows={2}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              placeholder="Yeni koleksiyonlar, özel kampanyalar ve sana özel fırsatlardan ilk sen haberdar ol." />
+          </div>
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">Giriş kutusu ipucu (placeholder)</label>
+            <input
+              value={(tpl.newsletter || {}).placeholder || ""}
+              onChange={(e) => setTpl({ ...tpl, newsletter: { ...(tpl.newsletter || {}), placeholder: e.target.value } })}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+              placeholder="E-posta adresin" />
+          </div>
+        </div>
+      </div>
+
       {/* Social */}
       <div className="bg-white border rounded-xl p-4">
         <h2 className="text-sm font-bold uppercase tracking-wider mb-3">Sosyal Medya</h2>

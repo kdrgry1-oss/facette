@@ -38,29 +38,38 @@ _DEFAULT = {
             ],
         },
         {
-            "title": "Müşteri Hizmetleri",
+            "title": "Yardım",
             "links": [
                 {"to": "/siparis-takip", "label": "Sipariş Takibi"},
-                {"to": "/sayfa/hakkimizda", "label": "Hakkımızda"},
+                {"to": "/iade-islemleri", "label": "İade İşlemleri"},
                 {"to": "/sayfa/iade-kosullari", "label": "İade & Değişim"},
-                {"to": "/sayfa/kvkk", "label": "KVKK"},
-                {"to": "/sayfa/gizlilik", "label": "Gizlilik Politikası"},
+                {"to": "/sikca-sorulan-sorular", "label": "Sıkça Sorulan Sorular"},
                 {"to": "/sayfa/iletisim", "label": "İletişim"},
+            ],
+        },
+        {
+            "title": "Kurumsal",
+            "links": [
+                {"to": "/sayfa/hakkimizda", "label": "Hakkımızda"},
+                {"to": "/sayfa/mesafeli-satis", "label": "Mesafeli Satış Sözleşmesi"},
+                {"to": "/sayfa/on-bilgilendirme", "label": "Ön Bilgilendirme"},
+                {"to": "/sayfa/kvkk", "label": "KVKK Aydınlatma Metni"},
+                {"to": "/sayfa/gizlilik", "label": "Gizlilik Politikası"},
             ],
         },
         {
             "title": "İletişim",
             "static": [
                 "info@facette.com.tr",
-                "+90 850 000 00 00",
+                "+90 543 330 03 10",
                 "Pazartesi-Cumartesi 09:00 - 18:00",
             ],
         },
     ],
     "newsletter": {
-        "title": "Bültene Abone Ol",
-        "description": "Yeni ürünler ve özel kampanyalardan ilk siz haberdar olun.",
-        "placeholder": "E-posta adresiniz",
+        "title": "Facette Kulübü seni bekliyor",
+        "description": "Yeni koleksiyonlar, özel kampanyalar ve sana özel fırsatlardan ilk sen haberdar ol.",
+        "placeholder": "E-posta adresin",
     },
     "social": {
         "instagram": "https://instagram.com/facette",

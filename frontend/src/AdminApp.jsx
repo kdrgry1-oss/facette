@@ -14,7 +14,7 @@ import AdminSettings from "./pages/admin/Settings";
 import AdminCampaigns from "./pages/admin/Campaigns";
 import AdminPages from "./pages/admin/Pages";
 import AdminPageDesign from "./pages/admin/PageDesign";
-import AdminMenu from "./pages/admin/MenuAdmin";
+import AdminFooterDesign from "./pages/admin/FooterDesign";
 import AdminIntegrations from "./pages/admin/Integrations";
 import Payments from "./pages/admin/Payments";
 import OrderStatusSettings from "./pages/admin/OrderStatusSettings";
@@ -102,7 +102,7 @@ export default function AdminApp() {
         <Route path="rooftr-excel" element={<RooftrExcelUpload />} />
         <Route path="sorular" element={<AdminQuestions />} />
         <Route path="sayfa-tasarimi" element={<AdminPageDesign />} />
-        <Route path="menu-yonetimi" element={<AdminMenu />} />
+        <Route path="footer-tasarim" element={<AdminFooterDesign />} />
         <Route path="bannerlar" element={<AdminBanners />} />
         <Route path="temalar" element={<Themes />} />
         <Route path="kampanyalar" element={<AdminCampaigns />} />
