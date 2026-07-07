@@ -60,6 +60,49 @@ async def auto_cancel_unpaid_havale_orders():
         logger.exception(f"[scheduler] auto_cancel_unpaid_havale_orders failed: {e}")
 
 
+async def auto_cancel_unpaid_card_orders():
+    """Başarısız/ödenmemiş KART siparişlerini 24 saat sonra iptal edip stoğu geri ekler.
+
+    KRİTİK: Bu iş zamanlanmamıştı → başarısız kart ödemeleri (iyzico 3DS reddi, yarıda kalan
+    ödeme) create_order'da düşürülen stoğu KALICI sızdırıyordu (ürünler yanlışlıkla tükeniyordu).
+    COD/havale HARİÇ (meşru şekilde bekler + kendi akışları var). Restock idempotenttir
+    (_restock_order_once — 'auto_cancel_expired' hareketi bir kez eklenir)."""
+    from routes.deps import db  # lazy import
+    from routes.orders import _restock_order_once
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                     "bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "transfer"]
+        query = {
+            "payment_status": {"$in": ["pending", "failed"]},
+            "status": {"$in": ["pending", "awaiting_payment"]},
+            "payment_method": {"$nin": _cod_bank},
+            "created_at": {"$lt": cutoff},
+        }
+        cancelled = 0
+        async for order in db.orders.find(query, {"_id": 0}):
+            try:
+                await db.orders.update_one(
+                    {"id": order["id"]},
+                    {"$set": {
+                        "status": "cancelled",
+                        "payment_status": "expired",
+                        "cancel_reason": "Ödeme 24 saat içinde tamamlanmadı (otomatik iptal)",
+                        "auto_cancelled": True,
+                        "cancelled_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }}
+                )
+                await _restock_order_once(order, "auto_cancel_expired")
+                cancelled += 1
+            except Exception as e_item:
+                logger.error(f"Failed to cancel card order {order.get('order_number')}: {e_item}")
+        if cancelled:
+            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid/failed card orders (>24h)")
+    except Exception as e:
+        logger.exception(f"[scheduler] auto_cancel_unpaid_card_orders failed: {e}")
+
+
 async def _ensure_hb_2min_sync():
     """Tek seferlik: Hepsiburada hesabını 2 dk'da bir STOK + SİPARİŞ senkronuna ayarlar.
     settings.hb_sync_2min_v1 bayrağıyla yalnızca bir kez uygulanır; sonradan
@@ -1369,6 +1412,17 @@ def start_scheduler():
         minutes=30,
         id="auto_cancel_havale_48h",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        max_instances=1,
+        coalesce=True,
+    )
+    # KRİTİK: başarısız/ödenmemiş KART siparişleri — 24 saat sonra iptal + stok iadesi.
+    # Önceden HİÇ zamanlanmamıştı → başarısız kart ödemeleri stoğu kalıcı sızdırıyordu.
+    _scheduler.add_job(
+        auto_cancel_unpaid_card_orders,
+        "interval",
+        minutes=30,
+        id="auto_cancel_card_24h",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
         max_instances=1,
         coalesce=True,
     )

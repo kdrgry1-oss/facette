@@ -234,3 +234,72 @@ async def record_consent(recipient_email: str, recipient_phone: str, channels: l
     except Exception as e:
         logger.warning(f"[iys] rapor spawn hata: {e}")
     return {"recorded": True, "id": rec["id"]}
+
+
+def _admin_or_403(current_user):
+    if not (current_user and current_user.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+
+
+@router.get("/diagnostics")
+async def iys_diagnostics(order_number: str = "", limit: int = 20,
+                          current_user: dict = Depends(get_current_user)):
+    """SALT-OKUNUR teşhis: NetGSM İYS kimlik bilgileri dolu mu + son izin kayıtlarının
+    BİLDİRİM durumu (reported / HTTP kodu / NetGSM yanıtı). 'İYS'ye düşmedi' sorununun tam
+    sebebini gösterir (kimlik eksik mi, NetGSM reddetti mi, kanal yok mu)."""
+    _admin_or_403(current_user)
+    cfg = await _iys_config()
+    present = {
+        "username": bool(cfg.get("username")),
+        "password": bool(cfg.get("password")),
+        "iys_code": bool(cfg.get("iys_code")),
+        "brand_code": bool(cfg.get("brand_code")),
+    }
+    q = {}
+    ord_info = None
+    if order_number:
+        o = await db.orders.find_one(
+            {"order_number": order_number},
+            {"_id": 0, "id": 1, "marketing_consent": 1, "shipping_address": 1})
+        if o:
+            q["order_id"] = o["id"]
+            ord_info = {"order_number": order_number,
+                        "marketing_consent": o.get("marketing_consent"),
+                        "phone": (o.get("shipping_address") or {}).get("phone"),
+                        "email": (o.get("shipping_address") or {}).get("email")}
+    recs = await db.iys_consents.find(q, {"_id": 0}).sort("created_at", -1)\
+        .limit(max(1, min(int(limit or 20), 100))).to_list(None)
+    return {
+        "config_present": present,
+        "all_credentials_ok": all(present.values()),
+        "netgsm_url": os.environ.get("NETGSM_IYS_URL", "https://api.netgsm.com.tr/iys/v2/consent/add"),
+        "order": ord_info,
+        "consent_count": len(recs),
+        "consents": [{
+            "order_id": r.get("order_id"), "channels": r.get("channels"), "status": r.get("status"),
+            "email": r.get("email"), "phone": r.get("phone"),
+            "reported": r.get("reported"), "report_status_code": r.get("report_status_code"),
+            "report_response": (r.get("report_response") or "")[:400],
+            "consent_date": r.get("consent_date"), "reported_at": r.get("reported_at"),
+        } for r in recs],
+    }
+
+
+@router.post("/retry")
+async def iys_retry_report(payload: dict, current_user: dict = Depends(get_current_user)):
+    """Kimlik bilgileri düzeltildikten sonra bildirilmemiş izinleri NetGSM İYS'ye YENİDEN
+    bildirir. payload: {order_number?} verilirse o siparişin izinleri; yoksa bildirilmemiş
+    (reported=false) son 100 izin denenir."""
+    _admin_or_403(current_user)
+    onum = str((payload or {}).get("order_number") or "").strip()
+    if onum:
+        o = await db.orders.find_one({"order_number": onum}, {"_id": 0, "id": 1})
+        q = {"order_id": o["id"]} if o else {"order_id": "__none__"}
+    else:
+        q = {"reported": {"$ne": True}}
+    recs = await db.iys_consents.find(q, {"_id": 0}).sort("created_at", -1).limit(100).to_list(None)
+    results = []
+    for r in recs:
+        ok = await _report_to_netgsm_iys(r)
+        results.append({"id": r.get("id"), "channels": r.get("channels"), "reported": bool(ok)})
+    return {"retried": len(results), "ok": sum(1 for x in results if x["reported"]), "results": results[:50]}

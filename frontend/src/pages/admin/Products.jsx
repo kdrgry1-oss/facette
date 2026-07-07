@@ -2988,7 +2988,12 @@ export default function AdminProducts() {
                     // Mükerrer dedup YALNIZ opsiyonel alanlara: ZORUNLU pazaryeri alanı Teknik Detay
                     // etiketiyle çakışsa bile GİZLENMEZ (gizli+boş = sessiz red riski). Değer tek
                     // kaynaktan (_effVal) dolar; satır görünür kalır → kullanıcı görüp doğrular.
-                    .filter(x => x.isRequired || !_techNames.has((x.attr.name || '').toLocaleLowerCase('tr').trim()));
+                    // İSTİSNA (Kadir): 'Kalıp' Teknik Detay'da olsa/opsiyonel olsa bile pazaryeri
+                    // özellik bölümünde HER ZAMAN görünür (kullanıcı buradan da seçip aktarabilsin).
+                    .filter(x => {
+                      const _nm = (x.attr.name || '').toLocaleLowerCase('tr').trim();
+                      return x.isRequired || _nm === 'kalıp' || !_techNames.has(_nm);
+                    });
                     const filledAttrs = processed.filter(a => a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const requiredEmpty = processed.filter(a => a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
                     const otherEmpty = processed.filter(a => !a.isRequired && !a.hasValue).sort((a, b) => a.attr.name.localeCompare(b.attr.name));
