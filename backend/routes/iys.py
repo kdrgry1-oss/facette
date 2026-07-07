@@ -125,55 +125,95 @@ async def _phone_recently_verified(phone: str) -> bool:
 
 
 async def _iys_config() -> dict:
-    """NetGSM İYS bilgileri — providers_config veya settings'ten. Eksikse rapor ertelenir."""
+    """NetGSM İYS bilgileri — SMS ile AYNI providers.netgsm bloğundan (usercode/password).
+    Marka kodu (brandCode) İYS marka kodudur (ör. 754607); netgsm bloğunda iys_brand_code
+    veya NETGSM_IYS_BRAND_CODE env ile verilir. Ayrı resmî İYS API kimliği GEREKMEZ —
+    NetGSM Facette adına İYS'ye iletir."""
     doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
     prov = (doc.get("providers", {}) or {}).get("netgsm", {}) or {}
     return {
         "username": prov.get("username") or os.environ.get("NETGSM_USERCODE", ""),
         "password": prov.get("password") or os.environ.get("NETGSM_PASSWORD", ""),
+        "appkey": prov.get("appkey") or os.environ.get("NETGSM_APPKEY", ""),
         "iys_code": prov.get("iys_code") or os.environ.get("NETGSM_IYS_CODE", ""),
-        "brand_code": prov.get("iys_brand_code") or os.environ.get("NETGSM_IYS_BRAND_CODE", ""),
+        "brand_code": (prov.get("iys_brand_code") or prov.get("brand_code")
+                       or os.environ.get("NETGSM_IYS_BRAND_CODE", "")),
     }
 
 
 async def _report_to_netgsm_iys(consent: dict):
-    """İzin/RED kaydını RESMÎ İYS API'sine (api.iys.org.tr) dijital bildirir (best-effort).
+    """İzin/RED kaydını NetGSM İYS'ye (POST https://api.netgsm.com.tr/iys/add) bildirir.
 
-    NOT: Önceki sürüm NetGSM'in placeholder ucuna (/iys/v2/consent/add) gidiyordu ve 404
-    alıyordu. Artık İYS'nin resmî API'si kullanılır (iys_integration.add_consent_official) —
-    IYS_API_USERNAME/PASSWORD (OAuth token) + IYS_BRAND_CODE gerekir. Her kanal (MESAJ/EPOSTA)
-    ayrı izin olarak eklenir; en az biri başarılıysa reported=True."""
-    from .iys_integration import add_consent_official
+    NetGSM, Facette'in İYS entegratörüdür — "NetGSM bizim adımıza yolluyor". İzinler SMS için
+    kullanılan AYNI NetGSM kimlik bilgileriyle (usercode/password) NetGSM'in İYS ucuna POST edilir;
+    NetGSM İYS'ye iletir. Ayrı resmî İYS API kullanıcısı GEREKMEZ. Marka kodu (brandCode) = İYS
+    marka kodu (ör. 754607).
+
+    Body (NetGSM resmî formatı):
+      {"header": {"username","password","brandCode","appkey"?},
+       "body": {"data": [{"type":"MESAJ|EPOSTA","source","recipient","status","consentDate","recipientType":"BIREYSEL"}]}}
+    Kanal başına bir data satırı; en az biri başarılıysa reported=True."""
+    cfg = await _iys_config()
     channels = consent.get("channels", []) or []
     if not channels:
         return False
+    username = (cfg.get("username") or "").strip()
+    password = (cfg.get("password") or "").strip()
+    brand_code = (cfg.get("brand_code") or cfg.get("iys_code") or "").strip()
+    if not (username and password and brand_code):
+        await db.iys_consents.update_one(
+            {"id": consent["id"]},
+            {"$set": {"reported": False, "report_status_code": None,
+                      "report_response": "NetGSM İYS kimlik/marka eksik (username/password/brandCode)",
+                      "reported_at": _now().isoformat()}})
+        logger.warning("[iys] NetGSM İYS kimlik/marka eksik — bildirim atlandı")
+        return False
     email = (consent.get("email") or "").strip()
     phone = (consent.get("phone") or "").strip()
-    # İYS telefon biçimi: +90XXXXXXXXXX
+    # NetGSM İYS telefon biçimi: +90XXXXXXXXXX
     if phone and not phone.startswith("+"):
         digits = phone.lstrip("0")
         phone = "+" + (digits if digits.startswith("90") else "90" + digits)
     status = consent.get("status", "ONAY")
     source = consent.get("source", "HS_WEB")
     cd = (consent.get("consent_date") or _now().isoformat()).replace("T", " ")[:19]
-    any_ok, last = False, {}
+    data = []
     for ch in channels:
         recipient = phone if ch == "MESAJ" else email
         if not recipient:
             continue
-        res = await add_consent_official(recipient, "BIREYSEL", ch, status, source, cd)
-        last = res
-        if res.get("ok"):
-            any_ok = True
+        data.append({
+            "type": ch, "source": source, "recipient": recipient,
+            "status": status, "consentDate": cd, "recipientType": "BIREYSEL",
+        })
+    if not data:
+        return False
+    header = {"username": username, "password": password, "brandCode": brand_code}
+    if cfg.get("appkey"):
+        header["appkey"] = cfg.get("appkey")
+    payload = {"header": header, "body": {"data": data}}
+    url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    ok, code, body = False, None, ""
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(url, json=payload,
+                             headers={"Content-Type": "application/json; charset=utf-8"})
+        code = r.status_code
+        body = (r.text or "").strip()[:500]
+        lo = body.lower().replace(" ", "")
+        # Başarı: HTTP 200 + resultstatus/code "success"/"00" ve "failure"/"hata" içermez
+        ok = (code == 200 and ("success" in lo or '"code":"00"' in lo or '"code":00' in lo
+                               or '"00"' in lo) and "failure" not in lo)
+    except Exception as e:
+        body = f"exception: {e}"[:500]
     await db.iys_consents.update_one(
         {"id": consent["id"]},
-        {"$set": {"reported": any_ok, "report_status_code": last.get("status"),
-                  "report_response": (last.get("body") or last.get("detail") or "")[:500],
-                  "reported_at": _now().isoformat()}},
+        {"$set": {"reported": ok, "report_status_code": code,
+                  "report_response": body, "reported_at": _now().isoformat()}},
     )
-    if not any_ok:
-        logger.warning(f"[iys] resmî İYS bildirimi başarısız: {last}")
-    return any_ok
+    if not ok:
+        logger.warning(f"[iys] NetGSM İYS bildirimi başarısız: code={code} body={body[:200]}")
+    return ok
 
 
 @router.post("/consent/update")
@@ -239,12 +279,13 @@ async def iys_diagnostics(order_number: str = "", limit: int = 20,
     BİLDİRİM durumu (reported / HTTP kodu / NetGSM yanıtı). 'İYS'ye düşmedi' sorununun tam
     sebebini gösterir (kimlik eksik mi, NetGSM reddetti mi, kanal yok mu)."""
     _admin_or_403(current_user)
-    # Resmî İYS API (api.iys.org.tr) kimlik durumu — bildirim ARTIK bunu kullanır.
-    try:
-        from .iys_integration import official_iys_config_present
-        present = official_iys_config_present()
-    except Exception as _e:
-        present = {"error": str(_e)}
+    # NetGSM İYS kimlik durumu — bildirim NetGSM'in /iys/add ucunu kullanır (SMS ile aynı kimlik).
+    cfg = await _iys_config()
+    present = {
+        "netgsm_username": bool(cfg.get("username")),
+        "netgsm_password": bool(cfg.get("password")),
+        "brand_code": bool(cfg.get("brand_code") or cfg.get("iys_code")),
+    }
     q = {}
     ord_info = None
     if order_number:
@@ -262,7 +303,8 @@ async def iys_diagnostics(order_number: str = "", limit: int = 20,
     return {
         "config_present": present,
         "all_credentials_ok": all(present.values()),
-        "netgsm_url": os.environ.get("NETGSM_IYS_URL", "https://api.netgsm.com.tr/iys/v2/consent/add"),
+        "brand_code": (cfg.get("brand_code") or cfg.get("iys_code") or "(eksik)"),
+        "netgsm_url": os.environ.get("NETGSM_IYS_URL", "https://api.netgsm.com.tr/iys/add"),
         "order": ord_info,
         "consent_count": len(recs),
         "consents": [{

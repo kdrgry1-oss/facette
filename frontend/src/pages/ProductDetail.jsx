@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock } from "lucide-react";
+import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock, Pencil, ZoomIn } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -100,6 +100,8 @@ export default function ProductDetail() {
   const [recentItems, setRecentItems] = useState([]); // son gezilenler (önceki sayfalardan)
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
+  // Masaüstü büyük görsel büyüteci (hover → imlecin olduğu bölge büyür)
+  const [zoom, setZoom] = useState({ on: false, x: 50, y: 50 });
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [quantity, setQuantity] = useState(1);
@@ -542,7 +544,17 @@ export default function ProductDetail() {
           {/* Image Gallery — mobile: swipe carousel, desktop: 2-col grid */}
           <div className="lg:col-span-7 space-y-2 min-w-0">
             {/* Mobile: full-width snap carousel with dots */}
-            <div className="lg:hidden -mx-4">
+            <div className="lg:hidden -mx-4 relative">
+              {user?.is_admin && (
+                <Link
+                  to={`/admin/urunler/${product.id}`}
+                  title="Ürünü düzenle (admin)"
+                  data-testid="pdp-admin-edit-mobile"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 z-20 bg-black text-white rounded-full p-2.5 shadow-lg"
+                >
+                  <Pencil size={16} />
+                </Link>
+              )}
               <div
                 className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
                 onScroll={(e) => {
@@ -613,16 +625,44 @@ export default function ProductDetail() {
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <div className="relative aspect-[2/3] bg-stone-50">
+                <div
+                  className="relative aspect-[2/3] bg-stone-50 overflow-hidden cursor-zoom-in"
+                  onMouseEnter={() => setZoom((z) => ({ ...z, on: true }))}
+                  onMouseLeave={() => setZoom({ on: false, x: 50, y: 50 })}
+                  onMouseMove={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const x = ((e.clientX - r.left) / r.width) * 100;
+                    const y = ((e.clientY - r.top) / r.height) * 100;
+                    setZoom({ on: true, x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) });
+                  }}
+                >
                   {hasDiscount && (
                     <div className="absolute top-3 left-3 z-10 bg-[#6b6b64] text-white text-xs font-normal px-2.5 py-1.5 leading-none">
                       %{Math.round(((product.price - displayPrice) / product.price) * 100)}
                     </div>
                   )}
+                  {/* Büyüteç ipucu — hover ile büyür */}
+                  <div className="absolute bottom-3 right-3 z-10 bg-black/55 text-white rounded-full p-1.5 pointer-events-none opacity-80">
+                    <ZoomIn size={14} />
+                  </div>
+                  {/* ADMIN düzenle kalemi — yalnızca admin oturumunda, en solda. Ürünü müşteri
+                      gözüyle incelerken tıkla → admin ürün düzenleme sayfasına gider. */}
+                  {user?.is_admin && (
+                    <Link
+                      to={`/admin/urunler/${product.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Ürünü düzenle (admin)"
+                      data-testid="pdp-admin-edit"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 bg-black text-white rounded-full p-2.5 shadow-lg hover:bg-gray-800 transition-colors"
+                    >
+                      <Pencil size={16} />
+                    </Link>
+                  )}
                   <img
                     src={optimizeImg(displayImages[selectedImage] || displayImages[0], 1400)}
                     alt={product.name}
-                    className="w-full h-full object-cover object-top"
+                    className="w-full h-full object-cover object-top transition-transform duration-150 ease-out"
+                    style={zoom.on ? { transform: "scale(2.3)", transformOrigin: `${zoom.x}% ${zoom.y}%` } : undefined}
                     loading="eager"
                     fetchPriority="high"
                     decoding="async"

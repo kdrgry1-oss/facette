@@ -3147,8 +3147,24 @@ def _dedup_claims_by_content(claims: list) -> list:
     kayıt tutulur. Böylece bir sipariş no yanlışlıkla 2-3 kez görünmez; gerçekten
     farklı iadeler (farklı kalem/tutar) ayrı kalır."""
     seen_sig = set()
+    seen_claim_ids = set()
     out = []
     for c in claims:
+        cid = str(c.get("claim_id") or "").strip()
+        if cid:
+            # GERÇEK claim_id benzersizdir (Trendyol/HB her iadeye ayrı id verir). İçerik imzası
+            # aynı olsa bile FARKLI claim_id'ler AYRI iadelerdir — aynı üründen 2 adet / 2 ayrı
+            # iade birbirini SİLMEZ. Yalnızca AYNI claim_id tekrarı elenir. İmza da işaretlenir ki
+            # claim_id'siz türetilmiş (order-derived) kopyası varsa o elensin.
+            if cid in seen_claim_ids:
+                continue
+            seen_claim_ids.add(cid)
+            sig = _claim_dup_signature(c)
+            if sig is not None:
+                seen_sig.add(sig)
+            out.append(c)
+            continue
+        # claim_id yok (türetilmiş/manuel) → içerik imzasıyla tekilleştir
         sig = _claim_dup_signature(c)
         if sig is not None:
             if sig in seen_sig:
@@ -3476,6 +3492,15 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                     "updated_at": datetime.now(timezone.utc).isoformat()
                 }
 
+                # MANUEL TUTAR KORUMASI: bir iade elle düzeltildiyse (set-amount → amount_overridden)
+                # periyodik senkron tutarı/kalemleri Trendyol değeriyle EZMESİN — yoksa "dün
+                # düzelttin ama yine yanlış" olur. Sadece o iki alan korunur; durum/kargo tazelenir.
+                _existing = await db.trendyol_claims.find_one(
+                    {"claim_id": claim_id}, {"_id": 0, "amount_overridden": 1})
+                if _existing and _existing.get("amount_overridden"):
+                    claim_doc.pop("refund_amount", None)
+                    claim_doc.pop("items", None)
+
                 await db.trendyol_claims.update_one(
                     {"claim_id": claim_id},
                     {"$set": claim_doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()}},
@@ -3533,7 +3558,7 @@ async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
     client = TrendyolClient(settings["supplier_id"], settings["api_key"], settings["api_secret"])
     
     # Get claims that need discount fix (where items have 0 discount)
-    claims = await db.trendyol_claims.find({}, {"_id": 0, "claim_id": 1, "order_number": 1, "items": 1}).to_list(None)
+    claims = await db.trendyol_claims.find({}, {"_id": 0, "claim_id": 1, "order_number": 1, "items": 1, "amount_overridden": 1}).to_list(None)
     
     order_cache = {}
     fixed = 0
@@ -3571,6 +3596,10 @@ async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
                         "discount": (line.get("discount", 0) or 0) / qty,
                     }
         
+        # MANUEL TUTAR KORUMASI: elle düzeltilmiş iadeyi (amount_overridden) atla.
+        if claim.get("amount_overridden"):
+            continue
+
         updated_items = []
         refund_amount = 0
         for item in items:
@@ -3579,13 +3608,14 @@ async def fix_claim_discounts(current_user: dict = Depends(require_admin)):
                 item["unit_price"] = discount_map[bc]["gross"]
                 item["discount_amount"] = discount_map[bc]["discount"]
                 item["price"] = discount_map[bc]["net"]
-            refund_amount += item.get("price", 0)
+            # ADET ile çarp: aynı üründen 2 adet iade edildiyse tutar 2× olmalı (yoksa yarısı).
+            refund_amount += float(item.get("price", 0) or 0) * max(int(item.get("quantity", 1) or 1), 1)
             updated_items.append(item)
-        
-        update_set = {"items": updated_items, "refund_amount": refund_amount}
+
+        update_set = {"items": updated_items, "refund_amount": round(refund_amount, 2)}
         if invoice_number:
             update_set["invoice_number"] = invoice_number
-        
+
         await db.trendyol_claims.update_one(
             {"claim_id": claim["claim_id"]},
             {"$set": update_set}

@@ -319,7 +319,7 @@ export default function Account() {
 
       {/* ───────────────────── Content ───────────────────── */}
       <main className="max-w-screen-xl mx-auto px-4 py-8 md:py-10">
-        {activeTab === "profile"   && <ProfilePane user={user} editing={editingProfile} setEditing={setEditingProfile} form={profileForm} setForm={setProfileForm} onSubmit={handleUpdateProfile} />}
+        {activeTab === "profile"   && <ProfilePane user={user} editing={editingProfile} setEditing={setEditingProfile} form={profileForm} setForm={setProfileForm} onSubmit={handleUpdateProfile} mkt={mkt} saveMkt={saveMkt} />}
         {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} onChanged={fetchOrders} />}
         {activeTab === "addresses" && <AddressesPane loading={loading} addresses={addresses} editing={editingAddress} setEditing={setEditingAddress} form={addressForm} setForm={setAddressForm} onSubmit={handleSaveAddress} onDelete={handleDeleteAddress} />}
         {activeTab === "favorites" && <FavoritesPane />}
@@ -333,7 +333,7 @@ export default function Account() {
 
 /* ═══════════════════════════════ PROFILE ═══════════════════════════════ */
 
-function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit }) {
+function ProfilePane({ user, editing, setEditing, form, setForm, onSubmit, mkt = {}, saveMkt = () => {} }) {
   return (
     <div className="grid lg:grid-cols-3 gap-6 max-w-4xl">
       <div className="lg:col-span-2 bg-white border border-gray-100 p-6 md:p-8">
