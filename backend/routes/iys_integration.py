@@ -182,6 +182,46 @@ async def iys_register(p: IYSRegister, _=Depends(require_admin)):
         raise HTTPException(status_code=502, detail=f"IYS error: {e}")
 
 
+async def add_consent_official(recipient: str, recipient_type: str, message_type: str,
+                               status: str, source: str, consent_date: str = "") -> dict:
+    """RESMÎ İYS API'sine (api.iys.org.tr) TEK izin ekler — checkout/manuel siparişten çağrılır.
+    iys_register ile aynı çekirdek; kimlik eksikse ok=False + reason döner (hata fırlatmaz).
+    IYS_API_USERNAME/PASSWORD (token için) + IYS_BRAND_CODE gerekir."""
+    tok = await _get_token()
+    if not tok:
+        return {"ok": False, "reason": "credentials_missing",
+                "detail": "IYS_API_USERNAME/PASSWORD/BRAND_CODE eksik (Secrets Vault / env)"}
+    cd = consent_date or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(
+                f"{IYS_BASE}/v1/consent/add/json",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"brandCode": IYS_BRAND, "permissions": [{
+                    "recipient": recipient, "recipientType": recipient_type,
+                    "type": message_type, "status": status, "source": source,
+                    "consentDate": cd,
+                }]},
+            )
+        try:
+            await _cache_put(recipient, recipient_type, message_type, status, source)
+        except Exception:
+            pass
+        return {"ok": r.status_code == 200, "status": r.status_code, "body": (r.text or "")[:400]}
+    except Exception as e:
+        return {"ok": False, "reason": "exception", "detail": str(e)[:200]}
+
+
+def official_iys_config_present() -> dict:
+    """Resmî İYS API kimlik bilgileri dolu mu (teşhis için)."""
+    return {
+        "iys_api_username": bool(os.environ.get("IYS_API_USERNAME")),
+        "iys_api_password": bool(os.environ.get("IYS_API_PASSWORD")),
+        "brand_code": bool(IYS_BRAND),
+        "base_url": IYS_BASE,
+    }
+
+
 @router.post("/query-batch")
 async def iys_query_batch(queries: List[IYSQuery], _=Depends(require_admin)):
     """Toplu sorgulama (max 50). Pazarlama kampanyaları öncesi izin doğrulama."""

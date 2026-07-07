@@ -266,7 +266,7 @@ export default function Account() {
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-gray-400 mb-1">{greeting()}</p>
                 <h1 className="text-2xl md:text-3xl font-light tracking-wide text-black" data-testid="account-greeting">
-                  {user.first_name || user.email.split("@")[0]}
+                  {user.first_name || (user.email ? user.email.split("@")[0] : "Hesabım")}
                 </h1>
                 <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                   <Mail size={12} /> {user.email}
