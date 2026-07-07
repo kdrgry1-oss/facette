@@ -145,9 +145,10 @@ export default function Header({ hideMenu = false }) {
   const [heroOverlay, setHeroOverlay] = useState(false);
   useEffect(() => {
     const compute = () => {
+      // HeroEditorial, hero tüm ekranı kapladığı SÜRECE data-hero-overlay="1" tutar;
+      // son slayt bitip normal içerik gelince "0" yapar. Sabit scroll eşiği YOK.
       const present = typeof document !== "undefined" && document.documentElement.getAttribute("data-hero-overlay") === "1";
-      const atTop = typeof window !== "undefined" && window.scrollY < window.innerHeight * 0.8;
-      setHeroOverlay(location.pathname === "/" && !!present && atTop);
+      setHeroOverlay(location.pathname === "/" && !!present);
     };
     compute();
     window.addEventListener("scroll", compute, { passive: true });

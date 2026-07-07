@@ -192,7 +192,7 @@ function HeroSlide({ img, cap, title, vidRef, eager }) {
  * SON slayt bittiğinde bölüm serbest bırakılır ve sayfa normal şekilde aşağı iner.
  * Scroll-hijack YOK — tarayıcının kendi kaydırması kullanılır (mobil + masaüstü).
  */
-function HeroEditorial({ block }) {
+function HeroEditorial({ block, isFirst = false }) {
   const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
   const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
   const captions = block?.settings?.captions || [];
@@ -201,6 +201,38 @@ function HeroEditorial({ block }) {
   const sectionRef = useRef(null);
   const [prog, setProg] = useState(0); // 0..n-1 arası kesirli ilerleme
   const active = Math.min(n - 1, Math.max(0, Math.round(prog)));
+
+  // Header overlay bayrağı: hero TÜM EKRANI kapladığı sürece "1" (şeffaf header, beyaz logo);
+  // son slayt bitip altındaki normal içerik gelince "0" (katı sticky header devreye girer).
+  // Yalnızca sayfadaki İLK blok hero ise yönetilir.
+  useEffect(() => {
+    if (!isFirst) return;
+    let raf = 0;
+    const compute = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const el = sectionRef.current;
+        if (!el) return;
+        const vh = window.innerHeight || 1;
+        const rectTop = el.getBoundingClientRect().top;
+        const sectionBottom = rectTop + el.offsetHeight;
+        // n>1 (sabitlenmiş slider): hero, tek ekrandan fazlasını kapladığı sürece açık.
+        // n<=1 (tek görsel): ekranın %70'inden azı kaydırıldıysa açık.
+        const on = n > 1 ? sectionBottom > vh + 2 : -rectTop < vh * 0.7;
+        document.documentElement.setAttribute("data-hero-overlay", on ? "1" : "0");
+      });
+    };
+    window.addEventListener("scroll", compute, { passive: true });
+    window.addEventListener("resize", compute);
+    compute();
+    return () => {
+      window.removeEventListener("scroll", compute);
+      window.removeEventListener("resize", compute);
+      if (raf) cancelAnimationFrame(raf);
+      document.documentElement.removeAttribute("data-hero-overlay");
+    };
+  }, [isFirst, n]);
 
   // Kaydırma ilerlemesi: bölüm n*100vh yüksek, iç sticky katman 100vh.
   useEffect(() => {
@@ -243,7 +275,7 @@ function HeroEditorial({ block }) {
   if (n <= 1) {
     const cap = captions[0] || {};
     return (
-      <section data-testid="hero-editorial" className="w-full">
+      <section ref={sectionRef} data-testid="hero-editorial" className="w-full">
         <Link
           to={links[0] || "/"}
           onClick={() => { try { trackSelectPromotion({ promotionId: "hero_1", promotionName: cap.title || links[0] || "Hero 1" }); } catch (_) { /* silent */ } }}
@@ -405,6 +437,12 @@ function ProductSlider({ block, products }) {
   // Kaç satır alt alta (yatay kayan slider içinde 1–3)
   const rows = Math.max(1, Math.min(Number(block?.settings?.rows) || 1, 3));
   const serif = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", serif' };
+  const scrollRef = useRef(null);
+  const scrollByDir = (dir) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.85), behavior: "smooth" });
+  };
 
   return (
     <section className="w-full py-10 md:py-14" data-testid="product-slider">
@@ -422,18 +460,43 @@ function ProductSlider({ block, products }) {
         </div>
       )}
 
-      {/* Yatay kayan ürün slider'ı — N satır. Kartlar yan yana, kaydırılır (mobilde peek). */}
-      <div className="overflow-x-auto scrollbar-hide snap-x px-4 md:px-6">
-        <div
-          className="grid grid-flow-col auto-cols-[46%] sm:auto-cols-[31%] md:auto-cols-[23%] lg:auto-cols-[19%] gap-x-2 gap-y-6"
-          style={{ gridTemplateRows: `repeat(${rows}, auto)` }}
-        >
-          {displayProducts.map((product) => (
-            <div key={product.id} className="snap-start">
-              <ProductCard product={product} />
-            </div>
-          ))}
+      {/* Yatay kayan ürün slider'ı — N satır. Kartlar yan yana, kaydırılır (mobilde peek).
+          Masaüstünde sol/sağ oklarla da kaydırılır (ana slider gibi). */}
+      <div className="relative">
+        <div ref={scrollRef} className="overflow-x-auto scrollbar-hide snap-x px-4 md:px-6 scroll-smooth">
+          <div
+            className="grid grid-flow-col auto-cols-[46%] sm:auto-cols-[31%] md:auto-cols-[23%] lg:auto-cols-[19%] gap-x-2 gap-y-6"
+            style={{ gridTemplateRows: `repeat(${rows}, auto)` }}
+          >
+            {displayProducts.map((product) => (
+              <div key={product.id} className="snap-start">
+                <ProductCard product={product} />
+              </div>
+            ))}
+          </div>
         </div>
+
+        {/* Oklar — yalnızca masaüstü (mobilde parmakla kaydırma yeterli). */}
+        {displayProducts.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => scrollByDir(-1)}
+              aria-label="Önceki ürünler"
+              className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 shadow-md ring-1 ring-black/5 items-center justify-center text-black hover:bg-black hover:text-white transition-colors"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollByDir(1)}
+              aria-label="Sonraki ürünler"
+              className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 shadow-md ring-1 ring-black/5 items-center justify-center text-black hover:bg-black hover:text-white transition-colors"
+            >
+              <ChevronRight size={20} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Başlık yoksa da sağ CTA görünmediğinden mobilde küçük bir "Tümünü Gör" bağlantısı */}
@@ -608,11 +671,11 @@ function HomeSkeleton() {
 }
 
 // Block Renderer
-function BlockRenderer({ block, products }) {
+function BlockRenderer({ block, products, index }) {
   let component = null;
   switch (block.type) {
     case "hero_slider":   component = block?.settings?.hero_style === "dikey"
-                            ? <HeroEditorial block={block} />
+                            ? <HeroEditorial block={block} isFirst={index === 0} />
                             : <HeroSlider block={block} />; break;
     case "full_banner":   component = <FullBanner block={block} />; break;
     case "half_banners":  component = <HalfBanners block={block} />; break;
@@ -684,8 +747,9 @@ export default function Home() {
     && flowBlocks[0]?.settings?.hero_style === "dikey"
     && (flowBlocks[0]?.show_mobile !== false || flowBlocks[0]?.show_desktop !== false);
   useEffect(() => {
-    if (firstIsEditorialHero) document.documentElement.setAttribute("data-hero-overlay", "1");
-    else document.documentElement.removeAttribute("data-hero-overlay");
+    // Editorial hero YOKSA bayrağı temizle. Varsa değeri HeroEditorial (kapsama alanına göre
+    // "1"/"0") kendisi yönetir — burada set etmiyoruz ki katı header erken devreye girmesin.
+    if (!firstIsEditorialHero) document.documentElement.removeAttribute("data-hero-overlay");
     return () => document.documentElement.removeAttribute("data-hero-overlay");
   }, [firstIsEditorialHero]);
 
@@ -700,8 +764,8 @@ export default function Home() {
         <HomeSkeleton />
       ) : hasCMSBlocks ? (
         <>
-          {flowBlocks.map((block) => (
-            <BlockRenderer key={block.id} block={block} products={products} />
+          {flowBlocks.map((block, idx) => (
+            <BlockRenderer key={block.id} block={block} products={products} index={idx} />
           ))}
           
           {/* Add default product grid if no product_slider block */}
