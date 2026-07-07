@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import axios from "axios";
@@ -26,38 +26,19 @@ const DEFAULT_INSTASHOP = [
 ];
 
 // Block Components
-// Hero slaytının video olup olmadığını URL uzantısından anla
-const isVideoUrl = (u) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(u || ""));
-
 function HeroSlider({ block }) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
   const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
-  const videoRefs = useRef({});
-  const activeIsVideo = isVideoUrl(images[currentSlide]);
 
-  // Otomatik geçiş: görsel slaytlarda 5sn; video slaytta videonun bitmesini bekle
-  // (onEnded ilerletir), takılırsa 30sn emniyet süresi devreye girer.
   useEffect(() => {
-    if (images.length <= 1) return;
-    const t = setTimeout(() => {
-      setCurrentSlide((prev) => (prev + 1) % images.length);
-    }, activeIsVideo ? 30000 : 5000);
-    return () => clearTimeout(t);
-  }, [images.length, currentSlide, activeIsVideo]);
-
-  // Yalnızca aktif video oynasın (pil/CPU); slayt değişince baştan başlat
-  useEffect(() => {
-    Object.entries(videoRefs.current).forEach(([i, v]) => {
-      if (!v) return;
-      if (Number(i) === currentSlide) {
-        try { v.currentTime = 0; } catch (_) { /* noop */ }
-        v.play().catch(() => {});
-      } else {
-        v.pause();
-      }
-    });
-  }, [currentSlide]);
+    if (images.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % images.length);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [images.length]);
 
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % images.length);
   const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + images.length) % images.length);
@@ -96,29 +77,6 @@ function HeroSlider({ block }) {
             }}
             className={`absolute inset-0 block transition-opacity duration-700 ${index === currentSlide ? "opacity-100 z-10" : "opacity-0"}`}
           >
-            {isVideoUrl(img) ? (
-              <video
-                ref={(el) => { videoRefs.current[index] = el; }}
-                src={img}
-                className="w-full h-full object-cover block"
-                muted
-                playsInline
-                preload={index === 0 ? "auto" : "metadata"}
-                autoPlay={index === 0}
-                loop={images.length === 1}
-                width={dimsFor(index)?.[0]}
-                height={dimsFor(index)?.[1]}
-                onLoadedMetadata={(e) => {
-                  const { videoWidth: w, videoHeight: h } = e.target;
-                  if (w && h) setLoadedDims((prev) => (prev[index] ? prev : { ...prev, [index]: [w, h] }));
-                }}
-                onEnded={() => {
-                  if (images.length > 1 && index === currentSlide) {
-                    setCurrentSlide((prev) => (prev + 1) % images.length);
-                  }
-                }}
-              />
-            ) : (
             <img
               src={optimizeImg(img, 1920, 78)}
               alt={block?.title || ""}
@@ -130,7 +88,6 @@ function HeroSlider({ block }) {
               height={dimsFor(index)?.[1]}
               onLoad={handleImgLoad(index)}
             />
-            )}
           </Link>
         ))}
       </div>
