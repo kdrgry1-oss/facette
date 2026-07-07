@@ -198,11 +198,17 @@ async def _report_to_netgsm_iys(consent: dict):
     header = {"username": username, "password": password, "brandCode": brand_code}
     payload = {"header": header, "body": {"data": data}}
     url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    # KRİTİK: NetGSM resmî n8n entegrasyonu İYS API'sini HTTP Basic Auth ile çağırır
+    # (Authorization: Basic base64(user:pass)). Gövdedeki header'a EK olarak bu şart —
+    # yoksa NetGSM 'iys modulunuzu aktiflestirin' (code 40) ile reddediyor.
+    import base64 as _b64
+    _auth = _b64.b64encode(f"{username}:{password}".encode()).decode()
+    _hdrs = {"Content-Type": "application/json; charset=utf-8",
+             "Authorization": "Basic " + _auth}
     ok, code, body = False, None, ""
     try:
         async with httpx.AsyncClient(timeout=20) as c:
-            r = await c.post(url, json=payload,
-                             headers={"Content-Type": "application/json; charset=utf-8"})
+            r = await c.post(url, json=payload, headers=_hdrs)
         code = r.status_code
         body = (r.text or "").strip()[:500]
         lo = body.lower().replace(" ", "")
@@ -374,11 +380,15 @@ async def iys_netgsm_probe(payload: dict, current_user: dict = Depends(get_curre
             item["appkey"] = appkey       # NetGSM resmî n8n: appkey data öğesinde
         data.append(item)
     payload_out = {"header": header, "body": {"data": data}}
+    import base64 as _b64
+    _auth = _b64.b64encode(f"{username}:{password}".encode()).decode()
+    _hdrs = {"Content-Type": "application/json; charset=utf-8",
+             "Authorization": "Basic " + _auth}
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
-            r = await c.post(url, json=payload_out,
-                             headers={"Content-Type": "application/json; charset=utf-8"})
-        return {"url": url, "sent_appkey": bool(appkey), "http_status": r.status_code,
+            r = await c.post(url, json=payload_out, headers=_hdrs)
+        return {"url": url, "sent_appkey": bool(appkey), "sent_basic_auth": True,
+                "http_status": r.status_code,
                 "final_url": str(r.url), "content_type": r.headers.get("content-type", ""),
                 "body": (r.text or "").strip()[:800], "sent_data_count": len(data)}
     except Exception as e:
