@@ -27,7 +27,7 @@
  *                                            hesabı (P1 backlog).
  * =============================================================================
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
@@ -92,21 +92,28 @@ export default function AdminOrders({ unpaidView = false }) {
   const [total, setTotal] = useState(0);
   // --- Gelişmiş Filtreler (kullanıcı talebiyle geri eklendi) ---
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [filters, setFilters] = useState(() => {
-    const _def = {
-      search: "", phone: "", email: "", order_number: "",
-      cargo_tracking: "", invoice_number: "", coupon_code: "",
-      start_date: "", end_date: "",
-      payment_method: "", payment_status: "", platform: "", channel: "",
-      influencer: "", is_corporate: ""
-    };
-    // Diğer filtreler korunur; ANCAK genel arama (search) sayfa yenilenince SIFIRLANIR.
-    const _saved = _loadOrdersView().filters;
-    return _saved ? { ..._def, ..._saved, search: "" } : _def;
+  // Sayfa yenilenince TÜM arama/filtre alanları sıfırlanır (kalıcılık YOK) —
+  // kullanıcı talebi: arama o an uygulanır, yenilemede temiz liste gelir.
+  const [filters, setFilters] = useState({
+    search: "", phone: "", email: "", order_number: "",
+    cargo_tracking: "", invoice_number: "", coupon_code: "",
+    start_date: "", end_date: "",
+    payment_method: "", payment_status: "", platform: "", channel: "",
+    influencer: "", is_corporate: ""
   });
   const [searchTick, setSearchTick] = useState(0);
   const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
   const onFilterKey = (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } };
+  // Genel arama "debounce": kullanıcı yazmayı ~350ms bırakınca arama OTOMATİK
+  // uygulanır — "Ara" butonuna basmaya gerek kalmaz. İlk render'da tetiklenmez
+  // (mount'ta fetchOrders zaten çalışıyor; çift istek atılmasın).
+  const _searchInit = useRef(true);
+  useEffect(() => {
+    if (_searchInit.current) { _searchInit.current = false; return; }
+    const _t = setTimeout(() => { setPage(1); setSearchTick((t) => t + 1); }, 350);
+    return () => clearTimeout(_t);
+  }, [filters.search]);
+  const _ordReqSeq = useRef(0); // yarış koruması: yalnız EN SON isteğin yanıtı uygulanır
   const [activeStatusKeys, setActiveStatusKeys] = useState([]); // Ayarlar > Siparis Durumlari "Gorunur"
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -166,11 +173,11 @@ export default function AdminOrders({ unpaidView = false }) {
     fetchOrders();
   }, [page, pageSize, unpaidView, searchTick]);
 
-  // Görünüm kalıcılığı: yenilemede sayfa + boyut + filtreler korunur.
-  // NOT: genel arama (search) saklanmaz → sayfa yenilenince arama kutusu temizlenir.
+  // Görünüm kalıcılığı: yenilemede YALNIZ sayfa + sayfa boyutu korunur.
+  // NOT: arama ve gelişmiş filtreler BİLİNÇLİ olarak saklanmaz → yenilemede sıfırlanır.
   useEffect(() => {
-    try { localStorage.setItem(ORDERS_VIEW_KEY, JSON.stringify({ page, pageSize, filters: { ...filters, search: "" } })); } catch (e) {}
-  }, [page, pageSize, filters]);
+    try { localStorage.setItem(ORDERS_VIEW_KEY, JSON.stringify({ page, pageSize })); } catch (e) {}
+  }, [page, pageSize]);
 
   /**
    * fetchOrders — Siparişleri arka uçtan çeker.
@@ -182,6 +189,7 @@ export default function AdminOrders({ unpaidView = false }) {
    * BESLER     : orders listesi + total (Pagination sayfa hesabı için).
    */
   const fetchOrders = async () => {
+    const _seq = ++_ordReqSeq.current; // bu çağrının sıra numarası
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
@@ -191,6 +199,7 @@ export default function AdminOrders({ unpaidView = false }) {
       if (!anyFilter) url += `&hide_closed=1`;
       Object.keys(filters).forEach((key) => { if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`; });
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (_seq !== _ordReqSeq.current) return; // eski yanıt — daha yeni bir istek yolda, yok say
       const list = res.data?.orders || [];
       setOrders(list);
       setTotal(res.data?.total || 0);
@@ -206,6 +215,7 @@ export default function AdminOrders({ unpaidView = false }) {
         }).then((r) => setRiskMap(r.data?.risks || {})).catch(() => { /* risk skoru opsiyonel */ });
       }
     } catch (err) {
+      if (_seq !== _ordReqSeq.current) return; // eski isteğin hatası — spinner'a dokunma
       console.error(err);
       setLoading(false);
     }
