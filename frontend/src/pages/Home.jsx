@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Play } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -144,107 +144,78 @@ function HeroSlider({ block }) {
   );
 }
 
-// Dikey Editorial Akış (Zara Home mobil stili) — TAM EKRAN, DİKEY KAYARAK geçen otomatik
-// carousel. Sağda dikey nokta göstergesi, parmakla yukarı/aşağı kaydırma. Görsel + video;
-// PERFORMANS: yalnızca AKTİF slaytın videosu oynar, diğerleri duraklatılır.
+// Dikey Editorial Akış (Zara/OYSHO mobil stili) — her slayt TAM EKRAN (100svh), NORMAL akışta
+// alt alta. OTOMATİK KAYMA YOK: parmakla/scroll ile bir sonraki slayta geçilir; son slayttan
+// sonra sayfa (ürünler) doğal olarak devam eder. Video slaytlar yalnızca EKRANDAYKEN oynar
+// (IntersectionObserver, performans). İlk slaytta ince "aşağı kaydır" ipucu.
 function HeroEditorial({ block }) {
   const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
   const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
   const captions = block?.settings?.captions || [];
-  const n = images.length;
-  const [current, setCurrent] = useState(0);
   const vids = useRef({});
-  const touchY = useRef(null);
-  const go = (k) => setCurrent(((k % n) + n) % n);
 
-  // Otomatik ilerleme (reduced-motion'da kapalı)
+  // Video: yalnızca ekranda görünen slaytınki oynar
   useEffect(() => {
-    if (n < 2) return;
-    if (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const t = setInterval(() => setCurrent((p) => (p + 1) % n), 5000);
-    return () => clearInterval(t);
-  }, [n]);
-
-  // Aktif slaytın videosunu oynat, diğerlerini duraklat
-  useEffect(() => {
-    Object.entries(vids.current).forEach(([i, v]) => {
-      if (!v) return;
-      if (Number(i) === current) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
-      else { try { v.pause?.(); } catch (_) { /* noop */ } }
-    });
-  }, [current, n]);
+    const els = Object.values(vids.current).filter(Boolean);
+    if (!els.length || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        const v = e.target;
+        if (e.isIntersecting && e.intersectionRatio >= 0.5) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
+        else { try { v.pause?.(); } catch (_) { /* noop */ } }
+      });
+    }, { threshold: [0, 0.5, 1] });
+    els.forEach((v) => io.observe(v));
+    return () => io.disconnect();
+  }, [images.length]);
 
   return (
-    <section
-      data-testid="hero-editorial"
-      className="relative w-full overflow-hidden bg-stone-100"
-      style={{ height: "100svh", minHeight: "80vh" }}
-      onTouchStart={(e) => { touchY.current = e.touches[0].clientY; }}
-      onTouchEnd={(e) => {
-        if (touchY.current == null) return;
-        const dy = e.changedTouches[0].clientY - touchY.current;
-        if (Math.abs(dy) > 45) go(current + (dy < 0 ? 1 : -1));
-        touchY.current = null;
-      }}
-    >
-      {/* Dikey kayan şerit — her slayt 100svh; translateY ile geçer */}
-      <div
-        className="absolute inset-x-0 top-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]"
-        style={{ height: `${n * 100}%`, transform: `translateY(-${(current * 100) / n}%)` }}
-      >
-        {images.map((img, i) => {
-          const cap = captions[i] || {};
-          return (
-            <Link
-              key={i}
-              to={links[i] || "/"}
-              onClick={() => { try { trackSelectPromotion({ promotionId: `hero_${i + 1}`, promotionName: cap.title || links[i] || `Hero ${i + 1}` }); } catch (_) { /* silent */ } }}
-              className="relative block w-full overflow-hidden"
-              style={{ height: `${100 / n}%` }}
-            >
-              {isVideoUrl(img) ? (
-                <video
-                  ref={(el) => { vids.current[i] = el; }}
-                  src={img}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  muted loop playsInline
-                  autoPlay={i === 0}
-                  preload={i === 0 ? "auto" : "none"}
-                />
-              ) : (
-                <img
-                  src={optimizeImg(img, 1920, 80)}
-                  alt={cap.title || block?.title || ""}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  loading={i === 0 ? "eager" : "lazy"}
-                  fetchPriority={i === 0 ? "high" : "auto"}
-                  decoding="async"
-                />
-              )}
-              <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,.45), rgba(0,0,0,0) 42%)" }} />
-              <div className="absolute left-5 md:left-10 bottom-16 md:bottom-24 z-10 text-white max-w-[82%]">
-                {cap.eyebrow ? <div className="text-[11px] tracking-[0.32em] uppercase opacity-90 mb-2">{cap.eyebrow}</div> : null}
-                {cap.title ? <div className="text-3xl md:text-5xl font-light tracking-wide leading-tight">{cap.title}</div> : null}
-                <div className="mt-3 text-[11px] tracking-[0.24em] uppercase inline-block border-b border-white/70 pb-1">{cap.cta || "Keşfet"}</div>
+    <section data-testid="hero-editorial" className="w-full">
+      {images.map((img, i) => {
+        const cap = captions[i] || {};
+        return (
+          <Link
+            key={i}
+            to={links[i] || "/"}
+            onClick={() => { try { trackSelectPromotion({ promotionId: `hero_${i + 1}`, promotionName: cap.title || links[i] || `Hero ${i + 1}` }); } catch (_) { /* silent */ } }}
+            className="relative block w-full overflow-hidden bg-stone-100"
+            style={{ height: "100svh", minHeight: "80vh" }}
+          >
+            {isVideoUrl(img) ? (
+              <video
+                ref={(el) => { vids.current[i] = el; }}
+                src={img}
+                className="absolute inset-0 w-full h-full object-cover"
+                muted loop playsInline
+                autoPlay={i === 0}
+                preload={i === 0 ? "auto" : "none"}
+              />
+            ) : (
+              <img
+                src={optimizeImg(img, 1920, 80)}
+                alt={cap.title || block?.title || ""}
+                className="absolute inset-0 w-full h-full object-cover"
+                loading={i === 0 ? "eager" : "lazy"}
+                fetchPriority={i === 0 ? "high" : "auto"}
+                decoding="async"
+              />
+            )}
+            <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,.42), rgba(0,0,0,0) 45%)" }} />
+            <div className="absolute left-5 md:left-10 bottom-16 md:bottom-24 z-10 text-white max-w-[82%]">
+              {cap.eyebrow ? <div className="text-[11px] tracking-[0.32em] uppercase opacity-90 mb-2">{cap.eyebrow}</div> : null}
+              {cap.title ? <div className="text-3xl md:text-5xl font-light tracking-wide leading-tight">{cap.title}</div> : null}
+              <div className="mt-3 text-[11px] tracking-[0.24em] uppercase inline-block border-b border-white/70 pb-1">{cap.cta || "Keşfet"}</div>
+            </div>
+            {/* İlk slaytta "aşağı kaydır" ipucu */}
+            {i === 0 && images.length > 1 && (
+              <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 text-white/80 text-[10px] tracking-[0.3em] uppercase flex flex-col items-center gap-1 pointer-events-none">
+                <span>Kaydır</span>
+                <ChevronDown size={16} className="animate-bounce" />
               </div>
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* Sağ dikey nokta göstergesi (Zara Home) */}
-      {n > 1 && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2">
-          {images.map((_, i) => (
-            <button
-              key={i}
-              onClick={(e) => { e.preventDefault(); go(i); }}
-              aria-label={`Slayt ${i + 1}`}
-              className={`rounded-full transition-all ${i === current ? "bg-white w-1.5 h-5" : "bg-white/50 w-1.5 h-1.5"}`}
-            />
-          ))}
-        </div>
-      )}
+            )}
+          </Link>
+        );
+      })}
     </section>
   );
 }
@@ -589,6 +560,17 @@ export default function Home() {
   // blok akışında tekrar render edilmemesi için ayrılır.
   const rotatingBlock = blocks.find(b => b.type === "rotating_text");
   const flowBlocks = blocks.filter(b => b.type !== "rotating_text");
+
+  // İLK blok TAM EKRAN editorial hero mu? Öyleyse header şeffaf-overlay (beyaz logo/ikon) olur.
+  // <html data-hero-overlay="1"> bayrağını Header okur; sayfadan ayrılınca temizlenir.
+  const firstIsEditorialHero = flowBlocks[0]?.type === "hero_slider"
+    && flowBlocks[0]?.settings?.hero_style === "dikey"
+    && (flowBlocks[0]?.show_mobile !== false || flowBlocks[0]?.show_desktop !== false);
+  useEffect(() => {
+    if (firstIsEditorialHero) document.documentElement.setAttribute("data-hero-overlay", "1");
+    else document.documentElement.removeAttribute("data-hero-overlay");
+    return () => document.documentElement.removeAttribute("data-hero-overlay");
+  }, [firstIsEditorialHero]);
 
   return (
     <div className="min-h-screen bg-white" data-testid="home-page">
