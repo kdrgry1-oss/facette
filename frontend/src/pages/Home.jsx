@@ -210,29 +210,54 @@ function HeroEditorial({ block }) {
   );
 }
 
+// Görseli YÜKLENDİĞİ en-boy oranında, KIRPMADAN gösterir. Container oranı = görsel oranı
+// olduğundan object-cover kırpmaz (tam oturur). Kayıtlı boyut (dims) varsa onu kullanır;
+// yoksa görsel yüklenince gerçek pikselinden okur → hangi boyutta yüklersen o oranda görünür.
+function NaturalImg({ src, dims, alt = "", w = 1920, fallback = "16 / 9", imgClass = "" }) {
+  const [d, setD] = useState(dims && dims.length === 2 ? dims : null);
+  const aspect = aspectFromDims(d, fallback);
+  return (
+    <div className="w-full bg-stone-100" style={{ aspectRatio: aspect }}>
+      <img
+        src={optimizeImg(src, w)}
+        alt={alt}
+        className={`w-full h-full object-cover block ${imgClass}`}
+        loading="lazy"
+        decoding="async"
+        onLoad={(e) => {
+          const nw = e.target.naturalWidth, nh = e.target.naturalHeight;
+          if (!d && nw && nh) setD([nw, nh]);
+        }}
+      />
+    </div>
+  );
+}
+
 function FullBanner({ block }) {
   if (!block?.images?.[0]) return null;
-  const dims = block?.settings?.img_dims?.[0];
   return (
-    <Link to={block.links?.[0] || "/"} className="block w-full bg-stone-100" data-testid="full-banner" style={{ aspectRatio: aspectFromDims(dims, "16 / 6") }}>
-      <img src={optimizeImg(block.images[0], 1920)} alt={block.title || ""} className="w-full h-full object-cover block" loading="lazy" decoding="async" />
+    <Link to={block.links?.[0] || "/"} className="block w-full" data-testid="full-banner">
+      <NaturalImg src={block.images[0]} dims={block?.settings?.img_dims?.[0]} alt={block.title || ""} w={1920} fallback="16 / 6" />
     </Link>
   );
 }
 
 function HalfBanners({ block }) {
   if (!block?.images || block.images.length < 2) return null;
-  // İki banner için TEK ve tutarlı en-boy oranı. Yüklenen görselin piksel
-  // boyutundan bağımsız: hangi boyutta görsel eklenirse eklensin, ikisi de
-  // eşit boyutta ve sayfaya sığarak (object-cover ile) görünür. Eski/karışık
-  // kayıtlı boyutların yerleşimi bozmasını engeller. Admin isterse
-  // block.settings.aspect ("16 / 9" gibi) ile değiştirebilir.
-  const aspect = block?.settings?.aspect || "16 / 9";
+  // Her görsel KENDİ yüklendiği oranda, kırpılmadan gösterilir. Farklı oranlar olabileceğinden
+  // sütunlar üstten hizalanır (items-start). Admin block.settings.aspect verirse o zorlanır.
+  const forced = block?.settings?.aspect || null;
   return (
-    <div className="grid grid-cols-2" data-testid="half-banners">
+    <div className="grid grid-cols-2 items-start" data-testid="half-banners">
       {block.images.slice(0, 2).map((img, index) => (
-        <Link key={index} to={block.links?.[index] || "/"} className="block bg-stone-100 overflow-hidden" style={{ aspectRatio: aspect }}>
-          <img src={optimizeImg(img, 1000)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
+        <Link key={index} to={block.links?.[index] || "/"} className="block overflow-hidden">
+          {forced ? (
+            <div className="w-full bg-stone-100" style={{ aspectRatio: forced }}>
+              <img src={optimizeImg(img, 1000)} alt="" className="w-full h-full object-cover block" loading="lazy" decoding="async" />
+            </div>
+          ) : (
+            <NaturalImg src={img} dims={block?.settings?.img_dims?.[index]} w={1000} fallback="4 / 5" />
+          )}
         </Link>
       ))}
     </div>
