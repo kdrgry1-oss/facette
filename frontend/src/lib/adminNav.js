@@ -9,6 +9,7 @@ import {
   Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle, Trash2,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
   Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain, Mail, Rss,
+  Instagram,
 } from "lucide-react";
 
 // Default sıralama (kullanıcı tercihi yoksa kullanılır):
@@ -81,8 +82,8 @@ export const navigationGroups = [
       { label: "Popuplar", path: "/admin/popuplar", icon: BellRing },
       { label: "Duyurular", path: "/admin/duyurular", icon: BellRing },
       { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
-      { label: "Menü Yönetimi", path: "/admin/menu-yonetimi", icon: PenTool },
       { label: "Footer Tasarımı", path: "/admin/footer-tasarim", icon: Palette },
+      { label: "Instagram Akışı", path: "/admin/instagram", icon: Instagram },
       { label: "Sayfalar (CMS)", path: "/admin/sayfalar", icon: FileText },
     ],
   },

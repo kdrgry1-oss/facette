@@ -1470,6 +1470,20 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
+    # Instagram akışı — auto_sync açık + token varsa her 30 dk @facette gönderilerini tazeler.
+    try:
+        from routes.instagram import auto_sync_instagram
+        _scheduler.add_job(
+            auto_sync_instagram,
+            "interval",
+            minutes=30,
+            id="instagram_auto_sync",
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+            max_instances=1,
+            coalesce=True,
+        )
+    except Exception as _e:
+        logging.getLogger("scheduler").warning("[scheduler] instagram job eklenemedi: %s", _e)
     # Marketplace auto-sync tick — her 1 dk'da çalışır, sonra tek tek
     # account'lara ait interval'lere göre ürün/sipariş senkronu planlar.
     # Bu sayede "3 dk'da bir ürün gönder" gibi ince ayarlar çalışır.

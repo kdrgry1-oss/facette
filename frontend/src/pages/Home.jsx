@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, ChevronDown, Play, ArrowRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Play, ArrowRight, Instagram } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -510,13 +510,39 @@ function ProductSlider({ block, products }) {
 }
 
 function InstaShop({ block }) {
-  const images = block?.images?.length > 0 ? block.images : DEFAULT_INSTASHOP.map(i => i.image);
-  const links = block?.links?.length > 0 ? block.links : DEFAULT_INSTASHOP.map(i => i.link);
+  // Gerçek @facette akışı: backend /instagram/feed (token'la çekilen ya da elle eklenen
+  // gönderiler). Boşsa bloktaki elle görsellere / varsayılana düşer.
+  const [feed, setFeed] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    axios.get(`${API}/instagram/feed?limit=12`)
+      .then((r) => { if (alive) setFeed(r.data?.posts || []); })
+      .catch(() => { if (alive) setFeed([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const blockImages = block?.images?.length > 0 ? block.images : DEFAULT_INSTASHOP.map(i => i.image);
+  const blockLinks = block?.links?.length > 0 ? block.links : DEFAULT_INSTASHOP.map(i => i.link);
+
+  // feed doluysa gerçek gönderiler; değilse blok görselleri.
+  const usingFeed = Array.isArray(feed) && feed.length > 0;
+  const items = usingFeed
+    ? feed.slice(0, 6).map((p) => ({
+        img: p.image,
+        href: p.product_link || p.permalink || "#",
+        external: !p.product_link && !!p.permalink,
+      }))
+    : blockImages.slice(0, 6).map((img, i) => ({ img, href: blockLinks[i] || "/", external: false }));
+
+  if (!usingFeed && (feed === null)) {
+    // İlk yükleme — flash olmasın diye başlığı gösterip grid'i boş bırakmak yerine blok
+    // görselleriyle devam eder (feed null iken items zaten blockImages'e düşüyor).
+  }
 
   return (
     <section className="py-14 md:py-20 bg-gray-50" data-testid="instashop">
       <div className="max-w-screen-2xl mx-auto px-4">
-        {/* #FACETTE × YOU — premium imza başlığı (eski "Stilini Yarat" metni kaldırıldı) */}
+        {/* #FACETTE × YOU — premium imza başlığı */}
         <div className="text-center mb-8 md:mb-10">
           <p className="text-[10px] md:text-[11px] tracking-[0.42em] uppercase text-gray-400 mb-3">Stilini Paylaş</p>
           <h2 className="text-2xl md:text-[2.4rem] leading-none font-extralight tracking-[0.22em] text-black">
@@ -526,12 +552,32 @@ function InstaShop({ block }) {
             Tarzını <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer" className="text-black hover:underline">@facette</a> etiketiyle paylaş, koleksiyonun bir parçası ol.
           </p>
         </div>
-        <div className="grid grid-cols-5 gap-1">
-          {images.slice(0, 5).map((img, index) => (
-            <Link key={index} to={links[index] || "/"} className="block overflow-hidden group">
-              <img src={optimizeImg(img, 600)} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
-            </Link>
-          ))}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
+          {items.map((it, index) => {
+            const inner = (
+              <>
+                <img src={optimizeImg(it.img, 600)} alt="" className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" decoding="async" />
+                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center">
+                  <Instagram size={22} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
+                </span>
+              </>
+            );
+            return it.external ? (
+              <a key={index} href={it.href} target="_blank" rel="noopener noreferrer" className="relative block overflow-hidden group">
+                {inner}
+              </a>
+            ) : (
+              <Link key={index} to={it.href} className="relative block overflow-hidden group">
+                {inner}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="text-center mt-8">
+          <a href="https://instagram.com/facette" target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1.5 transition-colors">
+            <Instagram size={14} /> @facette
+          </a>
         </div>
       </div>
     </section>
