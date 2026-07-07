@@ -16,6 +16,7 @@ const Cart = lazy(() => import("./pages/Cart"));
 const Checkout = lazy(() => import("./pages/Checkout"));
 const Search = lazy(() => import("./pages/Search"));
 const StaticPage = lazy(() => import("./pages/StaticPage"));
+const FAQ = lazy(() => import("./pages/FAQ"));
 const Account = lazy(() => import("./pages/Account"));
 const Login = lazy(() => import("./pages/Login"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
@@ -87,6 +88,8 @@ function App() {
                 <Route path="/arama" element={<Search />} />
                 <Route path="/sayfa/:slug" element={<StaticPage />} />
                 <Route path="/gizlilik" element={<GizlilikPolitikasi />} />
+                <Route path="/sikca-sorulan-sorular" element={<FAQ />} />
+                <Route path="/sss" element={<FAQ />} />
                 <Route path="/hesabim" element={<Account />} />
                 <Route path="/giris" element={<Login />} />
                 <Route path="/sifremi-unuttum" element={<ForgotPassword />} />

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, ChevronDown, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Play, ArrowRight } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -179,7 +179,7 @@ function HeroEditorial({ block }) {
             to={links[i] || "/"}
             onClick={() => { try { trackSelectPromotion({ promotionId: `hero_${i + 1}`, promotionName: cap.title || links[i] || `Hero ${i + 1}` }); } catch (_) { /* silent */ } }}
             className="relative block w-full overflow-hidden bg-stone-100"
-            style={{ height: "100svh", minHeight: "80vh" }}
+            style={{ height: "100vh" }}
           >
             {isVideoUrl(img) ? (
               <video
@@ -200,18 +200,16 @@ function HeroEditorial({ block }) {
                 decoding="async"
               />
             )}
-            <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,.42), rgba(0,0,0,0) 45%)" }} />
-            <div className="absolute left-5 md:left-10 bottom-16 md:bottom-24 z-10 text-white max-w-[82%]">
-              {cap.eyebrow ? <div className="text-[11px] tracking-[0.32em] uppercase opacity-90 mb-2">{cap.eyebrow}</div> : null}
-              {cap.title ? <div className="text-3xl md:text-5xl font-light tracking-wide leading-tight">{cap.title}</div> : null}
-              <div className="mt-3 text-[11px] tracking-[0.24em] uppercase inline-block border-b border-white/70 pb-1">{cap.cta || "Keşfet"}</div>
-            </div>
-            {/* İlk slaytta "aşağı kaydır" ipucu */}
-            {i === 0 && images.length > 1 && (
-              <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 text-white/80 text-[10px] tracking-[0.3em] uppercase flex flex-col items-center gap-1 pointer-events-none">
-                <span>Kaydır</span>
-                <ChevronDown size={16} className="animate-bounce" />
-              </div>
+            {/* Yazılar YALNIZCA admin girmişse çıkar (görselde zaten yazı varsa çift olmaz). */}
+            {(cap.eyebrow || cap.title || cap.cta) && (
+              <>
+                <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,.42), rgba(0,0,0,0) 45%)" }} />
+                <div className="absolute left-5 md:left-10 bottom-16 md:bottom-24 z-10 text-white max-w-[82%]">
+                  {cap.eyebrow ? <div className="text-[11px] tracking-[0.32em] uppercase opacity-90 mb-2">{cap.eyebrow}</div> : null}
+                  {cap.title ? <div className="text-3xl md:text-5xl font-light tracking-wide leading-tight">{cap.title}</div> : null}
+                  {cap.cta ? <div className="mt-3 text-[11px] tracking-[0.24em] uppercase inline-block border-b border-white/70 pb-1">{cap.cta}</div> : null}
+                </div>
+              </>
             )}
           </Link>
         );
@@ -308,23 +306,51 @@ function ProductSlider({ block, products }) {
   
   if (displayProducts.length === 0) return null;
 
-  const ctaLink = source === "discounted" ? "/sale" : "/en-yeniler";
+  const defaultCtaLink = source === "discounted" ? "/sale" : "/en-yeniler";
+  const title = block?.title;
+  const subtitle = block?.settings?.subtitle;
+  const ctaLabel = block?.settings?.cta_label || "Tümünü Gör";
+  const ctaHref = block?.settings?.cta_link || defaultCtaLink;
+  // Kaç satır alt alta (yatay kayan slider içinde 1–3)
+  const rows = Math.max(1, Math.min(Number(block?.settings?.rows) || 1, 3));
+  const serif = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", serif' };
 
   return (
-    <section className="w-full px-2 md:px-4 py-10" data-testid="product-slider">
-      {block?.title && (
-        <h2 className="text-center text-lg font-medium tracking-wide mb-8">{block.title}</h2>
+    <section className="w-full py-10 md:py-14" data-testid="product-slider">
+      {/* Başlık bloğu — girildiyse: sol büyük serif başlık + alt yazı, sağda "Tümünü Gör →"
+          (2. görsel tarzı). Standalone alt "Tümünü Gör" butonu kaldırıldı. */}
+      {(title || subtitle) && (
+        <div className="max-w-screen-2xl mx-auto px-4 md:px-6 mb-6 md:mb-9 flex items-end justify-between gap-4">
+          <div className="min-w-0">
+            {title && <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none" style={serif}>{title}</h2>}
+            {subtitle && <p className="mt-3 text-sm md:text-[15px] text-gray-500 font-light max-w-md leading-relaxed">{subtitle}</p>}
+          </div>
+          <Link to={ctaHref} className="shrink-0 hidden sm:inline-flex items-center gap-2 text-[11px] tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1.5 transition-colors whitespace-nowrap">
+            {ctaLabel} <ArrowRight size={14} />
+          </Link>
+        </div>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-[2px] gap-y-3 md:gap-y-4">
-        {displayProducts.map((product) => (
-          <ProductCard key={product.id} product={product} />
-        ))}
+
+      {/* Yatay kayan ürün slider'ı — N satır. Kartlar yan yana, kaydırılır (mobilde peek). */}
+      <div className="overflow-x-auto scrollbar-hide snap-x px-4 md:px-6">
+        <div
+          className="grid grid-flow-col auto-cols-[46%] sm:auto-cols-[31%] md:auto-cols-[23%] lg:auto-cols-[19%] gap-x-2 gap-y-6"
+          style={{ gridTemplateRows: `repeat(${rows}, auto)` }}
+        >
+          {displayProducts.map((product) => (
+            <div key={product.id} className="snap-start">
+              <ProductCard product={product} />
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="text-center mt-12">
-        <Link to={ctaLink} className="inline-block border border-black px-10 py-2.5 text-xs tracking-wider uppercase hover:bg-black hover:text-white transition-colors">
-          Tümünü Gör
-        </Link>
-      </div>
+
+      {/* Başlık yoksa da sağ CTA görünmediğinden mobilde küçük bir "Tümünü Gör" bağlantısı */}
+      {(title || subtitle) && (
+        <div className="sm:hidden text-center mt-6">
+          <Link to={ctaHref} className="text-[11px] tracking-[0.24em] uppercase border-b border-black pb-1">{ctaLabel} →</Link>
+        </div>
+      )}
     </section>
   );
 }

@@ -1330,6 +1330,47 @@ export default function PageDesign() {
                       className="w-full border px-3 py-2 rounded text-sm"
                     />
                   </div>
+                  <div className="w-32">
+                    <label className="block text-xs font-medium mb-1 text-gray-600">Kaç Satır (alt alta)</label>
+                    <select
+                      value={formData.settings?.rows || 1}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, rows: Number(e.target.value) } })}
+                      className="w-full border px-3 py-2 rounded text-sm"
+                    >
+                      <option value={1}>1 satır</option>
+                      <option value={2}>2 satır</option>
+                      <option value={3}>3 satır</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Başlık bloğu (2. görsel tarzı): Başlık = üstteki "Blok Başlığı" alanı.
+                    Alt yazı + "Tümünü Gör" bağlantısı buradan. Başlık girilmezse blok başlıksız çıkar. */}
+                <div className="grid grid-cols-1 gap-2 mb-3 bg-gray-50 border rounded-lg p-3">
+                  <p className="text-[11px] text-gray-500">Üstteki <b>Blok Başlığı</b> girilirse ürünlerin üstünde büyük başlık olarak çıkar (ör. "Senin için seçtik."). Aşağıdakiler opsiyonel:</p>
+                  <input
+                    type="text"
+                    value={formData.settings?.subtitle || ""}
+                    onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, subtitle: e.target.value } })}
+                    placeholder="Alt yazı (ör. Koleksiyonumuzdan senin stilini tamamlayacak parçalar.)"
+                    className="w-full border px-3 py-2 rounded text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={formData.settings?.cta_label || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, cta_label: e.target.value } })}
+                      placeholder="Buton yazısı (varsayılan: Tümünü Gör)"
+                      className="flex-1 border px-3 py-2 rounded text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={formData.settings?.cta_link || ""}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, cta_link: e.target.value } })}
+                      placeholder="Buton linki (ör. /elbise)"
+                      className="flex-1 border px-3 py-2 rounded text-sm"
+                    />
+                  </div>
                 </div>
 
                 {(formData.settings?.source === "category") && (

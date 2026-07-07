@@ -78,16 +78,24 @@ async def cancel_my_order(order_id: str, current_user: dict = Depends(require_au
         )
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    await db.orders.update_one(
-        {"id": order.get("id")},
-        {"$set": {
-            "status": "cancelled",
-            "updated_at": now_iso,
-            "cancelled_at": now_iso,
-            "cancel_source": "customer",
-            "cancel_reason": "Müşteri iptali (üye paneli)",
-        }},
-    )
+    # PARA İADESİ AYRIMI: Ödemesi ALINMIŞ (payment_status=paid — kart/iyzico veya onaylı havale)
+    # siparişte müşteri iptal ederse DOĞRUDAN "cancelled" YAPILMAZ; "cancel_requested"
+    # (İptal Talebi Alındı) durumuna çekilir ki personel para iadesini ATLAMASIN. Ödeme
+    # alınmamışsa (pending/COD) eskisi gibi doğrudan iptal edilir (iade gerekmez).
+    _was_paid = (order.get("payment_status") or "").lower() == "paid"
+    _new_status = "cancel_requested" if _was_paid else "cancelled"
+    _set = {
+        "status": _new_status,
+        "updated_at": now_iso,
+        "cancel_source": "customer",
+        "cancel_reason": "Müşteri iptali (üye paneli)",
+    }
+    if _new_status == "cancelled":
+        _set["cancelled_at"] = now_iso
+    else:
+        _set["cancel_requested_at"] = now_iso
+        _set["refund_pending"] = True   # personel: para iadesi bekliyor
+    await db.orders.update_one({"id": order.get("id")}, {"$set": _set})
 
     # Stok geri ekleme — panel/Trendyol iptal akışıyla AYNI idempotent guard (order_cancelled)
     try:
@@ -116,13 +124,17 @@ async def cancel_my_order(order_id: str, current_user: dict = Depends(require_au
             "order_id": order.get("id"),
             "order_number": order.get("order_number", ""),
             "event_type": "status",
-            "description": "Müşteri siparişi iptal etti (üye paneli)",
+            "description": ("Müşteri iptal talebi oluşturdu — ÖDEME ALINDIĞI İÇİN PARA İADESİ BEKLİYOR (üye paneli)"
+                            if _new_status == "cancel_requested" else "Müşteri siparişi iptal etti (üye paneli)"),
             "actor": current_user.get("email", "") or "müşteri",
             "created_at": now_iso,
         })
     except Exception:
         pass
 
+    if _new_status == "cancel_requested":
+        return {"success": True, "status": "cancel_requested",
+                "message": "İptal talebiniz alındı. Ödemeniz en kısa sürede iade edilecektir."}
     return {"success": True, "status": "cancelled", "message": "Siparişiniz iptal edildi."}
 
 

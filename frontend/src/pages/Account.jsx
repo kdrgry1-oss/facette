@@ -63,6 +63,7 @@ const ORDER_STATUS = {
   returned:    { label: "İade Tamamlandı", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
   refunded:    { label: "İade Bedeli Ödendi", cls: "bg-red-50 text-red-700 border-red-200", icon: CheckCircle },
   partial_refunded: { label: "Kısmi İade Yapıldı", cls: "bg-rose-50 text-rose-700 border-rose-200", icon: CheckCircle },
+  cancel_requested: { label: "İptal Talebi Alındı", cls: "bg-orange-50 text-orange-800 border-orange-300", icon: Clock },
   cancelled:   { label: "İptal Edildi",   cls: "bg-red-50     text-red-700     border-red-200",     icon: X },
 };
 
