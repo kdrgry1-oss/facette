@@ -564,9 +564,15 @@ export default function Returns() {
               ) : claims.length === 0 ? (
                 <tr><td colSpan={10} className="text-center py-12 text-gray-400">İade kaydı bulunamadı</td></tr>
               ) : claims.map(claim => {
-                const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0), 0);
-                const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0), 0);
-                const totalNet = (claim.items || []).reduce((s, i) => s + (i.price || 0), 0);
+                // ADET ile çarp: aynı üründen 2 adet iade edildiyse tutar 2× görünmeli (yoksa
+                // yarısı — 11361499309'daki "1207.5 yerine 2415 olmalı" hatası buydu).
+                const totalGross = (claim.items || []).reduce((s, i) => s + (i.unit_price || 0) * (i.quantity || 1), 0);
+                const totalDiscount = (claim.items || []).reduce((s, i) => s + (i.discount_amount || 0) * (i.quantity || 1), 0);
+                const _itemsNet = (claim.items || []).reduce((s, i) => s + (i.price || 0) * (i.quantity || 1), 0);
+                // İade tutarı: yetkili refund_amount öncelikli (Trendyol/sipariş toplamıyla birebir),
+                // yoksa kalemlerden (adet dahil) hesaplanır.
+                const totalNet = (claim.refund_amount != null && claim.refund_amount !== "")
+                  ? Number(claim.refund_amount) : _itemsNet;
                 const isExpanded = expandedId === claim.claim_id;
                 const isActioned = !!claim.panel_action;
 
@@ -620,10 +626,14 @@ export default function Returns() {
                                       )}
                                       <span className="flex-1">
                                         <span className="font-medium">{item.productName || "-"}</span>
+                                        {(item.quantity || 1) > 1 ? <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-bold">× {item.quantity} adet</span> : null}
                                         {item.barcode ? <span className="ml-2 font-mono text-[10px] text-gray-500">{item.barcode}</span> : null}
                                         {item.reason ? <span className="ml-2 text-[10px] text-gray-400">({item.reason})</span> : null}
                                       </span>
-                                      <span className="font-mono">{formatCurrency(item.price)}</span>
+                                      <span className="font-mono">
+                                        {(item.quantity || 1) > 1 && <span className="text-[10px] text-gray-400 mr-1">{formatCurrency(item.price)}×{item.quantity}=</span>}
+                                        {formatCurrency((item.price || 0) * (item.quantity || 1))}
+                                      </span>
                                     </label>
                                   ))}
                                 </div>

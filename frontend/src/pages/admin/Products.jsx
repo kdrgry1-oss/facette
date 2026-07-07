@@ -2621,6 +2621,36 @@ export default function AdminProducts() {
                           onChange={(e) => setFormData({ ...formData, sale_price: parseFloat(e.target.value) || null })}
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all font-bold text-green-600"
                         />
+                        {/* Oran (%) — satış fiyatından girilen yüzde kadar indirim uygular ve
+                            sonucu yukarıdaki İndirimli Fiyat alanına yazar. Değer, mevcut
+                            satış/indirimli fiyattan otomatik hesaplanarak gösterilir. */}
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min="0"
+                              max="99"
+                              placeholder="Oran"
+                              value={(Number(formData.price) > 0 && Number(formData.sale_price) > 0)
+                                ? Math.round((1 - Number(formData.sale_price) / Number(formData.price)) * 100)
+                                : ""}
+                              onChange={(e) => {
+                                const pct = parseFloat(e.target.value);
+                                const base = Number(formData.price) || 0;
+                                if (!pct || pct <= 0 || base <= 0) {
+                                  setFormData({ ...formData, sale_price: null });
+                                  return;
+                                }
+                                const sp = Math.round(base * (1 - pct / 100) * 100) / 100;
+                                setFormData({ ...formData, sale_price: sp });
+                              }}
+                              title="Satış fiyatından % indirim uygular → indirimli fiyatı otomatik yazar"
+                              className="w-16 border-gray-200 border pl-2 pr-5 py-1 rounded-lg text-xs focus:border-black outline-none"
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
+                          </div>
+                          <span className="text-[11px] text-gray-400">satış fiyatından indirim</span>
+                        </div>
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL)</label>
