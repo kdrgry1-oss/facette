@@ -188,9 +188,9 @@ async def _report_to_netgsm_iys(consent: dict):
         })
     if not data:
         return False
-    header = {"username": username, "password": password, "brandCode": brand_code}
-    if cfg.get("appkey"):
-        header["appkey"] = cfg.get("appkey")
+    # NetGSM resmî eklentisiyle BİREBİR: appkey her zaman gönderilir (yoksa boş string).
+    header = {"username": username, "password": password, "brandCode": brand_code,
+              "appkey": cfg.get("appkey") or ""}
     payload = {"header": header, "body": {"data": data}}
     url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
     ok, code, body = False, None, ""
@@ -335,3 +335,39 @@ async def iys_retry_report(payload: dict, current_user: dict = Depends(get_curre
         ok = await _report_to_netgsm_iys(r)
         results.append({"id": r.get("id"), "channels": r.get("channels"), "reported": bool(ok)})
     return {"retried": len(results), "ok": sum(1 for x in results if x["reported"]), "results": results[:50]}
+
+
+@router.post("/netgsm-probe")
+async def iys_netgsm_probe(payload: dict, current_user: dict = Depends(get_current_user)):
+    """TEŞHİS: NetGSM İYS ucunu FARKLI url/appkey ile dener ve NetGSM'in HAM yanıtını (status +
+    gövde) döndürür. 404'ün sebebini (yanlış yol mu, appkey/hesap yetkisi mi) tek deploy sonrası
+    tarayıcıdan bulmak için. payload: {url?, appkey?, recipient?, type?} — recipient verilmezse
+    NetGSM'e GERÇEK add gönderilmez, yalnızca yol/erişim test edilir (recipient boşsa 400 döner)."""
+    _admin_or_403(current_user)
+    cfg = await _iys_config()
+    url = (payload or {}).get("url") or os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    appkey = (payload or {}).get("appkey", cfg.get("appkey") or "")
+    recipient = str((payload or {}).get("recipient") or "").strip()
+    ch = str((payload or {}).get("type") or "MESAJ")
+    username = (cfg.get("username") or "").strip()
+    password = (cfg.get("password") or "").strip()
+    brand_code = (cfg.get("brand_code") or cfg.get("iys_code") or "").strip()
+    header = {"username": username, "password": password, "brandCode": brand_code, "appkey": appkey}
+    data = []
+    if recipient:
+        if ch == "MESAJ" and not recipient.startswith("+"):
+            d = recipient.lstrip("0")
+            recipient = "+" + (d if d.startswith("90") else "90" + d)
+        data = [{"type": ch, "source": "HS_WEB", "recipient": recipient,
+                 "status": "ONAY", "consentDate": _now().isoformat().replace("T", " ")[:19],
+                 "recipientType": "BIREYSEL"}]
+    payload_out = {"header": header, "body": {"data": data}}
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            r = await c.post(url, json=payload_out,
+                             headers={"Content-Type": "application/json; charset=utf-8"})
+        return {"url": url, "sent_appkey": bool(appkey), "http_status": r.status_code,
+                "final_url": str(r.url), "content_type": r.headers.get("content-type", ""),
+                "body": (r.text or "").strip()[:800], "sent_data_count": len(data)}
+    except Exception as e:
+        return {"url": url, "error": str(e)[:300]}
