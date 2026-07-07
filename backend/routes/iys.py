@@ -125,16 +125,23 @@ async def _phone_recently_verified(phone: str) -> bool:
 
 
 async def _iys_config() -> dict:
-    """NetGSM İYS bilgileri — SMS ile AYNI providers.netgsm bloğundan (usercode/password).
-    Marka kodu (brandCode) İYS marka kodudur (ör. 754607); netgsm bloğunda iys_brand_code
-    veya NETGSM_IYS_BRAND_CODE env ile verilir. Ayrı resmî İYS API kimliği GEREKMEZ —
-    NetGSM Facette adına İYS'ye iletir."""
+    """NetGSM İYS kimlik bilgileri — providers.netgsm bloğundan.
+
+    ÖNEMLİ: NetGSM'de İYS için AYRI bir API alt kullanıcısı vardır (İYS modülü yalnızca o
+    kullanıcıda aktiftir). Bu yüzden İYS gönderimi, varsa İYS ALT KULLANICISININ kendi
+    şifre/appkey'ini kullanır (iys_password / iys_appkey); yoksa SMS bloğundaki değerlere
+    düşer. username tüm alt kullanıcılarda ABONE numarasıdır (8503079456) — NetGSM panelindeki
+    'Alt kullanıcı ile giriş: kullanıcı adı = abone no' bilgisiyle birebir. Böylece İYS'ye ayrı
+    kimlik verilir, SMS OTP'nin şifre/appkey'i BOZULMAZ."""
     doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
     prov = (doc.get("providers", {}) or {}).get("netgsm", {}) or {}
     return {
         "username": prov.get("username") or os.environ.get("NETGSM_USERCODE", ""),
-        "password": prov.get("password") or os.environ.get("NETGSM_PASSWORD", ""),
-        "appkey": prov.get("appkey") or os.environ.get("NETGSM_APPKEY", ""),
+        # İYS alt kullanıcısının şifre/appkey'i öncelikli; yoksa SMS'inkine düş.
+        "password": (prov.get("iys_password") or prov.get("password")
+                     or os.environ.get("NETGSM_IYS_PASSWORD") or os.environ.get("NETGSM_PASSWORD", "")),
+        "appkey": (prov.get("iys_appkey") or prov.get("appkey")
+                   or os.environ.get("NETGSM_IYS_APPKEY") or os.environ.get("NETGSM_APPKEY", "")),
         "iys_code": prov.get("iys_code") or os.environ.get("NETGSM_IYS_CODE", ""),
         "brand_code": (prov.get("iys_brand_code") or prov.get("brand_code")
                        or os.environ.get("NETGSM_IYS_BRAND_CODE", "")),
