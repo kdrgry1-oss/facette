@@ -177,20 +177,25 @@ async def _report_to_netgsm_iys(consent: dict):
     status = consent.get("status", "ONAY")
     source = consent.get("source", "HS_WEB")
     cd = (consent.get("consent_date") or _now().isoformat()).replace("T", " ")[:19]
+    _appkey = (cfg.get("appkey") or "").strip()
     data = []
     for ch in channels:
         recipient = phone if ch == "MESAJ" else email
         if not recipient:
             continue
-        data.append({
+        item = {
             "type": ch, "source": source, "recipient": recipient,
             "status": status, "consentDate": cd, "recipientType": "BIREYSEL",
-        })
+        }
+        # NetGSM resmî n8n entegrasyonu: appkey (varsa) DATA öğesinde gönderilir.
+        if _appkey:
+            item["appkey"] = _appkey
+        data.append(item)
     if not data:
         return False
-    # NetGSM resmî eklentisiyle BİREBİR: appkey her zaman gönderilir (yoksa boş string).
-    header = {"username": username, "password": password, "brandCode": brand_code,
-              "appkey": cfg.get("appkey") or ""}
+    # Header: NetGSM resmî n8n koduyla birebir — {username, password, brandCode}.
+    # (appkey header'da DEĞİL; robustluk için varsa data öğesine yukarıda eklendi.)
+    header = {"username": username, "password": password, "brandCode": brand_code}
     payload = {"header": header, "body": {"data": data}}
     url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
     ok, code, body = False, None, ""
@@ -201,9 +206,13 @@ async def _report_to_netgsm_iys(consent: dict):
         code = r.status_code
         body = (r.text or "").strip()[:500]
         lo = body.lower().replace(" ", "")
-        # Başarı: HTTP 200 + resultstatus/code "success"/"00" ve "failure"/"hata" içermez
-        ok = (code == 200 and ("success" in lo or '"code":"00"' in lo or '"code":00' in lo
-                               or '"00"' in lo) and "failure" not in lo)
+        # Başarı: HTTP 200 + NetGSM başarı sinyali (code "00"/"0" veya resultstatus "success"/
+        # "basarili") ve "failure"/"error"/"hata"/'"code":"40"' gibi hata izi içermez.
+        _err = ("failure" in lo or '"error"' in lo or '"code":"40"' in lo
+                or '"code":"30"' in lo or '"code":"70"' in lo)
+        _succ = ("success" in lo or "basarili" in lo or '"code":"00"' in lo
+                 or '"code":"0"' in lo or '"code":00' in lo)
+        ok = (code == 200 and _succ and not _err)
     except Exception as e:
         body = f"exception: {e}"[:500]
     await db.iys_consents.update_one(
@@ -352,15 +361,18 @@ async def iys_netgsm_probe(payload: dict, current_user: dict = Depends(get_curre
     username = (cfg.get("username") or "").strip()
     password = (cfg.get("password") or "").strip()
     brand_code = (cfg.get("brand_code") or cfg.get("iys_code") or "").strip()
-    header = {"username": username, "password": password, "brandCode": brand_code, "appkey": appkey}
+    header = {"username": username, "password": password, "brandCode": brand_code}
     data = []
     if recipient:
         if ch == "MESAJ" and not recipient.startswith("+"):
             d = recipient.lstrip("0")
             recipient = "+" + (d if d.startswith("90") else "90" + d)
-        data = [{"type": ch, "source": "HS_WEB", "recipient": recipient,
-                 "status": "ONAY", "consentDate": _now().isoformat().replace("T", " ")[:19],
-                 "recipientType": "BIREYSEL"}]
+        item = {"type": ch, "source": "HS_WEB", "recipient": recipient,
+                "status": "ONAY", "consentDate": _now().isoformat().replace("T", " ")[:19],
+                "recipientType": "BIREYSEL"}
+        if appkey:
+            item["appkey"] = appkey       # NetGSM resmî n8n: appkey data öğesinde
+        data.append(item)
     payload_out = {"header": header, "body": {"data": data}}
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:

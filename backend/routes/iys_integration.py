@@ -161,65 +161,20 @@ async def iys_query(q: IYSQuery, _=Depends(require_admin)):
 
 @router.post("/register")
 async def iys_register(p: IYSRegister, _=Depends(require_admin)):
-    """İzin ekle/güncelle."""
-    tok = await _get_token()
-    if not tok:
-        raise HTTPException(status_code=400, detail="IYS credentials eksik (Secrets Vault)")
-    try:
-        async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.post(
-                f"{IYS_BASE}/v1/consent/add/json",
-                headers={"Authorization": f"Bearer {tok}"},
-                json={"brandCode": IYS_BRAND, "permissions": [{
-                    "recipient": p.recipient, "recipientType": p.recipient_type,
-                    "type": p.message_type, "status": p.status, "source": p.source,
-                    "consentDate": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                }]},
-            )
-            await _cache_put(p.recipient, p.recipient_type, p.message_type, p.status, p.source)
-            return {"ok": r.status_code == 200, "status": r.status_code, "body": r.text[:300]}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"IYS error: {e}")
+    """İzin ekle — ARACI NETGSM üzerinden. DOĞRUDAN devlet İYS'sine (api.iys.org.tr) GİTMEZ.
 
-
-async def add_consent_official(recipient: str, recipient_type: str, message_type: str,
-                               status: str, source: str, consent_date: str = "") -> dict:
-    """RESMÎ İYS API'sine (api.iys.org.tr) TEK izin ekler — checkout/manuel siparişten çağrılır.
-    iys_register ile aynı çekirdek; kimlik eksikse ok=False + reason döner (hata fırlatmaz).
-    IYS_API_USERNAME/PASSWORD (token için) + IYS_BRAND_CODE gerekir."""
-    tok = await _get_token()
-    if not tok:
-        return {"ok": False, "reason": "credentials_missing",
-                "detail": "IYS_API_USERNAME/PASSWORD/BRAND_CODE eksik (Secrets Vault / env)"}
-    cd = consent_date or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(
-                f"{IYS_BASE}/v1/consent/add/json",
-                headers={"Authorization": f"Bearer {tok}"},
-                json={"brandCode": IYS_BRAND, "permissions": [{
-                    "recipient": recipient, "recipientType": recipient_type,
-                    "type": message_type, "status": status, "source": source,
-                    "consentDate": cd,
-                }]},
-            )
-        try:
-            await _cache_put(recipient, recipient_type, message_type, status, source)
-        except Exception:
-            pass
-        return {"ok": r.status_code == 200, "status": r.status_code, "body": (r.text or "")[:400]}
-    except Exception as e:
-        return {"ok": False, "reason": "exception", "detail": str(e)[:200]}
-
-
-def official_iys_config_present() -> dict:
-    """Resmî İYS API kimlik bilgileri dolu mu (teşhis için)."""
-    return {
-        "iys_api_username": bool(os.environ.get("IYS_API_USERNAME")),
-        "iys_api_password": bool(os.environ.get("IYS_API_PASSWORD")),
-        "brand_code": bool(IYS_BRAND),
-        "base_url": IYS_BASE,
-    }
+    Facette'in İYS aracı hizmet sağlayıcısı NetGSM'dir; admin panelinden elle eklenen izin de
+    checkout ile AYNI NetGSM yolunu (record_consent → api.netgsm.com.tr/iys/add) kullanır.
+    Böylece tek kanal olur, devlet İYS'sine doğrudan çift gönderim yapılmaz."""
+    from .iys import record_consent
+    is_email = p.message_type == "EPOSTA"
+    email = p.recipient if is_email else ""
+    phone = "" if is_email else p.recipient
+    ch = "EPOSTA" if is_email else "MESAJ"
+    res = await record_consent(email, phone, [ch], status=p.status,
+                               source=(p.source or "ADMIN_PANEL"))
+    await _cache_put(p.recipient, p.recipient_type, p.message_type, p.status, p.source)
+    return {"ok": bool(res.get("recorded")), "via": "netgsm", **res}
 
 
 @router.post("/query-batch")
