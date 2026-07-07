@@ -965,20 +965,6 @@ export default function PageDesign() {
                 {formData.images.length > 1 && (
                   <p className="text-xs text-gray-500 mb-2">Kartları sol üstteki tutamaçtan sürükleyerek ya da ‹ › oklarıyla sıralayın — slider bu sırayla döner.</p>
                 )}
-                {formData.type === "hero_slider" && formData.images.some((u) => isVideoUrl(u)) && (
-                  <label className="flex items-start gap-2 mb-3 p-2.5 bg-gray-50 border rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={Boolean(formData.settings?.video_loop)}
-                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, video_loop: e.target.checked } })}
-                    />
-                    <span className="text-xs">
-                      <span className="font-medium">Video sürekli oynasın (döngü)</span>
-                      <span className="block text-gray-500 mt-0.5">İşaretliyse video bitince sonraki slayta geçmez, başa sarar; slider o slaytta kalır (ok ve noktalarla elle geçilebilir). Kapalıyken video bir kez oynar ve sıradaki slayta geçilir.</span>
-                    </span>
-                  </label>
-                )}
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}

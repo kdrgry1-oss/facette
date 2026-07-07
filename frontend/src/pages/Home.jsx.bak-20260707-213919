@@ -35,21 +35,16 @@ function HeroSlider({ block }) {
   const links = block?.links || DEFAULT_HERO_BANNERS.map(b => b.link);
   const videoRefs = useRef({});
   const activeIsVideo = isVideoUrl(images[currentSlide]);
-  // "Video sürekli oynasın" (admin > Blok Düzenle): video slayt döngüde kalır,
-  // otomatik geçiş o slaytta durur; ok/nokta ile elle geçilebilir.
-  const videoLoop = Boolean(block?.settings?.video_loop);
 
   // Otomatik geçiş: görsel slaytlarda 5sn; video slaytta videonun bitmesini bekle
   // (onEnded ilerletir), takılırsa 30sn emniyet süresi devreye girer.
-  // videoLoop açıkken aktif video slaytında zamanlayıcı kurulmaz.
   useEffect(() => {
     if (images.length <= 1) return;
-    if (activeIsVideo && videoLoop) return;
     const t = setTimeout(() => {
       setCurrentSlide((prev) => (prev + 1) % images.length);
     }, activeIsVideo ? 30000 : 5000);
     return () => clearTimeout(t);
-  }, [images.length, currentSlide, activeIsVideo, videoLoop]);
+  }, [images.length, currentSlide, activeIsVideo]);
 
   // Yalnızca aktif video oynasın (pil/CPU); slayt değişince baştan başlat
   useEffect(() => {
@@ -110,7 +105,7 @@ function HeroSlider({ block }) {
                 playsInline
                 preload={index === 0 ? "auto" : "metadata"}
                 autoPlay={index === 0}
-                loop={videoLoop || images.length === 1}
+                loop={images.length === 1}
                 width={dimsFor(index)?.[0]}
                 height={dimsFor(index)?.[1]}
                 onLoadedMetadata={(e) => {
@@ -118,7 +113,7 @@ function HeroSlider({ block }) {
                   if (w && h) setLoadedDims((prev) => (prev[index] ? prev : { ...prev, [index]: [w, h] }));
                 }}
                 onEnded={() => {
-                  if (!videoLoop && images.length > 1 && index === currentSlide) {
+                  if (images.length > 1 && index === currentSlide) {
                     setCurrentSlide((prev) => (prev + 1) % images.length);
                   }
                 }}
