@@ -269,6 +269,30 @@ async def create_manual_order(payload: dict, current_user: dict = Depends(requir
         import logging as _lg
         _lg.getLogger(__name__).error(f"Manuel siparis stok dususu hatasi: {_se}")
 
+    # İYS: manuel (telefon/mağaza) siparişteki iletişim bilgilerini de İYS'ye bildir.
+    # Kaynak HS_FIZIKSEL_ORTAM (yüz yüze/telefon — web değil). İletişim bilgisi olan kanal
+    # bildirilir; admin payload.marketing_consent ile kısıtlayabilir ({email:false}/{sms:false}).
+    try:
+        import asyncio as _aio
+        from routes.iys import record_consent as _rec_consent
+        _sa = doc.get("shipping_address") or {}
+        _mc = payload.get("marketing_consent") or {}
+        _email = (_sa.get("email") or "").strip()
+        _phone = (_sa.get("phone") or "").strip()
+        _channels = []
+        if _email and _mc.get("email", True):
+            _channels.append("EPOSTA")
+        if _phone and _mc.get("sms", True):
+            _channels.append("MESAJ")
+        if _channels:
+            _aio.create_task(_rec_consent(
+                recipient_email=_email, recipient_phone=_phone, channels=_channels,
+                status="ONAY", source="HS_FIZIKSEL_ORTAM", order_id=doc["id"],
+                user_id=doc.get("user_id"),
+            ))
+    except Exception as _iys_err:
+        logger.warning(f"[iys] manuel siparis izin bildirimi hata: {_iys_err}")
+
     doc.pop("_id", None)
     return {"success": True, "order": doc}
 
