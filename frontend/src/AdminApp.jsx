@@ -60,6 +60,7 @@ import AmazonSpApi from "./pages/admin/AmazonSpApi";
 import Compliance from "./pages/admin/Compliance";
 import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
+import ReportsInsights from "./pages/admin/ReportsInsights";
 import XmlFeeds from "./pages/admin/XmlFeeds";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
 import MarketplaceHub from "./pages/admin/MarketplaceHub";
@@ -130,6 +131,7 @@ export default function AdminApp() {
         <Route path="dpp-uyum" element={<Compliance />} />
         <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
         <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
+        <Route path="raporlar/konum-kanal" element={<ReportsInsights />} />
         <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
         <Route path="ayarlar/siparis-durumlari" element={<OrderStatusSettings />} />
         <Route path="pazaryerleri" element={<MarketplaceHub />} />

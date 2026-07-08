@@ -440,3 +440,154 @@ async def manufacturer_performance(current_user: dict = Depends(require_admin)):
         })
     out.sort(key=lambda x: -x["score"])
     return {"items": out}
+
+
+# ============================================================================
+# EK RAPORLAR — İl/İlçe, Kaynak (Instagram/Google/Pazaryeri), Uzun süredir satılmayan
+# ============================================================================
+
+@router.get("/by-location")
+async def sales_by_location(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    group: str = Query("city", regex="^(city|district)$"),
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: dict = Depends(require_admin),
+):
+    """Satışları İL (city) veya İLÇE (district) bazında gruplar. Tarih + kaynak filtresi."""
+    s, e = _iso_range(start_date, end_date)
+    field = "$shipping_address.city" if group == "city" else "$shipping_address.district"
+    gid = {"loc": field}
+    if group == "district":
+        gid["city"] = "$shipping_address.city"
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$group": {
+            "_id": gid,
+            "orders": {"$sum": 1},
+            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
+            "items": {"$sum": {"$size": {"$ifNull": ["$items", []]}}},
+        }},
+        {"$sort": {"revenue": -1}},
+        {"$limit": limit},
+    ]
+    rows = []
+    async for r in db.orders.aggregate(pipeline):
+        loc = (r["_id"].get("loc") or "").strip() or "Bilinmiyor"
+        row = {"location": loc, "orders": r["orders"], "revenue": round(r["revenue"], 2), "items": r["items"]}
+        if group == "district":
+            row["city"] = (r["_id"].get("city") or "").strip()
+        rows.append(row)
+    return {
+        "group": group,
+        "rows": rows,
+        "totals": {
+            "orders": sum(x["orders"] for x in rows),
+            "revenue": round(sum(x["revenue"] for x in rows), 2),
+        },
+    }
+
+
+def _channel_label(idv: dict) -> str:
+    """Bir siparişin satış kanalını tek etikete indirger: pazaryeri > sosyal kaynak > direct."""
+    pf = (idv.get("platform") or "").strip().lower()
+    mk = (idv.get("marketplace") or "").strip().lower()
+    for m in _MARKETPLACES:
+        if pf == m or mk == m:
+            return m
+    src = (idv.get("src") or "").strip().lower()
+    ch = (idv.get("channel") or "").strip().lower()
+    blob = f"{src} {ch}"
+    for k in ("instagram", "google", "facebook", "tiktok", "meta", "youtube", "pinterest", "email", "sms"):
+        if k in blob:
+            return "meta" if k in ("facebook", "meta") else k
+    if src or ch:
+        return src or ch
+    return "direct"
+
+
+@router.get("/by-source")
+async def sales_by_source(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Satışları KANAL bazında gruplar: pazaryerleri (Trendyol/HB/Temu) + site trafiği kaynağı
+    (Instagram/Google/Meta/direct) — attribution.source/channel'dan türetilir."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$group": {
+            "_id": {
+                "platform": {"$ifNull": ["$platform", ""]},
+                "marketplace": {"$ifNull": ["$marketplace", ""]},
+                "src": {"$ifNull": ["$attribution.source", ""]},
+                "channel": {"$ifNull": ["$attribution.channel", ""]},
+            },
+            "orders": {"$sum": 1},
+            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
+        }},
+    ]
+    agg: dict = {}
+    async for r in db.orders.aggregate(pipeline):
+        label = _channel_label(r["_id"])
+        a = agg.setdefault(label, {"orders": 0, "revenue": 0.0})
+        a["orders"] += r["orders"]
+        a["revenue"] += r["revenue"] or 0
+    rows = [{"channel": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)} for k, v in agg.items()]
+    rows.sort(key=lambda x: -x["revenue"])
+    return {
+        "rows": rows,
+        "totals": {
+            "orders": sum(x["orders"] for x in rows),
+            "revenue": round(sum(x["revenue"] for x in rows), 2),
+        },
+    }
+
+
+@router.get("/never-sold")
+async def never_sold(
+    days: int = Query(90, ge=1, le=3650),
+    limit: int = Query(500, ge=1, le=5000),
+    current_user: dict = Depends(require_admin),
+):
+    """Son N günde HİÇ satılmayan aktif ürünler (uzun süredir satış yok). Stok değerine göre sıralı."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    sold = set()
+    pipeline = [
+        {"$match": {"created_at": {"$gte": cutoff}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$group": {"_id": {"$ifNull": ["$items.product_id", "$items.id"]}}},
+    ]
+    async for r in db.orders.aggregate(pipeline):
+        if r.get("_id"):
+            sold.add(str(r["_id"]))
+    rows = []
+    async for p in db.products.find(
+        {"is_active": True, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "created_at": 1, "stock_code": 1, "images": 1},
+    ):
+        if str(p.get("id")) in sold:
+            continue
+        stock = int(p.get("stock") or 0)
+        price = float(p.get("price") or 0)
+        img = ""
+        try:
+            im0 = (p.get("images") or [None])[0]
+            img = im0.get("url") if isinstance(im0, dict) else (im0 or "")
+        except Exception:
+            img = ""
+        rows.append({
+            "product_id": p.get("id"),
+            "name": p.get("name") or "—",
+            "stock_code": p.get("stock_code") or "",
+            "stock": stock,
+            "price": price,
+            "stock_value": round(stock * price, 2),
+            "created_at": p.get("created_at") or "",
+            "image": img,
+        })
+    rows.sort(key=lambda x: -x["stock_value"])
+    total_value = round(sum(x["stock_value"] for x in rows), 2)
+    return {"days": days, "count": len(rows), "total_stock_value": total_value, "items": rows[:limit]}

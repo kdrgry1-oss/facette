@@ -58,6 +58,7 @@ export const navigationGroups = [
       { label: "Stok Raporu", path: "/admin/raporlar/stok", icon: Package },
       { label: "Üye Raporu", path: "/admin/raporlar/uye", icon: Users },
       { label: "Gelişmiş Raporlar", path: "/admin/raporlar/gelismis", icon: TrendingUp },
+      { label: "İl/İlçe & Kanal", path: "/admin/raporlar/konum-kanal", icon: TrendingUp },
       { label: "İade & Trend Analizi", path: "/admin/raporlar/iade-ve-trend", icon: TrendingUp },
       { label: "Pazaryeri Karlılık", path: "/admin/pazaryeri-karlilik", icon: TrendingUp },
     ],
