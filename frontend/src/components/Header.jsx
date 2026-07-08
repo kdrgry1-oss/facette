@@ -171,6 +171,25 @@ export default function Header({ hideMenu = false }) {
     };
   }, [location.pathname]);
 
+  // Duyuru barı (CountdownBar) yüksekliğini ölç → overlay modunda ŞEFFAF header'ı tam onun
+  // ALTINA konumlandır (logo/ikonlar siyah barın ÜZERİNE binmesin). Bar yoksa 0 → header en üstte.
+  const barRef = useRef(null);
+  const [barH, setBarH] = useState(0);
+  useEffect(() => {
+    const measure = () => setBarH(barRef.current ? barRef.current.offsetHeight : 0);
+    measure();
+    // Duyuru barı async yüklenebilir → ilk saniyede birkaç kez yeniden ölç.
+    const raf = requestAnimationFrame(measure);
+    const timers = [setTimeout(measure, 120), setTimeout(measure, 400), setTimeout(measure, 900)];
+    window.addEventListener("resize", measure);
+    let ro = null;
+    try { ro = new ResizeObserver(measure); if (barRef.current) ro.observe(barRef.current); } catch (_) { /* noop */ }
+    return () => {
+      cancelAnimationFrame(raf); timers.forEach(clearTimeout);
+      window.removeEventListener("resize", measure); if (ro) ro.disconnect();
+    };
+  }, [heroOverlay, location.pathname]);
+
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
   // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
   useEffect(() => {
@@ -283,16 +302,18 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Overlay modunda SİYAH duyuru barı + ŞEFFAF header TEK fixed sarmalayıcıda üst üste
-          BİNMEDEN stack'lenir: siyah bar EN ÜSTTE, şeffaf header hemen ALTINDA görselin üzerinde.
-          (Önceden header 'fixed top-0' idi → siyah barın üstüne biniyordu.) */}
-      <div className={heroOverlay ? "fixed inset-x-0 top-0 z-40" : ""}>
-        {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
+      {/* Top Banner — SİYAH duyuru barı. Overlay modunda AKIŞTA kalır (en üstte); header onun
+          ALTINA konumlanır. Yüksekliği barRef ile ölçülür. */}
+      <div ref={barRef} className={heroOverlay ? "fixed inset-x-0 top-0 z-50" : ""}>
         {!isCheckout && <CountdownBar />}
+      </div>
 
-        {/* Main Header — overlay'de sarmalayıcı fixed olduğundan header'a fixed/sticky VERİLMEZ;
-            akış modunda kendisi sticky kalır. */}
-        <header className={`relative z-40 transition-all duration-300 ${heroOverlay ? "bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}>
+      {/* Main Header — overlay'de FIXED ve top = duyuru barı yüksekliği (siyah barın TAM ALTINDA,
+          görselin üzerinde; logo/ikonlar artık siyah bara BİNMEZ). Akışta ise sticky/beyaz. */}
+      <header
+        className={`z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}
+        style={heroOverlay ? { top: barH } : undefined}
+      >
         {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
         {heroOverlay && (
           <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/25 to-transparent" aria-hidden="true" />
@@ -545,8 +566,7 @@ export default function Header({ hideMenu = false }) {
             </div>
           </div>
         )}
-        </header>
-      </div>
+      </header>
 
       {/* Mobile Menu */}
       {!isCheckout && (
