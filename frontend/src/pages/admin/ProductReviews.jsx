@@ -14,11 +14,19 @@ function TrendyolReviewSync() {
   const [result, setResult] = useState(null);
   const [workerUrl, setWorkerUrl] = useState("");
   const [cfgSaved, setCfgSaved] = useState(false);
+  const [byProduct, setByProduct] = useState(null);
+
+  const loadByProduct = () => {
+    axios.get(`${API}/integrations/trendyol/reviews/by-product?limit=500`, { headers: authHeaders() })
+      .then((r) => setByProduct(r.data))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     axios.get(`${API}/integrations/trendyol/reviews/fetch-config`, { headers: authHeaders() })
       .then((r) => setWorkerUrl(r.data?.review_worker_url || ""))
       .catch(() => {});
+    loadByProduct();
   }, []);
 
   const saveWorker = async () => {
@@ -40,6 +48,7 @@ function TrendyolReviewSync() {
       );
       setResult(data);
       toast.success(dryRun ? "Önizleme tamamlandı" : `${data?.total_inserted ?? 0} yorum eklendi`);
+      if (!dryRun) loadByProduct();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Senkron başarısız");
     } finally { setBusy(false); }
@@ -110,6 +119,39 @@ function TrendyolReviewSync() {
           {Array.isArray(result.errors) && result.errors.length > 0 && (
             <div className="col-span-full text-red-600">Hatalar: {result.errors.length} (ilk: {JSON.stringify(result.errors[0])?.slice(0, 120)})</div>
           )}
+        </div>
+      )}
+
+      {/* Haftalık otomatik çekim bilgisi */}
+      <p className="text-[11px] text-gray-400 mt-3">
+        🔁 Bu çekim <b>haftada bir otomatik</b> de çalışır (4-5 yıldız). Yeni yorumlar eklenir, mevcutlar tekrar eklenmez.
+      </p>
+
+      {/* Hangi ürüne kaç yorum çekildi — liste */}
+      {byProduct && byProduct.products?.length > 0 && (
+        <div className="mt-4 border-t pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-bold">Çekilen Yorumlar — Ürün Bazında ({byProduct.product_count} ürün · {byProduct.total_reviews} yorum)</h3>
+            <button onClick={loadByProduct} className="text-xs text-gray-500 hover:text-black">Yenile</button>
+          </div>
+          <div className="max-h-96 overflow-y-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
+                <tr><th className="text-left p-2.5">Ürün</th><th className="text-right p-2.5">Yorum</th><th className="text-right p-2.5">Ort. Puan</th></tr>
+              </thead>
+              <tbody>
+                {byProduct.products.map((p) => (
+                  <tr key={p.product_id} className="border-t">
+                    <td className="p-2.5">
+                      <a href={`/admin/urunler/${p.product_id}`} className="hover:underline">{p.name}</a>
+                    </td>
+                    <td className="p-2.5 text-right font-semibold">{p.count}</td>
+                    <td className="p-2.5 text-right">{p.avg ? `${p.avg} ★` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

@@ -1484,6 +1484,20 @@ def start_scheduler():
         )
     except Exception as _e:
         logging.getLogger("scheduler").warning("[scheduler] instagram job eklenemedi: %s", _e)
+    # Trendyol yorumları — HAFTADA BİR 4-5 yıldız yorumları otomatik çeker (worker/proxy varsa).
+    try:
+        from routes.integrations_trendyol_qna import weekly_trendyol_review_sync
+        _scheduler.add_job(
+            weekly_trendyol_review_sync,
+            "interval",
+            days=7,
+            id="trendyol_reviews_weekly",
+            next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10),
+            max_instances=1,
+            coalesce=True,
+        )
+    except Exception as _e:
+        logging.getLogger("scheduler").warning("[scheduler] trendyol yorum job eklenemedi: %s", _e)
     # Marketplace auto-sync tick — her 1 dk'da çalışır, sonra tek tek
     # account'lara ait interval'lere göre ürün/sipariş senkronu planlar.
     # Bu sayede "3 dk'da bir ürün gönder" gibi ince ayarlar çalışır.

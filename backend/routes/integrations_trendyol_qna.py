@@ -22,6 +22,7 @@ from typing import List, Optional
 import os
 import re
 import socket
+import asyncio
 import httpx
 
 from .deps import db, logger, require_admin, generate_id
@@ -587,12 +588,22 @@ async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pa
     worker = _review_worker()
     if worker:
         fetched: List[dict] = []
-        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             page = 0
             while page < max_pages:
                 sep = "&" if "?" in worker else "?"
-                resp = await client.get(f"{worker}{sep}contentId={content_id}&page={page}")
-                if resp.status_code == 404:
+                u = f"{worker}{sep}contentId={content_id}&page={page}"
+                # Trendyol hız sınırı → 502/429/503 gelirse artan bekleme ile 3 kez dene.
+                resp = None
+                for attempt in range(3):
+                    resp = await client.get(u)
+                    if resp.status_code == 200 or resp.status_code == 404:
+                        break
+                    if resp.status_code in (429, 500, 502, 503, 504):
+                        await asyncio.sleep(0.9 * (attempt + 1))
+                        continue
+                    break
+                if resp is None or resp.status_code == 404:
                     break
                 resp.raise_for_status()
                 body = resp.json()
@@ -835,6 +846,8 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
             continue
         summary["matched_products"] += 1
         for cid in cids:
+            # Trendyol hız sınırını aşmamak için istekler arası kısa bekleme (rate-limit → 502).
+            await asyncio.sleep(0.35)
             try:
                 fetched = await _fetch_reviews_for_content_id(cid, min_rating)
             except Exception as e:
@@ -889,6 +902,55 @@ async def sync_all_trendyol_reviews(
     except Exception:
         pass
     return {"success": True, **summary}
+
+
+@router.get("/trendyol/reviews/by-product")
+async def reviews_by_product(limit: int = 300, current_user: dict = Depends(require_admin)):
+    """Hangi ürüne kaç Trendyol yorumu çekildiğini listeler (en çok yorumlu önce)."""
+    limit = max(1, min(limit, 2000))
+    pipeline = [
+        {"$match": {"source": "trendyol_public", "product_id": {"$ne": None}}},
+        {"$group": {
+            "_id": "$product_id",
+            "count": {"$sum": 1},
+            "avg": {"$avg": "$rating"},
+            "last": {"$max": "$created_at"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+    rows = []
+    async for r in db.product_reviews.aggregate(pipeline):
+        pid = r["_id"]
+        p = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1})
+        rows.append({
+            "product_id": pid,
+            "name": (p or {}).get("name") or "—",
+            "count": r["count"],
+            "avg": round(r.get("avg") or 0, 1),
+            "last": r.get("last") or "",
+        })
+    total = await db.product_reviews.count_documents({"source": "trendyol_public"})
+    return {"total_reviews": total, "product_count": len(rows), "products": rows}
+
+
+async def weekly_trendyol_review_sync():
+    """Scheduler: HAFTADA BİR 4-5 yıldız Trendyol yorumlarını otomatik çeker.
+    Yalnızca worker/proxy ayarlıysa çalışır (aksi halde 530 alır, boşuna uğraşmaz)."""
+    import logging as _logging
+    log = _logging.getLogger("trendyol-reviews")
+    try:
+        s = await db.settings.find_one({"id": "trendyol"}, {"_id": 0}) or {}
+        has_relay = bool(s.get("review_worker_url") or s.get("review_proxy")
+                         or os.environ.get("TRENDYOL_REVIEW_WORKER") or os.environ.get("TRENDYOL_REVIEW_PROXY"))
+        if not has_relay:
+            log.info("[trendyol-reviews] haftalik sync atlandi — worker/proxy ayarli degil")
+            return
+        summary = await sync_all_trendyol_reviews_core(min_rating=4, limit=0, dry_run=False)
+        log.info("[trendyol-reviews] haftalik sync: eslesen=%s eklenen=%s hata=%s",
+                 summary.get("matched_products"), summary.get("total_inserted"), len(summary.get("errors") or []))
+    except Exception as e:
+        log.warning("[trendyol-reviews] haftalik sync hata: %s", e)
 
 
 @router.get("/trendyol/reviews/fetch-config")
