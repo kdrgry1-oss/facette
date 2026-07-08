@@ -16,6 +16,15 @@ import {
   Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Wallet, RefreshCw,
   Save, Search, Box, Activity, Zap, Factory, CalendarClock,
 } from "lucide-react";
+import ReportScopeBadge from "../../components/ReportScopeBadge";
+
+// Her sekmenin iptal/iade kapsama türü (rozet için)
+const _TAB_SCOPE = {
+  stock: "stock", forecast: "stock", costs: "stock",
+  fast: "exclude", slow: "exclude",
+  returns: "returns",
+  profit: "cancelOnly",
+};
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -40,7 +49,7 @@ export default function ReportsExtended() {
   return (
     <div data-testid="reports-extended-page" className="space-y-6">
       <div>
-        <h1 className="text-2xl font-light text-gray-900">Gelişmiş Raporlar</h1>
+        <h1 className="text-2xl font-light text-gray-900 flex items-center gap-2 flex-wrap">Gelişmiş Raporlar <ReportScopeBadge kind={_TAB_SCOPE[tab] || "exclude"} /></h1>
         <p className="text-sm text-gray-500 mt-1">Stok değer, satış hızı, iade oranı uyarısı, kanal bazlı net kâr ve maliyet yönetimi.</p>
       </div>
 

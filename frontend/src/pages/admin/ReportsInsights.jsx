@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { MapPin, Radio, PackageX, TrendingUp, Clock, CreditCard, Ticket, UserPlus } from "lucide-react";
+import ReportScopeBadge from "../../components/ReportScopeBadge";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
@@ -65,8 +66,8 @@ export default function ReportsInsights() {
   return (
     <div className="space-y-5" data-testid="reports-insights">
       <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2"><TrendingUp size={22} /> Gelişmiş Raporlar</h1>
-        <p className="text-sm text-gray-500 mt-1">İl/ilçe, satış kanalı (Instagram/Google/pazaryeri) ve uzun süredir satılmayan ürünler.</p>
+        <h1 className="text-2xl font-semibold flex items-center gap-2"><TrendingUp size={22} /> Gelişmiş Raporlar <ReportScopeBadge kind={tab === "never" ? "stock" : "exclude"} /></h1>
+        <p className="text-sm text-gray-500 mt-1">İl/ilçe, satış kanalı (Instagram/Google/pazaryeri) ve uzun süredir satılmayan ürünler. <span className="text-gray-400">(Tüm satış sekmelerinde iptal &amp; iade hariç.)</span></p>
       </div>
 
       {/* Sekmeler */}

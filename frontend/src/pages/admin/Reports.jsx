@@ -3,6 +3,7 @@ import { useLocation, Link } from "react-router-dom";
 import axios from "axios";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { TrendingUp, Package, Users, Truck, CreditCard, RefreshCw } from "lucide-react";
+import ReportScopeBadge from "../../components/ReportScopeBadge";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -50,7 +51,7 @@ export function SalesReport() {
     <div className="space-y-5" data-testid="sales-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Satış Raporları</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><TrendingUp /> Satış Raporları <ReportScopeBadge kind="exclude" /></h1>
           <p className="text-sm text-gray-500 mt-1">Tarih aralığına göre satış performansı. <span className="text-gray-400">(İptal ve iade siparişleri tutarlara dahil edilmez.)</span></p>
         </div>
         <div className="flex gap-2 items-center">
@@ -153,7 +154,7 @@ export function ProductsReport() {
     <div className="space-y-5" data-testid="products-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="exclude" /></h1>
           <p className="text-sm text-gray-500 mt-1">En çok satan ürünler ve kategoriler.</p>
         </div>
         <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
@@ -203,7 +204,7 @@ export function StockReport() {
 
   return (
     <div className="space-y-5" data-testid="stock-report-page">
-      <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Stok Raporu</h1>
+      <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Stok Raporu <ReportScopeBadge kind="stock" /></h1>
 
       <div className="grid md:grid-cols-3 gap-3">
         <div className="bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-xl p-5">
@@ -266,7 +267,7 @@ export function MembersReport() {
   }, []);
   return (
     <div className="space-y-5" data-testid="members-report-page">
-      <h1 className="text-2xl font-bold flex items-center gap-2"><Users /> Üye Raporu</h1>
+      <h1 className="text-2xl font-bold flex items-center gap-2"><Users /> Üye Raporu <ReportScopeBadge kind="cancelOnly" /></h1>
 
       <div className="bg-white border rounded-xl overflow-hidden">
         <h3 className="font-semibold p-5 pb-3">En Çok Harcayan 20 Üye</h3>

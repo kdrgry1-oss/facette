@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { TrendingUp, RotateCcw, Award, Sparkles } from "lucide-react";
+import ReportScopeBadge from "../../components/ReportScopeBadge";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -55,7 +56,7 @@ export default function ReportsAdvanced() {
 
         {/* İade Bedeni */}
         <section className="bg-white rounded-lg border border-gray-200 p-5">
-          <h2 className="font-semibold mb-3 flex items-center gap-2"><RotateCcw size={16} className="text-orange-600" /> En Çok İade Edilen Bedenler</h2>
+          <h2 className="font-semibold mb-3 flex items-center gap-2 flex-wrap"><RotateCcw size={16} className="text-orange-600" /> En Çok İade Edilen Bedenler <ReportScopeBadge kind="returns" /></h2>
           {bySize.length === 0 ? <p className="text-sm text-gray-500">Kayıt yok.</p> : (
             <table className="w-full text-sm">
               <thead className="text-xs text-gray-500">
@@ -75,7 +76,7 @@ export default function ReportsAdvanced() {
 
         {/* İade Sebepleri */}
         <section className="bg-white rounded-lg border border-gray-200 p-5">
-          <h2 className="font-semibold mb-3 flex items-center gap-2"><RotateCcw size={16} className="text-red-600" /> İade Sebepleri</h2>
+          <h2 className="font-semibold mb-3 flex items-center gap-2 flex-wrap"><RotateCcw size={16} className="text-red-600" /> İade Sebepleri <ReportScopeBadge kind="returns" /></h2>
           {reasons.length === 0 ? <p className="text-sm text-gray-500">Kayıt yok.</p> : (
             <table className="w-full text-sm">
               <tbody>
@@ -92,7 +93,7 @@ export default function ReportsAdvanced() {
 
         {/* Ürün bazlı iade */}
         <section className="bg-white rounded-lg border border-gray-200 p-5 lg:col-span-2">
-          <h2 className="font-semibold mb-3 flex items-center gap-2"><RotateCcw size={16} className="text-orange-600" /> En Çok İade Edilen Ürünler</h2>
+          <h2 className="font-semibold mb-3 flex items-center gap-2 flex-wrap"><RotateCcw size={16} className="text-orange-600" /> En Çok İade Edilen Ürünler <ReportScopeBadge kind="returns" /></h2>
           {byProduct.length === 0 ? <p className="text-sm text-gray-500">Kayıt yok.</p> : (
             <table className="w-full text-sm">
               <thead className="text-xs text-gray-500 border-b">
@@ -126,7 +127,7 @@ export default function ReportsAdvanced() {
         {/* Hızlı satış */}
         <section className="bg-white rounded-lg border border-gray-200 p-5 lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold flex items-center gap-2"><TrendingUp size={16} className="text-green-600" /> Hızlı Satış Dedektörü</h2>
+            <h2 className="font-semibold flex items-center gap-2 flex-wrap"><TrendingUp size={16} className="text-green-600" /> Hızlı Satış Dedektörü <ReportScopeBadge kind="cancelOnly" /></h2>
             <div className="flex items-center gap-2 text-xs">
               <label>Pencere (gün):</label>
               <input type="number" value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value) || 14)}
