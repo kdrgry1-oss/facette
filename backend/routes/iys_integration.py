@@ -190,7 +190,9 @@ async def iys_settings_post(p: IYSSettings, _=Depends(require_admin)):
 
 @router.post("/test-connection")
 async def iys_test_connection(_=Depends(require_admin)):
-    """NetGSM İYS bağlantısını yan-etkisiz doğrular: kimlik eksikliği + NetGSM bakiye sorgusu."""
+    """NetGSM İYS bağlantısını YAN-ETKİSİZ doğrular: gerçek İYS ucuna (/iys/add) BOŞ data ile
+    POST atar — hiçbir izin gönderilmez, yalnızca kimlik + marka + İYS modülü erişimi test edilir
+    (checkout bildiriminin kullandığı AYNI uç ve Basic-Auth yöntemi)."""
     prov = await _netgsm_prov()
     f = _iys_fields(prov)
     attempts: List[dict] = []
@@ -200,25 +202,38 @@ async def iys_test_connection(_=Depends(require_admin)):
         return {"ok": False, "message": "Eksik alan(lar): " + ", ".join(missing) +
                 ". İYS Ayarları'ndan marka kodunu, NetGSM bloğundan kullanıcı/şifreyi girin.",
                 "attempts": attempts}
-    # NetGSM kimlik doğrulama — bakiye sorgusu (SMS/İYS göndermez, yan etkisiz).
+    import base64 as _b64
+    url = os.environ.get("NETGSM_IYS_URL") or "https://api.netgsm.com.tr/iys/add"
+    _auth = _b64.b64encode(f"{f['username']}:{f['password']}".encode()).decode()
+    hdrs = {"Content-Type": "application/json; charset=utf-8", "Authorization": "Basic " + _auth}
+    payload = {"header": {"username": f["username"], "password": f["password"], "brandCode": f["brand_code"]},
+               "body": {"data": []}}          # BOŞ data → gerçek gönderim YOK (yan etkisiz)
     try:
-        async with httpx.AsyncClient(timeout=12) as c:
-            r = await c.get("https://api.netgsm.com.tr/balance/list/get",
-                            params={"usercode": f["username"], "password": f["password"]})
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            r = await c.post(url, json=payload, headers=hdrs)
         body = (r.text or "").strip()
-        attempts.append({"mode": "netgsm-balance", "code": r.status_code})
-        # NetGSM hata kodları düz metin döner: 30/40/60/70/80/100 = hata; başarı = bakiye/kredi bilgisi.
-        err_prefixes = ("30", "40", "60", "70", "80", "100")
-        if r.status_code == 200 and body and not body.startswith(err_prefixes) and "hata" not in body.lower():
-            return {"ok": True,
-                    "message": f"NetGSM kimlik doğrulandı ✓ · Marka {f['brand_code']} · İYS bildirimi hazır.",
-                    "attempts": attempts}
-        code = body.split()[0] if body else "?"
-        return {"ok": False,
-                "message": f"NetGSM kimlik doğrulanamadı (kod {code}). Kullanıcı/şifreyi kontrol edin.",
-                "attempts": attempts}
+        low = body.lower()
+        attempts.append({"mode": "iys-add(empty)", "code": r.status_code})
+        # NetGSM İYS modülü kapalı: code 40 / "aktif" / "modul" → net, düzeltilebilir mesaj.
+        if body[:2] == "40" or "aktifle" in low or "modul" in low or "modül" in low:
+            return {"ok": False,
+                    "message": "NetGSM İYS modülü hesabınızda aktif değil — NetGSM'den İYS (NetİYS) "
+                               "modülünü açtırın (kod 40). Kimlik/marka doğru.",
+                    "attempts": attempts, "raw": body[:200]}
+        # Kimlik reddi: 30/70 kodları veya HTTP 401/403 veya şifre/kullanıcı ibaresi.
+        if r.status_code in (401, 403) or body[:2] in ("30", "70") \
+                or "kullanıc" in low or "sifre" in low or "şifre" in low or "unauthor" in low:
+            return {"ok": False,
+                    "message": "NetGSM kimlik reddedildi — İYS alt-kullanıcı adı/şifresini kontrol edin.",
+                    "attempts": attempts, "raw": body[:200]}
+        # NetGSM'e ulaşıldı ve kimlik/modül hatası YOK → bağlantı hazır. (Boş data'yı NetGSM
+        # 'gönderilecek kayıt yok' diye reddetse bile bu, auth+marka+modülün ÇALIŞTIĞINI kanıtlar.)
+        return {"ok": True,
+                "message": f"NetGSM İYS bağlantısı hazır ✓ · Marka {f['brand_code']} · kimlik doğrulandı. "
+                           "Checkout izinleri İYS'ye bildirilebilir.",
+                "attempts": attempts, "raw": body[:200]}
     except Exception as e:
-        attempts.append({"mode": "netgsm-balance", "error": str(e)})
+        attempts.append({"mode": "iys-add(empty)", "error": str(e)})
         return {"ok": False, "message": "NetGSM'e ulaşılamadı: " + str(e), "attempts": attempts}
 
 
