@@ -5605,6 +5605,140 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     return {"success": True, "gider_pusulasi": gider_pusulasi}
 
 
+@router.get("/returns/gider-pusulasi/export")
+async def export_gider_pusulasi_excel(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    source: Optional[str] = None,   # site | trendyol | hepsiburada | all(None)
+    current_user: dict = Depends(require_permission("returns.expense_note")),
+):
+    """Gider pusulalarını MUHASEBE formatında Excel'e aktarır (görseldeki kolon düzeni):
+    Fatura Tarihi | Seri Numarası | Adı-Soyadı | Kdv Oranı | Tutar (VD) | Vergi Hariç Tutar (Y) | Kdv (Y)
+
+    MANTIK: Her pusula, kalemlerinin KDV ORANINA göre gruplanır → her (pusula × oran) AYRI SATIR
+    olur (kargo/vade farkı %20, ürünler %10 veya ürünün gerçek KDV'si). Tutarlar GİDER olduğundan
+    NEGATİF yazılır. Tutar (VD)=KDV dahil, Vergi Hariç=net matrah, Kdv=KDV tutarı.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+
+    query = {}
+    if source and source.lower() != "all":
+        query["source"] = source.lower()
+    if date_from or date_to:
+        dr = {}
+        if date_from:
+            dr["$gte"] = date_from
+        if date_to:
+            dr["$lte"] = date_to + "T23:59:59"
+        query["date"] = dr
+
+    records = await db.gider_pusulasi.find(query, {"_id": 0}).sort("number", 1).to_list(None)
+
+    # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
+    pids = set()
+    for gp in records:
+        for it in (gp.get("items") or []):
+            b = str(it.get("barcode") or "").strip()
+            if b:
+                pids.add(b)
+    vat_by_pid = {}
+    if pids:
+        async for p in db.products.find({"id": {"$in": list(pids)}}, {"_id": 0, "id": 1, "vat_rate": 1}):
+            if p.get("vat_rate") not in (None, ""):
+                try:
+                    vat_by_pid[p["id"]] = float(p["vat_rate"])
+                except Exception:
+                    pass
+
+    def _ddmmyyyy(iso: str) -> str:
+        s = str(iso or "")[:10]
+        if len(s) == 10 and s[4] == "-":
+            return f"{s[8:10]}.{s[5:7]}.{s[0:4]}"
+        return s
+
+    def _item_rate(it: dict, default_rate: float) -> float:
+        """Kalem KDV oranı: kargo/vade %20; ürün → ürünün vat_rate'i, yoksa pusula oranı."""
+        reason = (it.get("reason") or "").lower()
+        name = (it.get("name") or "").lower()
+        if "kargo" in reason or "kargo" in name or "vade" in reason or "vade" in name:
+            return 20.0
+        b = str(it.get("barcode") or "").strip()
+        if b and b in vat_by_pid:
+            return vat_by_pid[b]
+        return float(default_rate or 10)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Gider Pusulası"
+    headers = ["Fatura Tarihi", "Seri Numarası", "Adı-Soyadı", "Kdv Oranı",
+               "Tutar (VD)", "Vergi Hariç Tutar (Y)", "Kdv (Y)"]
+    ws.append(headers)
+    hfont = Font(bold=True, color="FFFFFF")
+    hfill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+    for c in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=c)
+        cell.font = hfont
+        cell.fill = hfill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for gp in records:
+        totals = gp.get("totals", {}) or {}
+        default_rate = totals.get("vat_rate") or 10
+        fatura_tarihi = _ddmmyyyy(gp.get("date") or gp.get("created_at") or "")
+        seri = gp.get("display_number") or (f"{gp.get('number', 0):06d}")
+        name = (gp.get("customer") or {}).get("name") or ""
+
+        items = gp.get("items") or []
+        # KDV oranına göre KDV-DAHİL tutarları grupla (kalem net_price = gerçek ödenen, KDV dahil).
+        by_rate = {}
+        for it in items:
+            rate = _item_rate(it, default_rate)
+            qty = int(it.get("quantity", 1) or 1)
+            gross_vatincl = _round2(_round2(it.get("net_price", 0)) * qty)
+            by_rate[rate] = _round2(by_rate.get(rate, 0.0) + gross_vatincl)
+
+        # Kalem yoksa (eski kayıt): tek satır, pusula toplamından.
+        if not by_rate:
+            net = _round2(totals.get("net") or 0)
+            if net > 0.009:
+                by_rate[float(default_rate)] = net
+
+        # Her oran grubu → bir satır (yüksek orandan düşüğe, kargo/vade üstte görünür).
+        for rate in sorted(by_rate.keys(), reverse=True):
+            gross = by_rate[rate]
+            if gross <= 0.009:
+                continue
+            vat = _round2(gross * rate / (100 + rate))
+            net_wo = _round2(gross - vat)
+            ws.append([
+                fatura_tarihi, seri, name, int(rate),
+                -gross, -net_wo, -vat,
+            ])
+
+    # Sütun genişlikleri + tutar formatları
+    widths = [14, 14, 22, 10, 14, 20, 14]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    for r in range(2, ws.max_row + 1):
+        for c in (5, 6, 7):
+            ws.cell(row=r, column=c).number_format = "#,##0.00"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    _fn = "gider-pusulasi"
+    if date_from or date_to:
+        _fn += f"-{(date_from or '')}_{(date_to or '')}"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{_fn}.xlsx"'},
+    )
+
+
 @router.post("/returns/vouchers/recompute")
 async def recompute_site_vouchers(payload: Optional[dict] = Body(default=None),
                                   current_user: dict = Depends(require_permission("returns.expense_note"))):

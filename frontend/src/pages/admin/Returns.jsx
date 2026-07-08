@@ -248,6 +248,34 @@ export default function Returns() {
     }
   };
 
+  // Gider Pusulası — MUHASEBE Excel'i (görseldeki kolon düzeni: Fatura Tarihi, Seri No,
+  // Adı-Soyadı, Kdv Oranı, Tutar (VD), Vergi Hariç Tutar (Y), Kdv (Y)). KDV oranına göre
+  // gruplanmış, negatif tutarlarla. Site + Trendyol ORTAK seri → tümü tek dosyada.
+  const [gpExporting, setGpExporting] = useState(false);
+  const exportGiderPusulasi = async () => {
+    setGpExporting(true);
+    try {
+      const res = await fetch(`${API}/orders/returns/gider-pusulasi/export`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+      if (!res.ok) throw new Error("export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "gider-pusulasi.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Gider pusulası Excel'i indirildi");
+    } catch (e) {
+      toast.error("Gider pusulası aktarımı başarısız");
+    } finally {
+      setGpExporting(false);
+    }
+  };
+
   const handleApprove = async (claim, explicitIds) => {
     const claimItemIds = (explicitIds && explicitIds.length)
       ? explicitIds
@@ -440,6 +468,14 @@ export default function Returns() {
                 {exporting ? "Hazırlanıyor..." : "Excel"}
               </button>
             )}
+            {/* Gider Pusulası MUHASEBE Excel'i — site + Trendyol tüm pusulalar, KDV oranına göre */}
+            <button onClick={exportGiderPusulasi} disabled={gpExporting}
+              data-testid="export-gider-pusulasi-btn"
+              title="Tüm gider pusulalarını muhasebe formatında (KDV oranına göre) Excel indir"
+              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
+              <Download size={16} />
+              {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
+            </button>
             {/* Manuel "Güncelle" kaldırıldı — iadeler 5 dk'da bir otomatik güncelleniyor. */}
           </div>
         </div>
