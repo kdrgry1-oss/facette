@@ -119,11 +119,35 @@ async def submit_review(payload: dict, current_user: dict = Depends(require_auth
 
 @reviews_public_router.get("/product/{pid}")
 async def list_approved_reviews(pid: str, limit: int = Query(50, ge=1, le=200)):
-    rows = await db.reviews.find({"product_id": pid, "status": "approved"}, {"_id": 0, "user_id": 0}).sort("created_at", -1).to_list(limit)
-    # Avg rating
-    total = len(rows)
-    avg = round(sum(r["rating"] for r in rows) / total, 2) if total else 0
-    return {"items": rows, "total": total, "average_rating": avg}
+    # 1) Müşteri yorumları (db.reviews, onaylı)
+    rows = await db.reviews.find(
+        {"product_id": pid, "status": "approved"}, {"_id": 0, "user_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+
+    # 2) Trendyol'dan çekilen yorumlar (db.product_reviews, approved:True) — aynı listede göster.
+    #    Şema normalize edilir: comment/rating/user_name/created_at + source=trendyol rozeti.
+    ty = await db.product_reviews.find(
+        {"product_id": pid, "approved": True},
+        {"_id": 0, "id": 1, "rating": 1, "title": 1, "comment": 1, "user_name": 1,
+         "is_verified": 1, "comment_date": 1, "created_at": 1, "source": 1},
+    ).sort("comment_date", -1).to_list(limit)
+    for r in ty:
+        r.setdefault("user_name", "Trendyol Müşterisi")
+        r["source"] = "trendyol"
+        r["verified"] = bool(r.get("is_verified"))
+        # created_at yoksa comment_date'i kullan (sıralama için)
+        if not r.get("created_at"):
+            r["created_at"] = r.get("comment_date") or ""
+
+    merged = rows + ty
+    # En yeni önce; tarih string ISO olduğundan lexicographic sıralama doğru çalışır
+    merged.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    merged = merged[:limit]
+
+    total_all = len(rows) + len(ty)
+    all_ratings = [r["rating"] for r in rows] + [r.get("rating", 0) for r in ty]
+    avg = round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0
+    return {"items": merged, "total": total_all, "average_rating": avg}
 
 
 @reviews_admin_router.get("")

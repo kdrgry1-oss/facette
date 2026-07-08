@@ -1,10 +1,80 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { MessageSquare, CheckCircle2, XCircle, Clock, Star, Trash2 } from "lucide-react";
+import { MessageSquare, CheckCircle2, XCircle, Clock, Star, Trash2, Download, Store } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
+
+// Trendyol Facette mağazasından 4-5★ yorumları toplu çekme paneli. Ürünleri barkodla
+// Trendyol listelemesine eşleştirir, public storefront'tan yorumları çeker, product_reviews'a yazar.
+function TrendyolReviewSync() {
+  const [minRating, setMinRating] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const run = async (dryRun) => {
+    setBusy(true); setResult(null);
+    try {
+      const { data } = await axios.post(
+        `${API}/integrations/trendyol/reviews/sync-all`,
+        { min_rating: Number(minRating), limit: 0, dry_run: dryRun },
+        { headers: authHeaders(), timeout: 600000 },
+      );
+      setResult(data);
+      toast.success(dryRun ? "Önizleme tamamlandı" : `${data?.total_inserted ?? 0} yorum eklendi`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Senkron başarısız");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white border rounded-xl p-4" data-testid="trendyol-review-sync">
+      <div className="flex items-center gap-2 mb-1">
+        <Store size={18} className="text-orange-500" />
+        <h2 className="text-sm font-bold uppercase tracking-wider">Trendyol Yorumları (Facette Mağazası)</h2>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Site ürünlerini barkodla Trendyol listelemene eşleştirir ve <b>{minRating}★ ve üzeri</b> yorumları çeker.
+        Yorumlar ürün sayfasında müşteri yorumlarıyla birlikte görünür. Uzun sürebilir.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm flex items-center gap-2">
+          Alt yıldız:
+          <select value={minRating} onChange={(e) => setMinRating(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm">
+            <option value={4}>4 ve 5 yıldız</option>
+            <option value={5}>Sadece 5 yıldız</option>
+            <option value={3}>3, 4 ve 5 yıldız</option>
+          </select>
+        </label>
+        <button onClick={() => run(true)} disabled={busy}
+          className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
+          Önizle (yazmadan say)
+        </button>
+        <button onClick={() => run(false)} disabled={busy}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50">
+          <Download size={14} className={busy ? "animate-pulse" : ""} /> {busy ? "Çekiliyor…" : "Yorumları Çek"}
+        </button>
+      </div>
+      {result && (
+        <div className="mt-3 text-xs bg-gray-50 border rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div><span className="text-gray-500">Trendyol ürün:</span> <b>{result.trendyol_products_indexed ?? "—"}</b></div>
+          <div><span className="text-gray-500">Eşleşen ürün:</span> <b>{result.matched_products ?? "—"}</b></div>
+          <div><span className="text-gray-500">Eşleşmeyen:</span> <b>{result.unmatched_products ?? "—"}</b></div>
+          <div><span className="text-gray-500">Çekilen yorum:</span> <b>{result.total_fetched ?? "—"}</b></div>
+          <div><span className="text-gray-500">Eklenen:</span> <b className="text-emerald-600">{result.total_inserted ?? "—"}</b></div>
+          <div><span className="text-gray-500">Zaten var:</span> <b>{result.skipped_existing ?? "—"}</b></div>
+          <div><span className="text-gray-500">Düşük puan:</span> <b>{result.skipped_low_rating ?? "—"}</b></div>
+          <div><span className="text-gray-500">Mod:</span> <b>{result.dry_run ? "önizleme" : "gerçek"}</b></div>
+          {Array.isArray(result.errors) && result.errors.length > 0 && (
+            <div className="col-span-full text-red-600">Hatalar: {result.errors.length} (ilk: {JSON.stringify(result.errors[0])?.slice(0, 120)})</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProductReviews() {
   const [items, setItems] = useState([]);
@@ -38,8 +108,10 @@ export default function ProductReviews() {
     <div className="space-y-5" data-testid="reviews-page">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><MessageSquare /> Ürün Yorumları</h1>
-        <p className="text-sm text-gray-500 mt-1">Müşteri yorumlarını moderasyondan geçirin.</p>
+        <p className="text-sm text-gray-500 mt-1">Müşteri yorumlarını moderasyondan geçirin, Trendyol yorumlarını çekin.</p>
       </div>
+
+      <TrendyolReviewSync />
 
       <div className="flex gap-2">
         {[

@@ -1087,6 +1087,11 @@ export default function ProductDetail() {
                       ))}
                     </div>
                     <span className="text-xs font-medium">{r.user_name || "Müşteri"}</span>
+                    {(r.source === "trendyol" || r.verified) && (
+                      <span className="text-[9px] tracking-wide uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5">
+                        Doğrulanmış Alışveriş
+                      </span>
+                    )}
                     <span className="text-[11px] text-gray-400">
                       {r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" }) : ""}
                     </span>
