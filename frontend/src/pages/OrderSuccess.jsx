@@ -5,9 +5,16 @@ import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import BankTransferInfo from "../components/BankTransferInfo";
 import { useAuth } from "../context/AuthContext";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Havale/EFT ödeme yöntemi mi? (sunucu farklı anahtarlar kullanabiliyor)
+const _isBankTransfer = (pm) =>
+  ["bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "havale/eft"].includes(
+    String(pm || "").toLowerCase()
+  );
 
 export default function OrderSuccess() {
   const { orderNumber } = useParams();
@@ -95,6 +102,11 @@ export default function OrderSuccess() {
             )}
           </div>
         </div>
+
+        {/* Havale/EFT: kopyalanabilir banka bilgileri (yalnızca havale siparişlerinde) */}
+        {_isBankTransfer(order?.payment_method) && (
+          <BankTransferInfo orderNumber={orderNumber} amount={order?.total} />
+        )}
 
         {/* Step indicator */}
         <div className="mb-16">

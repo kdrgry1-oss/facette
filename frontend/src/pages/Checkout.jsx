@@ -584,13 +584,16 @@ export default function Checkout() {
         _authToken ? { headers: { Authorization: `Bearer ${_authToken}` } } : undefined);
       const newOrderId = orderRes.data.order_id;
       setOrderId(newOrderId);
+      // Başarı sayfası sipariş NUMARASI ile açılır (by-number). Numara yoksa akışı kırma:
+      // order_id'ye düşme (OrderSuccess her ikisini de dener) — 'undefined' rotası oluşmasın.
+      const _successNum = orderRes.data.order_number || orderRes.data.order_id;
 
       // İdempotency: aynı sepet zaten ÖDENMİŞ bir siparişe bağlıysa tekrar ödeme başlatma
       // (çift çekim önlemi) — doğrudan başarı sayfasına götür.
       if (orderRes.data.idempotent && orderRes.data.payment_status === "paid") {
         setPaymentStep("success");
         clearCart();
-        navigate(`/order-success/${orderRes.data.order_number}`, { replace: true });
+        navigate(`/order-success/${_successNum}`, { replace: true });
         return;
       }
 
@@ -662,8 +665,9 @@ export default function Checkout() {
         setPaymentStep("success");
         clearCart();
         toast.success("Siparişiniz alındı!");
-        // Guest veya logged-in: doğrudan OrderSuccess sayfasına yönlendir.
-        navigate(`/order-success/${orderRes.data.order_number}`, { replace: true });
+        // Guest veya logged-in: doğrudan OrderSuccess sayfasına yönlendir (havale/EFT dahil —
+        // OrderSuccess havale ise banka bilgilerini kopyalanabilir gösterir).
+        navigate(`/order-success/${_successNum}`, { replace: true });
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || "Sipariş oluşturulamadı");
