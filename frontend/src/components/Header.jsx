@@ -144,18 +144,31 @@ export default function Header({ hideMenu = false }) {
   // document.documentElement'e data-hero-overlay="1" bırakır; burada scroll'a göre hesaplanır.
   const [heroOverlay, setHeroOverlay] = useState(false);
   useEffect(() => {
+    // Header, hero bloğundan ÖNCE mount olur; bu yüzden attribute'a GÜVENMEK yerine hero
+    // elementini DOĞRUDAN ölçeriz (yarış/zamanlama sorunlarına kapalı). Hero ekranın üst
+    // yarısını kaplıyorsa header şeffaf + logo/ikon beyaz; kaydırıp çıkınca opak/siyah.
     const compute = () => {
-      // HeroEditorial, hero tüm ekranı kapladığı SÜRECE data-hero-overlay="1" tutar;
-      // son slayt bitip normal içerik gelince "0" yapar. Sabit scroll eşiği YOK.
-      const present = typeof document !== "undefined" && document.documentElement.getAttribute("data-hero-overlay") === "1";
-      setHeroOverlay(location.pathname === "/" && !!present);
+      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); return; }
+      const hero = document.querySelector('[data-testid="hero-editorial"]');
+      if (!hero) { setHeroOverlay(false); return; }
+      const r = hero.getBoundingClientRect();
+      const vh = window.innerHeight || 1;
+      setHeroOverlay(r.top < vh * 0.5 && r.bottom > vh * 0.4);
     };
     compute();
+    // Hero, header'dan SONRA mount olduğundan ilk saniyede birkaç kez yeniden ölç.
+    const raf = requestAnimationFrame(compute);
+    const timers = [setTimeout(compute, 60), setTimeout(compute, 250), setTimeout(compute, 600)];
     window.addEventListener("scroll", compute, { passive: true });
     window.addEventListener("resize", compute);
     let mo = null;
+    // HeroEditorial slayt değiştikçe/çıkınca data-hero-overlay'i günceller → yeniden ölçme tetiği.
     try { mo = new MutationObserver(compute); mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-hero-overlay"] }); } catch (_) { /* noop */ }
-    return () => { window.removeEventListener("scroll", compute); window.removeEventListener("resize", compute); if (mo) mo.disconnect(); };
+    return () => {
+      cancelAnimationFrame(raf); timers.forEach(clearTimeout);
+      window.removeEventListener("scroll", compute); window.removeEventListener("resize", compute);
+      if (mo) mo.disconnect();
+    };
   }, [location.pathname]);
 
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
@@ -275,7 +288,11 @@ export default function Header({ hideMenu = false }) {
 
       {/* Main Header */}
       <header className={`top-0 z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 bg-transparent text-white" : "sticky bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}>
-        <div className="max-w-screen-2xl mx-auto px-3 md:px-6">
+        {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
+        {heroOverlay && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/25 to-transparent" aria-hidden="true" />
+        )}
+        <div className="relative max-w-screen-2xl mx-auto px-3 md:px-6">
           <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center gap-2.5">
