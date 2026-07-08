@@ -283,11 +283,16 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
-      {!isCheckout && <CountdownBar />}
+      {/* Overlay modunda SİYAH duyuru barı + ŞEFFAF header TEK fixed sarmalayıcıda üst üste
+          BİNMEDEN stack'lenir: siyah bar EN ÜSTTE, şeffaf header hemen ALTINDA görselin üzerinde.
+          (Önceden header 'fixed top-0' idi → siyah barın üstüne biniyordu.) */}
+      <div className={heroOverlay ? "fixed inset-x-0 top-0 z-40" : ""}>
+        {/* Top Banner — admin tarafından yönetilen geri sayım barı (countdown_bar block) */}
+        {!isCheckout && <CountdownBar />}
 
-      {/* Main Header */}
-      <header className={`top-0 z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 bg-transparent text-white" : "sticky bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}>
+        {/* Main Header — overlay'de sarmalayıcı fixed olduğundan header'a fixed/sticky VERİLMEZ;
+            akış modunda kendisi sticky kalır. */}
+        <header className={`relative z-40 transition-all duration-300 ${heroOverlay ? "bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}>
         {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
         {heroOverlay && (
           <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/25 to-transparent" aria-hidden="true" />
@@ -540,7 +545,8 @@ export default function Header({ hideMenu = false }) {
             </div>
           </div>
         )}
-      </header>
+        </header>
+      </div>
 
       {/* Mobile Menu */}
       {!isCheckout && (
