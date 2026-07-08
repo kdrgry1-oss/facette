@@ -566,19 +566,48 @@ async def _one_review_page(client, target: str, content_id: str, page: int):
     return await client.send(req)
 
 
+def _review_worker() -> str:
+    """Opsiyonel Cloudflare Worker vekili. Worker, Trendyol yorum JSON'unu aynen döndürür
+    (GET {worker}?contentId=X&page=Y). Trendyol'un datacenter-IP 530 engelini ÜCRETSİZ aşar.
+    Ayar: db.settings(id=trendyol).review_worker_url VEYA env TRENDYOL_REVIEW_WORKER."""
+    return os.environ.get("TRENDYOL_REVIEW_WORKER") or _pin_state.get("worker") or ""
+
+
 def _review_proxy() -> str:
-    """Yorum çekimi için opsiyonel proxy. Trendyol Cloudflare'i datacenter/Railway IP'lerini 530
-    ile engellerse, buraya girilen proxy (residential/datacenter) üzerinden çekilir.
-    Sıra: env TRENDYOL_REVIEW_PROXY → db.settings(id=trendyol).review_proxy (sync okunamaz;
-    scrape_all onu _pin_state'e koyar)."""
+    """Yorum çekimi için opsiyonel proxy (residential/datacenter). 530 engelini aşar.
+    Ayar: env TRENDYOL_REVIEW_PROXY → db.settings(id=trendyol).review_proxy."""
     return os.environ.get("TRENDYOL_REVIEW_PROXY") or _pin_state.get("proxy") or ""
 
 
 async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
     """Trendyol public storefront'tan bir contentId'nin yorumlarını çeker (sayfalı).
-    PROXY varsa: proxy üzerinden normal hostname ile çekilir (datacenter-IP 530 engelini aşar).
-    Proxy yoksa: Railway DNS çözemezse DoH IP'lerine bağlanır; her hedef 530/403 dönerse
-    bir sonraki denenir; çalışan hedef cache'lenir."""
+    ÖNCELİK: (1) Cloudflare Worker vekili → (2) Proxy → (3) doğrudan DoH IP hedefleri.
+    (1) ve (2) Trendyol'un Railway/datacenter-IP 530 engelini aşar."""
+    # (1) Cloudflare Worker vekili — worker Trendyol JSON'unu aynen döndürür.
+    worker = _review_worker()
+    if worker:
+        fetched: List[dict] = []
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            page = 0
+            while page < max_pages:
+                sep = "&" if "?" in worker else "?"
+                resp = await client.get(f"{worker}{sep}contentId={content_id}&page={page}")
+                if resp.status_code == 404:
+                    break
+                resp.raise_for_status()
+                body = resp.json()
+                rv = (body.get("result") or {}).get("productReviews", {}).get("content", [])
+                if not rv:
+                    break
+                fetched.extend(rv)
+                total_pages = (body.get("result") or {}).get("productReviews", {}).get("totalPages", 1) or 1
+                page += 1
+                if page >= total_pages:
+                    break
+        _pin_state["good"] = "worker"
+        return fetched
+
+    # (2) Proxy
     proxy = _review_proxy()
     if proxy:
         # Proxy DNS'i kendi çözer; IP pin/SNI gerekmez, düz hostname yeterli.
@@ -724,6 +753,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
     # Opsiyonel yorum-proxy'si: Trendyol Cloudflare Railway IP'sini 530 ile engellerse, buradaki
     # proxy üzerinden çekilir. Ayar: db.settings(id=trendyol).review_proxy VEYA env TRENDYOL_REVIEW_PROXY.
     _pin_state["proxy"] = settings.get("review_proxy") or os.environ.get("TRENDYOL_REVIEW_PROXY") or ""
+    _pin_state["worker"] = settings.get("review_worker_url") or os.environ.get("TRENDYOL_REVIEW_WORKER") or ""
 
     # 1) barcode -> contentId haritası (Trendyol ürünleri; approved filtresi yok = en geniş)
     client = TrendyolClient(supplier_id=str(supplier_id), api_key=api_key, api_secret=api_secret, mode=mode)
@@ -826,6 +856,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
     debug["public_candidates"] = _pin_state.get("candidates")
     debug["public_good_target"] = None if _pin_state.get("good") in (_UNSET, None) else _pin_state.get("good")
     debug["review_proxy_set"] = bool(_pin_state.get("proxy"))
+    debug["review_worker_set"] = bool(_pin_state.get("worker"))
     return summary
 
 
@@ -858,3 +889,27 @@ async def sync_all_trendyol_reviews(
     except Exception:
         pass
     return {"success": True, **summary}
+
+
+@router.get("/trendyol/reviews/fetch-config")
+async def get_review_fetch_config(current_user: dict = Depends(require_admin)):
+    """Yorum çekme yolu ayarı (Cloudflare Worker URL / proxy) — 530 engelini aşmak için."""
+    s = await db.settings.find_one({"id": "trendyol"}, {"_id": 0}) or {}
+    return {
+        "review_worker_url": s.get("review_worker_url", ""),
+        "review_proxy_set": bool(s.get("review_proxy")),
+    }
+
+
+@router.put("/trendyol/reviews/fetch-config")
+async def set_review_fetch_config(payload: dict, current_user: dict = Depends(require_admin)):
+    """Cloudflare Worker URL veya proxy adresini kaydeder. Trendyol yorumları bunlar üzerinden çekilir."""
+    upd = {}
+    if "review_worker_url" in (payload or {}):
+        upd["review_worker_url"] = str(payload.get("review_worker_url") or "").strip()
+    if "review_proxy" in (payload or {}):
+        upd["review_proxy"] = str(payload.get("review_proxy") or "").strip()
+    if not upd:
+        raise HTTPException(status_code=400, detail="review_worker_url veya review_proxy gerekli")
+    await db.settings.update_one({"id": "trendyol"}, {"$set": upd, "$setOnInsert": {"id": "trendyol"}}, upsert=True)
+    return {"success": True}

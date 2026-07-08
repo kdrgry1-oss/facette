@@ -22,7 +22,6 @@ export const navigationGroups = [
     icon: ShoppingCart,
     children: [
       { label: "Tüm Siparişler", path: "/admin/siparisler", icon: ShoppingCart },
-      { label: "Telefonla Sipariş", path: "/admin/telefonla-siparis", icon: Phone },
       { label: "İadeler", path: "/admin/iadeler", icon: RotateCcw },
       { label: "İptaller", path: "/admin/iptaller", icon: XCircle },
       { label: "Havale/EFT Bildirimleri", path: "/admin/havale-bildirimleri", icon: CreditCard },

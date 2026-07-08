@@ -634,7 +634,7 @@ export default function Header({ hideMenu = false }) {
           <div className="px-5 md:px-10 pt-5 pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
             {/* Üst bar: logo + kapat */}
             <div className="flex items-center justify-between mb-8 md:mb-12">
-              <Link to="/" onClick={closeSearch} className="text-[13px] tracking-[0.4em] font-light">FACETTE</Link>
+              <Link to="/" onClick={closeSearch} aria-label="FACETTE"><img src="/logo.webp" alt="FACETTE" className="h-5" /></Link>
               <button onClick={closeSearch} className="inline-flex items-center gap-1.5 text-[11px] tracking-[0.18em] uppercase hover:opacity-60 transition-opacity" aria-label="Kapat">
                 Kapat <X size={18} strokeWidth={1.4} />
               </button>

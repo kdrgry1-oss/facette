@@ -112,7 +112,7 @@ def render_size_table_image(
     )
 
     out = BytesIO()
-    img.save(out, format="PNG", optimize=True)
+    img.save(out, format="JPEG", quality=90, optimize=True)  # 1200x1800 JPEG
     return out.getvalue()
 
 
@@ -200,7 +200,7 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
         columns=st.get("columns") or [],
         values=st.get("values") or {},
     )
-    data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    data_url = "data:image/jpeg;base64," + base64.b64encode(png).decode("ascii")
 
     # Remove any previous size-table images and append fresh one as the last image
     imgs = list(product.get("images") or [])

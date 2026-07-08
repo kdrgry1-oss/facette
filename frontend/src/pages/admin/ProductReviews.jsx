@@ -12,6 +12,23 @@ function TrendyolReviewSync() {
   const [minRating, setMinRating] = useState(4);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [workerUrl, setWorkerUrl] = useState("");
+  const [cfgSaved, setCfgSaved] = useState(false);
+
+  useEffect(() => {
+    axios.get(`${API}/integrations/trendyol/reviews/fetch-config`, { headers: authHeaders() })
+      .then((r) => setWorkerUrl(r.data?.review_worker_url || ""))
+      .catch(() => {});
+  }, []);
+
+  const saveWorker = async () => {
+    try {
+      await axios.put(`${API}/integrations/trendyol/reviews/fetch-config`,
+        { review_worker_url: workerUrl.trim() }, { headers: authHeaders() });
+      setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2000);
+      toast.success("Kaydedildi");
+    } catch { toast.error("Kaydedilemedi"); }
+  };
 
   const run = async (dryRun) => {
     setBusy(true); setResult(null);
@@ -38,6 +55,29 @@ function TrendyolReviewSync() {
         Site ürünlerini barkodla Trendyol listelemene eşleştirir ve <b>{minRating}★ ve üzeri</b> yorumları çeker.
         Yorumlar ürün sayfasında müşteri yorumlarıyla birlikte görünür. Uzun sürebilir.
       </p>
+
+      {/* 530 çözümü: Cloudflare Worker vekili. Trendyol sunucu IP'lerini engellediği için
+          zorunlu. Boşsa doğrudan denenir (büyük ihtimalle 530 verir). */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+        <label className="block text-xs font-semibold text-amber-800 mb-1">
+          Cloudflare Worker URL (530 engelini aşmak için — önerilir)
+        </label>
+        <div className="flex gap-2">
+          <input
+            value={workerUrl}
+            onChange={(e) => setWorkerUrl(e.target.value)}
+            placeholder="https://facette-ty.hesabin.workers.dev"
+            className="flex-1 border border-amber-300 rounded px-3 py-2 text-sm"
+          />
+          <button onClick={saveWorker} className="px-3 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">
+            {cfgSaved ? "Kaydedildi ✓" : "Kaydet"}
+          </button>
+        </div>
+        <p className="text-[11px] text-amber-700 mt-1.5">
+          Trendyol, sunucumuzun IP'sini engelliyor (530). Ücretsiz Cloudflare Worker kurup URL'sini buraya
+          yapıştır — yorumlar oradan çekilir. Boş bırakırsan çekim çoğunlukla başarısız olur.
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm flex items-center gap-2">
           Alt yıldız:
