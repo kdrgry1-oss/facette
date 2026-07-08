@@ -619,8 +619,8 @@ export default function Header({ hideMenu = false }) {
               <Link to="/sayfa/iletisim" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
                 İletişim
               </Link>
-              <Link to="/sayfa/iade-kosullari" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
-                İade & Değişim
+              <Link to="/iade-islemleri" className="block text-[13px] font-light text-black/85" onClick={() => setMobileMenuOpen(false)}>
+                İade İşlemleri
               </Link>
             </div>
           </nav>

@@ -214,7 +214,10 @@ function HeroEditorial({ block, isFirst = false }) {
       const el = sectionRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const covering = r.top <= 1 && r.bottom > (window.innerHeight || 1) * 0.5;
+      const vh = window.innerHeight || 1;
+      // Sticky header/duyuru barı hero'yu birkaç px aşağı itebilir → r.top tam 0 olmayabilir.
+      // "Hero ekranın çoğunu kaplıyor mu" diye bak (üst ofsete toleranslı).
+      const covering = r.top < vh * 0.5 && r.bottom > vh * 0.5;
       document.documentElement.setAttribute("data-hero-overlay", covering ? "1" : "0");
     };
     compute();
@@ -235,7 +238,9 @@ function HeroEditorial({ block, isFirst = false }) {
 
     const covering = () => {
       const r = el.getBoundingClientRect();
-      return r.top <= 1 && r.bottom >= (window.innerHeight || 1) - 1;
+      const vh = window.innerHeight || 1;
+      // Header/duyuru barı ofsetine toleranslı: hero ekranın çoğunu kaplıyorsa jest aktif.
+      return r.top < vh * 0.4 && r.bottom > vh * 0.5;
     };
     // dir +1 = sonraki slayt (yukarı kaydır), -1 = önceki (aşağı kaydır)
     const canHijack = (dir) => {
@@ -809,9 +814,11 @@ export default function Home() {
     && flowBlocks[0]?.settings?.hero_style !== "klasik"
     && (flowBlocks[0]?.show_mobile !== false || flowBlocks[0]?.show_desktop !== false);
   useEffect(() => {
-    // Editorial hero YOKSA bayrağı temizle. Varsa değeri HeroEditorial (kapsama alanına göre
-    // "1"/"0") kendisi yönetir — burada set etmiyoruz ki katı header erken devreye girmesin.
-    if (!firstIsEditorialHero) document.documentElement.removeAttribute("data-hero-overlay");
+    // Editorial hero VARSA bayrağı hemen "1" yap → header ANINDA fixed/şeffaf olur, akıştan çıkar,
+    // hero en üste (y=0) oturur; böylece deadlock kırılır (sticky header hero'yu aşağı itmez).
+    // Sonrasında değeri HeroEditorial kapsama alanına göre "1"/"0" günceller.
+    if (firstIsEditorialHero) document.documentElement.setAttribute("data-hero-overlay", "1");
+    else document.documentElement.removeAttribute("data-hero-overlay");
     return () => document.documentElement.removeAttribute("data-hero-overlay");
   }, [firstIsEditorialHero]);
 

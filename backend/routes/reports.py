@@ -566,12 +566,24 @@ async def never_sold(
     rows = []
     async for p in db.products.find(
         {"is_active": True, "is_deleted": {"$ne": True}},
-        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "created_at": 1, "stock_code": 1, "images": 1},
+        {"_id": 0, "id": 1, "name": 1, "stock": 1, "price": 1, "sale_price": 1,
+         "created_at": 1, "stock_code": 1, "images": 1, "variants": 1},
     ):
         if str(p.get("id")) in sold:
             continue
-        stock = int(p.get("stock") or 0)
-        price = float(p.get("price") or 0)
+        variants = p.get("variants") or []
+        # Stok: varyant varsa varyant stoklarının TOPLAMI (top-level 'stock' varyantlıda 0 olabilir).
+        v_stock = sum(int(v.get("stock") or 0) for v in variants)
+        stock = v_stock if variants else int(p.get("stock") or 0)
+        if not variants and stock == 0:
+            stock = int(p.get("stock") or 0)
+        price = float(p.get("sale_price") or p.get("price") or 0)
+        # Bedenler: stok bilgisiyle birlikte (S:3, M:0, L:5 gibi)
+        sizes = []
+        for v in variants:
+            sz = (v.get("size") or "").strip()
+            if sz:
+                sizes.append(f"{sz}:{int(v.get('stock') or 0)}")
         img = ""
         try:
             im0 = (p.get("images") or [None])[0]
@@ -580,9 +592,11 @@ async def never_sold(
             img = ""
         rows.append({
             "product_id": p.get("id"),
-            "name": p.get("name") or "—",
+            "name": p.get("name") or "(isimsiz ürün)",
             "stock_code": p.get("stock_code") or "",
             "stock": stock,
+            "sizes": ", ".join(sizes) if sizes else "—",
+            "variant_count": len(variants),
             "price": price,
             "stock_value": round(stock * price, 2),
             "created_at": p.get("created_at") or "",

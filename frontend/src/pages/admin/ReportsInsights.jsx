@@ -208,7 +208,7 @@ export default function ReportsInsights() {
           </div>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr><th className="text-left p-3">Ürün</th><th className="text-left p-3">Stok Kodu</th><th className="text-right p-3">Stok</th><th className="text-right p-3">Fiyat</th><th className="text-right p-3">Stok Değeri</th></tr>
+              <tr><th className="text-left p-3">Ürün</th><th className="text-left p-3">Stok Kodu</th><th className="text-left p-3">Bedenler (stok)</th><th className="text-right p-3">Toplam Stok</th><th className="text-right p-3">Fiyat</th><th className="text-right p-3">Stok Değeri</th></tr>
             </thead>
             <tbody>
               {(never?.items || []).map((r, i) => (
@@ -218,12 +218,13 @@ export default function ReportsInsights() {
                     {r.name}
                   </td>
                   <td className="p-3 text-gray-500">{r.stock_code || "—"}</td>
+                  <td className="p-3 text-gray-600 text-xs">{r.sizes || "—"}</td>
                   <td className="p-3 text-right">{r.stock}</td>
                   <td className="p-3 text-right">{TRY(r.price)}</td>
                   <td className="p-3 text-right font-semibold">{TRY(r.stock_value)}</td>
                 </tr>
               ))}
-              {(!never?.items || never.items.length === 0) && <tr><td colSpan={5} className="p-6 text-center text-gray-400">Bu aralıkta satılmayan ürün yok — hepsi satmış! 🎉</td></tr>}
+              {(!never?.items || never.items.length === 0) && <tr><td colSpan={6} className="p-6 text-center text-gray-400">Bu aralıkta satılmayan ürün yok — hepsi satmış! 🎉</td></tr>}
             </tbody>
           </table>
         </div>
