@@ -186,11 +186,11 @@ function HeroSlide({ img, cap, title, vidRef, eager }) {
 }
 
 /**
- * HeroEditorial — Zara Home tarzı DİKEY SABİTLENMİŞ (sticky pinned) slider.
- * Başlangıçta yalnızca 1. slayt tam ekran görünür; 2/3/4 GİZLİDİR.
- * Sayfa aşağı kaydırıldıkça slaytlar sırayla yerinde değişir (dikey akış + crossfade).
- * SON slayt bittiğinde bölüm serbest bırakılır ve sayfa normal şekilde aşağı iner.
- * Scroll-hijack YOK — tarayıcının kendi kaydırması kullanılır (mobil + masaüstü).
+ * HeroEditorial — Zara Home tarzı DİKEY TAM-EKRAN slider (fullpage / jest tabanlı).
+ * Yalnızca 1. slayt görünür; 2/3/4 ekran DIŞINDA gizli. TEK bir kaydırma/swipe = TEK slayt
+ * (parmağı takip etmez, uzun kaydırma beklemez). Slaytlar arasında SAYFA KAYMAZ → scrollY 0'da
+ * kalır → header tüm slider boyunca ŞEFFAF/BEYAZ (logo+ikonlar slider üzerine biner). Son slayttan
+ * sonra bir kaydırma daha yapınca hero serbest kalır ve sayfa normal aşağı iner.
  */
 function HeroEditorial({ block, isFirst = false }) {
   const images = block?.images?.length > 0 ? block.images : DEFAULT_HERO_BANNERS.map(b => b.image);
@@ -199,66 +199,91 @@ function HeroEditorial({ block, isFirst = false }) {
   const n = images.length;
   const vids = useRef({});
   const sectionRef = useRef(null);
-  const [prog, setProg] = useState(0); // 0..n-1 arası kesirli ilerleme
-  const active = Math.min(n - 1, Math.max(0, Math.round(prog)));
+  const [active, setActive] = useState(0);
+  const activeRef = useRef(0);
+  const lockRef = useRef(false);
+  const touchStart = useRef(null);
+  const safeActive = Math.min(active, Math.max(0, n - 1));
+  useEffect(() => { activeRef.current = safeActive; }, [safeActive]);
 
-  // Header overlay bayrağı: hero TÜM EKRANI kapladığı sürece "1" (şeffaf header, beyaz logo);
-  // son slayt bitip altındaki normal içerik gelince "0" (katı sticky header devreye girer).
-  // Yalnızca sayfadaki İLK blok hero ise yönetilir.
+  // Header overlay: hero ekranı kapladığı sürece "1" (şeffaf/beyaz header). Slaytlar arası sayfa
+  // kaymadığından bu, tüm slider boyunca açık kalır; hero yukarı kayıp çıkınca "0" olur.
   useEffect(() => {
     if (!isFirst) return;
-    let raf = 0;
     const compute = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const el = sectionRef.current;
-        if (!el) return;
-        const vh = window.innerHeight || 1;
-        const rectTop = el.getBoundingClientRect().top;
-        const sectionBottom = rectTop + el.offsetHeight;
-        // n>1 (sabitlenmiş slider): hero, tek ekrandan fazlasını kapladığı sürece açık.
-        // n<=1 (tek görsel): ekranın %70'inden azı kaydırıldıysa açık.
-        const on = n > 1 ? sectionBottom > vh + 2 : -rectTop < vh * 0.7;
-        document.documentElement.setAttribute("data-hero-overlay", on ? "1" : "0");
-      });
+      const el = sectionRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const covering = r.top <= 1 && r.bottom > (window.innerHeight || 1) * 0.5;
+      document.documentElement.setAttribute("data-hero-overlay", covering ? "1" : "0");
     };
+    compute();
     window.addEventListener("scroll", compute, { passive: true });
     window.addEventListener("resize", compute);
-    compute();
     return () => {
       window.removeEventListener("scroll", compute);
       window.removeEventListener("resize", compute);
-      if (raf) cancelAnimationFrame(raf);
       document.documentElement.removeAttribute("data-hero-overlay");
     };
   }, [isFirst, n]);
 
-  // Kaydırma ilerlemesi: bölüm n*100vh yüksek, iç sticky katman 100vh.
+  // Jest yakalama: hero ekranı tam kapladığında ve sınır slaytta değilken tek kaydırma = tek slayt.
   useEffect(() => {
     if (n <= 1) return;
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const el = sectionRef.current;
-        if (!el) return;
-        const rectTop = el.getBoundingClientRect().top;         // viewport'a göre
-        const pinned = el.offsetHeight - window.innerHeight;     // sabitlenme mesafesi (px)
-        if (pinned <= 0) { setProg(0); return; }
-        const local = Math.min(Math.max(-rectTop, 0), pinned);
-        const unit = pinned / (n - 1);
-        setProg(unit ? local / unit : 0);
-      });
+    const el = sectionRef.current;
+    if (!el) return;
+
+    const covering = () => {
+      const r = el.getBoundingClientRect();
+      return r.top <= 1 && r.bottom >= (window.innerHeight || 1) - 1;
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
-    onScroll();
+    // dir +1 = sonraki slayt (yukarı kaydır), -1 = önceki (aşağı kaydır)
+    const canHijack = (dir) => {
+      if (!covering()) return false;
+      const a = activeRef.current;
+      if (dir > 0 && a >= n - 1) return false; // son slayttan sonra → sayfa aksın
+      if (dir < 0 && a <= 0) return false;      // ilk slayttan önce → sayfa aksın
+      return true;
+    };
+    const go = (dir) => {
+      if (lockRef.current) return;
+      if (!canHijack(dir)) return;
+      lockRef.current = true;
+      setActive((cur) => Math.min(n - 1, Math.max(0, cur + dir)));
+      setTimeout(() => { lockRef.current = false; }, 620);
+    };
+
+    const onWheel = (e) => {
+      const dir = e.deltaY > 0 ? 1 : -1;
+      if (!canHijack(dir)) return;   // sınırda → tarayıcı normal kaydırsın
+      e.preventDefault();            // hero içindeyken sayfayı kaydırma, slayt değiştir
+      go(dir);
+    };
+    const onTouchStart = (e) => { touchStart.current = e.touches[0].clientY; };
+    const onTouchMove = (e) => {
+      if (touchStart.current == null) return;
+      const dy = touchStart.current - e.touches[0].clientY; // + yukarı
+      const dir = dy > 0 ? 1 : -1;
+      if (Math.abs(dy) > 6 && canHijack(dir)) e.preventDefault(); // sayfa kaymasın
+    };
+    const onTouchEnd = (e) => {
+      if (touchStart.current == null) return;
+      const endY = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : touchStart.current);
+      const dy = touchStart.current - endY;
+      touchStart.current = null;
+      if (Math.abs(dy) < 30) return;          // küçük dokunuş → yok say
+      go(dy > 0 ? 1 : -1);                     // tek swipe = tek slayt
+    };
+
+    window.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
     };
   }, [n]);
 
@@ -266,77 +291,59 @@ function HeroEditorial({ block, isFirst = false }) {
   useEffect(() => {
     Object.entries(vids.current).forEach(([i, v]) => {
       if (!v) return;
-      if (Number(i) === active) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
+      if (Number(i) === safeActive) { const p = v.play?.(); if (p?.catch) p.catch(() => {}); }
       else { try { v.pause?.(); } catch (_) { /* noop */ } }
     });
-  }, [active, n]);
-
-  // Tek görsel → sabitleme mekanizması gereksiz, düz tam ekran.
-  if (n <= 1) {
-    const cap = captions[0] || {};
-    return (
-      <section ref={sectionRef} data-testid="hero-editorial" className="w-full">
-        <Link
-          to={links[0] || "/"}
-          onClick={() => { try { trackSelectPromotion({ promotionId: "hero_1", promotionName: cap.title || links[0] || "Hero 1" }); } catch (_) { /* silent */ } }}
-          className="relative block w-full overflow-hidden bg-stone-100"
-          style={{ height: "100vh" }}
-        >
-          <HeroSlide img={images[0]} cap={cap} title={block?.title} vidRef={(el) => { vids.current[0] = el; }} eager />
-        </Link>
-      </section>
-    );
-  }
+  }, [safeActive, n]);
 
   return (
     <section
       ref={sectionRef}
       data-testid="hero-editorial"
-      className="relative w-full"
-      style={{ height: `${n * 100}vh` }}
+      className="relative w-full overflow-hidden bg-stone-100"
+      style={{ height: "100vh" }}
     >
-      {/* Sabitlenen tek ekran — slaytlar burada üst üste, aktif olan görünür */}
-      <div className="sticky top-0 h-screen w-full overflow-hidden bg-stone-100">
-        {images.map((img, i) => {
-          const cap = captions[i] || {};
-          const dist = prog - i;                                  // + geçildi, - gelecek
-          const opacity = Math.max(0, 1 - Math.abs(dist));
-          const translateY = (i - prog) * 8;                      // gelecek slayt alttan yukarı akar (%)
-          const isActive = active === i;
-          const near = Math.abs(dist) < 1.02;                     // yalnızca komşu slaytları çiz
-          return (
+      {images.map((img, i) => {
+        const cap = captions[i] || {};
+        const offset = (i - safeActive) * 100;                 // dikey kayma: aktif 0, diğerleri ekran dışı
+        const isActive = i === safeActive;
+        return (
+          <div
+            key={i}
+            className="absolute inset-0 will-change-transform"
+            style={{
+              transform: `translateY(${offset}%)`,
+              transition: "transform .62s cubic-bezier(0.22,1,0.36,1)",
+              zIndex: isActive ? 2 : 1,
+            }}
+            aria-hidden={!isActive}
+          >
             <Link
-              key={i}
               to={links[i] || "/"}
               onClick={() => { try { trackSelectPromotion({ promotionId: `hero_${i + 1}`, promotionName: cap.title || links[i] || `Hero ${i + 1}` }); } catch (_) { /* silent */ } }}
-              className="absolute inset-0 block will-change-transform"
-              style={{
-                opacity,
-                transform: `translateY(${translateY}%)`,
-                pointerEvents: isActive ? "auto" : "none",
-                zIndex: isActive ? 3 : 2,
-                transition: "opacity .12s linear",
-              }}
-              aria-hidden={!isActive}
+              className="block w-full h-full"
               tabIndex={isActive ? 0 : -1}
             >
-              {near || i === 0 ? (
-                <HeroSlide img={img} cap={cap} title={block?.title} vidRef={(el) => { vids.current[i] = el; }} eager={i === 0} />
-              ) : null}
+              <HeroSlide img={img} cap={cap} title={block?.title} vidRef={(el) => { vids.current[i] = el; }} eager={i === 0} />
             </Link>
-          );
-        })}
+          </div>
+        );
+      })}
 
-        {/* Sağ dikey ilerleme göstergesi */}
-        <div className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10 flex flex-col gap-2" aria-hidden="true">
+      {/* Sağ dikey ilerleme göstergesi (tıklanabilir) */}
+      {n > 1 && (
+        <div className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2">
           {images.map((_, i) => (
-            <span
+            <button
               key={i}
-              className={`w-[3px] rounded-full transition-all duration-300 ${active === i ? "h-7 bg-white" : "h-2 bg-white/45"}`}
+              type="button"
+              aria-label={`Slayt ${i + 1}`}
+              onClick={() => { if (!lockRef.current) { lockRef.current = true; setActive(i); setTimeout(() => { lockRef.current = false; }, 620); } }}
+              className={`w-[3px] rounded-full transition-all duration-300 ${i === safeActive ? "h-7 bg-white" : "h-2 bg-white/45 hover:bg-white/70"}`}
             />
           ))}
         </div>
-      </div>
+      )}
     </section>
   );
 }
