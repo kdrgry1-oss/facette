@@ -8,7 +8,7 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -436,11 +436,12 @@ async def get_orders(
     if is_corporate and str(is_corporate).lower() not in ("0", "false", ""):
         query["billing_info.is_corporate"] = True
         
+    # Tarih aralığı TR yerel günü kabul edilir → UTC sınırı (bitiş günü tam dahil, TZ kayması yok).
     date_query = {}
     if start_date:
-        date_query["$gte"] = start_date
+        date_query["$gte"] = tr_day_start_utc(start_date)
     if end_date:
-        date_query["$lte"] = end_date
+        date_query["$lte"] = tr_day_end_utc(end_date)
     if date_query:
         query["created_at"] = date_query
     
@@ -5610,6 +5611,7 @@ async def export_gider_pusulasi_excel(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     source: Optional[str] = None,   # site | trendyol | hepsiburada | all(None)
+    only_refunded: bool = True,     # yalnız İADE BEDELİ ÖDENMİŞ pusulalar (varsayılan)
     current_user: dict = Depends(require_permission("returns.expense_note")),
 ):
     """Gider pusulalarını MUHASEBE formatında Excel'e aktarır (görseldeki kolon düzeni):
@@ -5630,12 +5632,37 @@ async def export_gider_pusulasi_excel(
     if date_from or date_to:
         dr = {}
         if date_from:
-            dr["$gte"] = date_from
+            dr["$gte"] = tr_day_start_utc(date_from)
         if date_to:
-            dr["$lte"] = date_to + "T23:59:59"
+            dr["$lte"] = tr_day_end_utc(date_to)
         query["date"] = dr
 
     records = await db.gider_pusulasi.find(query, {"_id": 0}).sort("number", 1).to_list(None)
+
+    # SADECE İADE BEDELİ ÖDENMİŞ pusulalar: iade "refunded/partial_refunded" olmuş VEYA
+    # siparişte refund_paid_at işaretli olanlar. (Site iadesi 'İade Bedeli Öde' ile refunded olur;
+    # pazaryeri iadesini platform öder → ilgili sipariş/iade refunded ise dahil edilir.)
+    if only_refunded and records:
+        _rids = list({str(gp.get("return_id")) for gp in records if gp.get("return_id")})
+        _onums = list({str(gp.get("order_number")) for gp in records if gp.get("order_number")})
+        _paid_status = ["refunded", "partial_refunded"]
+        paid_returns = set()
+        if _rids:
+            async for r in db.customer_returns.find(
+                {"id": {"$in": _rids},
+                 "$or": [{"status": {"$in": _paid_status}}, {"refund_payment": {"$exists": True}}]},
+                {"_id": 0, "id": 1}):
+                paid_returns.add(str(r.get("id")))
+        paid_orders = set()
+        if _onums:
+            async for o in db.orders.find(
+                {"order_number": {"$in": _onums},
+                 "$or": [{"status": {"$in": _paid_status}}, {"refund_paid_at": {"$exists": True}}]},
+                {"_id": 0, "order_number": 1}):
+                paid_orders.add(str(o.get("order_number")))
+        records = [gp for gp in records
+                   if str(gp.get("return_id")) in paid_returns
+                   or str(gp.get("order_number")) in paid_orders]
 
     # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
     pids = set()

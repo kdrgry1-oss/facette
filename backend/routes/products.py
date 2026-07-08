@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import re
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc
 from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
 from fastapi import Response, UploadFile, File
 import pandas as pd
@@ -590,12 +590,11 @@ async def _build_products_query(
     if date_from or date_to:
         date_q = {}
         try:
-            from datetime import datetime, timezone
+            # TR yerel günü → UTC sınırı (bitiş günü tam dahil, saat-dilimi kayması yok).
             if date_from:
-                date_q["$gte"] = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc).isoformat()
+                date_q["$gte"] = tr_day_start_utc(date_from)
             if date_to:
-                # end of day
-                date_q["$lte"] = datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=timezone.utc).isoformat()
+                date_q["$lte"] = tr_day_end_utc(date_to)
             query["created_at"] = date_q
         except Exception:
             pass

@@ -14,15 +14,17 @@ from fastapi import APIRouter, Depends, Query
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from .deps import db, require_admin
+from .deps import db, require_admin, tr_range_to_utc
 
 
 router = APIRouter(prefix="/admin/reports", tags=["admin-reports"])
 
 
 def _iso_range(start: Optional[str], end: Optional[str], days_default: int = 30):
+    # Seçilen tarihler TÜRKİYE yerel günü kabul edilir (00:00–23:59:59.999 +03:00) ve UTC ISO
+    # sınırına çevrilir → bitiş günü tam dahil olur, saat-dilimi kayması OLMAZ. (deps.tr_range_to_utc)
     if start and end:
-        return start, end
+        return tr_range_to_utc(start, end)
     now = datetime.now(timezone.utc)
     return (now - timedelta(days=days_default)).isoformat(), now.isoformat()
 

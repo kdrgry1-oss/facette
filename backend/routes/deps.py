@@ -620,3 +620,44 @@ def _search_tr_regex(s: str) -> str:
         'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
     }
     return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
+
+
+# =============================================================================
+# Tarih aralığı — TÜRKİYE yerel günü → UTC ISO sınırı (GLOBAL, tek kaynak)
+# =============================================================================
+# Sorun: created_at UTC saklanır; "07.05–08.05" gibi bir aralık ham verilince
+#   (a) bitiş günü ("...T14:30") string olarak "2026-05-08"den büyük çıkıp dışlanır,
+#   (b) UTC sınırı TR (+03:00) ile 3 saat kayar → önceki/sonraki günün verisi karışır.
+# Çözüm: seçilen tarihi TR yerel GÜN sınırı (00:00 / 23:59:59.999999 +03:00) kabul edip
+#   UTC'ye çevirmek. created_at .isoformat() (mikro-saniyeli, +00:00) ile string-karşılaştırma
+#   bu sınırlarda doğru çalışır. Tam ISO gelirse (T içeren) olduğu gibi bırakılır.
+_TR_TZ = timezone(timedelta(hours=3))
+
+
+def tr_day_start_utc(d):
+    """'YYYY-MM-DD' (TR gün başı 00:00) → UTC ISO. Tam ISO/boş ise dokunmadan döndürür."""
+    s = str(d or "").strip()
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            y, m, dd = int(s[0:4]), int(s[5:7]), int(s[8:10])
+            return datetime(y, m, dd, 0, 0, 0, 0, tzinfo=_TR_TZ).astimezone(timezone.utc).isoformat()
+        except Exception:
+            return s
+    return s
+
+
+def tr_day_end_utc(d):
+    """'YYYY-MM-DD' (TR gün sonu 23:59:59.999999) → UTC ISO. Tam ISO/boş ise dokunmaz."""
+    s = str(d or "").strip()
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            y, m, dd = int(s[0:4]), int(s[5:7]), int(s[8:10])
+            return datetime(y, m, dd, 23, 59, 59, 999999, tzinfo=_TR_TZ).astimezone(timezone.utc).isoformat()
+        except Exception:
+            return s
+    return s
+
+
+def tr_range_to_utc(start, end):
+    """(start, end) tarih aralığını TR yerel günü kabul edip (start_utc, end_utc) döndürür."""
+    return tr_day_start_utc(start), tr_day_end_utc(end)

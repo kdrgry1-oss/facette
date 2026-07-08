@@ -12,7 +12,7 @@ import uuid
 import os
 import httpx
 
-from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger
+from .deps import db, require_admin, require_auth, get_current_user, generate_id, logger, tr_day_start_utc, tr_day_end_utc
 
 
 def _now() -> str:
@@ -414,8 +414,9 @@ async def hourly_sales(days: int = Query(7, ge=1, le=90), current_user: dict = D
 @extra_reports_router.get("/by-city")
 async def by_city(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc)
-    s = start_date or (now - timedelta(days=30)).isoformat()
-    e = end_date or now.isoformat()
+    # TR yerel günü → UTC sınırı (bitiş günü tam dahil, saat-dilimi kayması yok).
+    s = tr_day_start_utc(start_date) if start_date else (now - timedelta(days=30)).isoformat()
+    e = tr_day_end_utc(end_date) if end_date else now.isoformat()
     pipeline = [
         {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
         {"$group": {"_id": {"$ifNull": ["$shipping_address.city", "—"]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
