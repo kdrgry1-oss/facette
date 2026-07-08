@@ -296,8 +296,8 @@ export default function Header({ hideMenu = false }) {
         {heroOverlay && (
           <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" aria-hidden="true" />
         )}
-        {/* Overlay'de logo/ikonlar görselin üzerinde biraz AŞAĞIDA başlasın (image 3): ekstra üst boşluk */}
-        <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-3 md:pt-2" : ""}`}>
+        {/* Overlay'de logo/ikonlar görselin üzerinde DAHA AŞAĞIDA başlasın (image 3): ekstra üst boşluk */}
+        <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-9 md:pt-6" : ""}`}>
           <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center gap-2.5">
