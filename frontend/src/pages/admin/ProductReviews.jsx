@@ -113,6 +113,7 @@ function TrendyolReviewSync() {
           <div><span className="text-gray-500">Eşleşmeyen:</span> <b>{result.unmatched_products ?? "—"}</b></div>
           <div><span className="text-gray-500">Çekilen yorum:</span> <b>{result.total_fetched ?? "—"}</b></div>
           <div><span className="text-gray-500">Eklenen:</span> <b className="text-emerald-600">{result.total_inserted ?? "—"}</b></div>
+          <div><span className="text-gray-500">Güncellenen:</span> <b className="text-blue-600">{result.total_updated ?? "—"}</b></div>
           <div><span className="text-gray-500">Zaten var:</span> <b>{result.skipped_existing ?? "—"}</b></div>
           <div><span className="text-gray-500">Düşük puan:</span> <b>{result.skipped_low_rating ?? "—"}</b></div>
           <div><span className="text-gray-500">Mod:</span> <b>{result.dry_run ? "önizleme" : "gerçek"}</b></div>

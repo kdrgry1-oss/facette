@@ -684,9 +684,49 @@ async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pa
     raise Exception(f"tum hedefler basarisiz ({len(order)} denendi): {last_err}")
 
 
+def _parse_ty_date(val) -> str:
+    """Trendyol yorum tarihini ISO'ya normalize eder. epoch ms/sn, ISO string veya boş kabul eder.
+    Türkçe metin ('19 Mart 2026') gibi ayrıştırılamayanlar için '' döner."""
+    if not val:
+        return ""
+    if isinstance(val, (int, float)):
+        ts = val / 1000.0 if val > 1e12 else float(val)
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+        except Exception:
+            return ""
+    s = str(val).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):  # ISO
+        return s
+    # Türkçe ay adlı metin → ISO'ya çevir
+    _months = {"ocak": 1, "şubat": 2, "subat": 2, "mart": 3, "nisan": 4, "mayıs": 5, "mayis": 5,
+               "haziran": 6, "temmuz": 7, "ağustos": 8, "agustos": 8, "eylül": 9, "eylul": 9,
+               "ekim": 10, "kasım": 11, "kasim": 11, "aralık": 12, "aralik": 12}
+    m = re.match(r"(\d{1,2})\s+([A-Za-zçÇğĞıİöÖşŞüÜ]+)\s+(\d{4})", s)
+    if m:
+        d, mon, y = int(m.group(1)), _months.get(m.group(2).lower()), int(m.group(3))
+        if mon:
+            try:
+                return datetime(y, mon, d, tzinfo=timezone.utc).isoformat()
+            except Exception:
+                return ""
+    return ""
+
+
+def _review_raw_date(r: dict):
+    """Ham yorum objesinden tarih değerini (hangi alanda olursa) alır."""
+    for k in ("commentDateISOtype", "lastModifiedDate", "commentDate", "date", "createdDate",
+              "creationDate", "reviewDate", "commentDateText", "formattedDate", "commentDateHumanized"):
+        v = r.get(k)
+        if v:
+            return v
+    return ""
+
+
 async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_id: str, min_rating: int) -> dict:
-    """Çekilen ham yorumlardan >= min_rating olanları product_reviews'a yazar (external_id ile dedup)."""
-    inserted = skipped_low = skipped_existing = 0
+    """Çekilen yorumları product_reviews'a yazar. YENİ yorumlar gerçek tarihiyle eklenir;
+    MEVCUT yorumların tarihi/puanı güncellenir (external_id ile eşleşir)."""
+    inserted = updated = skipped_low = skipped_existing = 0
     for r in fetched:
         rating = int(r.get("rate") or 0)
         if rating < min_rating:
@@ -695,11 +735,21 @@ async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_
         review_id = str(r.get("id") or "")
         if not review_id:
             continue
+        raw_date = _review_raw_date(r)
+        iso_date = _parse_ty_date(raw_date)
+        display_date = iso_date or datetime.now(timezone.utc).isoformat()
+
         existing = await db.product_reviews.find_one(
-            {"source": "trendyol_public", "external_id": review_id}, {"_id": 1}
+            {"source": "trendyol_public", "external_id": review_id}, {"_id": 1, "comment_date": 1}
         )
         if existing:
-            skipped_existing += 1
+            # Mevcut yorumun tarihini gerçek tarihe güncelle (8 Temmuz sorununu düzeltir).
+            upd = {"rating": rating}
+            if iso_date:
+                upd["comment_date"] = raw_date
+                upd["created_at"] = iso_date
+            await db.product_reviews.update_one({"_id": existing["_id"]}, {"$set": upd})
+            updated += 1
             continue
         doc = {
             "id": generate_id(),
@@ -714,12 +764,13 @@ async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_
             "is_verified": bool(r.get("verifiedPurchase")),
             "is_seller_verified": bool(r.get("sellerVerified")),
             "approved": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "comment_date": r.get("commentDateISOtype") or r.get("lastModifiedDate") or "",
+            "created_at": display_date,          # GERÇEK yorum tarihi (varsa)
+            "comment_date": raw_date or "",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.product_reviews.insert_one(doc)
         inserted += 1
-    return {"inserted": inserted, "skipped_low_rating": skipped_low, "skipped_existing": skipped_existing}
+    return {"inserted": inserted, "updated": updated, "skipped_low_rating": skipped_low, "skipped_existing": skipped_existing}
 
 
 async def _recalc_product_rating(local_pid: str) -> None:
@@ -819,6 +870,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
         "content_ids_scraped": 0,
         "total_fetched": 0,
         "total_inserted": 0,
+        "total_updated": 0,
         "skipped_low_rating": 0,
         "skipped_existing": 0,
         "errors": [],
@@ -860,6 +912,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
                 continue
             res = await _store_reviews(fetched, pid, cid, min_rating)
             summary["total_inserted"] += res["inserted"]
+            summary["total_updated"] += res.get("updated", 0)
             summary["skipped_low_rating"] += res["skipped_low_rating"]
             summary["skipped_existing"] += res["skipped_existing"]
         if not dry_run:

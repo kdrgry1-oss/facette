@@ -591,3 +591,123 @@ async def never_sold(
     rows.sort(key=lambda x: -x["stock_value"])
     total_value = round(sum(x["stock_value"] for x in rows), 2)
     return {"days": days, "count": len(rows), "total_stock_value": total_value, "items": rows[:limit]}
+
+
+# ============================================================================
+# EK RAPORLAR 2 — Saatlik, Ödeme Tipi, Kupon Performansı, Yeni/Tekrar Eden Müşteri
+# ============================================================================
+
+@router.get("/by-hour")
+async def sales_by_hour(
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    source: Optional[str] = None, current_user: dict = Depends(require_admin),
+):
+    """Günün SAATLERİNE göre satış dağılımı (TR saati, +03:00). En yoğun saatler."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%H", "date": {"$dateFromString": {"dateString": "$created_at"}}, "timezone": "+03:00"}},
+            "orders": {"$sum": 1},
+            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    by = {f"{h:02d}": {"orders": 0, "revenue": 0.0} for h in range(24)}
+    async for r in db.orders.aggregate(pipeline):
+        by[r["_id"]] = {"orders": r["orders"], "revenue": round(r["revenue"], 2)}
+    rows = [{"hour": h, "orders": v["orders"], "revenue": v["revenue"]} for h, v in sorted(by.items())]
+    return {"rows": rows, "totals": {"orders": sum(x["orders"] for x in rows), "revenue": round(sum(x["revenue"] for x in rows), 2)}}
+
+
+_PM_LABELS = {
+    "transfer": "Havale/EFT", "havale": "Havale/EFT", "bank_transfer": "Havale/EFT",
+    "eft": "Havale/EFT", "havale_eft": "Havale/EFT", "banka_havale": "Havale/EFT",
+    "card": "Kredi/Banka Kartı", "credit_card": "Kredi/Banka Kartı", "iyzico": "Kredi/Banka Kartı",
+    "iyzipay": "Kredi/Banka Kartı", "cod": "Kapıda Ödeme", "kapida": "Kapıda Ödeme",
+}
+
+
+@router.get("/by-payment")
+async def sales_by_payment(
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    source: Optional[str] = None, current_user: dict = Depends(require_admin),
+):
+    """Ödeme tipine göre satış (Havale / Kart / Kapıda vb.)."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$group": {"_id": {"$ifNull": ["$payment_method", ""]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+    ]
+    agg = {}
+    async for r in db.orders.aggregate(pipeline):
+        label = _PM_LABELS.get(str(r["_id"]).strip().lower(), (str(r["_id"]).strip() or "Belirtilmemiş"))
+        a = agg.setdefault(label, {"orders": 0, "revenue": 0.0})
+        a["orders"] += r["orders"]; a["revenue"] += r["revenue"] or 0
+    rows = [{"method": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)} for k, v in agg.items()]
+    rows.sort(key=lambda x: -x["revenue"])
+    return {"rows": rows, "totals": {"orders": sum(x["orders"] for x in rows), "revenue": round(sum(x["revenue"] for x in rows), 2)}}
+
+
+@router.get("/coupon-performance")
+async def coupon_performance(
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Kupon performansı: her kupon kaç siparişte kullanıldı, ne kadar indirim + ciro getirdi."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES},
+                    "coupon_code": {"$nin": [None, ""]}}},
+        {"$group": {
+            "_id": "$coupon_code",
+            "orders": {"$sum": 1},
+            "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
+            "discount": {"$sum": {"$ifNull": ["$discount", {"$ifNull": ["$discount_amount", 0]}]}},
+        }},
+        {"$sort": {"orders": -1}},
+    ]
+    rows = []
+    async for r in db.orders.aggregate(pipeline):
+        rows.append({"coupon": r["_id"], "orders": r["orders"], "revenue": round(r["revenue"], 2), "discount": round(r.get("discount") or 0, 2)})
+    return {"rows": rows, "totals": {
+        "orders": sum(x["orders"] for x in rows),
+        "revenue": round(sum(x["revenue"] for x in rows), 2),
+        "discount": round(sum(x["discount"] for x in rows), 2),
+    }}
+
+
+@router.get("/customer-type")
+async def customer_type(
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Bu aralıkta sipariş veren müşteriler: YENİ (ilk siparişi bu aralıkta) vs TEKRAR EDEN
+    (daha önce de sipariş vermiş). Müşteri anahtarı: e-posta."""
+    s, e = _iso_range(start_date, end_date)
+    key = {"$toLower": {"$ifNull": ["$email", {"$ifNull": ["$shipping_address.email", "$user_id"]}]}}
+    pipeline = [
+        {"$match": {"status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$group": {
+            "_id": key,
+            "firstOrder": {"$min": "$created_at"},
+            "ordersInRange": {"$sum": {"$cond": [{"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}, 1, 0]}},
+            "revInRange": {"$sum": {"$cond": [{"$and": [{"$gte": ["$created_at", s]}, {"$lte": ["$created_at", e]}]}, {"$ifNull": ["$total", 0]}, 0]}},
+        }},
+        {"$match": {"ordersInRange": {"$gt": 0}}},
+    ]
+    new_c = ret_c = 0
+    new_rev = ret_rev = 0.0
+    new_ord = ret_ord = 0
+    async for r in db.orders.aggregate(pipeline):
+        is_new = (r.get("firstOrder") or "") >= s
+        if is_new:
+            new_c += 1; new_rev += r.get("revInRange") or 0; new_ord += r.get("ordersInRange") or 0
+        else:
+            ret_c += 1; ret_rev += r.get("revInRange") or 0; ret_ord += r.get("ordersInRange") or 0
+    total_c = new_c + ret_c
+    return {
+        "new": {"customers": new_c, "orders": new_ord, "revenue": round(new_rev, 2)},
+        "returning": {"customers": ret_c, "orders": ret_ord, "revenue": round(ret_rev, 2)},
+        "repeat_rate": round((ret_c / total_c) * 100, 1) if total_c else 0,
+    }

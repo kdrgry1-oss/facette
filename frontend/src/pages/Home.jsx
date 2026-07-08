@@ -729,9 +729,16 @@ function HomeSkeleton() {
 function BlockRenderer({ block, products, index }) {
   let component = null;
   switch (block.type) {
-    case "hero_slider":   component = block?.settings?.hero_style === "dikey"
-                            ? <HeroEditorial block={block} isFirst={index === 0} />
-                            : <HeroSlider block={block} />; break;
+    case "hero_slider": {
+      // İlk hero bloğu, AKSİ (klasik) belirtilmedikçe otomatik fullpage/editorial olur —
+      // böylece "Dikey Editorial" seçilmese de mobilde tek-swipe slider + şeffaf header çalışır.
+      const _style = block?.settings?.hero_style;
+      const _useEditorial = _style === "dikey" || (index === 0 && _style !== "klasik");
+      component = _useEditorial
+        ? <HeroEditorial block={block} isFirst={index === 0} />
+        : <HeroSlider block={block} />;
+      break;
+    }
     case "full_banner":   component = <FullBanner block={block} />; break;
     case "half_banners":  component = <HalfBanners block={block} />; break;
     case "product_slider":component = <ProductSlider block={block} products={products} />; break;
@@ -799,7 +806,7 @@ export default function Home() {
   // İLK blok TAM EKRAN editorial hero mu? Öyleyse header şeffaf-overlay (beyaz logo/ikon) olur.
   // <html data-hero-overlay="1"> bayrağını Header okur; sayfadan ayrılınca temizlenir.
   const firstIsEditorialHero = flowBlocks[0]?.type === "hero_slider"
-    && flowBlocks[0]?.settings?.hero_style === "dikey"
+    && flowBlocks[0]?.settings?.hero_style !== "klasik"
     && (flowBlocks[0]?.show_mobile !== false || flowBlocks[0]?.show_desktop !== false);
   useEffect(() => {
     // Editorial hero YOKSA bayrağı temizle. Varsa değeri HeroEditorial (kapsama alanına göre
