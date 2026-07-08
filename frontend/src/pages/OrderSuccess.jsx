@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Check, Package, Truck, Home, Mail, Phone, MapPin, UserPlus, ChevronLeft } from "lucide-react";
+import { Check, Package, Truck, Home, Mail, Phone, MapPin, UserPlus, ChevronLeft, Clock } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -105,18 +105,27 @@ export default function OrderSuccess() {
 
         {/* Havale/EFT: kopyalanabilir banka bilgileri (yalnızca havale siparişlerinde) */}
         {_isBankTransfer(order?.payment_method) && (
-          <BankTransferInfo orderNumber={orderNumber} amount={order?.total} />
+          <BankTransferInfo orderNumber={orderNumber} />
         )}
 
-        {/* Step indicator */}
+        {/* Step indicator — havale/EFT siparişinde önce "Ödeme Bekliyor" adımı gelir */}
         <div className="mb-16">
           <div className="flex items-center justify-between max-w-2xl mx-auto">
-            {[
-              { icon: Check, label: "Onaylandı", active: true },
-              { icon: Package, label: "Hazırlanıyor", active: false },
-              { icon: Truck, label: "Kargoda", active: false },
-              { icon: Home, label: "Teslim", active: false },
-            ].map((step, i, arr) => (
+            {(_isBankTransfer(order?.payment_method)
+              ? [
+                  { icon: Clock, label: "Ödeme Bekliyor", active: true },
+                  { icon: Check, label: "Onaylandı", active: false },
+                  { icon: Package, label: "Hazırlanıyor", active: false },
+                  { icon: Truck, label: "Kargoda", active: false },
+                  { icon: Home, label: "Teslim", active: false },
+                ]
+              : [
+                  { icon: Check, label: "Onaylandı", active: true },
+                  { icon: Package, label: "Hazırlanıyor", active: false },
+                  { icon: Truck, label: "Kargoda", active: false },
+                  { icon: Home, label: "Teslim", active: false },
+                ]
+            ).map((step, i, arr) => (
               <div key={i} className="flex-1 flex items-center">
                 <div className="flex flex-col items-center">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${step.active ? "bg-black text-white" : "bg-gray-100 text-gray-500"}`}>

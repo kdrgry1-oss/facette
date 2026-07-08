@@ -1,16 +1,17 @@
 import { useState } from "react";
-import { Copy, Check, Building2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Copy, Check, Building2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 /**
  * BankTransferInfo — Havale/EFT ile ödenecek siparişlerde müşteriye gösterilen
- * KOPYALANABİLİR banka hesap bilgileri kartı.
+ * KOPYALANABİLİR banka hesap bilgileri kartı + "Ödeme Bildirimi Yap" butonu.
  *
- * Her satırın yanında kopyala butonu var; ayrıca "Tümünü Kopyala" ile IBAN + alıcı +
- * sipariş numarası (açıklama) tek seferde panoya alınır. Sipariş numarası havale
- * açıklamasına yazılması için vurgulanır.
+ * Her satırın yanında kopyala butonu var. Sipariş numarası havale açıklamasına
+ * yazılması için vurgulanır. Ödeme yapıldıysa müşteri dekont yükleme (ödeme bildirimi)
+ * sayfasına yönlendirilir.
  *
- * Props: orderNumber (string), amount (number|string)
+ * Props: orderNumber (string)
  */
 
 // Facette resmî hesap bilgileri
@@ -21,7 +22,6 @@ const BANK = {
   branch: "ESENYURT",
   branchCode: "1454",
   iban: "TR86 0006 4000 0011 4540 1414 67",
-  ibanRaw: "TR860006400000114540141467",
 };
 
 function CopyRow({ label, value, mono = false, strong = false }) {
@@ -56,31 +56,7 @@ function CopyRow({ label, value, mono = false, strong = false }) {
   );
 }
 
-export default function BankTransferInfo({ orderNumber, amount }) {
-  const [copiedAll, setCopiedAll] = useState(false);
-
-  const amountText =
-    amount != null && amount !== "" ? `${Number(amount).toFixed(2)} TL` : "";
-
-  const copyAll = async () => {
-    const lines = [
-      `Alıcı: ${BANK.holder}`,
-      `Banka: ${BANK.bank} (${BANK.currency})`,
-      `Şube: ${BANK.branch} - Şube Kodu: ${BANK.branchCode}`,
-      `IBAN: ${BANK.ibanRaw}`,
-      orderNumber ? `Açıklama: ${orderNumber}` : "",
-      amountText ? `Tutar: ${amountText}` : "",
-    ].filter(Boolean);
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      setCopiedAll(true);
-      toast.success("Tüm bilgiler kopyalandı");
-      setTimeout(() => setCopiedAll(false), 1800);
-    } catch (_) {
-      toast.error("Kopyalanamadı");
-    }
-  };
-
+export default function BankTransferInfo({ orderNumber }) {
   return (
     <div className="border border-black/80 mb-12" data-testid="bank-transfer-info">
       <div className="bg-black text-white px-5 sm:px-8 py-4 flex items-center gap-2.5">
@@ -100,16 +76,18 @@ export default function BankTransferInfo({ orderNumber, amount }) {
         {orderNumber && (
           <CopyRow label="Açıklama (sipariş no)" value={orderNumber} mono />
         )}
-        {amountText && <CopyRow label="Tutar" value={amountText} strong />}
 
-        <button
-          type="button"
-          onClick={copyAll}
-          className="mt-4 w-full h-11 bg-black text-white text-xs tracking-[0.2em] uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
-        >
-          {copiedAll ? <Check size={15} /> : <Copy size={15} />}
-          {copiedAll ? "Kopyalandı" : "Tüm Bilgileri Kopyala"}
-        </button>
+        {/* Ödeme yaptıysanız → dekont yükleme (ödeme bildirimi) sayfası */}
+        {orderNumber && (
+          <Link
+            to={`/odeme-bildirimi/${orderNumber}`}
+            className="mt-4 w-full h-11 bg-black text-white text-xs tracking-[0.2em] uppercase flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+            data-testid="payment-notify-btn"
+          >
+            <Upload size={15} />
+            Ödeme Yaptıysanız Ödeme Bildirimi Yapın
+          </Link>
+        )}
 
         <p className="mt-3 text-[11px] text-gray-500 leading-relaxed">
           <strong className="text-gray-700">Önemli:</strong> Havale/EFT açıklamasına
