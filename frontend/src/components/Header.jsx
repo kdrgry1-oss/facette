@@ -149,23 +149,30 @@ export default function Header({ hideMenu = false }) {
   // arası overlay AÇIK kalır; ancak gerçek sayfa kaydırması başlayınca kapanır.)
   const [heroOverlay, setHeroOverlay] = useState(false);
   useEffect(() => {
+    let rafId = 0;
     const compute = () => {
-      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); return; }
+      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); return false; }
       const hero = document.querySelector('[data-testid="hero-editorial"]');
-      if (!hero) { setHeroOverlay(false); return; }
+      if (!hero) { setHeroOverlay(false); return false; }
       const scrolled = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
       setHeroOverlay(scrolled < 6);   // yalnız sayfa en üstünde → floating; kaydırınca → sticky
+      return true;                    // hero bulundu
     };
-    compute();
-    // Hero, header'dan SONRA mount olduğundan ilk saniyede birkaç kez yeniden değerlendir.
-    const raf = requestAnimationFrame(compute);
-    const timers = [setTimeout(compute, 60), setTimeout(compute, 250), setTimeout(compute, 600)];
+    // Hero, sayfa blokları async yüklendiği için header'dan GEÇ mount olabilir → hero DOM'a gelene
+    // kadar (max ~2.5 sn) requestAnimationFrame ile POLL et. Bulununca değerlendirme zaten yapıldı,
+    // poll'u sonlandır (sonrasında scroll/resize dinleyicileri yeterli).
+    let tries = 0;
+    const poll = () => {
+      const found = compute();
+      if (!found && tries < 150) { tries++; rafId = requestAnimationFrame(poll); }
+    };
+    poll();
     window.addEventListener("scroll", compute, { passive: true });
     window.addEventListener("resize", compute);
     let mo = null;
     try { mo = new MutationObserver(compute); mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-hero-overlay"] }); } catch (_) { /* noop */ }
     return () => {
-      cancelAnimationFrame(raf); timers.forEach(clearTimeout);
+      if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener("scroll", compute); window.removeEventListener("resize", compute);
       if (mo) mo.disconnect();
     };
