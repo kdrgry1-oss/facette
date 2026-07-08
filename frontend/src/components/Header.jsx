@@ -148,12 +148,14 @@ export default function Header({ hideMenu = false }) {
   // sticky header + siyah duyuru barı gelir. (Hero jest-slider'ı sayfayı kaydırmadığı için slaytlar
   // arası overlay AÇIK kalır; ancak gerçek sayfa kaydırması başlayınca kapanır.)
   const [heroOverlay, setHeroOverlay] = useState(false);
+  const [heroPage, setHeroPage] = useState(false);   // ana sayfa + editorial hero var mı (kaydırmadan bağımsız)
   useEffect(() => {
     let rafId = 0;
     const compute = () => {
-      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); return false; }
+      if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); setHeroPage(false); return false; }
       const hero = document.querySelector('[data-testid="hero-editorial"]');
-      if (!hero) { setHeroOverlay(false); return false; }
+      if (!hero) { setHeroOverlay(false); setHeroPage(false); return false; }
+      setHeroPage(true);
       const scrolled = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
       setHeroOverlay(scrolled < 6);   // yalnız sayfa en üstünde → floating; kaydırınca → sticky
       return true;                    // hero bulundu
@@ -290,21 +292,29 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Top Banner — SİYAH duyuru barı. İLK HERO EKRANINDA (overlay) GİZLİ → görsel tam ekran,
-          header görselin üzerinde yüzer. Kaydırınca (overlay kapanınca) görünür + akışta. */}
-      {!heroOverlay && !isCheckout && <CountdownBar />}
+      {/* Ana-sayfa-hero'da: SİYAH bar + header TEK fixed sarmalayıcıda (aralarında BOŞLUK/BEYAZ ÇİZGİ
+          YOK, bitişik). Hero arkada top-0'da → görsel tam ekran. İlk ekran (overlay): bar siyah + header
+          şeffaf/beyaz görselin üzerinde. Kaydırınca (overlay off): bar gizlenir, header beyaz sticky.
+          Diğer sayfalarda: bar akışta + header sticky (klasik). */}
+      <div className={heroPage ? "fixed inset-x-0 top-0 z-40" : ""}>
+        {/* Duyuru barı: ana-sayfa-hero'da yalnız EN ÜSTTE (overlay) görünür; diğer sayfalarda hep. */}
+        {(heroPage ? heroOverlay : true) && !isCheckout && <CountdownBar />}
 
-      {/* Main Header — overlay'de FIXED + ŞEFFAF: siyah bar YOK, header görselin üzerinde biraz
-          aşağıda yüzer (logo/ikon beyaz). Kaydırınca sticky/beyaz olur (bar üstünde). */}
-      <header
-        className={`z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 top-0 bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}
-      >
-        {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
-        {heroOverlay && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" aria-hidden="true" />
-        )}
-        {/* Overlay'de logo/ikonlar görselin üzerinde DAHA AŞAĞIDA başlasın (image 3): ekstra üst boşluk */}
-        <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-9 md:pt-6" : ""}`}>
+        <header
+          className={`z-40 transition-colors duration-300 ${
+            heroOverlay
+              ? "bg-transparent text-white"
+              : heroPage
+                ? "bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"
+                : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"
+          }`}
+        >
+          {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
+          {heroOverlay && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" aria-hidden="true" />
+          )}
+          {/* Overlay'de logo/ikonlar görselin üzerinde biraz AŞAĞIDA başlasın: ekstra üst boşluk */}
+          <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-6 md:pt-4" : ""}`}>
           <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center gap-2.5">
@@ -552,7 +562,8 @@ export default function Header({ hideMenu = false }) {
             </div>
           </div>
         )}
-      </header>
+        </header>
+      </div>
 
       {/* Mobile Menu */}
       {!isCheckout && (
