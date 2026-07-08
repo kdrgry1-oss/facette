@@ -421,6 +421,9 @@ function ProductSlider({ block, products }) {
     return () => { alive = false; };
   }, [source, limit, JSON.stringify(block?.settings?.category_ids || [])]);
 
+  // TÜM hook'lar erken return'den ÖNCE çağrılmalı (React kuralı — #310).
+  const scrollRef = useRef(null);
+
   let displayProducts;
   if (source !== "manual" && source !== "newest") {
     displayProducts = feed || [];
@@ -433,7 +436,7 @@ function ProductSlider({ block, products }) {
     displayProducts = dedupeColorGroups(products?.slice(0, limit * 2) || [])
       .slice(0, limit);
   }
-  
+
   if (displayProducts.length === 0) return null;
 
   const defaultCtaLink = source === "discounted" ? "/sale" : "/en-yeniler";
@@ -444,7 +447,6 @@ function ProductSlider({ block, products }) {
   // Kaç satır alt alta (yatay kayan slider içinde 1–3)
   const rows = Math.max(1, Math.min(Number(block?.settings?.rows) || 1, 3));
   const serif = { fontFamily: 'Georgia, "Times New Roman", "Playfair Display", serif' };
-  const scrollRef = useRef(null);
   const scrollByDir = (dir) => {
     const el = scrollRef.current;
     if (!el) return;
