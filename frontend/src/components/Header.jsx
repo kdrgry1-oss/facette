@@ -142,27 +142,27 @@ export default function Header({ hideMenu = false }) {
   // Hero-overlay: ana sayfada TAM EKRAN editorial hero varken ve sayfa en üstteyken header
   // ŞEFFAF + logo/ikonlar BEYAZ; aşağı inince beyaz zemin + siyah. Home, hero varsa
   // document.documentElement'e data-hero-overlay="1" bırakır; burada scroll'a göre hesaplanır.
+  // Hero-overlay: ana sayfada editorial hero VARKEN ve sayfa TAM EN ÜSTTEYKEN (kaydırılmamış) →
+  // ilk ekran: SİYAH duyuru barı YOK, görsel tam ekran, header ŞEFFAF + logo/ikon BEYAZ, görselin
+  // üzerinde biraz aşağıda yüzer. KAYDIRMA BAŞLAR BAŞLAMAZ (scrollY>0) → overlay kapanır: beyaz
+  // sticky header + siyah duyuru barı gelir. (Hero jest-slider'ı sayfayı kaydırmadığı için slaytlar
+  // arası overlay AÇIK kalır; ancak gerçek sayfa kaydırması başlayınca kapanır.)
   const [heroOverlay, setHeroOverlay] = useState(false);
   useEffect(() => {
-    // Header, hero bloğundan ÖNCE mount olur; bu yüzden attribute'a GÜVENMEK yerine hero
-    // elementini DOĞRUDAN ölçeriz (yarış/zamanlama sorunlarına kapalı). Hero ekranın üst
-    // yarısını kaplıyorsa header şeffaf + logo/ikon beyaz; kaydırıp çıkınca opak/siyah.
     const compute = () => {
       if (typeof document === "undefined" || location.pathname !== "/") { setHeroOverlay(false); return; }
       const hero = document.querySelector('[data-testid="hero-editorial"]');
       if (!hero) { setHeroOverlay(false); return; }
-      const r = hero.getBoundingClientRect();
-      const vh = window.innerHeight || 1;
-      setHeroOverlay(r.top < vh * 0.5 && r.bottom > vh * 0.4);
+      const scrolled = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+      setHeroOverlay(scrolled < 6);   // yalnız sayfa en üstünde → floating; kaydırınca → sticky
     };
     compute();
-    // Hero, header'dan SONRA mount olduğundan ilk saniyede birkaç kez yeniden ölç.
+    // Hero, header'dan SONRA mount olduğundan ilk saniyede birkaç kez yeniden değerlendir.
     const raf = requestAnimationFrame(compute);
     const timers = [setTimeout(compute, 60), setTimeout(compute, 250), setTimeout(compute, 600)];
     window.addEventListener("scroll", compute, { passive: true });
     window.addEventListener("resize", compute);
     let mo = null;
-    // HeroEditorial slayt değiştikçe/çıkınca data-hero-overlay'i günceller → yeniden ölçme tetiği.
     try { mo = new MutationObserver(compute); mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-hero-overlay"] }); } catch (_) { /* noop */ }
     return () => {
       cancelAnimationFrame(raf); timers.forEach(clearTimeout);
@@ -170,25 +170,6 @@ export default function Header({ hideMenu = false }) {
       if (mo) mo.disconnect();
     };
   }, [location.pathname]);
-
-  // Duyuru barı (CountdownBar) yüksekliğini ölç → overlay modunda ŞEFFAF header'ı tam onun
-  // ALTINA konumlandır (logo/ikonlar siyah barın ÜZERİNE binmesin). Bar yoksa 0 → header en üstte.
-  const barRef = useRef(null);
-  const [barH, setBarH] = useState(0);
-  useEffect(() => {
-    const measure = () => setBarH(barRef.current ? barRef.current.offsetHeight : 0);
-    measure();
-    // Duyuru barı async yüklenebilir → ilk saniyede birkaç kez yeniden ölç.
-    const raf = requestAnimationFrame(measure);
-    const timers = [setTimeout(measure, 120), setTimeout(measure, 400), setTimeout(measure, 900)];
-    window.addEventListener("resize", measure);
-    let ro = null;
-    try { ro = new ResizeObserver(measure); if (barRef.current) ro.observe(barRef.current); } catch (_) { /* noop */ }
-    return () => {
-      cancelAnimationFrame(raf); timers.forEach(clearTimeout);
-      window.removeEventListener("resize", measure); if (ro) ro.disconnect();
-    };
-  }, [heroOverlay, location.pathname]);
 
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
   // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
@@ -302,23 +283,21 @@ export default function Header({ hideMenu = false }) {
 
   return (
     <>
-      {/* Top Banner — SİYAH duyuru barı. Overlay modunda AKIŞTA kalır (en üstte); header onun
-          ALTINA konumlanır. Yüksekliği barRef ile ölçülür. */}
-      <div ref={barRef} className={heroOverlay ? "fixed inset-x-0 top-0 z-50" : ""}>
-        {!isCheckout && <CountdownBar />}
-      </div>
+      {/* Top Banner — SİYAH duyuru barı. İLK HERO EKRANINDA (overlay) GİZLİ → görsel tam ekran,
+          header görselin üzerinde yüzer. Kaydırınca (overlay kapanınca) görünür + akışta. */}
+      {!heroOverlay && !isCheckout && <CountdownBar />}
 
-      {/* Main Header — overlay'de FIXED ve top = duyuru barı yüksekliği (siyah barın TAM ALTINDA,
-          görselin üzerinde; logo/ikonlar artık siyah bara BİNMEZ). Akışta ise sticky/beyaz. */}
+      {/* Main Header — overlay'de FIXED + ŞEFFAF: siyah bar YOK, header görselin üzerinde biraz
+          aşağıda yüzer (logo/ikon beyaz). Kaydırınca sticky/beyaz olur (bar üstünde). */}
       <header
-        className={`z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}
-        style={heroOverlay ? { top: barH } : undefined}
+        className={`z-40 transition-all duration-300 ${heroOverlay ? "fixed inset-x-0 top-0 bg-transparent text-white" : "sticky top-0 bg-white/95 backdrop-blur-xl border-b border-black/5 text-black"}`}
       >
         {/* Açık hero görselinde beyaz logo/ikonların okunması için üstte ince koyu gradient scrim */}
         {heroOverlay && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/25 to-transparent" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" aria-hidden="true" />
         )}
-        <div className="relative max-w-screen-2xl mx-auto px-3 md:px-6">
+        {/* Overlay'de logo/ikonlar görselin üzerinde biraz AŞAĞIDA başlasın (image 3): ekstra üst boşluk */}
+        <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-3 md:pt-2" : ""}`}>
           <div className="relative flex items-center h-12 md:h-14">
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center gap-2.5">
