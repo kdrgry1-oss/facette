@@ -115,16 +115,111 @@ class IYSRegister(IYSQuery):
     source: str = "API"
 
 
+# NetGSM İYS ayar okuma/yazma — checkout bildirimi ile AYNI yer (providers.netgsm) --------
+async def _netgsm_prov() -> dict:
+    """providers.netgsm bloğu (İYS + SMS kimlikleri burada; iys.py._iys_config ile aynı kaynak)."""
+    doc = await db.settings.find_one({"id": "notification_providers"}, {"_id": 0}) or {}
+    return (doc.get("providers", {}) or {}).get("netgsm", {}) or {}
+
+
+def _iys_fields(prov: dict) -> dict:
+    """providers.netgsm + env'den etkin İYS kimlik/marka değerlerini çıkarır (iys.py ile birebir)."""
+    return {
+        "username": (prov.get("username") or os.environ.get("NETGSM_USERCODE", "")).strip(),
+        "password": (prov.get("iys_password") or prov.get("password")
+                     or os.environ.get("NETGSM_IYS_PASSWORD") or os.environ.get("NETGSM_PASSWORD", "")).strip(),
+        "appkey": (prov.get("iys_appkey") or prov.get("appkey")
+                   or os.environ.get("NETGSM_IYS_APPKEY") or os.environ.get("NETGSM_APPKEY", "")).strip(),
+        "brand_code": (prov.get("iys_brand_code") or prov.get("brand_code")
+                       or os.environ.get("NETGSM_IYS_BRAND_CODE", "")).strip(),
+    }
+
+
+class IYSSettings(BaseModel):
+    brand_code: str = ""
+    appkey: str = ""
+
+
 # Endpoints ------------------------------------------------------------------
 @router.get("/status")
 async def iys_status(_=Depends(require_admin)):
-    """Konfigürasyon ve son token durumu."""
+    """NetGSM İYS bağlantı durumu — checkout bildiriminin okuduğu providers.netgsm'den."""
+    prov = await _netgsm_prov()
+    f = _iys_fields(prov)
+    username_set = bool(f["username"])
+    password_set = bool(f["password"])
+    appkey_set = bool(f["appkey"])
+    brand = f["brand_code"]
+    configured = bool(username_set and password_set and brand)
+    hint = ""
+    if not brand:
+        hint = "İYS Marka Kodu eksik — sağdaki 'İYS Ayarları'ndan girip kaydedin (NetGSM panelinde NetİYS altında görünür)."
+    elif not (username_set and password_set):
+        hint = "NetGSM kullanıcı/şifre eksik — Ayarlar → Bildirim Sağlayıcıları → NetGSM bloğundan girin (İYS için ayrı şifre varsa iys_password)."
     return {
-        "configured": bool(IYS_BRAND and (os.environ.get("IYS_API_USERNAME") or True)),
-        "brand_code": IYS_BRAND or "(eksik)",
+        "configured": configured,
+        "brand_code": brand or "(eksik)",
+        "username_set": username_set,
+        "password_set": password_set,
+        "appkey_set": appkey_set,
+        "hint": hint,
         "base_url": IYS_BASE,
-        "token_valid_seconds": max(0, int(_token.expires_at - time.time())) if _token.token else 0,
     }
+
+
+@router.get("/settings")
+async def iys_settings_get(_=Depends(require_admin)):
+    """Kayıtlı İYS marka kodu + appkey (providers.netgsm)."""
+    prov = await _netgsm_prov()
+    return {
+        "brand_code": prov.get("iys_brand_code") or prov.get("brand_code") or "",
+        "appkey": prov.get("iys_appkey") or prov.get("appkey") or "",
+    }
+
+
+@router.post("/settings")
+async def iys_settings_post(p: IYSSettings, _=Depends(require_admin)):
+    """İYS marka kodu + appkey'i providers.netgsm bloğuna yazar (checkout bildirimi buradan okur)."""
+    upd = {"providers.netgsm.iys_brand_code": (p.brand_code or "").strip()}
+    # appkey boş gönderilirse mevcut değeri ezme; doluysa İYS alt-kullanıcı appkey'ine yaz.
+    if (p.appkey or "").strip():
+        upd["providers.netgsm.iys_appkey"] = p.appkey.strip()
+    await db.settings.update_one({"id": "notification_providers"}, {"$set": upd}, upsert=True)
+    return {"ok": True}
+
+
+@router.post("/test-connection")
+async def iys_test_connection(_=Depends(require_admin)):
+    """NetGSM İYS bağlantısını yan-etkisiz doğrular: kimlik eksikliği + NetGSM bakiye sorgusu."""
+    prov = await _netgsm_prov()
+    f = _iys_fields(prov)
+    attempts: List[dict] = []
+    missing = [lbl for lbl, v in (("kullanıcı", f["username"]), ("şifre", f["password"]),
+                                  ("marka kodu", f["brand_code"])) if not v]
+    if missing:
+        return {"ok": False, "message": "Eksik alan(lar): " + ", ".join(missing) +
+                ". İYS Ayarları'ndan marka kodunu, NetGSM bloğundan kullanıcı/şifreyi girin.",
+                "attempts": attempts}
+    # NetGSM kimlik doğrulama — bakiye sorgusu (SMS/İYS göndermez, yan etkisiz).
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r = await c.get("https://api.netgsm.com.tr/balance/list/get",
+                            params={"usercode": f["username"], "password": f["password"]})
+        body = (r.text or "").strip()
+        attempts.append({"mode": "netgsm-balance", "code": r.status_code})
+        # NetGSM hata kodları düz metin döner: 30/40/60/70/80/100 = hata; başarı = bakiye/kredi bilgisi.
+        err_prefixes = ("30", "40", "60", "70", "80", "100")
+        if r.status_code == 200 and body and not body.startswith(err_prefixes) and "hata" not in body.lower():
+            return {"ok": True,
+                    "message": f"NetGSM kimlik doğrulandı ✓ · Marka {f['brand_code']} · İYS bildirimi hazır.",
+                    "attempts": attempts}
+        code = body.split()[0] if body else "?"
+        return {"ok": False,
+                "message": f"NetGSM kimlik doğrulanamadı (kod {code}). Kullanıcı/şifreyi kontrol edin.",
+                "attempts": attempts}
+    except Exception as e:
+        attempts.append({"mode": "netgsm-balance", "error": str(e)})
+        return {"ok": False, "message": "NetGSM'e ulaşılamadı: " + str(e), "attempts": attempts}
 
 
 @router.post("/query")
