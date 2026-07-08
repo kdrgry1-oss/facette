@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, ChevronDown, Play, ArrowRight, Instagram } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, ArrowRight, Instagram } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";

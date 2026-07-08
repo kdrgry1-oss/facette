@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Save, RefreshCw, Trash2, Plus, Instagram as IgIcon, Link2, ExternalLink, Unplug } from "lucide-react";
+import { Save, RefreshCw, Trash2, Plus, Instagram as IgIcon, ExternalLink, Unplug } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
