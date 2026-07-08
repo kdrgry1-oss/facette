@@ -1624,6 +1624,7 @@ export default function AdminProducts() {
       short_description: product.short_description || "",
       price: product.price || 0,
       sale_price: product.sale_price || null,
+      size_advice: product.size_advice || "",
       category_name: product.category_name || "",
       categories: (() => {
         // Yaprak seçim: önce product.categories, yoksa category_id / category_name eşlemesi.
@@ -2651,6 +2652,20 @@ export default function AdminProducts() {
                           </div>
                           <span className="text-[11px] text-gray-400">satış fiyatından indirim</span>
                         </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Beden Önerisi (Kalıp)</label>
+                        <select
+                          value={formData.size_advice || ""}
+                          onChange={(e) => setFormData({ ...formData, size_advice: e.target.value })}
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all text-sm"
+                          title="Ürün sayfasında beden seçiminin yanında öneri yazısı çıkar"
+                        >
+                          <option value="">Belirtme</option>
+                          <option value="dar">Dar kalıp → bir beden büyük öner</option>
+                          <option value="normal">Normal kalıp → kendi bedenini al</option>
+                          <option value="bol">Bol kalıp → bir beden küçük öner</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL)</label>

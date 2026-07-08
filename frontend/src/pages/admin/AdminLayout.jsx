@@ -120,6 +120,27 @@ export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigation = useMemo(() => getNavigationFor(user?.id || user?.email), [user?.id, user?.email]);
 
+  // Panel 1 saat işlemsiz kalınca otomatik çıkış + filtre sıfırlama (güvenlik).
+  // Aktivite (fare/klavye/tık/scroll) olunca süre sıfırlanır. Hook'lar erken return'den ÖNCE.
+  useEffect(() => {
+    if (!user) return undefined;
+    let timer;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        try {
+          // Sayfa filtreleri genelde bileşen state'i; çıkışta sıfırlanır. Kalıcı filtre anahtarlarını temizle.
+          Object.keys(localStorage).forEach((k) => { if (/filter|filtre/i.test(k)) localStorage.removeItem(k); });
+        } catch (_) { /* yoksay */ }
+        logout();
+      }, 60 * 60 * 1000); // 1 saat
+    };
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => { clearTimeout(timer); events.forEach((e) => window.removeEventListener(e, reset)); };
+  }, [user, logout]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100">

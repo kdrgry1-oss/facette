@@ -727,6 +727,17 @@ export default function ProductDetail() {
                   )}
                 </span>
               </div>
+              {/* Beden önerisi — admin ürün formundaki "Kalıp" seçimine göre. */}
+              {product.size_advice && (
+                <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-black/50" />
+                  {product.size_advice === "dar"
+                    ? "Bu ürün dar kalıptır — bir beden büyük almanızı öneririz."
+                    : product.size_advice === "bol"
+                      ? "Bu ürün bol kalıptır — bir beden küçük almanızı öneririz."
+                      : "Standart kalıptır — normalde kullandığınız bedeni alabilirsiniz."}
+                </p>
+              )}
               <div className="flex items-end justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {

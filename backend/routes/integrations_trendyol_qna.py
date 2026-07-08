@@ -566,10 +566,44 @@ async def _one_review_page(client, target: str, content_id: str, page: int):
     return await client.send(req)
 
 
+def _review_proxy() -> str:
+    """Yorum çekimi için opsiyonel proxy. Trendyol Cloudflare'i datacenter/Railway IP'lerini 530
+    ile engellerse, buraya girilen proxy (residential/datacenter) üzerinden çekilir.
+    Sıra: env TRENDYOL_REVIEW_PROXY → db.settings(id=trendyol).review_proxy (sync okunamaz;
+    scrape_all onu _pin_state'e koyar)."""
+    return os.environ.get("TRENDYOL_REVIEW_PROXY") or _pin_state.get("proxy") or ""
+
+
 async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
-    """Trendyol public storefront'tan bir contentId'nin yorumlarını çeker (sayfalı, çoklu hedef).
-    Railway DNS public.trendyol.com'u çözemezse DoH IP'lerine bağlanır; her hedef Cloudflare 530/403
-    dönerse bir sonraki denenir. Çalışan hedef cache'lenir (sonraki ürünler hızlı geçer)."""
+    """Trendyol public storefront'tan bir contentId'nin yorumlarını çeker (sayfalı).
+    PROXY varsa: proxy üzerinden normal hostname ile çekilir (datacenter-IP 530 engelini aşar).
+    Proxy yoksa: Railway DNS çözemezse DoH IP'lerine bağlanır; her hedef 530/403 dönerse
+    bir sonraki denenir; çalışan hedef cache'lenir."""
+    proxy = _review_proxy()
+    if proxy:
+        # Proxy DNS'i kendi çözer; IP pin/SNI gerekmez, düz hostname yeterli.
+        api_url = (f"https://{_PUBLIC_HOST}/discovery-web-websfxsocialreviewrating-santral/"
+                   f"api/v1/reviews/{content_id}")
+        fetched: List[dict] = []
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True, proxy=proxy) as client:
+            page = 0
+            while page < max_pages:
+                resp = await client.get(api_url, params={"page": page, "size": 30, "order": "DESC", "orderBy": "Score"},
+                                        headers=_BROWSER_HEADERS)
+                if resp.status_code == 404:
+                    break
+                resp.raise_for_status()
+                rv = (resp.json().get("result") or {}).get("productReviews", {}).get("content", [])
+                if not rv:
+                    break
+                fetched.extend(rv)
+                total_pages = (resp.json().get("result") or {}).get("productReviews", {}).get("totalPages", 1) or 1
+                page += 1
+                if page >= total_pages:
+                    break
+        _pin_state["good"] = "proxy"
+        return fetched
+
     cands = _build_candidates()
     good = _pin_state["good"]
     order = ([good] if good != _UNSET and good in cands else []) + \
@@ -687,6 +721,9 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
     mode = settings.get("mode") or os.environ.get("TRENDYOL_MODE") or "live"
     if not (supplier_id and api_key and api_secret):
         raise HTTPException(status_code=400, detail="Trendyol kimlik bilgileri eksik")
+    # Opsiyonel yorum-proxy'si: Trendyol Cloudflare Railway IP'sini 530 ile engellerse, buradaki
+    # proxy üzerinden çekilir. Ayar: db.settings(id=trendyol).review_proxy VEYA env TRENDYOL_REVIEW_PROXY.
+    _pin_state["proxy"] = settings.get("review_proxy") or os.environ.get("TRENDYOL_REVIEW_PROXY") or ""
 
     # 1) barcode -> contentId haritası (Trendyol ürünleri; approved filtresi yok = en geniş)
     client = TrendyolClient(supplier_id=str(supplier_id), api_key=api_key, api_secret=api_secret, mode=mode)
@@ -788,6 +825,7 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
     # Teşhis: hangi bağlantı hedefi çalıştı / kaç aday denendi (530 sorunu için).
     debug["public_candidates"] = _pin_state.get("candidates")
     debug["public_good_target"] = None if _pin_state.get("good") in (_UNSET, None) else _pin_state.get("good")
+    debug["review_proxy_set"] = bool(_pin_state.get("proxy"))
     return summary
 
 
