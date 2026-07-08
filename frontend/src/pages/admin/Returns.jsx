@@ -250,12 +250,19 @@ export default function Returns() {
 
   // Gider Pusulası — MUHASEBE Excel'i (görseldeki kolon düzeni: Fatura Tarihi, Seri No,
   // Adı-Soyadı, Kdv Oranı, Tutar (VD), Vergi Hariç Tutar (Y), Kdv (Y)). KDV oranına göre
-  // gruplanmış, negatif tutarlarla. Site + Trendyol ORTAK seri → tümü tek dosyada.
+  // gruplanmış, negatif tutarlarla. Site + Trendyol + Hepsiburada TÜM pusulalar tek dosyada,
+  // seçili tarih aralığında. (Sekme-başına ayrı Excel butonları KALDIRILDI — tek kaynak burası.)
   const [gpExporting, setGpExporting] = useState(false);
+  const [gpFrom, setGpFrom] = useState("");
+  const [gpTo, setGpTo] = useState("");
   const exportGiderPusulasi = async () => {
     setGpExporting(true);
     try {
-      const res = await fetch(`${API}/orders/returns/gider-pusulasi/export`, {
+      const params = new URLSearchParams();
+      if (gpFrom) params.append("date_from", gpFrom);
+      if (gpTo) params.append("date_to", gpTo);
+      const qs = params.toString();
+      const res = await fetch(`${API}/orders/returns/gider-pusulasi/export${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
       if (!res.ok) throw new Error("export failed");
@@ -460,22 +467,28 @@ export default function Returns() {
                 Toplu Yazdır ({selectedIds.size})
               </button>
             )}
-            {platform !== "facette" && (
-              <button onClick={exportExcel} disabled={exporting}
-                data-testid="export-excel-btn"
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50">
+            {/* TEK Excel: tüm gider pusulaları (site + Trendyol + Hepsiburada), seçili tarih
+                aralığında, muhasebe formatında (KDV oranına göre gruplu). Sekme-başına ayrı
+                Excel butonları KALDIRILDI. */}
+            <div className="flex items-end gap-2 flex-wrap">
+              <div className="flex flex-col">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Baş. Tarihi</label>
+                <input type="date" value={gpFrom} onChange={(e) => setGpFrom(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              <div className="flex flex-col">
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Bit. Tarihi</label>
+                <input type="date" value={gpTo} onChange={(e) => setGpTo(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+              </div>
+              <button onClick={exportGiderPusulasi} disabled={gpExporting}
+                data-testid="export-gider-pusulasi-btn"
+                title="Tüm gider pusulalarını (seçili tarih aralığında) muhasebe formatında Excel indir"
+                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
                 <Download size={16} />
-                {exporting ? "Hazırlanıyor..." : "Excel"}
+                {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
               </button>
-            )}
-            {/* Gider Pusulası MUHASEBE Excel'i — site + Trendyol tüm pusulalar, KDV oranına göre */}
-            <button onClick={exportGiderPusulasi} disabled={gpExporting}
-              data-testid="export-gider-pusulasi-btn"
-              title="Tüm gider pusulalarını muhasebe formatında (KDV oranına göre) Excel indir"
-              className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
-              <Download size={16} />
-              {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
-            </button>
+            </div>
             {/* Manuel "Güncelle" kaldırıldı — iadeler 5 dk'da bir otomatik güncelleniyor. */}
           </div>
         </div>

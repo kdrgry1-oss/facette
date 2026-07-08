@@ -389,17 +389,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
           İade / kısmi iade durumundaki siparişler.
           {totalReturns > 0 && <span className="ml-1 font-medium text-gray-800">Toplam {totalReturns} iade siparişi.</span>}
         </div>
-        {/* Manuel "Siparişleri Çek" / "Tarihleri Düzelt" kaldırıldı — veriler otomatik
-            (5 dk'da bir) güncelleniyor. Yalnız Excel dışa aktarım kaldı. */}
-        <button
-          onClick={exportExcel}
-          disabled={exporting}
-          title="İade siparişlerini (mevcut filtreyle) Excel olarak indir"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-bold hover:bg-green-700 disabled:opacity-60"
-        >
-          <Download size={15} />
-          {exporting ? "Hazırlanıyor…" : "Excel'e Aktar"}
-        </button>
+        {/* Sekme-başına ayrı Excel butonları KALDIRILDI. Tek Excel (tüm gider pusulaları,
+            tarih aralıklı, muhasebe formatı) İadeler ekranının üst araç çubuğundadır. */}
       </div>
 
       {/* İade durum sekmeleri — Trendyol sekmeleriyle birebir görsel dil (oval/pill) */}
