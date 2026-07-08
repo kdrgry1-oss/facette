@@ -367,44 +367,13 @@ async def scrape_trendyol_reviews(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Yorum çekme hatası: {e}")
 
-    inserted = 0
-    skipped_low_rating = 0
-    skipped_existing = 0
-
-    for r in fetched:
-        rating = int(r.get("rate") or 0)
-        if rating < min_rating:
-            skipped_low_rating += 1
-            continue
-        review_id = str(r.get("id") or "")
-        if not review_id:
-            continue
-        existing = await db.product_reviews.find_one(
-            {"source": "trendyol_public", "external_id": review_id}, {"_id": 1}
-        )
-        if existing:
-            skipped_existing += 1
-            continue
-
-        comment_date = r.get("commentDateISOtype") or r.get("lastModifiedDate") or ""
-        doc = {
-            "id": generate_id(),
-            "external_id": review_id,
-            "source": "trendyol_public",
-            "product_id": local_pid or None,
-            "trendyol_content_id": content_id,
-            "rating": rating,
-            "title": r.get("commentTitle") or "",
-            "comment": r.get("comment") or "",
-            "user_name": r.get("userFullName") or "Trendyol Müşterisi",
-            "is_verified": bool(r.get("verifiedPurchase")),
-            "is_seller_verified": bool(r.get("sellerVerified")),
-            "approved": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "comment_date": comment_date,
-        }
-        await db.product_reviews.insert_one(doc)
-        inserted += 1
+    # Depolama + tarih normalizasyonu tek yerden (robust _store_reviews): gerçek yorum tarihini
+    # otomatik-algılar, mevcut yorumların tarihini günceller.
+    _res = await _store_reviews(fetched, local_pid, content_id, min_rating)
+    inserted = _res["inserted"]
+    updated = _res.get("updated", 0)
+    skipped_low_rating = _res["skipped_low_rating"]
+    skipped_existing = _res.get("skipped_existing", 0)
 
     if local_pid:
         agg = await db.product_reviews.aggregate([
@@ -431,6 +400,7 @@ async def scrape_trendyol_reviews(
         "content_id": content_id,
         "fetched": len(fetched),
         "inserted": inserted,
+        "updated": updated,
         "skipped_low_rating": skipped_low_rating,
         "skipped_existing": skipped_existing,
         "min_rating": min_rating,
@@ -713,14 +683,44 @@ def _parse_ty_date(val) -> str:
     return ""
 
 
+def _looks_like_date(v) -> bool:
+    """Değer tarih-benzeri mi? epoch(ms/sn), ISO string veya 'GG Ay YYYY' Türkçe metin."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        # makul aralık: 2015-01-01 .. 2035-01-01 (sn ve ms olarak)
+        return 1.42e9 <= v <= 2.05e9 or 1.42e12 <= v <= 2.05e12
+    if isinstance(v, str):
+        s = v.strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}", s):  # ISO
+            return True
+        # 'GG Ay YYYY' Türkçe/İngilizce ay adı
+        if re.match(r"^\d{1,2}\s+[A-Za-zçÇğĞıİöÖşŞüÜ]+\s+\d{4}", s):
+            return True
+    return False
+
+
 def _review_raw_date(r: dict):
-    """Ham yorum objesinden tarih değerini (hangi alanda olursa) alır."""
-    for k in ("commentDateISOtype", "lastModifiedDate", "commentDate", "date", "createdDate",
-              "creationDate", "reviewDate", "commentDateText", "formattedDate", "commentDateHumanized"):
+    """Ham yorum objesinden tarih değerini alır. Önce bilinen alan adlarını dener,
+    bulamazsa TÜM alanları tarih-benzeri değer için tarar (Trendyol alan adını değiştirse de çalışır)."""
+    # 1) Bilinen alan adları (öncelik sırası)
+    for k in ("commentDateISOtype", "commentDateISO", "lastModifiedDate", "commentDate", "date",
+              "createdDate", "createdAt", "creationDate", "reviewDate", "commentDateText",
+              "formattedDate", "commentDateHumanized", "lastModified"):
         v = r.get(k)
-        if v:
+        if v and _looks_like_date(v):
             return v
-    return ""
+    # 2) Otomatik tarama: adında 'date'/'time'/'tarih' geçen alanları öncele
+    best = ""
+    for k, v in r.items():
+        if not _looks_like_date(v):
+            continue
+        kl = str(k).lower()
+        if any(w in kl for w in ("date", "time", "tarih", "created", "modified")):
+            return v          # en olası alan
+        if not best:
+            best = v          # tarih-benzeri ilk değer (yedek)
+    return best
 
 
 async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_id: str, min_rating: int) -> dict:

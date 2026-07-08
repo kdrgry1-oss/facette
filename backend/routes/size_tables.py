@@ -43,7 +43,7 @@ def render_size_table_image(
     brand: str = "FACETTE",
     unit: str = "cm",
 ) -> bytes:
-    """Render a 1200x1800 PNG size-table for storefront/integrator usage."""
+    """Render a 1200x1800 JPEG size-table with a mannequin silhouette (suudcollection-tarzı)."""
     W, H = 1200, 1800
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
@@ -53,6 +53,7 @@ def render_size_table_image(
     font_th = _find_font(30)
     font_td = _find_font(28)
     font_brand = _find_font(80)
+    font_sm = _find_font(26)
 
     # Header band
     draw.rectangle([(0, 0), (W, 160)], fill=(17, 24, 39))  # near-black
@@ -62,13 +63,51 @@ def render_size_table_image(
     # Meta line
     draw.text((60, 190), f"Tüm ölçüler {unit} cinsindendir.", fill=(107, 114, 128), font=font_subtitle)
 
-    # Table geometry
-    table_top = 260
-    table_left = 60
+    # --- MANKEN SİLUETİ (sol panel) + ölçü çizgileri ---
+    # Ölçü sütun adlarına göre hangi çizgilerin gösterileceğini belirle.
+    _col_lower = [str(c).lower() for c in columns]
+    def _has(*keys):
+        return any(any(k in c for k in keys) for c in _col_lower)
+    cx = 290  # siluet merkez x
+    # (yarı_genişlik, y) profili — düz omuz üstü / göğüs / bel / kalça / etek
+    profile = [(150, 342), (150, 385), (138, 560), (146, 615), (92, 800), (148, 1010), (128, 1245), (120, 1320)]
+    right_pts = [(cx + hw, y) for hw, y in profile]
+    left_pts = [(cx - hw, y) for hw, y in reversed(profile)]
+    draw.polygon(right_pts + left_pts, fill=(236, 238, 242), outline=(190, 196, 206))
+    # Ölçü seviyeleri: (etiket, y, aktif mi) — etiketler tabloya değmeden SAĞA hizalanır.
+    levels = [
+        ("Omuz", 385, _has("omuz", "shoulder")),
+        ("Göğüs", 585, _has("göğüs", "gogus", "bust", "chest")),
+        ("Bel", 800, _has("bel", "waist")),
+        ("Kalça", 1010, _has("kalça", "kalca", "hip", "basen")),
+    ]
+    for label, y, active in levels:
+        if not active:
+            continue
+        hw = 150
+        # kısa kesikli yatay ölçü çizgisi (formun içinden geçer)
+        for xseg in range(cx - hw, cx + hw, 24):
+            draw.line([(xseg, y), (min(xseg + 14, cx + hw), y)], fill=(154, 52, 18), width=3)
+        txt = label.upper()
+        tw = draw.textlength(txt, font=font_sm)
+        lx = 540 - tw  # etiket sağ kenarı tablodan (560) önce biter
+        draw.text((lx, y - 18), txt, fill=(60, 60, 68), font=font_sm)
+        # siluet kenarından etikete uzanan gösterge çizgisi + nokta
+        draw.line([(cx + hw, y), (lx - 14, y)], fill=(154, 52, 18), width=3)
+        draw.ellipse([(cx + hw - 4, y - 4), (cx + hw + 4, y + 4)], fill=(154, 52, 18))
+    # Boy oku (sol kenar)
+    draw.line([(120, 320), (120, 1290)], fill=(150, 156, 166), width=3)
+    draw.polygon([(112, 330), (128, 330), (120, 312)], fill=(150, 156, 166))
+    draw.polygon([(112, 1280), (128, 1280), (120, 1298)], fill=(150, 156, 166))
+    draw.text((70, 780), "BOY", fill=(120, 126, 136), font=font_sm)
+
+    # Table geometry — sağ panele kaydırıldı (siluete yer aç)
+    table_top = 300
+    table_left = 560
     table_right = W - 60
     table_width = table_right - table_left
-    # First column wider for size label
-    col_size_w = 180
+    # First column narrower (beden etiketi)
+    col_size_w = 120
     rest_cols = max(1, len(columns))
     col_w = (table_width - col_size_w) / rest_cols
     row_h = 78

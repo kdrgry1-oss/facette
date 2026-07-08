@@ -125,9 +125,28 @@ async def top_products(
         {"$sort": {"revenue": -1}},
         {"$limit": limit},
     ]
-    out = []
+    raw = []
     async for r in db.orders.aggregate(pipeline):
-        out.append({"product_id": r["_id"].get("pid"), "name": r["_id"].get("name"), "qty": r["qty"], "revenue": round(r["revenue"], 2), "orders": r["orders"]})
+        raw.append(r)
+    # Ürün adları/stok: order item'ında boş olabilir (özellikle pazaryeri) → products'tan doldur.
+    pids = [r["_id"].get("pid") for r in raw if r["_id"].get("pid")]
+    prod_map = {}
+    if pids:
+        async for p in db.products.find({"id": {"$in": pids}},
+                                        {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1}):
+            variants = p.get("variants") or []
+            stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
+            prod_map[p["id"]] = {"name": p.get("name") or "", "stock": stock}
+    out = []
+    for r in raw:
+        pid = r["_id"].get("pid")
+        pm = prod_map.get(pid, {})
+        name = pm.get("name") or r["_id"].get("name") or "(isimsiz ürün)"
+        out.append({
+            "product_id": pid, "name": name,
+            "qty": r["qty"], "revenue": round(r["revenue"], 2), "orders": r["orders"],
+            "current_stock": pm.get("stock", None),
+        })
     return {"items": out}
 
 
