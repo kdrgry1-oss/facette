@@ -468,12 +468,33 @@ async def scrape_trendyol_reviews_bulk(
 # ============================================================================
 
 _PUBLIC_HOST = "public.trendyol.com"
-_pin_state = {"done": False, "ip": None}
+# _NO_PIN sentinel = hostname'e doğrudan bağlan (pin yok). good=_UNSET → henüz çalışan hedef yok.
+_NO_PIN = "__hostname__"
+_UNSET = "__unset__"
+_pin_state = {"resolved": False, "candidates": [], "good": _UNSET, "ip": None}
+
+# Cloudflare 530/1016 çoğunlukla datacenter IP'sine WAF şüphesiyle döner. Gerçek tarayıcı
+# başlıkları (Referer/Origin/Accept-Language/sec-ch-ua) bu şüpheyi büyük ölçüde azaltır.
+_BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.trendyol.com/",
+    "Origin": "https://www.trendyol.com",
+    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+}
 
 
-def _resolve_public_ip_via_doh():
-    """public.trendyol.com'un GERÇEK A kaydını DNS-over-HTTPS ile çözer.
-    Cloudflare DoH (1.1.1.1) sabit IP — Railway DNS'e bağımlı değil. SNI cloudflare-dns.com."""
+def _resolve_public_ips_via_doh() -> List[str]:
+    """public.trendyol.com'un TÜM A kayıtlarını DNS-over-HTTPS ile çözer (birden fazla IP).
+    Cloudflare/Google DoH sabit IP — Railway özel DNS'ine bağımlı değil."""
+    ips: List[str] = []
     for doh_ip, sni in (("1.1.1.1", "cloudflare-dns.com"), ("8.8.8.8", "dns.google")):
         try:
             with httpx.Client(timeout=10) as c:
@@ -486,80 +507,107 @@ def _resolve_public_ip_via_doh():
                 resp = c.send(req)
                 resp.raise_for_status()
                 for ans in resp.json().get("Answer", []):
-                    if ans.get("type") == 1 and ans.get("data"):  # A record
-                        return ans["data"]
+                    if ans.get("type") == 1 and ans.get("data") and ans["data"] not in ips:
+                        ips.append(ans["data"])
+            if ips:
+                break
         except Exception:
             continue
-    return None
+    return ips
+
+
+def _build_candidates() -> List[str]:
+    """Denenecek bağlantı hedefleri (sıralı): hostname (Railway çözebiliyorsa) → DoH IP'leri →
+    çözülebilen Trendyol anycast IP'leri. Idempotent (bir kez çözer, cache'ler)."""
+    if _pin_state["resolved"]:
+        return _pin_state["candidates"]
+    _pin_state["resolved"] = True
+    cands: List[str] = []
+    try:
+        socket.gethostbyname(_PUBLIC_HOST)
+        cands.append(_NO_PIN)   # DNS çözülüyor → doğrudan hostname
+    except Exception:
+        pass
+    for ip in _resolve_public_ips_via_doh():
+        if ip not in cands:
+            cands.append(ip)
+    for alt in ("apigw.trendyol.com", "www.trendyol.com", "api.trendyol.com"):
+        try:
+            ip = socket.gethostbyname(alt)
+            if ip not in cands:
+                cands.append(ip)
+        except Exception:
+            continue
+    if not cands:
+        cands.append(_NO_PIN)   # son çare
+    _pin_state["candidates"] = cands
+    _pin_state["ip"] = next((c for c in cands if c != _NO_PIN), None)  # teşhis için
+    return cands
 
 
 def _pin_public_trendyol_if_needed():
-    """
-    Railway private DNS (fd12::10) public.trendyol.com'u çözemiyor. Önce DoH ile GERÇEK
-    public.trendyol.com IP'sini çözeriz (apigw anycast IP'si farklı Cloudflare origin —
-    530 veriyordu). Fetch bu IP'ye bağlanır; TLS SNI + cert + Host header public.trendyol.com
-    kalır (httpx sni_hostname extension). DNS'e dokunmaz. Idempotent.
-    """
-    if _pin_state["done"]:
-        return
-    _pin_state["done"] = True
-    try:
-        socket.gethostbyname(_PUBLIC_HOST)
-        return  # zaten çözülüyor — pin gereksiz, ip None kalır (normal URL kullanılır)
-    except Exception:
-        pass
-    # 1) DoH ile gerçek IP (en doğru — doğru origin'e gider)
-    ip = _resolve_public_ip_via_doh()
-    if ip:
-        _pin_state["ip"] = ip
-        return
-    # 2) fallback: çözülebilen Trendyol/Cloudflare host IP'si (anycast denemesi)
-    for alt in ("apigw.trendyol.com", "api.trendyol.com", "www.trendyol.com"):
-        try:
-            _pin_state["ip"] = socket.gethostbyname(alt)
-            return
-        except Exception:
-            continue
+    """Geriye dönük uyumluluk — adaylar bir kez çözülür."""
+    _build_candidates()
+
+
+async def _one_review_page(client, target: str, content_id: str, page: int):
+    """Tek sayfa istek. target=_NO_PIN → hostname; aksi halde IP'ye bağlan, Host+SNI korunur."""
+    pin = None if target == _NO_PIN else target
+    base = f"https://{pin}" if pin else f"https://{_PUBLIC_HOST}"
+    api_url = (f"{base}/discovery-web-websfxsocialreviewrating-santral/"
+               f"api/v1/reviews/{content_id}")
+    params = {"page": page, "size": 30, "order": "DESC", "orderBy": "Score"}
+    headers = dict(_BROWSER_HEADERS)
+    if pin:
+        headers["Host"] = _PUBLIC_HOST
+    req = client.build_request("GET", api_url, params=params, headers=headers)
+    if pin:
+        req.extensions["sni_hostname"] = _PUBLIC_HOST.encode("ascii")  # TLS SNI + cert = public.trendyol.com
+    return await client.send(req)
 
 
 async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pages: int = 10) -> List[dict]:
-    """Trendyol public storefront API'sinden bir contentId'nin yorumlarını çeker (sayfalı).
-    Railway DNS public.trendyol.com'u çözemezse, çözülebilen Cloudflare IP'sine bağlanır;
-    TLS SNI + cert doğrulama + HTTP Host header public.trendyol.com kalır (httpx sni_hostname
-    extension), Cloudflare anycast doğru origin'e yönlendirir."""
-    _pin_public_trendyol_if_needed()
-    pin_ip = _pin_state["ip"]
-    base = f"https://{pin_ip}" if pin_ip else f"https://{_PUBLIC_HOST}"
-    api_url = (
-        f"{base}/discovery-web-websfxsocialreviewrating-santral/"
-        f"api/v1/reviews/{content_id}"
-    )
-    fetched: List[dict] = []
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        page = 0
-        while page < max_pages:
-            params = {"page": page, "size": 30, "order": "DESC", "orderBy": "Score"}
-            headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-            if pin_ip:
-                headers["Host"] = _PUBLIC_HOST
-            req = client.build_request("GET", api_url, params=params, headers=headers)
-            if pin_ip:
-                # TLS SNI + cert verification hostname'i public.trendyol.com olur
-                req.extensions["sni_hostname"] = _PUBLIC_HOST.encode("ascii")
-            resp = await client.send(req)
-            if resp.status_code == 404:
-                break
-            resp.raise_for_status()
-            data = resp.json()
-            reviews = (data.get("result") or {}).get("productReviews", {}).get("content", [])
-            if not reviews:
-                break
-            fetched.extend(reviews)
-            total_pages = (data.get("result") or {}).get("productReviews", {}).get("totalPages", 1)
-            page += 1
-            if page >= total_pages:
-                break
-    return fetched
+    """Trendyol public storefront'tan bir contentId'nin yorumlarını çeker (sayfalı, çoklu hedef).
+    Railway DNS public.trendyol.com'u çözemezse DoH IP'lerine bağlanır; her hedef Cloudflare 530/403
+    dönerse bir sonraki denenir. Çalışan hedef cache'lenir (sonraki ürünler hızlı geçer)."""
+    cands = _build_candidates()
+    good = _pin_state["good"]
+    order = ([good] if good != _UNSET and good in cands else []) + \
+            [c for c in cands if c != good]
+
+    last_err = None
+    _BAD = {403, 429, 500, 502, 503, 520, 521, 522, 523, 524, 525, 526, 530}
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        for target in order:
+            try:
+                resp = await _one_review_page(client, target, content_id, 0)
+                if resp.status_code in _BAD:
+                    last_err = f"HTTP {resp.status_code} @ {target}"
+                    continue
+                if resp.status_code == 404:
+                    _pin_state["good"] = target   # bu hedef çalışıyor (ürünün yorumu yok sadece)
+                    return []
+                resp.raise_for_status()
+                _pin_state["good"] = target        # çalışan hedefi sabitle
+                data = resp.json()
+                fetched: List[dict] = list((data.get("result") or {}).get("productReviews", {}).get("content", []))
+                total_pages = (data.get("result") or {}).get("productReviews", {}).get("totalPages", 1) or 1
+                page = 1
+                while page < min(max_pages, total_pages):
+                    r2 = await _one_review_page(client, target, content_id, page)
+                    if r2.status_code != 200:
+                        break
+                    rv2 = (r2.json().get("result") or {}).get("productReviews", {}).get("content", [])
+                    if not rv2:
+                        break
+                    fetched.extend(rv2)
+                    page += 1
+                return fetched
+            except Exception as e:
+                last_err = str(e)[:140]
+                continue
+    # Hiçbir hedef çalışmadı — çağıran (sync_all) hatayı özet errors'a yazar.
+    raise Exception(f"tum hedefler basarisiz ({len(order)} denendi): {last_err}")
 
 
 async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_id: str, min_rating: int) -> dict:
@@ -737,6 +785,9 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
         if not dry_run:
             await _recalc_product_rating(pid)
 
+    # Teşhis: hangi bağlantı hedefi çalıştı / kaç aday denendi (530 sorunu için).
+    debug["public_candidates"] = _pin_state.get("candidates")
+    debug["public_good_target"] = None if _pin_state.get("good") in (_UNSET, None) else _pin_state.get("good")
     return summary
 
 
