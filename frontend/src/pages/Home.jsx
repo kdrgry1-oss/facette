@@ -306,7 +306,8 @@ function HeroEditorial({ block, isFirst = false }) {
       ref={sectionRef}
       data-testid="hero-editorial"
       className="relative w-full overflow-hidden bg-stone-100"
-      style={{ height: "100vh" }}
+      // İlk hero: üstteki siyah duyuru barıyla arasında beyaz boşluk/çizgi kalmasın diye yukarı çek.
+      style={{ height: "100vh", marginTop: isFirst ? "-2px" : 0 }}
     >
       {images.map((img, i) => {
         const cap = captions[i] || {};
@@ -688,7 +689,7 @@ function RotatingText({ block }) {
 
   return (
     <div
-      className="text-center py-1 border-b border-gray-100"
+      className="text-center py-1"
       style={{ backgroundColor: bg }}
       data-testid="rotating-text"
     >
