@@ -5033,6 +5033,7 @@ def _resolve_return_selection(all_items, sel_items, sel_idx):
     def _inorm(v):
         return " ".join(str(v or "").strip().lower().split())
     _sel = []
+    # 1) ÖNCE kimlik (barcode/ad+beden+renk) — index kaymasına dayanıklı.
     if isinstance(sel_items, list) and sel_items:
         for want in sel_items:
             if not isinstance(want, dict):
@@ -5050,9 +5051,9 @@ def _resolve_return_selection(all_items, sel_items, sel_idx):
                 if w_key[0] and w_key == it_key:
                     _sel.append(i)
                     break
-        if not _sel:
-            raise ValueError("Seçilen kalemler iade kaydında bulunamadı — sayfayı yenileyip tekrar deneyin")
-    elif isinstance(sel_idx, list) and sel_idx:
+    # 2) Kimlik TUTMADIYSA index'e düş (sel_items ile sel_idx birlikte gönderilir; kimlik
+    #    drift'inde SESSİZCE tam iadeye düşmek yerine index seçimini kullan → kısmi korunur).
+    if not _sel and isinstance(sel_idx, list) and sel_idx:
         for _i in sel_idx:
             try:
                 _i = int(_i)
@@ -5060,8 +5061,9 @@ def _resolve_return_selection(all_items, sel_items, sel_idx):
                 continue
             if 0 <= _i < len(all_items):
                 _sel.append(_i)
-        if not _sel:
-            raise ValueError("Seçilen kalemler iade kaydıyla eşleşmedi — sayfayı yenileyip tekrar deneyin")
+    # 3) Bir seçim İSTENDİ ama hiçbir şey çözülemediyse hata ver (sessizce tam iadeye düşme).
+    if (sel_items or sel_idx) and not _sel:
+        raise ValueError("Seçilen kalemler iade kaydında bulunamadı — sayfayı yenileyip tekrar deneyin")
     return sorted(set(_sel))
 
 
@@ -6122,6 +6124,43 @@ async def recompute_site_vouchers(payload: Optional[dict] = Body(default=None),
             failed += 1
             errors.append({"return_id": rid, "detail": str(e)[:120]})
     return {"success": True, "recomputed": recomputed, "failed": failed, "errors": errors[:50]}
+
+
+@router.post("/returns/vouchers/set-number")
+async def set_voucher_number(payload: dict = Body(...),
+                             current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """Kesilmiş bir gider pusulasının SERİ/TAKİP numarasını elle değiştirir.
+    Anahtar: return_id (site) | claim_id (Trendyol/HB) | order_number (site fallback).
+    Numara idempotenttir; bağlı sipariş/claim üzerindeki gider_pusulasi_no da güncellenir."""
+    return_id = str(payload.get("return_id") or "").strip()
+    claim_id = str(payload.get("claim_id") or "").strip()
+    order_number = str(payload.get("order_number") or "").strip()
+    new_no = str(payload.get("display_number") or payload.get("number") or "").strip()
+    if not new_no:
+        raise HTTPException(status_code=400, detail="Numara boş olamaz")
+    if return_id:
+        q = {"return_id": return_id}
+    elif claim_id:
+        q = {"claim_id": claim_id}
+    elif order_number:
+        q = {"order_number": order_number}
+    else:
+        raise HTTPException(status_code=400, detail="return_id / claim_id / order_number gerekli")
+    gp = await db.gider_pusulasi.find_one(q, {"_id": 0, "return_id": 1, "claim_id": 1, "order_number": 1})
+    if not gp:
+        raise HTTPException(status_code=404, detail="Gider pusulası bulunamadı")
+    await db.gider_pusulasi.update_one(q, {"$set": {"display_number": new_no}})
+    # Bağlı sipariş / claim üzerindeki gider_pusulasi_no'yu da güncelle (panelde tutarlı görünür).
+    _rid = gp.get("return_id")
+    if _rid:
+        _r = await db.customer_returns.find_one({"id": _rid}, {"_id": 0, "order_id": 1})
+        if _r and _r.get("order_id"):
+            await db.orders.update_one({"id": _r["order_id"]}, {"$set": {"gider_pusulasi_no": new_no}})
+    if gp.get("claim_id"):
+        await db.trendyol_claims.update_one({"claim_id": gp["claim_id"]}, {"$set": {"gider_pusulasi_no": new_no}})
+    if gp.get("order_number"):
+        await db.orders.update_one({"order_number": gp["order_number"]}, {"$set": {"gider_pusulasi_no": new_no}})
+    return {"success": True, "display_number": new_no}
 
 
 # ============================================================================

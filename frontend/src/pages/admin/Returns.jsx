@@ -655,7 +655,17 @@ export default function Returns() {
                 const totalNet = (claim.refund_amount != null && claim.refund_amount !== "")
                   ? Number(claim.refund_amount) : _itemsNet;
                 const isExpanded = expandedId === claim.claim_id;
-                const isActioned = !!claim.panel_action;
+                // ONAYLANDI mı? (panel butonu VEYA claim durumu VEYA gider pusulası/onay damgası).
+                // Böylece dropdown'dan/senkrondan "Accepted" olan iade de ONAYLI sayılır → "Bekliyor"
+                // ile karışmaz ve yeşil "İade Onayla" butonu tekrar bastırmaz.
+                const isApproved = claim.panel_action === "approved"
+                  || claim.claim_status === "Accepted"
+                  || !!claim.return_approved_at
+                  || !!claim.has_gider_pusulasi;
+                const isRejected = claim.panel_action === "issued"
+                  || ["Rejected", "Cancelled"].includes(claim.claim_status);
+                const badgeAction = isApproved ? "approved" : (isRejected ? "issued" : (claim.panel_action || "pending"));
+                const isActioned = !!claim.panel_action || isApproved || isRejected;
 
                 return (
                   <tr key={claim.claim_id} className={`${selectedIds.has(claim.claim_id) ? "bg-blue-50" : "hover:bg-gray-50"} transition-colors`}>
@@ -718,14 +728,20 @@ export default function Returns() {
                                     </label>
                                   ))}
                                 </div>
-                                {!isActioned && !claim.manual && (
+                                {!claim.manual && (isApproved ? (
+                                  <span
+                                    title="Bu iade zaten onaylanmış — tekrar onaylanamaz"
+                                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-600 border border-green-200 rounded-lg text-xs font-bold cursor-not-allowed opacity-70 select-none">
+                                    <Check size={13} /> İade Onaylandı
+                                  </span>
+                                ) : !isActioned && (
                                   <button onClick={() => handleApprove(claim, Array.from(selIds))}
                                     data-testid={`approve-items-${claim.claim_id}`}
                                     disabled={selIds.size === 0}
                                     className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 disabled:opacity-50">
                                     <Check size={13} /> Seçili {selIds.size} ürünü İade Onayla
                                   </button>
-                                )}
+                                ))}
                               </>
                             );
                           })()}
@@ -775,7 +791,7 @@ export default function Returns() {
                             {ORDER_RETURN_STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
                         ) : (<>
-                        <ActionBadge action={claim.panel_action} />
+                        <ActionBadge action={badgeAction} />
                         <select
                           value={claim.claim_status || ""}
                           onChange={(e) => changeClaimStatus(claim.claim_id, e.target.value)}

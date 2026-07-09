@@ -118,6 +118,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const [perms, setPerms] = useState([]);
   const [wf, setWf] = useState(null); // iade işlem akışı modal'ı
   const [selItems, setSelItems] = useState({}); // açılır detayda tiklenen kalemler: { "orderId::index": true }
+  const [editGpNo, setEditGpNo] = useState(null); // gider pusulası no inline düzenleme: { id, value }
   const [cargoSel, setCargoSel] = useState({}); // kargo satırı tiklendi mi: { orderId: true }
   const [freeShipFee, setFreeShipFee] = useState(0); // ücretsiz-kargo mahsup tutarı (ayarlardan)
   // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
@@ -410,6 +411,22 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
     } finally { setBusyId(""); }
   };
 
+  // Gider pusulası numarasını elle değiştir (satırdaki #no'ya tıklayınca inline düzenlenir).
+  const saveGpNo = async (r) => {
+    const val = String(editGpNo?.value || "").trim();
+    if (!val) { setEditGpNo(null); return; }
+    try {
+      setBusyId(r.id);
+      await axios.post(`${API}/orders/returns/vouchers/set-number`,
+        { order_number: r.order_number, display_number: val }, auth());
+      toast.success("Gider pusulası numarası güncellendi");
+      setEditGpNo(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Numara güncellenemedi");
+    } finally { setBusyId(""); }
+  };
+
   const wfCanAct = can("returns.approve") || can("returns.reject") || can("returns.expense_note") || can("returns.refund_pay");
 
   // Bu iade daha önce karara bağlandı mı? (modal'da Onayla/Reddet'i soluklaştırmak için)
@@ -555,9 +572,22 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         {r.gider_pusulasi_no && (
-                          <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
-                            #{r.gider_pusulasi_no}
-                          </span>
+                          editGpNo?.id === r.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input autoFocus value={editGpNo.value} disabled={busyId === r.id}
+                                onChange={(e) => setEditGpNo({ id: r.id, value: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === "Enter") saveGpNo(r); if (e.key === "Escape") setEditGpNo(null); }}
+                                className="w-24 text-[11px] font-mono border border-purple-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-300" />
+                              <button onClick={() => saveGpNo(r)} disabled={busyId === r.id} className="text-green-600 hover:text-green-700" title="Kaydet"><CheckCircle size={14} /></button>
+                              <button onClick={() => setEditGpNo(null)} className="text-gray-400 hover:text-gray-600" title="Vazgeç"><XCircle size={14} /></button>
+                            </span>
+                          ) : (
+                            <span onClick={() => can("returns.expense_note") && setEditGpNo({ id: r.id, value: r.gider_pusulasi_no })}
+                              className={`text-[11px] font-mono font-bold text-purple-700 px-1 ${can("returns.expense_note") ? "cursor-pointer hover:underline" : ""}`}
+                              title={can("returns.expense_note") ? "Numarayı değiştirmek için tıkla" : "Gider Pusulası Takip No"}>
+                              #{r.gider_pusulasi_no}
+                            </span>
+                          )
                         )}
                         {/* Gider pusulası YALNIZCA onaylanan iadelerde oluşturulur (talep/kargoda
                             aşamasında gösterilmez). Zaten pusulası olanlarda yeniden yazdırmak için kalır. */}
