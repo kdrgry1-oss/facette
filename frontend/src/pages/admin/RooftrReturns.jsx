@@ -100,8 +100,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / PER_PAGE));
   const _cpage = Math.min(cpage, pageCount);
   const pageRows = sortedRows.slice((_cpage - 1) * PER_PAGE, _cpage * PER_PAGE);
-  // Filtre / arama / sıralama değişince ilk sayfaya dön.
-  useEffect(() => { setCpage(1); }, [debounced, statusFilter, paymentFilter, sort.key, sort.dir]);
+  // Liste (filtre/arama sonrası yeniden yüklenince) veya sıralama değişince ilk sayfaya dön.
+  useEffect(() => { setCpage(1); }, [rows, sort.key, sort.dir]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [redating, setRedating] = useState(false);
