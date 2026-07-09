@@ -28,7 +28,7 @@
  * =============================================================================
  */
 import { useState, useEffect, useRef } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search, ExternalLink } from "lucide-react";
 import JourneyFunnel from "./JourneyFunnel";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
@@ -104,7 +104,6 @@ export default function AdminOrders({ unpaidView = false }) {
     influencer: "", is_corporate: ""
   });
   const [searchTick, setSearchTick] = useState(0);
-  const [showHidden, setShowHidden] = useState(false); // gizlenen (iptal/iade/ödenmemiş) siparişleri de göster
   const applyFilters = () => { setPage(1); setSearchTick((t) => t + 1); };
   const onFilterKey = (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } };
   // Genel arama "debounce": kullanıcı yazmayı ~350ms bırakınca arama OTOMATİK
@@ -174,7 +173,7 @@ export default function AdminOrders({ unpaidView = false }) {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, pageSize, unpaidView, searchTick, showHidden]);
+  }, [page, pageSize, unpaidView, searchTick]);
 
   // Görünüm kalıcılığı: yenilemede YALNIZ sayfa + sayfa boyutu korunur.
   // NOT: arama ve gelişmiş filtreler BİLİNÇLİ olarak saklanmaz → yenilemede sıfırlanır.
@@ -199,8 +198,7 @@ export default function AdminOrders({ unpaidView = false }) {
       // Liste varsayilan olarak kapali statuler haric; aktif gelismis filtre varsa tum siparislerde arar.
       let url = `${API}/orders?page=${page}&limit=${pageSize}&payment_view=${unpaidView ? "unpaid" : "valid"}`;
       const anyFilter = Object.values(filters).some((v) => v);
-      if (showHidden) url += `&show_hidden=1`;            // gizlenenleri (iptal/iade/ödenmemiş) de göster
-      else if (!anyFilter) url += `&hide_closed=1`;
+      if (!anyFilter) url += `&hide_closed=1`;
       Object.keys(filters).forEach((key) => { if (filters[key]) url += `&${key}=${encodeURIComponent(filters[key])}`; });
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       if (_seq !== _ordReqSeq.current) return; // eski yanıt — daha yeni bir istek yolda, yok say
@@ -926,24 +924,12 @@ export default function AdminOrders({ unpaidView = false }) {
     <div data-testid="admin-orders">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">{unpaidView ? "Ödeme Kaydı Bulunmayan Siparişler" : "Siparişler"}</h1>
-        <div className="flex items-center gap-2">
-          {!unpaidView && (
-            <button
-              onClick={() => { setShowHidden((v) => !v); setPage(1); }}
-              title="Gizlenen siparişleri de göster: iptal / iade / refund + ödemesi tamamlanmamış siparişler ana listede görünür."
-              className={`flex items-center gap-2 px-4 py-2 border rounded text-sm transition-colors ${showHidden ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600' : 'hover:bg-gray-50'}`}
-            >
-              {showHidden ? <Eye size={16} /> : <EyeOff size={16} />}
-              {showHidden ? "Gizlenenler Açık" : "Gizlenenleri Göster"}
-            </button>
-          )}
-          <button
-            onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
-            className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
-          >
-            <Filter size={16} /> Gelişmiş Filtreler
-          </button>
-        </div>
+        <button
+          onClick={() => setAdvancedFiltersOpen(!advancedFiltersOpen)}
+          className={`flex items-center gap-2 px-4 py-2 border rounded hover:bg-gray-50 text-sm ${advancedFiltersOpen ? 'bg-gray-100 border-gray-300' : ''}`}
+        >
+          <Filter size={16} /> Gelişmiş Filtreler
+        </button>
       </div>
 
       {/* Gelişmiş Filtreler Paneli */}
