@@ -52,6 +52,38 @@ async def auto_cancel_unpaid_havale_orders():
                 )
                 await _restock_order_once(order, "havale_auto_cancel")
                 cancelled += 1
+                # Müşteriye bildirim: "Siparişiniz ödeme yapılmadığı için iptal edildi" (SMS+e-posta).
+                # Standart 'order_cancelled' event'i (Ayarlar → Bildirimler → 'Sipariş İptal Edildi').
+                try:
+                    from notification_service import send_notification
+                    from routes.orders import _order_notify_vars
+                    _addr = order.get("shipping_address") or {}
+                    _phone = _addr.get("phone") or order.get("phone")
+                    _email = _addr.get("email") or order.get("email")
+                    _ch = None
+                    _label = "İptal Edildi"
+                    try:
+                        from order_statuses import get_status_config, customer_label_for
+                        _cfg = await get_status_config(db)
+                        _nz = (_cfg.get("notify") or {}).get("cancelled") or {}
+                        _ch = [c for c in ("sms", "email") if _nz.get(c)] or None
+                        _label = customer_label_for("cancelled")
+                    except Exception:
+                        pass
+                    if _ch is None:
+                        _ch = (["email"] if _email else []) + (["sms"] if _phone else [])
+                    _vars = await _order_notify_vars(
+                        order, status_label=_label,
+                        cancel_reason="72 saat içinde havale ödemesi yapılmadı",
+                    )
+                    if _ch:
+                        await send_notification(
+                            db, "order_cancelled",
+                            to_phone=_phone, to_email=_email,
+                            variables=_vars, channels=_ch,
+                        )
+                except Exception as _e_notif:
+                    logger.warning(f"[scheduler] havale-cancel notif failed for {order.get('order_number')}: {_e_notif}")
             except Exception as e_item:
                 logger.error(f"Failed to cancel order {order.get('order_number')}: {e_item}")
         if cancelled:

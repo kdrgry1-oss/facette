@@ -5610,8 +5610,8 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
 async def export_gider_pusulasi_excel(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    source: Optional[str] = None,   # site | trendyol | hepsiburada | all(None)
-    only_refunded: bool = True,     # yalnız İADE BEDELİ ÖDENMİŞ pusulalar (varsayılan)
+    source: Optional[str] = None,   # site | trendyol | hepsiburada | all(None) → TÜMÜ (varsayılan)
+    only_refunded: bool = False,    # False=TÜM iade durumları; True=yalnız iade bedeli ödenmiş
     current_user: dict = Depends(require_permission("returns.expense_note")),
 ):
     """Gider pusulalarını MUHASEBE formatında Excel'e aktarır (görseldeki kolon düzeni):
@@ -5637,7 +5637,8 @@ async def export_gider_pusulasi_excel(
             dr["$lte"] = tr_day_end_utc(date_to)
         query["date"] = dr
 
-    records = await db.gider_pusulasi.find(query, {"_id": 0}).sort("number", 1).to_list(None)
+    # EN YENİ ÜSTTE: tarihe göre azalan (date yoksa created_at). Excel'de en yeni pusula en üstte.
+    records = await db.gider_pusulasi.find(query, {"_id": 0}).sort([("date", -1), ("number", -1)]).to_list(None)
 
     # SADECE İADE BEDELİ ÖDENMİŞ pusulalar: iade "refunded/partial_refunded" olmuş VEYA
     # siparişte refund_paid_at işaretli olanlar. (Site iadesi 'İade Bedeli Öde' ile refunded olur;
