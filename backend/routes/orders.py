@@ -5542,7 +5542,18 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     else:
         _sel = list(range(len(all_items)))
         items = list(all_items)
-    is_full = len(all_items) > 0 and len(_sel) >= len(all_items)
+    # TAM İADE mi? Seçim, iade KAYDININ kalemlerine göre DEĞİL, SİPARİŞİN kalemlerine göre
+    # ölçülür: customer_returns kaydı siparişin ALT KÜMESİ olabilir (müşteri yalnız 1 ürün iade
+    # talep etmiş → kayıtta tek kalem). Kaydın "tümü" seçili olsa bile bu KISMİ iadedir; aksi
+    # halde order.total (TÜM sipariş + vade farkı) baz alınıp tek ürüne tüm tutar yazılırdı
+    # (W10331 hatası: Nerel'e 3.150,90 yazması). Adet bazında siparişle kıyaslarız.
+    _order_items = order.get("items") or []
+    _ord_qty = sum(int((i or {}).get("quantity", 1) or 1) for i in _order_items)
+    _sel_qty = sum(int((all_items[i] or {}).get("quantity", 1) or 1) for i in _sel if 0 <= i < len(all_items))
+    if _ord_qty > 0:
+        is_full = _sel_qty >= _ord_qty and len(_sel) >= len(_order_items)
+    else:
+        is_full = len(all_items) > 0 and len(_sel) >= len(all_items)
 
     def _q(it):
         return int(it.get("quantity", 1) or 1)
