@@ -634,8 +634,26 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                 <label key={i} className={`flex items-center gap-3 text-xs text-gray-900 border rounded-md px-2.5 py-1.5 cursor-pointer ${sel ? "bg-orange-50 border-orange-300" : "bg-white"}`}>
                                   <input type="checkbox" checked={sel} onChange={() => toggleItem(r.id, i)} className="shrink-0" />
                                   <span className="truncate max-w-[260px]">{it.name || "—"}</span>
-                                  <span className="whitespace-nowrap">{it.qty} ad. × {fmtTL(it.price)}</span>
-                                  <span className="font-semibold whitespace-nowrap">{fmtTL((Number(it.qty) || 1) * (Number(it.price) || 0))}</span>
+                                  <span className="whitespace-nowrap text-gray-500">{it.qty} ad. × {fmtTL(it.price)}</span>
+                                  {(() => {
+                                    // Sipariş-seviyesi indirim (kupon vb.) kalemlere ORANSAL dağıtılır —
+                                    // gider pusulasındaki kalem neti ile birebir aynı mantık. Satırda göster.
+                                    const g = (Number(it.qty) || 1) * (Number(it.price) || 0);
+                                    const dr = (Number(r.subtotal) > 0 && Number(r.discount) > 0)
+                                      ? Math.min(1, Number(r.discount) / Number(r.subtotal)) : 0;
+                                    const dShare = g * dr;
+                                    const net = g - dShare;
+                                    return dr > 0.0001 ? (
+                                      <span className="whitespace-nowrap inline-flex items-center gap-2"
+                                        title={`Brüt ${fmtTL(g)} · indirim payı %${(dr * 100).toFixed(0)} (−${fmtTL(dShare)}) · net ${fmtTL(net)}`}>
+                                        <span className="text-gray-400 line-through">{fmtTL(g)}</span>
+                                        <span className="text-orange-600">−{fmtTL(dShare)} <span className="text-[10px]">(%{(dr * 100).toFixed(0)})</span></span>
+                                        <span className="font-semibold text-gray-900">{fmtTL(net)}</span>
+                                      </span>
+                                    ) : (
+                                      <span className="font-semibold whitespace-nowrap">{fmtTL(g)}</span>
+                                    );
+                                  })()}
                                   {it.barcode && <span className="text-gray-700">#{it.barcode}</span>}
                                   {it.size && <span className="text-gray-700">Beden: {it.size}</span>}
                                   {it.color && <span className="text-gray-700">Renk: {it.color}</span>}
