@@ -655,6 +655,104 @@ async def get_order(
     return order
 
 
+@router.get("/{order_id}/journey")
+async def order_customer_journey(order_id: str, current_user: dict = Depends(require_admin)):
+    """Müşteri yolculuğu / attribution HUNİSİ: müşteri hangi kaynaktan (organik / reklam-kampanya /
+    influencer / pazaryeri) gelmiş, hangi kampanya/kreatif, referrer, giriş sayfası, kaç ziyaret sonra
+    hangi ürünü satın almış. Sipariş attribution snapshot + oturum touches (ziyaret sırası) + influencer."""
+    order = await db.orders.find_one(
+        {"id": order_id},
+        {"_id": 0, "attribution": 1, "click_ids": 1, "influencer_id": 1, "influencer_via": 1,
+         "items": 1, "created_at": 1, "order_number": 1, "platform": 1, "marketplace": 1,
+         "coupon_code": 1, "customer_ip": 1},
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    attr = order.get("attribution") or {}
+    clicks = {k: v for k, v in (order.get("click_ids") or {}).items() if v}
+
+    # Oturum yolculuğu (ziyaret sırası) — en fazla 20 touch saklanır.
+    touches = []
+    sid = attr.get("session_id")
+    if sid:
+        sess = await db.attribution_sessions.find_one(
+            {"session_id": sid},
+            {"_id": 0, "touches": 1, "first_touch": 1, "last_touch": 1, "visit_count": 1, "device": 1},
+        ) or {}
+        touches = sess.get("touches") or []
+
+    # Influencer
+    influencer = None
+    if order.get("influencer_id"):
+        inf = await db.influencers.find_one(
+            {"id": order["influencer_id"]},
+            {"_id": 0, "name": 1, "handle": 1, "platform": 1, "follower_count": 1},
+        )
+        if inf:
+            influencer = {"name": inf.get("name"), "handle": inf.get("handle"),
+                          "platform": inf.get("platform"), "followers": inf.get("follower_count"),
+                          "via": order.get("influencer_via")}
+
+    # Reklam mı? (gclid/fbc/ttclid tıklama kimliği VEYA ücretli medium)
+    _mkt = ["trendyol", "hepsiburada", "temu"]
+    is_marketplace = (order.get("platform") in _mkt) or (order.get("marketplace") in _mkt)
+    medium = (attr.get("medium") or "").lower()
+    is_ad = bool(clicks.get("gclid") or clicks.get("fbc") or clicks.get("ttclid") or clicks.get("fbclid")
+                 or medium in ("cpc", "ppc", "paid", "paid_social", "display", "paidsocial"))
+    ad_platform = ("Google Ads" if clicks.get("gclid") else
+                   "Meta (FB/IG)" if (clicks.get("fbc") or clicks.get("fbclid")) else
+                   "TikTok" if clicks.get("ttclid") else
+                   (attr.get("source") or "").title() if is_ad else "")
+
+    if is_marketplace:
+        kind = "pazaryeri"
+    elif influencer:
+        kind = "influencer"
+    elif is_ad:
+        kind = "reklam"
+    elif attr.get("channel") and attr.get("channel") not in ("direct", ""):
+        kind = "organik"
+    else:
+        kind = "direct"
+
+    return {
+        "order_number": order.get("order_number"),
+        "purchased_at": order.get("created_at"),
+        "kind": kind,                       # pazaryeri | influencer | reklam | organik | direct
+        "is_ad": is_ad,
+        "ad_platform": ad_platform,
+        "attribution": {
+            "channel": attr.get("channel", ""),
+            "source": attr.get("source", ""),
+            "medium": attr.get("medium", ""),
+            "campaign": attr.get("campaign", ""),     # kampanya id/adı (utm_campaign)
+            "content": attr.get("content", ""),       # reklam kreatifi (utm_content)
+            "term": attr.get("term", ""),
+            "referrer": attr.get("referrer", ""),     # nereden geldi (ör. instagram.com)
+            "landing_page": attr.get("landing_page", ""),  # ilk gördüğü sayfa/görsel
+            "device": attr.get("device", ""),
+            "touches_count": attr.get("touches_count", len(touches)),
+        },
+        "click_ids": clicks,
+        "influencer": influencer,
+        "coupon_code": order.get("coupon_code", ""),
+        "touches": [
+            {"ts": t.get("ts"), "channel": t.get("channel"), "source": t.get("utm_source"),
+             "medium": t.get("utm_medium"), "campaign": t.get("utm_campaign"),
+             "content": t.get("utm_content"), "referrer": t.get("referrer"),
+             "landing_page": t.get("landing_page"), "device": t.get("device")}
+            for t in touches
+        ],
+        "products": [
+            {"name": it.get("name") or it.get("product_name") or it.get("productName") or "Ürün",
+             "image": it.get("image"), "qty": it.get("quantity", 1),
+             "product_id": it.get("product_id"), "slug": it.get("slug") or it.get("product_slug"),
+             "barcode": it.get("barcode")}
+            for it in (order.get("items") or [])
+        ],
+    }
+
+
 @router.get("/{order_id}/events")
 async def get_order_events(
     order_id: str,

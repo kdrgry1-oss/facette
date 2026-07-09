@@ -28,7 +28,8 @@
  * =============================================================================
  */
 import { useState, useEffect } from "react";
-import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search } from "lucide-react";
+import { FolderOpen, RefreshCw, Printer, FileText, FileCheck, MessageSquare, Package, Truck, Tag, CheckSquare, Square, Trash2, Filter, Search, ExternalLink } from "lucide-react";
+import JourneyFunnel from "./JourneyFunnel";
 import axios from "axios";
 import OrderEventsLog from "../../components/admin/OrderEventsLog";
 import MultiSelect from "../../components/admin/MultiSelect";
@@ -1481,27 +1482,12 @@ export default function AdminOrders({ unpaidView = false }) {
                     Faturayı Sıfırla
                   </button>
                 )}
-                {!selectedOrder.cargo?.tracking_number && !selectedOrder.cargo_tracking_number ? (
-                  <>
-                    <button 
-                      onClick={() => handleCreateMngShipment(selectedOrder.id)}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700"
-                    >
-                      <Truck size={16} />
-                      DHL E-Commerce ile Gönder
-                    </button>
-                    <button 
-                      onClick={() => openShipModal(selectedOrder.id)}
-                      className="flex items-center gap-2 px-4 py-2 border text-sm rounded hover:bg-gray-50"
-                    >
-                      <Truck size={16} />
-                      Manuel Kargo
-                    </button>
-                  </>
-                ) : (
+                {/* Kargo oluşturma (DHL E-Commerce / Manuel Kargo) ve 'Onay SMS' butonları
+                    kaldırıldı — istek üzerine. Kargo takip no VARSA etiket + kargo SMS kalır. */}
+                {(selectedOrder.cargo?.tracking_number || selectedOrder.cargo_tracking_number) && (
                   <>
                     {selectedOrder.platform === 'trendyol' && selectedOrder.cargo_tracking_number ? (
-                      <button 
+                      <button
                         onClick={() => handleTrendyolPrintLabel(selectedOrder.cargo_tracking_number)}
                         className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
                       >
@@ -1509,7 +1495,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         Trendyol Etiketi Yazdır
                       </button>
                     ) : (
-                      <button 
+                      <button
                         onClick={() => handlePrintLabel(selectedOrder.id)}
                         className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
                       >
@@ -1517,7 +1503,7 @@ export default function AdminOrders({ unpaidView = false }) {
                         Etiket Yazdır
                       </button>
                     )}
-                    <button 
+                    <button
                       onClick={() => handleSendShippingSMS(selectedOrder.id)}
                       className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
                     >
@@ -1525,15 +1511,6 @@ export default function AdminOrders({ unpaidView = false }) {
                       Kargo SMS
                     </button>
                   </>
-                )}
-                {!selectedOrder.sms_confirmation_sent && (
-                  <button 
-                    onClick={() => handleSendConfirmationSMS(selectedOrder.id)}
-                    className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm rounded hover:bg-teal-700"
-                  >
-                    <MessageSquare size={16} />
-                    Onay SMS
-                  </button>
                 )}
                 <button 
                   onClick={() => window.print()}
@@ -1809,10 +1786,23 @@ export default function AdminOrders({ unpaidView = false }) {
               <div className="border rounded">
                 <h3 className="font-medium p-4 border-b">Sipariş Kalemleri</h3>
                 <div className="divide-y">
-                  {(editMode ? editData.items : (selectedOrder.lines?.length > 0 ? selectedOrder.lines : selectedOrder.items))?.map((item, i) => (
+                  {(editMode ? editData.items : (selectedOrder.lines?.length > 0 ? selectedOrder.lines : selectedOrder.items))?.map((item, i) => {
+                    // Ürüne tıklayınca aç: slug varsa storefront ürün sayfası, yoksa isim/barkodla arama (yeni sekme).
+                    const _pname = item.productName || item.product_name || item.name || "Ürün";
+                    const _pslug = item.slug || item.product_slug;
+                    const _phref = _pslug
+                      ? `/${_pslug}`
+                      : (_pname && _pname !== "Ürün"
+                          ? `/arama?q=${encodeURIComponent(_pname)}`
+                          : (item.barcode ? `/arama?q=${encodeURIComponent(item.barcode)}` : null));
+                    return (
                     <div key={i} className="flex items-start justify-between p-4 gap-4">
                       <div className="flex items-start gap-4 flex-1 min-w-0">
-                        {item.image && <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100 rounded shrink-0" />}
+                        {item.image && (
+                          _phref
+                            ? <a href={_phref} target="_blank" rel="noopener noreferrer" className="shrink-0" title="Ürünü aç"><img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100 rounded shrink-0 hover:opacity-80 transition-opacity" /></a>
+                            : <img src={item.image} alt="" className="w-16 h-20 object-cover bg-gray-100 rounded shrink-0" />
+                        )}
                         {editMode ? (
                           <div className="flex-1 space-y-1 min-w-0">
                             <input className="border rounded px-2 py-1 text-sm w-full font-medium" placeholder="Ürün adı" value={item.productName ?? item.product_name ?? item.name ?? ""} onChange={(e) => setItem(i, _nameKeyOf(item), e.target.value)} />
@@ -1823,7 +1813,13 @@ export default function AdminOrders({ unpaidView = false }) {
                           </div>
                         ) : (
                           <div>
-                            <p className="font-medium">{item.productName || item.product_name || item.name || "Ürün"}</p>
+                            {_phref ? (
+                              <a href={_phref} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 hover:text-blue-600 hover:underline inline-flex items-center gap-1" title="Ürünü aç">
+                                {_pname} <ExternalLink size={12} className="opacity-60" />
+                              </a>
+                            ) : (
+                              <p className="font-medium">{_pname}</p>
+                            )}
                             {item.size && <p className="text-sm text-gray-500">Beden: {item.size}</p>}
                             <p className="text-sm text-gray-500">Adet: {item.quantity}</p>
                             {item.brand && <p className="text-sm text-gray-500">Marka: {item.brand}</p>}
@@ -1856,9 +1852,15 @@ export default function AdminOrders({ unpaidView = false }) {
                         )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* Müşteri Yolculuğu / Attribution Hunisi — düzenleme modunda gizle */}
+              {!editMode && selectedOrder?.id && (
+                <JourneyFunnel orderId={selectedOrder.id} />
+              )}
 
               {/* Totals */}
               <div className="p-4 bg-gray-50 rounded space-y-2">
