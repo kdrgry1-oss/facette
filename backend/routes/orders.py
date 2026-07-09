@@ -5977,6 +5977,20 @@ async def export_gider_pusulasi_excel(
             if net > 0.009:
                 by_rate = {float(default_rate): net}
 
+        # FATURA MUTABAKATI (VADE FARKI DÜZELTMESİ): pusulanın toplam neti (totals.net) faturayı
+        # yansıtır — fatura grand total = paidPrice = ürün + kargo + VADE FARKI (KDV Kanunu 24/c,
+        # %20). Kesilen ESKİ pusulalarda vade/kargo satırı items dizisine yazılmamış olabildiğinden
+        # kalem toplamı totals.net'in ALTINDA kalır → Excel eksik tutar gösterirdi. Eksik farkı,
+        # faturadaki gibi %20 KDV'li (vade farkı/kargo) satır olarak ekleyip pusulayı totals.net'e
+        # BİREBİR eşitleriz. Böylece 658 mevcut pusula RE-CUT GEREKMEDEN faturayla örtüşür.
+        # Yeni pusulalar (vade satırı zaten items'ta) ve pazaryeri pusulaları (items zaten
+        # total_net'e mutabık) için fark 0 → ÇİFT SAYIM OLMAZ.
+        _net_target = _round2(totals.get("net") or 0)
+        if _net_target > 0.009 and by_rate:
+            _short = _round2(_net_target - _round2(sum(by_rate.values())))
+            if _short >= 0.01:
+                by_rate[20.0] = _round2(by_rate.get(20.0, 0.0) + _short)
+
         # Her oran grubu → bir satır (yüksek orandan düşüğe, kargo/vade üstte görünür).
         for rate in sorted(by_rate.keys(), reverse=True):
             gross = by_rate[rate]
