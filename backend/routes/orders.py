@@ -417,10 +417,13 @@ async def get_orders(
     elif str(hide_closed).lower() in ("0", "false"):
         # Açıkça "kapalı durumları da göster" istendi → durum filtresi uygulanmaz.
         pass
-    elif search:
-        # GENEL ARAMA: kullanıcı belirli bir siparişi arıyor → TÜM durumlarda ara (iptal/iade/
-        # refund dahil). Varsayılan "kapalı durumları gizle" filtresi ARAMADA UYGULANMAZ; aksi
-        # halde iptal/iade olmuş bir sipariş (ör. iade edilmiş Trendyol siparişi) hiç bulunamaz.
+    elif (search or order_number or invoice_number or cargo_tracking
+          or phone or email or coupon_code):
+        # BELİRLİ SİPARİŞ ARAMASI: genel arama VEYA Sipariş No / Fatura No / Kargo No / Telefon /
+        # E-posta / Kupon alanlarından biri girildiyse kullanıcı belirli bir siparişi arıyor →
+        # TÜM durumlarda ara (iptal/iade/refund dahil). Varsayılan "kapalı durumları gizle"
+        # filtresi UYGULANMAZ; aksi halde iade/iptal olmuş bir sipariş (ör. iade edilmiş sipariş)
+        # Sipariş No alanına yazılsa bile bulunamaz. (Önceden yalnız genel arama bunu aşıyordu.)
         pass
     else:
         # VARSAYILAN: ana "Tüm Siparişler" görünümünde iptal/İADE grubu kapalı durumları GİZLE.
