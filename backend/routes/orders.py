@@ -412,6 +412,11 @@ async def get_orders(
     elif str(hide_closed).lower() in ("0", "false"):
         # Açıkça "kapalı durumları da göster" istendi → durum filtresi uygulanmaz.
         pass
+    elif search:
+        # GENEL ARAMA: kullanıcı belirli bir siparişi arıyor → TÜM durumlarda ara (iptal/iade/
+        # refund dahil). Varsayılan "kapalı durumları gizle" filtresi ARAMADA UYGULANMAZ; aksi
+        # halde iptal/iade olmuş bir sipariş (ör. iade edilmiş Trendyol siparişi) hiç bulunamaz.
+        pass
     else:
         # VARSAYILAN: ana "Tüm Siparişler" görünümünde iptal/İADE grubu kapalı durumları GİZLE.
         # Böylece iade TALEBİ oluşan sipariş de ana listede KALMAZ, İadeler sayfasına "gider".
@@ -630,11 +635,11 @@ async def list_deleted_orders(
     """Silinen (arşivlenen) siparişler — orders_deleted koleksiyonundan, en yeni üstte."""
     q = {}
     if search:
-        q["$or"] = [
-            {"order_number": {"$regex": search, "$options": "i"}},
-            {"shipping_address.phone": {"$regex": search, "$options": "i"}},
-            {"shipping_address.email": {"$regex": search, "$options": "i"}},
-        ]
+        # Ana sipariş aramasıyla AYNI kapsam (pazaryeri paket no, fatura, kargo, ad-soyad,
+        # telefon, ürün vb.) → silinen bir Trendyol siparişi paket no ile de bulunur.
+        _ors = _order_search_or(search)
+        if _ors:
+            q["$or"] = _ors
     try:
         limit = max(1, min(int(limit), 200))
         page = max(1, int(page))
@@ -5798,6 +5803,29 @@ async def export_gider_pusulasi_excel(
     def _claim_platform(c):
         return "hepsiburada" if str(c.get("platform") or "").lower() == "hepsiburada" else "trendyol"
 
+    # ── DURUM SÜZGECİ (kullanıcı talebi): Excel'e SADECE onaylanan/tamamlanan/ödenen iadeler girer.
+    # DAHİL: iade onaylandı, iade tamamlandı, (kısmi) iade tamamlandı/ödendi, iade bedeli ödendi,
+    #        onay sonrası kargoda/teslim alındı + Trendyol/HB "Accepted".
+    # HARİÇ: reddedilenler, iptal edilenler, sadece "iade talebi oluşturuldu" / henüz işlemde olanlar.
+    _DENY_STATUS = {
+        "return_requested", "created", "pending", "preparing", "shipped",
+        "return_rejected", "rejected", "cancelled", "canceled", "expired",
+        "error", "exception", "undelivered",
+        "waitinginaction", "inanalysis", "unresolved",  # TY/HB: onaylanmamış/işlemde
+    }
+    def _status_ok(st):
+        return str(st or "").strip().lower() not in _DENY_STATUS
+
+    # Site iade durum haritaları (voucher kaydında durum yok → return_id / order_number ile bağla).
+    ret_status_by_id, ret_status_by_num = {}, {}
+    async for _r in db.customer_returns.find(
+            {}, {"_id": 0, "id": 1, "status": 1, "order_number": 1}):
+        _st = _r.get("status") or ""
+        if _r.get("id"):
+            ret_status_by_id[str(_r["id"])] = _st
+        if _r.get("order_number"):
+            ret_status_by_num.setdefault(str(_r["order_number"]), _st)
+
     # ── 1) Var olan gider pusulaları (kesilmiş) — doğru seri + düzeltilmiş tutar ──
     all_vouchers = await db.gider_pusulasi.find({}, {"_id": 0}).to_list(None)
     seen_claim, seen_return = set(), set()
@@ -5819,6 +5847,12 @@ async def export_gider_pusulasi_excel(
                 continue
             if gp.get("return_id"):
                 seen_return.add(str(gp.get("return_id")))
+        # durum: claim ise claim_status; site ise return/order durumundan
+        if cid:
+            gp["_status"] = claim_by_id.get(cid, {}).get("claim_status", "")
+        else:
+            gp["_status"] = (ret_status_by_id.get(str(gp.get("return_id") or ""))
+                             or ret_status_by_num.get(str(gp.get("order_number") or "")) or "")
         records.append(gp)
 
     # only_refunded (opsiyonel; UI'daki tek buton bunu False geçer): sadece kesilmiş +
@@ -5876,6 +5910,7 @@ async def export_gider_pusulasi_excel(
                 "order_number": c.get("order_number", ""),
                 "items": syn_items,
                 "totals": {"net": _net if _net not in (None, "") else 0, "vat_rate": 10},
+                "_status": c.get("claim_status", ""),
             })
 
         # ── 3) Pusulası kesilmemiş SİTE iadeleri → satır sentezle ──
@@ -5914,10 +5949,27 @@ async def export_gider_pusulasi_excel(
                     "order_number": r.get("order_number", ""),
                     "items": syn_items,
                     "totals": {"net": 0, "vat_rate": 10},
+                    "_status": r.get("status", ""),
                 })
 
     # EN YENİ ÜSTTE: birleşik listeyi tarihe göre azalan sırala.
     records.sort(key=lambda g: str(g.get("date") or g.get("created_at") or ""), reverse=True)
+
+    # Durumu bilinmeyen (voucher return_id/order eşleşmedi) kayıtlar için sipariş durumuna bak.
+    _unknown_onums = list({str(g.get("order_number")) for g in records
+                           if not g.get("_status") and g.get("order_number")})
+    if _unknown_onums:
+        _ostat = {}
+        async for o in db.orders.find(
+                {"order_number": {"$in": _unknown_onums}},
+                {"_id": 0, "order_number": 1, "status": 1}):
+            _ostat[str(o.get("order_number"))] = o.get("status") or ""
+        for g in records:
+            if not g.get("_status"):
+                g["_status"] = _ostat.get(str(g.get("order_number")), "")
+
+    # SADECE izin verilen durumlar: reddedilen / iptal / sadece-talep / işlemde HARİÇ.
+    records = [g for g in records if _status_ok(g.get("_status"))]
 
     # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
     pids = set()
