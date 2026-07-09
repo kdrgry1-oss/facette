@@ -666,6 +666,37 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           <div className="text-xs text-gray-400">Ürün kalemi yok.</div>
                         )}
 
+                        {/* Seçili kalemlerin iade tutarı — İYZİCO'YA GİRİLECEK TUTAR.
+                            KISMİ (bazı kalemler): KARGO HARİÇ (yalnız ürün neti). TAM (hepsi):
+                            kargo DAHİL. Backend hesabıyla (product net × (1−indirim oranı)) birebir. */}
+                        {selCount(r.id) > 0 && (() => {
+                          // İndirim YALNIZ ürünlere (payda = ara toplam, kargo HARİÇ) — kargoya indirim
+                          // uygulanmaz (kargo %20 KDV, ürün %10; matrah karışmasın). Backend ile aynı.
+                          const _base = Number(r.subtotal);
+                          const dr = (_base > 0 && Number(r.discount) > 0)
+                            ? Math.min(1, Number(r.discount) / _base) : 0;
+                          let selNet = 0, selN = 0;
+                          (r.items || []).forEach((it, i) => {
+                            if (!selItems[`${r.id}::${i}`]) return;
+                            selN += 1;
+                            selNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr);
+                          });
+                          const totalItems = (r.items || []).length;
+                          const isFullSel = totalItems > 0 && selN >= totalItems;
+                          // TAM iade → müşterinin gerçekte ödediği tutar (kargo + varsa vade farkı dahil).
+                          // KISMİ → yalnız seçili ürün netleri (kargo hariç). Backend ile aynı.
+                          const total = isFullSel ? (Number(r.charged_total) || Number(r.total) || selNet) : selNet;
+                          return (
+                            <div className="mt-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-1.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                              <span>{isFullSel ? "İade net tutarı (kargo dahil)" : "İade net tutarı (kargo hariç)"}: <b>{fmtTL(total)}</b></span>
+                              <span className="text-[10px] font-normal text-gray-500">gider pusulası neti · iyzico'da ilgili ürün kalemini iade et (kargo kalemini seçme)</span>
+                              {Number(r.vade_farki) > 0 && (
+                                <span className="text-[10px] font-normal text-amber-600">taksitli: vade farkı payı gider pusulasında eklenir</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         {/* Kargo bedeli — tek anlam: "kargoyu müşteriden KES (mahsup)".
                             Kusur müşterideyse (bana uymadı vb.) işaretle → iade tutarından düşülür.
                             Tam iadede de tiklenebilir: işaretliyse net = ödenen − kargo. */}

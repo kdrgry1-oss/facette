@@ -189,24 +189,50 @@ def _build_initialize_payload(order: dict, callback_url: str) -> dict:
     bill_city = (bill.get("city") or city).strip()
     bill_zip = str(bill.get("postal_code") or bill.get("zip_code") or zipcode)
 
-    # ----- Sepet kalemleri (toplamı price'a eşit olmalı; indirim paidPrice'tan düşülür) -----
-    basket_items = []
+    # ----- Sepet kalemleri -----
+    # İNDİRİM YALNIZ ÜRÜNLERE: kupon/kampanya indirimini ÜRÜN satırlarına oransal işleriz; kargo/
+    # hediye/hizmet TAM kalır. Amaç: iyzico da indirimi kargoya YAYMASIN. Tam fiyat + düşük paidPrice
+    # gönderirsek iyzico farkı TÜM kalemlere (kargo dahil) kendi dağıtır → kargo indirimli görünür,
+    # KDV matrahı karışır. Bunun yerine ürünleri indirimli gönderip price=paidPrice yaparız →
+    # iyzico'nun redistribüte edeceği fark kalmaz; kalemler bizim muhasebemizle birebir olur.
+    _prods = []
     items_sum = 0.0
     for it in (order.get("items") or []):
         qty = int(it.get("quantity") or 1)
         line = round(float(it.get("price") or 0) * qty, 2)
         items_sum += line
+        _prods.append([it, line])
+
+    shipping_cost = float(order.get("shipping_cost") or 0)
+    gift_price = float(order.get("gift_wrap_price") or 0)
+    cod_fee = 10.0 if order.get("payment_method") == "cash_on_delivery" else 0.0
+
+    # Sipariş-seviyesi indirim = tam sepet − ödenen (order.total). Kargoya/ekstralara DEĞİL,
+    # yalnız ürün satırlarına dağıtılır.
+    _full = round(items_sum + shipping_cost + gift_price + cod_fee, 2)
+    _raw_total = round(float(order.get("total") or 0), 2)
+    _order_disc = round(max(0.0, _full - _raw_total), 2) if _raw_total > 0.009 else 0.0
+    if _order_disc > 0.009 and items_sum > 0.009:
+        _ratio = _order_disc / items_sum
+        for p in _prods:
+            p[1] = round(p[1] * (1 - _ratio), 2)
+        # YUVARLAMA MUTABAKATI (iyzico şartı: sepet toplamı = price, kuruşu kuruşuna): ürün
+        # satırları toplamı hedefe (ürün brüt − indirim) BİREBİR eşitlenir; fark son ürüne yazılır.
+        _prod_target = round(items_sum - _order_disc, 2)
+        _cur = round(sum(p[1] for p in _prods), 2)
+        _d = round(_prod_target - _cur, 2)
+        if _prods and abs(_d) >= 0.01:
+            _prods[-1][1] = round(_prods[-1][1] + _d, 2)
+
+    basket_items = []
+    for it, line in _prods:
         basket_items.append({
             "id": str(it.get("product_id") or it.get("id") or "item"),
             "name": (it.get("name") or "Ürün")[:200],
             "category1": (it.get("category") or it.get("category_name") or "Giyim")[:60],
             "itemType": "PHYSICAL",
-            "price": _fmt(line),
+            "price": _fmt(max(0.0, line)),
         })
-
-    shipping_cost = float(order.get("shipping_cost") or 0)
-    gift_price = float(order.get("gift_wrap_price") or 0)
-    cod_fee = 10.0 if order.get("payment_method") == "cash_on_delivery" else 0.0
 
     if shipping_cost > 0:
         basket_items.append({"id": "shipping", "name": "Kargo Ücreti", "category1": "Kargo", "itemType": "VIRTUAL", "price": _fmt(shipping_cost)})
@@ -215,7 +241,10 @@ def _build_initialize_payload(order: dict, callback_url: str) -> dict:
     if cod_fee > 0:
         basket_items.append({"id": "cod-fee", "name": "Kapıda Ödeme Hizmeti", "category1": "Hizmet", "itemType": "VIRTUAL", "price": _fmt(cod_fee)})
 
-    price = round(items_sum + shipping_cost + gift_price + cod_fee, 2)
+    # price = sepet TOPLAMI (kalemlerle KURUŞU KURUŞUNA — iyzico şartı). İndirim ürün satırlarına
+    # işlendiğinden price artık indirimli toplam (≈ order.total); paidPrice de aynı → iyzico'nun
+    # yayacağı indirim farkı kalmaz (kargo tam bedeliyle, kendi KDV'siyle durur).
+    price = round(sum(float(b["price"]) for b in basket_items), 2)
     paid_price = round(float(order.get("total") or price), 2)
     # paidPrice price'ı geçemez (indirim sadece düşürür)
     if paid_price > price:

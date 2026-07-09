@@ -5585,7 +5585,13 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
     # GERÇEKTE ödediğini göstersin diye bu indirim kalemlere oransal dağıtılır. Aksi halde
     # pusula kalem tutarları faturadan/ödemeden farklı çıkar (Özge Yalçın tutarsızlığı).
     order_disc = _round2((order.get("discount") or 0) + (order.get("payment_discount") or 0))
-    _disc_ratio = (order_disc / order_sub) if order_sub > 0.009 else 0.0
+    # İNDİRİM YALNIZ ÜRÜNLERE dağıtılır (payda = ara toplam, KARGO HARİÇ). MUHASEBE TERCİHİ:
+    # kargo (%20 KDV) ile ürünler (%10 KDV) farklı oranlı; indirim kargoya yayılırsa KDV matrahları
+    # karışır. Kargoya indirim UYGULANMAZ → kargo tam bedeliyle (kendi %20 KDV'siyle) durur, indirim
+    # tamamen ürünlere biner. (iyzico indirimi kargo dahil oranlar → kalem neti ~kuruş farklı çıkar;
+    # bizim muhasebemize göre kargoya indirim yansıtmak yanlış olduğundan iyzico'yu baz ALMIYORUZ.)
+    _disc_base = order_sub
+    _disc_ratio = (order_disc / _disc_base) if _disc_base > 0.009 else 0.0
     if _disc_ratio < 0:
         _disc_ratio = 0.0
     if _disc_ratio > 1:
@@ -5623,7 +5629,7 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": _vf_r, "qty": 1}
     else:
         # KISMİ İADE → seçili ürünler; sipariş-seviyesi (kupon) indirimi seçili kalemlere oransal dağıtılır.
-        alloc_disc = _round2(order_disc * (prod_net / order_sub)) if (order_disc > 0 and order_sub > 0) else 0.0
+        alloc_disc = _round2(order_disc * (prod_net / _disc_base)) if (order_disc > 0 and _disc_base > 0) else 0.0
         base_net = _round2(max(0.0, prod_net - alloc_disc))
         # VADE FARKI (taksit) — kısmi iadede de faturayla örtüşsün diye ORANSAL eklenir: iade edilen
         # ürünlerin faiz-siz ödenen tabana (order.total) oranı kadar vade farkı iade edilir. Tam
