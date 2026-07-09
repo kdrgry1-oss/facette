@@ -400,15 +400,20 @@ async def get_orders(
     is_corporate: Optional[str] = None,
     payment_view: Optional[str] = "all",
     hide_closed: Optional[str] = None,
+    show_hidden: Optional[str] = None,   # 1 → HİÇBİR şeyi gizleme (iptal/iade + ödenmemiş junk dahil)
     current_user: dict = Depends(require_admin)
 ):
     """Get orders with pagination (admin only)"""
     skip = (page - 1) * limit
     query = {}
-    
+    _show_hidden = str(show_hidden).lower() in ("1", "true", "yes")
+
     if status:
         _st = [x.strip() for x in str(status).split(",") if x.strip()]
         query["status"] = _st[0] if len(_st) == 1 else {"$in": _st}
+    elif _show_hidden:
+        # "Gizlenenleri göster" → HİÇBİR durum gizlenmez (iptal/iade/refund dahil hepsi listede).
+        pass
     elif str(hide_closed).lower() in ("0", "false"):
         # Açıkça "kapalı durumları da göster" istendi → durum filtresi uygulanmaz.
         pass
@@ -487,7 +492,11 @@ async def get_orders(
         {"payment_method": {"$nin": _offline_pm}},
         {"status": {"$nin": _fulfilled_status}},
     ]}
-    if payment_view == "unpaid":
+    if _show_hidden:
+        # Gizlenenleri göster: ödeme "junk" (tamamlanmamış web kart denemesi) süzgeci de UYGULANMAZ
+        # → daha önce hiçbir görünümde çıkmayan siparişler de listeye gelir.
+        pass
+    elif payment_view == "unpaid":
         query.setdefault("$and", []).append(_junk_cond)
     elif payment_view == "valid":
         query.setdefault("$and", []).append({"$nor": [_junk_cond]})
