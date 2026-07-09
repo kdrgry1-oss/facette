@@ -65,6 +65,43 @@ const fmtDate = (s) => {
 
 export default function RooftrReturns({ embedded = false, gpStart = "085490", onGiderCreated }) {
   const [rows, setRows] = useState([]);
+  // Tarih kolonuna göre sıralama: Sipariş Tarihi / İade Onay-Ret / İade Ödeme.
+  // dir "desc" = en yeni üstte. Aynı başlığa tekrar tıklayınca yön değişir.
+  const [sort, setSort] = useState({ key: "", dir: "desc" });
+  const toggleSort = (key) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
+  const _ts = (v) => { const t = v ? Date.parse(v) : NaN; return Number.isNaN(t) ? null : t; };
+  const sortedRows = (() => {
+    if (!sort.key) return rows;
+    const arr = [...rows];
+    arr.sort((a, b) => {
+      const ta = _ts(a[sort.key]), tb = _ts(b[sort.key]);
+      if (ta === null && tb === null) return 0;
+      if (ta === null) return 1;   // tarihi olmayan (—) her zaman en altta
+      if (tb === null) return -1;
+      return sort.dir === "desc" ? tb - ta : ta - tb;
+    });
+    return arr;
+  })();
+  const SortHead = ({ label, k }) => (
+    <th className="px-3 py-2.5 font-bold whitespace-nowrap cursor-pointer select-none hover:text-gray-700"
+        onClick={() => toggleSort(k)} title="Sıralamak için tıkla">
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sort.key === k
+          ? (sort.dir === "desc" ? <ChevronDown size={13} /> : <ChevronUp size={13} />)
+          : <ChevronDown size={12} className="text-gray-300" />}
+      </span>
+    </th>
+  );
+  // Client-side sayfalama: tümü yüklenir, sıralama TÜM listeyi kapsar, ekranda sayfa sayfa gösterilir.
+  const PER_PAGE = 50;
+  const [cpage, setCpage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / PER_PAGE));
+  const _cpage = Math.min(cpage, pageCount);
+  const pageRows = sortedRows.slice((_cpage - 1) * PER_PAGE, _cpage * PER_PAGE);
+  // Filtre / arama / sıralama değişince ilk sayfaya dön.
+  useEffect(() => { setCpage(1); }, [debounced, statusFilter, paymentFilter, sort.key, sort.dir]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [redating, setRedating] = useState(false);
@@ -119,6 +156,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       if (statusFilter) params.append("status", statusFilter);
       if (paymentFilter) params.append("payment", paymentFilter);
       if (debounced) params.append("search", debounced);
+      params.append("limit", "10000");   // TÜMÜNÜ çek → client-side sırala + sayfala
       const res = await axios.get(`${API}/admin/rooftr/return-orders?${params}`, auth());
       setRows(res.data.orders || []);
       setFreeShipFee(Number(res.data.free_ship_fee) || 0);
@@ -451,15 +489,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                 <th className="px-3 py-2.5 font-bold">Ödeme</th>
                 <th className="px-3 py-2.5 font-bold">Kargo</th>
                 <th className="px-3 py-2.5 font-bold text-right whitespace-nowrap">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
-                <th className="px-3 py-2.5 font-bold whitespace-nowrap">Sipariş Tarihi</th>
-                <th className="px-3 py-2.5 font-bold whitespace-nowrap">İade Onay/Ret</th>
-                <th className="px-3 py-2.5 font-bold whitespace-nowrap">İade Ödeme</th>
+                <SortHead label="Sipariş Tarihi" k="created_at" />
+                <SortHead label="İade Onay/Ret" k="return_approved_at" />
+                <SortHead label="İade Ödeme" k="refund_paid_at" />
                 <th className="px-3 py-2.5 font-bold">Durum</th>
                 <th className="px-3 py-2.5 font-bold text-right w-8">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {rows.map((r) => (
+              {pageRows.map((r) => (
                 <Fragment key={r.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
@@ -671,6 +709,25 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
               ))}
             </tbody>
           </table>
+          {/* Sayfalama — sıralanmış TÜM liste üzerinden (client-side) */}
+          {sortedRows.length > PER_PAGE && (
+            <div className="flex items-center justify-between gap-3 px-3 py-3 border-t bg-gray-50 text-sm flex-wrap">
+              <div className="text-gray-500">
+                {(_cpage - 1) * PER_PAGE + 1}–{Math.min(_cpage * PER_PAGE, sortedRows.length)} / {sortedRows.length} iade
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setCpage(1)} disabled={_cpage <= 1}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">« İlk</button>
+                <button onClick={() => setCpage((p) => Math.max(1, p - 1))} disabled={_cpage <= 1}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">‹ Önceki</button>
+                <span className="px-3 py-1 font-semibold text-gray-700">Sayfa {_cpage} / {pageCount}</span>
+                <button onClick={() => setCpage((p) => Math.min(pageCount, p + 1))} disabled={_cpage >= pageCount}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">Sonraki ›</button>
+                <button onClick={() => setCpage(pageCount)} disabled={_cpage >= pageCount}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">Son »</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -53,7 +53,7 @@ async def list_rooftr_return_orders(
     payment: Optional[str] = Query(None, description="Ödeme tipi filtresi (bank_transfer/credit_card/cash_on_delivery)"),
     search: Optional[str] = Query(None, description="Sipariş no / müşteri adı / telefon araması"),
     page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=10000),  # frontend TÜMÜNÜ çeker (client-side sırala+sayfala)
     current_user: dict = Depends(require_admin),
 ):
     """Ticimax kaynaklı iade / kısmi iade siparişlerini listeler.
