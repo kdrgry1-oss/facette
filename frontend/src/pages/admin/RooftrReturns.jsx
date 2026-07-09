@@ -707,10 +707,23 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                               : "Kısmi iade yapıldı. (Kaynak sistem kalem bazında ayrım vermiyor; iade edilen tutar yukarıdaki tutar bilgisine yansır.)"}
                           </div>
                         )}
-                        {wfCanAct && (
+                        {wfCanAct && (() => {
+                          // Bu iade ZATEN onaylandı mı? (durum onay/iade/refund VEYA onay damgası
+                          // VEYA gider pusulası kesilmiş). Onaylıysa yeşil "İade Onay" tekrar bastırmaz;
+                          // soluk/pasif "İade Onaylandı" gösterilir (karışıklık gitsin).
+                          const rowApproved = ["return_approved", "returned", "refunded", "partial_refunded"].includes(r.status)
+                            || !!r.return_approved_at || !!r.has_gider_pusulasi || !!r.gider_pusulasi_no;
+                          return (
                           <div className="mt-3">
                             <div className="flex flex-wrap gap-2">
-                              {can("returns.approve") && (
+                              {can("returns.approve") && (rowApproved ? (
+                                <span
+                                  title="Bu iade zaten onaylanmış — tekrar onaylanamaz"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 text-xs font-semibold cursor-not-allowed opacity-70 select-none"
+                                >
+                                  <CheckCircle size={14} /> İade Onaylandı
+                                </span>
+                              ) : (
                                 <button
                                   onClick={() => openWorkflow(r, "approve")}
                                   disabled={busyId === r.id}
@@ -718,7 +731,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                                 >
                                   <CheckCircle size={14} /> İade Onay{selCount(r.id) > 0 ? ` (${selCount(r.id)} kalem)` : ""}
                                 </button>
-                              )}
+                              ))}
                               {can("returns.reject") && (
                                 <button
                                   onClick={() => openWorkflow(r, "reject")}
@@ -730,7 +743,8 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                               )}
                             </div>
                           </div>
-                        )}
+                          );
+                        })()}
                         {r.notes && <div className="mt-2 text-[11px] text-gray-700">Not: {r.notes}</div>}
                       </td>
                     </tr>
