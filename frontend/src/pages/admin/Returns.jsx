@@ -283,6 +283,32 @@ export default function Returns() {
     }
   };
 
+  // GEÇMİŞ pusulaları düzelt: mevcut SİTE gider pusulalarını güncel mantıkla (vade farkı oransal
+  // dağıtımı + yuvarlama mutabakatı) yeniden hesaplar. Numara KORUNUR (idempotent). Özellikle
+  // kısmi iade + taksitli siparişlerde vade farkı eksik kalan eski pusulaları faturayla eşitler.
+  const [gpRecomputing, setGpRecomputing] = useState(false);
+  const recomputeGiderPusulasi = async () => {
+    if (!window.confirm("Mevcut TÜM site gider pusulaları güncel tutar mantığıyla (vade farkı dahil) yeniden hesaplanacak. Pusula NUMARALARI korunur. Devam edilsin mi?")) return;
+    setGpRecomputing(true);
+    try {
+      const res = await fetch(`${API}/orders/returns/vouchers/recompute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) throw new Error("recompute failed");
+      toast.success(`${data.recomputed} pusula yeniden hesaplandı${data.failed ? ` · ${data.failed} atlandı` : ""}`);
+    } catch (e) {
+      toast.error("Yeniden hesaplama başarısız");
+    } finally {
+      setGpRecomputing(false);
+    }
+  };
+
   const handleApprove = async (claim, explicitIds) => {
     const claimItemIds = (explicitIds && explicitIds.length)
       ? explicitIds
@@ -487,6 +513,12 @@ export default function Returns() {
                 className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
                 <Download size={16} />
                 {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
+              </button>
+              <button onClick={recomputeGiderPusulasi} disabled={gpRecomputing}
+                title="Geçmiş site gider pusulalarını güncel tutar mantığıyla (vade farkı dahil) yeniden hesaplar. Numaralar korunur."
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50">
+                <RefreshCw size={15} className={gpRecomputing ? "animate-spin" : ""} />
+                {gpRecomputing ? "Hesaplanıyor..." : "Geçmişi Düzelt"}
               </button>
             </div>
             {/* Manuel "Güncelle" kaldırıldı — iadeler 5 dk'da bir otomatik güncelleniyor. */}

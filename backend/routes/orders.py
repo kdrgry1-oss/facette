@@ -5595,9 +5595,21 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
         # KISMİ İADE → seçili ürünler; sipariş-seviyesi (kupon) indirimi seçili kalemlere oransal dağıtılır.
         alloc_disc = _round2(order_disc * (prod_net / order_sub)) if (order_disc > 0 and order_sub > 0) else 0.0
         base_net = _round2(max(0.0, prod_net - alloc_disc))
-        net_total = _round2(max(0.0, base_net - (cargo_amount if deduct_cargo else 0.0)))
-        total_gross = _round2(prod_gross)
+        # VADE FARKI (taksit) — kısmi iadede de faturayla örtüşsün diye ORANSAL eklenir: iade edilen
+        # ürünlerin faiz-siz ödenen tabana (order.total) oranı kadar vade farkı iade edilir. Tam
+        # iadeyle aynı mantık, yalnız iade payına düşen kısmı. (Önceden kısmi iadede HİÇ eklenmiyordu.)
+        _vf_r, _charged_r, _inst_r = _order_vade_farki(order)
+        alloc_vade = 0.0
+        if _vf_r >= 0.01 and order_total > 0.009:
+            _ret_share = base_net / order_total
+            if _ret_share > 1:
+                _ret_share = 1.0
+            alloc_vade = _round2(_vf_r * _ret_share)
+        net_total = _round2(max(0.0, base_net + alloc_vade - (cargo_amount if deduct_cargo else 0.0)))
+        total_gross = _round2(prod_gross + (alloc_vade if alloc_vade >= 0.01 else 0.0))
         total_discount = _round2(max(0.0, total_gross - net_total))
+        if alloc_vade >= 0.01:
+            vade_line = {"name": f"Vade Farkı (Taksit x{_inst_r})", "net_price": alloc_vade, "qty": 1}
         if deduct_cargo:
             cargo_mode = "deducted"
 
