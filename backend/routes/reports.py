@@ -116,36 +116,61 @@ async def top_products(
     pipeline = [
         {"$match": _base_match(s, e, source)},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
-        {
-            "$group": {
-                "_id": {"pid": "$items.product_id", "name": "$items.name"},
-                "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
-                "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
-                "orders": {"$sum": 1},
-            }
-        },
+        # Kalem adı SİTE'de items.name, PAZARYERİ'nde items.product_name / items.productName tutulur.
+        # Barkod (varsa) hem gruplama hem ürün eşleştirme için kullanılır.
+        {"$addFields": {
+            "_nm": {"$ifNull": ["$items.name",
+                     {"$ifNull": ["$items.product_name",
+                       {"$ifNull": ["$items.productName", ""]}]}]},
+            "_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
+            "_pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
+        }},
+        # Gruplama anahtarı: barkod > product_id > ad (aynı ürünün farklı beden/renk kalemleri birleşir).
+        {"$addFields": {"_key": {"$switch": {"branches": [
+            {"case": {"$ne": ["$_bc", ""]}, "then": {"$concat": ["bc:", "$_bc"]}},
+            {"case": {"$ne": ["$_pid", ""]}, "then": {"$concat": ["pid:", "$_pid"]}},
+        ], "default": {"$concat": ["nm:", "$_nm"]}}}}},
+        {"$group": {
+            "_id": "$_key",
+            "name": {"$first": "$_nm"},
+            "barcode": {"$first": "$_bc"},
+            "pid": {"$first": "$_pid"},
+            "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "orders": {"$sum": 1},
+        }},
         {"$sort": {"revenue": -1}},
         {"$limit": limit},
     ]
     raw = []
     async for r in db.orders.aggregate(pipeline):
         raw.append(r)
-    # Ürün adları/stok: order item'ında boş olabilir (özellikle pazaryeri) → products'tan doldur.
-    pids = [r["_id"].get("pid") for r in raw if r["_id"].get("pid")]
-    prod_map = {}
-    if pids:
-        async for p in db.products.find({"id": {"$in": pids}},
-                                        {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1}):
+    # Ürün adı/stok: item'da boş/pazaryeri ise products'tan BARKOD veya id ile eşleştir.
+    pids = [r.get("pid") for r in raw if r.get("pid")]
+    bcs = [r.get("barcode") for r in raw if r.get("barcode")]
+    by_id, by_bc = {}, {}
+    if pids or bcs:
+        q = {"$or": []}
+        if pids:
+            q["$or"].append({"id": {"$in": pids}})
+        if bcs:
+            q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
+        async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
-            prod_map[p["id"]] = {"name": p.get("name") or "", "stock": stock}
+            info = {"name": p.get("name") or "", "stock": stock}
+            by_id[str(p.get("id"))] = info
+            if p.get("barcode"):
+                by_bc[str(p["barcode"])] = info
+            for v in variants:
+                if v.get("barcode"):
+                    by_bc[str(v["barcode"])] = info
     out = []
     for r in raw:
-        pid = r["_id"].get("pid")
-        pm = prod_map.get(pid, {})
-        name = pm.get("name") or r["_id"].get("name") or "(isimsiz ürün)"
+        pm = by_bc.get(r.get("barcode") or "") or by_id.get(r.get("pid") or "") or {}
+        name = pm.get("name") or r.get("name") or "(isimsiz ürün)"
         out.append({
-            "product_id": pid, "name": name,
+            "product_id": r.get("pid") or None, "name": name,
             "qty": r["qty"], "revenue": round(r["revenue"], 2), "orders": r["orders"],
             "current_stock": pm.get("stock", None),
         })
@@ -160,17 +185,36 @@ async def category_report(
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date, days_default=90)
-    # Join items -> products -> category
+    # items -> product: product_id VEYA barkod (üst/varyant) ile eşleştir (pazaryeri kalemleri
+    # productCode taşır, Facette id'siyle eşleşmez → barkod köprüsü şart). Kategori adı: kategori
+    # dokümanı > ürünün category_name'i > kalemin kendi category'si > (Kategorisiz).
     pipeline = [
         {"$match": _base_match(s, e, source)},
         {"$unwind": "$items"},
-        {"$lookup": {"from": "products", "localField": "items.product_id", "foreignField": "id", "as": "p"}},
+        {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
+        {"$lookup": {
+            "from": "products",
+            "let": {"pid": "$items.product_id", "bc": "$_bc"},
+            "pipeline": [
+                {"$match": {"$expr": {"$or": [
+                    {"$eq": ["$id", "$$pid"]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$eq": [{"$toString": "$barcode"}, "$$bc"]}]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$in": ["$$bc", {"$map": {"input": {"$ifNull": ["$variants", []]}, "as": "v", "in": {"$toString": "$$v.barcode"}}}]}]},
+                ]}}},
+                {"$limit": 1},
+                {"$project": {"_id": 0, "category_id": 1, "category_name": 1}},
+            ],
+            "as": "p",
+        }},
         {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
         {"$lookup": {"from": "categories", "localField": "p.category_id", "foreignField": "id", "as": "c"}},
         {"$unwind": {"path": "$c", "preserveNullAndEmptyArrays": True}},
         {
             "$group": {
-                "_id": {"$ifNull": ["$c.name", "(Kategorisiz)"]},
+                "_id": {"$ifNull": ["$c.name",
+                         {"$ifNull": ["$p.category_name",
+                           {"$ifNull": ["$items.category_name",
+                             {"$ifNull": ["$items.category", "(Kategorisiz)"]}]}]}]},
                 "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
                 "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
             }
@@ -179,7 +223,7 @@ async def category_report(
     ]
     out = []
     async for r in db.orders.aggregate(pipeline):
-        out.append({"category": r["_id"], "qty": r["qty"], "revenue": round(r["revenue"], 2)})
+        out.append({"category": r["_id"] or "(Kategorisiz)", "qty": r["qty"], "revenue": round(r["revenue"], 2)})
     return {"items": out}
 
 
@@ -510,8 +554,26 @@ async def sales_by_location(
     }
 
 
+# Kaynak kısaltmaları → tek kanal. ig=instagram, fb=meta, gads=google… (aynı kanal ayrı satır
+# olmasın diye). TAM değer eşleşmesiyle uygulanır (substring değil — "ig" pek çok kelimede geçer).
+_CHANNEL_ALIASES = {
+    "ig": "instagram", "insta": "instagram", "instagram": "instagram", "instagramshop": "instagram",
+    "ig_shopping": "instagram", "instagram_shop": "instagram", "instagram-feed": "instagram", "igshopping": "instagram",
+    "fb": "meta", "facebook": "meta", "meta": "meta", "fb_ig": "meta",
+    "gl": "google", "google": "google", "gads": "google", "adwords": "google", "googleads": "google",
+    "google_ads": "google", "google-ads": "google", "cpc": "google",
+    "tt": "tiktok", "tiktok": "tiktok",
+    "yt": "youtube", "youtube": "youtube",
+    "pin": "pinterest", "pinterest": "pinterest",
+    "eposta": "email", "e-posta": "email", "email": "email", "mail": "email", "sms": "sms",
+    "referral": "referral", "direct": "direct", "organic": "organic",
+}
+
+
 def _channel_label(idv: dict) -> str:
-    """Bir siparişin satış kanalını tek etikete indirger: pazaryeri > sosyal kaynak > direct."""
+    """Bir siparişin satış kanalını tek etikete indirger: pazaryeri > sosyal kaynak > direct.
+    'ig'/'insta' gibi kısaltmalar 'instagram'a, 'fb' 'meta'ya vb. normalize edilir → aynı kanal
+    tek satırda toplanır."""
     pf = (idv.get("platform") or "").strip().lower()
     mk = (idv.get("marketplace") or "").strip().lower()
     for m in _MARKETPLACES:
@@ -519,6 +581,11 @@ def _channel_label(idv: dict) -> str:
             return m
     src = (idv.get("src") or "").strip().lower()
     ch = (idv.get("channel") or "").strip().lower()
+    # 1) TAM değer alias'ı (ig=instagram gibi kısaltmalar) — hem src hem channel denenir.
+    for v in (src, ch):
+        if v in _CHANNEL_ALIASES:
+            return _CHANNEL_ALIASES[v]
+    # 2) İçerik taraması: tam kanal adı metnin içinde geçiyorsa (utm_source=instagram_stories vb.)
     blob = f"{src} {ch}"
     for k in ("instagram", "google", "facebook", "tiktok", "meta", "youtube", "pinterest", "email", "sms"):
         if k in blob:
