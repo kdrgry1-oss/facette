@@ -94,6 +94,14 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       </span>
     </th>
   );
+  // Client-side sayfalama: tümü yüklenir, sıralama TÜM listeyi kapsar, ekranda sayfa sayfa gösterilir.
+  const PER_PAGE = 50;
+  const [cpage, setCpage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / PER_PAGE));
+  const _cpage = Math.min(cpage, pageCount);
+  const pageRows = sortedRows.slice((_cpage - 1) * PER_PAGE, _cpage * PER_PAGE);
+  // Filtre / arama / sıralama değişince ilk sayfaya dön.
+  useEffect(() => { setCpage(1); }, [debounced, statusFilter, paymentFilter, sort.key, sort.dir]);
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [redating, setRedating] = useState(false);
@@ -148,6 +156,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       if (statusFilter) params.append("status", statusFilter);
       if (paymentFilter) params.append("payment", paymentFilter);
       if (debounced) params.append("search", debounced);
+      params.append("limit", "10000");   // TÜMÜNÜ çek → client-side sırala + sayfala
       const res = await axios.get(`${API}/admin/rooftr/return-orders?${params}`, auth());
       setRows(res.data.orders || []);
       setFreeShipFee(Number(res.data.free_ship_fee) || 0);
@@ -488,7 +497,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
               </tr>
             </thead>
             <tbody className="divide-y">
-              {sortedRows.map((r) => (
+              {pageRows.map((r) => (
                 <Fragment key={r.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-3 py-2.5">
@@ -700,6 +709,25 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
               ))}
             </tbody>
           </table>
+          {/* Sayfalama — sıralanmış TÜM liste üzerinden (client-side) */}
+          {sortedRows.length > PER_PAGE && (
+            <div className="flex items-center justify-between gap-3 px-3 py-3 border-t bg-gray-50 text-sm flex-wrap">
+              <div className="text-gray-500">
+                {(_cpage - 1) * PER_PAGE + 1}–{Math.min(_cpage * PER_PAGE, sortedRows.length)} / {sortedRows.length} iade
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setCpage(1)} disabled={_cpage <= 1}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">« İlk</button>
+                <button onClick={() => setCpage((p) => Math.max(1, p - 1))} disabled={_cpage <= 1}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">‹ Önceki</button>
+                <span className="px-3 py-1 font-semibold text-gray-700">Sayfa {_cpage} / {pageCount}</span>
+                <button onClick={() => setCpage((p) => Math.min(pageCount, p + 1))} disabled={_cpage >= pageCount}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">Sonraki ›</button>
+                <button onClick={() => setCpage(pageCount)} disabled={_cpage >= pageCount}
+                  className="px-2.5 py-1 rounded border bg-white disabled:opacity-40 hover:bg-gray-100">Son »</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
