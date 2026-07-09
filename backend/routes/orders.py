@@ -24,6 +24,10 @@ def _order_search_or(search: str) -> list:
     rx = {"$regex": _search_tr_regex(s), "$options": "i"}
     fields = [
         "order_number", "invoice_number", "cargo_tracking", "id",
+        # Pazaryeri kimlikleri: müşteri/panel bunları da arayabilir (TY paket no ≠ order_number).
+        "trendyol_package_id", "hepsiburada_order_number", "hb_claim_number",
+        "package_number", "shipment_package_id", "marketplace_order_id",
+        "cargo_tracking_number", "return_request.return_code",
         "shipping_address.first_name", "shipping_address.last_name",
         "shipping_address.email", "shipping_address.phone",
         "shipping_address.city", "shipping_address.district",
@@ -36,6 +40,18 @@ def _order_search_or(search: str) -> list:
         "lines.product_name", "lines.name", "lines.barcode",
     ]
     ors = [{f: rx} for f in fields]
+    # Pazaryeri paket/no alanları INT saklanabilir → regex tutmaz. Arama tamamen rakamsa
+    # bu alanlarda hem int hem string olarak TAM eşleşme ekle (TY paket no vb. bulunur).
+    if s.isdigit():
+        try:
+            _n = int(s)
+        except Exception:
+            _n = None
+        for f in ("trendyol_package_id", "package_number", "shipment_package_id",
+                  "marketplace_order_id", "hepsiburada_order_number"):
+            ors.append({f: s})
+            if _n is not None:
+                ors.append({f: _n})
     # Telefon: sadece rakamları al, son 10 haneyi ara (formatten bağımsız)
     digits = re.sub(r"\D", "", s)
     if len(digits) >= 7:
@@ -5724,35 +5740,88 @@ async def export_gider_pusulasi_excel(
     from io import BytesIO
     from fastapi.responses import StreamingResponse
 
-    query = {}
-    if source and source.lower() != "all":
-        query["source"] = source.lower()
-    if date_from or date_to:
-        dr = {}
-        if date_from:
-            dr["$gte"] = tr_day_start_utc(date_from)
-        if date_to:
-            dr["$lte"] = tr_day_end_utc(date_to)
-        query["date"] = dr
+    # ── Kaynak süzgeci (varsayılan: TÜMÜ) ──────────────────────────────
+    _src = (source or "").lower().strip()
+    want_site = _src in ("", "all", "site")
+    want_ty = _src in ("", "all", "trendyol")
+    want_hb = _src in ("", "all", "hepsiburada")
 
-    # EN YENİ ÜSTTE: tarihe göre azalan (date yoksa created_at). Excel'de en yeni pusula en üstte.
-    records = await db.gider_pusulasi.find(query, {"_id": 0}).sort([("date", -1), ("number", -1)]).to_list(None)
+    # Tarih aralığı → UTC sınırları. Koleksiyonlar farklı tarih alanı/formatı kullandığından
+    # (voucher.date, claim.created_date, return.created_at) Python'da parse edip karşılaştırırız.
+    def _to_dt(v):
+        s = str(v or "").strip()
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.fromisoformat(s[:19])
+            except Exception:
+                return None
+    lo_dt = _to_dt(tr_day_start_utc(date_from)) if date_from else None
+    hi_dt = _to_dt(tr_day_end_utc(date_to)) if date_to else None
 
-    # SADECE İADE BEDELİ ÖDENMİŞ pusulalar: iade "refunded/partial_refunded" olmuş VEYA
-    # siparişte refund_paid_at işaretli olanlar. (Site iadesi 'İade Bedeli Öde' ile refunded olur;
-    # pazaryeri iadesini platform öder → ilgili sipariş/iade refunded ise dahil edilir.)
-    if only_refunded and records:
+    def _in_range(v):
+        d = _to_dt(v)
+        if d is None:
+            return not (lo_dt or hi_dt)  # tarih yoksa: süzgeç varsa dışarıda bırak
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        if lo_dt and d < lo_dt:
+            return False
+        if hi_dt and d > hi_dt:
+            return False
+        return True
+
+    # ── Tüm iade taleplerini (Trendyol + Hepsiburada — ikisi de trendyol_claims'te,
+    #    HB platform="hepsiburada") ve site iadelerini çekeriz. Kesilmiş pusula VARSA onu
+    #    (doğru seri no + düzeltilmiş tutar) kullanırız; YOKSA talepten satır sentezleriz.
+    #    Böylece pusula kesilmemiş iadeler de Excel'e girer ("658 tümünü çekmiyor" düzeltmesi)
+    #    ve ileride eklenen her iade kaynağı otomatik dahil olur.
+    all_claims = await db.trendyol_claims.find(
+        {}, {"_id": 0, "raw_data": 0}).to_list(None)
+    claim_by_id = {str(c.get("claim_id")): c for c in all_claims if c.get("claim_id")}
+
+    def _claim_platform(c):
+        return "hepsiburada" if str(c.get("platform") or "").lower() == "hepsiburada" else "trendyol"
+
+    # ── 1) Var olan gider pusulaları (kesilmiş) — doğru seri + düzeltilmiş tutar ──
+    all_vouchers = await db.gider_pusulasi.find({}, {"_id": 0}).to_list(None)
+    seen_claim, seen_return = set(), set()
+    records = []
+    for gp in all_vouchers:
+        if not _in_range(gp.get("date") or gp.get("created_at")):
+            continue
+        # kaynak süzgeci: site pusulası source=site; TY/HB pusulasında claim_id var → platform claim'den
+        cid = str(gp.get("claim_id") or "")
+        if cid:
+            plat = _claim_platform(claim_by_id.get(cid, {}))
+            if plat == "hepsiburada" and not want_hb:
+                continue
+            if plat == "trendyol" and not want_ty:
+                continue
+            seen_claim.add(cid)
+        else:
+            if not want_site:
+                continue
+            if gp.get("return_id"):
+                seen_return.add(str(gp.get("return_id")))
+        records.append(gp)
+
+    # only_refunded (opsiyonel; UI'daki tek buton bunu False geçer): sadece kesilmiş +
+    # iade bedeli ödenmiş pusulaları bırak, sentezlenenleri hiç ekleme.
+    if only_refunded:
         _rids = list({str(gp.get("return_id")) for gp in records if gp.get("return_id")})
         _onums = list({str(gp.get("order_number")) for gp in records if gp.get("order_number")})
         _paid_status = ["refunded", "partial_refunded"]
-        paid_returns = set()
+        paid_returns, paid_orders = set(), set()
         if _rids:
             async for r in db.customer_returns.find(
                 {"id": {"$in": _rids},
                  "$or": [{"status": {"$in": _paid_status}}, {"refund_payment": {"$exists": True}}]},
                 {"_id": 0, "id": 1}):
                 paid_returns.add(str(r.get("id")))
-        paid_orders = set()
         if _onums:
             async for o in db.orders.find(
                 {"order_number": {"$in": _onums},
@@ -5762,6 +5831,81 @@ async def export_gider_pusulasi_excel(
         records = [gp for gp in records
                    if str(gp.get("return_id")) in paid_returns
                    or str(gp.get("order_number")) in paid_orders]
+    else:
+        # ── 2) Pusulası kesilmemiş Trendyol/HB iadeleri → satır sentezle ──
+        for c in all_claims:
+            cid = str(c.get("claim_id") or "")
+            if not cid or cid in seen_claim:
+                continue
+            plat = _claim_platform(c)
+            if plat == "hepsiburada" and not want_hb:
+                continue
+            if plat == "trendyol" and not want_ty:
+                continue
+            cdate = c.get("created_date") or c.get("created_at") or ""
+            if not _in_range(cdate):
+                continue
+            syn_items = []
+            for ci in (c.get("items") or []):
+                syn_items.append({
+                    "name": ci.get("productName") or ci.get("name") or "",
+                    "barcode": str(ci.get("barcode") or "").strip(),
+                    "quantity": int(ci.get("quantity", 1) or 1),
+                    "net_price": ci.get("price", 0),
+                    "reason": ci.get("reason", ""),
+                })
+            _net = c.get("refund_amount")
+            records.append({
+                "date": cdate,
+                "display_number": (c.get("gider_pusulasi_no") or c.get("invoice_number")
+                                   or c.get("order_number") or cid),
+                "number": 0,
+                "customer": {"name": c.get("customer_name", "")},
+                "order_number": c.get("order_number", ""),
+                "items": syn_items,
+                "totals": {"net": _net if _net not in (None, "") else 0, "vat_rate": 10},
+            })
+
+        # ── 3) Pusulası kesilmemiş SİTE iadeleri → satır sentezle ──
+        if want_site:
+            site_rets = await db.customer_returns.find(
+                {"status": {"$ne": "expired"}}, {"_id": 0}).to_list(None)
+            site_rets = [r for r in site_rets
+                         if str(r.get("id")) not in seen_return and _in_range(
+                             r.get("created_at") or r.get("date"))]
+            # müşteri adını sipariş shipping_address'ten toplu çek
+            _oids = list({r.get("order_id") for r in site_rets if r.get("order_id")})
+            _oname = {}
+            if _oids:
+                async for o in db.orders.find(
+                    {"id": {"$in": _oids}},
+                    {"_id": 0, "id": 1, "shipping_address": 1, "customer_name": 1}):
+                    sh = o.get("shipping_address", {}) or {}
+                    nm = (f"{sh.get('first_name','')} {sh.get('last_name','')}".strip()
+                          or sh.get("full_name", "") or o.get("customer_name", "") or "")
+                    _oname[o.get("id")] = nm
+            for r in site_rets:
+                syn_items = []
+                for it in (r.get("items") or []):
+                    syn_items.append({
+                        "name": it.get("name") or it.get("product_name") or "",
+                        "barcode": str(it.get("product_id") or it.get("barcode") or "").strip(),
+                        "quantity": int(it.get("quantity", 1) or 1),
+                        "net_price": it.get("price", it.get("unit_price", 0)),
+                        "reason": it.get("reason", ""),
+                    })
+                records.append({
+                    "date": r.get("created_at") or r.get("date") or "",
+                    "display_number": r.get("order_number") or str(r.get("id")),
+                    "number": 0,
+                    "customer": {"name": _oname.get(r.get("order_id"), "") or "Müşteri"},
+                    "order_number": r.get("order_number", ""),
+                    "items": syn_items,
+                    "totals": {"net": 0, "vat_rate": 10},
+                })
+
+    # EN YENİ ÜSTTE: birleşik listeyi tarihe göre azalan sırala.
+    records.sort(key=lambda g: str(g.get("date") or g.get("created_at") or ""), reverse=True)
 
     # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
     pids = set()
@@ -5826,11 +5970,12 @@ async def export_gider_pusulasi_excel(
             gross_vatincl = _round2(_round2(it.get("net_price", 0)) * qty)
             by_rate[rate] = _round2(by_rate.get(rate, 0.0) + gross_vatincl)
 
-        # Kalem yoksa (eski kayıt): tek satır, pusula toplamından.
-        if not by_rate:
+        # Kalem yoksa VEYA kalem tutarları 0 çıktıysa (sentez iade: fiyatsız kalem ama
+        # refund_amount var) → pusula/talep net toplamından tek satır.
+        if (not by_rate) or _round2(sum(by_rate.values())) <= 0.009:
             net = _round2(totals.get("net") or 0)
             if net > 0.009:
-                by_rate[float(default_rate)] = net
+                by_rate = {float(default_rate): net}
 
         # Her oran grubu → bir satır (yüksek orandan düşüğe, kargo/vade üstte görünür).
         for rate in sorted(by_rate.keys(), reverse=True):
