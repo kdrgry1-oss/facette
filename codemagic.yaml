@@ -59,18 +59,36 @@ workflows:
             done
           done
 
-          # Kendi private key'imizi üretip sertifikayı ONA BAĞLI oluştur
-          # (aksi halde "Cannot save ... without certificate private key" hatası).
+          # 1) Dağıtım sertifikasını kendi private key'imizle oluştur ve p12'yi kaydet.
           openssl genrsa -out /tmp/dist_key.pem 2048
-          # --strict-match-identifier: SADECE tam "com.facette.app" ile eşleş.
-          # Aksi halde API kısmi eşleşmeyle "com.facette.appleLogin"i seçip profili
-          # YANLIŞ bundle id için üretiyordu → projeye uymuyordu.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
+          CERT_ID=$(app-store-connect create-certificate \
+            --type IOS_DISTRIBUTION \
             --certificate-key @file:/tmp/dist_key.pem \
-            --strict-match-identifier \
-            --create
+            --save --json 2>/tmp/cert_err.txt \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+          echo "CERT_ID=$CERT_ID"
+          cat /tmp/cert_err.txt 2>/dev/null || true
           keychain add-certificates
+
+          # 2) Hesaptaki TÜM bundle id'leri listele (platform filtresi OLMADAN) ve
+          #    com.facette.app'in resource id'sini çöz. fetch-signing-files'ın
+          #    platform=IOS filtresi mevcut (universal) bundle'ı göremiyordu.
+          app-store-connect list-bundle-ids --json > /tmp/bids.json 2>/dev/null || echo "[]" > /tmp/bids.json
+          echo "=== HESAPTAKI BUNDLE ID'LER (identifier | platform | resourceId) ==="
+          python3 -c "import json;[print(b['attributes']['identifier'],'|',b['attributes'].get('platform'),'|',b['id']) for b in json.load(open('/tmp/bids.json'))]" 2>/dev/null || cat /tmp/bids.json
+          BID_RES=$(python3 -c "import json;d=json.load(open('/tmp/bids.json'));print(next((b['id'] for b in d if b['attributes']['identifier']=='$BUNDLE_ID'),''))" 2>/dev/null || true)
+          echo "com.facette.app resource id: '$BID_RES'"
+          if [ -z "$BID_RES" ]; then
+            echo "!!! $BUNDLE_ID bu hesapta KAYITLI DEĞİL. Yukarıdaki listeden doğru bundle id'yi Claude'a ilet."
+            exit 1
+          fi
+
+          # 3) App Store provizyon profilini DOĞRU bundle id + sertifika ile oluştur.
+          app-store-connect create-profile \
+            --type IOS_APP_STORE \
+            --bundle-id "$BID_RES" \
+            --certificate "$CERT_ID" \
+            --save 2>/tmp/prof_err.txt || cat /tmp/prof_err.txt
 
           echo "=== keychain sertifikaları ==="
           keychain list-certificates || true
