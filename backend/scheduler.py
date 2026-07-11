@@ -393,6 +393,11 @@ async def _run_trendyol_auto_orders_pull():
                     if data.get("status") not in ("cancelled", "returned"):
                         from routes.integrations import _decrement_stock_for_imported_order
                         await _decrement_stock_for_imported_order(data, "trendyol")
+                        try:
+                            from routes.push import send_new_order_push
+                            asyncio.create_task(send_new_order_push(data))
+                        except Exception as _pe:
+                            logger.warning(f"[cron] Trendyol yeni sipariş push atlandı: {_pe}")
             except Exception as _ex:
                 logger.error(f"[cron] Trendyol order import hata: {_ex}")
         try:
@@ -623,6 +628,11 @@ async def _run_hepsiburada_auto_orders_pull():
                     # Zaten iptal/iade gelen YENİ sipariş için stok düşülmez (hiç rezerve edilmemişti).
                     if data.get("status") not in ("cancelled", "returned"):
                         await _decrement_stock_for_imported_order(data, "hepsiburada")
+                        try:
+                            from routes.push import send_new_order_push
+                            asyncio.create_task(send_new_order_push(data))
+                        except Exception as _pe:
+                            logger.warning(f"[cron] HB yeni sipariş push atlandı: {_pe}")
             except Exception as e:
                 await log_integration_event(
                     marketplace="hepsiburada", action="import_order", status="error",
@@ -1001,6 +1011,11 @@ async def _ticimax_sync_orders():
                         new_count += 1
                         from routes.integrations import _decrement_stock_for_imported_order
                         await _decrement_stock_for_imported_order(doc, "ticimax")
+                        try:
+                            from routes.push import send_new_order_push
+                            asyncio.create_task(send_new_order_push(doc))
+                        except Exception as _pe:
+                            logger.warning(f"[cron] Ticimax yeni sipariş push atlandı: {_pe}")
                 except Exception as ie:
                     logger.warning(f"[cron][ticimax] upsert err: {ie}")
         if new_count > 0 or updated_count > 0:

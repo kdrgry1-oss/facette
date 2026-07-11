@@ -120,17 +120,23 @@ workflows:
           echo "SEÇİLEN → TEAM_ID=$TEAM_ID  PROFILE_NAME=$PROFILE_NAME"
 
           # --- Archive + IPA ---
+          # CFBundleVersion (build no) her YÜKLEMEDE öncekinden BÜYÜK olmalı (Apple 409).
+          # Unix epoch saniyesi: daima artan, benzersiz, 32-bit sınıra 2106'ya kadar sığar.
+          # Info.plist'te CFBundleVersion=$(CURRENT_PROJECT_VERSION) olduğu için xcargs ile geçiyoruz.
+          BUILD_NO=$(date +%s)
+          echo "CFBundleVersion (build no) = $BUILD_NO"
           cd frontend/ios/App
           if [ -n "$TEAM_ID" ] && [ -n "$PROFILE_NAME" ]; then
             xcode-project build-ipa \
               --workspace "$XCODE_WORKSPACE" \
               --scheme "$XCODE_SCHEME" \
-              --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$TEAM_ID PROVISIONING_PROFILE_SPECIFIER=\"$PROFILE_NAME\" CODE_SIGN_IDENTITY=\"Apple Distribution\""
+              --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$TEAM_ID PROVISIONING_PROFILE_SPECIFIER=\"$PROFILE_NAME\" CODE_SIGN_IDENTITY=\"Apple Distribution\" CURRENT_PROJECT_VERSION=$BUILD_NO"
           else
             # use-profiles zaten uyguladıysa düz derleme de çalışır.
             xcode-project build-ipa \
               --workspace "$XCODE_WORKSPACE" \
-              --scheme "$XCODE_SCHEME"
+              --scheme "$XCODE_SCHEME" \
+              --archive-xcargs "CURRENT_PROJECT_VERSION=$BUILD_NO"
           fi
     artifacts:
       - frontend/ios/App/build/ios/ipa/*.ipa

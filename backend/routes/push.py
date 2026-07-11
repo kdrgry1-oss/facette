@@ -99,6 +99,38 @@ async def send_push_to_admins(title: str, body: str, data: dict = None) -> int:
         return 0
 
 
+def _order_platform_label(order: dict) -> str:
+    """Sipariş kaynağı etiketi: Site / Trendyol / Hepsiburada / Ticimax."""
+    p = (str(order.get("platform") or order.get("marketplace") or "")).strip().lower()
+    return {"trendyol": "Trendyol", "hepsiburada": "Hepsiburada",
+            "ticimax": "Ticimax"}.get(
+        p, "Site" if p in ("", "facette", "site") else p.title())
+
+
+async def send_new_order_push(order: dict) -> int:
+    """Yeni sipariş için admin cihazlarına push (site + pazaryeri ORTAK).
+    Kaynak (Site/Trendyol/Hepsiburada/Ticimax) bildirim gövdesinde gösterilir.
+    Best-effort: hata olsa da ASLA exception fırlatmaz."""
+    try:
+        try:
+            total = float(order.get("total") or 0)
+        except Exception:
+            total = 0.0
+        ship = order.get("shipping_address") or {}
+        who = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+               or ship.get("full_name") or order.get("customer_name") or "Müşteri")
+        pf = _order_platform_label(order)
+        title = f"🛍️ Yeni Sipariş · {total:,.2f} TL".replace(",", ".")
+        body = f"{order.get('order_number','')} · {who} · {pf}"
+        return await send_push_to_admins(
+            title, body,
+            {"type": "new_order", "order_id": str(order.get("id") or ""),
+             "order_number": str(order.get("order_number") or "")})
+    except Exception as e:
+        logger.warning(f"send_new_order_push atlandı: {e}")
+        return 0
+
+
 @router.post("/test")
 async def push_test(current_user: dict = Depends(require_admin)):
     """Yönetici: tüm kayıtlı admin cihazlarına modern FCM v1 test bildirimi."""
