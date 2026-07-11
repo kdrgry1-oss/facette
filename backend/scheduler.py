@@ -114,8 +114,12 @@ async def auto_cancel_unpaid_card_orders():
         cancelled = 0
         async for order in db.orders.find(query, {"_id": 0}):
             try:
-                await db.orders.update_one(
-                    {"id": order["id"]},
+                # TOCTOU koruması: sorgu ile update arasında ödeme onaylanmış olabilir.
+                # Filtreye payment_status != paid ekle → ödenmiş sipariş iptal/geri stok
+                # EDİLMESİN. matched_count 0 ise (ödenmiş) restock da yapılmaz.
+                res = await db.orders.update_one(
+                    {"id": order["id"], "payment_status": {"$nin": ["paid", "refunded"]},
+                     "status": {"$in": ["pending", "awaiting_payment"]}},
                     {"$set": {
                         "status": "cancelled",
                         "payment_status": "expired",
@@ -125,6 +129,8 @@ async def auto_cancel_unpaid_card_orders():
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }}
                 )
+                if res.matched_count == 0:
+                    continue  # arada ödendi/durumu değişti — dokunma
                 await _restock_order_once(order, "auto_cancel_expired")
                 cancelled += 1
             except Exception as e_item:

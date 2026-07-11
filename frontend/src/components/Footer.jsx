@@ -6,6 +6,7 @@
  *                            otomatik render edilir
  */
 import { Link } from "react-router-dom";
+import { sanitizeHtml } from "../lib/sanitizeHtml";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { Instagram, Facebook, Twitter, ChevronDown, ArrowRight, Check } from "lucide-react";
@@ -187,7 +188,7 @@ export default function Footer() {
       <>
         <NewsletterBand nl={newsletter} />
         <footer className="bg-black text-white" data-testid="footer-html">
-          <div dangerouslySetInnerHTML={{ __html: tpl.custom_html }} />
+          <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(tpl.custom_html) }} />
         </footer>
       </>
     );

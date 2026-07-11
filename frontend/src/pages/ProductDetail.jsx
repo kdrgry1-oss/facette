@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { sanitizeHtml } from "../lib/sanitizeHtml";
 import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock, Pencil, ZoomIn } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -948,7 +949,7 @@ export default function ProductDetail() {
                   {expandedSections.description ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
                 {expandedSections.description && (
-                  <div className="pb-3 text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: product.description || "Ürün açıklaması bulunmamaktadır." }} />
+                  <div className="pb-3 text-xs text-gray-600 leading-relaxed" dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) || "Ürün açıklaması bulunmamaktadır." }} />
                 )}
               </div>
               

@@ -22,7 +22,7 @@ workflows:
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
-        BUNDLE_ID: "tr.com.facette.app"
+        BUNDLE_ID: "tr.com.facette.admin"
       node: 20
       xcode: latest
       cocoapods: default

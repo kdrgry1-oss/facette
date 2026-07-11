@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { sanitizeHtml } from "../lib/sanitizeHtml";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import Header from "../components/Header";
@@ -44,7 +45,7 @@ export default function StaticPage() {
             <h1 className="text-3xl font-medium mb-8">{page.title}</h1>
             <div 
               className="prose prose-lg max-w-none"
-              dangerouslySetInnerHTML={{ __html: page.content }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(page.content) }}
             />
           </>
         ) : (

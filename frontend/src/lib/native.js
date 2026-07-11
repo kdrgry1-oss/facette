@@ -70,10 +70,27 @@ export async function setupPushNotifications() {
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     const data = action.notification.data || {};
     if (data.deep_link) {
-      const path = String(data.deep_link).replace("facette://", "/");
-      window.location.href = path;
+      const path = safeDeepLinkPath(data.deep_link);
+      if (path) window.location.href = path;
     }
   });
+}
+
+/**
+ * GÜVENLİK: deep-link / push payload'ından SADECE aynı-origin relatif bir yol üret.
+ * `facette://order/5` → `/order/5`. Dış host (evil.com), mutlak URL, javascript:,
+ * `//` protokol-relatif veya scheme içeren değerler reddedilir (açık yönlendirme /
+ * keyfi navigasyon engeli).
+ */
+function safeDeepLinkPath(raw) {
+  let s = String(raw || "").trim();
+  s = s.replace(/^facette:\/\//i, "/");
+  // Sadece "/" ile başlayan, "//" olmayan, scheme/backslash içermeyen yollar
+  if (!s.startsWith("/")) return null;
+  if (s.startsWith("//")) return null;
+  if (/[:\\]/.test(s)) return null; // ":" (scheme) veya "\" barındıran değer reddedilir
+  if (!/^\/[A-Za-z0-9/_\-?=&.%#]*$/.test(s)) return null;
+  return s;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -98,8 +115,8 @@ export async function checkAppVersion() {
 export function setupDeepLinks() {
   if (!isNative || !App) return;
   App.addListener("appUrlOpen", (event) => {
-    const url = String(event.url || "").replace("facette://", "/");
-    if (url) window.location.href = url;
+    const path = safeDeepLinkPath(event.url);
+    if (path) window.location.href = path;
   });
 }
 

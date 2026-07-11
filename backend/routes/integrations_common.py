@@ -1322,7 +1322,12 @@ async def upload_rooftr_products_excel(
                 base_name = base_name[: -(len(renk) + 1)].strip()
 
             list_price = _f(first["SATISFIYATI"]) if _has("SATISFIYATI") else 0.0
-            sale_price = (_f(first["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0) or list_price
+            # İNDİRİM: yalnızca Ticimax'te GERÇEK indirim varsa (0 < INDIRIMLIFIYAT < SATISFIYATI)
+            # sale_price ayarlanır. Aksi halde None → 'sale_price = list_price' damgası YAPILMAZ.
+            # (Eski 'or list_price' deseni sale_price'ı fiyata eşitleyip hem üstü-çizili gösterimi
+            #  gizliyor hem de Facette panelinden ELLE girilen indirimi eziyordu — "dün gitti" sebebi.)
+            _ind_raw = (_f(first["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0)
+            sale_price = _ind_raw if (_ind_raw and 0 < _ind_raw < list_price) else None
             member_price_1 = (_f(first["UYETIPIFIYAT1"]) if _has("UYETIPIFIYAT1") else 0.0) or list_price
             cost_price = _f(first["ALISFIYATI"]) if _has("ALISFIYATI") else 0.0
             vat_rate = _f(first["KDVORANI"], 10) if _has("KDVORANI") else 10
@@ -1343,7 +1348,11 @@ async def upload_rooftr_products_excel(
                     "urun_id": _cell(row, "URUNID"),
                     "stock": default_stock,
                     "price": _f(row["SATISFIYATI"]) if _has("SATISFIYATI") else list_price,
-                    "sale_price": (_f(row["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0) or (_f(row["SATISFIYATI"]) if _has("SATISFIYATI") else list_price),
+                    # Varyant indirimi de yalnızca gerçek indirimde; yoksa fiyata eşitleme.
+                    "sale_price": (lambda _vp, _vl: _vp if (_vp and 0 < _vp < _vl) else None)(
+                        (_f(row["INDIRIMLIFIYAT"]) if _has("INDIRIMLIFIYAT") else 0.0),
+                        (_f(row["SATISFIYATI"]) if _has("SATISFIYATI") else list_price),
+                    ),
                 }
                 variants.append(v)
                 stats["variants_total"] += 1
@@ -1368,7 +1377,6 @@ async def upload_rooftr_products_excel(
                 "sku": parent_stock_code,
                 "urun_karti_id": kart_id,
                 "price": list_price,
-                "sale_price": sale_price,
                 "member_price_1": member_price_1,
                 "cost_price": cost_price,
                 "vat_rate": vat_rate,
@@ -1379,12 +1387,19 @@ async def upload_rooftr_products_excel(
                 "breadcrumb": breadcrumb,
                 "variants": variants,
             }
+            # sale_price'ı SADECE Ticimax'te gerçek indirim varsa yaz. İndirim yoksa güncellemede
+            # bu alanı HİÇ dokunma → Facette panelinden elle girilen indirim KORUNUR.
+            if sale_price is not None:
+                update_doc["sale_price"] = sale_price
             if cat_doc:
                 update_doc["category_id"] = cat_doc.get("id")
                 update_doc["category_name"] = cat_doc.get("name")
 
             if existing:
-                await db.products.update_one({"id": existing["id"]}, {"$set": update_doc})
+                _set_doc = dict(update_doc)
+                # Yeni ürün oluşturmuyoruz: indirim yoksa mevcut sale_price'a dokunma (yukarıda
+                # zaten eklenmedi). Gerçek indirim varsa üstteki blok ekledi → güncellenir.
+                await db.products.update_one({"id": existing["id"]}, {"$set": _set_doc})
                 stats["parents_updated_db"] += 1
             else:
                 # Slug çakışmasını önle: temiz slug kullan, ancak başka bir ürün
@@ -1445,11 +1460,32 @@ async def import_xml_products(
     import html
     from utils.attr_parser import parse_description_attributes
 
+    # SSRF KORUMASI: xml_url yalnızca http(s) ve PUBLIC bir host olmalı. İç ağ /
+    # loopback / link-local (169.254.169.254 bulut metadata dahil) hedefleri reddet.
+    def _assert_public_url(u: str):
+        from urllib.parse import urlparse
+        import socket, ipaddress
+        p = urlparse(u or "")
+        if p.scheme not in ("http", "https") or not p.hostname:
+            raise HTTPException(status_code=400, detail="Geçersiz URL")
+        try:
+            infos = socket.getaddrinfo(p.hostname, None)
+        except Exception:
+            raise HTTPException(status_code=400, detail="URL çözümlenemedi")
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                raise HTTPException(status_code=400, detail="İç ağ/özel IP adreslerine erişim engellendi (SSRF)")
+
+    _assert_public_url(xml_url)
     try:
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        # follow_redirects=False: yönlendirmeyle iç ağa kaçış engellenir.
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
             resp = await client.get(xml_url)
             resp.raise_for_status()
             xml_bytes = resp.content
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"XML feed çekilemedi: {str(e)}")
 

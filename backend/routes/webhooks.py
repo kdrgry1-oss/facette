@@ -5,17 +5,24 @@ import traceback
 import hmac
 import hashlib
 import os
+from datetime import datetime, timezone
 
 router = APIRouter(tags=["Webhooks"])
 
 
 def _verify_trendyol_signature(body: bytes, signature: Optional[str]) -> bool:
-    """Trendyol webhook HMAC-SHA256 imza doğrulaması.
-    TRENDYOL_WEBHOOK_SECRET env set değilse (ör. test ortamı) True döner.
+    """Trendyol webhook HMAC-SHA256 imza doğrulaması — FAIL-CLOSED.
+    GÜVENLİK: Secret set DEĞİLSE istek REDDEDİLİR (eskiden True dönüp kimliksiz
+    event kabul ediyordu → sipariş durumu/stok forge edilebiliyordu). Yalnızca
+    açıkça TRENDYOL_WEBHOOK_ALLOW_UNSIGNED=1 verilen dev ortamında imzasız geçer.
     """
     secret = os.environ.get("TRENDYOL_WEBHOOK_SECRET", "").strip()
     if not secret:
-        return True  # test/dev — imza zorunlu değil, prod için env ayarla
+        if os.environ.get("TRENDYOL_WEBHOOK_ALLOW_UNSIGNED", "").strip() == "1":
+            logger.warning("Trendyol webhook: secret YOK, ALLOW_UNSIGNED=1 (yalnız DEV) — imzasız kabul")
+            return True
+        logger.error("Trendyol webhook: TRENDYOL_WEBHOOK_SECRET ayarlı değil — istek REDDEDİLDİ (fail-closed)")
+        return False
     if not signature:
         return False
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
@@ -73,19 +80,50 @@ async def process_trendyol_event(payload: dict):
         logger.error(f"Error processing Trendyol webhook: {str(e)}\n{traceback.format_exc()}")
 
 
+async def _webhook_event_is_new(source: str, payload: dict) -> bool:
+    """İDEMPOTENS: Aynı webhook eventi (Trendyol retry / replay) stoğu tekrar
+    geri yüklemesin. Event için kararlı bir anahtar üretip atomik upsert ile
+    ilk kez mi işleniyor kontrol eder. True → yeni (işlenebilir), False → mükerrer.
+    """
+    try:
+        import json as _json
+        key_src = _json.dumps({
+            "s": source,
+            "e": payload.get("eventType"),
+            "o": payload.get("orderNumber"),
+            "sp": payload.get("shipmentPackageId") or payload.get("id"),
+            "l": [(l.get("barcode"), l.get("quantity")) for l in (payload.get("orderLines") or [])],
+        }, sort_keys=True, ensure_ascii=False)
+        ekey = hashlib.sha256(key_src.encode("utf-8")).hexdigest()
+        res = await db.processed_webhook_events.update_one(
+            {"key": ekey},
+            {"$setOnInsert": {"key": ekey, "source": source, "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        return res.upserted_id is not None
+    except Exception as e:
+        logger.warning(f"webhook idempotency check failed ({e}) — işleniyor kabul edildi")
+        return True
+
+
 async def handle_stock_restoration(payload: dict):
     """
     Sipariş iptal edildiğinde veya iade onaylandığında ilgili stokları geri yükle.
     Trendyol 'ClaimApproved' ve 'OrderCancelled' eventlarında orderLineItem listesi atar.
+    GÜVENLİK: idempotent — mükerrer event stoğu tekrar şişirmez.
     """
     lines = payload.get("orderLines", [])
     if not lines:
         return
-        
+
+    if not await _webhook_event_is_new("trendyol", payload):
+        logger.info("Trendyol Webhook: mükerrer stok geri yükleme eventi atlandı (idempotens)")
+        return
+
     for line in lines:
         barcode = line.get("barcode", "")
         qty = int(line.get("quantity", 0))
-        
+
         if barcode and qty > 0:
             # Find the product/variant with this barcode
             product = await db.products.find_one({"variants.barcode": barcode})

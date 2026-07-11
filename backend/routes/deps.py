@@ -393,6 +393,26 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     return user
 
 
+async def verify_admin_token(token: str) -> dict:
+    """URL query'sinde gelen token'i (iframe/yazdirma gorunumleri icin) ADMIN JWT
+    olarak dogrular. Gecersiz/eksik/yetkisiz ise HTTPException firlatir.
+    Kimliksiz erisilen PII yazdirma uclarini (fatura/kargo etiketi) kapatir."""
+    if not token:
+        raise HTTPException(status_code=401, detail="Yetkilendirme gerekli")
+    try:
+        payload = _decode_jwt_strict(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token süresi dolmuş")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Geçersiz token")
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
+    user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
+    if not user or user.get("is_active") is False:
+        raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    return user
+
+
 async def get_effective_permissions(user: dict) -> list:
     """Kullanicinin etkin yetki listesini dondurur.
 

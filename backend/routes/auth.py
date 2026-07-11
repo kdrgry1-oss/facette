@@ -24,16 +24,11 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
 @router.post("/register")
 @(limiter.limit("5/minute") if limiter else (lambda f: f))
-async def register(
-    request: Request,
-    email: str = Query(None),
-    password: str = Query(None),
-    first_name: str = Query(None),
-    last_name: str = Query(None),
-    phone: str = Query(None)
-):
+async def register(request: Request):
     """Register new user.
-    O19: Kimlik bilgileri öncelikle GÖVDEDEN okunur (şifre query'de log'a sızmasın); query geriye uyumlu."""
+    GÜVENLİK (O19+): Kimlik bilgileri YALNIZCA istek GÖVDESİNDEN okunur; şifrenin
+    URL query'de log'a sızma yolu kaldırıldı."""
+    email = password = first_name = last_name = phone = None
     if not email or not password:
         try:
             _b = await request.json()
@@ -165,15 +160,13 @@ async def register(
 
 @router.post("/login")
 @(limiter.limit("10/minute") if limiter else (lambda f: f))
-async def login(
-    request: Request,
-    email: str = Query(None),
-    password: str = Query(None)
-):
+async def login(request: Request):
     """Login with email and password (rate-limited + lockout-protected).
-    O19: Kimlik bilgileri artık öncelikle istek GÖVDESİNDEN okunur — şifre URL query
-    parametresi olarak access log / tarayıcı geçmişi / Referer'a sızmasın. Geriye uyum
-    için query hâlâ kabul edilir."""
+    GÜVENLİK (O19+): Kimlik bilgileri YALNIZCA istek GÖVDESİNDEN okunur. Şifrenin
+    URL query parametresi olarak access log / tarayıcı geçmişi / Referer'a sızma
+    yolu tamamen kaldırıldı (query desteği çıkarıldı)."""
+    email = None
+    password = None
     if not email or not password:
         try:
             _b = await request.json()
@@ -489,7 +482,8 @@ async def forgot_password_request_otp(request: Request, req: OTPRequestReq):
         {"$set": {"used": True, "invalidated": True}},
     )
 
-    code = f"{random.randint(0, 999999):06d}"
+    import secrets as _secrets
+    code = f"{_secrets.randbelow(1000000):06d}"  # CSPRNG — tahmin edilebilir Mersenne Twister yerine
     expires = (now.timestamp() + 300)  # 5 dk
     record = {
         "phone": phone_norm,

@@ -556,7 +556,7 @@ async def _build_products_query(
         query["images.0"] = {"$exists": True}
 
     if brand:
-        query["brand"] = {"$regex": brand, "$options": "i"}
+        query["brand"] = {"$regex": re.escape(brand.strip()), "$options": "i"}  # ReDoS/regex-injection koruması
 
     if min_stock is not None:
         query["stock"] = {"$gte": min_stock}
@@ -577,7 +577,7 @@ async def _build_products_query(
         query["is_free_shipping"] = is_free_shipping
 
     if stock_code:
-        query["stock_code"] = {"$regex": stock_code, "$options": "i"}
+        query["stock_code"] = {"$regex": re.escape(stock_code.strip()), "$options": "i"}  # ReDoS/regex-injection koruması
 
     if barcode:
         import re as _re2
@@ -2478,6 +2478,11 @@ def _xlsx_clean(v):
         return v
     s = str(v)
     s = _XLSX_ILLEGAL_RE.sub("", s)
+    # CSV/Excel FORMÜL INJECTION koruması: = + - @ ile (veya tab/CR ile) başlayan
+    # hücreler Excel'de formül olarak çalışır (DDE/HYPERLINK saldırısı). Başına
+    # tek tırnak koyarak metin olarak zorla.
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        s = "'" + s
     if len(s) > 32767:
         s = s[:32767]
     return s

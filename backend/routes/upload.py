@@ -200,11 +200,15 @@ async def _serve(path: str, w: int = 0, q: int = 90):
             content = base64.b64decode(record["data_b64"])
         except Exception as e:
             logger.warning(f"serve db decode failed for {path}: {e}")
-    # 2) Disk önbelleği (fallback)
+    # 2) Disk önbelleği (fallback) — PATH TRAVERSAL KORUMASI:
+    #    `path` ham URL segmentidir. `..`, mutlak yol veya sembolik kaçışla
+    #    UPLOAD_DIR dışına çıkılamamalı. realpath ile taban dizin içinde
+    #    kaldığını doğrula; aksi halde 404 (bilgi sızdırma) ver.
     if content is None:
-        file_path = os.path.join(UPLOAD_DIR, path)
-        if os.path.exists(file_path):
-            with open(file_path, "rb") as f:
+        base_dir = os.path.realpath(UPLOAD_DIR)
+        candidate = os.path.realpath(os.path.join(base_dir, path))
+        if (candidate == base_dir or candidate.startswith(base_dir + os.sep)) and os.path.isfile(candidate):
+            with open(candidate, "rb") as f:
                 content = f.read()
     if content is None:
         raise HTTPException(status_code=404, detail="File not found")

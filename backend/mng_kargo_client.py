@@ -9,11 +9,9 @@ Verified WSDL operations:
   - TekBarkodGonderiIptali(...)        : cancel a single shipment by barcode
   - MNGGonderiBarkod(req)              : barcode print request
 
-Default credentials (override via DB settings):
-  CustomerCode: FACETTE DIŞ TİC.A.Ş.
-  Username    : 490059279
-  Password    : Face.0024E
-  TaxNumber   : 6080712084
+Kimlik bilgileri (GÜVENLİK: koda gömülmez):
+  DB settings.id="mng_kargo" veya ortam değişkeni MNG_USERNAME / MNG_PASSWORD
+  üzerinden sağlanır. CustomerCode/TaxNumber gizli olmayan şirket bilgileridir.
 """
 import logging
 import warnings

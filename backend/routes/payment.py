@@ -33,6 +33,32 @@ from .deps import db, logger
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
+
+def _safe_return_base(return_url: str, request) -> str:
+    """OPEN-REDIRECT koruması: ödeme sonrası yönlendirilecek adres SADECE kendi
+    origin'imize (istek host'u) veya bilinen facette alan adlarına izinli. Dış/kötü
+    niyetli return_url (ör. https://evil.tld) reddedilip güvenli varsayılana düşülür.
+    """
+    default = f"{str(request.base_url).rstrip('/')}/odeme"
+    ru = (return_url or "").strip()
+    if not ru:
+        return default
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(ru)
+        if p.scheme not in ("http", "https"):
+            return default
+        host = (p.hostname or "").lower()
+        req_host = (urlparse(str(request.base_url)).hostname or "").lower()
+        allowed = {req_host, "facette.com.tr", "www.facette.com.tr", "api.facette.com.tr"}
+        allowed.discard("")
+        if host in allowed:
+            return ru.rstrip("/")
+    except Exception:
+        pass
+    return default
+
+
 INIT_PATH = "/payment/iyzipos/checkoutform/initialize/auth/ecom"
 RETRIEVE_PATH = "/payment/iyzipos/checkoutform/auth/ecom/detail"
 # Doğrudan kart (kendi formumuz) — iyzico klasik Payment API yolları
@@ -453,7 +479,7 @@ async def payment_callback(request: Request, token: str = Form(default=None)):
 
     result = await _retrieve_and_finalize(tok)
     order = result["order"]
-    return_base = result["return_url"] or f"{str(request.base_url).rstrip('/')}/odeme"
+    return_base = _safe_return_base(result["return_url"], request)
     sep = "&" if "?" in return_base else "?"
     status = "success" if result["ok"] else "fail"
     redirect = f"{return_base}{sep}status={status}&order={order.get('order_number')}"
@@ -627,7 +653,7 @@ async def callback_3ds(request: Request):
     conv_id = form.get("conversationId") or request.query_params.get("conversationId") or ""
 
     order = await db.orders.find_one({"id": conv_id}, {"_id": 0}) if conv_id else None
-    return_base = (order or {}).get("iyzico_return_url") or f"{str(request.base_url).rstrip('/')}/odeme"
+    return_base = _safe_return_base((order or {}).get("iyzico_return_url"), request)
 
     ok = False
     if status == "success" and md == "1" and payment_id:

@@ -118,15 +118,9 @@ async def admin_save_settings(req: SocialSettingsReq, current_user: dict = Depen
 
 async def _issue_jwt(user_id: str, email: str, extra: Optional[Dict] = None) -> str:
     """Mevcut create_token ile uyumlu JWT üret (7 gün)."""
-    try:
-        return create_token(user_id, is_admin=False)
-    except Exception as e:
-        logger.warning(f"create_token failed, fallback: {e}")
-    secret = os.environ.get("JWT_SECRET", "change-me")
-    return pyjwt.encode(
-        {"user_id": user_id, "email": email, "iat": int(datetime.now(timezone.utc).timestamp())},
-        secret, algorithm="HS256",
-    )
+    # GÜVENLİK: zayıf sabit "change-me" fallback secret kaldırıldı. Yalnızca vetted
+    # create_token (env JWT_SECRET + issuer + exp) kullanılır; başarısız olursa hata ver.
+    return create_token(user_id, is_admin=False)
 
 
 async def _upsert_social_user(provider: str, provider_id: str, email: str, name: str = "") -> dict:

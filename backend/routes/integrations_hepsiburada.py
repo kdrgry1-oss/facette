@@ -492,11 +492,10 @@ async def hepsiburada_oms_diag(on: str = "", key: str = ""):
         results["by_number"] = await timed(lambda: client.get_order_by_number(on), 10)
     return {"ok": True, "info": info, "results": results}
 @router.get("/hepsiburada/orders/import-by-number")
-async def hepsiburada_import_by_number(on: str = "", key: str = ""):
-    """GEÇİCİ: Siparişi numarayla OMS'ten çekip doğrudan panele (db.orders) aktarır — frontend'e bağlı değil.
-    Tarayıcıdan aç: /api/integrations/hepsiburada/orders/import-by-number?key=facette_oms_diag&on=<sipariş_no>"""
-    if key != "facette_oms_diag":
-        return {"ok": False, "error": "?key=facette_oms_diag gerekli"}
+async def hepsiburada_import_by_number(on: str = "", current_user: dict = Depends(require_admin)):
+    """Siparişi numarayla OMS'ten çekip doğrudan panele (db.orders) aktarır.
+    GÜVENLİK: Artık admin auth zorunlu (eskiden sabit ?key ile kimliksiz stok
+    değiştirilebiliyordu — kaldırıldı)."""
     on = (on or "").strip()
     if not on:
         return {"ok": False, "error": "on (siparis no) gerekli"}

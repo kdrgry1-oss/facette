@@ -4,6 +4,7 @@
  * İçerik kullanıcıdan geldiği için cevaplar HTML olarak (dangerouslySetInnerHTML) render edilir.
  */
 import { useState } from "react";
+import { sanitizeHtml } from "../lib/sanitizeHtml";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 
@@ -114,7 +115,7 @@ export default function FAQ() {
                   {open && (
                     <div
                       className="bg-white border border-t-0 border-gray-200 rounded-b-md px-4 py-4 text-sm text-gray-700 font-normal leading-relaxed [&_b]:font-semibold [&_b]:text-black"
-                      dangerouslySetInnerHTML={{ __html: item.a }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.a) }}
                     />
                   )}
                 </div>

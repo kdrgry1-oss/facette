@@ -9,7 +9,8 @@ const LS_KEY = "facette_favorites";
 
 const readLocal = () => {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+    const v = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+    return Array.isArray(v) ? v : [];  // bozuk/dizi-olmayan değerde .map çökmesini önle
   } catch {
     return [];
   }

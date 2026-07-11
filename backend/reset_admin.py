@@ -19,7 +19,12 @@ async def reset():
     client = AsyncIOMotorClient(MONGO_URL)
     db = client[db_name]
     
-    new_password = os.environ.get("ADMIN_RESET_PASSWORD", "admin123")
+    # GÜVENLİK: sabit "admin123" varsayılanı kaldırıldı. ADMIN_RESET_PASSWORD env
+    # zorunlu; verilmezse betik hiçbir şey yapmadan durur (zayıf parola dayatılmaz).
+    new_password = os.environ.get("ADMIN_RESET_PASSWORD", "").strip()
+    if len(new_password) < 10:
+        print("HATA: ADMIN_RESET_PASSWORD ortam değişkeni (>=10 karakter) gerekli. İşlem iptal.")
+        return
     hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
     
     result = await db.users.update_one(
@@ -42,10 +47,10 @@ async def reset():
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
-        print("Admin user CREATED with email: admin@facette.com / password: admin123")
+        print("Admin user CREATED: admin@facette.com (parola ADMIN_RESET_PASSWORD ile ayarlandı)")
     else:
         print(f"Admin password RESET. Matched: {result.matched_count}, Modified: {result.modified_count}")
-        print("Login: admin@facette.com / admin123")
+        print("Login: admin@facette.com (parola ADMIN_RESET_PASSWORD ile ayarlandı)")
 
 if __name__ == "__main__":
     asyncio.run(reset())

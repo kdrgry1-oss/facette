@@ -8,7 +8,7 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -623,11 +623,16 @@ async def get_order_by_number(order_number: str):
         digits = "".join(c for c in str(p or "") if c.isdigit())
         return (digits[:3] + "****" + digits[-2:]) if len(digits) >= 6 else ""
 
+    def _mask_name(n: str) -> str:
+        # Sıra numarası tahmin edilebilir olduğundan (enumeration) ad-soyad da maskelenir.
+        n = str(n or "").strip()
+        return (n[:1] + "***") if n else ""
+
     ship = order.get("shipping_address") or {}
     if ship:
         order["shipping_address"] = {
-            "first_name": ship.get("first_name", ""),
-            "last_name": ship.get("last_name", ""),
+            "first_name": _mask_name(ship.get("first_name", "")),
+            "last_name": _mask_name(ship.get("last_name", "")),
             "phone": _mask_phone(ship.get("phone", "")),
             "email": _mask_email(ship.get("email", "")),
             "address": (ship.get("address") or "")[:40] + ("..." if len(ship.get("address") or "") > 40 else ""),
@@ -3067,7 +3072,9 @@ async def create_invoice_for_order(
 # ---------------------------------------------------------------------------
 @router.get("/{order_id}/invoice/print")
 async def print_invoice_html(order_id: str, token: str = None):
-    """Basit fatura HTML çıktısı (yazdırılabilir). Bulk print için iframe."""
+    """Basit fatura HTML çıktısı (yazdırılabilir). Bulk print için iframe.
+    GÜVENLİK: token admin JWT olarak doğrulanır — kimliksiz PII sızıntısı kapatıldı."""
+    await verify_admin_token(token)
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -3159,11 +3166,15 @@ def _normalize_phone(p: str) -> str:
 
 
 async def _get_mng_settings() -> dict:
-    """MNG Kargo ayarlarını DB'den çeker, yoksa kullanıcı tarafından verilen default'u döndürür."""
+    """MNG Kargo ayarlarını DB'den çeker; kimlik bilgileri (kullanıcı adı/parola)
+    GÜVENLİK gereği artık kaynak koda gömülü DEĞİL — DB ayarı yoksa ortam
+    değişkeninden (MNG_USERNAME / MNG_PASSWORD) okunur. Şirket kodu/vergi no
+    gizli olmadığından sabit kalır."""
+    import os as _os
     s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
     return {
-        "username": s.get("username") or "490059279",
-        "password": s.get("password") or "Face.0024E",
+        "username": s.get("username") or _os.environ.get("MNG_USERNAME", ""),
+        "password": s.get("password") or _os.environ.get("MNG_PASSWORD", ""),
         "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
         "tax_no": s.get("tax_no") or "6080712084",
         "is_active": s.get("is_active", True),
@@ -4116,6 +4127,7 @@ async def get_cargo_label(order_id: str, token: str = None):
     + REMARKS + tek barkod sağ altta + sağ kenarda handling icon'ları.
     """
     from fastapi.responses import HTMLResponse
+    await verify_admin_token(token)  # GÜVENLİK: kimliksiz kargo etiketi PII sızıntısı kapatıldı
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -4327,11 +4339,12 @@ async def get_cargo_label(order_id: str, token: str = None):
 @router.get("/cargo/mng-settings")
 async def get_mng_settings(current_user: dict = Depends(require_admin)):
     """MNG Kargo ayarlarını döndür (şifre maskelenir)."""
+    import os as _os
     s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
     return {
         "customer_code": s.get("customer_code") or "FACETTE DIS TIC.A.S.",
-        "username": s.get("username") or "490059279",
-        "password": "********" if s.get("password") else "",
+        "username": s.get("username") or _os.environ.get("MNG_USERNAME", ""),
+        "password": "********" if (s.get("password") or _os.environ.get("MNG_PASSWORD")) else "",
         "tax_no": s.get("tax_no") or "6080712084",
         "is_active": s.get("is_active", True),
         "barkod_cikti_turu": s.get("barkod_cikti_turu") or "Standart",
