@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
 import { FavoritesProvider } from "./context/FavoritesContext";
-import { bootstrapNative } from "./lib/native";
+import { bootstrapNative, isNative } from "./lib/native";
 
 // Storefront — sadece ana sayfa (LCP) eager; gerisi route'a girilince yüklenir.
 // Bu, ilk açılışta indirilen JS'i ciddi şekilde küçültür (mobil TBT/LCP/FCP iyileşir).
@@ -80,8 +80,8 @@ function App() {
             <MaintenanceGate>
               <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
                 <Routes>
-                {/* Storefront */}
-                <Route path="/" element={<Home />} />
+                {/* Storefront (native mobil uygulamada kök -> admin paneli açılır) */}
+                <Route path="/" element={isNative ? <Navigate to="/admin" replace /> : <Home />} />
                 <Route path="/kategori/:slug" element={<Category />} />
                 <Route path="/sepet" element={<Cart />} />
                 <Route path="/odeme" element={<Checkout />} />
