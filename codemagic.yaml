@@ -1,0 +1,62 @@
+# Codemagic — Facette iOS (App Store) bulut derleme tarifi.
+# Yerel Xcode/Mac GEREKMEZ: Codemagic bulut Mac'te güncel Xcode ile derler ve
+# doğrudan TestFlight'a yükler.
+#
+# ÖN KOŞULLAR (Codemagic panelinde, bir kez):
+#   1) Team settings → Integrations → App Store Connect → API key ekle
+#      (App Store Connect'ten indirdiğin .p8 + Key ID + Issuer ID).
+#      Bu entegrasyona verdiğin İSİM aşağıdaki `app_store_connect: CodemagicKey`
+#      ile AYNI olmalı.
+#   2) Bu workflow'un Environment variables kısmına ekle:
+#         REACT_APP_BACKEND_URL = https://CANLI-BACKEND-ADRESIN   (Cloudflare'dekiyle aynı)
+#   3) App Store Connect'teki uygulamanın Bundle ID'si `com.facette.app` olmalı
+#      (farklıysa aşağıdaki bundle_identifier'ı ona göre değiştir).
+
+workflows:
+  ios-facette:
+    name: Facette iOS (App Store)
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      app_store_connect: CodemagicKey     # ← Codemagic'te eklediğin API key adı
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.facette.app
+      vars:
+        XCODE_WORKSPACE: "App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.facette.app"
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Web build (React) + Capacitor sync
+        script: |
+          cd frontend
+          yarn install --frozen-lockfile || yarn install
+          # Canlı API adresi env'den gelir (Codemagic → Environment variables)
+          echo "REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL" > .env
+          yarn build
+          npx cap sync ios
+      - name: CocoaPods
+        script: |
+          cd frontend/ios/App
+          pod install
+      - name: Kod imzalama profillerini uygula
+        script: |
+          xcode-project use-profiles
+      - name: IPA derle
+        script: |
+          cd frontend/ios/App
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - frontend/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true       # otomatik TestFlight'a yükle
+        # submit_to_app_store: false     # incelemeye göndermeyi sonra açarsın
