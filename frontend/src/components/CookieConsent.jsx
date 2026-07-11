@@ -56,16 +56,37 @@ const logConsent = (decision) => {
   }
 };
 
+// Metinler AYARLAR'dan düzenlenebilir (settings.cookie_consent). Boşsa bu varsayılanlar.
+const DEFAULT_CFG = {
+  heading: "Gizliliğinize önem veriyoruz",
+  body: "Deneyimini iyileştirmek, içerikleri kişiselleştirmek ve trafiği analiz etmek için çerezler kullanıyoruz. Tercihini istediğin zaman değiştirebilirsin.",
+  policy_url: "/sayfa/gizlilik",
+  policy_label: "Gizlilik Politikası",
+};
+
 export default function CookieConsent() {
   const [visible, setVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analytics, setAnalytics] = useState(true);
   const [marketing, setMarketing] = useState(true);
+  const [cfg, setCfg] = useState(DEFAULT_CFG);
 
   useEffect(() => {
     // Karar yoksa kısa gecikmeyle göster (LCP'yi bloklamasın).
     if (readConsent()) return;
     const t = setTimeout(() => setVisible(true), 600);
+    // Çerez bildirimi metinlerini ayarlardan çek (yoksa varsayılan).
+    axios.get(`${API}/settings`)
+      .then((r) => {
+        const c = r.data?.cookie_consent || {};
+        setCfg({
+          heading: (c.heading || "").trim() || DEFAULT_CFG.heading,
+          body: (c.body || "").trim() || DEFAULT_CFG.body,
+          policy_url: (c.policy_url || "").trim() || DEFAULT_CFG.policy_url,
+          policy_label: (c.policy_label || "").trim() || DEFAULT_CFG.policy_label,
+        });
+      })
+      .catch(() => { /* varsayılan kalır */ });
     return () => clearTimeout(t);
   }, []);
 
@@ -106,11 +127,10 @@ export default function CookieConsent() {
         <div className="px-5 py-5 md:px-8 md:py-6">
           <div className="md:flex md:items-start md:gap-8">
             <div className="flex-1">
-              <p className="text-[10px] tracking-[0.32em] uppercase text-black/45 mb-2">Gizliliğe Saygı</p>
+              <p className="text-[10px] tracking-[0.32em] uppercase text-black/45 mb-2">{cfg.heading}</p>
               <p className="text-sm font-light text-black/75 leading-relaxed max-w-2xl">
-                Deneyimini iyileştirmek, içerikleri kişiselleştirmek ve trafiği analiz etmek için
-                çerezler kullanıyoruz. Tercihini istediğin zaman değiştirebilirsin.{" "}
-                <a href="/sayfa/gizlilik" className="underline hover:no-underline">Gizlilik Politikası</a>
+                {cfg.body}{" "}
+                <a href={cfg.policy_url} className="underline hover:no-underline">{cfg.policy_label}</a>
               </p>
 
               {settingsOpen && (
@@ -142,6 +162,7 @@ export default function CookieConsent() {
             </div>
 
             <div className="mt-5 md:mt-0 flex flex-col gap-2 md:w-56 flex-shrink-0">
+              {/* 1) Tümünü Kabul Et (siyah) — en üstte */}
               <button
                 onClick={acceptAll}
                 className="w-full bg-black text-white text-xs tracking-[0.18em] uppercase py-3 hover:bg-black/85 transition-colors"
@@ -149,29 +170,30 @@ export default function CookieConsent() {
               >
                 Tümünü Kabul Et
               </button>
-              {settingsOpen ? (
+              {/* 2) Tercihleri Yönet (buton) — kabul et'in altında; açınca Kaydet çıkar */}
+              <button
+                onClick={() => setSettingsOpen((o) => !o)}
+                className="w-full border border-black text-xs tracking-[0.18em] uppercase py-3 hover:bg-black hover:text-white transition-colors"
+                data-testid="cookie-settings"
+              >
+                {settingsOpen ? "Tercihleri Gizle" : "Tercihleri Yönet"}
+              </button>
+              {settingsOpen && (
                 <button
                   onClick={savePrefs}
-                  className="w-full border border-black text-xs tracking-[0.18em] uppercase py-3 hover:bg-black hover:text-white transition-colors"
+                  className="w-full border border-black/60 text-xs tracking-[0.18em] uppercase py-3 hover:bg-black hover:text-white transition-colors"
                   data-testid="cookie-save"
                 >
                   Tercihleri Kaydet
                 </button>
-              ) : (
-                <button
-                  onClick={rejectAll}
-                  className="w-full border border-black/25 text-xs tracking-[0.18em] uppercase py-3 hover:border-black transition-colors"
-                  data-testid="cookie-reject"
-                >
-                  Reddet
-                </button>
               )}
+              {/* 3) Reddet — en altta */}
               <button
-                onClick={() => setSettingsOpen((o) => !o)}
-                className="text-[11px] tracking-[0.12em] uppercase text-black/45 hover:text-black transition-colors py-1"
-                data-testid="cookie-settings"
+                onClick={rejectAll}
+                className="w-full border border-black/25 text-xs tracking-[0.18em] uppercase py-3 hover:border-black transition-colors"
+                data-testid="cookie-reject"
               >
-                {settingsOpen ? "Kapat" : "Tercihleri Yönet"}
+                Reddet
               </button>
             </div>
           </div>

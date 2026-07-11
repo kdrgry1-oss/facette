@@ -337,6 +337,54 @@ export default function AdminSettings() {
           </div>
         </div>
 
+        {/* Çerez Bildirimi (Cookie Consent) — sitede alt kısımda çıkan çerez barı metinleri */}
+        <div className="bg-white p-6 rounded-lg shadow-sm">
+          <h2 className="text-lg font-medium mb-1">Çerez Bildirimi</h2>
+          <p className="text-xs text-gray-500 mb-4">Sitenin altında çıkan çerez izni barındaki metinler. Boş bırakılırsa varsayılan kullanılır.</p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Başlık</label>
+              <input
+                type="text"
+                value={settings.cookie_consent?.heading || ""}
+                onChange={(e) => setSettings({ ...settings, cookie_consent: { ...(settings.cookie_consent || {}), heading: e.target.value } })}
+                placeholder="Gizliliğinize önem veriyoruz"
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Gizlilik Politikası linki</label>
+              <input
+                type="text"
+                value={settings.cookie_consent?.policy_url || ""}
+                onChange={(e) => setSettings({ ...settings, cookie_consent: { ...(settings.cookie_consent || {}), policy_url: e.target.value } })}
+                placeholder="/sayfa/gizlilik"
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">Açıklama metni</label>
+              <textarea
+                value={settings.cookie_consent?.body || ""}
+                onChange={(e) => setSettings({ ...settings, cookie_consent: { ...(settings.cookie_consent || {}), body: e.target.value } })}
+                rows={3}
+                placeholder="Deneyimini iyileştirmek, içerikleri kişiselleştirmek ve trafiği analiz etmek için çerezler kullanıyoruz. Tercihini istediğin zaman değiştirebilirsin."
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Link metni</label>
+              <input
+                type="text"
+                value={settings.cookie_consent?.policy_label || ""}
+                onChange={(e) => setSettings({ ...settings, cookie_consent: { ...(settings.cookie_consent || {}), policy_label: e.target.value } })}
+                placeholder="Gizlilik Politikası"
+                className="w-full border px-3 py-2 rounded text-sm"
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Payment Methods */}
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h2 className="text-lg font-medium mb-4">Ödeme Yöntemleri</h2>
