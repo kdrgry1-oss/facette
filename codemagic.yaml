@@ -41,12 +41,29 @@ workflows:
           pod install
       - name: Kod imzalama — sertifika + profil OTOMATİK oluştur/çek
         script: |
+          set -e
           keychain initialize
-          # Dağıtım sertifikası + App Store provizyon profili YOKSA oluştur, VARSA çek.
+
+          # --- TEŞHİS: API key gerçekten sertifika oluşturabiliyor mu? ---
+          # App Manager rolü DAĞITIM sertifikası OLUŞTURAMAZ (Apple kuralı: Admin gerekir).
+          # Aşağıdaki liste boş dönüyorsa ve --create de üretmiyorsa → key rolü yetersiz.
+          echo "=== Mevcut DAĞITIM (IOS_DISTRIBUTION) sertifikaları ==="
+          app-store-connect list-certificates --type IOS_DISTRIBUTION --json || true
+
+          # Dağıtım sertifikası YOKSA oluştur (Admin rolü şart), VARSA yerel keychain'e kur.
+          # --create ile hem sertifika hem App Store provizyon profili gelir/oluşur.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
+
+          echo "=== fetch SONRASI sertifikalar (üretildi mi?) ==="
+          app-store-connect list-certificates --type IOS_DISTRIBUTION --json || true
+
           keychain add-certificates
+
+          echo "=== keychain'de kurulu imza kimlikleri ==="
+          keychain list-identities || true
+
           # use-profiles PROJE KLASÖRÜNDEN çalışmalı ki App.xcodeproj'u bulup manuel imzaya
           # çevirsin (proje Automatic + team tanımsız geldiği için repo kökünden boş geçiyordu).
           cd frontend/ios/App
