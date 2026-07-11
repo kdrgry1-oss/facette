@@ -7,10 +7,9 @@
 #      (App Store Connect'ten indirdiğin .p8 + Key ID + Issuer ID).
 #      Bu entegrasyona verdiğin İSİM aşağıdaki `app_store_connect: CodemagicKey`
 #      ile AYNI olmalı.
-#   2) Bu workflow'un Environment variables kısmına ekle:
-#         REACT_APP_BACKEND_URL = https://CANLI-BACKEND-ADRESIN   (Cloudflare'dekiyle aynı)
-#   3) App Store Connect'teki uygulamanın Bundle ID'si `com.facette.app` olmalı
-#      (farklıysa aşağıdaki bundle_identifier'ı ona göre değiştir).
+#   2) App Store Connect'teki uygulamanın (Facette Admin) Bundle ID'si `com.facette.app`
+#      olmalı (farklıysa aşağıdaki bundle_identifier'ı ona göre değiştir).
+# NOT: Canlı backend adresi (api.facette.com.tr) yaml'a GÖMÜLÜ (gizli değil) — env var GEREKMEZ.
 
 workflows:
   ios-facette:
@@ -35,8 +34,8 @@ workflows:
         script: |
           cd frontend
           yarn install --frozen-lockfile || yarn install
-          # Canlı API adresi env'den gelir (Codemagic → Environment variables)
-          echo "REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL" > .env
+          # Canlı API adresi (Cloudflare'dekiyle aynı) — doğrudan gömülü, env var gerekmez.
+          echo "REACT_APP_BACKEND_URL=https://api.facette.com.tr" > .env
           yarn build
           npx cap sync ios
       - name: CocoaPods
