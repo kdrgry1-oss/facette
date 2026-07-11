@@ -67,8 +67,9 @@ const DEFAULT_CFG = {
 export default function CookieConsent() {
   const [visible, setVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [analytics, setAnalytics] = useState(true);
-  const [marketing, setMarketing] = useState(true);
+  // KVKK/GDPR: zorunlu-olmayan çerezler AÇIK RIZA'ya kadar KAPALI (opt-in) başlar.
+  const [analytics, setAnalytics] = useState(false);
+  const [marketing, setMarketing] = useState(false);
   const [cfg, setCfg] = useState(DEFAULT_CFG);
 
   useEffect(() => {

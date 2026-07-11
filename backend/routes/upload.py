@@ -214,7 +214,13 @@ async def _serve(path: str, w: int = 0, q: int = 90):
         raise HTTPException(status_code=404, detail="File not found")
 
     # İçerik-adresli (uuid) dosyalar değişmez → 1 yıl immutable cache (PageSpeed + tekrar ziyaret)
-    headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+    headers = {"Cache-Control": "public, max-age=31536000, immutable",
+               "X-Content-Type-Options": "nosniff"}
+    # SVG XSS KORUMASI: SVG top-level açılırsa içindeki <script> çalışır. attachment ile
+    # top-level render engellenir (<img> ile gömme etkilenmez, orada script zaten çalışmaz).
+    if "svg" in (ctype or "").lower():
+        headers["Content-Disposition"] = "attachment"
+        headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
 
     # On-the-fly optimize/resize — yalnızca ?w= verildiyse ve raster görselse.
     if w and w > 0 and ctype.startswith("image/") and "svg" not in ctype:

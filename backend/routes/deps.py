@@ -420,9 +420,15 @@ async def get_effective_permissions(user: dict) -> list:
       - email == 'admin@facette.com' VEYA role_id yok  -> ['*'] (super admin)
       - aksi halde rol kaydindaki permissions listesi
     """
-    role_id = (user or {}).get("role_id") or ""
-    if (user or {}).get("email") == "admin@facette.com" or not role_id:
+    # GÜVENLİK: eskiden boş role_id → ["*"] (süper-admin) idi → rolsüz oluşturulan
+    # personel sessizce tam yetki alıyordu. Artık süper-admin YALNIZCA e-posta
+    # eşleşmesi VEYA açık is_super_admin bayrağı ile. Rolsüz kullanıcı → [] (fail-closed).
+    u = user or {}
+    if u.get("email") == "admin@facette.com" or u.get("is_super_admin") is True:
         return ["*"]
+    role_id = u.get("role_id") or ""
+    if not role_id:
+        return []
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return []

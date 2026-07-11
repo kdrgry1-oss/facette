@@ -176,10 +176,13 @@ async def delete_panel_user(user_id: str, current_user: dict = Depends(require_a
 async def get_my_permissions(current_user: dict = Depends(require_admin)):
     """Return effective permissions of the current user."""
     await _ensure_default_roles()
-    role_id = current_user.get("role_id") or ""
-    # super admin defaults
-    if current_user.get("email") == "admin@facette.com" or not role_id:
+    # GÜVENLİK: süper-admin yalnızca e-posta VEYA is_super_admin bayrağı ile
+    # (rolsüz kullanıcı artık otomatik ["*"] ALMAZ → deps.get_effective_permissions ile aynı).
+    if current_user.get("email") == "admin@facette.com" or current_user.get("is_super_admin") is True:
         return {"permissions": ["*"], "role": "Süper Admin"}
+    role_id = current_user.get("role_id") or ""
+    if not role_id:
+        return {"permissions": [], "role": None}
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return {"permissions": [], "role": None}

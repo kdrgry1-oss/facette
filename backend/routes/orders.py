@@ -8,7 +8,7 @@ import time
 import uuid
 import re
 
-from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token
+from .deps import db, logger, get_current_user, require_admin, require_permission, generate_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc, verify_admin_token, limiter
 from .attribution import resolve_attribution_for_order
 from pymongo import ReturnDocument
 
@@ -804,12 +804,13 @@ async def get_order_events(
 
 
 @router.post("")
+@(limiter.limit("20/minute") if limiter else (lambda f: f))
 async def create_order(
     order_data: dict,
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Create new order"""
+    """Create new order (rate-limited: bot/enumeration + kaynak tüketimi koruması)"""
     # FAZ 6 — Kullanıcı IP'sini kayda al (X-Forwarded-For → gerçek IP)
     forwarded = request.headers.get("x-forwarded-for", "")
     client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "")
@@ -4383,13 +4384,16 @@ async def test_mng_connection(current_user: dict = Depends(require_admin)):
 # Faz 2 — Havale dekont bildirimi (storefront yukleme + admin goruntuleme)
 # =============================================================================
 @router.post("/by-number/{order_number}/payment-notification")
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
 async def submit_payment_notification(
+    request: Request,
     order_number: str,
     file: UploadFile = File(...),
     note: str = Form(""),
 ):
-    """Musteri: ilgili siparis icin dekont (PDF/gorsel) yukler.
+    """Musteri: ilgili siparis icin dekont (PDF/gorsel) yukler (rate-limited).
     Auth gerekmez; siparis numarasi yetkilendirme anahtaridir."""
+    _ = request  # rate-limit için
     order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")

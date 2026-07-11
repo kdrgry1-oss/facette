@@ -360,11 +360,18 @@ async def lifespan(app: FastAPI):
     client.close()
 
 # Create FastAPI app
+# GÜVENLİK: prod'da interaktif API dokümanı (/docs, /redoc, OpenAPI şeması) kapalı —
+# saldırı yüzeyini/uç envanteri ifşasını azaltır. DEV'de açmak için ENABLE_API_DOCS=1.
+_docs_enabled = os.environ.get("ENABLE_API_DOCS", "").strip() == "1" or \
+    os.environ.get("ENVIRONMENT", "production").strip().lower() in ("dev", "development", "local")
 app = FastAPI(
     title="Facette E-Commerce API",
     version="3.0",
     description="Modular E-Commerce API with Iyzico, Trendyol, MNG Kargo, GIB integrations",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 # CORS — strict whitelist (no wildcard in production). Configure via CORS_ORIGINS env.
@@ -613,6 +620,9 @@ api_router.include_router(locations_router)
 api_router.include_router(attribution_router)
 from routes.push import router as push_router  # mobil admin push bildirimleri
 api_router.include_router(push_router)
+
+from routes.consent import router as consent_router  # KVKK çerez onayı kaydı
+api_router.include_router(consent_router)
 api_router.include_router(members_router)
 api_router.include_router(coupons_admin_router)
 api_router.include_router(coupons_public_router)
