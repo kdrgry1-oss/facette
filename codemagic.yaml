@@ -44,6 +44,26 @@ workflows:
           set -e
           keychain initialize
 
+          # --- Eski (özel anahtarı elimizde OLMAYAN) dağıtım sertifikalarını temizle ---
+          # Apple hesap başına en fazla 2 dağıtım sertifikasına izin verir. Dolu olduğunda
+          # bize ait yeni sertifika ÜRETİLEMEZ (409 hatası). Bu eski sertifikaların özel
+          # anahtarı bizde olmadığından ZATEN kullanılamaz — güvenle siliyoruz. Böylece
+          # her build tam 1 taze sertifika üretir; limit asla dolmaz. (App Store zaten
+          # yüklenen IPA'yı kendi tarafında yeniden imzaladığı için bu güvenlidir.)
+          for T in DISTRIBUTION IOS_DISTRIBUTION; do
+            IDS=$(app-store-connect certificates list --type "$T" --json 2>/dev/null \
+                  | python3 -c "import sys,json
+try:
+    print(' '.join(c.get('id','') for c in json.load(sys.stdin)))
+except Exception:
+    pass")
+            for CID in $IDS; do
+              [ -n "$CID" ] || continue
+              echo ">>> Eski $T sertifikası siliniyor: $CID"
+              app-store-connect certificates delete "$CID" || true
+            done
+          done
+
           # Kendi private key'imizi üretip sertifikayı ONA BAĞLI oluştur
           # (aksi halde "Cannot save ... without certificate private key" hatası).
           openssl genrsa -out /tmp/dist_key.pem 2048
