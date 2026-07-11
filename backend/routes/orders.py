@@ -1242,6 +1242,25 @@ async def create_order(
 
     _spawn(_notify_order_created())
 
+    # Mobil admin uygulamasına ANLIK PUSH: yeni sipariş bildirimi (best-effort; yoksa sessiz).
+    async def _notify_admins_push():
+        try:
+            from .push import send_push_to_admins
+            _tl = _round2(order.get("total") or 0)
+            _ship = order.get("shipping_address") or {}
+            _who = (f"{_ship.get('first_name','')} {_ship.get('last_name','')}".strip()
+                    or _ship.get("full_name") or "Müşteri")
+            _pf = _platform_display(order)
+            await send_push_to_admins(
+                f"🛍️ Yeni Sipariş · {_tl:,.2f} TL".replace(",", "."),
+                f"{order.get('order_number','')} · {_who} · {_pf}",
+                {"type": "new_order", "order_id": str(order.get("id") or ""),
+                 "order_number": str(order.get("order_number") or "")},
+            )
+        except Exception as e:
+            logger.warning(f"admin push (new_order) atlandı: {e}")
+    _spawn(_notify_admins_push())
+
     # FAZ 1 - C1: otomatik stok düşümü
     try:
         moves = await _stock_delta_for_order(order, -1)

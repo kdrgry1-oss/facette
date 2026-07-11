@@ -611,6 +611,8 @@ api_router.include_router(ai_chatbot_router)
 api_router.include_router(ai_assistant_router)
 api_router.include_router(locations_router)
 api_router.include_router(attribution_router)
+from routes.push import router as push_router  # mobil admin push bildirimleri
+api_router.include_router(push_router)
 api_router.include_router(members_router)
 api_router.include_router(coupons_admin_router)
 api_router.include_router(coupons_public_router)
