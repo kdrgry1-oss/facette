@@ -62,9 +62,13 @@ workflows:
           # Kendi private key'imizi üretip sertifikayı ONA BAĞLI oluştur
           # (aksi halde "Cannot save ... without certificate private key" hatası).
           openssl genrsa -out /tmp/dist_key.pem 2048
+          # --strict-match-identifier: SADECE tam "com.facette.app" ile eşleş.
+          # Aksi halde API kısmi eşleşmeyle "com.facette.appleLogin"i seçip profili
+          # YANLIŞ bundle id için üretiyordu → projeye uymuyordu.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key @file:/tmp/dist_key.pem \
+            --strict-match-identifier \
             --create
           keychain add-certificates
 
