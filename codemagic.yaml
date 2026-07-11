@@ -19,9 +19,6 @@ workflows:
     integrations:
       app_store_connect: CodemagicKey     # ← Codemagic'te eklediğin API key adı
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.facette.app
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
@@ -42,8 +39,15 @@ workflows:
         script: |
           cd frontend/ios/App
           pod install
-      - name: Kod imzalama profillerini uygula
+      - name: Kod imzalama — sertifika + profil OTOMATİK oluştur/çek
         script: |
+          keychain initialize
+          # Dağıtım sertifikası + App Store provizyon profili YOKSA oluştur, VARSA çek.
+          # (Codemagic'in ios_signing bloğu profili kendiliğinden üretmediği için açıkça yapıyoruz.)
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           xcode-project use-profiles
       - name: IPA derle
         script: |
