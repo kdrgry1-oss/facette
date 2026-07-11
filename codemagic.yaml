@@ -43,11 +43,13 @@ workflows:
         script: |
           keychain initialize
           # Dağıtım sertifikası + App Store provizyon profili YOKSA oluştur, VARSA çek.
-          # (Codemagic'in ios_signing bloğu profili kendiliğinden üretmediği için açıkça yapıyoruz.)
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
+          # use-profiles PROJE KLASÖRÜNDEN çalışmalı ki App.xcodeproj'u bulup manuel imzaya
+          # çevirsin (proje Automatic + team tanımsız geldiği için repo kökünden boş geçiyordu).
+          cd frontend/ios/App
           xcode-project use-profiles
       - name: IPA derle
         script: |
