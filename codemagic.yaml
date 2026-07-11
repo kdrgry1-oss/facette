@@ -39,44 +39,57 @@ workflows:
         script: |
           cd frontend/ios/App
           pod install
-      - name: Kod imzalama — sertifika + profil OTOMATİK oluştur/çek
+      - name: Kod imzalama + IPA derle (profil elle geçirilir)
         script: |
           set -e
           keychain initialize
 
-          # --- TEŞHİS: portalda halihazırda dağıtım sertifikası var mı? ---
-          echo "=== Apple Distribution (DISTRIBUTION) sertifikaları ==="
-          app-store-connect certificates list --type DISTRIBUTION --json || true
-          echo "=== iOS Distribution (IOS_DISTRIBUTION) sertifikaları ==="
-          app-store-connect certificates list --type IOS_DISTRIBUTION --json || true
-
-          # ÖNEMLİ: Kendi özel anahtarımızı (private key) ÜRETİP sertifikayı ONA BAĞLI
-          # oluşturuyoruz. `--create` tek başınayken portaldaki (özel anahtarını
-          # bilmediğimiz) sertifikaları kaydetmeye çalışıp
-          #   "Cannot save Signing Certificates without certificate private key"
-          # hatası veriyordu. Kendi anahtarımızı vererek bu engeli kaldırıyoruz.
+          # Kendi private key'imizi üretip sertifikayı ONA BAĞLI oluştur
+          # (aksi halde "Cannot save ... without certificate private key" hatası).
           openssl genrsa -out /tmp/dist_key.pem 2048
-
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key @file:/tmp/dist_key.pem \
             --create
-
           keychain add-certificates
 
-          echo "=== keychain'de kurulu imza kimlikleri ==="
+          echo "=== keychain imza kimlikleri ==="
           keychain list-identities || true
 
-          # use-profiles PROJE KLASÖRÜNDEN çalışmalı ki App.xcodeproj'u bulup manuel imzaya
-          # çevirsin (proje Automatic + team tanımsız geldiği için repo kökünden boş geçiyordu).
-          cd frontend/ios/App
-          xcode-project use-profiles
-      - name: IPA derle
-        script: |
+          # use-profiles projeyi manuel imzaya çevirsin (yedek — asıl imza aşağıda elle).
+          ( cd frontend/ios/App && xcode-project use-profiles ) || true
+
+          # --- İndirilen profilden TEAM ID + profil adını ÇIKAR ---
+          # use-profiles projeyi düzgün değiştiremediğinde archive "requires a
+          # provisioning profile" veriyordu. Bu değerleri xcodebuild'e DOĞRUDAN
+          # geçerek o bağımlılığı ortadan kaldırıyoruz.
+          PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "=== İndirilen provisioning profilleri ==="
+          ls -la "$PP_DIR" || true
+          TEAM_ID=""; PROFILE_NAME=""
+          for f in "$PP_DIR"/*.mobileprovision; do
+            [ -e "$f" ] || continue
+            security cms -D -i "$f" > /tmp/pp.plist 2>/dev/null || continue
+            APPID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/pp.plist 2>/dev/null || echo "")
+            case "$APPID" in
+              *".$BUNDLE_ID")
+                TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.team-identifier" /tmp/pp.plist 2>/dev/null)
+                PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/pp.plist 2>/dev/null)
+                ;;
+            esac
+          done
+          echo "SEÇİLEN → TEAM_ID=$TEAM_ID  PROFILE_NAME=$PROFILE_NAME"
+          if [ -z "$TEAM_ID" ] || [ -z "$PROFILE_NAME" ]; then
+            echo "HATA: $BUNDLE_ID için indirilmiş profil bulunamadı."
+            exit 1
+          fi
+
+          # --- Archive + IPA: imza ayarlarını doğrudan xcodebuild'e geçir ---
           cd frontend/ios/App
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+            --scheme "$XCODE_SCHEME" \
+            --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$TEAM_ID PROVISIONING_PROFILE_SPECIFIER=\"$PROFILE_NAME\" CODE_SIGN_IDENTITY=\"Apple Distribution\""
     artifacts:
       - frontend/ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
