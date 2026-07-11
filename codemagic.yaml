@@ -51,15 +51,10 @@ workflows:
           # her build tam 1 taze sertifika üretir; limit asla dolmaz. (App Store zaten
           # yüklenen IPA'yı kendi tarafında yeniden imzaladığı için bu güvenlidir.)
           for T in DISTRIBUTION IOS_DISTRIBUTION; do
-            IDS=$(app-store-connect certificates list --type "$T" --json 2>/dev/null \
-                  | python3 -c "import sys,json
-try:
-    print(' '.join(c.get('id','') for c in json.load(sys.stdin)))
-except Exception:
-    pass")
+            IDS=$(app-store-connect certificates list --type "$T" --json 2>/dev/null | python3 -c "import sys,json; print(' '.join(c.get('id','') for c in json.load(sys.stdin)))" 2>/dev/null || true)
             for CID in $IDS; do
               [ -n "$CID" ] || continue
-              echo ">>> Eski $T sertifikası siliniyor: $CID"
+              echo "Eski $T sertifikasi siliniyor $CID"
               app-store-connect certificates delete "$CID" || true
             done
           done
