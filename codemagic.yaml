@@ -44,20 +44,23 @@ workflows:
           set -e
           keychain initialize
 
-          # --- TEŞHİS: API key gerçekten sertifika oluşturabiliyor mu? ---
-          # App Manager rolü DAĞITIM sertifikası OLUŞTURAMAZ (Apple kuralı: Admin gerekir).
-          # Aşağıdaki liste boş dönüyorsa ve --create de üretmiyorsa → key rolü yetersiz.
-          echo "=== Mevcut DAĞITIM (IOS_DISTRIBUTION) sertifikaları ==="
-          app-store-connect list-certificates --type IOS_DISTRIBUTION --json || true
+          # --- TEŞHİS: portalda halihazırda dağıtım sertifikası var mı? ---
+          echo "=== Apple Distribution (DISTRIBUTION) sertifikaları ==="
+          app-store-connect certificates list --type DISTRIBUTION --json || true
+          echo "=== iOS Distribution (IOS_DISTRIBUTION) sertifikaları ==="
+          app-store-connect certificates list --type IOS_DISTRIBUTION --json || true
 
-          # Dağıtım sertifikası YOKSA oluştur (Admin rolü şart), VARSA yerel keychain'e kur.
-          # --create ile hem sertifika hem App Store provizyon profili gelir/oluşur.
+          # ÖNEMLİ: Kendi özel anahtarımızı (private key) ÜRETİP sertifikayı ONA BAĞLI
+          # oluşturuyoruz. `--create` tek başınayken portaldaki (özel anahtarını
+          # bilmediğimiz) sertifikaları kaydetmeye çalışıp
+          #   "Cannot save Signing Certificates without certificate private key"
+          # hatası veriyordu. Kendi anahtarımızı vererek bu engeli kaldırıyoruz.
+          openssl genrsa -out /tmp/dist_key.pem 2048
+
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key @file:/tmp/dist_key.pem \
             --create
-
-          echo "=== fetch SONRASI sertifikalar (üretildi mi?) ==="
-          app-store-connect list-certificates --type IOS_DISTRIBUTION --json || true
 
           keychain add-certificates
 
