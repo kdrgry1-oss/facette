@@ -22,7 +22,7 @@ workflows:
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
-        BUNDLE_ID: "com.facette.app"
+        BUNDLE_ID: "tr.com.facette.app"
       node: 20
       xcode: latest
       cocoapods: default
@@ -77,7 +77,7 @@ workflows:
           echo "=== HESAPTAKI BUNDLE ID'LER (identifier | platform | resourceId) ==="
           python3 -c "import json;[print(b['attributes']['identifier'],'|',b['attributes'].get('platform'),'|',b['id']) for b in json.load(open('/tmp/bids.json'))]" 2>/dev/null || cat /tmp/bids.json
           BID_RES=$(python3 -c "import json;d=json.load(open('/tmp/bids.json'));print(next((b['id'] for b in d if b['attributes']['identifier']=='$BUNDLE_ID'),''))" 2>/dev/null || true)
-          echo "com.facette.app resource id: '$BID_RES'"
+          echo "$BUNDLE_ID resource id: '$BID_RES'"
           if [ -z "$BID_RES" ]; then
             echo "!!! $BUNDLE_ID bu hesapta KAYITLI DEĞİL. Yukarıdaki listeden doğru bundle id'yi Claude'a ilet."
             exit 1

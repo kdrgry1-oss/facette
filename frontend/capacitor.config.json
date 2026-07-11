@@ -1,5 +1,5 @@
 {
-  "appId": "com.facette.app",
+  "appId": "tr.com.facette.app",
   "appName": "Facette",
   "webDir": "build",
   "bundledWebRuntime": false,
@@ -27,7 +27,7 @@
       "overlaysWebView": false
     },
     "Preferences": {
-      "group": "com.facette.app"
+      "group": "tr.com.facette.app"
     }
   },
   "ios": {
