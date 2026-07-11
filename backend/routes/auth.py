@@ -507,7 +507,7 @@ async def forgot_password_request_otp(request: Request, req: OTPRequestReq):
         except Exception as e:
             logger.warning(f"OTP sms failed: {e}")
     else:
-        logger.info(f"OTP request for unknown phone (silent): {phone_norm}")
+        logger.info(f"OTP request for unknown phone (silent): ***{str(phone_norm)[-4:]}")  # PII/CRLF sızıntısı yok
 
     return {"success": True, "message": "Eğer numara sistemimizde kayıtlıysa SMS kodu gönderildi."}
 
@@ -597,7 +597,8 @@ async def forgot_password_email(request: Request, req: EmailResetReq):
         {"_id": 0, "id": 1, "email": 1, "first_name": 1},
     )
     if not user or not user.get("id"):
-        logger.info(f"Email reset for unknown email (silent): {email}")
+        _em = str(email or ""); _dom = _em.split("@")[-1] if "@" in _em else "?"
+        logger.info(f"Email reset for unknown email (silent): ***@{_dom.replace(chr(10),'').replace(chr(13),'')}")  # PII/CRLF sızıntısı yok
         return generic
 
     # Rate limit — aynı e-postaya son 60 sn içinde link atıldıysa sessizce aynı cevap

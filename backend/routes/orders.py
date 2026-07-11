@@ -1294,15 +1294,34 @@ async def update_order(
     order_data: dict,
     current_user: dict = Depends(require_admin)
 ):
-    """Update order (admin only)"""
+    """Update order (admin only).
+    GÜVENLİK: Genel güncelleme finansal/kimlik/iç alanları EZEMEZ (mass-assignment
+    koruması). Tutar/ödeme durumu için ayrı, denetimli uçlar var (/status, /mark-paid).
+    Böylece ele geçirilmiş veya düşük-yetkili admin token'ı toplamı/ödeme durumunu/
+    sahipliği manipüle edemez."""
     existing = await db.orders.find_one({"id": order_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    
+
+    _PROTECTED = {
+        "id", "_id", "order_number", "user_id", "created_at",
+        "total", "total_amount", "subtotal", "discount", "discount_amount",
+        "shipping_cost", "payment_status", "is_paid", "paid_at",
+        "invoice_number", "invoice_seq", "idempotency_key",
+        "iyzico_retrieve_response", "iyzico_init_response", "iyzico_response",
+        "iyzico_token", "iyzico_return_url", "payment_receipt",
+        "capi_purchase_sent", "coupon_redemptions_recorded",
+    }
+    removed = [k for k in list(order_data.keys()) if k in _PROTECTED]
+    for k in removed:
+        order_data.pop(k, None)
+    if removed:
+        logger.warning(f"[GUVENLIK] update_order korunan alan(lar) yok sayildi order={order_id} alanlar={removed} admin={current_user.get('email')}")
+
     order_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.orders.update_one({"id": order_id}, {"$set": order_data})
-    
+
     return {"message": "Sipariş güncellendi"}
 
 def _sanitize_click_ids(raw) -> dict:

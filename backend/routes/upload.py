@@ -70,11 +70,18 @@ def _optimize_for_upload(data: bytes, content_type: str):
         return None, None, None
 
 
+_ALLOWED_IMAGE_TYPES = {
+    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
+    "image/svg+xml", "image/avif", "image/heic", "image/heif", "image/bmp",
+}
+
+
 @router.post("/image")
 async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
     """Görseli optimize edip (resize+WebP) Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Sadece resim dosyaları yüklenebilir")
+    # GÜVENLİK: geniş "image/*" yerine açık allowlist — sahte/garip content-type reddedilir.
+    if not file.content_type or file.content_type.split(";")[0].strip().lower() not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Sadece resim dosyaları yüklenebilir (jpeg/png/webp/gif/svg)")
 
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
@@ -141,9 +148,12 @@ MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100 MB — hero slider videoları
 async def upload_video(file: UploadFile = File(...), user=Depends(get_current_user)):
     """Video yükler (hero slider slaytı için) → Cloudflare R2 CDN'e; optimize edilmez,
     olduğu gibi CDN'den servis edilir (anasayfayı yormaz). R2 kapalıysa MongoDB+disk'e düşer."""
-    ct = (file.content_type or "").lower()
-    if not ct.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Sadece video dosyaları yüklenebilir")
+    ct = (file.content_type or "").split(";")[0].strip().lower()
+    # GÜVENLİK: açık video allowlist — sahte content-type ile keyfi dosya deposu engeli.
+    _ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime",
+                            "video/x-msvideo", "video/mpeg", "video/ogg"}
+    if ct not in _ALLOWED_VIDEO_TYPES:
+        raise HTTPException(status_code=400, detail="Sadece video dosyaları yüklenebilir (mp4/webm/mov)")
     data = await file.read()
     if len(data) > MAX_VIDEO_BYTES:
         raise HTTPException(status_code=400, detail="Video çok büyük (maks 100MB)")

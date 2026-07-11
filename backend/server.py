@@ -463,6 +463,27 @@ class SecurityHeadersMiddleware(_BHM):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+
+class BodySizeLimitMiddleware(_BHM):
+    """DoS koruması: Content-Length çok büyük olan istekleri body okunmadan 413 ile
+    reddeder (devasa gövde → bellek tükenmesi). Cap 120MB — video yükleme sınırının
+    (100MB) üstünde olduğu için meşru hiçbir isteği engellemez."""
+    MAX_BYTES = 120 * 1024 * 1024
+
+    async def dispatch(self, request, call_next):
+        cl = request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > self.MAX_BYTES:
+                    from starlette.responses import JSONResponse as _JR
+                    return _JR(status_code=413, content={"detail": "İstek gövdesi çok büyük"})
+            except (ValueError, TypeError):
+                pass
+        return await call_next(request)
+
+
+app.add_middleware(BodySizeLimitMiddleware)
+
 # ---------------------------------------------------------------------------
 # INTEGRATION LOGGING MIDDLEWARE
 # ---------------------------------------------------------------------------

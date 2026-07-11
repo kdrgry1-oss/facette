@@ -29,7 +29,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, Form
 from fastapi.responses import RedirectResponse
 
-from .deps import db, logger
+from .deps import db, logger, limiter
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
@@ -320,8 +320,10 @@ def _build_initialize_payload(order: dict, callback_url: str) -> dict:
 
 
 @router.post("/initialize")
-async def initialize_payment(order_id: str, callback_url: str, return_url: str = ""):
-    """Sipariş için iyzico Ödeme Formu başlatır."""
+@(limiter.limit("20/minute") if limiter else (lambda f: f))
+async def initialize_payment(request: Request, order_id: str, callback_url: str, return_url: str = ""):
+    """Sipariş için iyzico Ödeme Formu başlatır (rate-limited)."""
+    _ = request
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
@@ -591,7 +593,8 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
 
 
 @router.post("/3ds/initialize")
-async def initialize_3ds_payment(payload: dict):
+@(limiter.limit("20/minute") if limiter else (lambda f: f))
+async def initialize_3ds_payment(payload: dict, request: Request):
     """Kendi kart formumuzdan 3D Secure başlatır; threeDSHtmlContent döner."""
     order_id = (payload.get("order_id") or "").strip()
     callback_url = (payload.get("callback_url") or "").strip()
@@ -685,8 +688,11 @@ async def callback_3ds(request: Request):
 
 
 @router.post("/card/pay")
-async def card_pay_non3ds(payload: dict):
-    """3DS'siz doğrudan tahsilat (use3DSecure kapalıysa). Yönlendirme yok."""
+@(limiter.limit("10/minute") if limiter else (lambda f: f))
+async def card_pay_non3ds(payload: dict, request: Request):
+    """3DS'siz doğrudan tahsilat (use3DSecure kapalıysa). Yönlendirme yok.
+    Rate-limited: kart-testi / BIN saldırısı yüzeyini daraltır."""
+    _ = request
     order_id = (payload.get("order_id") or "").strip()
     card = payload.get("card") or {}
     installment = int(payload.get("installment") or 1)
