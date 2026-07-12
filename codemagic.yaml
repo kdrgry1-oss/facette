@@ -126,10 +126,10 @@ workflows:
           BUILD_NO=$(date +%s)
           echo "CFBundleVersion (build no) = $BUILD_NO"
           cd frontend/ios/App
-          # GARANTI: build numarasini pbxproj'a DOGRUDAN yaz (xcargs override'a ek).
-          # Info.plist CFBundleVersion=$(CURRENT_PROJECT_VERSION) oldugu icin bu kesin etki eder.
-          sed -i '' -E "s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = ${BUILD_NO};/g" App.xcodeproj/project.pbxproj || true
-          echo "pbxproj CURRENT_PROJECT_VERSION ->"; grep -n "CURRENT_PROJECT_VERSION" App.xcodeproj/project.pbxproj | head
+          # GARANTI: build numarasini pbxproj'a Python ile DOGRUDAN yaz. Eslesme yoksa
+          # build DURUR (sessiz basarisizlik YOK). Info.plist CFBundleVersion=$(CURRENT_PROJECT_VERSION).
+          python3 -c "import re,sys; p='App.xcodeproj/project.pbxproj'; n='$BUILD_NO'; s=open(p).read(); s2,c=re.subn(r'CURRENT_PROJECT_VERSION = [0-9]+;', 'CURRENT_PROJECT_VERSION = '+n+';', s); open(p,'w').write(s2); print('pbxproj build no ->', n, '| degisen yer:', c); sys.exit(0 if c>0 else 1)"
+          grep -n "CURRENT_PROJECT_VERSION" App.xcodeproj/project.pbxproj | head
           if [ -n "$TEAM_ID" ] && [ -n "$PROFILE_NAME" ]; then
             xcode-project build-ipa \
               --workspace "$XCODE_WORKSPACE" \
