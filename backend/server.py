@@ -381,6 +381,15 @@ if not _origins_list:
     logger.warning("CORS_ORIGINS env is missing/empty — defaulting to localhost only. "
                    "Set explicit whitelist in /app/backend/.env for production.")
     _origins_list = ["http://localhost:3000"]
+
+# Capacitor/native mobil uygulama origin'leri — CORS whitelist'e HER ZAMAN eklenir (env'e bağlı
+# DEĞİL). iOS WebView "capacitor://localhost", Android (androidScheme=https) "https://localhost"
+# origin'iyle istek atar; bunlar olmadan native uygulamadan login ve tüm API çağrıları CORS'a takılır.
+if _origins_list != ["*"]:
+    for _native_origin in ("capacitor://localhost", "https://localhost", "http://localhost", "ionic://localhost"):
+        if _native_origin not in _origins_list:
+            _origins_list.append(_native_origin)
+
 # Güvenlik: wildcard origin ("*") ile allow_credentials=True BİRLİKTE kullanılamaz — Starlette
 # çağıranın Origin'ini yansıtıp kimlik-bilgili (cookie/Authorization) çapraz-origin isteğe izin
 # verirdi. Wildcard varsa credentials KAPATILIR (spec gereği zaten geçersiz kombinasyon).
