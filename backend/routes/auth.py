@@ -271,7 +271,7 @@ async def login(request: Request):
             "mfa_token": create_mfa_pending_token(user["id"]),
         }
 
-    token = create_token(user["id"], user.get("is_admin", False))
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     await write_audit_log("login", user_id=user["id"], email=email,
                           ip=ip, user_agent=ua, success=True)
 
@@ -449,17 +449,22 @@ async def change_password(
             success=False, meta={"reason": "wrong_current_password"},
         )
         raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
+    # GÜVENLİK: token_version'ı bump et → çalınmış/eski TÜM oturumlar geçersizleşir.
+    new_tv = int(user.get("token_version", 0) or 0) + 1
     await db.users.update_one(
         {"id": current_user["id"]},
         {"$set": {"password": hash_password(new),
-                  "password_changed_at": datetime.now(timezone.utc).isoformat()}}
+                  "password_changed_at": datetime.now(timezone.utc).isoformat(),
+                  "token_version": new_tv}}
     )
     await write_audit_log(
         "password_change", user_id=current_user["id"], email=current_user.get("email"),
         ip=client_ip_from_request(request), user_agent=request.headers.get("user-agent"),
         success=True,
     )
-    return {"success": True, "message": "Şifre güncellendi"}
+    # Mevcut oturum düşmesin diye TAZE token dön (yeni tv ile). Diğer cihazlar çıkış yapar.
+    fresh = create_token(current_user["id"], user.get("is_admin", False), token_version=new_tv)
+    return {"success": True, "message": "Şifre güncellendi", "token": fresh}
 
 
 # =============================================================================
@@ -611,7 +616,8 @@ async def forgot_password_reset(req: OTPResetReq):
 
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"password": hash_password(req.new_password), "password_updated_at": datetime.now(timezone.utc).isoformat()}},
+        {"$set": {"password": hash_password(req.new_password), "password_updated_at": datetime.now(timezone.utc).isoformat()},
+         "$inc": {"token_version": 1}},  # GÜVENLİK: sıfırlama tüm eski oturumları geçersiz kılar
     )
     await db.password_reset_otps.delete_one({"_id": rec["_id"]})
     return {"success": True, "message": "Şifreniz güncellendi"}
@@ -763,7 +769,7 @@ async def google_signin(request: Request, payload: dict):
                               user_agent=ua, success=False, meta={"reason": "inactive"})
         raise HTTPException(status_code=403, detail="Hesabiniz devre disi")
 
-    token = create_token(user["id"])
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
                           user_agent=ua, success=True)
     return {
@@ -842,7 +848,7 @@ async def google_session(request: Request, session_id: str = Query(...)):
                               user_agent=ua, success=False, meta={"reason": "inactive"})
         raise HTTPException(status_code=403, detail="Hesabınız devre dışı")
 
-    token = create_token(user["id"])
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     await write_audit_log("google_login", user_id=user["id"], email=email, ip=ip,
                           user_agent=ua, success=True)
     return {
@@ -950,7 +956,7 @@ async def google_callback(code: str, request: Request):
         )
         user = await db.users.find_one({"email": email}, {"_id": 0, "password": 0})
 
-    token = create_token(user["id"], user.get("is_admin", False))
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
 
     # Güvenlik: yanıt gövdesinde bcrypt şifre hash'i ASLA dönmemeli.
     user.pop("password", None)

@@ -148,7 +148,7 @@ async def process_queue(db: AsyncIOMotorDatabase) -> dict:
     if not admin:
         return {"processed": 0, "succeeded": 0, "still_stuck": len(barcodes), "error": "Admin user yok"}
     from routes.deps import create_token
-    token = create_token(admin.get("id"), admin.get("is_admin", True))
+    token = create_token(admin.get("id"), admin.get("is_admin", True), token_version=admin.get("token_version", 0))
 
     result = {}
     try:

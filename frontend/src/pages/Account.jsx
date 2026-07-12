@@ -935,10 +935,13 @@ function SecurityPane() {
     setBusy(true);
     try {
       const token = localStorage.getItem("token");
-      await axios.post(`${API}/auth/change-password`,
+      const _res = await axios.post(`${API}/auth/change-password`,
         { current_password: form.current_password, new_password: form.new_password },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      // Parola değişince eski token'lar geçersizleşir → sunucudan gelen TAZE token'ı sakla,
+      // yoksa bu oturum da düşer.
+      if (_res?.data?.token) localStorage.setItem("token", _res.data.token);
       toast.success("Şifreniz güncellendi");
       setForm({ current_password: "", new_password: "", confirm: "" });
     } catch (err) {

@@ -120,7 +120,13 @@ async def _issue_jwt(user_id: str, email: str, extra: Optional[Dict] = None) -> 
     """Mevcut create_token ile uyumlu JWT üret (7 gün)."""
     # GÜVENLİK: zayıf sabit "change-me" fallback secret kaldırıldı. Yalnızca vetted
     # create_token (env JWT_SECRET + issuer + exp) kullanılır; başarısız olursa hata ver.
-    return create_token(user_id, is_admin=False)
+    _tv = 0
+    try:
+        _u = await db.users.find_one({"id": user_id}, {"_id": 0, "token_version": 1})
+        _tv = (_u or {}).get("token_version", 0)
+    except Exception:
+        pass
+    return create_token(user_id, is_admin=False, token_version=_tv)
 
 
 async def _upsert_social_user(provider: str, provider_id: str, email: str, name: str = "") -> dict:

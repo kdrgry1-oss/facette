@@ -157,7 +157,7 @@ async def mfa_verify(payload: dict):
     # başarı -> sayaç sıfırla
     await db.users.update_one({"id": user["id"]}, {"$set": {"mfa_fail_count": 0}, "$unset": {"mfa_fail_window": ""}})
 
-    token = create_token(user["id"], user.get("is_admin", False))
+    token = create_token(user["id"], user.get("is_admin", False), token_version=user.get("token_version", 0))
     return {
         "token": token,
         "user": {
