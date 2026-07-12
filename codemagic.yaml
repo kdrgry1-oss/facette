@@ -84,11 +84,12 @@ workflows:
           fi
 
           # 3) App Store provizyon profilini DOĞRU bundle id + sertifika ile oluştur.
+          # NOT: yeni CLI'da bundle id POZİSYONEL argüman, sertifika --certificate-ids ile verilir.
           app-store-connect create-profile \
             --type IOS_APP_STORE \
-            --bundle-id "$BID_RES" \
-            --certificate "$CERT_ID" \
-            --save 2>/tmp/prof_err.txt || cat /tmp/prof_err.txt
+            --certificate-ids "$CERT_ID" \
+            --save \
+            "$BID_RES" 2>/tmp/prof_err.txt || cat /tmp/prof_err.txt
 
           echo "=== keychain sertifikaları ==="
           keychain list-certificates || true
