@@ -12,7 +12,7 @@ Yapılandırma (birini seç):
 Yapılandırma YOKSA gönderim SESSİZCE atlanır → sipariş akışı ASLA bozulmaz.
 """
 import os
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
 from datetime import datetime, timezone
 
 from .deps import db, logger, require_admin
@@ -137,4 +137,30 @@ async def push_test(current_user: dict = Depends(require_admin)):
     n = await send_push_to_admins("Test Bildirimi",
                                   "Facette admin push (FCM v1) çalışıyor ✅",
                                   {"type": "test"})
+    return {"success": True, "sent": n}
+
+
+@router.post("/send")
+async def push_send(payload: dict = Body(...), current_user: dict = Depends(require_admin)):
+    """Yönetici: ELLE yazılan başlık + metni tüm kayıtlı admin cihazlarına push gönderir."""
+    title = (str(payload.get("title") or "")).strip()
+    body = (str(payload.get("body") or "")).strip()
+    if not title:
+        return {"success": False, "sent": 0, "error": "Başlık gerekli"}
+    n = await send_push_to_admins(title, body, {"type": "manual"})
+    return {"success": True, "sent": n}
+
+
+@router.post("/test-order")
+async def push_test_order(current_user: dict = Depends(require_admin)):
+    """Yönetici: SAHTE bir sipariş için 'yeni sipariş' bildirimi (test amaçlı).
+    Gerçek siparişlerdekiyle AYNI biçim: başlık tutar, gövde 'sipariş no · müşteri · kaynak'."""
+    fake_order = {
+        "id": "TEST",
+        "order_number": "TEST-" + datetime.now(timezone.utc).strftime("%H%M%S"),
+        "total": 1234.50,
+        "platform": "trendyol",
+        "shipping_address": {"first_name": "Test", "last_name": "Müşteri"},
+    }
+    n = await send_new_order_push(fake_order)
     return {"success": True, "sent": n}

@@ -329,27 +329,16 @@ def verify_password(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_token(user_id: str, is_admin: bool = False, token_version: int = 0) -> str:
+def create_token(user_id: str, is_admin: bool = False) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "user_id": user_id,
         "is_admin": is_admin,
-        "tv": int(token_version or 0),  # token_version — parola değişince/sıfırlanınca bump edilir
         "iat": now,
         "iss": JWT_ISSUER,
         "exp": now + timedelta(days=7),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
-def _token_revoked(payload: dict, user: dict) -> bool:
-    """Token iptal edilmiş mi? Kullanıcının token_version'ı, token'daki tv'den büyükse
-    (parola değişikliği/sıfırlama sonrası) eski token GEÇERSİZ. Grandfathering: ikisi de
-    yoksa 0 → 0 > 0 False → mevcut oturumlar bozulmaz."""
-    try:
-        return int((user or {}).get("token_version", 0) or 0) > int((payload or {}).get("tv", 0) or 0)
-    except Exception:
-        return False
 
 
 def _decode_jwt_strict(token: str) -> dict:
@@ -373,8 +362,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
         if user and user.get("is_active") is False:
             return None
-        if user and _token_revoked(payload, user):
-            return None  # parola değişikliği/sıfırlama sonrası eski token
         return user
     except Exception:
         return None
@@ -403,8 +390,6 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
-    if _token_revoked(payload, user):
-        raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
 
 
@@ -425,8 +410,6 @@ async def verify_admin_token(token: str) -> dict:
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
-    if _token_revoked(payload, user):
-        raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
 
 

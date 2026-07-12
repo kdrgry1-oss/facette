@@ -1906,18 +1906,13 @@ async def save_marketplace_settings(marketplace: str, payload: dict, current_use
         "default_markup": payload.get("default_markup", 0),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    # Only update secret if provided — GÜVENLİK: sırları at-rest ŞİFRELE
-    # (Trendyol get_trendyol_config / HB _hb_unmask / Temu _get_temu_config okurken çözer).
-    try:
-        from security.crypto import encrypt as _enc_secret
-    except Exception:
-        _enc_secret = lambda v: v
+    # Only update secret if provided
     if payload.get("api_secret") and payload.get("api_secret") != "********":
-        update_data["api_secret"] = _enc_secret(payload.get("api_secret"))
+        update_data["api_secret"] = payload.get("api_secret")
     if payload.get("password") and payload.get("password") != "********":
-        update_data["password"] = _enc_secret(payload.get("password"))
+        update_data["password"] = payload.get("password")
     if payload.get("secret_key") and payload.get("secret_key") != "********":
-        update_data["secret_key"] = _enc_secret(payload.get("secret_key"))
+        update_data["secret_key"] = payload.get("secret_key")
 
     await db.settings.update_one({"id": marketplace}, {"$set": update_data}, upsert=True)
     return {"success": True, "message": f"{marketplace.capitalize()} ayarları kaydedildi"}
@@ -1953,15 +1948,6 @@ async def test_marketplace_connection(marketplace: str, current_user: dict = Dep
     settings = await db.settings.find_one({"id": marketplace}, {"_id": 0})
     if not settings:
         return {"success": False, "message": f"{marketplace.capitalize()} ayarları kaydedilmemiş"}
-
-    # GÜVENLİK: at-rest şifreli sırları probe'tan ÖNCE çöz (decrypt düz-metni geçirir).
-    try:
-        from security.crypto import decrypt as _dec_secret
-        for _sf in ("api_secret", "password", "secret_key", "access_token"):
-            if settings.get(_sf):
-                settings[_sf] = _dec_secret(settings[_sf]) or settings[_sf]
-    except Exception:
-        pass
 
     try:
         if marketplace == "hepsiburada":
