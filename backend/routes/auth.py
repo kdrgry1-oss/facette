@@ -85,11 +85,36 @@ async def register(request: Request):
         "weight_kg": weight_kg,
         "is_admin": False,
         "is_active": True,
+        "email_verified": False,  # yumuşak doğrulama — hesabı bloke etmez, sadece işaretler
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     await db.users.insert_one(user)
     token = create_token(user["id"])
+    # E-POSTA DOĞRULAMA (yumuşak): checkout'u bloke etmez; sahte-e-posta caydırıcısı +
+    # gelecekte gating için temel. Doğrulama linki e-posta ile gider (best-effort).
+    try:
+        import os as _os2
+        vtok = secrets.token_urlsafe(32)
+        await db.email_verifications.insert_one({
+            "token": vtok, "user_id": user["id"], "email": email,
+            "expires_at": int(datetime.now(timezone.utc).timestamp()) + 7 * 24 * 3600,
+            "used": False, "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _site = _os2.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+        _vlink = f"{_site}/api/auth/verify-email?token={vtok}"
+        _vhtml = (
+            f'<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#2a2a2a">'
+            f'<h2 style="font-weight:600">E-posta adresini doğrula</h2>'
+            f'<p>FACETTE hesabın oluşturuldu. Adresini doğrulamak için:</p>'
+            f'<p style="margin:24px 0"><a href="{_vlink}" style="background:#1a1a1a;color:#fff;'
+            f'padding:12px 28px;text-decoration:none;border-radius:4px">E-postamı Doğrula</a></p>'
+            f'<p style="font-size:12px;color:#888">Link 7 gün geçerlidir. Bu işlemi sen yapmadıysan yok say.</p></div>'
+        )
+        from email_smtp import send_smtp_email
+        await send_smtp_email(db, email, "E-posta Doğrulama — FACETTE", _vhtml)
+    except Exception as _ve:
+        logger.warning(f"verification email failed for {email}: {_ve}")
     # Hoş geldin e-postası (best-effort; kaydı asla bloklamaz)
     try:
         import os as _os
@@ -157,6 +182,24 @@ async def register(request: Request):
             "is_admin": user["is_admin"]
         }
     }
+
+@router.get("/verify-email")
+async def verify_email(token: str = ""):
+    """E-posta doğrulama linki hedefi. Geçerli token → email_verified=True; siteye döner."""
+    from fastapi.responses import RedirectResponse
+    import os as _os
+    site = _os.environ.get("SITE_URL", "https://facette.com.tr").rstrip("/")
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    rec = None
+    if token:
+        rec = await db.email_verifications.find_one(
+            {"token": token, "used": False, "expires_at": {"$gt": now_ts}})
+    if not rec:
+        return RedirectResponse(url=f"{site}/?email_verified=0", status_code=302)
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"email_verified": True}})
+    await db.email_verifications.update_one({"token": token}, {"$set": {"used": True}})
+    return RedirectResponse(url=f"{site}/?email_verified=1", status_code=302)
+
 
 @router.post("/login")
 @(limiter.limit("10/minute") if limiter else (lambda f: f))
@@ -355,6 +398,7 @@ async def convert_guest_order(payload: dict, request: Request):
         "phone": phone_norm or phone,
         "role": "customer",
         "is_active": True,
+        "email_verified": False,  # misafir-dönüşüm — sağlayıcı doğrulaması yok
         "source": "checkout_guest_convert",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

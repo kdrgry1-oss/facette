@@ -62,7 +62,13 @@ def _get_cached_client(wsdl_url, transport, settings):
 class DoganClient:
     def __init__(self, username: str, password: str, is_test: bool = True):
         self.username = username
-        self.password = password
+        # GÜVENLİK: parola DB'de şifreli (v1:...) saklanabilir → burada çöz.
+        # decrypt() düz-metni olduğu gibi geçirir, bu yüzden eski kayıtlar da çalışır.
+        try:
+            from security.crypto import decrypt as _dec_secret
+            self.password = _dec_secret(password) if password else password
+        except Exception:
+            self.password = password
         self.is_test = is_test
         self.session_id = None
 

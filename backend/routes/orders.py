@@ -3192,9 +3192,17 @@ async def _get_mng_settings() -> dict:
     gizli olmadığından sabit kalır."""
     import os as _os
     s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
+    # GÜVENLİK: parola at-rest şifreli (v1:...) olabilir → çöz. decrypt() düz-metni
+    # geçirdiği için eski kayıt / env fallback da sorunsuz çalışır.
+    _pw = s.get("password") or _os.environ.get("MNG_PASSWORD", "")
+    try:
+        from security.crypto import decrypt as _dec_secret
+        _pw = _dec_secret(_pw) if _pw else _pw
+    except Exception:
+        pass
     return {
         "username": s.get("username") or _os.environ.get("MNG_USERNAME", ""),
-        "password": s.get("password") or _os.environ.get("MNG_PASSWORD", ""),
+        "password": _pw,
         "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
         "tax_no": s.get("tax_no") or "6080712084",
         "is_active": s.get("is_active", True),
@@ -4385,7 +4393,12 @@ async def save_mng_settings(payload: dict, current_user: dict = Depends(require_
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if payload.get("password") and payload.get("password") != "********":
-        update["password"] = payload.get("password")
+        # GÜVENLİK: MNG parolasını at-rest ŞİFRELE (_get_mng_settings okurken çözülür).
+        try:
+            from security.crypto import encrypt as _enc_secret
+            update["password"] = _enc_secret(payload.get("password"))
+        except Exception:
+            update["password"] = payload.get("password")
     await db.settings.update_one({"id": "mng_kargo"}, {"$set": update}, upsert=True)
     return {"success": True, "message": "MNG Kargo ayarları kaydedildi"}
 

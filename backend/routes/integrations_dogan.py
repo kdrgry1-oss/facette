@@ -51,6 +51,13 @@ async def save_dogan_settings(payload: dict, current_user: dict = Depends(requir
     # Maskeli değer gelirse mevcut password'ü koru
     if payload.get("password") in (None, "", "********"):
         payload.pop("password", None)
+    else:
+        # GÜVENLİK: yeni parolayı at-rest ŞİFRELE (DoganClient okurken çözülür).
+        try:
+            from security.crypto import encrypt as _enc_secret
+            payload["password"] = _enc_secret(payload["password"])
+        except Exception:
+            pass
     await db.settings.update_one({"id": "dogan_edonusum"}, {"$set": payload}, upsert=True)
     return {"success": True, "message": "Doğan e-Dönüşüm ayarları kaydedildi"}
 

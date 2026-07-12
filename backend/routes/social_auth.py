@@ -156,6 +156,7 @@ async def _upsert_social_user(provider: str, provider_id: str, email: str, name:
         "password": "",  # sosyal girişli
         "role": "customer",
         "is_active": True,
+        "email_verified": True,  # sağlayıcı (Google/Apple) e-postayı zaten doğruladı
         "auth_providers": {provider: {"id": provider_id, "linked_at": datetime.now(timezone.utc).isoformat()}},
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": f"social_{provider}",
