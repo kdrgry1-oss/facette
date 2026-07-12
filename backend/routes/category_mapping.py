@@ -128,7 +128,13 @@ def _hb_unmask(sec):
         return ""
     if set(s) <= {"*", "•", "·"}:   # tamamı maske karakteri
         return ""
-    return s
+    # GÜVENLİK: secret at-rest şifreli (v1:...) olabilir → çöz. decrypt() düz-metni
+    # geçirir; TÜM HB kimlik okumaları bu fonksiyondan geçtiği için tek nokta yeterli.
+    try:
+        from security.crypto import decrypt as _dec_secret
+        return _dec_secret(s) or s
+    except Exception:
+        return s
 
 
 async def _get_hb_client():

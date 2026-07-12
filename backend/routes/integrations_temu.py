@@ -80,6 +80,13 @@ async def _get_temu_config() -> Dict[str, Any]:
     else:  # eu + tr + diğer tüm durumlar
         gateway = "https://openapi-b-eu.temu.com/openapi/router"
     gateway = creds.get("gateway") or acc.get("gateway") or gateway
+    # GÜVENLİK: app_secret / access_token at-rest şifreli (v1:...) olabilir → çöz.
+    try:
+        from security.crypto import decrypt as _dec_secret
+        app_secret = _dec_secret(app_secret) or app_secret
+        access_token = _dec_secret(access_token) or access_token
+    except Exception:
+        pass
     return {
         "app_key": app_key,
         "app_secret": app_secret,

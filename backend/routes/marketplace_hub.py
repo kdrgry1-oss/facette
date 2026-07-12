@@ -381,10 +381,31 @@ async def save_account(key: str, payload: dict, current_user: dict = Depends(req
     """Hesap bilgileri + transfer rules + auto-sync'i kaydeder."""
     if key not in MARKETPLACES:
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
+    # GÜVENLİK: credentials içindeki sır alanlarını at-rest ŞİFRELE. Maskeli ("****")
+    # gelirse dokunma (mevcut korunur). Getter'lar (_get_temu_config / _hb_unmask) çözer.
+    _creds = dict(payload.get("credentials") or {})
+    try:
+        from security.crypto import encrypt as _enc_secret
+        _existing = await db.marketplace_accounts.find_one({"key": key}, {"_id": 0, "credentials": 1}) or {}
+        _ex_creds = _existing.get("credentials") or {}
+        for _sf in ("app_secret", "api_secret", "access_token", "secret_key", "password", "refresh_token"):
+            _v = _creds.get(_sf)
+            if _v is None:
+                continue
+            _vs = str(_v).strip()
+            if not _vs or set(_vs) <= {"*", "•", "·"}:
+                # maskeli/boş → mevcut şifreli değeri koru
+                if _ex_creds.get(_sf) is not None:
+                    _creds[_sf] = _ex_creds.get(_sf)
+                continue
+            if not _vs.startswith("v1:"):  # zaten şifreli değilse şifrele
+                _creds[_sf] = _enc_secret(_vs)
+    except Exception:
+        pass
     update = {
         "key": key,
         "enabled": bool(payload.get("enabled", False)),
-        "credentials": payload.get("credentials") or {},
+        "credentials": _creds,
         "transfer_rules": payload.get("transfer_rules") or {},
         "auto_sync": payload.get("auto_sync") or {
             "products_enabled": False,

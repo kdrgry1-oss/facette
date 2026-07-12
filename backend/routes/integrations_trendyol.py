@@ -83,9 +83,16 @@ async def get_trendyol_config():
         mode = settings.get("mode", "sandbox")
         local_markup = settings.get("default_markup", 0) or 0
         effective_markup = main_markup_f if main_markup_f is not None else local_markup
+        # GÜVENLİK: api_secret at-rest şifreli (v1:...) olabilir → çöz. decrypt() düz-metni
+        # geçirir; tüm Trendyol tüketicileri bu getter'dan okuduğu için tek nokta yeterli.
+        try:
+            from security.crypto import decrypt as _dec_secret
+            _tr_secret = _dec_secret(settings.get("api_secret", "")) or ""
+        except Exception:
+            _tr_secret = settings.get("api_secret", "")
         return {
             "api_key": settings.get("api_key", ""),
-            "api_secret": settings.get("api_secret", ""),
+            "api_secret": _tr_secret,
             "supplier_id": settings.get("supplier_id", ""),
             "is_active": settings.get("is_active", False),
             "mode": mode,
@@ -188,7 +195,12 @@ async def save_trendyol_settings(
     }
 
     if settings.get("api_secret") and settings.get("api_secret") != "********":
-        update_data["api_secret"] = settings.get("api_secret")
+        # GÜVENLİK: api_secret'ı at-rest ŞİFRELE (get_trendyol_config okurken çözer).
+        try:
+            from security.crypto import encrypt as _enc_secret
+            update_data["api_secret"] = _enc_secret(settings.get("api_secret"))
+        except Exception:
+            update_data["api_secret"] = settings.get("api_secret")
 
     # Faz T3 (white-label): kanal varsayilanlari — yalniz gonderildiyse yaz (yoksa mevcut korunur).
     for _k in ("default_brand_id", "default_cargo_company_id", "default_vat_rate"):
