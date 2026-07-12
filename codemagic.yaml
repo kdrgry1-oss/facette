@@ -51,7 +51,7 @@ workflows:
           # her build tam 1 taze sertifika üretir; limit asla dolmaz. (App Store zaten
           # yüklenen IPA'yı kendi tarafında yeniden imzaladığı için bu güvenlidir.)
           for T in DISTRIBUTION IOS_DISTRIBUTION; do
-            IDS=$(app-store-connect certificates list --type "$T" --json 2>/dev/null | python3 -c "import sys,json; print(' '.join(c.get('id','') for c in json.load(sys.stdin)))" 2>/dev/null || true)
+            IDS=$(app-store-connect certificates list --type "$T" --json 2>/dev/null | python3 -c "import sys,json,re; t=sys.stdin.read(); m=re.search(r'[\[{].*',t,re.S); d=json.loads(m.group(0)) if m else []; d=d.get('data',d) if isinstance(d,dict) else d; print(' '.join(c.get('id','') for c in d))" 2>/dev/null || true)
             for CID in $IDS; do
               [ -n "$CID" ] || continue
               echo "Eski $T sertifikasi siliniyor $CID"
@@ -64,8 +64,8 @@ workflows:
           CERT_ID=$(app-store-connect create-certificate \
             --type IOS_DISTRIBUTION \
             --certificate-key @file:/tmp/dist_key.pem \
-            --save --json 2>/tmp/cert_err.txt \
-            | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+            --save --json 2>&1 \
+            | python3 -c "import sys,json,re; t=sys.stdin.read(); m=re.search(r'\{.*\}',t,re.S); print(json.loads(m.group(0)).get('id','') if m else '')" 2>/dev/null || true)
           echo "CERT_ID=$CERT_ID"
           cat /tmp/cert_err.txt 2>/dev/null || true
           keychain add-certificates
@@ -75,8 +75,8 @@ workflows:
           #    platform=IOS filtresi mevcut (universal) bundle'ı göremiyordu.
           app-store-connect list-bundle-ids --json > /tmp/bids.json 2>/dev/null || echo "[]" > /tmp/bids.json
           echo "=== HESAPTAKI BUNDLE ID'LER (identifier | platform | resourceId) ==="
-          python3 -c "import json;r=json.load(open('/tmp/bids.json'));d=r.get('data',[]) if isinstance(r,dict) else r;[print(b.get('attributes',{}).get('identifier'),'|',b.get('attributes',{}).get('platform'),'|',b.get('id')) for b in d]" 2>/dev/null || cat /tmp/bids.json
-          BID_RES=$(python3 -c "import json;r=json.load(open('/tmp/bids.json'));d=r.get('data',[]) if isinstance(r,dict) else r;print(next((b['id'] for b in d if b.get('attributes',{}).get('identifier')=='$BUNDLE_ID'),''))" 2>/dev/null || true)
+          python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'[\[{].*',t,re.S);r=json.loads(m.group(0)) if m else [];d=r.get('data',[]) if isinstance(r,dict) else r;[print(b.get('attributes',{}).get('identifier'),'|',b.get('attributes',{}).get('platform'),'|',b.get('id')) for b in d]" 2>/dev/null || cat /tmp/bids.json
+          BID_RES=$(python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'[\[{].*',t,re.S);r=json.loads(m.group(0)) if m else [];d=r.get('data',[]) if isinstance(r,dict) else r;print(next((b['id'] for b in d if b.get('attributes',{}).get('identifier')=='$BUNDLE_ID'),''))" 2>/dev/null || true)
           echo "$BUNDLE_ID resource id: '$BID_RES'"
           if [ -z "$BID_RES" ]; then
             echo "!!! $BUNDLE_ID bu hesapta KAYITLI DEĞİL. Yukarıdaki listeden doğru bundle id'yi Claude'a ilet."
