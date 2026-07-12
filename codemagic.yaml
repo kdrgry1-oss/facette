@@ -73,10 +73,10 @@ workflows:
           # 2) Hesaptaki TÜM bundle id'leri listele (platform filtresi OLMADAN) ve
           #    com.facette.app'in resource id'sini çöz. fetch-signing-files'ın
           #    platform=IOS filtresi mevcut (universal) bundle'ı göremiyordu.
-          app-store-connect list-bundle-ids --json > /tmp/bids.json 2>/dev/null || echo "[]" > /tmp/bids.json
+          app-store-connect bundle-ids list --json > /tmp/bids.json 2>/dev/null || app-store-connect list-bundle-ids --json > /tmp/bids.json 2>/dev/null || echo "[]" > /tmp/bids.json
           echo "=== HESAPTAKI BUNDLE ID'LER (identifier | platform | resourceId) ==="
-          python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'[\[{].*',t,re.S);r=json.loads(m.group(0)) if m else [];d=r.get('data',[]) if isinstance(r,dict) else r;[print(b.get('attributes',{}).get('identifier'),'|',b.get('attributes',{}).get('platform'),'|',b.get('id')) for b in d]" 2>/dev/null || cat /tmp/bids.json
-          BID_RES=$(python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'[\[{].*',t,re.S);r=json.loads(m.group(0)) if m else [];d=r.get('data',[]) if isinstance(r,dict) else r;print(next((b['id'] for b in d if b.get('attributes',{}).get('identifier')=='$BUNDLE_ID'),''))" 2>/dev/null || true)
+          python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'\[.*\]',t,re.S);d=json.loads(m.group(0)) if m else [];[print(b.get('attributes',{}).get('identifier'),'|',b.get('attributes',{}).get('platform'),'|',b.get('id')) for b in d]" 2>/dev/null || cat /tmp/bids.json
+          BID_RES=$(python3 -c "import json,re;t=open('/tmp/bids.json').read();m=re.search(r'\[.*\]',t,re.S);d=json.loads(m.group(0)) if m else [];print(next((b['id'] for b in d if b.get('attributes',{}).get('identifier')=='$BUNDLE_ID'),''))" 2>/dev/null || true)
           echo "$BUNDLE_ID resource id: '$BID_RES'"
           if [ -z "$BID_RES" ]; then
             echo "!!! $BUNDLE_ID bu hesapta KAYITLI DEĞİL. Yukarıdaki listeden doğru bundle id'yi Claude'a ilet."
