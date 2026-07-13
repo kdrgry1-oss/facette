@@ -624,6 +624,8 @@ export default function AdminOrders({ unpaidView = false }) {
       return;
     }
     if (!await window.appConfirm(`${selectedOrders.length} sipariş için fatura oluşturulacak (otomatik: VKN'liyse e-Fatura, değilse e-Arşiv). Devam?`)) return;
+    // Toplu barkodla tutarlı: işlem sürerken "oluşturuluyor" bildirimi (aynı id ile sonra başarı/hata ile değişir).
+    const _invTid = toast.loading("Toplu fatura oluşturuluyor...");
     try {
       const token = localStorage.getItem('token');
       const res = await axios.post(
@@ -633,7 +635,7 @@ export default function AdminOrders({ unpaidView = false }) {
       );
       const ok = res.data?.success_count || 0;
       const fail = res.data?.error_count || 0;
-      toast.success(`${ok} fatura oluşturuldu${fail > 0 ? `, ${fail} başarısız` : ""}`);
+      toast.success(`${ok} fatura oluşturuldu${fail > 0 ? `, ${fail} başarısız` : ""}`, { id: _invTid });
       if (fail > 0 && res.data?.errors?.length) {
         console.warn("Bulk invoice errors:", res.data.errors);
         const havaleBlocked = res.data.errors.filter(
@@ -649,7 +651,7 @@ export default function AdminOrders({ unpaidView = false }) {
       setSelectedOrders([]);
       fetchOrders();
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Toplu fatura başarısız");
+      toast.error(err.response?.data?.detail || "Toplu fatura başarısız", { id: _invTid });
     }
   };
 
