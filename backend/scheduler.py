@@ -1389,7 +1389,11 @@ async def _return_cargo_poll_tick():
             new_ret = new_order = ev = None
             ostamp = {}
             if delivered:
-                new_ret, new_order, ev = "received", "returned", "order_returned"
+                # B1 fix: iade kargosu depoya ULAŞTI → durum içeride 'returned' (aksiyon/inceleme)
+                # olur AMA müşteriye "İadeniz Tamamlandı" SMS'i GÖNDERİLMEZ — para henüz iade
+                # edilmedi (erken/yanlış bildirim olurdu). Müşteri, iade bedeli ödenince
+                # 'order_refunded' ("İade Bedeliniz Ödendi") bildirimini alır (refund_pay adımı).
+                new_ret, new_order, ev = "received", "returned", None
                 ostamp["returned_at"] = _parse_tr_dt(teslim) or now_iso
             elif moved and cur == "created":
                 new_ret, new_order, ev = "in_transit", "return_in_transit", "order_return_in_transit"
