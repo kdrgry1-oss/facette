@@ -72,6 +72,7 @@ const statusOptions = [
   { value: "refunded", label: "İade Bedeli Ödendi", class: "status-cancelled" },
   { value: "cancel_requested", label: "İptal Talebi Alındı (İade Bekliyor)", class: "status-pending" },
   { value: "cancelled", label: "İptal Edildi", class: "status-cancelled" },
+  { value: "cancel_refunded", label: "İptal Ödemesi Yapıldı", class: "status-cancelled" },
 ];
 
 const cargoCompanies = [

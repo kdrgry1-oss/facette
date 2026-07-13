@@ -35,13 +35,14 @@ ORDER_STATUS_CATALOG = [
     {"key": "refunded", "label": "İade Bedeli Ödendi", "customer_label": "İade Bedeliniz Ödendi", "event": "order_refunded", "color": "#9F1239", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "partial_refunded", "label": "Kısmi İade Yapıldı", "customer_label": "Kısmi İadeniz Yapıldı", "event": "order_partial_refunded", "color": "#DB2777", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "cancelled", "label": "İptal Edildi", "customer_label": "Siparişiniz İptal Edildi", "event": "order_cancelled", "color": "#6B7280", "group": "Son", "default_active": True, "default_sms": False, "default_email": False},
+    {"key": "cancel_refunded", "label": "İptal Ödemesi Yapıldı", "customer_label": "İptal Bedeliniz İade Edildi", "event": "order_cancel_refunded", "color": "#7C3AED", "group": "Son", "default_active": True, "default_sms": True, "default_email": True},
 ]
 
 _BY_KEY = {s["key"]: s for s in ORDER_STATUS_CATALOG}
 CONFIG_ID = "order_status_config"
 # Şablon tohumlama versiyonu — DEFAULT_STATUS_TEMPLATES'e yeni event/email şablonu
 # eklendikçe artır; get_status_config bu sürümü görünce eksikleri yeniden tohumlar.
-SEED_VERSION = 2
+SEED_VERSION = 3
 
 
 def all_status_keys():
@@ -243,6 +244,11 @@ DEFAULT_STATUS_TEMPLATES = {
         "sms": "Sayin {customer_name}, {order_number} numarali iadeniz tamamlandi.",
         "email_subject": "İadeniz Tamamlandı — {order_number}",
         "email_body": "<p>Merhaba {customer_name},</p><p><b>{order_number}</b> numaralı siparişinize ait iade işleminiz tamamlandı. Varsa iade bedeliniz ayrıca işleme alınacaktır.</p>",
+    },
+    "order_cancel_refunded": {
+        "sms": "Sayin {customer_name}, iptal edilen {order_number} numarali siparisinizin odemesi iade edilmistir. Tutar bankaniza bagli 1-7 is gununde hesabiniza yansir.",
+        "email_subject": "İptal Bedeliniz İade Edildi — {order_number}",
+        "email_body": "<p>Merhaba {customer_name},</p><p>İptal edilen <b>{order_number}</b> numaralı siparişinizin ödemesi tarafınıza iade edilmiştir.</p><p>İade tutarının hesabınıza/kartınıza yansıması bankanıza bağlı olarak 1-7 iş günü sürebilir.</p><p>FACETTE'i tercih ettiğiniz için teşekkür ederiz.</p>",
     },
     "order_refunded": {
         "sms": "Sayin {customer_name}, {order_number} numarali siparisinizin iade bedeli odendi.",
