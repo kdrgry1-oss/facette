@@ -84,6 +84,7 @@ export default function Cancellations() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [payFilter, setPayFilter] = useState("");  // #21: ödeme tipi filtresi
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);   // detay modalı için sipariş
   const [savingId, setSavingId] = useState(null); // durum güncellenirken
@@ -117,6 +118,7 @@ export default function Cancellations() {
       const token = localStorage.getItem("token");
       let url = `${API}/orders?page=${page}&limit=${pageSize}&status=cancelled`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (payFilter) url += `&payment_method=${encodeURIComponent(payFilter)}`;  // #21
       const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
       setOrders(res.data?.orders || []);
       setTotal(res.data?.total || 0);
@@ -126,7 +128,7 @@ export default function Cancellations() {
     } finally {
       setLoading(false);
     }
-  }, [page, search]);
+  }, [page, search, payFilter]);
 
   useEffect(() => { fetchCancelled(); }, [fetchCancelled]);
 
@@ -193,6 +195,13 @@ export default function Cancellations() {
           />
         </div>
         <button onClick={applySearch} className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm">Ara</button>
+        <select value={payFilter} onChange={(e) => { setPage(1); setPayFilter(e.target.value); }}
+          className="px-3 py-2 border rounded-lg text-sm bg-white" title="Ödeme tipine göre filtrele">
+          <option value="">Tüm Ödeme Tipleri</option>
+          <option value="credit_card">Kredi Kartı</option>
+          <option value="bank_transfer">Havale/EFT</option>
+          <option value="cash_on_delivery">Kapıda Ödeme</option>
+        </select>
         <button onClick={fetchCancelled} className="px-3 py-2 border rounded-lg text-sm flex items-center gap-1">
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Yenile
         </button>
@@ -207,6 +216,7 @@ export default function Cancellations() {
               <th className="text-left font-medium px-3 py-2">Platform</th>
               <th className="text-left font-medium px-3 py-2">Müşteri / Ürün</th>
               <th className="text-left font-medium px-3 py-2">Tutar</th>
+              <th className="text-left font-medium px-3 py-2">Ödeme</th>
               <th className="text-left font-medium px-3 py-2">Tarih</th>
               <th className="text-left font-medium px-3 py-2">Sebep</th>
               <th className="text-left font-medium px-3 py-2">Durum</th>
@@ -215,9 +225,9 @@ export default function Cancellations() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">Yükleniyor…</td></tr>
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">Yükleniyor…</td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-gray-400">İptal edilen sipariş bulunamadı.</td></tr>
             ) : orders.map((o) => {
               const name = custName(o);
               const invName = invoiceName(o);
@@ -253,6 +263,9 @@ export default function Cancellations() {
                       )}
                       <span>Fiyat: {money(o.total ?? o.total_amount ?? o.grand_total)}</span>
                     </div>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {{credit_card:"Kredi Kartı", bank_transfer:"Havale/EFT", havale:"Havale/EFT", eft:"Havale/EFT", cash_on_delivery:"Kapıda Ödeme", kapida:"Kapıda Ödeme", marketplace:"Pazaryeri"}[(o.payment_method||"").toLowerCase()] || (o.payment_method || "—")}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">{dt}</td>
                   <td className="px-3 py-2 text-xs text-gray-600 max-w-[160px] truncate" title={o.cancel_reason || ""}>{o.cancel_reason || "—"}</td>
