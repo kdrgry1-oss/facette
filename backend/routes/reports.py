@@ -252,6 +252,164 @@ async def top_products(
     return {"items": out[:limit]}
 
 
+# ============================================================================
+# KÂRLILIK ANALİZİ (Melontik-tarzı) — kategori × pazaryeri NET kâr
+# Gider kalemleri: COGS + komisyon + kargo + hizmet bedeli + reklam + KDV + kurumlar vergisi.
+# Oranlar db.settings id="profitability_config" tan; yoksa TR gerçeğine göre varsayılan.
+# ============================================================================
+_PROFIT_DEFAULTS = {
+    # Pazaryeri komisyonu (%) — kategori bazında değişir; buradan pazaryeri-geneli ayarlanır.
+    "commission_pct": {"trendyol": 18.0, "hepsiburada": 17.0, "temu": 5.0,
+                       "n11": 12.0, "amazon": 15.0, "site": 3.0, "manual": 0.0},
+    # Hizmet/işlem bedeli (%) — Trendyol hizmet bedeli vb. (varsayılan 0, kullanıcı girer)
+    "service_fee_pct": {"trendyol": 0.0, "hepsiburada": 0.0, "temu": 0.0, "site": 0.0},
+    # Dönem TOPLAM reklam gideri (TL) — kanal bazında; ciro payına göre kategorilere dağıtılır.
+    "ad_spend": {"trendyol": 0.0, "hepsiburada": 0.0, "site": 0.0},
+    "packaging_per_order": 0.0,   # sipariş başı paketleme/operasyon (TL)
+    "vat_rate": 10.0,             # KDV (%)
+    "corporate_tax_pct": 25.0,    # Kurumlar vergisi (2025 TR)
+    "cog_fallback_ratio": 0.5,    # maliyet bilinmiyorsa satış fiyatının %'si
+}
+
+
+async def _profitability_config() -> dict:
+    doc = await db.settings.find_one({"id": "profitability_config"}, {"_id": 0}) or {}
+    cfg = {**_PROFIT_DEFAULTS}
+    for k, v in doc.items():
+        if k == "id":
+            continue
+        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+            cfg[k] = {**cfg[k], **v}
+        else:
+            cfg[k] = v
+    return cfg
+
+
+@router.get("/profitability-config")
+async def get_profitability_config(current_user: dict = Depends(require_admin)):
+    """Kârlılık analizi gider oran/varsayımları (komisyon, reklam, hizmet bedeli, KDV, kurumlar vergisi)."""
+    return {"config": await _profitability_config(), "defaults": _PROFIT_DEFAULTS}
+
+
+@router.put("/profitability-config")
+async def set_profitability_config(payload: dict, current_user: dict = Depends(require_admin)):
+    """Kârlılık gider varsayımlarını günceller (yalnız gönderilen alanlar birleşir)."""
+    payload = {k: v for k, v in (payload or {}).items() if k in _PROFIT_DEFAULTS}
+    await db.settings.update_one({"id": "profitability_config"}, {"$set": {"id": "profitability_config", **payload}}, upsert=True)
+    return {"success": True, "config": await _profitability_config()}
+
+
+@router.get("/profitability")
+async def profitability(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
+    current_user: dict = Depends(require_admin),
+):
+    """KÂRLILIK ANALİZİ — kategori bazında (kaynak filtreli) tüm giderler düşülerek NET kâr.
+    Kalemler: Ciro − COGS − Komisyon − Kargo − Hizmet Bedeli − Reklam − İade − KDV − Kurumlar Vergisi.
+    Oranlar profitability-config'ten; maliyet ürün purchase_price/product_costs'tan (yoksa oranla tahmin)."""
+    s, e = _iso_range(start_date, end_date, days_default=30)
+    cfg = await _profitability_config()
+    _CH_ALIAS = {"facette": "site", "": "site", "web": "site", "admin_manual": "manual", "admin": "manual"}
+    from collections import defaultdict as _dd
+
+    # Ana kırılım: (kategori, kanal) → ciro, maliyet, adet, sipariş. Maliyet: purchase_price köprüsü.
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
+        {"$unwind": "$items"},
+        {"$addFields": {"_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}}}},
+        {"$lookup": {
+            "from": "products",
+            "let": {"pid": "$items.product_id", "bc": "$_bc"},
+            "pipeline": [
+                {"$match": {"$expr": {"$or": [
+                    {"$eq": ["$id", "$$pid"]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$eq": [{"$toString": "$barcode"}, "$$bc"]}]},
+                    {"$and": [{"$ne": ["$$bc", ""]}, {"$in": ["$$bc", {"$map": {"input": {"$ifNull": ["$variants", []]}, "as": "v", "in": {"$toString": "$$v.barcode"}}}]}]},
+                ]}}},
+                {"$limit": 1},
+                {"$project": {"_id": 0, "category_name": 1, "purchase_price": 1}},
+            ],
+            "as": "p",
+        }},
+        {"$unwind": {"path": "$p", "preserveNullAndEmptyArrays": True}},
+        {"$group": {
+            "_id": {"cat": {"$ifNull": ["$p.category_name",
+                        {"$ifNull": ["$items.category_name", {"$ifNull": ["$items.category", "(Kategorisiz)"]}]}]},
+                    "ch": "$_ch"},
+            "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "cogs": {"$sum": {"$multiply": [{"$ifNull": ["$p.purchase_price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
+            "revenue_nocost": {"$sum": {"$cond": [{"$gt": [{"$ifNull": ["$p.purchase_price", 0]}, 0]}, 0,
+                                {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}]}},
+        }},
+    ]
+    # Kanal başına toplam kargo (ciro payına göre kategorilere dağıtılır)
+    cargo_by_ch = _dd(float)
+    async for r in db.orders.aggregate([
+        {"$match": _base_match(s, e, source)},
+        {"$addFields": {"_ch": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
+        {"$group": {"_id": "$_ch", "shipping": {"$sum": {"$ifNull": ["$shipping_cost", 0]}}, "orders": {"$sum": 1}}},
+    ]):
+        cargo_by_ch[_CH_ALIAS.get((r["_id"] or "site"), r["_id"] or "site")] = {"shipping": float(r["shipping"] or 0), "orders": int(r["orders"])}
+
+    # Kategori-kanal satırlarını topla
+    rows = []
+    rev_by_ch = _dd(float)
+    async for r in db.orders.aggregate(pipeline):
+        ch = _CH_ALIAS.get((r["_id"].get("ch") or "site"), r["_id"].get("ch") or "site")
+        rev = float(r["revenue"] or 0)
+        cogs = float(r["cogs"] or 0)
+        # Maliyeti bilinmeyen kalemler için oranla tahmin ekle
+        cogs += float(r.get("revenue_nocost") or 0) * float(cfg["cog_fallback_ratio"])
+        rows.append({"category": r["_id"].get("cat") or "(Kategorisiz)", "channel": ch,
+                     "qty": int(r["qty"]), "revenue": rev, "cogs": round(cogs, 2)})
+        rev_by_ch[ch] += rev
+    total_rev = sum(rev_by_ch.values()) or 1.0
+
+    vat = float(cfg["vat_rate"])
+    corp = float(cfg["corporate_tax_pct"])
+    out = []
+    for row in rows:
+        ch = row["channel"]
+        rev = row["revenue"]
+        cogs = row["cogs"]
+        commission = rev * float(cfg["commission_pct"].get(ch, 5.0)) / 100.0
+        service_fee = rev * float(cfg["service_fee_pct"].get(ch, 0.0)) / 100.0
+        # Kargo: kanal toplam kargosunu bu satırın ciro payına göre dağıt
+        ch_cargo = (cargo_by_ch.get(ch) or {}).get("shipping", 0.0)
+        cargo = ch_cargo * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
+        # Reklam: kanal reklam giderini ciro payına göre dağıt
+        ad_total = float(cfg["ad_spend"].get(ch, 0.0))
+        ad_alloc = ad_total * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
+        operating = rev - cogs - commission - service_fee - cargo - ad_alloc
+        # KDV (net ödenecek — katma değer üzerinden): (ciro - maliyet) içindeki KDV
+        vat_payable = max(0.0, (rev - cogs)) * vat / (100.0 + vat)
+        pre_tax = operating - vat_payable
+        corporate_tax = max(0.0, pre_tax) * corp / 100.0
+        net = pre_tax - corporate_tax
+        out.append({
+            "category": row["category"], "channel": ch, "qty": row["qty"],
+            "revenue": round(rev, 2), "cogs": round(cogs, 2),
+            "commission": round(commission, 2), "service_fee": round(service_fee, 2),
+            "cargo": round(cargo, 2), "ad_spend": round(ad_alloc, 2),
+            "vat_payable": round(vat_payable, 2), "corporate_tax": round(corporate_tax, 2),
+            "net_profit": round(net, 2),
+            "margin_pct": round(net / rev * 100.0, 1) if rev else 0.0,
+        })
+    out.sort(key=lambda x: -x["net_profit"])
+    # Toplamlar
+    def _sum(k):
+        return round(sum(x[k] for x in out), 2)
+    totals = {k: _sum(k) for k in ("revenue", "cogs", "commission", "service_fee", "cargo",
+                                    "ad_spend", "vat_payable", "corporate_tax", "net_profit")}
+    totals["qty"] = sum(x["qty"] for x in out)
+    totals["margin_pct"] = round(totals["net_profit"] / totals["revenue"] * 100.0, 1) if totals["revenue"] else 0.0
+    return {"items": out, "totals": totals, "config": cfg}
+
+
 @router.get("/categories")
 async def category_report(
     start_date: Optional[str] = None,

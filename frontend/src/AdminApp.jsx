@@ -61,6 +61,7 @@ import AmazonSpApi from "./pages/admin/AmazonSpApi";
 import Compliance from "./pages/admin/Compliance";
 import CapiLogs from "./pages/admin/CapiLogs";
 import ReportsAdvanced from "./pages/admin/ReportsAdvanced";
+import ProfitabilityAnalysis from "./pages/admin/ProfitabilityAnalysis";
 import ReportsInsights from "./pages/admin/ReportsInsights";
 import XmlFeeds from "./pages/admin/XmlFeeds";
 import SocialAuthSettings from "./pages/admin/SocialAuthSettings";
@@ -169,6 +170,7 @@ export default function AdminApp() {
         <Route path="kuponlar" element={<Coupons />} />
         <Route path="yorumlar" element={<ProductReviews />} />
         <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
+        <Route path="raporlar/karlilik" element={<ProfitabilityAnalysis />} />
         <Route path="raporlar/satis" element={<SalesReport />} />
         <Route path="raporlar/urun" element={<ProductsReport />} />
         <Route path="raporlar/stok" element={<StockReport />} />
