@@ -8,6 +8,7 @@ import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
+import { fetchHeaderMenu, slugFromLink } from "../lib/headerMenu";
 import { priceView } from "../lib/price";
 import axios from "axios";
 
@@ -27,8 +28,9 @@ function MegaPrice({ p }) {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Mega menu structure - facette.com.tr exact structure
-const GIYIM_MENU = {
+// Mega menu structure — VARSAYILAN (fallback). Gerçek menü Admin > Tasarım > Menü Yönetimi'nden
+// (page-blocks/header-menu API) gelir; fetch başarısızsa bu varsayılan kullanılır.
+const DEFAULT_GIYIM_MENU = {
   "ÜST GİYİM": [
     { name: "Elbise", slug: "elbise" },
     { name: "Bluz", slug: "bluz" },
@@ -53,13 +55,36 @@ const GIYIM_MENU = {
   ]
 };
 
-const AKSESUAR_MENU = [
+const DEFAULT_AKSESUAR_MENU = [
   { name: "Çanta", slug: "canta" },
   { name: "Şal", slug: "sal" },
   { name: "Atkı", slug: "atki" },
   { name: "Kemer", slug: "kemer" },
   { name: "Şapka", slug: "sapka" },
 ];
+
+// API tab'ini (page-blocks/header-menu) mevcut render şekline dönüştürür.
+// GİYİM: { "KOLON BAŞLIĞI": [{name, slug}], ... }  — kolon başlık linki JSX'te slugify ile üretilir.
+function apiTabToGiyimMenu(tab) {
+  const obj = {};
+  for (const col of (tab?.columns || [])) {
+    if (!col || !col.title) continue;
+    obj[col.title] = (col.items || [])
+      .filter((it) => it && it.name)
+      .map((it) => ({ name: it.name, slug: slugFromLink(it.link) || slugify(it.name) }));
+  }
+  return Object.keys(obj).length ? obj : null;
+}
+// AKSESUAR: tüm kolonların item'ları düz liste [{name, slug}]
+function apiTabToAksesuarMenu(tab) {
+  const arr = [];
+  for (const col of (tab?.columns || [])) {
+    for (const it of (col?.items || [])) {
+      if (it && it.name) arr.push({ name: it.name, slug: slugFromLink(it.link) || slugify(it.name) });
+    }
+  }
+  return arr.length ? arr : null;
+}
 
 // Menu images for right side
 const MENU_IMAGES = {
@@ -122,6 +147,21 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
 
 export default function Header({ hideMenu = false }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Üst menü: Admin > Tasarım > Menü Yönetimi'nden (page-blocks/header-menu) beslenir.
+  // Fetch gelene kadar / başarısızsa varsayılan sabitler kullanılır (header asla boş kalmaz).
+  const [giyimMenu, setGiyimMenu] = useState(DEFAULT_GIYIM_MENU);
+  const [aksesuarMenu, setAksesuarMenu] = useState(DEFAULT_AKSESUAR_MENU);
+  useEffect(() => {
+    let alive = true;
+    fetchHeaderMenu(API).then((tabs) => {
+      if (!alive || !Array.isArray(tabs)) return;
+      const g = tabs.find((t) => t && (t.id === "giyim" || t.link === "/giyim"));
+      const a = tabs.find((t) => t && (t.id === "aksesuar" || t.link === "/aksesuar"));
+      const gm = apiTabToGiyimMenu(g); if (gm) setGiyimMenu(gm);
+      const am = apiTabToAksesuarMenu(a); if (am) setAksesuarMenu(am);
+    }).catch(() => { /* varsayılan kalır */ });
+    return () => { alive = false; };
+  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -444,8 +484,8 @@ export default function Header({ hideMenu = false }) {
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
                 {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
-                <div className={MEGA_LINK_GRID} style={megaCols(3)}>
-                  {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                <div className={MEGA_LINK_GRID} style={megaCols(Object.keys(giyimMenu).length || 3)}>
+                  {Object.entries(giyimMenu).map(([category, items]) => (
                     <div key={category}>
                       <Link
                         to={`/${slugify(category)}`}
@@ -509,7 +549,7 @@ export default function Header({ hideMenu = false }) {
                 <div className="flex-1">
                   <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
                   <ul className={MEGA_LINK_GRID} style={megaCols(2)}>
-                    {AKSESUAR_MENU.map((item) => (
+                    {aksesuarMenu.map((item) => (
                       <li key={item.slug}>
                         <Link
                           to={`/${item.slug}`}
@@ -595,7 +635,7 @@ export default function Header({ hideMenu = false }) {
                   <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
                 </summary>
                 <div className="pb-3 pl-1 space-y-3">
-                  {Object.entries(GIYIM_MENU).map(([category, items]) => (
+                  {Object.entries(giyimMenu).map(([category, items]) => (
                     <div key={category}>
                       <Link
                         to={`/${slugify(category)}`}
@@ -626,7 +666,7 @@ export default function Header({ hideMenu = false }) {
                   <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
                 </summary>
                 <div className="pb-3 pl-1">
-                  {AKSESUAR_MENU.map((item) => (
+                  {aksesuarMenu.map((item) => (
                     <Link
                       key={item.slug}
                       to={`/${item.slug}`}
