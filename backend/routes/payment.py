@@ -327,6 +327,11 @@ async def initialize_payment(request: Request, order_id: str, callback_url: str,
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    # GÜVENLİK: Zaten ödenmiş/tamamlanmış/iptal siparişte ödeme başlatma — kart-testi
+    # ve tekrar-tahsilat yüzeyini kapatır.
+    if order.get("payment_status") in ("paid", "refunded") or \
+       order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
+        raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
     settings = await _get_iyzico_settings()
     payload = _build_initialize_payload(order, callback_url)
@@ -606,6 +611,9 @@ async def initialize_3ds_payment(payload: dict, request: Request):
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("payment_status") in ("paid", "refunded") or \
+       order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
+        raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, callback_url, is_3ds=True)
@@ -701,6 +709,9 @@ async def card_pay_non3ds(payload: dict, request: Request):
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("payment_status") in ("paid", "refunded") or \
+       order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
+        raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, "", is_3ds=False)
