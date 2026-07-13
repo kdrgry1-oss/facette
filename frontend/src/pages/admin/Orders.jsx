@@ -1589,6 +1589,42 @@ export default function AdminOrders({ unpaidView = false }) {
                       <a href={pdfSrc} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline shrink-0">Yeni sekmede aç ↗</a>
                     </div>
                     <iframe src={pdfSrc} title="Fatura" className="w-full rounded border bg-white" style={{ height: 520 }} />
+                    {/* #20: Faturada kullanılan MATRAH bilgileri (birim fiyat · iskonto · KDV) */}
+                    {(() => {
+                      const items = selectedOrder.items || selectedOrder.lines || [];
+                      const sub = Number(selectedOrder.subtotal) || items.reduce((a, it) => a + (Number(it.unit_price ?? it.price ?? 0)) * (Number(it.quantity ?? it.qty ?? 1)), 0);
+                      const disc = Number(selectedOrder.discount || selectedOrder.discount_total || 0) + Number(selectedOrder.payment_discount || 0);
+                      const dr = sub > 0 ? Math.min(1, Math.max(0, disc / sub)) : 0;
+                      const fmt = (n) => (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      let tI = 0, tN = 0, tK = 0;
+                      const rows = items.map((it, i) => {
+                        const q = Number(it.quantity ?? it.qty ?? 1);
+                        const unit = Number(it.unit_price ?? it.price ?? it.list_price ?? 0);
+                        const gross = unit * q, net = gross * (1 - dr), isk = gross - net;
+                        const rate = Number(it.vat_rate ?? selectedOrder.vat_rate ?? 10);
+                        const kdv = net * rate / (100 + rate);
+                        tI += isk; tN += net; tK += kdv;
+                        return { i, name: it.name || it.product_name || 'Ürün', unit, q, isk, net, rate, kdv };
+                      });
+                      if (!rows.length) return null;
+                      return (
+                        <div className="mt-3 overflow-x-auto">
+                          <div className="text-xs font-semibold text-green-900 mb-1">Fatura Matrahı (birim fiyat · iskonto · KDV)</div>
+                          <table className="w-full text-xs border bg-white">
+                            <thead className="bg-green-100 text-green-900">
+                              <tr><th className="px-2 py-1 text-left">Ürün</th><th className="px-2 py-1 text-right">Birim</th><th className="px-2 py-1 text-right">Adet</th><th className="px-2 py-1 text-right">İskonto</th><th className="px-2 py-1 text-right">Net</th><th className="px-2 py-1 text-right">KDV%</th><th className="px-2 py-1 text-right">KDV</th></tr>
+                            </thead>
+                            <tbody>
+                              {rows.map(r => (<tr key={r.i} className="border-t"><td className="px-2 py-1">{r.name}</td><td className="px-2 py-1 text-right">{fmt(r.unit)}</td><td className="px-2 py-1 text-right">{r.q}</td><td className="px-2 py-1 text-right text-amber-700">-{fmt(r.isk)}</td><td className="px-2 py-1 text-right">{fmt(r.net)}</td><td className="px-2 py-1 text-right">%{r.rate}</td><td className="px-2 py-1 text-right">{fmt(r.kdv)}</td></tr>))}
+                            </tbody>
+                            <tfoot className="bg-green-50 font-semibold">
+                              <tr className="border-t"><td className="px-2 py-1" colSpan={3}>Toplam</td><td className="px-2 py-1 text-right text-amber-700">-{fmt(tI)}</td><td className="px-2 py-1 text-right">{fmt(tN)}</td><td className="px-2 py-1 text-right">Matrah {fmt(tN - tK)}</td><td className="px-2 py-1 text-right">{fmt(tK)}</td></tr>
+                            </tfoot>
+                          </table>
+                          {Number(selectedOrder.shipping_cost) > 0 && <div className="text-[11px] text-gray-500 mt-1">+ Kargo: {fmt(selectedOrder.shipping_cost)} (KDV %20, ayrı matrah)</div>}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
