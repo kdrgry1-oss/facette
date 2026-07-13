@@ -346,6 +346,21 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       toast.error(e.response?.data?.detail || "İade işlem akışı açılamadı");
     } finally { setBusyId(""); }
   };
+  // #12: Kısmi iadede kargo kararını modal içinde AÇIKÇA değiştir → refund'u yeniden hesapla.
+  const changeCargoFault = async (newFault) => {
+    if (!wf || wf.loading || wf.fault === newFault) return;
+    setWf((m) => ({ ...m, fault: newFault, loading: true }));
+    try {
+      const q = `fault=${newFault}${wf.returnedNet != null ? `&returned_net=${wf.returnedNet}` : ""}`;
+      const pv = await axios.get(`${API}/orders/returns/${wf.returnId}/refund-preview?${q}`, auth());
+      const preview = pv.data?.breakdown || null;
+      setWf((m) => ({ ...m, fault: newFault, preview,
+        finalAmount: preview ? preview.auto_refund : m.finalAmount, edited: false, loading: false }));
+    } catch {
+      setWf((m) => ({ ...m, loading: false }));
+    }
+  };
+
   const wfApprove = async () => {
     if (!wf) return;
     setWf((m) => ({ ...m, loading: true }));
@@ -844,6 +859,25 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
               <div className="text-xs text-gray-500">
                 Mevcut iade durumu: <b className="text-gray-800">{lbl(wf.row.status)}</b>
               </div>
+
+              {/* #12: KISMİ iadede kargo ücreti kararı — açık son onay (biz mi karşılıyoruz / müşteriye mi). */}
+              {wf.returnedNet != null && (
+                <div className="border border-amber-200 bg-amber-50 rounded-xl p-3">
+                  <div className="text-xs font-semibold text-amber-900 mb-2">Kısmi iade — kargo ücreti kimde kalsın?</div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => changeCargoFault("store")} disabled={wf.loading}
+                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${wf.fault === "store" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-700 border-gray-300 hover:border-emerald-400"}`}>
+                      Kargoyu BİZ karşılıyoruz
+                      <span className="block text-[10px] font-normal opacity-80">müşteriden kesme</span>
+                    </button>
+                    <button type="button" onClick={() => changeCargoFault("customer")} disabled={wf.loading}
+                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${wf.fault === "customer" ? "bg-amber-600 text-white border-amber-600" : "bg-white text-gray-700 border-gray-300 hover:border-amber-400"}`}>
+                      Kargoyu MÜŞTERİYE yansıt
+                      <span className="block text-[10px] font-normal opacity-80">iade tutarından kes</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {wf.preview ? (
                 <div className="border rounded-xl p-3 text-sm">
