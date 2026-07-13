@@ -472,6 +472,31 @@ async def _retrieve_and_finalize(token: str) -> dict:
     return {"ok": paid, "order": order, "return_url": order.get("iyzico_return_url") or ""}
 
 
+PAYMENT_DETAIL_PATH = "/payment/detail"
+
+
+async def _finalize_by_payment_id(order_id: str, payment_id: str) -> bool:
+    """3DS/kart akışında (hosted token YOK) paymentId ile iyzico'dan ödemeyi retrieve edip
+    finalize eder — webhook/reconcile güvenlik ağı; 'çekildi ama kayıt yok/failed' vakalarını
+    kapatır. Belirsiz cevapta (non-JSON/exception) siparişe DOKUNMAZ (failed yazmaz)."""
+    if not order_id or not payment_id:
+        return False
+    settings = await _get_iyzico_settings()
+    payload = {"locale": "tr", "conversationId": str(order_id), "paymentId": str(payment_id)}
+    body_str = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    headers = _v2_headers(settings["api_key"], settings["api_secret"], PAYMENT_DETAIL_PATH, body_str)
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(f"{settings['base_url']}{PAYMENT_DETAIL_PATH}", content=body_str.encode("utf-8"), headers=headers)
+        if not resp.headers.get("content-type", "").startswith("application/json"):
+            return False   # belirsiz → failed yazma
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"iyzico payment-detail retrieve hata order={order_id} pid={payment_id}: {e}")
+        return False
+    return await _mark_order_from_payment(order_id, data)
+
+
 @router.api_route("/callback", methods=["POST", "GET"])
 async def payment_callback(request: Request, token: str = Form(default=None)):
     """iyzico ödeme sonrası buraya yönlendirir; sonucu doğrulayıp storefront'a geri yollar."""
@@ -678,15 +703,40 @@ async def callback_3ds(request: Request):
             body["conversationData"] = conv_data
         body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
         headers = _v2_headers(settings["api_key"], settings["api_secret"], THREEDS_AUTH_PATH, body_str)
+        # KART BU ADIMDA ÇEKİLİR. Cevabı GÜVENİLİR şekilde okuyabildik mi ayrı tut:
+        # transport/parse hatasında (timeout, non-JSON) çekim yapılmış OLABİLİR → siparişi
+        # 'failed' yazma (para alınıp kayıt yok/failed olur); reconcile bayrağı bırak.
+        _resp_certain = True
         try:
             async with httpx.AsyncClient(timeout=30) as c:
                 resp = await c.post(f"{settings['base_url']}{THREEDS_AUTH_PATH}", content=body_str.encode("utf-8"), headers=headers)
-            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure"}
+            if resp.headers.get("content-type", "").startswith("application/json"):
+                data = resp.json()
+            else:
+                data = {"status": "failure"}
+                _resp_certain = False   # iyzico JSON dönmedi → belirsiz
         except Exception as e:
             logger.error(f"iyzico 3ds auth error: {e}")
             data = {"status": "failure", "errorMessage": str(e)}
+            _resp_certain = False        # transport hatası → belirsiz
+        # Fix 2: callback'te conversationId boş/uyuşmazsa siparişi AUTH yanıtındaki
+        # conversationId ile de ara (aksi halde para çekilir ama finalize atlanırdı).
+        if order is None:
+            _cid2 = str((data or {}).get("conversationId") or conv_id or "").strip()
+            if _cid2:
+                order = await db.orders.find_one({"id": _cid2}, {"_id": 0})
+                if order and not return_base:
+                    return_base = _safe_return_base(order.get("iyzico_return_url"), request)
         if order:
-            ok = await _mark_order_from_payment(order.get("id"), data)
+            if _resp_certain:
+                ok = await _mark_order_from_payment(order.get("id"), data)
+            else:
+                # Fix 3: cevap belirsiz — 'failed' YAZMA; pending bırak + reconcile bayrağı.
+                await db.orders.update_one(
+                    {"id": order.get("id"), "payment_status": {"$ne": "paid"}},
+                    {"$set": {"needs_reconciliation": True,
+                              "reconcile_payment_id": str(payment_id),
+                              "updated_at": datetime.now(timezone.utc).isoformat()}})
     elif order:
         # Y1: ödenmiş siparişi 'failed'a düşürme — sahte failure callback'i koruması.
         await db.orders.update_one(
@@ -732,6 +782,12 @@ async def card_pay_non3ds(payload: dict, request: Request):
         data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"status": "failure", "errorMessage": resp.text[:300]}
     except Exception as e:
         logger.error(f"iyzico non-3ds error: {e}")
+        # Fix 3: çekim yapılmış OLABİLİR ama cevabı okuyamadık → siparişi 'failed' bırakma,
+        # reconcile bayrağı koy (cron/webhook iyzico'dan doğrulayıp finalize etsin).
+        await db.orders.update_one(
+            {"id": order_id, "payment_status": {"$ne": "paid"}},
+            {"$set": {"needs_reconciliation": True,
+                      "updated_at": datetime.now(timezone.utc).isoformat()}})
         raise HTTPException(status_code=502, detail=f"iyzico bağlantı hatası: {e}")
 
     paid = await _mark_order_from_payment(order_id, data)
@@ -876,11 +932,22 @@ async def iyzico_webhook(request: Request):
 
     # Henüz paid değilse webhook verisine körü körüne güvenme — iyzico'dan
     # retrieve ile doğrulayıp finalize et (bildirim + CAPI purchase içeride tetiklenir).
-    if (order.get("payment_status") or "") != "paid" and token:
-        try:
-            await _retrieve_and_finalize(token)
-        except Exception as e:
-            logger.warning(f"iyzico webhook finalize hata order={order.get('id')}: {e}")
+    if (order.get("payment_status") or "") != "paid":
+        if token:
+            try:
+                await _retrieve_and_finalize(token)          # hosted Checkout Form akışı
+            except Exception as e:
+                logger.warning(f"iyzico webhook finalize hata order={order.get('id')}: {e}")
+        else:
+            # Fix 1: 3DS/kart akışında hosted token YOK → paymentId ile finalize et.
+            # Bu, callback'e ulaşamayan (sekme kapandı vb.) çekilmiş siparişleri kurtarır.
+            _pid = str(payload.get("iyziPaymentId") or payload.get("paymentId")
+                       or payload.get("iyziReferenceCode") or "").strip()
+            if _pid:
+                try:
+                    await _finalize_by_payment_id(order["id"], _pid)
+                except Exception as e:
+                    logger.warning(f"iyzico webhook paymentId finalize hata order={order.get('id')}: {e}")
 
     # Paid ise purchase'ı garanti et (daha önce gittiyse no-op)
     fresh = await db.orders.find_one({"id": order["id"]}, {"_id": 0, "payment_status": 1})
