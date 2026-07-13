@@ -1910,7 +1910,8 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
 # iptal yolu (auto-cancel + elle iptal + havale auto-cancel) tetiklenebildiğinden, iade
 # hareketi zaten varsa stok TEKRAR eklenmez. Hareket-tipi bağımsız guard.
 _RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increment",
-                       "backfill_increment", "havale_auto_cancel", "order_returned"]
+                       "backfill_increment", "havale_auto_cancel", "order_returned",
+                       "return_restock"]  # A1: pazaryeri claim/site iade restock'u da guard'a dahil
 
 
 async def record_order_redemptions(order: dict) -> None:

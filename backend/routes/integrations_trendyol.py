@@ -4755,55 +4755,57 @@ async def approve_trendyol_claim(
                 }}
             )
 
-            # A7: İade onaylanınca stok otomatik geri iade
+            # A7: İade onaylanınca stok otomatik geri iade — ATOMİK (A1/A2 fix).
             try:
                 claim_doc = await db.trendyol_claims.find_one({"claim_id": claim_id}, {"_id": 0, "items": 1, "order_number": 1, "stock_restored": 1})
+                # A1: guard'ı ATOMİK al — onay + GP(restock_claim_once) çift restock yapmasın.
+                _lock = await db.trendyol_claims.update_one(
+                    {"claim_id": claim_id, "stock_restored": {"$ne": True}},
+                    {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(),
+                              "stock_restored_source": "approve"}})
+                _now = datetime.now(timezone.utc).isoformat()
                 restocked_items = []
-                for item in ([] if (claim_doc or {}).get("stock_restored") else ((claim_doc or {}).get("items") or [])):
-                    if str(item.get("claim_item_id", "")) not in [str(x) for x in claim_item_ids]:
+                _cids = {str(x) for x in claim_item_ids}
+                for item in (((claim_doc or {}).get("items") or []) if _lock.modified_count else []):
+                    if str(item.get("claim_item_id", "")) not in _cids:
                         continue
                     barcode = item.get("barcode", "")
                     qty = int(item.get("quantity", 1) or 1)
                     if not barcode:
                         continue
-                    # variant-level restock
-                    prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "variants": 1, "stock": 1})
+                    # A2: ATOMİK varyant $inc (tüm diziyi $set etme — oversell/sürüklenme yok)
+                    prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
                     if prod:
-                        for v in (prod.get("variants") or []):
-                            if v.get("barcode") == barcode:
-                                v["stock"] = int(v.get("stock", 0) or 0) + qty
-                                break
-                        new_total_stock = sum(int(v.get("stock", 0) or 0) for v in prod.get("variants", []))
+                        await db.products.update_one(
+                            {"id": prod["id"], "variants.barcode": barcode},
+                            {"$inc": {"variants.$[v].stock": qty}, "$set": {"updated_at": _now}},
+                            array_filters=[{"v.barcode": barcode}])
                         await db.products.update_one(
                             {"id": prod["id"]},
-                            {"$set": {"variants": prod["variants"], "stock": new_total_stock, "updated_at": datetime.now(timezone.utc).isoformat()}}
-                        )
+                            [{"$set": {"stock": {"$sum": {"$map": {"input": {"$ifNull": ["$variants", []]},
+                                "as": "vv", "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
                         restocked_items.append({"barcode": barcode, "qty": qty, "product_id": prod["id"]})
                     else:
-                        # Fallback: try product.barcode
-                        p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1, "stock": 1})
+                        p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
                         if p2:
                             await db.products.update_one(
-                                {"id": p2["id"]},
-                                {"$inc": {"stock": qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
-                            )
+                                {"id": p2["id"]}, {"$inc": {"stock": qty}, "$set": {"updated_at": _now}})
                             restocked_items.append({"barcode": barcode, "qty": qty, "product_id": p2["id"]})
 
-                # Stok hareketi loglama
+                # Stok hareketi loglama — A1: order_id ile de (sipariş yolu guard'ı görsün)
                 if restocked_items:
+                    _onum = str((claim_doc or {}).get("order_number") or "")
+                    _o = await db.orders.find_one({"order_number": _onum}, {"_id": 0, "id": 1}) if _onum else None
                     await db.stock_movements.insert_one({
                         "id": str(uuid.uuid4()),
-                        "type": "return_approved",
+                        "type": "return_restock",
                         "claim_id": claim_id,
-                        "order_number": claim_doc.get("order_number", ""),
+                        "order_id": (_o or {}).get("id"),
+                        "order_number": _onum,
                         "items": restocked_items,
                         "created_by": current_user["email"],
-                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "created_at": _now,
                     })
-                    await db.trendyol_claims.update_one(
-                        {"claim_id": claim_id},
-                        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(), "stock_restored_source": "approve"}}
-                    )
             except Exception as restock_err:
                 logger.error(f"Restock after claim approve failed: {restock_err}")
                 # non-fatal

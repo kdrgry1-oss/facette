@@ -1829,43 +1829,55 @@ async def restock_claim_once(claim_id: str, source: str, by_email: str = "") -> 
     )
     if not claim or claim.get("stock_restored"):
         return []
+    # A1: guard'ı ATOMİK al — iki eşzamanlı çağrı (senkron + elle) çift restock yapmasın.
+    _lock = await db.trendyol_claims.update_one(
+        {"claim_id": claim_id, "stock_restored": {"$ne": True}},
+        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(),
+                  "stock_restored_source": source}})
+    if _lock.modified_count == 0:
+        return []  # başka bir çağrı zaten yaptı
+    _now = datetime.now(timezone.utc).isoformat()
     restocked = []
     for item in (claim.get("items") or []):
         barcode = str(item.get("barcode", "") or "").strip()
         qty = int(item.get("quantity", 1) or 1)
         if not barcode or qty <= 0:
             continue
-        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "variants": 1, "stock": 1})
+        # A2: ATOMİK varyant stok artışı (arrayFilters + $inc). Önceki kod tüm varyant dizisini
+        # Python'da okuyup $set ile yazıyordu → eşzamanlı sipariş düşüşünü EZİYORDU (oversell).
+        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
         if prod:
-            for v in (prod.get("variants") or []):
-                if v.get("barcode") == barcode:
-                    v["stock"] = int(v.get("stock", 0) or 0) + qty
-                    break
-            new_total = sum(int(v.get("stock", 0) or 0) for v in prod.get("variants", []))
+            await db.products.update_one(
+                {"id": prod["id"], "variants.barcode": barcode},
+                {"$inc": {"variants.$[v].stock": qty}, "$set": {"updated_at": _now}},
+                array_filters=[{"v.barcode": barcode}],
+            )
+            # Parent stok = varyant toplamı (tek atomik pipeline update)
             await db.products.update_one(
                 {"id": prod["id"]},
-                {"$set": {"variants": prod["variants"], "stock": new_total, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                    "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}],
             )
             restocked.append({"barcode": barcode, "qty": qty, "product_id": prod["id"]})
         else:
-            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1, "stock": 1})
+            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
             if p2:
                 await db.products.update_one(
-                    {"id": p2["id"]},
-                    {"$inc": {"stock": qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
-                )
+                    {"id": p2["id"]}, {"$inc": {"stock": qty}, "$set": {"updated_at": _now}})
                 restocked.append({"barcode": barcode, "qty": qty, "product_id": p2["id"]})
-    # Tekrarı önlemek için her durumda işaretle
-    await db.trendyol_claims.update_one(
-        {"claim_id": claim_id},
-        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat(), "stock_restored_source": source}}
-    )
+    # A1: hareketi order_id ile de kaydet ki SİPARİŞ yolu guard'ı (_restock_order_once) bunu
+    # görüp aynı siparişi İKİNCİ kez geri-stoklamasın (return_restock artık _RESTORE_MOVE_TYPES'ta).
+    _oid = None
+    _onum = str(claim.get("order_number") or "")
+    if _onum:
+        _o = await db.orders.find_one({"order_number": _onum}, {"_id": 0, "id": 1})
+        _oid = (_o or {}).get("id")
     if restocked:
         await db.stock_movements.insert_one({
             "id": str(uuid.uuid4()), "type": "return_restock", "source": source,
-            "claim_id": claim_id, "order_number": claim.get("order_number", ""),
-            "items": restocked, "created_by": by_email,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "claim_id": claim_id, "order_id": _oid, "order_number": _onum,
+            "items": restocked, "created_by": by_email, "created_at": _now,
         })
     return restocked
 ALLOWED_MARKETPLACES = {
