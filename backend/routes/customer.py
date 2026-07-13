@@ -102,25 +102,31 @@ async def cancel_my_order(order_id: str, current_user: dict = Depends(require_au
         _set["refund_pending"] = True   # personel: para iadesi bekliyor
     await db.orders.update_one({"id": order.get("id")}, {"$set": _set})
 
-    # Stok geri ekleme — panel/Trendyol iptal akışıyla AYNI idempotent guard (order_cancelled)
-    try:
-        already = await db.stock_movements.find_one(
-            {"order_id": order.get("id"), "type": "order_cancelled"}, {"_id": 1}
-        )
-        if not already:
-            from routes.orders import _stock_delta_for_order
-            moves = await _stock_delta_for_order(order, +1)
-            await db.stock_movements.insert_one({
-                "id": generate_id(),
-                "type": "order_cancelled",
-                "order_id": order.get("id"),
-                "order_number": order.get("order_number", ""),
-                "items": moves,
-                "source": "customer_cancel",
-                "created_at": now_iso,
-            })
-    except Exception as _e:
-        logger.error(f"[customer cancel restock {order_id}] {_e}")
+    # Stok geri ekleme — YALNIZCA sipariş GERÇEKTEN iptal edildiyse (cancelled).
+    # E1 fix: Ödenmiş siparişte durum 'cancel_requested' (talep alındı, para iadesi bekliyor,
+    # sipariş HÂLÂ CANLI). Bu aşamada stok GERİ EKLENMEZ — personel talebi reddedip sevk ederse
+    # stok çift sayılırdı (oversell). Stok, personel iptali onaylayınca (update_order_status →
+    # cancelled → _restock_order_once) idempotent olarak geri eklenir.
+    if _new_status == "cancelled":
+        try:
+            already = await db.stock_movements.find_one(
+                {"order_id": order.get("id"), "type": {"$in": ["order_cancelled", "return_restock",
+                    "auto_cancel_expired", "havale_auto_cancel", "manual_increment"]}}, {"_id": 1}
+            )
+            if not already:
+                from routes.orders import _stock_delta_for_order
+                moves = await _stock_delta_for_order(order, +1)
+                await db.stock_movements.insert_one({
+                    "id": generate_id(),
+                    "type": "order_cancelled",
+                    "order_id": order.get("id"),
+                    "order_number": order.get("order_number", ""),
+                    "items": moves,
+                    "source": "customer_cancel",
+                    "created_at": now_iso,
+                })
+        except Exception as _e:
+            logger.error(f"[customer cancel restock {order_id}] {_e}")
 
     # Sipariş olay günlüğü (admin tarafında görünür)
     try:
