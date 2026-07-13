@@ -295,6 +295,10 @@ export function StockReport() {
     <div className="space-y-5" data-testid="stock-report-page">
       <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Stok Raporu <ReportScopeBadge kind="stock" /></h1>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Deponuzun anlık durumunu görürsünüz — <b>toplam stok adedi</b>, güncel satış fiyatı üzerinden <b>toplam stok değeri (₺)</b> ve <b>stoğu biten ürün sayısı</b>. Altta <b>kritik stok (≤5 adet)</b> ve <b>tamamen tükenmiş</b> ürünler listelenir; hangi ürünleri acilen yeniden sipariş etmeniz veya ürettirmeniz gerektiğini buradan fark eder, "Düzenle" ile doğrudan ürüne gidersiniz.
+      </div>
+
       <div className="grid md:grid-cols-3 gap-3">
         <div className="bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-xl p-5">
           <div className="text-xs uppercase opacity-80">Toplam Stok Adedi</div>
@@ -357,6 +361,10 @@ export function MembersReport() {
   return (
     <div className="space-y-5" data-testid="members-report-page">
       <h1 className="text-2xl font-bold flex items-center gap-2"><Users /> Üye Raporu <ReportScopeBadge kind="cancelOnly" /></h1>
+
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Sitenize <b>en çok harcayan 20 üyeyi</b> görürsünüz — her üyenin <b>sipariş sayısı</b>, <b>toplam harcaması</b> ve <b>son sipariş tarihi</b> ile birlikte. En değerli müşterilerinizi tespit edip sadakat/kampanya çalışmalarını bu kişilere yönlendirebilir, uzun süredir sipariş vermeyenleri son sipariş tarihinden fark edebilirsiniz.
+      </div>
 
       <div className="bg-white border rounded-xl overflow-hidden">
         <h3 className="font-semibold p-5 pb-3">En Çok Harcayan 20 Üye</h3>

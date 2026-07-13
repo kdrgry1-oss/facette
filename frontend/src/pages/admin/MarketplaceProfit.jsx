@@ -71,6 +71,10 @@ export default function MarketplaceProfit() {
         </div>
       </div>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900 mb-4">
+        <span className="font-semibold">Bu raporda:</span> Her <b>kanal/pazaryeri</b> için (Trendyol, Hepsiburada, Temu, Site…) <b>brüt ciro</b>, <b>komisyon</b>, <b>kargo maliyeti</b> ve <b>iadeler</b> düşülerek <b>net kâr</b> ve <b>net marj %</b> hesaplanır. Hangi pazaryerinin gerçekte kâr bıraktığını, komisyon/kargonun kârınızı ne kadar erittiğini kıyaslayıp kârı en yükseğe çıkaracak kanallara odaklanabilir, sonuçları Excel'e aktarabilirsiniz.
+      </div>
+
       {data?.totals && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-white border rounded-xl p-4"><div className="text-xs text-gray-500 uppercase">Toplam Sipariş</div><div className="text-2xl font-black">{data.totals.orders}</div></div>

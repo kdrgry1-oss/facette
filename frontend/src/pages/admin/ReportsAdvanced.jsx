@@ -51,6 +51,10 @@ export default function ReportsAdvanced() {
         <p className="text-sm text-gray-500 mt-1">İade analizleri, hızlı satış dedektörü ve üretici performansı.</p>
       </div>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> İade sorunlarınızı ve satış hızınızı derinlemesine incelersiniz — <b>en çok iade edilen bedenler</b>, <b>iade sebepleri</b> ve <b>ürün bazında iade oranı</b> (yüksek oranlılar kırmızı) ile beden/kalite sorunlarını yakalarsınız. <b>Hızlı satış dedektörü</b> seçtiğiniz gün penceresinde belirlenen adedin üzerinde satan ürünleri işaretler (reklam önerisiyle), <b>üretici performans skoru</b> ise teslim gecikmesi ve adet farkına göre tedarikçilerinizi puanlar.
+      </div>
+
       {loading ? <div className="text-gray-500">Yükleniyor...</div> : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 

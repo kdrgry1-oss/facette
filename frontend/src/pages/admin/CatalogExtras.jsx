@@ -639,6 +639,10 @@ export function ExtraReports() {
     <div className="space-y-6" data-testid="extra-reports-page">
       <h1 className="text-2xl font-bold">Gelişmiş Raporlar</h1>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Dört farklı kesit bir arada — <b>saatlik satış</b> (son 7 gün, en yoğun saatler), <b>il bazında satış</b> (son 30 gün), <b>ürün karlılık raporu</b> (satılan, ciro, maliyet, kâr ve marj %) ve <b>stok hareketi</b> (son 30 günde en çok çıkan ürünler). Karlılık tablosundan hangi ürünlerin gerçekte kâr bıraktığını, düşük marjlıları fark edip fiyat/maliyet aksiyonu alabilirsiniz (kâr için ürünlere <b>alış maliyeti</b> girilmiş olmalı).
+      </div>
+
       <div className="bg-white rounded-xl border p-5">
         <h3 className="font-semibold mb-3">Saatlik Satış (Son 7 Gün)</h3>
         <ResponsiveContainer width="100%" height={260}>

@@ -70,6 +70,10 @@ export default function ReportsInsights() {
         <p className="text-sm text-gray-500 mt-1">İl/ilçe, satış kanalı (Instagram/Google/pazaryeri) ve uzun süredir satılmayan ürünler. <span className="text-gray-400">(Tüm satış sekmelerinde iptal &amp; iade hariç.)</span></p>
       </div>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Seçtiğiniz tarih aralığında satışlarınızı farklı açılardan kesersiniz — <b>il/ilçe bazlı</b> (nereden ne kadar satıyorsunuz), <b>satış kanalı</b> (pazaryeri + Instagram/Google/Meta gibi trafik kaynakları), <b>saatlik yoğunluk</b>, <b>ödeme tipi</b>, <b>kupon performansı</b> ve <b>yeni/tekrar eden müşteri</b> kırılımı. <b>Uzun süredir satılmayan</b> sekmesiyle 30–365 gündür hiç satmayan ürünleri ve bunlara bağlanmış stok değerini görüp indirim/tasfiye kararı verebilirsiniz.
+      </div>
+
       {/* Sekmeler */}
       <div className="flex flex-wrap gap-2">
         {[

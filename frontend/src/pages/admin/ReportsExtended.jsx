@@ -53,6 +53,10 @@ export default function ReportsExtended() {
         <p className="text-sm text-gray-500 mt-1">Stok değer, satış hızı, iade oranı uyarısı, kanal bazlı net kâr ve maliyet yönetimi.</p>
       </div>
 
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Kârlılık ve stok verimliliğini yönetirsiniz — <b>Stok Değer</b> (alış/satış değeri ve potansiyel kâr marjı), <b>Üretim Önerisi</b> (satış hızına göre tükenecek ürünler ve önerilen üretim adedi), <b>Hızlı/Yavaş Satan</b> ürünler, <b>İade Oranı</b> uyarısı, kanal bazlı <b>Net Kâr</b> ve ürün <b>Maliyet Girişi</b>. "Yavaş Satan / Ölü Stok" ile uzun süredir satmayıp paranızı bağlayan ürünleri fark eder, "Net Kâr" ve "Maliyet Girişi" ile hangi kanalın gerçekte kâr bıraktığını görüp kârınızı artıracak kararlar alırsınız.
+      </div>
+
       <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
         {TABS.map((t) => {
           const Icon = t.icon;
