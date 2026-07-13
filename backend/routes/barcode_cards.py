@@ -127,6 +127,9 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     Kesme payi (bos seritler): sol + orta + sag = 0.5cm -> satir genisligi 11.5cm.
     Barkodlar VEKTOR (SVG) -> net baski. Toolbar'dan kopya adedi secilir.
     """
+    # GÜVENLİK: title'a ürün adı (pazaryeri kontrollü) girebiliyor → HTML-escape (stored-XSS)
+    import html as _html_t
+    title = _html_t.escape(str(title if title is not None else ""))
     LABEL_W = "5cm"
     LABEL_H = "4cm"
     CUT     = "0.5cm"

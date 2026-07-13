@@ -1460,30 +1460,61 @@ async def import_xml_products(
     import html
     from utils.attr_parser import parse_description_attributes
 
-    # SSRF KORUMASI: xml_url yalnızca http(s) ve PUBLIC bir host olmalı. İç ağ /
-    # loopback / link-local (169.254.169.254 bulut metadata dahil) hedefleri reddet.
-    def _assert_public_url(u: str):
+    # SSRF KORUMASI (DNS-rebinding dahil): Host'u BİR KEZ çöz, PUBLIC olduğunu doğrula ve
+    # tam ÇÖZÜLEN IP'ye PİNLİ bağlan. Böylece doğrulama ile istek arasında DNS'in özel IP'ye
+    # dönmesi (rebinding) engellenir. HTTPS'te SNI/sertifika doğrulaması HOST için yapılır.
+    def _fetch_url_pinned(url: str, timeout: int = 60, max_bytes: int = 50 * 1024 * 1024) -> bytes:
         from urllib.parse import urlparse
-        import socket, ipaddress
-        p = urlparse(u or "")
+        import socket, ssl, ipaddress, http.client
+        p = urlparse(url or "")
         if p.scheme not in ("http", "https") or not p.hostname:
             raise HTTPException(status_code=400, detail="Geçersiz URL")
+        host = p.hostname
+        port = p.port or (443 if p.scheme == "https" else 80)
         try:
-            infos = socket.getaddrinfo(p.hostname, None)
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         except Exception:
             raise HTTPException(status_code=400, detail="URL çözümlenemedi")
+        pinned = None
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                    or ip.is_multicast or ip.is_unspecified):
                 raise HTTPException(status_code=400, detail="İç ağ/özel IP adreslerine erişim engellendi (SSRF)")
+            pinned = info[4][0]
+        if not pinned:
+            raise HTTPException(status_code=400, detail="URL çözümlenemedi")
+        conn = None
+        try:
+            sock = socket.create_connection((pinned, port), timeout=timeout)
+            if p.scheme == "https":
+                ctx = ssl.create_default_context()
+                sock = ctx.wrap_socket(sock, server_hostname=host)  # SNI + sertifika = host
+                conn = http.client.HTTPSConnection(host, port, timeout=timeout)
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=timeout)
+            conn.sock = sock  # pinli IP'ye bağlı soketi kullan (yeniden çözme YOK)
+            path = (p.path or "/") + (("?" + p.query) if p.query else "")
+            conn.request("GET", path, headers={"Host": host, "User-Agent": "FacetteFeed/1.0", "Accept": "*/*"})
+            resp = conn.getresponse()
+            if resp.status in (301, 302, 303, 307, 308):
+                raise HTTPException(status_code=400, detail="Feed yönlendirme yapıyor (SSRF koruması)")
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail=f"Feed HTTP {resp.status}")
+            data = resp.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise HTTPException(status_code=400, detail="Feed çok büyük")
+            return data
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
 
-    _assert_public_url(xml_url)
+    from fastapi.concurrency import run_in_threadpool as _ritp
     try:
-        # follow_redirects=False: yönlendirmeyle iç ağa kaçış engellenir.
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
-            resp = await client.get(xml_url)
-            resp.raise_for_status()
-            xml_bytes = resp.content
+        xml_bytes = await _ritp(_fetch_url_pinned, xml_url)
     except HTTPException:
         raise
     except Exception as e:
