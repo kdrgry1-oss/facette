@@ -104,6 +104,50 @@ async def sales(
     return {"rows": rows, "totals": {"orders": total_orders, "revenue": total_revenue, "aov": aov}}
 
 
+@router.get("/sales-breakdown")
+async def sales_breakdown(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
+    current_user: dict = Depends(require_admin),
+):
+    """Ciro kırılımı — 4 kademe:
+      ① included = İptal + İade DAHİL toplam ciro (net + iptal + iade)
+      ② cancels  = sadece iptal edilen siparişlerin tutarı (kaybedilen)
+      ③ returns  = sadece iade edilen siparişlerin tutarı (kaybedilen)
+      ④ net      = iptal & iade HARİÇ net ciro (elimizde kalan)
+    Tutar = order.total toplamı. Tarih aralığı TR yerel gün, kaynak filtreli."""
+    s, e = _iso_range(start_date, end_date)
+    base = {"created_at": {"$gte": s, "$lte": e}}
+    sc = _source_cond(source)
+    if sc:
+        base.update(sc)
+    _CANCEL = ["cancelled"]
+    # İade grubu (return_rejected HARİÇ — satış geçerli sayılır, ciroda kalır)
+    _RETURN = ["return_requested", "return_approved", "return_in_transit",
+               "returned", "refunded", "partial_refunded"]
+
+    async def _sum(status_cond):
+        m = dict(base)
+        if status_cond is not None:
+            m["status"] = status_cond
+        pipe = [{"$match": m}, {"$group": {"_id": None,
+                "revenue": {"$sum": {"$ifNull": ["$total", 0]}}, "orders": {"$sum": 1}}}]
+        async for r in db.orders.aggregate(pipe):
+            return {"revenue": round(float(r["revenue"]), 2), "orders": int(r["orders"])}
+        return {"revenue": 0.0, "orders": 0}
+
+    cancels = await _sum({"$in": _CANCEL})
+    returns = await _sum({"$in": _RETURN})
+    net = await _sum({"$nin": _EXCLUDED_STATUSES})
+    # DAHİL = net + iptal + iade (içsel tutarlı: pending/ödeme-bekleyen gürültüsü katılmaz)
+    included = {
+        "revenue": round(net["revenue"] + cancels["revenue"] + returns["revenue"], 2),
+        "orders": net["orders"] + cancels["orders"] + returns["orders"],
+    }
+    return {"included": included, "cancels": cancels, "returns": returns, "net": net}
+
+
 @router.get("/products/top")
 async def top_products(
     limit: int = Query(1000, ge=1, le=5000),   # varsayılan TÜM ürünler (yüksek tavan)

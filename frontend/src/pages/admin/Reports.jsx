@@ -36,16 +36,20 @@ export function SalesReport() {
   const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
+  const [brk, setBrk] = useState(null);
 
   const load = async () => {
-    const [s, p] = await Promise.all([
+    const [s, p, b] = await Promise.all([
       axios.get(`${API}/admin/reports/sales`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group_by: groupBy, source } }),
       axios.get(`${API}/admin/reports/payments`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } }),
+      axios.get(`${API}/admin/reports/sales-breakdown`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } }),
     ]);
     setData(s.data);
     setPayData(p.data.items || []);
+    setBrk(b.data);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy, source]);
+  const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
   return (
     <div className="space-y-5" data-testid="sales-report-page">
@@ -71,18 +75,23 @@ export function SalesReport() {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-3">
+      {/* Ciro kırılımı — 4 kademe: dahil → sadece iptal → sadece iade → net (elde kalan) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { lbl: "Sipariş", val: data?.totals?.orders ?? 0, c: "from-slate-900 to-slate-700" },
-          { lbl: "Ciro", val: `₺${(data?.totals?.revenue ?? 0).toLocaleString("tr-TR")}`, c: "from-emerald-600 to-emerald-500" },
-          { lbl: "Ortalama Sepet", val: `₺${(data?.totals?.aov ?? 0).toLocaleString("tr-TR")}`, c: "from-blue-600 to-blue-500" },
+          { lbl: "İptal & İade DAHİL Ciro", d: brk?.included, c: "from-slate-900 to-slate-700", sub: "Toplam (her şey dahil)" },
+          { lbl: "Sadece İptaller", d: brk?.cancels, c: "from-rose-600 to-rose-500", sub: "Kaybedilen (iptal)" },
+          { lbl: "Sadece İadeler", d: brk?.returns, c: "from-amber-600 to-amber-500", sub: "Kaybedilen (iade)" },
+          { lbl: "İptal & İade HARİÇ (Net)", d: brk?.net, c: "from-emerald-600 to-emerald-500", sub: "Elimizde kalan net ciro" },
         ].map((k) => (
           <div key={k.lbl} className={`bg-gradient-to-br ${k.c} text-white rounded-xl p-5`}>
-            <div className="text-xs uppercase opacity-80">{k.lbl}</div>
-            <div className="text-3xl font-bold mt-1">{k.val}</div>
+            <div className="text-[11px] uppercase opacity-80 leading-tight">{k.lbl}</div>
+            <div className="text-2xl font-bold mt-1">{tl(k.d?.revenue)}</div>
+            <div className="text-[11px] opacity-75 mt-1">{k.d?.orders ?? 0} sipariş · {k.sub}</div>
           </div>
         ))}
       </div>
+      {/* Ortalama sepet (net) küçük satır */}
+      <div className="text-sm text-gray-500 -mt-2">Ortalama Sepet (net): <b className="text-gray-800">{tl(data?.totals?.aov)}</b></div>
 
       <div className="bg-white rounded-xl border p-5">
         <h3 className="font-semibold mb-3">Günlük Ciro & Sipariş</h3>
