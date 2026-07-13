@@ -1474,7 +1474,18 @@ async def update_order_status(
     valid_statuses = valid_keys(_cfg0)
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Geçersiz durum. Geçerli değerler: {sorted(valid_statuses)}")
-    
+
+    # #16: MOR sipariş (ödemesi ALINMIŞ) İPTALİ yalnız Finans (muhasebe) yetkisiyle —
+    # ödenmiş siparişi iptale çekmek para iadesi/muhasebe sonucu doğurur.
+    if status == "cancelled":
+        _od_pay = await db.orders.find_one({"id": order_id}, {"_id": 0, "payment_status": 1, "status": 1})
+        if _od_pay and _od_pay.get("payment_status") == "paid" and _od_pay.get("status") != "cancelled":
+            from .deps import get_effective_permissions
+            _perms = await get_effective_permissions(current_user)
+            if "*" not in _perms and "returns.expense_note" not in _perms:
+                raise HTTPException(status_code=403,
+                    detail="Ödemesi alınmış (mor) siparişin iptali yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından yapılabilir.")
+
     _now = datetime.now(timezone.utc).isoformat()
     _set = {"status": status, "updated_at": _now}
     if status == "return_approved":
@@ -2426,6 +2437,16 @@ def _havale_invoice_block(order: dict):
     return None
 
 
+# #17: Fatura/kargo barkodu YALNIZ onaylanmış (confirmed) veya sonrası siparişe yapılabilir.
+# Ödeme öncesi (pending/awaiting_payment/payment_notified) ya da iptal edilmiş sipariş engellenir.
+_PRE_CONFIRM_STATUSES = {"pending", "awaiting_payment", "payment_notified", "cancelled"}
+def _ensure_order_confirmed(order: dict, action: str = "işlem"):
+    st = (order or {}).get("status") or ""
+    if st in _PRE_CONFIRM_STATUSES:
+        raise HTTPException(status_code=400,
+            detail=f"Bu işlem ({action}) yalnızca ONAYLANMIŞ siparişe yapılabilir. Sipariş durumu: '{st}'. Önce siparişi 'Onaylandı' durumuna alın.")
+
+
 @router.post("/{order_id}/create-invoice")
 async def create_invoice_for_order(
     order_id: str,
@@ -2444,6 +2465,7 @@ async def create_invoice_for_order(
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    _ensure_order_confirmed(order, "fatura kesme")  # #17
     if order.get("invoice_issued"):
         return {"success": True, "message": "Fatura zaten kesilmiş",
                 "invoice_number": order.get("invoice_number", "")}
@@ -3289,6 +3311,7 @@ async def create_cargo_barcode(
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    _ensure_order_confirmed(order, "kargo barkodu oluşturma")  # #17 (bulk-cargo-barcode de bu ucu çağırır → o da kapsanır)
 
     # Havale/EFT siparişi ödeme onaylanmadan kargo barkodu OLUŞTURULMAZ (fatura ile aynı kural).
     _bc_pm = (order.get("payment_method") or "").lower()
