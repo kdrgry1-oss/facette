@@ -1020,6 +1020,12 @@ async def get_products(
     except Exception as _ce:
         logger.warning(f"Kampanya rozeti işlenemedi: {_ce}")
 
+    # GÜVENLİK: Storefront (admin olmayan) listelerinde alış fiyatı, marj, tedarikçi
+    # gibi iç/ticari alanları temizle — public /products taraması kâr marjını sızdırmasın.
+    # (Admin panel admin_view=1 gönderir; ona tam alanlar döner.)
+    if not _admin_view:
+        products = [_strip_internal_fields(p) for p in products]
+
     return {
         "products": products,
         "total": total,
@@ -1221,6 +1227,7 @@ _PRODUCT_INTERNAL_FIELDS = (
     "cost_price", "purchase_price", "alis_fiyati", "buy_price", "supplier", "tedarikci",
     "supplier_code", "member_price_1", "member_price_2", "member_price_3", "member_price",
     "margin", "profit", "profit_margin", "kar", "kar_marji", "ticimax_fields",
+    "markup_rate", "use_default_markup",
     "admin_notes", "internal_notes", "vendor", "vendor_id",
 )
 
