@@ -109,11 +109,26 @@ async def delete_role(role_id: str, current_user: dict = Depends(require_super_a
 
 @router.get("/users")
 async def list_panel_users(current_user: dict = Depends(require_admin)):
+    # Yalnız GERÇEK panel personeli: eski/bozuk veride is_admin=True kalmış MÜŞTERİ
+    # (role='customer') hesaplarını listeye ALMA (güvenlik + doğru sayım).
     users = await db.users.find(
-        {"is_admin": True},
+        {"is_admin": True, "role": {"$ne": "customer"}},
         {"_id": 0, "password": 0}
     ).to_list(500)
     return {"users": users}
+
+
+@router.post("/users/cleanup-customer-admins")
+async def cleanup_customer_admins(current_user: dict = Depends(require_super_admin)):
+    """GÜVENLİK: Eski/bozuk veride is_admin=True kalmış MÜŞTERİ (role='customer')
+    hesaplarını admin'likten düşürür ve mevcut oturumlarını iptal eder (token_version++).
+    Panelde 'Kullanıcılar' listesinde görünen müşteri e-postalarını kalıcı temizler."""
+    q = {"is_admin": True, "role": "customer"}
+    affected = await db.users.find(q, {"_id": 0, "id": 1, "email": 1}).to_list(5000)
+    if affected:
+        await db.users.update_many(q, {"$set": {"is_admin": False}, "$inc": {"token_version": 1}})
+    return {"success": True, "demoted": len(affected),
+            "emails": [u.get("email", "") for u in affected][:200]}
 
 
 @router.post("/users")

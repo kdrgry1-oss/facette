@@ -409,6 +409,11 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    # GÜVENLİK: Müşteri hesabı (role='customer') ASLA admin panele giremez — eski/bozuk
+    # veride is_admin=True kalmış müşteriler için SERT KAPI. create_panel_user gerçek
+    # personele role='customer' yazmadığı için personel etkilenmez.
+    if user.get("role") == "customer":
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
     if _token_revoked(payload, user):
         raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
@@ -431,6 +436,11 @@ async def verify_admin_token(token: str) -> dict:
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    # GÜVENLİK: Müşteri hesabı (role='customer') ASLA admin panele giremez — eski/bozuk
+    # veride is_admin=True kalmış müşteriler için SERT KAPI. create_panel_user gerçek
+    # personele role='customer' yazmadığı için personel etkilenmez.
+    if user.get("role") == "customer":
+        raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
     if _token_revoked(payload, user):
         raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
