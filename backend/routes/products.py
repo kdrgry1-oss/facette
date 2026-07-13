@@ -684,8 +684,14 @@ async def _build_products_query(
             {"brand": {"$regex": esc, "$options": "i"}},
             {"variants.color": {"$regex": esc, "$options": "i"}},
             {"variants.size": {"$regex": esc, "$options": "i"}},
+            # Ürün tipi/özellik değerleri (ör. attributes[].value = "Büstiyer"),
+            # kategori adı ve ana renk — müşteri "büstiyer" arayınca tipi büstiyer
+            # olan ürün de gelsin (isim/açıklamada geçmese bile).
+            {"attributes.value": {"$regex": esc, "$options": "i"}},
+            {"category_name": {"$regex": esc, "$options": "i"}},
+            {"color": {"$regex": esc, "$options": "i"}},
         ]
-    
+
     if is_featured is not None:
         query["is_featured"] = is_featured
     
