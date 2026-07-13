@@ -226,6 +226,19 @@ export default function AdminProducts() {
     else setSelectedProducts(products.map((p) => p.id));
   };
   const [editingProduct, setEditingProduct] = useState(null);
+  // #22: Stok hareketleri modal
+  const [stockMovesProduct, setStockMovesProduct] = useState(null);
+  const [stockMoves, setStockMoves] = useState([]);
+  const [stockMovesLoading, setStockMovesLoading] = useState(false);
+  const openStockMoves = async (product) => {
+    setStockMovesProduct(product); setStockMoves([]); setStockMovesLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API}/products/${product.id}/stock-movements`, { headers: { Authorization: `Bearer ${token}` } });
+      setStockMoves(res.data?.movements || []);
+    } catch { setStockMoves([]); }
+    finally { setStockMovesLoading(false); }
+  };
   // technicalDetails: XML/Ticimax description'dan parse edilen teknik özellikler.
   // Shape: { kumas: {label, value}, kalip: {label, value}, ... } VEYA boş obj
   const [technicalDetails, setTechnicalDetails] = useState({});
@@ -2207,6 +2220,9 @@ export default function AdminProducts() {
                     <div className="flex gap-1 items-center">
                         <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Hızlı Düzenle (Modal)" data-testid={`product-edit-modal-${product.id}`}>
                           <Edit size={16} />
+                        </button>
+                        <button onClick={() => openStockMoves(product)} className="p-1.5 hover:bg-purple-100 rounded text-purple-600" title="Stok Hareketleri" data-testid={`product-stock-moves-${product.id}`}>
+                          <Layers size={16} />
                         </button>
                         <button
                           onClick={() => { window.open(`/admin/urunler/${product.id}`, '_blank'); }}
@@ -4315,6 +4331,51 @@ export default function AdminProducts() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* #22: ── Stok Hareketleri ─────────────────────────────── */}
+      {stockMovesProduct && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={() => setStockMovesProduct(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white">
+              <div>
+                <div className="font-semibold text-gray-900">Stok Hareketleri</div>
+                <div className="text-xs text-gray-500 truncate max-w-[420px]">{stockMovesProduct.name}</div>
+              </div>
+              <button onClick={() => setStockMovesProduct(null)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
+            </div>
+            <div className="p-4">
+              {stockMovesLoading ? (
+                <div className="text-center text-gray-400 py-8 text-sm">Yükleniyor…</div>
+              ) : stockMoves.length === 0 ? (
+                <div className="text-center text-gray-400 py-8 text-sm">Bu ürün için stok hareketi kaydı yok.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 font-medium">Tarih</th>
+                      <th className="text-left px-2 py-1.5 font-medium">Sebep</th>
+                      <th className="text-right px-2 py-1.5 font-medium">Değişim</th>
+                      <th className="text-left px-2 py-1.5 font-medium">Sipariş</th>
+                      <th className="text-left px-2 py-1.5 font-medium">Kaynak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockMoves.map((m, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="px-2 py-1.5 whitespace-nowrap">{m.date ? new Date(m.date).toLocaleString("tr-TR") : "—"}</td>
+                        <td className="px-2 py-1.5">{m.reason}</td>
+                        <td className={`px-2 py-1.5 text-right font-bold ${m.delta > 0 ? "text-emerald-600" : m.delta < 0 ? "text-red-600" : "text-gray-500"}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</td>
+                        <td className="px-2 py-1.5">{m.order_number || "—"}</td>
+                        <td className="px-2 py-1.5 text-gray-500">{m.by || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Barkod Yazdırma: Beden Seçimi ─────────────────────────────── */}
       {barcodeSizeModal && (

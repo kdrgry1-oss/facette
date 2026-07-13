@@ -1230,6 +1230,57 @@ async def get_product(product_id: str, request: Request):
     return product
 
 
+# #22: Ürün stok hareketleri — her hareketin sebebiyle (sipariş düşme, iptal/iade artma,
+# stok girişi vb.) listelenir. db.stock_movements: {type, items:[{product_id,delta}], ...}
+_STOCK_MOVE_REASONS = {
+    "new_order": "Sipariş — stok düştü",
+    "order_created": "Sipariş — stok düştü",
+    "manual_decrement": "Manuel sipariş — stok düştü",
+    "order_imported": "Pazaryeri siparişi — stok düştü",
+    "backfill_decrement": "Geçmiş düzeltme (backfill)",
+    "order_cancelled": "İptal — stok geri eklendi",
+    "return_approved": "İade onaylandı — stok geri eklendi",
+    "return_restock": "İade — stok geri eklendi",
+    "stock_in": "Stok girişi",
+    "manual_increment": "Manuel stok girişi",
+    "production": "Üretim — stok girişi",
+}
+
+
+@router.get("/{product_id}/stock-movements")
+async def get_product_stock_movements(product_id: str, limit: int = Query(300, ge=1, le=2000),
+                                      current_user: dict = Depends(require_admin)):
+    """Bir ürünün stok hareketlerini sebebiyle döndürür (en yeni önce)."""
+    q = {"$or": [{"items.product_id": product_id}, {"product_id": product_id}]}
+    rows = await db.stock_movements.find(q, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    out = []
+    for r in rows:
+        delta = 0
+        _items = r.get("items") or []
+        if _items:
+            for it in _items:
+                if it.get("product_id") == product_id:
+                    try:
+                        delta += int(it.get("delta") if it.get("delta") is not None else it.get("qty") or 0)
+                    except Exception:
+                        pass
+        elif r.get("product_id") == product_id:
+            try:
+                delta = int(r.get("delta") if r.get("delta") is not None else r.get("quantity") or 0)
+            except Exception:
+                delta = 0
+        _t = r.get("type", "") or ""
+        out.append({
+            "date": r.get("created_at", ""),
+            "type": _t,
+            "reason": _STOCK_MOVE_REASONS.get(_t, _t or "—"),
+            "delta": delta,
+            "order_number": r.get("order_number", ""),
+            "by": r.get("created_by") or r.get("source") or "",
+        })
+    return {"movements": out, "count": len(out)}
+
+
 # GÜVENLİK: Public yanıtlardan iç/ticari alanları (alış fiyatı, tedarikçi, marj vb.)
 # temizle — rakip/istismarcıya kâr marjı sızmasın.
 _PRODUCT_INTERNAL_FIELDS = (
