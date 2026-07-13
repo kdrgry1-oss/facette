@@ -265,6 +265,10 @@ _PROFIT_DEFAULTS = {
     "service_fee_pct": {"trendyol": 0.0, "hepsiburada": 0.0, "temu": 0.0, "site": 0.0},
     # Dönem TOPLAM reklam gideri (TL) — kanal bazında; ciro payına göre kategorilere dağıtılır.
     "ad_spend": {"trendyol": 0.0, "hepsiburada": 0.0, "site": 0.0},
+    # AYLIK reklam bütçesi (TL) — kanal bazında; seçili tarih aralığına OTOMATİK orantılanır
+    # (Trendyol reklam verisi API'de olmadığından: aylık gir, rapor gün sayısına göre böler).
+    # Bir kanalda ad_spend_monthly>0 ise o kanalda ad_spend yerine bu (orantılı) kullanılır.
+    "ad_spend_monthly": {"trendyol": 0.0, "hepsiburada": 0.0, "site": 0.0},
     "packaging_per_order": 0.0,   # sipariş başı paketleme/operasyon (TL)
     "vat_rate": 10.0,             # KDV (%)
     "corporate_tax_pct": 25.0,    # Kurumlar vergisi (2025 TR)
@@ -311,6 +315,13 @@ async def profitability(
     Oranlar profitability-config'ten; maliyet ürün purchase_price/product_costs'tan (yoksa oranla tahmin)."""
     s, e = _iso_range(start_date, end_date, days_default=30)
     cfg = await _profitability_config()
+    # Tarih aralığı gün sayısı — aylık reklam bütçesini orantılamak için.
+    try:
+        _d0 = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        _d1 = datetime.fromisoformat(e.replace("Z", "+00:00"))
+        _days_range = max(1, (_d1 - _d0).days + 1)
+    except Exception:
+        _days_range = 30
     _CH_ALIAS = {"facette": "site", "": "site", "web": "site", "admin_manual": "manual", "admin": "manual"}
     from collections import defaultdict as _dd
 
@@ -381,8 +392,9 @@ async def profitability(
         # Kargo: kanal toplam kargosunu bu satırın ciro payına göre dağıt
         ch_cargo = (cargo_by_ch.get(ch) or {}).get("shipping", 0.0)
         cargo = ch_cargo * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
-        # Reklam: kanal reklam giderini ciro payına göre dağıt
-        ad_total = float(cfg["ad_spend"].get(ch, 0.0))
+        # Reklam: AYLIK bütçe girildiyse tarih aralığına orantıla (aylık × gün/30), yoksa dönem toplamı.
+        _monthly = float((cfg.get("ad_spend_monthly") or {}).get(ch, 0.0))
+        ad_total = round(_monthly * _days_range / 30.0, 2) if _monthly > 0 else float(cfg["ad_spend"].get(ch, 0.0))
         ad_alloc = ad_total * (rev / rev_by_ch[ch]) if rev_by_ch.get(ch) else 0.0
         operating = rev - cogs - commission - service_fee - cargo - ad_alloc
         # KDV (net ödenecek — katma değer üzerinden): (ciro - maliyet) içindeki KDV

@@ -91,8 +91,9 @@ export default function ProfitabilityAnalysis() {
               {["trendyol", "hepsiburada", "temu", "site"].map(ch => chField("commission_pct", ch, plat(ch)))}
             </div>
             <div className="space-y-2">
-              <div className="text-xs font-bold uppercase text-gray-400">Reklam Gideri (dönem TL)</div>
-              {["trendyol", "hepsiburada", "site"].map(ch => chField("ad_spend", ch, plat(ch)))}
+              <div className="text-xs font-bold uppercase text-gray-400">Aylık Reklam Bütçesi (TL)</div>
+              <div className="text-[10px] text-gray-400 -mt-1">Trendyol reklam verisi API'de olmadığından: aylık gir, rapor seçili tarih aralığına otomatik orantılar.</div>
+              {["trendyol", "hepsiburada", "site"].map(ch => chField("ad_spend_monthly", ch, plat(ch)))}
             </div>
             <div className="space-y-2">
               <div className="text-xs font-bold uppercase text-gray-400">Hizmet Bedeli %</div>
