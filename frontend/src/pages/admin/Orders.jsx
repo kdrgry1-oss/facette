@@ -101,6 +101,7 @@ export default function AdminOrders({ unpaidView = false }) {
     cargo_tracking: "", invoice_number: "", coupon_code: "",
     start_date: "", end_date: "",
     payment_method: "", payment_status: "", platform: "", channel: "",
+    status: "",
     influencer: "", is_corporate: ""
   });
   const [searchTick, setSearchTick] = useState(0);
@@ -982,6 +983,8 @@ export default function AdminOrders({ unpaidView = false }) {
                 { value: "failed", label: "Başarısız" },
                 { value: "refunded", label: "İade Edildi" },
               ]} />
+            <MultiSelect className="w-44" placeholder="Tüm Sipariş Durumları" value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })}
+              options={statusOptions.map(s => ({ value: s.value, label: s.label }))} />
             <label className="flex items-center gap-2 text-sm border px-3 py-1.5 rounded cursor-pointer">
               <input type="checkbox" className="accent-black" checked={filters.influencer === "1"} onChange={e => setFilters({...filters, influencer: e.target.checked ? "1" : ""})} />
               Influencer ile gelen
@@ -1002,7 +1005,7 @@ export default function AdminOrders({ unpaidView = false }) {
               </button>
               <button
                 onClick={() => {
-                  setFilters({ search: "", phone: "", email: "", order_number: "", cargo_tracking: "", invoice_number: "", coupon_code: "", start_date: "", end_date: "", payment_method: "", payment_status: "", platform: "", channel: "", influencer: "", is_corporate: "" });
+                  setFilters({ search: "", phone: "", email: "", order_number: "", cargo_tracking: "", invoice_number: "", coupon_code: "", start_date: "", end_date: "", payment_method: "", payment_status: "", platform: "", channel: "", status: "", influencer: "", is_corporate: "" });
                   applyFilters();
                 }}
                 className="w-1/2 px-3 py-1.5 border hover:border-gray-400 rounded text-sm bg-gray-50 hover:bg-white transition-colors"
