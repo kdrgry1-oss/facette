@@ -6244,8 +6244,10 @@ async def export_gider_pusulasi_excel(
             _net = c.get("refund_amount")
             records.append({
                 "date": cdate,
-                "display_number": (c.get("gider_pusulasi_no") or c.get("invoice_number")
-                                   or c.get("order_number") or cid),
+                # Koçan/seri no SADECE gerçekten atanmışsa yazılır. Atanmamışsa BOŞ bırakılır —
+                # invoice_number / order_number / claim_id gibi BAŞKA bir numara ÇEKİLMEZ
+                # (muhasebe "atanmamış pusulaya yanlış no geliyor" düzeltmesi).
+                "display_number": (c.get("gider_pusulasi_no") or ""),
                 "number": 0,
                 "customer": {"name": c.get("customer_name", "")},
                 "order_number": c.get("order_number", ""),
@@ -6284,7 +6286,9 @@ async def export_gider_pusulasi_excel(
                     })
                 records.append({
                     "date": r.get("created_at") or r.get("date") or "",
-                    "display_number": r.get("order_number") or str(r.get("id")),
+                    # Site sentez satırı: pusula henüz kesilmemiş → seri no BOŞ kalır
+                    # (order_number/return id gibi başka bir numara koçan alanına ÇEKİLMEZ).
+                    "display_number": "",
                     "number": 0,
                     "customer": {"name": _oname.get(r.get("order_id"), "") or "Müşteri"},
                     "order_number": r.get("order_number", ""),
@@ -6363,7 +6367,10 @@ async def export_gider_pusulasi_excel(
         totals = gp.get("totals", {}) or {}
         default_rate = totals.get("vat_rate") or 10
         fatura_tarihi = _ddmmyyyy(gp.get("date") or gp.get("created_at") or "")
-        seri = gp.get("display_number") or (f"{gp.get('number', 0):06d}")
+        # Seri/koçan no: gerçek atanmış numara varsa onu yaz. Sentez kayıtta number=0 →
+        # "000000" DAMGALANMAZ; atanmamış pusula seri no'su BOŞ kalır.
+        _num = gp.get("number") or 0
+        seri = gp.get("display_number") or (f"{_num:06d}" if _num else "")
         name = (gp.get("customer") or {}).get("name") or ""
 
         items = gp.get("items") or []
