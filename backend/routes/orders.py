@@ -29,6 +29,11 @@ def _order_search_or(search: str) -> list:
         "package_number", "shipment_package_id", "marketplace_order_id",
         "cargo_tracking_number", "return_request.return_code",
         "shipping_address.first_name", "shipping_address.last_name",
+        # İsim bazen SPLIT değil tek alanda tutulur (full_name/name) ya da üst-düzeyde
+        # (customer_name) — bunlar taranmazsa o siparişler aramada HİÇ gelmiyordu.
+        "shipping_address.full_name", "shipping_address.name",
+        "customer_name", "customer_email", "customer_phone",
+        "user_email", "user_phone", "email", "phone",
         "shipping_address.email", "shipping_address.phone",
         "shipping_address.city", "shipping_address.district",
         "shipping_address.address",
@@ -59,7 +64,11 @@ def _order_search_or(search: str) -> list:
     # Çok kelimeli tam ad: her kelime ad VEYA soyadda geçsin (sıra önemsiz)
     words = [w for w in s.split() if len(w) >= 2]
     if len(words) >= 2:
-        nf = ["shipping_address.first_name", "shipping_address.last_name"]
+        # Ad-soyad her kelimesi, isim TUTULAN HERHANGİ bir alanda geçebilsin (first/last
+        # ayrı ya da full_name/name/customer_name tek alan) — sıra önemsiz. Böylece
+        # "Ezgi Ceren Uluşan" gibi çok kelimeli aramalar tüm sipariş şemalarında bulunur.
+        nf = ["shipping_address.first_name", "shipping_address.last_name",
+              "shipping_address.full_name", "shipping_address.name", "customer_name"]
         ors.append({"$and": [
             {"$or": [{f: {"$regex": _search_tr_regex(w), "$options": "i"}} for f in nf]}
             for w in words
