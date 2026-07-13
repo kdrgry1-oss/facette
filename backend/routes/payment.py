@@ -727,7 +727,9 @@ async def card_pay_non3ds(payload: dict, request: Request):
 
 
 @router.post("/installments")
-async def get_installments(payload: dict):
+@(limiter.limit("20/minute") if limiter else (lambda f: f))
+async def get_installments(payload: dict, request: Request):
+    _ = request  # BIN-oracle sömürüsüne karşı rate-limit
     """Kart BIN'ine göre taksit seçeneklerini iyzico'dan sorgular.
     Kart verisi TAŞINMAZ; yalnızca ilk 6-8 hane (BIN) gönderilir."""
     bin_number = "".join(ch for ch in str(payload.get("bin_number") or "") if ch.isdigit())[:8]

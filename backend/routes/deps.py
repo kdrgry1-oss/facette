@@ -329,11 +329,12 @@ def verify_password(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_token(user_id: str, is_admin: bool = False) -> str:
+def create_token(user_id: str, is_admin: bool = False, token_version: int = 0) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "user_id": user_id,
         "is_admin": is_admin,
+        "tv": int(token_version or 0),  # token_version — parola değişince/sıfırlanınca bump edilir
         "iat": now,
         "iss": JWT_ISSUER,
         "exp": now + timedelta(days=7),
@@ -341,16 +342,32 @@ def create_token(user_id: str, is_admin: bool = False) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def _token_revoked(payload: dict, user: dict) -> bool:
+    """Token iptal edilmiş mi? Kullanıcının token_version'ı, token'daki tv'den büyükse
+    (parola değişikliği/sıfırlama sonrası) eski token GEÇERSİZ. Grandfathering: ikisi de
+    yoksa 0 → 0 > 0 False → mevcut oturumlar bozulmaz."""
+    try:
+        return int((user or {}).get("token_version", 0) or 0) > int((payload or {}).get("tv", 0) or 0)
+    except Exception:
+        return False
+
+
 def _decode_jwt_strict(token: str) -> dict:
     """Strictly decode JWT — locks algorithm to HS256 and validates issuer.
     Raises jwt exceptions on tamper/expiry which the caller maps to HTTP errs."""
-    return jwt.decode(
+    payload = jwt.decode(
         token,
         JWT_SECRET,
         algorithms=[JWT_ALGORITHM],
         options={"require": ["exp", "user_id"], "verify_signature": True},
         issuer=JWT_ISSUER,
     )
+    # GÜVENLİK (MFA atlatma): Tek-amaçlı token'lar (ör. purpose="mfa_pending") TAM
+    # OTURUM olarak KABUL EDİLMEZ. Aksi halde login'de dönen mfa_token doğrudan Bearer
+    # olarak kullanilip ikinci faktör atlanabiliyordu.
+    if payload.get("purpose"):
+        raise jwt.InvalidTokenError("Tek-amaçlı token oturum için kullanılamaz")
+    return payload
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -362,6 +379,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
         if user and user.get("is_active") is False:
             return None
+        if user and _token_revoked(payload, user):
+            return None  # parola değişikliği/sıfırlama sonrası eski token
         return user
     except Exception:
         return None
@@ -390,6 +409,8 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    if _token_revoked(payload, user):
+        raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
 
 
@@ -410,6 +431,8 @@ async def verify_admin_token(token: str) -> dict:
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
+    if _token_revoked(payload, user):
+        raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
     return user
 
 
@@ -447,6 +470,16 @@ def require_permission(perm_key: str):
             return current_user
         raise HTTPException(status_code=403, detail=f"Bu işlem için yetkiniz yok ({perm_key})")
     return _checker
+
+
+async def require_super_admin(current_user: dict = Depends(require_admin)) -> dict:
+    """SADECE süper-admin (etkin izin '*'). Kullanıcı/rol yönetimi gibi ayricalik-
+    yükseltmeye yol açan işlemler için — herhangi bir is_admin personelin kendini
+    super_admin yapmasını (BFLA) engeller."""
+    perms = await get_effective_permissions(current_user)
+    if "*" not in perms:
+        raise HTTPException(status_code=403, detail="Bu işlem yalnızca süper-admin yetkisi gerektirir")
+    return current_user
 
 def generate_id() -> str:
     """Generate unique UUID"""

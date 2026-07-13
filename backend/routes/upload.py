@@ -5,7 +5,7 @@ import base64
 import uuid
 import os
 
-from .deps import db, get_current_user, logger
+from .deps import db, get_current_user, require_auth, logger
 from services import r2_storage as r2
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -77,7 +77,7 @@ _ALLOWED_IMAGE_TYPES = {
 
 
 @router.post("/image")
-async def upload_image(file: UploadFile = File(...), user=Depends(get_current_user)):
+async def upload_image(file: UploadFile = File(...), user=Depends(require_auth)):
     """Görseli optimize edip (resize+WebP) Cloudflare R2'ye yükler; R2 kapalıysa MongoDB+disk'e düşer."""
     # GÜVENLİK: geniş "image/*" yerine açık allowlist — sahte/garip content-type reddedilir.
     if not file.content_type or file.content_type.split(";")[0].strip().lower() not in _ALLOWED_IMAGE_TYPES:
@@ -145,7 +145,7 @@ MAX_VIDEO_BYTES = 100 * 1024 * 1024  # 100 MB — hero slider videoları
 
 
 @router.post("/video")
-async def upload_video(file: UploadFile = File(...), user=Depends(get_current_user)):
+async def upload_video(file: UploadFile = File(...), user=Depends(require_auth)):
     """Video yükler (hero slider slaytı için) → Cloudflare R2 CDN'e; optimize edilmez,
     olduğu gibi CDN'den servis edilir (anasayfayı yormaz). R2 kapalıysa MongoDB+disk'e düşer."""
     ct = (file.content_type or "").split(";")[0].strip().lower()

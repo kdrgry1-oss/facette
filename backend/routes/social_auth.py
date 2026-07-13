@@ -120,7 +120,13 @@ async def _issue_jwt(user_id: str, email: str, extra: Optional[Dict] = None) -> 
     """Mevcut create_token ile uyumlu JWT üret (7 gün)."""
     # GÜVENLİK: zayıf sabit "change-me" fallback secret kaldırıldı. Yalnızca vetted
     # create_token (env JWT_SECRET + issuer + exp) kullanılır; başarısız olursa hata ver.
-    return create_token(user_id, is_admin=False)
+    _tv = 0
+    try:
+        _u = await db.users.find_one({"id": user_id}, {"_id": 0, "token_version": 1})
+        _tv = (_u or {}).get("token_version", 0)
+    except Exception:
+        pass
+    return create_token(user_id, is_admin=False, token_version=_tv)
 
 
 async def _upsert_social_user(provider: str, provider_id: str, email: str, name: str = "") -> dict:
@@ -205,11 +211,17 @@ async def apple_login(req: AppleLoginReq):
         raise HTTPException(status_code=401, detail="Apple token yayıncısı geçersiz")
 
     sub = payload.get("sub")
-    email = payload.get("email") or req.user_email
     if not sub:
         raise HTTPException(status_code=400, detail="Apple token sub eksik")
+    # GÜVENLİK (ATO düzeltmesi): Hesap eşleştirme/bağlama ASLA istemci girdisine
+    # (req.user_email) dayanamaz — aksi halde saldırgan kendi geçerli Apple token'ı +
+    # user_email=kurban ile kurbanın hesabını ele geçirir. Yalnızca Apple'ın İMZALADIĞI
+    # ve doğrulanmış (email_verified) e-posta claim'i eşleştirmede kullanılır.
+    _token_email = payload.get("email")
+    _ev = str(payload.get("email_verified", "")).lower() in ("true", "1")
+    verified_email = _token_email if (_token_email and _ev) else None
 
-    user = await _upsert_social_user("apple", sub, email or "", req.user_name or "")
+    user = await _upsert_social_user("apple", sub, verified_email or "", req.user_name or "")
     token = await _issue_jwt(user["id"], user["email"])
     return {"token": token, "user": {k: v for k, v in user.items() if k != "password"}}
 

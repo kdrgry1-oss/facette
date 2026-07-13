@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
 
-from .deps import db, logger, require_admin
+from .deps import db, logger, require_admin, require_permission
 
 router = APIRouter(tags=["Integrations-Iyzico"])
 
@@ -131,7 +131,7 @@ async def test_iyzico_connection(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/iyzico/refund")
-async def iyzico_refund(payload: dict, current_user: dict = Depends(require_admin)):
+async def iyzico_refund(payload: dict, current_user: dict = Depends(require_permission("returns.iyzico_refund"))):
     """
     Iyzico kısmi iade. Kargo bedeli düşülerek iade yapılır.
 
@@ -161,6 +161,24 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_admi
     net_refund = round(amount - shipping_deduction, 2)
     if net_refund <= 0:
         raise HTTPException(status_code=400, detail="Kargo kesintisi sonrası iade tutarı 0 ya da negatif")
+
+    # GÜVENLİK: TUTAR SINIRI + IDEMPOTENCY — toplam iade, tahsil edilen tutarı AŞAMAZ
+    # (aksi halde aşırı/tekrarlı iade ile para sızdırılabiliyordu).
+    try:
+        _charged = float(order.get("total") or order.get("total_amount") or 0)
+    except Exception:
+        _charged = 0.0
+    _already = 0.0
+    for _r in (order.get("refunds") or []):
+        try:
+            _already += float(_r.get("net_refund") or _r.get("amount") or 0)
+        except Exception:
+            pass
+    if _charged > 0 and round(_already + net_refund, 2) > round(_charged + 0.02, 2):
+        raise HTTPException(
+            status_code=400,
+            detail=f"İade tutarı tahsil edilen toplamı aşıyor (tahsil={_charged:.2f}, önceki iade={_already:.2f}, istenen={net_refund:.2f})",
+        )
 
     settings = await db.settings.find_one({"id": "iyzico"}, {"_id": 0})
     if not settings or not settings.get("api_key"):

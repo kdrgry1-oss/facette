@@ -47,8 +47,9 @@ async def resolve_influencer_for_order(aff_id: Optional[str], coupon_code: Optio
     if not inf:
         code = (coupon_code or "").strip().upper()
         if code:
+            import re as _re_i
             inf = await db.influencers.find_one(
-                {"coupon_code": {"$regex": f"^{code}$", "$options": "i"}, "is_active": True},
+                {"coupon_code": {"$regex": f"^{_re_i.escape(code)}$", "$options": "i"}, "is_active": True},
                 {"_id": 0},
             )
             if inf:
@@ -298,7 +299,18 @@ async def create_campaign_cargo(campaign_id: str, current_user: dict = Depends(r
 @router.post("/influencers/cargo-webhook")
 async def influencer_cargo_webhook(payload: dict, request: Request):
     """Kargo statü değişimi webhook'u → influencer'a SMS.
-    Payload: { tracking_no | siparis_no, status }  (Kargoya Verildi / Teslim Edildi)."""
+    Payload: { tracking_no | siparis_no, status }  (Kargoya Verildi / Teslim Edildi).
+    GÜVENLİK: Paylaşımlı secret zorunlu (fail-closed) — aksi halde herkes ücretli SMS
+    tetikleyip kargo durumu forge edebiliyordu."""
+    import os as _os, hmac as _hmac
+    _secret = (_os.environ.get("INFLUENCER_WEBHOOK_SECRET", "") or "").strip()
+    if not _secret:
+        _cfg = await db.settings.find_one({"id": "influencer"}, {"_id": 0, "webhook_secret": 1}) or {}
+        _secret = str(_cfg.get("webhook_secret") or "").strip()
+    _provided = (request.headers.get("X-Webhook-Secret")
+                 or request.query_params.get("key") or "").strip()
+    if not _secret or not _provided or not _hmac.compare_digest(_secret, _provided):
+        raise HTTPException(status_code=401, detail="Yetkisiz webhook")
     tracking = (payload.get("tracking_no") or payload.get("siparis_no") or "").strip()
     status = (payload.get("status") or "").strip()
     if not tracking:

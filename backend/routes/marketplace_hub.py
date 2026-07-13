@@ -360,7 +360,7 @@ async def get_account(key: str, current_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Pazaryeri bulunamadı")
     doc = await db.marketplace_accounts.find_one({"key": key}, {"_id": 0})
     if not doc:
-        doc = {
+        return {
             "key": key,
             "enabled": False,
             "credentials": {},
@@ -373,6 +373,14 @@ async def get_account(key: str, current_user: dict = Depends(require_admin)):
                 "orders_lookback_hours": 100,
             },
         }
+    # GÜVENLİK: kimlik bilgilerini MASKELE — sır alanları (şifreli veya düz) asla
+    # frontend'e sızmaz; UI maskeli değeri geri gönderirse save_account mevcut değeri korur.
+    _cr = dict(doc.get("credentials") or {})
+    for _sf in ("app_secret", "api_secret", "access_token", "secret_key", "password",
+                "refresh_token", "oauth_token", "oauth_token_secret", "token", "client_secret"):
+        if _cr.get(_sf):
+            _cr[_sf] = "********"
+    doc["credentials"] = _cr
     return doc
 
 
@@ -388,7 +396,8 @@ async def save_account(key: str, payload: dict, current_user: dict = Depends(req
         from security.crypto import encrypt as _enc_secret
         _existing = await db.marketplace_accounts.find_one({"key": key}, {"_id": 0, "credentials": 1}) or {}
         _ex_creds = _existing.get("credentials") or {}
-        for _sf in ("app_secret", "api_secret", "access_token", "secret_key", "password", "refresh_token"):
+        for _sf in ("app_secret", "api_secret", "access_token", "secret_key", "password",
+                    "refresh_token", "oauth_token", "oauth_token_secret", "token", "client_secret"):
             _v = _creds.get(_sf)
             if _v is None:
                 continue
@@ -428,7 +437,13 @@ async def list_accounts(current_user: dict = Depends(require_admin)):
     cursor = db.marketplace_accounts.find({}, {"_id": 0, "credentials.password": 0,
                                                 "credentials.api_secret": 0,
                                                 "credentials.secret_key": 0,
-                                                "credentials.app_secret": 0})
+                                                "credentials.app_secret": 0,
+                                                "credentials.access_token": 0,
+                                                "credentials.refresh_token": 0,
+                                                "credentials.oauth_token": 0,
+                                                "credentials.oauth_token_secret": 0,
+                                                "credentials.token": 0,
+                                                "credentials.client_secret": 0})
     items = await cursor.to_list(length=100)
     return {"accounts": items, "total": len(items)}
 

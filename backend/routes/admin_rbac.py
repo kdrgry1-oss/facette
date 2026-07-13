@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
 
-from .deps import db, require_admin, hash_password, validate_strong_password
+from .deps import db, require_admin, require_super_admin, hash_password, validate_strong_password, get_effective_permissions
 from permissions import PERMISSION_TREE, DEFAULT_ROLES, ALL_PERMISSION_KEYS
 
 router = APIRouter(prefix="/admin", tags=["admin-rbac"])
@@ -50,7 +50,7 @@ async def list_roles(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/roles")
-async def create_role(payload: dict, current_user: dict = Depends(require_admin)):
+async def create_role(payload: dict, current_user: dict = Depends(require_super_admin)):
     name = (payload or {}).get("name", "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Rol adı boş olamaz")
@@ -73,7 +73,7 @@ async def create_role(payload: dict, current_user: dict = Depends(require_admin)
 
 
 @router.put("/roles/{role_id}")
-async def update_role(role_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+async def update_role(role_id: str, payload: dict, current_user: dict = Depends(require_super_admin)):
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         raise HTTPException(status_code=404, detail="Rol bulunamadı")
@@ -95,7 +95,7 @@ async def update_role(role_id: str, payload: dict, current_user: dict = Depends(
 
 
 @router.delete("/roles/{role_id}")
-async def delete_role(role_id: str, current_user: dict = Depends(require_admin)):
+async def delete_role(role_id: str, current_user: dict = Depends(require_super_admin)):
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         raise HTTPException(status_code=404, detail="Rol bulunamadı")
@@ -117,7 +117,7 @@ async def list_panel_users(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/users")
-async def create_panel_user(payload: dict, current_user: dict = Depends(require_admin)):
+async def create_panel_user(payload: dict, current_user: dict = Depends(require_super_admin)):
     email = (payload or {}).get("email", "").strip().lower()
     password = payload.get("password", "")
     if not email or not password:
@@ -144,7 +144,7 @@ async def create_panel_user(payload: dict, current_user: dict = Depends(require_
 
 
 @router.put("/users/{user_id}")
-async def update_panel_user(user_id: str, payload: dict, current_user: dict = Depends(require_admin)):
+async def update_panel_user(user_id: str, payload: dict, current_user: dict = Depends(require_super_admin)):
     user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
@@ -161,7 +161,7 @@ async def update_panel_user(user_id: str, payload: dict, current_user: dict = De
 
 
 @router.delete("/users/{user_id}")
-async def delete_panel_user(user_id: str, current_user: dict = Depends(require_admin)):
+async def delete_panel_user(user_id: str, current_user: dict = Depends(require_super_admin)):
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1})
     if not user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
-from .deps import db, require_admin, logger
+from .deps import db, require_admin, require_auth, logger
 
 
 admin_router = APIRouter(prefix="/admin/coupons", tags=["admin-coupons"])
@@ -401,8 +401,10 @@ async def apply_coupon(payload: dict):
 
 
 @public_router.post("/redeem")
-async def redeem_coupon(payload: dict):
-    """Record a redemption. Called by orders.create after successful save."""
+async def redeem_coupon(payload: dict, current_user: dict = Depends(require_auth)):
+    """Record a redemption. GÜVENLİK: Ana akış record_order_redemptions() FONKSİYONUNU
+    doğrudan çağırır; bu HTTP ucu kullanılmıyordu ve anonim erişimle kupon kullanım
+    sayacı şişirilebiliyordu → artık kimlik doğrulaması zorunlu."""
     cid = payload.get("coupon_id")
     if not cid:
         return {"recorded": False}

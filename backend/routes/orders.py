@@ -434,13 +434,13 @@ async def get_orders(
             "return_requested", "return_in_transit", "return_rejected", "partial_refunded",
         ]}
     if phone:
-        query["shipping_address.phone"] = {"$regex": phone, "$options": "i"}
+        query["shipping_address.phone"] = {"$regex": re.escape(str(phone)), "$options": "i"}  # ReDoS koruması
     if email:
-        query["shipping_address.email"] = {"$regex": email, "$options": "i"}
+        query["shipping_address.email"] = {"$regex": re.escape(str(email)), "$options": "i"}
     if order_number:
-        query["order_number"] = {"$regex": order_number, "$options": "i"}
+        query["order_number"] = {"$regex": re.escape(str(order_number)), "$options": "i"}
     if cargo_tracking:
-        query["cargo_tracking"] = {"$regex": cargo_tracking, "$options": "i"}
+        query["cargo_tracking"] = {"$regex": re.escape(str(cargo_tracking)), "$options": "i"}
     if payment_method:
         _pm = [x.strip() for x in str(payment_method).split(",") if x.strip()]
         query["payment_method"] = {"$in": _pm} if len(_pm) > 1 else (_pm[0] if _pm else payment_method)
@@ -448,18 +448,19 @@ async def get_orders(
         _pf = [x.strip() for x in str(platform).split(",") if x.strip()]
         query["platform"] = {"$in": _pf} if len(_pf) > 1 else (_pf[0] if _pf else platform)
     if invoice_number:
-        query["invoice_number"] = {"$regex": invoice_number, "$options": "i"}
+        query["invoice_number"] = {"$regex": re.escape(str(invoice_number)), "$options": "i"}
     if payment_status:
         _ps = [x.strip() for x in str(payment_status).split(",") if x.strip()]
         query["payment_status"] = {"$in": _ps} if len(_ps) > 1 else (_ps[0] if _ps else payment_status)
     if channel:
-        # Çoklu seçim: virgülle gelen değerler regex alternation'a çevrilir (organic,ads|paid → organic|ads|paid)
-        _ch = str(channel).replace(",", "|").strip("|")
-        query["attribution.channel"] = {"$regex": _ch, "$options": "i"}
+        # Çoklu seçim: her parça ayrı ayrı escape edilip alternation kurulur (ReDoS koruması)
+        _ch = "|".join(re.escape(x) for x in str(channel).split(",") if x.strip())
+        if _ch:
+            query["attribution.channel"] = {"$regex": _ch, "$options": "i"}
     if source:
-        query["attribution.source"] = {"$regex": source, "$options": "i"}
+        query["attribution.source"] = {"$regex": re.escape(str(source)), "$options": "i"}
     if coupon_code:
-        query["coupon_code"] = {"$regex": coupon_code, "$options": "i"}
+        query["coupon_code"] = {"$regex": re.escape(str(coupon_code)), "$options": "i"}
     if influencer and str(influencer).lower() not in ("0", "false", ""):
         query["influencer_id"] = {"$exists": True, "$ne": None}
     if is_corporate and str(is_corporate).lower() not in ("0", "false", ""):
@@ -639,6 +640,15 @@ async def get_order_by_number(order_number: str):
             "city": ship.get("city", ""),
             "district": ship.get("district", ""),
         }
+    # GÜVENLİK: Sipariş no ENUMERATION edilebildiğinden üst-düzey PII de maskelenir/çıkarılır
+    # (top-level phone/email/customer_name + kargo takip no sızmasın).
+    if order.get("phone"):
+        order["phone"] = _mask_phone(order.get("phone", ""))
+    if order.get("email"):
+        order["email"] = _mask_email(order.get("email", ""))
+    for _pk in ("customer_name", "user_email", "user_phone", "cargo_tracking",
+                "cargo_tracking_number", "tracking_number", "billing_info", "customer_ip"):
+        order.pop(_pk, None)
     return order
 
 
@@ -949,9 +959,18 @@ async def create_order(
         # veremiyordu. Bulunamayan (gerçek olmayan) kalem için istemci fiyatı korunur; loglanır.
         if prod:
             it["price"] = _eff_unit_price(prod, it.get("variant_id"))
-        elif pid:
-            logger.warning(f"[FIYAT] urun bulunamadi, istemci fiyati korundu pid={pid} "
-                           f"fiyat={it.get('price')}")
+        else:
+            # GÜVENLİK (fiyat manipülasyonu): Ürün DB'de yoksa istemci fiyatına GÜVENME.
+            # Eskiden istemci fiyatı korunuyordu → saldırgan bilinmeyen product_id'ye
+            # NEGATİF fiyat verip toplamı düşürüyor/bedava mal alıyordu. Böyle kalemi REDDET.
+            logger.warning(f"[GUVENLIK] gecersiz/bulunamayan urun kalemi reddedildi pid={pid} fiyat={it.get('price')}")
+            raise HTTPException(status_code=400, detail="Sepette geçersiz veya artık mevcut olmayan bir ürün var. Lütfen sepeti yenileyin.")
+        # Fiyat asla negatif olamaz (savunma)
+        try:
+            if float(it.get("price", 0) or 0) < 0:
+                it["price"] = 0.0
+        except Exception:
+            it["price"] = 0.0
         qty = int(it.get("quantity", it.get("qty", 1)) or 1)
         if qty < 1:
             qty = 1
@@ -1557,6 +1576,12 @@ async def update_order_status(
                 return
             _nz = (_cfg.get("notify") or {}).get(status) or {}
             _channels = [c for c in ("sms", "email") if _nz.get(c)]
+            # İPTAL: Müşteri ödeme yaptıysa iptal edildiğini (ve iade sürecini) MUTLAKA
+            # bilmeli. Manuel iptalde iptal SMS'i, Ayarlar toggle'ından BAĞIMSIZ her zaman
+            # gider. (Otomatik iptaller bu uçtan geçmez; yalnız admin panelinden manuel
+            # durum değişimini kapsar.)
+            if status == "cancelled" and "sms" not in _channels:
+                _channels.append("sms")
             if not _channels:
                 return  # bu durum icin bildirim kapali (Ayarlar > Siparis Durumlari)
             addr = order_doc.get("shipping_address") or {}
@@ -3103,9 +3128,12 @@ async def print_invoice_html(order_id: str, token: str = None):
     items = order.get("items") or []
     total = order.get("total") or order.get("total_amount") or 0
 
+    import html as _html
+    def _h(v):  # GÜVENLİK: müşteri/pazaryeri alanlarını HTML-escape et (stored-XSS)
+        return _html.escape(str(v if v is not None else ""))
     rows = "".join(
-        f"<tr><td>{i.get('product_name') or i.get('name') or ''}</td>"
-        f"<td style='text-align:center'>{i.get('quantity',1)}</td>"
+        f"<tr><td>{_h(i.get('product_name') or i.get('name') or '')}</td>"
+        f"<td style='text-align:center'>{int(i.get('quantity',1) or 1)}</td>"
         f"<td style='text-align:right'>{(i.get('price') or 0):.2f} ₺</td>"
         f"<td style='text-align:right'>{((i.get('price') or 0)*(i.get('quantity') or 1)):.2f} ₺</td></tr>"
         for i in items
@@ -3143,15 +3171,15 @@ async def print_invoice_html(order_id: str, token: str = None):
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
   <div>
     <div class="meta" style="font-weight:700">Alıcı:</div>
-    <div>{addr.get('full_name','')}</div>
-    <div class="meta">{addr.get('address','')}</div>
-    <div class="meta">{addr.get('district','')} / {addr.get('city','')}</div>
-    <div class="meta">Tel: {addr.get('phone','')}</div>
+    <div>{_h(addr.get('full_name') or ((addr.get('first_name') or '') + ' ' + (addr.get('last_name') or '')).strip())}</div>
+    <div class="meta">{_h(addr.get('address',''))}</div>
+    <div class="meta">{_h(addr.get('district',''))} / {_h(addr.get('city',''))}</div>
+    <div class="meta">Tel: {_h(addr.get('phone',''))}</div>
   </div>
   <div>
     <div class="meta" style="font-weight:700">Sipariş Kanalı:</div>
-    <div>{order.get('channel') or 'web'}</div>
-    <div class="meta">Ödeme: {order.get('payment_method','-')}</div>
+    <div>{_h(order.get('channel') or 'web')}</div>
+    <div class="meta">Ödeme: {_h(order.get('payment_method','-'))}</div>
   </div>
 </div>
 <table>
@@ -4252,6 +4280,22 @@ async def get_cargo_label(order_id: str, token: str = None):
     sender_phone = _fmt_phone(sender.get("phone", "") or "")
     receiver_phone_fmt = _fmt_phone(receiver_phone)
 
+    # GÜVENLİK: müşteri/pazaryeri kontrollü alanları HTML-escape et (stored-XSS →
+    # admin tarayıcısında çalışıp URL'deki token'ı çalabiliyordu).
+    import html as _html_c
+    def _hc(v):
+        return _html_c.escape(str(v if v is not None else ""))
+    receiver_name = _hc(receiver_name)
+    receiver_phone_fmt = _hc(receiver_phone_fmt)
+    receiver_full_addr = _hc(receiver_full_addr)
+    sender_company = _hc(sender_company)
+    sender_phone = _hc(sender_phone)
+    sender_addr_line = _hc(sender_addr_line)
+    try:
+        tracking_line = _hc(tracking_line)
+    except NameError:
+        pass
+
     html = f"""<!DOCTYPE html>
 <html lang="tr"><head><meta charset="UTF-8"><title>Kargo Etiketi - {siparis_no}</title>
 <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800;900&family=Libre+Barcode+39+Extended&display=swap" rel="stylesheet">
@@ -4429,6 +4473,15 @@ async def submit_payment_notification(
     order = await db.orders.find_one({"order_number": order_number}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    # GÜVENLİK: Sipariş no tahmin edilebilir → dekont yükleme YALNIZCA gerçekten dekont
+    # bekleyen (havale/EFT + ödeme bekliyor) siparişlerde. Böylece kart/ödenmiş/tamamlanmış
+    # siparişlerin dekontu üzerine yazma (griefing) + durum forge yüzeyi daraltılır.
+    _pm = str(order.get("payment_method") or "").lower()
+    _is_bank = any(k in _pm for k in ("havale", "eft", "transfer", "banka"))
+    _pending = order.get("status") in ("awaiting_payment", "pending") and \
+        order.get("payment_status") not in ("paid", "refunded")
+    if not (_is_bank and _pending):
+        raise HTTPException(status_code=400, detail="Bu sipariş için dekont yüklenemez.")
     data = await file.read()
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Dosya 8MB'tan büyük olamaz")
@@ -4490,11 +4543,20 @@ async def get_payment_receipt(order_id: str, current_user: dict = Depends(requir
         raise HTTPException(status_code=404, detail="Dekont bulunamadı")
     import base64 as _b64
     raw = _b64.b64decode(r["data_b64"])
-    return Response(
-        content=raw,
-        media_type=r.get("content_type", "application/octet-stream"),
-        headers={"Content-Disposition": f'inline; filename="{r.get("filename","dekont")}"'},
-    )
+    _ct = str(r.get("content_type", "application/octet-stream") or "").lower()
+    # GÜVENLİK: filename header injection'ı temizle
+    _fn = str(r.get("filename", "dekont") or "dekont").replace('"', "").replace("\r", "").replace("\n", "")[:100]
+    # SVG/HTML veya güvenli olmayan tür → inline RENDER etme (admin tarayıcısında XSS),
+    # indir olarak sun + sandbox. Yalnız gerçek raster görsel / PDF inline gösterilir.
+    _safe_inline = (_ct.startswith("image/") and "svg" not in _ct) or _ct == "application/pdf"
+    _disp = "inline" if _safe_inline else "attachment"
+    _headers = {
+        "Content-Disposition": f'{_disp}; filename="{_fn}"',
+        "X-Content-Type-Options": "nosniff",
+    }
+    if not _safe_inline:
+        _headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return Response(content=raw, media_type=_ct or "application/octet-stream", headers=_headers)
 
 
 @router.post("/cargo/poll-now")
@@ -6174,6 +6236,12 @@ async def export_gider_pusulasi_excel(
         for c in (5, 6, 7):
             ws.cell(row=r, column=c).number_format = "#,##0.00"
 
+    # GÜVENLİK: Excel/CSV formül injection — = + - @ ile başlayan metin hücrelerini kaçışla
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                    _c.value = "'" + _c.value
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)

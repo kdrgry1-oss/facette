@@ -5,8 +5,10 @@ files via authenticated admin endpoints.
 """
 import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
+
+from .deps import require_admin
 
 router = APIRouter(tags=["Docs"])
 
@@ -27,8 +29,8 @@ AVAILABLE_DOCS = {
 
 
 @router.get("/docs")
-async def list_docs():
-    """Mevcut dokümanları listele."""
+async def list_docs(current_user: dict = Depends(require_admin)):
+    """Mevcut dokümanları listele (admin)."""
     return {
         "docs": [
             {"id": k, "title": v["title"], "filename": v["download_name"],
@@ -39,8 +41,8 @@ async def list_docs():
 
 
 @router.get("/docs/{doc_id}/download")
-async def download_doc(doc_id: str):
-    """Markdown dokümantasyon dosyasını indir."""
+async def download_doc(doc_id: str, current_user: dict = Depends(require_admin)):
+    """Markdown dokümantasyon dosyasını indir (admin)."""
     meta = AVAILABLE_DOCS.get(doc_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Doküman bulunamadı")

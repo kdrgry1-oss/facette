@@ -1089,6 +1089,8 @@ async def slider_feed(
                     pp["campaign_label"] = label
     except Exception:
         pass
+    if not _admin_view:
+        prods = [_strip_internal_fields(_p) for _p in prods]
     return {"products": prods, "source": source}
 
 
@@ -1208,7 +1210,31 @@ async def get_product(product_id: str, request: Request):
                 product["campaign_label"] = label
     except Exception:
         pass
+    if not _is_admin:
+        product = _strip_internal_fields(product)
     return product
+
+
+# GÜVENLİK: Public yanıtlardan iç/ticari alanları (alış fiyatı, tedarikçi, marj vb.)
+# temizle — rakip/istismarcıya kâr marjı sızmasın.
+_PRODUCT_INTERNAL_FIELDS = (
+    "cost_price", "purchase_price", "alis_fiyati", "buy_price", "supplier", "tedarikci",
+    "supplier_code", "member_price_1", "member_price_2", "member_price_3", "member_price",
+    "margin", "profit", "profit_margin", "kar", "kar_marji", "ticimax_fields",
+    "admin_notes", "internal_notes", "vendor", "vendor_id",
+)
+
+
+def _strip_internal_fields(p: dict) -> dict:
+    if not isinstance(p, dict):
+        return p
+    for _k in _PRODUCT_INTERNAL_FIELDS:
+        p.pop(_k, None)
+    for _v in (p.get("variants") or []):
+        if isinstance(_v, dict):
+            for _k in _PRODUCT_INTERNAL_FIELDS:
+                _v.pop(_k, None)
+    return p
 
 
 # ── Otomatik kampanya rozeti yardımcıları ─────────────────────────────────────

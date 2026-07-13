@@ -386,6 +386,12 @@ async def export_rooftr_return_orders(
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + i)].width = w
 
+    # GÜVENLİK: Excel/CSV formül injection — = + - @ ile başlayan metin hücrelerini kaçışla
+    for _ws in wb.worksheets:
+        for _row in _ws.iter_rows():
+            for _c in _row:
+                if isinstance(_c.value, str) and _c.value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+                    _c.value = "'" + _c.value
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)

@@ -12,7 +12,7 @@ Yapılandırma (birini seç):
 Yapılandırma YOKSA gönderim SESSİZCE atlanır → sipariş akışı ASLA bozulmaz.
 """
 import os
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
 
 from .deps import db, logger, require_admin
@@ -39,8 +39,15 @@ async def send_push_to_admins(title: str, body: str, data: dict = None) -> int:
         if not project or not sa:
             logger.info("push: FCM v1 yapılandırılmamış — gönderim atlandı")
             return 0
+        # GÜVENLİK: "admin" bildirimi (sipariş PII içerebilir) YALNIZCA admin
+        # kullanıcıların cihazlarına gitmeli. user_devices müşteri cihazlarını da
+        # içerdiğinden, önce admin user_id kümesini çıkar ve cihazları ona göre filtrele.
+        admin_ids = [u["id"] async for u in db.users.find(
+            {"is_admin": True}, {"_id": 0, "id": 1}) if u.get("id")]
+        if not admin_ids:
+            return 0
         devices = await db.user_devices.find(
-            {"is_active": True, "push_token": {"$nin": [None, ""]}},
+            {"is_active": True, "push_token": {"$nin": [None, ""]}, "user_id": {"$in": admin_ids}},
             {"_id": 0, "push_token": 1, "device_id": 1}).to_list(5000)
         tokens = [d["push_token"] for d in devices if d.get("push_token")]
         if not tokens:
@@ -99,68 +106,10 @@ async def send_push_to_admins(title: str, body: str, data: dict = None) -> int:
         return 0
 
 
-def _order_platform_label(order: dict) -> str:
-    """Sipariş kaynağı etiketi: Site / Trendyol / Hepsiburada / Ticimax."""
-    p = (str(order.get("platform") or order.get("marketplace") or "")).strip().lower()
-    return {"trendyol": "Trendyol", "hepsiburada": "Hepsiburada",
-            "ticimax": "Ticimax"}.get(
-        p, "Site" if p in ("", "facette", "site") else p.title())
-
-
-async def send_new_order_push(order: dict) -> int:
-    """Yeni sipariş için admin cihazlarına push (site + pazaryeri ORTAK).
-    Kaynak (Site/Trendyol/Hepsiburada/Ticimax) bildirim gövdesinde gösterilir.
-    Best-effort: hata olsa da ASLA exception fırlatmaz."""
-    try:
-        try:
-            total = float(order.get("total") or 0)
-        except Exception:
-            total = 0.0
-        ship = order.get("shipping_address") or {}
-        who = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
-               or ship.get("full_name") or order.get("customer_name") or "Müşteri")
-        pf = _order_platform_label(order)
-        title = f"🛍️ Yeni Sipariş · {total:,.2f} TL".replace(",", ".")
-        body = f"{order.get('order_number','')} · {who} · {pf}"
-        return await send_push_to_admins(
-            title, body,
-            {"type": "new_order", "order_id": str(order.get("id") or ""),
-             "order_number": str(order.get("order_number") or "")})
-    except Exception as e:
-        logger.warning(f"send_new_order_push atlandı: {e}")
-        return 0
-
-
 @router.post("/test")
 async def push_test(current_user: dict = Depends(require_admin)):
     """Yönetici: tüm kayıtlı admin cihazlarına modern FCM v1 test bildirimi."""
     n = await send_push_to_admins("Test Bildirimi",
                                   "Facette admin push (FCM v1) çalışıyor ✅",
                                   {"type": "test"})
-    return {"success": True, "sent": n}
-
-
-@router.post("/send")
-async def push_send(payload: dict = Body(...), current_user: dict = Depends(require_admin)):
-    """Yönetici: ELLE yazılan başlık + metni tüm kayıtlı admin cihazlarına push gönderir."""
-    title = (str(payload.get("title") or "")).strip()
-    body = (str(payload.get("body") or "")).strip()
-    if not title:
-        return {"success": False, "sent": 0, "error": "Başlık gerekli"}
-    n = await send_push_to_admins(title, body, {"type": "manual"})
-    return {"success": True, "sent": n}
-
-
-@router.post("/test-order")
-async def push_test_order(current_user: dict = Depends(require_admin)):
-    """Yönetici: SAHTE bir sipariş için 'yeni sipariş' bildirimi (test amaçlı).
-    Gerçek siparişlerdekiyle AYNI biçim: başlık tutar, gövde 'sipariş no · müşteri · kaynak'."""
-    fake_order = {
-        "id": "TEST",
-        "order_number": "TEST-" + datetime.now(timezone.utc).strftime("%H%M%S"),
-        "total": 1234.50,
-        "platform": "trendyol",
-        "shipping_address": {"first_name": "Test", "last_name": "Müşteri"},
-    }
-    n = await send_new_order_push(fake_order)
     return {"success": True, "sent": n}

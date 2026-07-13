@@ -98,14 +98,17 @@ def _barcode_svg_inline(code: str) -> str:
 def _card_html_for_variant(product: dict, variant: dict) -> str:
     """Tek varyant icin tek barkod ETIKETI (5cm x 4cm). Markasiz, sola yasli.
     Tasarim: urun adi / urun kart no / renk(sol)+beden(sag) / barkod / numara."""
-    name = (product.get("name", "") or "").strip()
-    card_no = str(product.get("urun_karti_id") or product.get("csv_card_id") or "").strip()
+    import html as _html_b
+    def _hb(v):  # GÜVENLİK: ürün/varyant alanlarını HTML-escape et (pazaryeri kaynaklı stored-XSS)
+        return _html_b.escape(str(v if v is not None else ""))
+    name = _hb((product.get("name", "") or "").strip())
+    card_no = _hb(str(product.get("urun_karti_id") or product.get("csv_card_id") or "").strip())
     stock_code = variant.get("stock_code") or product.get("stock_code") or ""
     bar_code = variant.get("barcode") or product.get("barcode") or stock_code
-    size = (variant.get("size") or "").strip()
-    color = (variant.get("color") or "").strip()
+    size = _hb((variant.get("size") or "").strip())
+    color = _hb((variant.get("color") or "").strip())
 
-    barcode_svg = _barcode_svg_inline(bar_code)
+    barcode_svg = _barcode_svg_inline(bar_code)  # bar_code yalnız barkod çizimine gider
 
     return f"""
     <div class="card">
@@ -113,7 +116,7 @@ def _card_html_for_variant(product: dict, variant: dict) -> str:
       {f'<div class="cardno">{card_no}</div>' if card_no else ''}
       <div class="row"><span class="color">{color}</span><span class="size">{size}</span></div>
       {barcode_svg}
-      <div class="barcode-text">{bar_code or ''}</div>
+      <div class="barcode-text">{_hb(bar_code or '')}</div>
     </div>
     """
 
