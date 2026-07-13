@@ -81,6 +81,7 @@ export const navigationGroups = [
       { label: "Bannerlar & Sliderlar", path: "/admin/bannerlar", icon: Image },
       { label: "Popuplar", path: "/admin/popuplar", icon: BellRing },
       { label: "Duyurular", path: "/admin/duyurular", icon: BellRing },
+      { label: "Menü Yönetimi", path: "/admin/menu-yonetimi", icon: LayoutDashboard },
       { label: "Sayfa Tasarımı", path: "/admin/sayfa-tasarimi", icon: Palette },
       { label: "Footer Tasarımı", path: "/admin/footer-tasarim", icon: Palette },
       { label: "Instagram Akışı", path: "/admin/instagram", icon: Instagram },
