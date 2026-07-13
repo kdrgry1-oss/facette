@@ -2804,6 +2804,15 @@ async def create_invoice_for_order(
         if _inv_discount < 0:
             _inv_discount = 0.0
 
+        # #14: Bedava kargo kampanyası → e-Arşiv faturasında BİLGİ NOTU. GİB-GÜVENLİ: monetary
+        # tutar/matrah/KDV'ye DOKUNMAZ. (Ayrı "kargo iskonto kalemi" = belge-seviyesi AllowanceCharge
+        # GİB LineExtension/matrah doğrulamasını bozduğu için kullanılamıyor — bkz. yukarıdaki not.)
+        _fs_waived = float(order.get("free_shipping_waived_fee") or 0)
+        _fs_note = ""
+        if order.get("free_shipping_applied") and _fs_waived > 0:
+            _fs_note = (f"Kargo Kampanyasi: {_fs_waived:.2f} TL tutarindaki kargo bedeli magazamizca "
+                        f"karsilanmis olup fatura tutarina yansitilmamistir.")
+
         # İndirimi ÜRÜN satırlarının birim fiyatına orantılı dağıt (kargo hariç).
         # Böylece her satırın KDV matrahı indirimli tutardan hesaplanır; satır toplamları
         # ve KDV tutarlı kalır → GİB/Doğan geçerli. (Builder'ın belge-seviyesi indirimi
@@ -2896,7 +2905,7 @@ async def create_invoice_for_order(
             carrier_name=_carrier_name,
             carrier_vkn=_carrier_vkn,
             carrier_city=_carrier_city,
-            note=_vf_note,
+            note=" ".join(x for x in [_vf_note, _fs_note] if x),
         )
         # Mikro ihracat İSTİSNA: faturada alıcı = yabancı alıcı (billing_address), kargocu değil.
         if order.get("is_micro_export"):
