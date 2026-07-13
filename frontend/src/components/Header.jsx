@@ -77,11 +77,22 @@ function apiTabToGiyimMenu(tab) {
   return Object.keys(obj).length ? obj : null;
 }
 // AKSESUAR: tüm kolonların item'ları düz liste [{name, slug}]
+// Kemer & Şapka mağazada YOK → panelde hâlâ tanımlı olsalar bile menüden GİZLE
+// (canlı menü panelden beslendiği için filtre burada zorlanır; panel elle temizlenmese de düşer).
+const _AKSESUAR_HIDDEN = ["kemer", "sapka", "şapka"];
+function _isHiddenAksesuar(name, slug) {
+  const n = String(name || "").toLocaleLowerCase("tr");
+  const s = String(slug || "").toLocaleLowerCase("tr");
+  return _AKSESUAR_HIDDEN.some((h) => n === h || s === h || n.startsWith(h + " ") || s.startsWith(h + "-"));
+}
 function apiTabToAksesuarMenu(tab) {
   const arr = [];
   for (const col of (tab?.columns || [])) {
     for (const it of (col?.items || [])) {
-      if (it && it.name) arr.push({ name: it.name, slug: slugFromLink(it.link) || slugify(it.name) });
+      if (!it || !it.name) continue;
+      const slug = slugFromLink(it.link) || slugify(it.name);
+      if (_isHiddenAksesuar(it.name, slug)) continue;
+      arr.push({ name: it.name, slug });
     }
   }
   return arr.length ? arr : null;
