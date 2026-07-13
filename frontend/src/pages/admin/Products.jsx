@@ -2605,7 +2605,7 @@ export default function AdminProducts() {
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Satış Fiyatı (TL)</label>
                         <input
                           type="number"
-                          value={formData.price}
+                          value={formData.price || ""}
                           onChange={(e) => {
                             const v = parseFloat(e.target.value) || 0;
                             // #3: Satış fiyatı, üye fiyatı manuel değiştirilmediyse Üye Tipi 1'e de yazılır.
@@ -2671,7 +2671,7 @@ export default function AdminProducts() {
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL)</label>
                         <input
                           type="number"
-                          value={formData.purchase_price}
+                          value={formData.purchase_price || ""}
                           onChange={(e) => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0 })}
                           className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
                           data-testid="product-purchase-price"
@@ -2782,7 +2782,7 @@ export default function AdminProducts() {
                           <label className="block text-xs font-bold text-orange-900 uppercase mb-2">Bu Ürüne Özel Trendyol Fark Oranı (%)</label>
                           <input
                             type="number"
-                            value={formData.markup_rate}
+                            value={formData.markup_rate || ""}
                             onChange={(e) => setFormData({ ...formData, markup_rate: parseFloat(e.target.value) || 0 })}
                             placeholder="Örn: 25"
                             className="w-full border-orange-200 border-2 px-4 py-3 rounded-xl focus:border-orange-500 outline-none transition-all text-xl font-bold text-orange-700"
@@ -3288,7 +3288,7 @@ export default function AdminProducts() {
                               <td className="px-4 py-3 text-center">
                                 <input
                                   type="number"
-                                  value={v.stock || 0}
+                                  value={v.stock || ""}
                                   onChange={(e) => {
                                     const updated = [...formData.variants];
                                     updated[v.originalIdx].stock = parseInt(e.target.value) || 0;
