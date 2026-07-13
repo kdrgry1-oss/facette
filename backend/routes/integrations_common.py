@@ -1723,7 +1723,7 @@ _ORDER_STATUS_BUCKET = {
     "return_requested": "talep_olusturulan",
     "return_in_transit": "kargoya_verilen",
     "return_approved": "onaylanan",
-    "returned": "aksiyon_bekleyen",   # depoya ulaştı (Teslim Alındı) → iade bedeli/gider pusulası AKSİYONU bekliyor; scheduler yorumu "Aksiyon'a düşer" ile tutarlı
+    "returned": "onaylanan",          # "İade Tamamlandı" = TAMAMLANMIŞ/onaylanmış iade → aksiyon bekleyende KALMAZ, Onaylanan'a geçer (admin durumu buna alınca aksiyon listesinden düşer)
     "refunded": "onaylanan",
     "partial_refunded": "onaylanan",
     "return_rejected": "reddedilen",

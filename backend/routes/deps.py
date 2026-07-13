@@ -715,7 +715,12 @@ def _search_tr_regex(s: str) -> str:
     # NFC normalize + combining dot temizliği ile ham (U+0130) ya da ayrışmış gelişten bağımsız eşleşir.
     import unicodedata as _ud
     _s = _ud.normalize('NFC', (s or '').strip()).replace('̇', '')
-    return ''.join(cls.get(ch, re.escape(ch)) for ch in _s)
+    # Dayanıklılık: DB'de bazı adlar NFD (AYRIŞMIŞ) saklanmış olabilir — ör. 'ü' = 'u'+U+0308
+    # (birleşik iki nokta). Bu durumda düz [uüÜU] sınıfı yalnız 'u'yu tüketir, ardındaki U+0308
+    # takılır ve eşleşme kırılır ("Büstiyer" bulunamaz). Her karakterden sonra opsiyonel birleşik
+    # aksan (U+0300–U+036F) eşleyerek hem NFC hem NFD saklanmış veriyi yakalarız.
+    _comb = r'[̀-ͯ]*'
+    return ''.join(cls.get(ch, re.escape(ch)) + _comb for ch in _s)
 
 
 # =============================================================================
