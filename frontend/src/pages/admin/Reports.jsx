@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useLocation, Link } from "react-router-dom";
 import axios from "axios";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
@@ -153,6 +153,8 @@ export function ProductsReport() {
   const [sortDir, setSortDir] = useState("desc");
   const [platFilter, setPlatFilter] = useState("");
   const [sizeFilter, setSizeFilter] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
+  const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const load = async () => {
     const [t, c] = await Promise.all([
@@ -244,9 +246,15 @@ export function ProductsReport() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((p, i) => (
-                <tr key={(p.product_id || p.name) + i} className="border-t hover:bg-gray-50">
-                  <td className="p-3 font-medium max-w-xs truncate" title={p.name}>{p.name}</td>
+              {rows.map((p, i) => {
+                const key = (p.product_id || p.name) + i;
+                const isOpen = expanded.has(key);
+                return (
+                <Fragment key={key}>
+                <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(key)}>
+                  <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
+                    <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
+                  </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
                   <td className={`p-3 text-right ${p.current_stock === 0 ? "text-red-600 font-semibold" : ""}`}>{p.current_stock == null ? "—" : p.current_stock}</td>
@@ -255,7 +263,33 @@ export function ProductsReport() {
                     {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
                   </td>
                 </tr>
-              ))}
+                {isOpen && (
+                  <tr className="bg-gray-50/60">
+                    <td colSpan={6} className="px-8 py-3">
+                      <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
+                        <div>
+                          <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(p.size_breakdown || []).length ? (p.size_breakdown || []).map(s => (
+                              <span key={s.size} className="px-2 py-0.5 bg-white border rounded-full">{s.size}: <b>{s.qty}</b></span>
+                            )) : <span className="text-gray-400">—</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-700 mb-1">Platform Dağılımı (adet)</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(p.platform_breakdown || []).map(x => (
+                              <span key={x.platform} className="px-2 py-0.5 bg-white border rounded-full">{platLabel(x.platform)}: <b>{x.qty}</b></span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
               {rows.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
