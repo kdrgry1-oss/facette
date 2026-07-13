@@ -149,7 +149,8 @@ async def search_marketplace_brands(
     q_ = (q or "").strip()
     query = {}
     if q_:
-        query["name"] = {"$regex": q_, "$options": "i"}
+        import re as _re
+        query["name"] = {"$regex": _re.escape(q_), "$options": "i"}  # ReDoS koruması
     rows = await db[coll_name].find(query, {"_id": 0}).limit(max(1, min(200, int(limit)))).to_list(length=limit)
     return {"items": [{"id": r.get("id"), "name": r.get("name", "")} for r in rows], "count": len(rows)}
 

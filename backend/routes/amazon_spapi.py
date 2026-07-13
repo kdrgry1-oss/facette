@@ -288,7 +288,10 @@ async def spapi_oauth_callback(request: Request, spapi_oauth_code: str = None,
     frontend = _public_base()
     if not spapi_oauth_code or not cfg:
         return RedirectResponse(url=f"{frontend}/admin/amazon?status=error")
-    if cfg.get("oauth_state") and state and state != cfg.get("oauth_state"):
+    # GÜVENLİK (CSRF): oauth_state tanımlıysa, gelen state MUTLAKA verilmeli VE eşleşmeli.
+    # Eskiden `and state` kısa devresi yüzünden state="" gönderilince kontrol ATLANIYORDU.
+    _expected_state = cfg.get("oauth_state")
+    if _expected_state and (not state or state != _expected_state):
         return RedirectResponse(url=f"{frontend}/admin/amazon?status=state_mismatch")
     redirect_uri = cfg.get("oauth_redirect") or f"{_public_base()}/api/amazon/spapi/oauth/callback"
     try:

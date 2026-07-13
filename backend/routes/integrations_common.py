@@ -231,7 +231,7 @@ async def _build_product_query_from_payload(payload: dict) -> dict:
             cat_q = {"$or": inner_or} if len(inner_or) > 1 else inner_or[0]
             extra_q = {}
             if filters.get("stock_code"):
-                extra_q["stock_code"] = {"$regex": filters["stock_code"], "$options": "i"}
+                extra_q["stock_code"] = {"$regex": re.escape(str(filters["stock_code"])), "$options": "i"}  # ReDoS koruması
             if filters.get("date_range"):
                 try:
                     date_obj = datetime.strptime(filters["date_range"], "%Y-%m-%d").replace(tzinfo=timezone.utc)

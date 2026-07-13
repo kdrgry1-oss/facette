@@ -64,10 +64,12 @@ async def list_manufacturing(
     if stage:
         query["current_stage"] = stage
     if search:
+        import re as _re
+        _s = _re.escape(str(search))  # ReDoS koruması
         query["$or"] = [
-            {"product_name": {"$regex": search, "$options": "i"}},
-            {"partner_name": {"$regex": search, "$options": "i"}},
-            {"code": {"$regex": search, "$options": "i"}},
+            {"product_name": {"$regex": _s, "$options": "i"}},
+            {"partner_name": {"$regex": _s, "$options": "i"}},
+            {"code": {"$regex": _s, "$options": "i"}},
         ]
     items = await db.manufacturing.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     # Summary counts per stage

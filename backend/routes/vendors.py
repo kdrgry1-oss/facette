@@ -26,10 +26,12 @@ async def get_vendors(
         query["vendor_type"] = vendor_type
     
     if search:
+        import re as _re
+        _s = _re.escape(str(search))  # ReDoS koruması
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"company_name": {"$regex": search, "$options": "i"}},
-            {"tax_number": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": _s, "$options": "i"}},
+            {"company_name": {"$regex": _s, "$options": "i"}},
+            {"tax_number": {"$regex": _s, "$options": "i"}}
         ]
     
     skip = (page - 1) * limit
@@ -63,9 +65,11 @@ async def search_vendors(
         query["vendor_type"] = vendor_type
     
     if q:
+        import re as _re
+        _q = _re.escape(str(q))  # ReDoS koruması
         query["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"company_name": {"$regex": q, "$options": "i"}}
+            {"name": {"$regex": _q, "$options": "i"}},
+            {"company_name": {"$regex": _q, "$options": "i"}}
         ]
     
     vendors = await db.vendors.find(query, {"_id": 0, "id": 1, "name": 1, "company_name": 1, "vendor_type": 1}).sort("name", 1).limit(limit).to_list(limit)
