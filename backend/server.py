@@ -172,7 +172,18 @@ async def lifespan(app: FastAPI):
                 {"email": "admin@facette.com"},
                 {"$set": {"is_super_admin": True}},
             )
-        
+
+        # GÜVENLİK: is_admin=True kalmış MÜŞTERİ hesaplarını (personel işareti taşımayan:
+        # created_by/role_id/is_super_admin/varsayılan admin YOK) admin'likten düşür →
+        # Üyeler listesine geçsinler, panele giremesinler. İdempotent; her başlangıçta güvenli.
+        try:
+            from routes.admin_rbac import demote_customer_admins
+            _dc = await demote_customer_admins()
+            if _dc.get("demoted"):
+                logger.warning(f"[guvenlik] {_dc['demoted']} musteri hesabi admin'likten dusuruldu (Uyeler'e tasindi).")
+        except Exception as _de:
+            logger.error(f"[guvenlik] customer-admin temizligi hatasi: {_de}")
+
         # Create indexes
         await db.products.create_index("slug")
         await db.products.create_index("stock_code")

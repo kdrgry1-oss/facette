@@ -409,10 +409,17 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(secu
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
-    # GÜVENLİK: Müşteri hesabı (role='customer') ASLA admin panele giremez — eski/bozuk
-    # veride is_admin=True kalmış müşteriler için SERT KAPI. create_panel_user gerçek
-    # personele role='customer' yazmadığı için personel etkilenmez.
-    if user.get("role") == "customer":
+    # GÜVENLİK: Yalnız GERÇEK panel personeli admin erişebilir. Panel personeli
+    # create_panel_user ile oluşur → 'created_by' + 'role_id' taşır; ya da is_super_admin /
+    # varsayılan admin@facette.com. Bunların HİÇBİRİ yoksa hesap bir MÜŞTERİdir (eski/bozuk
+    # veride is_admin=True kalmış register kaydı — 'role' alanı bile yok) → admin erişimi REDDEDİLİR.
+    _is_staff = (
+        (user.get("created_by") not in (None, ""))
+        or bool(user.get("is_super_admin"))
+        or user.get("email") == "admin@facette.com"
+        or (user.get("role_id") not in (None, ""))
+    )
+    if user.get("role") == "customer" or not _is_staff:
         raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
     if _token_revoked(payload, user):
         raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")
@@ -436,10 +443,17 @@ async def verify_admin_token(token: str) -> dict:
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0, "password": 0})
     if not user or user.get("is_active") is False:
         raise HTTPException(status_code=401, detail="Hesap devre dışı")
-    # GÜVENLİK: Müşteri hesabı (role='customer') ASLA admin panele giremez — eski/bozuk
-    # veride is_admin=True kalmış müşteriler için SERT KAPI. create_panel_user gerçek
-    # personele role='customer' yazmadığı için personel etkilenmez.
-    if user.get("role") == "customer":
+    # GÜVENLİK: Yalnız GERÇEK panel personeli admin erişebilir. Panel personeli
+    # create_panel_user ile oluşur → 'created_by' + 'role_id' taşır; ya da is_super_admin /
+    # varsayılan admin@facette.com. Bunların HİÇBİRİ yoksa hesap bir MÜŞTERİdir (eski/bozuk
+    # veride is_admin=True kalmış register kaydı — 'role' alanı bile yok) → admin erişimi REDDEDİLİR.
+    _is_staff = (
+        (user.get("created_by") not in (None, ""))
+        or bool(user.get("is_super_admin"))
+        or user.get("email") == "admin@facette.com"
+        or (user.get("role_id") not in (None, ""))
+    )
+    if user.get("role") == "customer" or not _is_staff:
         raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
     if _token_revoked(payload, user):
         raise HTTPException(status_code=401, detail="Oturum sonlandırıldı, tekrar giriş yapın")

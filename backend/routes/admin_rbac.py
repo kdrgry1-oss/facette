@@ -22,6 +22,27 @@ from permissions import PERMISSION_TREE, DEFAULT_ROLES, ALL_PERMISSION_KEYS
 router = APIRouter(prefix="/admin", tags=["admin-rbac"])
 
 
+# Panel personeli AYIRT EDİCİ işaretleri: create_panel_user personele created_by + role_id
+# yazar; ayrıca is_super_admin ve varsayılan admin@facette.com personeldir. Bunlardan biri
+# varsa GERÇEK personel; hiçbiri yoksa is_admin=True olsa bile MÜŞTERİdir (eski/bozuk register).
+PANEL_STAFF_OR = [
+    {"created_by": {"$exists": True, "$nin": [None, ""]}},
+    {"is_super_admin": True},
+    {"email": "admin@facette.com"},
+    {"role_id": {"$exists": True, "$nin": [None, ""]}},
+]
+
+
+async def demote_customer_admins():
+    """is_admin=True kalmış ama personel işareti taşımayan MÜŞTERİ hesaplarını admin'likten
+    düşürür + oturumlarını iptal eder (token_version++). İdempotent; başlangıçta da çağrılır."""
+    q = {"is_admin": True, "$nor": PANEL_STAFF_OR}
+    affected = await db.users.find(q, {"_id": 0, "email": 1}).to_list(5000)
+    if affected:
+        await db.users.update_many(q, {"$set": {"is_admin": False}, "$inc": {"token_version": 1}})
+    return {"demoted": len(affected), "emails": [u.get("email", "") for u in affected][:200]}
+
+
 async def _ensure_default_roles():
     existing_ids = set()
     async for r in db.roles.find({}, {"_id": 0, "id": 1}):
@@ -109,10 +130,11 @@ async def delete_role(role_id: str, current_user: dict = Depends(require_super_a
 
 @router.get("/users")
 async def list_panel_users(current_user: dict = Depends(require_admin)):
-    # Yalnız GERÇEK panel personeli: eski/bozuk veride is_admin=True kalmış MÜŞTERİ
-    # (role='customer') hesaplarını listeye ALMA (güvenlik + doğru sayım).
+    # Yalnız GERÇEK panel personeli. Personel create_panel_user ile oluşur → created_by +
+    # role_id taşır; ya da is_super_admin / varsayılan admin@facette.com. Bu işaretlerin
+    # HİÇBİRİ olmayan is_admin=True hesap = eski/bozuk MÜŞTERİ (register kaydı) → gösterilmez.
     users = await db.users.find(
-        {"is_admin": True, "role": {"$ne": "customer"}},
+        {"is_admin": True, "$or": PANEL_STAFF_OR},
         {"_id": 0, "password": 0}
     ).to_list(500)
     return {"users": users}
@@ -120,15 +142,10 @@ async def list_panel_users(current_user: dict = Depends(require_admin)):
 
 @router.post("/users/cleanup-customer-admins")
 async def cleanup_customer_admins(current_user: dict = Depends(require_super_admin)):
-    """GÜVENLİK: Eski/bozuk veride is_admin=True kalmış MÜŞTERİ (role='customer')
-    hesaplarını admin'likten düşürür ve mevcut oturumlarını iptal eder (token_version++).
-    Panelde 'Kullanıcılar' listesinde görünen müşteri e-postalarını kalıcı temizler."""
-    q = {"is_admin": True, "role": "customer"}
-    affected = await db.users.find(q, {"_id": 0, "id": 1, "email": 1}).to_list(5000)
-    if affected:
-        await db.users.update_many(q, {"$set": {"is_admin": False}, "$inc": {"token_version": 1}})
-    return {"success": True, "demoted": len(affected),
-            "emails": [u.get("email", "") for u in affected][:200]}
+    """GÜVENLİK: is_admin=True kalmış MÜŞTERİ hesaplarını (personel işareti taşımayan)
+    admin'likten düşürür + oturumlarını iptal eder → Üyeler listesine geçerler."""
+    res = await demote_customer_admins()
+    return {"success": True, **res}
 
 
 @router.post("/users")
