@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { RefreshCw, Search, Check, FileText, Printer, Download, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { RefreshCw, Search, Check, X, FileText, Printer, Download, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import RooftrReturns from "./RooftrReturns";
 
@@ -133,6 +133,7 @@ export default function Returns() {
   const [gpModalOpen, setGpModalOpen] = useState(false);
   const [gpData, setGpData] = useState(null);
   const [gpLoading, setGpLoading] = useState(false);
+  const [editGpNo, setEditGpNo] = useState(null); // gider pusulası no inline düzenleme (TY/HB): { key, value }
   const [bulkPrintData, setBulkPrintData] = useState(null);
   // Gider pusulası: takip no (085490'dan), matbu bindirme modu ve hizalama (mm)
   const [gpStart, setGpStart] = useState(() => localStorage.getItem("gp_next_no") || "085490");
@@ -389,6 +390,52 @@ export default function Returns() {
     } catch (err) {
       toast.error(err.response?.data?.detail || "Gider pusulası oluşturulamadı");
     } finally { setGpLoading(false); }
+  };
+
+  // Gider pusulası no'yu satırdaki #no'ya tıklayınca inline düzenle (TY/HB + manuel).
+  // Web sitesi (RooftrReturns) ile AYNI uç: /orders/returns/vouchers/set-number.
+  // Anahtar: TY/HB için claim_id, manuel/site için order_number.
+  const saveGpNo = async (claim) => {
+    const val = String(editGpNo?.value || "").trim();
+    if (!val) { setEditGpNo(null); return; }
+    try {
+      const token = localStorage.getItem("token");
+      const body = claim.claim_id
+        ? { claim_id: claim.claim_id, display_number: val }
+        : { order_number: claim.order_number, display_number: val };
+      await axios.post(`${API}/orders/returns/vouchers/set-number`, body,
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Gider pusulası numarası güncellendi");
+      setEditGpNo(null);
+      fetchClaims();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Numara güncellenemedi");
+    }
+  };
+  const gpRowKey = (claim) => claim.claim_id || claim.order_number || claim.order_id;
+  // #no'yu tıklanabilir/inline-düzenlenebilir gösterir (web sitesiyle aynı UX).
+  const renderGpNo = (claim) => {
+    if (!claim.gider_pusulasi_no) return null;
+    const key = gpRowKey(claim);
+    if (editGpNo?.key === key) {
+      return (
+        <span className="inline-flex items-center gap-1">
+          <input autoFocus value={editGpNo.value}
+            onChange={(e) => setEditGpNo({ key, value: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") saveGpNo(claim); if (e.key === "Escape") setEditGpNo(null); }}
+            className="w-20 text-[11px] font-mono border border-purple-300 rounded px-1 py-0.5 focus:outline-none focus:border-purple-500" />
+          <button onClick={() => saveGpNo(claim)} className="text-green-600 hover:text-green-700" title="Kaydet"><Check size={14} /></button>
+          <button onClick={() => setEditGpNo(null)} className="text-gray-400 hover:text-gray-600" title="Vazgeç"><X size={14} /></button>
+        </span>
+      );
+    }
+    return (
+      <span onClick={() => setEditGpNo({ key, value: claim.gider_pusulasi_no })}
+        className="text-[11px] font-mono font-bold text-purple-700 px-1 cursor-pointer hover:underline"
+        title="Gider Pusulası No — düzenlemek için tıkla">
+        #{claim.gider_pusulasi_no}
+      </span>
+    );
   };
 
   // Modaldan tek pusula yazdır: aynı 4'lü A4 mekanizmasını kullanır
@@ -784,11 +831,7 @@ export default function Returns() {
                       <div className="flex items-center justify-end gap-1">
                         {claim.manual ? (
                           <>
-                            {claim.gider_pusulasi_no && (
-                              <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
-                                #{claim.gider_pusulasi_no}
-                              </span>
-                            )}
+                            {renderGpNo(claim)}
                             <button onClick={() => handleManualGiderPusulasi(claim)}
                               disabled={gpLoading}
                               className={`p-1.5 rounded-lg transition-colors ${
@@ -800,11 +843,7 @@ export default function Returns() {
                             </button>
                           </>
                         ) : (<>
-                        {claim.gider_pusulasi_no && (
-                          <span className="text-[11px] font-mono font-bold text-purple-700 px-1" title="Gider Pusulası Takip No">
-                            #{claim.gider_pusulasi_no}
-                          </span>
-                        )}
+                        {renderGpNo(claim)}
                         <button onClick={() => handleGiderPusulasi(claim.claim_id)}
                           disabled={gpLoading}
                           data-testid={`gp-${claim.claim_id}`}
