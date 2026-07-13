@@ -35,7 +35,7 @@ import base64
 import io
 import re
 
-from .deps import db, get_current_user, require_admin
+from .deps import db, get_current_user, require_admin, verify_admin_token
 
 # python-barcode zaten requirements.txt'te (0.16.1)
 import barcode
@@ -235,15 +235,17 @@ async def get_product_barcode_card(
     product_id: str,
     token: str = Query(None),
     sizes: str = Query(None, description="Virgülle ayrık beden filtresi (örn. 'S,M'). Boş = tüm bedenler."),
-    current_user: dict = Depends(get_current_user),
 ):
     """
     Tek ürün için yazdırılabilir barkod kartı sayfası döner.
     Ürünün her varyantı için ayrı kart; `sizes` verilirse yalnız o bedenler.
-    Query `token` parametresi frontend'de window.open içinde kimlik
-    doğrulama için kullanılabilsin diye gevşek tutuldu — asıl kontrol
-    `get_current_user` dependency'sinde.
+
+    GÜVENLİK: Bu uç window.open ile ?token= üzerinden açılır. Eskiden
+    get_current_user (None dönebilen) çağrılıp SONUÇ HİÇ KONTROL EDİLMİYORDU →
+    kimliksiz erişilip ürün barkod/stok kodları sızabiliyordu. Artık fatura/
+    kargo etiketi ile aynı şekilde verify_admin_token ile ADMIN doğrulanır.
     """
+    await verify_admin_token(token)
     product = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")

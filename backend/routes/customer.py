@@ -37,7 +37,12 @@ async def get_my_orders(
     # user_id + e-posta ile eşleştir (eski/misafir siparişlerini de kapsar)
     query = {"$or": _owner_or_clauses(current_user)}
 
-    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    # GÜVENLİK: Müşteriye personel-iç/pazarlama/ham-gateway alanlarını sızdırma
+    # (admin_notes = risk/dolandırıcılık notları). Public by-number ile tutarlı.
+    _hide = {"admin_notes": 0, "customer_ip": 0, "user_agent": 0, "attribution": 0,
+             "payment_id": 0, "iyzico_retrieve_response": 0, "iyzico_init_response": 0,
+             "iyzico_response": 0}
+    orders = await db.orders.find(query, {"_id": 0, **_hide}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.orders.count_documents(query)
     
     return {

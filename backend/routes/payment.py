@@ -75,7 +75,11 @@ async def _get_iyzico_settings() -> dict:
         raise HTTPException(status_code=400, detail="iyzico ödeme bilgileri eksik. Lütfen admin panelinden ayarlayın.")
     mode = s.get("mode", "sandbox")
     base = "https://api.iyzipay.com" if mode == "live" else "https://sandbox-api.iyzipay.com"
-    return {"api_key": s["api_key"], "api_secret": s["api_secret"], "mode": mode, "base_url": base}
+    # GÜVENLİK: api_secret at-rest şifreli saklanır; burada tek çözüm noktasıdır
+    # (tüm v2 ödeme header'ları + webhook imza kontrolü buradan besler).
+    # decrypt legacy düz-metni passthrough eder → mevcut kayıt kırılmaz.
+    from security.crypto import decrypt as _dec_secret
+    return {"api_key": s["api_key"], "api_secret": _dec_secret(s["api_secret"]) or "", "mode": mode, "base_url": base}
 
 
 def _v2_headers(api_key: str, secret_key: str, path: str, body_str: str) -> dict:

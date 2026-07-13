@@ -712,6 +712,11 @@ async def get_order(
     if not current_user.get("is_admin"):
         if order.get("user_id") != current_user.get("id"):
             raise HTTPException(status_code=403, detail="Bu siparişi görüntüleme yetkiniz yok")
+        # GÜVENLİK: sahibine bile personel-iç/pazarlama/ham-gateway alanlarını gösterme
+        # (admin_notes = risk/dolandırıcılık notları). Public by-number ile tutarlı.
+        for _k in ("admin_notes", "customer_ip", "user_agent", "attribution", "payment_id",
+                   "iyzico_retrieve_response", "iyzico_init_response", "iyzico_response"):
+            order.pop(_k, None)
 
     order["items"] = await _enrich_items_with_products(order.get("items") or [])
     return order

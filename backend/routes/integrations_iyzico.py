@@ -49,7 +49,8 @@ def is_iyzico_configured() -> bool:
 def _iyzico_auth_header(settings: dict, uri: str, body: dict) -> dict:
     """Iyzico v1 auth header builder (PKI string tabanlı — eski format ama iade için çalışır)."""
     api_key = settings.get("api_key", "")
-    secret = settings.get("api_secret", "")
+    from security.crypto import decrypt as _dec_secret  # at-rest şifreli sır; düz-metin passthrough
+    secret = _dec_secret(settings.get("api_secret", "")) or ""
     rnd = str(random.randint(10**15, 10**16 - 1))
     payload = api_key + rnd + secret
     h = hashlib.sha1(payload.encode("utf-8")).hexdigest()
@@ -117,7 +118,9 @@ async def save_iyzico_settings(payload: dict, current_user: dict = Depends(requi
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if payload.get("api_secret") and payload.get("api_secret") != "********":
-        update_data["api_secret"] = payload.get("api_secret")
+        # GÜVENLİK: ödeme sırrını at-rest şifrele (diğer entegrasyonlarla tutarlı)
+        from security.crypto import encrypt as _enc_secret
+        update_data["api_secret"] = _enc_secret(payload.get("api_secret"))
     await db.settings.update_one({"id": "iyzico"}, {"$set": update_data}, upsert=True)
     return {"success": True, "message": "Iyzico ayarları kaydedildi"}
 
