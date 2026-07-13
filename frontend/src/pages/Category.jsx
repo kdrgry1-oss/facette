@@ -32,7 +32,14 @@ export default function Category() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  // Sayfa numarası URL'de tutulur (?page=3) — detaydan/geri dönünce remount olsa
+  // bile korunur ve deep-link paylaşılabilir. (Eskiden useState(1) idi → back → sayfa 1.)
+  const page = parseInt(searchParams.get("page") || "1", 10) || 1;
+  const setPage = (n) => {
+    const next = new URLSearchParams(searchParams);
+    if (!n || n <= 1) next.delete("page"); else next.set("page", String(n));
+    setSearchParams(next);
+  };
   const [pages, setPages] = useState(1);
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -71,14 +78,22 @@ export default function Category() {
 
   // O15: Kategori (slug) değişince sayfayı 1'e sıfırla — aksi halde başka kategoriye geçince
   // yeni kategori ESKİ sayfa numarasında açılıp boş/eksik liste (stok yokmuş gibi) gösteriyordu.
+  // İlk mount'ta ÇALIŞMAZ (yoksa /kadin?page=3 deep-link'inde page silinirdi);
+  // yalnız gerçek slug DEĞİŞİMİNDE sayfayı 1'e döndürür.
+  const prevSlugRef = useRef(slug);
   useEffect(() => {
-    setPage(1);
+    if (prevSlugRef.current !== slug) {
+      prevSlugRef.current = slug;
+      setPage(1);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   useEffect(() => {
-    fetchProducts();
+    const controller = new AbortController();
+    fetchProducts(controller.signal);
     fetchCategories();
+    return () => controller.abort();  // hızlı sayfa/filtre değişiminde eski isteği iptal et (yarış → eski veri ezmesin)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, sort, order, minPrice, maxPrice, sizesParam, colorsParam, page]);
 
@@ -86,7 +101,7 @@ export default function Category() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [page]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (signal) => {
     setLoading(true);
     try {
       let url = `${API}/products?page=${page}&limit=24&sort=${sort}&order=${order}`;
@@ -96,7 +111,7 @@ export default function Category() {
       if (sizesParam) url += `&sizes=${encodeURIComponent(sizesParam)}`;
       if (colorsParam) url += `&colors=${encodeURIComponent(colorsParam)}`;
 
-      const res = await axios.get(url);
+      const res = await axios.get(url, { signal });
       const fetched = res.data?.products || [];
       setProducts(fetched);
       setTotal(res.data?.total || 0);
@@ -107,9 +122,10 @@ export default function Category() {
         } catch (_) { /* silent */ }
       }
     } catch (err) {
+      if (axios.isCancel?.(err) || err.name === "CanceledError") return;  // iptal edilen istek — yeni istek zaten yolda
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
@@ -185,7 +201,7 @@ export default function Category() {
     if (stMax) next.set("max_price", stMax); else next.delete("max_price");
     if (stSizes.length) next.set("sizes", stSizes.join(",")); else next.delete("sizes");
     if (stColors.length) next.set("colors", stColors.join(",")); else next.delete("colors");
-    setPage(1);
+    next.delete("page");   // filtre değişince sayfa 1 — tek setSearchParams (yarış yok)
     setSearchParams(next);
     setFilterOpen(false);
   };

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation, useNavigationType } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "./context/CartContext";
@@ -39,10 +39,13 @@ import "./App.css";
 // Rota değişiminde sayfayı anında en üste al — 2./3. sayfaya geçişte veya yeni
 // sayfa açıldığında footer'ın önce görünüp sonra yukarı zıplaması engellenir.
 function ScrollToTop() {
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
+  const navType = useNavigationType();  // "POP" = geri/ileri → scroll'a dokunma, tarayıcı pozisyonu restore etsin
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }, [pathname, search]);
+    // Yeni sayfa (PUSH/REPLACE) → en üste al. Geri/ileri (POP) → kullanıcının
+    // kaldığı yeri koru (liste → ürün → geri: liste eski scroll'unda açılır).
+    if (navType !== "POP") window.scrollTo({ top: 0, behavior: "auto" });
+  }, [pathname, navType]);
   return null;
 }
 

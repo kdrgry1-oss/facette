@@ -246,9 +246,16 @@ export default function ProductDetail() {
   }, [product?.id]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    let cancel = false;
+    // Ürünler arası geçişte (A→B) önceki ürünün seçili varyantı/bedeni KALMASIN —
+    // aksi halde B'nin bedeni stoksuzken A'nın varyantı sepete B ürünüyle düşüyordu.
+    setSelectedVariant(null);
+    setSelectedSize("");
     (async () => {
       try {
-        const res = await axios.get(`${API}/products/${slug}`);
+        const res = await axios.get(`${API}/products/${slug}`, { signal: controller.signal });
+        if (cancel) return;   // A→B hızlı geçişte eski ürünün geç dönen verisi yeni sayfayı EZMESİN
         setProduct(res.data);
 
         // Son gezilenler: önceki listeyi (mevcut ürün hariç) göster, sonra mevcut
@@ -262,7 +269,6 @@ export default function ProductDetail() {
             slug: _p.slug || _p.id,
             image: (_p.images && _p.images[0]) || _p.image || "",
             price: _p.price,
-            sale_price: _p.sale_price,
             sale_price: _p.sale_price,
           });
         } catch { /* sessiz */ }
@@ -324,11 +330,13 @@ export default function ProductDetail() {
           setComboProducts([]);
         }
       } catch (err) {
+        if (cancel || axios.isCancel?.(err) || err.name === "CanceledError") return;
         console.error(err);
       } finally {
-        setLoading(false);
+        if (!cancel) setLoading(false);
       }
     })();
+    return () => { cancel = true; controller.abort(); };
   }, [slug]);
 
   const handleAddToCart = () => {

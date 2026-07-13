@@ -686,7 +686,12 @@ def _search_tr_regex(s: str) -> str:
         'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
         'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
     }
-    return ''.join(cls.get(ch, re.escape(ch)) for ch in (s or '').strip())
+    # Dayanıklılık: bazı istemci/ara katman 'İ'yi toLowerCase ile 'i̇' (i + U+0307
+    # combining dot) olarak gönderebilir → DB'deki 'Büstiyer' ile eşleşmezdi.
+    # NFC normalize + combining dot temizliği ile ham (U+0130) ya da ayrışmış gelişten bağımsız eşleşir.
+    import unicodedata as _ud
+    _s = _ud.normalize('NFC', (s or '').strip()).replace('̇', '')
+    return ''.join(cls.get(ch, re.escape(ch)) for ch in _s)
 
 
 # =============================================================================

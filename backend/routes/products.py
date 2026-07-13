@@ -352,11 +352,13 @@ def _fuzzy_tr_regex(s: str) -> str:
         'c': '[cçÇC]', 'ç': '[cçÇC]', 'C': '[cçÇC]', 'Ç': '[cçÇC]',
         'g': '[gğĞG]', 'ğ': '[gğĞG]', 'G': '[gğĞG]', 'Ğ': '[gğĞG]',
     }
-    chars = [ch for ch in (s or '').strip() if not ch.isspace()]
-    if len(chars) < 3:
+    import unicodedata as _ud
+    _s = _ud.normalize('NFC', (s or '').strip()).replace('̇', '')
+    chars = [ch for ch in _s if not ch.isspace()]
+    if len(chars) < 4:   # 3→4: "aaa" gibi 3-harflik gürültü artık fuzzy'yi TETİKLEMEZ
         return ''
     parts = [cls.get(ch, re.escape(ch)) for ch in chars]
-    return '.{0,2}'.join(parts)
+    return '.{0,1}'.join(parts)   # .{0,2}→.{0,1}: subsequence sıkılaştı → alakasız "abuk sabuk" eşleşme azalır
 
 @router.post("/ai-description")
 async def ai_generate_description(payload: dict, current_user: dict = Depends(require_admin)):
@@ -856,11 +858,12 @@ async def _build_products_query(
         if _exact_n == 0:
             _fz = _fuzzy_tr_regex(search)
             if _fz:
+                # Fuzzy YALNIZ name/keywords/brand'de aransın — description (uzun serbest
+                # metin) çıkarıldı; subsequence deseni orada rastgele "abuk sabuk" eşleşiyordu.
                 query["$or"] = [
                     {"name": {"$regex": _fz, "$options": "i"}},
                     {"keywords": {"$regex": _fz, "$options": "i"}},
                     {"brand": {"$regex": _fz, "$options": "i"}},
-                    {"description": {"$regex": _fz, "$options": "i"}},
                 ]
     return query, _admin_view
 
