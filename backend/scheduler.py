@@ -36,11 +36,15 @@ async def auto_cancel_unpaid_havale_orders():
         cancelled = 0
         async for order in db.orders.find(query, {"_id": 0}):
             try:
-                # O16: Önce durumu güncelle, SONRA idempotent iade yap. Önceki sıra (önce restock,
-                # sonra status) update hata verirse bir sonraki turda stoğu TEKRAR ekliyordu.
-                # _restock_order_once zaten iade hareketi varsa ikinci kez eklemez.
-                await db.orders.update_one(
-                    {"id": order["id"]},
+                # O16: Önce durumu güncelle, SONRA idempotent iade yap.
+                # TOCTOU koruması (D1 fix): sorgu ile update arasında müşteri ödemiş/dekont
+                # bildirmiş olabilir. Filtreye payment_status != paid + status re-check ekle;
+                # matched_count 0 ise (arada ödendi/durum değişti) İPTAL DE STOK GERİ DE YAPMA
+                # → "72. saatte ödeyen müşterinin siparişi iptal edilip stoğu geri eklenmesi" biter.
+                res = await db.orders.update_one(
+                    {"id": order["id"],
+                     "payment_status": {"$nin": ["paid", "expired", "refunded"]},
+                     "status": {"$in": ["pending", "awaiting_payment"]}},
                     {"$set": {
                         "status": "cancelled",
                         "payment_status": "expired",
@@ -50,6 +54,8 @@ async def auto_cancel_unpaid_havale_orders():
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }}
                 )
+                if res.matched_count == 0:
+                    continue  # arada ödendi / dekont bildirildi / durum değişti — dokunma
                 await _restock_order_once(order, "havale_auto_cancel")
                 cancelled += 1
                 # Müşteriye bildirim: "Siparişiniz ödeme yapılmadığı için iptal edildi" (SMS+e-posta).
@@ -139,6 +145,57 @@ async def auto_cancel_unpaid_card_orders():
             logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid/failed card orders (>24h)")
     except Exception as e:
         logger.exception(f"[scheduler] auto_cancel_unpaid_card_orders failed: {e}")
+
+
+async def reconcile_charged_but_unrecorded_orders():
+    """OTOMATİK KURTARMA: iyzico'dan para ÇEKİLMİŞ ama 'ödendi' işaretlenmemiş kart siparişlerini
+    (needs_reconciliation bayraklı VEYA pending/failed) iyzico'dan paymentId ile doğrulayıp
+    finalize eder — kimsenin elle 'recover-charged' çalıştırmasına gerek kalmaz.
+    _finalize_by_payment_id belirsiz cevapta siparişe DOKUNMAZ (yanlış paid yazmaz).
+    Kapsam: son 7 gün, kart (COD/havale hariç), tur başına en çok 50 sipariş."""
+    from routes.deps import db  # lazy import
+    try:
+        from routes.payment import _finalize_by_payment_id
+    except Exception as e:
+        logger.warning(f"[scheduler] reconcile import atlandı: {e}")
+        return
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
+                     "bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "transfer"]
+        query = {
+            "created_at": {"$gt": cutoff},
+            "payment_method": {"$nin": _cod_bank},
+            "payment_status": {"$ne": "paid"},
+            "$or": [
+                {"needs_reconciliation": True},
+                {"payment_status": {"$in": ["pending", "failed"]}},
+            ],
+        }
+        recovered = 0
+        candidates = await db.orders.find(
+            query, {"_id": 0, "id": 1, "reconcile_payment_id": 1,
+                    "iyzico_payment_id": 1, "payment_id": 1, "order_number": 1}
+        ).sort("created_at", -1).to_list(50)
+        for order in candidates:
+            pid = str(order.get("reconcile_payment_id") or order.get("iyzico_payment_id")
+                      or order.get("payment_id") or "").strip()
+            if not pid:
+                continue  # paymentId yok → otomatik doğrulanamaz (webhook/callback bekler)
+            try:
+                paid = await _finalize_by_payment_id(order["id"], pid)
+            except Exception as _e:
+                logger.warning(f"[scheduler] reconcile finalize hata {order.get('order_number')}: {_e}")
+                continue
+            if paid:
+                await db.orders.update_one(
+                    {"id": order["id"]},
+                    {"$unset": {"needs_reconciliation": "", "reconcile_payment_id": ""}})
+                recovered += 1
+        if recovered:
+            logger.info(f"[scheduler] iyzico reconcile: {recovered} çekilmiş sipariş otomatik finalize edildi")
+    except Exception as e:
+        logger.exception(f"[scheduler] reconcile_charged_but_unrecorded_orders failed: {e}")
 
 
 async def retry_pending_iys_consents():
@@ -1494,6 +1551,17 @@ def start_scheduler():
         minutes=30,
         id="auto_cancel_card_24h",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+        max_instances=1,
+        coalesce=True,
+    )
+    # iyzico OTOMATİK reconcile: para çekilmiş ama 'ödendi' işaretlenmemiş kart siparişlerini
+    # her 15 dk'da iyzico'dan doğrulayıp finalize eder (elle recover-charged gerekmez).
+    _scheduler.add_job(
+        reconcile_charged_but_unrecorded_orders,
+        "interval",
+        minutes=15,
+        id="iyzico_reconcile_charged",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
         max_instances=1,
         coalesce=True,
     )

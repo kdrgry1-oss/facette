@@ -1947,6 +1947,69 @@ async def record_order_redemptions(order: dict) -> None:
         logger.warning(f"Promosyon kullanım kaydı başarısız (sipariş etkilenmedi): {_redeem_err}")
 
 
+async def _restock_return_items_once(rec: dict, order: dict = None) -> int:
+    """OTOMATİK site-iade stok geri yükleme — iade edilen kalemleri ADET kadar stoğa ekler.
+    KISMİ iadede yalnız iade edilen kalemler; TAM iadede hepsi ("iptal edilen ürün adedi kadar").
+    İADE-BAŞINA idempotent (customer_returns.stock_restored atomik guard) → aynı iade iki kez
+    (onay + tamamlandı) tetiklense de bir kez uygulanır. Pazaryeri (Trendyol/HB/Temu) siparişi
+    HARİÇ — claim yolu restock_claim_once ile ayrıca geri yükler (çift olmasın). Döner: adet."""
+    if not rec:
+        return 0
+    order = order or await db.orders.find_one({"id": rec.get("order_id")}, {"_id": 0})
+    if not order:
+        return 0
+    _plat = str(order.get("platform") or order.get("marketplace") or "").lower()
+    if _plat in ("trendyol", "hepsiburada", "temu"):
+        return 0
+    # Atomik guard: yalnız henüz restock edilmemişse ilerle (yarış/çift-çağrı koruması).
+    _claim = await db.customer_returns.update_one(
+        {"id": rec.get("id"), "stock_restored": {"$ne": True}},
+        {"$set": {"stock_restored": True, "stock_restored_at": datetime.now(timezone.utc).isoformat()}})
+    if _claim.modified_count == 0:
+        return 0  # başka bir çağrı zaten yaptı
+    # Hangi kalemler? KISMİ onayda yalnız onaylananlar (approved_items), yoksa tüm iade kalemleri.
+    src = rec.get("approved_items") or rec.get("items") or []
+    # Sipariş kalemlerini hem (product_id,beden,renk) hem barkod ile indexle (esnek eşleşme).
+    def _k(it):
+        return (str(it.get("product_id") or it.get("sku") or ""),
+                str(it.get("size") or ""), str(it.get("color") or ""))
+    order_by_key, order_by_bc = {}, {}
+    for oi in (order.get("items") or []):
+        order_by_key.setdefault(_k(oi), oi)
+        _obc = str(oi.get("barcode") or oi.get("sku") or "")
+        if _obc:
+            order_by_bc.setdefault(_obc, oi)
+    restock_items, total = [], 0
+    for ri in src:
+        # barkod: kalemde varsa (approved_items) doğrudan; yoksa siparişten eşle (items).
+        bc = str(ri.get("barcode") or "") or str((order_by_key.get(_k(ri)) or {}).get("barcode") or "")
+        oi = order_by_bc.get(bc) or order_by_key.get(_k(ri)) or {}
+        if not bc:
+            bc = str(oi.get("barcode") or oi.get("sku") or "")
+        # adet: kalemde varsa (items) o; yoksa (approved_items) siparişteki adet; en az 1.
+        qty = int(ri.get("quantity") or oi.get("quantity") or 1)
+        if bc and qty > 0:
+            restock_items.append({"barcode": bc, "quantity": qty, "name": ri.get("name")})
+            total += qty
+    if not restock_items:
+        # Guard'ı geri al ki eşleşme düzelince tekrar denenebilsin.
+        await db.customer_returns.update_one({"id": rec.get("id")}, {"$unset": {"stock_restored": ""}})
+        return 0
+    moves = await _stock_delta_for_order({"items": restock_items}, +1)
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "return_restock",
+        "order_id": order.get("id"),
+        "order_number": order.get("order_number", ""),
+        "return_id": rec.get("id"),
+        "items": moves,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source": "site_return",
+    })
+    logger.info(f"[iade] otomatik stok geri: {total} adet order={order.get('order_number')} return={rec.get('id')}")
+    return total
+
+
 async def _restock_order_once(order: dict, move_type: str) -> list:
     """Sipariş kalemlerini stoğa GERİ ekler — ama yalnızca daha önce iade edilmediyse.
     İade hareketi zaten kayıtlıysa hiçbir şey yapmaz (çift iade engellenir)."""
@@ -5184,6 +5247,14 @@ async def update_return_status(return_id: str, payload: dict, current_user: dict
         if order_status in ("refunded", "partial_refunded"):
             _oset["refund_paid_at"] = now_iso
         await db.orders.update_one({"id": rec["order_id"]}, {"$set": _oset})
+        # OTOMATİK STOK GERİ (site iadesi): iade tamamlanınca/onaylanınca iade edilen kalemleri
+        # ADET kadar stoğa ekle (kısmi dahil). İade-başına idempotent. Eskiden site iadesinde stok
+        # HİÇ geri gelmiyordu (Trendyol'da GP kesiminde geliyordu — asimetri kapatıldı).
+        if order_status in ("returned", "refunded", "partial_refunded", "return_approved"):
+            try:
+                await _restock_return_items_once(rec)
+            except Exception as _e:
+                logger.warning(f"[iade] otomatik restock hata order={rec.get('order_id')}: {_e}")
     else:
         await db.orders.update_one({"id": rec["order_id"]},
             {"$set": {"return_request.status": new, "updated_at": now_iso}})
@@ -5501,6 +5572,14 @@ async def approve_return(return_id: str, payload: dict,
         "status": "return_approved", "return_request.status": "approved", "updated_at": now_iso,
         "return_approved_at": now_iso,
     }})
+
+    # OTOMATİK STOK GERİ: iade ONAYLANDI → onaylanan kalemleri ADET kadar stoğa ekle (idempotent,
+    # kısmi dahil). Güncel kaydı (yeni yazılan approved_items dahil) çekip helper'a ver.
+    try:
+        _fresh = await db.customer_returns.find_one({"id": return_id}, {"_id": 0})
+        await _restock_return_items_once(_fresh or rec, order)
+    except Exception as _e:
+        logger.warning(f"[iade] onay restock hata order={rec.get('order_id')}: {_e}")
 
     # Bildirim: "İade Onaylandı" + tutar (kanal ayarı panelden yönetilir)
     import asyncio as _aio
