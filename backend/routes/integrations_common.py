@@ -1444,8 +1444,10 @@ def _xml_all(item: ET.Element, tag: str, ns: dict = _NS) -> list:
 async def import_xml_products(
     xml_url: str = Query(XML_FEED_URL, description="Google Shopping XML URL"),
     deactivate_missing: bool = Query(
-        True,
-        description="Feed'de bulunmayan (Ticimax'ta pasif/silinmiş) ürünleri pasif yap"
+        False,   # ARTIK XML çekilmiyor → varsayılan KAPALI: hiçbir senkron ürünü otomatik pasife
+                 # ALMAZ. Ürün yalnızca ADMIN SİL/pasif yaparsa kaybolur. (Açıkça True istenirse
+                 # yine güvenlik kilidi devrede — bozuk feed kataloğu toplu silemez.)
+        description="Feed'de bulunmayan ürünleri pasif yap (VARSAYILAN KAPALI — otomatik pasifleştirme yok)"
     ),
     current_user: dict = Depends(require_admin)
 ):
