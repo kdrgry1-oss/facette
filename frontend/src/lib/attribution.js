@@ -58,6 +58,7 @@ function readUTM() {
       utm_content: p.get("utm_content") || "",
       gclid: p.get("gclid") || "",
       fbclid: p.get("fbclid") || "",
+      ttclid: p.get("ttclid") || "",
       aff_id: p.get("aff_id") || p.get("aff") || "",
     };
   } catch (_) { return {}; }
@@ -69,7 +70,7 @@ export async function trackVisit() {
     const existingSid = localStorage.getItem(SID_KEY) || null;
     const aff_id = captureAffId();
     const utm = readUTM();
-    const hasNewUtm = !!(utm.utm_source || utm.utm_campaign || utm.gclid || utm.fbclid || aff_id);
+    const hasNewUtm = !!(utm.utm_source || utm.utm_campaign || utm.gclid || utm.fbclid || utm.ttclid || aff_id);
     const payload = {
       ...utm,
       aff_id: aff_id || utm.aff_id || "",

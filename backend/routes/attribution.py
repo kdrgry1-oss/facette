@@ -52,10 +52,28 @@ MARKETPLACE_DOMAINS = {
 }
 
 
-def detect_channel(utm_source: str, utm_medium: str, referrer: str) -> str:
-    """Resolve a canonical marketing channel label from UTM + referrer."""
+def detect_channel(utm_source: str, utm_medium: str, referrer: str,
+                   ttclid: str = "", fbclid: str = "", gclid: str = "", user_agent: str = "") -> str:
+    """Resolve a canonical marketing channel label from UTM + referrer + click-id + UA.
+
+    ÖNEMLİ: TikTok/Instagram/Facebook UYGULAMA-İÇİ tarayıcıları (in-app webview) genelde referrer'ı
+    SİLER ve utm taşımaz → eski mantıkta bu ziyaretler 'direct'e düşüp raporda HİÇ görünmüyordu.
+    Bu yüzden önce güçlü sinyaller (tıklama-kimliği: ttclid/fbclid/gclid) ve in-app tarayıcı
+    USER-AGENT'ı ile kanal tanınır."""
     s = (utm_source or "").lower().strip()
     m = (utm_medium or "").lower().strip()
+    ua = (user_agent or "").lower()
+
+    # --- GÜÇLÜ SİNYALLER (utm/referrer olmasa bile) ---
+    if ttclid:
+        return "tiktok_ads"                       # TikTok tıklama kimliği = TikTok reklamı
+    # In-app tarayıcı UA tanıma (referrer boş gelse bile)
+    if any(t in ua for t in ("bytedancewebview", "musical_ly", "tiktok", "trill", "aweme")):
+        return "tiktok"
+    if "instagram" in ua:
+        return "instagram"
+    if "fban" in ua or "fbav" in ua or "fb_iab" in ua:
+        return "facebook"
 
     # Paid ads
     if m in {"cpc", "ppc", "paidsearch", "paid-search", "paid_search"}:
@@ -115,6 +133,11 @@ def detect_channel(utm_source: str, utm_medium: str, referrer: str) -> str:
         except Exception:
             pass
 
+    # utm/referrer yok ama tıklama kimliği var → reklam kaynağı (in-app strip sonrası son çare)
+    if fbclid:
+        return "facebook_ads"
+    if gclid:
+        return "google_ads"
     return "direct"
 
 
@@ -149,11 +172,13 @@ async def track_visit(payload: dict, request: Request):
     landing = (payload.get("landing_page") or "").strip()
     gclid = (payload.get("gclid") or "").strip()
     fbclid = (payload.get("fbclid") or "").strip()
+    ttclid = (payload.get("ttclid") or "").strip()  # TikTok tıklama kimliği
     aff_id = (payload.get("aff_id") or "").strip()
     ua = request.headers.get("user-agent", "")
     ip = request.client.host if request.client else ""
     device = detect_device(ua)
-    channel = detect_channel(utm_source, utm_medium, referrer)
+    channel = detect_channel(utm_source, utm_medium, referrer, ttclid=ttclid,
+                             fbclid=fbclid, gclid=gclid, user_agent=ua)
 
     touch = {
         "ts": now_iso,
@@ -164,6 +189,7 @@ async def track_visit(payload: dict, request: Request):
         "utm_content": utm_content,
         "gclid": gclid,
         "fbclid": fbclid,
+        "ttclid": ttclid,
         "aff_id": aff_id,
         "referrer": referrer,
         "landing_page": landing,
