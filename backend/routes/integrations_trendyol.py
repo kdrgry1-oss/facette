@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import hashlib
 
-from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id
+from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, get_effective_permissions
 from facette_defaults import facette_fixed_value_for  # tüm-pazaryeri sabit varsayılan (gap-fill)
 
 router = APIRouter(tags=["Integrations-Trendyol"])
@@ -4312,6 +4312,13 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     # yeni numara yakmaz — tutar düzeltmesi mevcut pusulanın numarasını değiştirmez).
     _existing_gp = await db.gider_pusulasi.find_one(
         {"claim_id": claim_id}, {"_id": 0, "number": 1, "display_number": 1})
+    # #15: İlk gider pusulası kesildikten SONRA yeniden oluşturma yalnızca Finans
+    # (muhasebe) yetkisiyle. İlk oluşturma her admin; 2. ve sonrası returns.expense_note ister.
+    if _existing_gp:
+        _perms = await get_effective_permissions(current_user)
+        if "*" not in _perms and "returns.expense_note" not in _perms:
+            raise HTTPException(status_code=403,
+                detail="Bu iade için gider pusulası zaten oluşturulmuş; yeniden oluşturma yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından yapılabilir.")
     tracking_no = str((payload or {}).get("tracking_no") or "").strip()
     if _existing_gp and _existing_gp.get("number"):
         gp_number = _existing_gp["number"]

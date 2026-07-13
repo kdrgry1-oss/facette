@@ -308,8 +308,13 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const itemCount = (row.items || []).length;
       const selIdx = (row.items || []).map((_, i) => i).filter((i) => selItems[`${row.id}::${i}`]);
       const isPartialSelection = selIdx.length > 0 && selIdx.length < itemCount;
+      // İNDİRİM ORANINI UYGULA (indirim / ara toplam) — aksi halde liste fiyatı (indirimsiz)
+      // iade edilir; müşteri indirimli ödediği hâlde fazla iade alırdı (ör. 2100 yerine 1890).
+      // Panel "İade net tutarı" ile BİREBİR aynı formül: product net × (1 − indirim oranı).
+      const _base = Number(row.subtotal) || 0;
+      const _dr = (_base > 0 && Number(row.discount) > 0) ? Math.min(1, Number(row.discount) / _base) : 0;
       const selAmount = isPartialSelection ? Math.round(selIdx.reduce(
-        (a, i) => a + (Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0), 0
+        (a, i) => a + (Number(row.items[i].qty) || 1) * (Number(row.items[i].price) || 0) * (1 - _dr), 0
       ) * 100) / 100 : 0;
       const returnedNet = selAmount > 0 ? selAmount : null;
       // Kısmi onayda seçilen kalemler backend'e KİMLİKLERİYLE gönderilir (approve kaydına
