@@ -353,6 +353,20 @@ def _eff_unit_price(prod: dict, variant_id: str = None) -> float:
     return round(base + adj, 2)
 
 
+def _server_variant_barcode(prod: dict, variant_id: str = None):
+    """GÜVENLİK: Stok düşüm anahtarını (barcode) SUNUCU'dan çöz. variant_id ile
+    eşleşen varyantın barkodunu döndürür; eşleşme yoksa None (o zaman mevcut istemci
+    değeri korunur → regresyon riski yok). İstemcinin yanlış varyantın stoğunu
+    düşürmesini engeller."""
+    if not variant_id:
+        return None
+    for v in (prod.get("variants") or []):
+        if v.get("id") == variant_id:
+            bc = v.get("barcode") or v.get("sku")
+            return bc or None
+    return None
+
+
 async def next_order_number() -> str:
     """Kısa, sıralı site sipariş numarası: W10001, W10002, ...
     Atomik sayaç (db.counters) ile çakışma imkânsız. Sayaç başarısız olursa
@@ -959,6 +973,10 @@ async def create_order(
         # veremiyordu. Bulunamayan (gerçek olmayan) kalem için istemci fiyatı korunur; loglanır.
         if prod:
             it["price"] = _eff_unit_price(prod, it.get("variant_id"))
+            # GÜVENLİK: stok anahtarını sunucudan çöz (yanlış varyant stoğu düşülmesin)
+            _sv_bc = _server_variant_barcode(prod, it.get("variant_id"))
+            if _sv_bc:
+                it["barcode"] = _sv_bc
         else:
             # GÜVENLİK (fiyat manipülasyonu): Ürün DB'de yoksa istemci fiyatına GÜVENME.
             # Eskiden istemci fiyatı korunuyordu → saldırgan bilinmeyen product_id'ye
@@ -1861,7 +1879,9 @@ async def record_order_redemptions(order: dict) -> None:
     İdempotent: aynı (coupon_id, order_id) için ikinci kez yazmaz. FİYATA DOKUNMAZ.
     Y6: Kart siparişlerinde ÖDEME ONAYINDAN sonra çağrılır; başarısız ödemede kupon yanmaz."""
     try:
-        _email = (order.get("shipping_address") or {}).get("email", "")
+        # GÜVENLİK: e-postayı lowercase normalize et — kupon per-user/first-order sayımı
+        # eval tarafında lowercase sorgulandığından, mixed-case saklarsak limit ATLANABİLİYORDU.
+        _email = ((order.get("shipping_address") or {}).get("email", "") or "").strip().lower()
         _redeem_ids = []
         _applied = order.get("applied_promotions") or []
         if _applied:
@@ -4880,8 +4900,15 @@ async def create_return_request(order_id: str, payload: dict, current_user: dict
         order = await db.orders.find_one({"order_number": order_id}, {"_id": 0})
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
-    if order.get("user_id") and current_user.get("id") and order["user_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    # GÜVENLİK (BOLA): Üyeli siparişte user_id eşleşmeli. MİSAFİR siparişte (user_id boş)
+    # eskiden kontrol atlanıp HERHANGİ bir üye iade açabiliyordu → artık üyenin kendi
+    # e-posta/telefonu siparişteki iletişimle eşleşmeli.
+    if order.get("user_id"):
+        if current_user.get("id") and order["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+    else:
+        if not _order_contact_matches(order, current_user.get("email", ""), current_user.get("phone", "")):
+            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
     return await _build_return_for_order(order, payload, current_user)
 
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from .deps import db, require_admin
+from .deps import db, require_admin, require_super_admin
 
 router = APIRouter(prefix="/admin/security", tags=["admin-security"])
 
@@ -170,7 +170,7 @@ async def recent_events(limit: int = Query(100, ge=1, le=500),
 
 
 @router.post("/unlock-user")
-async def unlock_user(payload: dict, current_user: dict = Depends(require_admin)):
+async def unlock_user(payload: dict, current_user: dict = Depends(require_super_admin)):
     """Admin manuel olarak kilitli hesabın kilidini açar."""
     email = (payload or {}).get("email", "").lower().strip()
     if not email:
@@ -214,7 +214,7 @@ async def list_ip_blocklist(current_user: dict = Depends(require_admin)):
 
 
 @router.post("/ip-blocklist")
-async def block_ip(payload: dict, current_user: dict = Depends(require_admin)):
+async def block_ip(payload: dict, current_user: dict = Depends(require_super_admin)):
     """Manuel IP ban — admin'in ilettiği IP'yi blocklist'e ekler.
     Body: {ip, hours? (default=24), permanent? (default=False), reason?}
     """
@@ -259,7 +259,7 @@ async def block_ip(payload: dict, current_user: dict = Depends(require_admin)):
 
 
 @router.delete("/ip-blocklist/{ip}")
-async def unblock_ip(ip: str, current_user: dict = Depends(require_admin)):
+async def unblock_ip(ip: str, current_user: dict = Depends(require_super_admin)):
     """IP ban'ı kaldır."""
     res = await db.ip_blocklist.delete_one({"ip": ip})
     await db.auth_audit_logs.insert_one({
