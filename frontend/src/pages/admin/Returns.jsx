@@ -335,13 +335,27 @@ export default function Returns() {
     localStorage.setItem("gp_next_no", next);
   };
 
-  const handleGiderPusulasi = async (claimId) => {
+  const handleGiderPusulasi = async (claim) => {
+    // claim_id (eski çağrı) yerine claim objesi bekleriz; geriye uyum:
+    const claimId = typeof claim === "string" ? claim : claim.claim_id;
+    const _claimObj = typeof claim === "string" ? null : claim;
     setGpLoading(true);
     try {
       const token = localStorage.getItem("token");
       const trackingNo = pad6(gpStart);
+      const body = { tracking_no: trackingNo };
+      // KISMİ GP: yalnız SEÇİLİ kalemler pusulaya girsin (Trendyol'da sadece M'yi ilerletince
+      // pusula tümünü basıyordu). Seçili kalem index'lerini backend'e gönder (item_indexes).
+      if (_claimObj && Array.isArray(_claimObj.items)) {
+        const allIds = _claimObj.items.map(i => i.claim_item_id).filter(Boolean);
+        const selIds = itemSel[claimId] || new Set(allIds);
+        const idxs = _claimObj.items
+          .map((it, idx) => (selIds.has(it.claim_item_id) ? idx : -1))
+          .filter(idx => idx >= 0);
+        if (idxs.length && idxs.length < _claimObj.items.length) body.item_indexes = idxs;
+      }
       const res = await axios.post(`${API}/integrations/trendyol/claims/${claimId}/gider-pusulasi`,
-        { tracking_no: trackingNo },
+        body,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setGpData({ ...res.data.gider_pusulasi, assigned_no: trackingNo });
@@ -844,7 +858,7 @@ export default function Returns() {
                           </>
                         ) : (<>
                         {renderGpNo(claim)}
-                        <button onClick={() => handleGiderPusulasi(claim.claim_id)}
+                        <button onClick={() => handleGiderPusulasi(claim)}
                           disabled={gpLoading}
                           data-testid={`gp-${claim.claim_id}`}
                           className={`p-1.5 rounded-lg transition-colors ${
