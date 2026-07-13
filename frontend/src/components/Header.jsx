@@ -488,11 +488,14 @@ export default function Header({ hideMenu = false }) {
                 {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
                 <div className={MEGA_LINK_GRID} style={megaCols(Object.keys(giyimMenu).length || 3)}>
                   {Object.entries(giyimMenu).map(([category, items]) => (
-                    <div key={category}>
+                    // Kolon başlığına/alanına gelince o ana kategorinin ürünleri sağda çıksın
+                    // (BEACHWEAR gibi alt-linki olmayan kolonlar dahil). Alt ürün hover'ı override eder.
+                    <div key={category} onMouseEnter={() => setHoveredCategory(slugify(category))}>
                       <Link
                         to={`/${slugify(category)}`}
                         className="block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer"
                         onClick={() => setActiveMenu(null)}
+                        onMouseEnter={() => setHoveredCategory(slugify(category))}
                       >
                         {category}
                       </Link>
