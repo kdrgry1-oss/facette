@@ -1655,22 +1655,36 @@ async def import_xml_products(
 
     # Feed'de OLMAYAN xml_feed ürünleri pasif yap (Ticimax'ta pasif/silinmiş)
     deactivated = 0
+    _deact_skipped = False
     if deactivate_missing and seen_xml_ids:
-        result = await db.products.update_many(
-            {
-                "source": "xml_feed",
-                "xml_id": {"$nin": list(seen_xml_ids)},
-                "is_active": {"$ne": False},
-            },
-            {
-                "$set": {
-                    "is_active": False,
-                    "deactivated_reason": "ticimax_xml_missing",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            },
-        )
-        deactivated = result.modified_count
+        # GÜVENLİK KİLİDİ: Eksik/kısmi/bozuk bir feed (ör. Ticimax geçici hata) TÜM kataloğu
+        # pasife almasın → "ürünler yok oldu" felaketi. Feed'deki ürün sayısı, mevcut xml_feed
+        # ürünlerinin çok altındaysa (>%40'ını pasife alacaksa) pasifleştirmeyi ATLA + uyar.
+        _total_xml = await db.products.count_documents({"source": "xml_feed"})
+        _would_deact = await db.products.count_documents({
+            "source": "xml_feed", "xml_id": {"$nin": list(seen_xml_ids)}, "is_active": {"$ne": False}})
+        if _total_xml > 20 and (len(seen_xml_ids) < _total_xml * 0.5 or _would_deact > _total_xml * 0.4):
+            _deact_skipped = True
+            logger.warning(
+                f"[xml-feed] GUVENLIK: feed cok kucuk gorunuyor (feed={len(seen_xml_ids)}, "
+                f"katalog={_total_xml}, pasife alinacakti={_would_deact}) -> TOPLU PASIFLESTIRME ATLANDI. "
+                f"Feed eksik/bozuk olabilir; urunler korundu.")
+        else:
+            result = await db.products.update_many(
+                {
+                    "source": "xml_feed",
+                    "xml_id": {"$nin": list(seen_xml_ids)},
+                    "is_active": {"$ne": False},
+                },
+                {
+                    "$set": {
+                        "is_active": False,
+                        "deactivated_reason": "ticimax_xml_missing",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+            )
+            deactivated = result.modified_count
 
     return {
         "success":     True,
@@ -1685,6 +1699,37 @@ async def import_xml_products(
             + (f", {errors} hata" if errors else "")
         ),
     }
+
+
+async def restore_xml_missing_products_once():
+    """TEK SEFERLİK OTOMATİK TELAFİ: bozuk/eksik feed yüzünden 'ticimax_xml_missing' ile pasife
+    alınmış ürünleri geri AKTİF eder. Settings bayrağıyla yalnız BİR KEZ çalışır (deploy'da);
+    böylece her açılışta çalışıp gelecekteki meşru pasifleştirmelerle savaşmaz. Sonraki İYİ feed
+    senkronu (güvenlik kilidi geçerse) gerçekten eksik olanları normal şekilde yine pasife alır."""
+    try:
+        flag = await db.settings.find_one({"id": "xml_missing_restore_v1"}, {"_id": 0})
+        if flag and flag.get("done"):
+            return {"restored": 0, "skipped": "already-done"}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res = await db.products.update_many(
+            {"deactivated_reason": "ticimax_xml_missing", "is_active": {"$ne": True}},
+            {"$set": {"is_active": True, "updated_at": now_iso},
+             "$unset": {"deactivated_reason": ""}},
+        )
+        await db.settings.update_one(
+            {"id": "xml_missing_restore_v1"},
+            {"$set": {"id": "xml_missing_restore_v1", "done": True,
+                      "restored": res.modified_count, "at": now_iso}},
+            upsert=True,
+        )
+        if res.modified_count:
+            logger.info(f"[xml-feed] TELAFI: {res.modified_count} pasife alinan urun geri aktiflestirildi (tek seferlik)")
+        return {"restored": res.modified_count}
+    except Exception as e:
+        logger.warning(f"[xml-feed] restore_xml_missing_products_once hata: {e}")
+        return {"restored": 0, "error": str(e)}
+
+
 @router.get("/xml/status")
 async def get_xml_feed_status():
     """XML feed son senkronizasyon bilgisi"""

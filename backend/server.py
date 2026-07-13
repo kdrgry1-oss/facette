@@ -184,6 +184,16 @@ async def lifespan(app: FastAPI):
         except Exception as _de:
             logger.error(f"[guvenlik] customer-admin temizligi hatasi: {_de}")
 
+        # TELAFİ: bozuk/eksik XML feed yüzünden pasife alınmış ("ticimax_xml_missing") ürünleri
+        # TEK SEFER geri aktif et — "bazı ürünler yok oldu" sorununu otomatik onarır (bayrakla 1 kez).
+        try:
+            from routes.integrations_common import restore_xml_missing_products_once
+            _rx = await restore_xml_missing_products_once()
+            if _rx.get("restored"):
+                logger.warning(f"[urun-telafi] {_rx['restored']} pasife alinan urun geri aktiflestirildi.")
+        except Exception as _re:
+            logger.error(f"[urun-telafi] xml-missing restore hatasi: {_re}")
+
         # Create indexes
         await db.products.create_index("slug")
         await db.products.create_index("stock_code")
