@@ -59,8 +59,9 @@ const DEFAULT_AKSESUAR_MENU = [
   { name: "Çanta", slug: "canta" },
   { name: "Şal", slug: "sal" },
   { name: "Atkı", slug: "atki" },
-  { name: "Kemer", slug: "kemer" },
-  { name: "Şapka", slug: "sapka" },
+  { name: "Fular", slug: "fular" },
+  // NOT: Kemer & Şapka kaldırıldı (mağazada yok). CANLI menü panelden (Menü Yönetimi) beslendiği
+  // için canlıda da kaldırmak istersen Tasarım > Menü Yönetimi'nden bu iki satırı sil.
 ];
 
 // API tab'ini (page-blocks/header-menu) mevcut render şekline dönüştürür.
@@ -554,7 +555,8 @@ export default function Header({ hideMenu = false }) {
                 {/* Categories */}
                 <div className="flex-1">
                   <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
-                  <ul className={MEGA_LINK_GRID} style={megaCols(2)}>
+                  {/* Tek kolon: Şal/Kemer/Fular sağa taşmaz, hepsi SOLDA alt alta listelenir. */}
+                  <ul className={MEGA_LINK_GRID} style={megaCols(1)}>
                     {aksesuarMenu.map((item) => (
                       <li key={item.slug}>
                         <Link
@@ -682,6 +684,14 @@ export default function Header({ hideMenu = false }) {
                       {item.name}
                     </Link>
                   ))}
+                  {/* Mobil: AKSESUAR en altında "Tümünü Gör" */}
+                  <Link
+                    to="/aksesuar"
+                    className="block py-1.5 mt-1 text-[13px] font-medium underline text-black/80"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Tümünü Gör
+                  </Link>
                 </div>
               </details>
 
