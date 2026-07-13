@@ -631,12 +631,29 @@ async def _build_products_query(
                 # göstermek yerine boş döndür (eşleşmeyen sentinel).
                 and_clauses.append({"id": "__en_yeniler_category_missing__"})
         elif cat_slug == "sale":
-            and_clauses.append({"$or": [
+            # İndirimli fiyatlılar VE elle "İndirim/Sale" kategorisine eklenen ürünler (manuel etiket).
+            _sale_or = [
                 {"sale_price": {"$gt": 0}},
                 {"discount_price": {"$gt": 0}},
                 {"is_on_sale": True},
                 {"sale_active": True},
-            ]})
+            ]
+            # "İNDİRİM"/"Sale" kategorisine üye ürünleri de kapsa (slug: indirim/sale/firsat).
+            _sale_slugs = {"indirim", "sale", "firsat", "fırsat", "indirimli"}
+            _sale_cat_ids, _sale_cat_names = [], []
+            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1, "slug_aliases": 1}):
+                _csl = (_c.get("slug") or "").strip().lower()
+                _als = {str(a).strip().lower() for a in (_c.get("slug_aliases") or [])}
+                if _csl in _sale_slugs or (_sale_slugs & _als) or generate_slug(_c.get("name") or "") in _sale_slugs:
+                    if _c.get("id"):
+                        _sale_cat_ids.append(_c["id"])
+                    if _c.get("name"):
+                        _sale_cat_names.append(_c["name"])
+            if _sale_cat_ids:
+                _sale_or.append({"category_ids": {"$in": _sale_cat_ids}})
+            if _sale_cat_names:
+                _sale_or.append({"category_name": {"$in": _sale_cat_names}})
+            and_clauses.append({"$or": _sale_or})
         else:
             dia = _slug_to_diacritic_regex(cat_slug)
             # Slug'tan tam kategori adını çöz (generate_slug ile ters eşleme)

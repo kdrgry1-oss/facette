@@ -2401,7 +2401,15 @@ export default function AdminProducts() {
                                   />
                                 </div>
                                 <div className="p-1">
-                                  {categories.filter(c => (c.full_name || c.name).toLowerCase().includes(categorySearchTerm.toLowerCase())).slice().sort((a, b) => (a.full_name || a.name || "").localeCompare(b.full_name || b.name || "", "tr")).map(c => {
+                                  {categories.filter(c => {
+                                    // Arama: ad + full_name + SLUG + slug_aliases; ayrıca EŞANLAM
+                                    // ('sale'↔'indirim') → "sale" yazınca İNDİRİM kategorisi bulunur.
+                                    const _SYN = { sale: "indirim", indirim: "sale", "fırsat": "indirim", firsat: "indirim" };
+                                    const q = (categorySearchTerm || "").toLowerCase().trim();
+                                    if (!q) return true;
+                                    const hay = [c.full_name, c.name, c.slug, ...(c.slug_aliases || [])].filter(Boolean).map(x => String(x).toLowerCase()).join(" ");
+                                    return hay.includes(q) || (_SYN[q] && hay.includes(_SYN[q]));
+                                  }).slice().sort((a, b) => (a.full_name || a.name || "").localeCompare(b.full_name || b.name || "", "tr")).map(c => {
                                     const checked = (formData.categories || []).includes(c.id);
                                     const _fn = c.full_name || c.name || "";
                                     const _parts = _fn.split(" > ");
