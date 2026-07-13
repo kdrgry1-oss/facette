@@ -3799,12 +3799,26 @@ async def get_trendyol_claims(
             c["staff_notes"] = _notes_map.get(str(c.get("order_number")), [])
 
     # Sekme adetleri — iade_scoped (iptal hariç) üzerinden, _claim_bucket ile.
+    # ÖNEMLİ (#11): Trendyol panelindeki "aksiyon bekleyen" sayısı ÜRÜN (kalem) adedini
+    # gösterir; bir iade talebi (claim) birden çok ürün içerebilir. Bu yüzden sekme rozetleri
+    # de claim değil ÜRÜN sayısını sayar → Trendyol ile birebir eşleşir. Kalemi olmayan
+    # (manuel/eski) kayıt en az 1 sayılır. Liste hâlâ claim satırı gösterir; rozet ürün adedi.
+    def _claim_item_count(_c) -> int:
+        _its = _c.get("items") or []
+        _n = len(_its)
+        return _n if _n > 0 else 1
+
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
+    _ccount = dict(_bcount)  # claim (satır) adedi — dahili referans/uyum için
     for c in iade_scoped:
         _b = _claim_bucket(c)
         if _b in _bcount:
-            _bcount[_b] += 1
-    tab_counts = {"all": len(iade_scoped), **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
+            _bcount[_b] += _claim_item_count(c)
+            _ccount[_b] += 1
+    _all_items = sum(_claim_item_count(c) for c in iade_scoped)
+    tab_counts = {"all": _all_items, **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
+    # Claim (satır) bazlı adetler — frontend isterse "X talep / Y ürün" gösterebilsin diye ayrıca döner.
+    tab_claim_counts = {"all": len(iade_scoped), **_ccount, "acik_iade": _ccount["talep_olusturulan"] + _ccount["kargoya_verilen"]}
 
     # İstatistikler — "Toplam İade" kartı = "Tüm İadeler" sekmesi (iptal hariç tekil iade).
     total_returns = len(iade_scoped)
@@ -3817,6 +3831,7 @@ async def get_trendyol_claims(
         "page": page,
         "limit": limit,
         "tab_counts": tab_counts,
+        "tab_claim_counts": tab_claim_counts,
         "stats": {
             "total_returns": total_returns,
             "total_cancels": total_cancels,

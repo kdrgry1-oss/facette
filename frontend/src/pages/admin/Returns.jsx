@@ -120,6 +120,7 @@ export default function Returns() {
   // Web Sitesi sekmesi doğrudan sipariş bazlı iade akışını (RooftrReturns) gösterir; alt-sekme yok.
   const [statusTab, setStatusTab] = useState("all");
   const [tabCounts, setTabCounts] = useState({});
+  const [tabClaimCounts, setTabClaimCounts] = useState({}); // #11: talep (satır) adedi — rozet ürün adedini gösterir
   const [itemSel, setItemSel] = useState({}); // {claim_id: Set(claim_item_id)} - manuel adet onayı
   const toggleItem = (claimId, itemId, allIds) => {
     setItemSel(prev => {
@@ -173,6 +174,7 @@ export default function Returns() {
       setTotal(res.data.total || 0);
       setStats(res.data.stats || {});
       setTabCounts(res.data.tab_counts || {});
+      setTabClaimCounts(res.data.tab_claim_counts || {});
     } catch (err) {
       console.error(err);
     } finally {
@@ -620,7 +622,12 @@ export default function Returns() {
               onClick={() => { setStatusTab(t.key); setPage(1); }}
               className={`whitespace-nowrap px-3 py-1.5 rounded-full text-sm border transition-colors ${statusTab === t.key ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}>
               {t.label}
-              <span className={`ml-1.5 text-xs ${statusTab === t.key ? "text-gray-300" : "text-gray-400"}`}>{tabCounts[t.key] ?? 0}</span>
+              {/* #11: rozet ürün (kalem) adedi = Trendyol ile eşleşir; talep adedi farklıysa parantezde */}
+              <span className={`ml-1.5 text-xs ${statusTab === t.key ? "text-gray-300" : "text-gray-400"}`}>
+                {tabCounts[t.key] ?? 0}
+                {tabClaimCounts[t.key] != null && tabClaimCounts[t.key] !== (tabCounts[t.key] ?? 0)
+                  ? ` (${tabClaimCounts[t.key]} talep)` : ""}
+              </span>
             </button>
           ))}
         </div>
