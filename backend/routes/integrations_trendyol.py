@@ -3798,26 +3798,50 @@ async def get_trendyol_claims(
         for c in claims:
             c["staff_notes"] = _notes_map.get(str(c.get("order_number")), [])
 
-    # Sekme adetleri — iade_scoped (iptal hariç) üzerinden, _claim_bucket ile.
-    # ÖNEMLİ (#11): Trendyol panelindeki "aksiyon bekleyen" sayısı ÜRÜN (kalem) adedini
-    # gösterir; bir iade talebi (claim) birden çok ürün içerebilir. Bu yüzden sekme rozetleri
-    # de claim değil ÜRÜN sayısını sayar → Trendyol ile birebir eşleşir. Kalemi olmayan
-    # (manuel/eski) kayıt en az 1 sayılır. Liste hâlâ claim satırı gösterir; rozet ürün adedi.
-    def _claim_item_count(_c) -> int:
-        _its = _c.get("items") or []
-        _n = len(_its)
-        return _n if _n > 0 else 1
+    # Sekme adetleri (#11) — Trendyol "aksiyon bekleyen ÜRÜN sayısı" ile birebir tutması için
+    # ÜRÜN (kalem) bazında sayılır. KRİTİK: bir claim KARIŞIK statülü olabilir (ör. 2 kalem;
+    # 1'i WaitingInAction, 1'i Accepted). Bu yüzden claim'in tüm kalemlerini tek kovaya atmak
+    # YANLIŞ (Trendyol'u aşar). Doğrusu: her claimItem'i KENDİ statüsüyle kovaya atmak.
+    # Statü kaynağı: raw_data.items[].claimItems[].claimItemStatus.name (her claim'de mevcut,
+    # re-sync gerekmez). Manuel/site kaydı veya raw yoksa → claim kovasında stored kalem (min 1).
+    def _item_status_to_bucket(_nm: str, _has_cargo: bool):
+        _nm = (_nm or "").strip()
+        if _nm == "Accepted":
+            return "onaylanan"
+        if _nm in ("Rejected", "Unresolved"):
+            return "reddedilen"
+        if _nm in ("WaitingInAction", "InAnalysis"):
+            return "aksiyon_bekleyen"
+        if _nm == "Created":
+            return "kargoya_verilen" if _has_cargo else "talep_olusturulan"
+        return None  # Cancelled / bilinmeyen → sayma (iptal edilmiş kalem iadelerde görünmez)
 
     _bcount = {"talep_olusturulan": 0, "kargoya_verilen": 0, "aksiyon_bekleyen": 0, "onaylanan": 0, "reddedilen": 0}
-    _ccount = dict(_bcount)  # claim (satır) adedi — dahili referans/uyum için
+    _ccount = dict(_bcount)  # claim (satır) adedi — liste satır sayısıyla tutması için
+    _all_items = 0
     for c in iade_scoped:
-        _b = _claim_bucket(c)
-        if _b in _bcount:
-            _bcount[_b] += _claim_item_count(c)
-            _ccount[_b] += 1
-    _all_items = sum(_claim_item_count(c) for c in iade_scoped)
+        _cb = _claim_bucket(c)
+        if _cb in _ccount:
+            _ccount[_cb] += 1
+        _has_cargo = bool(str(c.get("cargo_tracking_number") or "").strip())
+        _raw = c.get("raw_data") or {}
+        _counted = 0
+        if not c.get("manual") and (_raw.get("items")):
+            for _it in (_raw.get("items") or []):
+                for _ci in (_it.get("claimItems") or []):
+                    _nm = ((_ci.get("claimItemStatus") or {}).get("name") or "")
+                    _b = _item_status_to_bucket(_nm, _has_cargo)
+                    if _b in _bcount:
+                        _bcount[_b] += 1
+                        _all_items += 1
+                        _counted += 1
+        if _counted == 0 and _cb in _bcount:
+            # Manuel/site kaydı veya raw_data yok → claim kovasında stored kalem adedi (en az 1)
+            _n = len(c.get("items") or []) or 1
+            _bcount[_cb] += _n
+            _all_items += _n
     tab_counts = {"all": _all_items, **_bcount, "acik_iade": _bcount["talep_olusturulan"] + _bcount["kargoya_verilen"]}
-    # Claim (satır) bazlı adetler — frontend isterse "X talep / Y ürün" gösterebilsin diye ayrıca döner.
+    # Claim (satır) bazlı adetler — frontend "N talep" ipucu için ayrıca döner.
     tab_claim_counts = {"all": len(iade_scoped), **_ccount, "acik_iade": _ccount["talep_olusturulan"] + _ccount["kargoya_verilen"]}
 
     # İstatistikler — "Toplam İade" kartı = "Tüm İadeler" sekmesi (iptal hariç tekil iade).
