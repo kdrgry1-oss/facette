@@ -3780,6 +3780,28 @@ async def get_trendyol_claims(
         c["bucket_label"] = _BUCKET_LABEL.get(_b, "—")
         if c.get("manual") and c.get("order_status"):
             c["bucket_label"] = _ORDER_STATUS_TR.get(c.get("order_status"), c["bucket_label"])
+        # İADE SEBEBİNİ GÖSTERMEYE ZORLA: claim_reason boşsa (eski/eksik kayıtlar) raw_data'daki
+        # customerClaimItemReason.name'den türet + kalem sebeplerini de doldur. Böylece Trendyol/HB
+        # iadelerinde "Sebep" alanı ve kalem sebepleri "-" kalmaz.
+        if not (c.get("claim_reason") or "").strip() or any(not (it.get("reason") or "").strip() for it in (c.get("items") or [])):
+            _raw_items = (c.get("raw_data") or {}).get("items") or []
+            # barkod/kalem-id -> sebep haritası
+            _rmap, _first = {}, ""
+            for _it in _raw_items:
+                _ol = _it.get("orderLine") or {}
+                _bc = str(_ol.get("barcode") or "")
+                for _ci in (_it.get("claimItems") or []):
+                    _rn = ((_ci.get("customerClaimItemReason") or {}).get("name") or "").strip()
+                    if _rn:
+                        _first = _first or _rn
+                        if _bc:
+                            _rmap[_bc] = _rn
+                        _rmap[str(_ci.get("id") or "")] = _rn
+            if _first and not (c.get("claim_reason") or "").strip():
+                c["claim_reason"] = _first
+            for it in (c.get("items") or []):
+                if not (it.get("reason") or "").strip():
+                    it["reason"] = _rmap.get(str(it.get("barcode") or "")) or _rmap.get(str(it.get("claim_item_id") or "")) or _first or ""
 
     # Personel (admin) notlari: bu sayfadaki claim'lerin siparislerinden admin_notes'u tek
     # sorguyla cek, order_number'a gore iade satirina ekle (Siparisler'de girilen personel
