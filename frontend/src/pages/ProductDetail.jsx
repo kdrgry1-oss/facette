@@ -37,39 +37,54 @@ function estimateDelivery(minDays = 2, maxDays = 4) {
   return `${fmt(addBiz(now, minDays))} - ${fmt(addBiz(now, maxDays))}`;
 }
 
-// "xx saat içinde sipariş ver → bugün/… kargoda" aciliyet ibaresi.
-// KURAL: Cumartesi/Pazar kargo YOK. Cutoff hafta içi 12:00.
-//  • Hafta içi ve 12:00'dan önce  → bugün kargoda (kalan süre sayacı)
-//  • Hafta içi 12:00'dan sonra     → bir sonraki İŞ GÜNÜ kargoda
-//  • Cumartesi/Pazar               → Pazartesi kargoda (hafta sonu atlanır)
-// Böylece hafta sonu asla "bugün/yarın (Cmt/Paz) kargoda" YAZMAZ; gerçek sevk günü gösterilir.
+// "xx saat yy dakika içinde kargoda" kargo aciliyeti + geri sayım.
+// KURAL: Kargo YALNIZ iş günlerinde (Cmt/Paz + resmi tatiller hariç). Cutoff 10:30.
+//  • İş günü ve 10:30'dan ÖNCE → bugün kargoda + geri sayım ("S saat D dakika içinde kargoda")
+//  • İş günü 10:30'dan SONRA (gün dönmese de) → bir sonraki İŞ GÜNÜ kargoda ("yarın kargoda")
+//  • Hafta sonu / resmi tatil → sonraki iş günü ("Pazartesi kargoda")
+// Geri sayımda yalnız SAAT ve DAKİKA gösterilir; saniye gösterilmez (dakikada bir güncellenir).
 const _TR_DAYS = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
-function shippingCutoff(cutoffHour = 12) {
+// Resmi tatiller. Sabit ulusal bayramlar MM-DD; her yıl kayan dini bayramlar YYYY-MM-DD
+// olarak eklenir (aşağıya ilgili yılın Ramazan/Kurban tarihleri girilebilir).
+const TR_PUBLIC_HOLIDAYS = new Set([
+  "01-01", // Yılbaşı
+  "04-23", // Ulusal Egemenlik ve Çocuk Bayramı
+  "05-01", // Emek ve Dayanışma Günü
+  "05-19", // Atatürk'ü Anma, Gençlik ve Spor Bayramı
+  "07-15", // Demokrasi ve Millî Birlik Günü
+  "08-30", // Zafer Bayramı
+  "10-29", // Cumhuriyet Bayramı
+  // Dini bayramlar (değişken tarihli) — örn: "2026-03-20", "2026-05-27" ...
+]);
+function _isHolidayDate(d) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return TR_PUBLIC_HOLIDAYS.has(`${mm}-${dd}`) || TR_PUBLIC_HOLIDAYS.has(`${d.getFullYear()}-${mm}-${dd}`);
+}
+function _isWorkingDay(d) {
+  const wd = d.getDay();
+  return wd !== 0 && wd !== 6 && !_isHolidayDate(d);
+}
+function shippingCutoff(cutoffHour = 10, cutoffMinute = 30) {
   const now = new Date();
-  const wd = now.getDay(); // 0 Paz … 6 Cmt
-  const isWeekend = wd === 0 || wd === 6;
-  const beforeCutoff = now.getHours() < cutoffHour;
+  const cutoff = new Date(now); cutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
 
-  if (!isWeekend && beforeCutoff) {
-    const remMs = new Date(now).setHours(cutoffHour, 0, 0, 0) - now.getTime();
+  // İş günü ve cutoff'tan önce → bugün kargoda + geri sayım (saat + dakika)
+  if (_isWorkingDay(now) && now.getTime() < cutoff.getTime()) {
+    const remMs = cutoff.getTime() - now.getTime();
     const h = Math.floor(remMs / 3600000);
     const m = Math.floor((remMs % 3600000) / 60000);
-    const left = h >= 1 ? `${h} saat ${m} dk` : `${m} dk`;
-    return { urgent: true, text: `Sonraki ${left} içinde sipariş ver,`, strong: "bugün kargoda." };
+    const left = h >= 1 ? `${h} saat ${m} dakika` : `${m} dakika`;
+    return { urgent: true, countdown: true, text: "Siparişin", strong: `${left} içinde kargoda.` };
   }
 
-  // Sonraki iş günü (Cmt/Paz atlanır)
-  const next = new Date(now);
-  do { next.setDate(next.getDate() + 1); } while (next.getDay() === 0 || next.getDay() === 6);
-  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  // Cutoff geçti veya bugün iş günü değil → sonraki İŞ GÜNÜ (hafta sonu + tatil atlanır)
+  const next = new Date(now); next.setHours(0, 0, 0, 0);
+  do { next.setDate(next.getDate() + 1); } while (!_isWorkingDay(next));
+  const tomorrow = new Date(now); tomorrow.setHours(0, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
   const isTomorrow = next.toDateString() === tomorrow.toDateString();
   const label = isTomorrow ? "yarın" : _TR_DAYS[next.getDay()];
-  // Hafta içi cutoff sonrası: yarın kargoda. Hafta sonu: "Pazartesi (12:00'a kadar) kargoda."
-  return {
-    urgent: false,
-    text: isWeekend ? `${label} 12:00'a kadar verilen siparişler` : "Siparişin",
-    strong: `${label} kargoda.`,
-  };
+  return { urgent: false, countdown: false, text: "Siparişin", strong: `${label} kargoda.` };
 }
 
 // Son gezilen ürünler — localStorage'da küçük anlık görüntü (snapshot) listesi.
@@ -106,6 +121,12 @@ export default function ProductDetail() {
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [quantity, setQuantity] = useState(1);
+  // Kargo geri sayımı: dakikada bir yeniden render (saniye gösterilmez, saat+dakika canlı düşer)
+  const [, setShipTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setShipTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
   const [showSizeChart, setShowSizeChart] = useState(false);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [mobileImageIdx, setMobileImageIdx] = useState(0);
@@ -852,7 +873,7 @@ export default function ProductDetail() {
                     </button>
                   </div>
 
-                  {/* Kargo aciliyeti — xx saat içinde sipariş ver → bugün/yarın kargoda */}
+                  {/* Kargo aciliyeti/geri sayımı — 10:30 cutoff: bugün kargoda (S saat D dakika içinde) / yarın kargoda */}
                   {(() => {
                     const c = shippingCutoff();
                     return (
