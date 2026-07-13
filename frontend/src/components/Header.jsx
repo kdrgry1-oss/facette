@@ -355,9 +355,10 @@ export default function Header({ hideMenu = false }) {
           )}
           {/* Overlay'de logo/ikonlar görselin üzerinde biraz AŞAĞIDA başlasın: ekstra üst boşluk */}
           <div className={`relative max-w-screen-2xl mx-auto px-3 md:px-6 ${heroOverlay ? "pt-6 md:pt-4" : ""}`}>
-          {/* Masaüstünde (lg) logo + sol menü + sağ butonlar birlikte biraz aşağıda dursun:
-              satıra üstten boşluk (mobil/tablet aynı kalır). */}
-          <div className="relative flex items-center h-12 md:h-14 lg:pt-6">
+          {/* Masaüstünde (lg) logo + menü + butonlar YALNIZ hero-overlay (üst/şeffaf) durumunda
+              biraz aşağıda dursun. STICKY (kaydırınca beyaz sabit header) devreye girince pt-6
+              KALKAR → içerik dikeyde ortalı kalır (aşağı kaymaz). Mobil/tablet aynı. */}
+          <div className={`relative flex items-center h-12 md:h-14 ${heroOverlay ? "lg:pt-6" : ""}`}>
             {/* Left: Navigation Menu */}
             <div className="flex-1 flex items-center gap-2.5">
               {!isCheckout && (

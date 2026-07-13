@@ -211,5 +211,40 @@
                 setTimeout(_phInit, 2500);
             }
         </script>
+        <script>
+            // CSS SELF-HEAL: Instagram/Facebook gibi in-app tarayıcılar 'no-cache' başlığını yok
+            // sayıp eski index.html'i önbelleğe alabiliyor → yeni deploy'un hash'li CSS'ine 404 →
+            // site STİLSİZ (ham HTML, üst üste) açılıyor. Yüklemeden sonra ana CSS gerçekten
+            // uygulanmış mı kontrol et; uygulanmadıysa cache-bust'lı bir kez tazele (sessionStorage
+            // bayrağı sonsuz döngüyü önler).
+            (function () {
+                function cssApplied() {
+                    var links = document.querySelectorAll('link[rel="stylesheet"][href*="/static/css/"]');
+                    if (!links.length) return true; // CSS linki yoksa (inline stil) kontrol etme
+                    var sheets = document.styleSheets;
+                    for (var i = 0; i < sheets.length; i++) {
+                        var href = sheets[i].href || "";
+                        if (href.indexOf("/static/css/") > -1) {
+                            try {
+                                if (sheets[i].cssRules && sheets[i].cssRules.length > 0) return true;
+                            } catch (e) { return true; } // erişilemiyorsa yüklenmiş say (güvenli)
+                        }
+                    }
+                    return false;
+                }
+                function check() {
+                    try {
+                        if (cssApplied()) { sessionStorage.removeItem("__css_heal"); return; }
+                        if (sessionStorage.getItem("__css_heal")) return; // zaten bir kez denendi
+                        sessionStorage.setItem("__css_heal", "1");
+                        var u = location.pathname + location.search +
+                            (location.search ? "&" : "?") + "_r=" + Date.now();
+                        location.replace(u); // cache-bust ile taze index.html
+                    } catch (e) {}
+                }
+                if (document.readyState === "complete") setTimeout(check, 1200);
+                else window.addEventListener("load", function () { setTimeout(check, 1200); });
+            })();
+        </script>
     </body>
 </html>
