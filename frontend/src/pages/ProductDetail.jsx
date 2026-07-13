@@ -1233,9 +1233,9 @@ export default function ProductDetail() {
       {/* Size Chart Modal – HTML table */}
       {showSizeChart && (sizeTableData || sizeTableImg) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowSizeChart(false)}>
-          <div className="bg-white max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white flex justify-between items-center p-4 border-b">
-              <h3 className="text-sm font-bold uppercase tracking-wider">Beden Tablosu</h3>
+          <div className="bg-white max-w-3xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white flex justify-between items-center px-6 py-4 border-b">
+              <h3 className="text-base font-semibold uppercase tracking-wider text-gray-800">Beden Kılavuzu</h3>
               <button onClick={() => setShowSizeChart(false)} className="p-1"><X size={18} /></button>
             </div>
             {!sizeTableData && sizeTableImg && (
@@ -1245,30 +1245,53 @@ export default function ProductDetail() {
             )}
             {sizeTableData && (
             <div className="p-6" data-testid="size-table-html">
-              <p className="text-xs text-gray-500 mb-4">Tüm ölçüler cm cinsindendir.</p>
-              <div className="overflow-x-auto border rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider">Beden</th>
-                      {sizeTableData.columns.map(c => (
-                        <th key={c} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider">{c}</th>
+              {/* Üst blok: sol ürün görseli + sağda ad & Ürün Özellikleri (örnek düzen) */}
+              <div className="flex flex-col sm:flex-row gap-6 mb-6">
+                {(product.images?.[0] || product.image) && (
+                  <img
+                    src={optimizeImg(product.images?.[0] || product.image, 500)}
+                    alt={product.name}
+                    className="w-40 sm:w-44 aspect-[3/4] object-cover object-top flex-shrink-0 bg-gray-50"
+                    loading="lazy"
+                  />
+                )}
+                <div className="min-w-0">
+                  <h4 className="text-lg text-gray-700 mb-3">{product.name}</h4>
+                  {product.description && (
+                    <>
+                      <p className="text-sm font-semibold text-gray-800 mb-1.5">Ürün Özellikleri</p>
+                      <div
+                        className="text-sm text-gray-600 leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-0.5"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) }}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+              {/* Ölçü tablosu — TRANSPOZE: satır=ölçü (Göğüs/Bel/Boy), kolon=beden (34/36/38/40) */}
+              <div className="overflow-x-auto border border-gray-200">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left px-5 py-3 font-semibold text-gray-800">Ölçüler</th>
+                      {sizeTableData.sizes.map(s => (
+                        <th key={s} className="text-center px-5 py-3 font-semibold text-gray-800 border-l border-gray-200">{s}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {sizeTableData.sizes.map((s, i) => (
-                      <tr key={s} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-4 py-3 font-bold text-gray-900">{s}</td>
-                        {sizeTableData.columns.map(c => (
-                          <td key={c} className="px-4 py-3 text-gray-700">{sizeTableData.values?.[s]?.[c] || '—'}</td>
+                    {sizeTableData.columns.map((c, ri) => (
+                      <tr key={c} className={`border-b border-gray-100 ${ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                        <td className="px-5 py-3 text-gray-700">{c}</td>
+                        {sizeTableData.sizes.map(s => (
+                          <td key={s} className="px-5 py-3 text-center text-gray-600 border-l border-gray-100">{sizeTableData.values?.[s]?.[c] || '—'}</td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 mt-4">Değerler ± 1-2 cm tolerans taşıyabilir.</p>
+              <p className="text-xs text-gray-400 mt-4">Tüm ölçüler cm cinsindendir; ± 1-2 cm tolerans taşıyabilir.</p>
             </div>
             )}
           </div>
