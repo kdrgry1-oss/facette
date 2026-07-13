@@ -620,11 +620,13 @@ export function ExtraReports() {
   const [cities, setCities] = useState([]);
   const [profit, setProfit] = useState([]);
   const [moves, setMoves] = useState([]);
+  const [source, setSource] = useState("all");
   useEffect(() => {
     (async () => {
+      // Saatlik + il bazında rapor KAYNAĞA göre ayrılır (site/trendyol/hepsiburada/temu).
       const results = await Promise.allSettled([
-        axios.get(`${API}/admin/reports-extra/hourly`, { headers: h() }),
-        axios.get(`${API}/admin/reports-extra/by-city`, { headers: h() }),
+        axios.get(`${API}/admin/reports-extra/hourly`, { headers: h(), params: { source } }),
+        axios.get(`${API}/admin/reports-extra/by-city`, { headers: h(), params: { source } }),
         axios.get(`${API}/admin/reports-extra/profit`, { headers: h() }),
         axios.get(`${API}/admin/reports-extra/stock-movements`, { headers: h() }),
       ]);
@@ -634,10 +636,19 @@ export function ExtraReports() {
       setProfit(pick(results[2])?.rows || []);
       setMoves(pick(results[3])?.rows || []);
     })();
-  }, []);
+  }, [source]);
   return (
     <div className="space-y-6" data-testid="extra-reports-page">
-      <h1 className="text-2xl font-bold">Gelişmiş Raporlar</h1>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-2xl font-bold">Gelişmiş Raporlar</h1>
+        <select value={source} onChange={(e) => setSource(e.target.value)} className="px-3 py-1.5 border rounded text-sm" title="Saatlik ve il bazında satışı kaynağa göre ayır">
+          <option value="all">Tüm Kaynaklar</option>
+          <option value="site">Site (Kendi)</option>
+          <option value="trendyol">Trendyol</option>
+          <option value="hepsiburada">Hepsiburada</option>
+          <option value="temu">Temu</option>
+        </select>
+      </div>
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
         <span className="font-semibold">Bu raporda:</span> Dört farklı kesit bir arada — <b>saatlik satış</b> (son 7 gün, en yoğun saatler), <b>il bazında satış</b> (son 30 gün), <b>ürün karlılık raporu</b> (satılan, ciro, maliyet, kâr ve marj %) ve <b>stok hareketi</b> (son 30 günde en çok çıkan ürünler). Karlılık tablosundan hangi ürünlerin gerçekte kâr bıraktığını, düşük marjlıları fark edip fiyat/maliyet aksiyonu alabilirsiniz (kâr için ürünlere <b>alış maliyeti</b> girilmiş olmalı).

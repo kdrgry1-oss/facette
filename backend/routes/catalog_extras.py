@@ -394,11 +394,23 @@ async def resolve_shipping(cart_total: float = Query(0)):
 extra_reports_router = APIRouter(prefix="/admin/reports-extra", tags=["admin-reports-extra"])
 
 
+# Gelişmiş Raporlar kaynak (site/trendyol/hepsiburada/temu) filtresi — pazaryeri platform VEYA
+# marketplace alanında durabilir; 'site' = pazaryeri OLMAYAN. Boş/all = filtre yok.
+_MARKETPLACES_EX = ["trendyol", "hepsiburada", "temu", "n11", "amazon"]
+def _src_match_ex(source):
+    s = (source or "all").strip().lower()
+    if s in ("", "all", "tum", "tümü", "hepsi"):
+        return {}
+    if s in ("site", "facette", "web", "kendi"):
+        return {"platform": {"$nin": _MARKETPLACES_EX}, "marketplace": {"$nin": _MARKETPLACES_EX}}
+    return {"$or": [{"platform": s}, {"marketplace": s}]}
+
+
 @extra_reports_router.get("/hourly")
-async def hourly_sales(days: int = Query(7, ge=1, le=90), current_user: dict = Depends(require_admin)):
+async def hourly_sales(days: int = Query(7, ge=1, le=90), source: Optional[str] = None, current_user: dict = Depends(require_admin)):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     pipeline = [
-        {"$match": {"created_at": {"$gte": cutoff}, "status": {"$ne": "cancelled"}}},
+        {"$match": {"created_at": {"$gte": cutoff}, "status": {"$ne": "cancelled"}, **_src_match_ex(source)}},
         {"$group": {"_id": {"$hour": {"date": {"$dateFromString": {"dateString": "$created_at"}}, "timezone": "Europe/Istanbul"}}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"_id": 1}},
     ]
@@ -412,13 +424,13 @@ async def hourly_sales(days: int = Query(7, ge=1, le=90), current_user: dict = D
 
 
 @extra_reports_router.get("/by-city")
-async def by_city(start_date: Optional[str] = None, end_date: Optional[str] = None, current_user: dict = Depends(require_admin)):
+async def by_city(start_date: Optional[str] = None, end_date: Optional[str] = None, source: Optional[str] = None, current_user: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc)
     # TR yerel günü → UTC sınırı (bitiş günü tam dahil, saat-dilimi kayması yok).
     s = tr_day_start_utc(start_date) if start_date else (now - timedelta(days=30)).isoformat()
     e = tr_day_end_utc(end_date) if end_date else now.isoformat()
     pipeline = [
-        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}}},
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$ne": "cancelled"}, **_src_match_ex(source)}},
         {"$group": {"_id": {"$ifNull": ["$shipping_address.city", "—"]}, "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"revenue": -1}},
     ]
