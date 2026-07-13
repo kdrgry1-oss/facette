@@ -890,6 +890,12 @@ export default function Returns() {
           </DialogHeader>
           {gpData && (
             <div className="print:hidden">
+              {gpData.cargo_campaign_warning && (
+                <div className="mb-3 flex items-start gap-2 rounded-lg border-2 border-red-400 bg-red-50 px-3 py-2 text-red-800">
+                  <span className="text-lg leading-none">⚠️</span>
+                  <span className="text-sm font-bold">{gpData.cargo_campaign_warning}</span>
+                </div>
+              )}
               <p className="text-xs text-gray-500 mb-2">
                 Bu pusula <span className="font-mono font-bold text-purple-700">#{gpData.assigned_no || gpData.display_number}</span> numaralı matbu forma basılacak. Numara kağıda yazılmaz; yalnız veriler basılır.
               </p>

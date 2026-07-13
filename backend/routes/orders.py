@@ -1070,6 +1070,13 @@ async def create_order(
     if _thr is not None and (_subtotal - _server_discount) >= _thr:
         _shipping = 0.0
     order["shipping_cost"] = round(_shipping, 2)
+    # #13/#14: Bedava kargo kampanyası (kupon free_shipping VEYA eşik) izini sakla —
+    # iade sonrası "kampanya dışı kaldı" uyarısı ve faturada kargo-iskonto kalemi için.
+    _fs_applied = bool(_free_shipping) or (_thr is not None and (_subtotal - _server_discount) >= _thr)
+    order["free_shipping_applied"] = _fs_applied
+    order["free_shipping_waived_fee"] = round(_ship_fee, 2) if (_fs_applied and _shipping == 0 and _ship_fee > 0) else 0.0
+    if _thr is not None:
+        order["free_shipping_threshold"] = _thr
 
     # Toplam = subtotal - kupon indirimi - havale indirimi + kargo + hediye paketi.
     _gift = max(0.0, float(order.get("gift_wrap_price", 0) or 0))
@@ -5917,11 +5924,24 @@ async def site_return_gider_pusulasi(return_id: str, payload: Optional[dict] = B
             "reason": "Vade farkı (taksit)",
         })
 
+    # #13: Bedava kargo alınan siparişten KISMİ iade → kargo kampanya koşulu değişti (muhasebe uyarısı).
+    _cargo_campaign_warning = ""
+    if (not paid_shipping) and (not is_full):
+        _fs_thr = order.get("free_shipping_threshold")
+        _kept = _round2(order_sub - prod_net)  # iade edilmeyen (kalan) ürünlerin tutarı
+        if _fs_thr and _kept < float(_fs_thr):
+            _cargo_campaign_warning = (f"KARGO KAMPANYA DIŞI KALDI — sipariş ücretsiz kargo ile alınmıştı; "
+                f"kısmi iade sonrası kalan tutar {_kept:.2f} TL, ücretsiz kargo eşiğinin ({float(_fs_thr):.0f} TL) ALTINA düştü.")
+        else:
+            _cargo_campaign_warning = ("KARGO KAMPANYA DIŞI KALDI — sipariş ücretsiz kargo ile alınmıştı; "
+                "kısmi iade sonrası kargo kampanya koşulunu yeniden değerlendirin.")
+
     gider_pusulasi = {
         "number": gp_number,
         "display_number": display_number,
         "return_id": return_id,
         "source": "site",
+        "cargo_campaign_warning": _cargo_campaign_warning,
         "order_number": rec.get("order_number", ""),
         "date": datetime.now(timezone.utc).isoformat(),
         "company": company,
