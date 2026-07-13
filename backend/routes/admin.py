@@ -113,17 +113,31 @@ async def get_users(
     search: str = Query(None),
     current_user: dict = Depends(require_admin)
 ):
-    """Get users list (admin only)"""
+    """PANEL personeli listesi (admin only).
+
+    ÖNEMLİ: Bu uç, /admin/users path'inde admin_rbac.list_panel_users ile ÇAKIŞIYORDU ve
+    filtresiz olduğu için 20 MÜŞTERİYİ 'kullanıcı' gibi gösteriyordu. Artık yalnız GERÇEK
+    panel personeli döner (elle eklenen = created_by; süper-admin; varsayılan admin). Müşteri
+    (register) hesapları 'Üyeler' (/admin/members) sayfasında görünür; burada GÖRÜNMEZ."""
+    import re as _re
     skip = (page - 1) * limit
-    query = {}
-    
+    # Panel personeli ayırt edici işaretleri (admin_rbac.PANEL_STAFF_OR ile birebir).
+    _staff_or = [
+        {"created_by": {"$exists": True, "$nin": [None, ""]}},
+        {"is_super_admin": True},
+        {"email": "admin@facette.com"},
+        {"role_id": {"$exists": True, "$nin": [None, ""]}},
+    ]
+    query = {"is_admin": True, "$or": _staff_or}
+
     if search:
-        query["$or"] = [
-            {"email": {"$regex": search, "$options": "i"}},
-            {"first_name": {"$regex": search, "$options": "i"}},
-            {"last_name": {"$regex": search, "$options": "i"}}
-        ]
-    
+        _s = _re.escape(search.strip())  # ReDoS/regex-injection koruması
+        query["$and"] = [{"$or": [
+            {"email": {"$regex": _s, "$options": "i"}},
+            {"first_name": {"$regex": _s, "$options": "i"}},
+            {"last_name": {"$regex": _s, "$options": "i"}},
+        ]}]
+
     users = await db.users.find(query, {"_id": 0, "password": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.users.count_documents(query)
     
