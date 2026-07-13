@@ -182,7 +182,12 @@ async def get_my_permissions(current_user: dict = Depends(require_admin)):
         return {"permissions": ["*"], "role": "Süper Admin"}
     role_id = current_user.get("role_id") or ""
     if not role_id:
-        return {"permissions": [], "role": None}
+        # Rolsüz personel: tüm operasyonel yetkiler (süper-admin değil) — deps ile aynı.
+        try:
+            from permissions import ALL_PERMISSION_KEYS
+            return {"permissions": list(ALL_PERMISSION_KEYS), "role": "Yönetici (rol atanmamış)"}
+        except Exception:
+            return {"permissions": [], "role": None}
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return {"permissions": [], "role": None}

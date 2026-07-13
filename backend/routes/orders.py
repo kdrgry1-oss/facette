@@ -1461,9 +1461,9 @@ async def dispatch_purchase_capi(order_id: str, source: str = "") -> bool:
 async def update_order_status(
     order_id: str,
     status: str = Query(...),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("orders.update_status"))
 ):
-    """Update order status"""
+    """Update order status (RBAC: orders.update_status)"""
     from order_statuses import get_status_config, valid_keys
     _cfg0 = await get_status_config(db)
     valid_statuses = valid_keys(_cfg0)
@@ -1780,9 +1780,9 @@ async def mark_order_paid(
 @router.delete("/{order_id}")
 async def delete_order(
     order_id: str,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_permission("orders.delete"))
 ):
-    """Siparişi sil — fiziksel silmeden ÖNCE orders_deleted arşivine taşı.
+    """Siparişi sil — fiziksel silmeden ÖNCE orders_deleted arşivine taşı. (RBAC: orders.delete)
     Böylece 'Silinen Siparişler' sayfasından görülüp geri alınabilir; ana orders
     sorguları/raporları/dashboard hiç etkilenmez."""
     order = await db.orders.find_one({"id": order_id}, {"_id": 0})
@@ -2425,7 +2425,7 @@ def _havale_invoice_block(order: dict):
 async def create_invoice_for_order(
     order_id: str,
     invoice_type: str = "auto",
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(require_permission("orders.invoice")),
 ):
     """
     Seçili sipariş için e-Arşiv / e-Fatura keser.

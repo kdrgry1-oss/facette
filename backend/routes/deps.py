@@ -451,7 +451,15 @@ async def get_effective_permissions(user: dict) -> list:
         return ["*"]
     role_id = u.get("role_id") or ""
     if not role_id:
-        return []
+        # GÜVENLİK + GERİYE-UYUM: Rolü ATANMAMIŞ personel süper-admin ('*') OLMAZ
+        # (kullanıcı/rol yönetimi + escalation kapalı) AMA tüm OPERASYONEL yetkileri alır
+        # (iade/refund/sipariş vb. işleri aksamasın). Least-privilege isteniyorsa panelden
+        # kişiye özel rol atanır → o zaman yalnız rolündeki yetkiler geçerli olur.
+        try:
+            from permissions import ALL_PERMISSION_KEYS
+            return list(ALL_PERMISSION_KEYS)
+        except Exception:
+            return []
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if not role:
         return []
