@@ -139,10 +139,15 @@ export function ProductsReport() {
   const { from, setFrom, to, setTo } = useDateRange();
   const [top, setTop] = useState([]);
   const [cats, setCats] = useState([]);
+  const [q, setQ] = useState("");
+  const [sortKey, setSortKey] = useState("revenue");
+  const [sortDir, setSortDir] = useState("desc");
+  const [platFilter, setPlatFilter] = useState("");
+  const [sizeFilter, setSizeFilter] = useState("");
 
   const load = async () => {
     const [t, c] = await Promise.all([
-      axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", limit: 20 } }),
+      axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", limit: 2000 } }),
       axios.get(`${API}/admin/reports/categories`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } }),
     ]);
     setTop(t.data.items || []);
@@ -150,14 +155,42 @@ export function ProductsReport() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
+  const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
+  const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" ? "asc" : "desc"); } };
+  // Filtre seçenekleri (veriden)
+  const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
+  const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
+  const rows = (() => {
+    const f = q.trim().toLocaleLowerCase("tr");
+    let r = f ? top.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f)) : [...top];
+    if (platFilter) r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter));
+    if (sizeFilter) r = r.filter(p => (p.size_breakdown || []).some(x => x.size === sizeFilter));
+    r.sort((a, b) => {
+      let va = a[sortKey], vb = b[sortKey];
+      if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
+      va = va ?? -1; vb = vb ?? -1; return sortDir === "asc" ? va - vb : vb - va;
+    });
+    return r;
+  })();
+  const SortTh = ({ k, children, right }) => (
+    <th onClick={() => toggleSort(k)} className={`p-3 cursor-pointer select-none hover:text-gray-900 ${right ? "text-right" : "text-left"}`}>
+      {children}{sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+    </th>
+  );
+
   return (
     <div className="space-y-5" data-testid="products-report-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="exclude" /></h1>
-          <p className="text-sm text-gray-500 mt-1">En çok satan ürünler ve kategoriler.</p>
+          <p className="text-sm text-gray-500 mt-1">Tüm ürünlerin satış performansı — adet, ciro, güncel stok, en çok satan beden ve platform dağılımı.</p>
         </div>
         <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
+      </div>
+
+      {/* Rapordan neye erişilir — kılavuz */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-900">
+        <span className="font-semibold">Bu raporda:</span> Seçili tarih aralığında (iptal & iade hariç) her ürünün toplam <b>satış adedi</b> ve <b>cirosu</b>, <b>güncel stok</b> durumu, <b>en çok satan bedeni</b> ve <b>hangi platformdan</b> ne kadar sattığı yer alır. Kolon başlıklarına tıklayarak (ör. cirodan yükseğe/düşüğe) sıralayabilir, arama ile ürün filtreleyebilirsiniz.
       </div>
 
       <div className="bg-white rounded-xl border p-5">
@@ -171,6 +204,53 @@ export function ProductsReport() {
             <Bar dataKey="revenue" fill="#3b82f6" name="Ciro (₺)" />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* TÜM ÜRÜNLER — sıralanabilir/filtrelenebilir tablo */}
+      <div className="bg-white rounded-xl border">
+        <div className="flex items-center justify-between gap-3 p-5 pb-3 flex-wrap">
+          <h3 className="font-semibold">Tüm Ürünler ({rows.length})</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select value={platFilter} onChange={e => setPlatFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+              <option value="">Tüm Platformlar</option>
+              {platOptions.map(p => <option key={p} value={p}>{platLabel(p)}</option>)}
+            </select>
+            <select value={sizeFilter} onChange={e => setSizeFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+              <option value="">Tüm Bedenler</option>
+              {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Ürün ara…" className="border rounded-lg px-3 py-1.5 text-sm w-48" />
+          </div>
+        </div>
+        <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
+              <tr>
+                <SortTh k="name">Ürün</SortTh>
+                <SortTh k="qty" right>Adet</SortTh>
+                <SortTh k="revenue" right>Ciro</SortTh>
+                <SortTh k="current_stock" right>Güncel Stok</SortTh>
+                <SortTh k="best_size">En Çok Beden</SortTh>
+                <SortTh k="top_platform">Platform</SortTh>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p, i) => (
+                <tr key={(p.product_id || p.name) + i} className="border-t hover:bg-gray-50">
+                  <td className="p-3 font-medium max-w-xs truncate" title={p.name}>{p.name}</td>
+                  <td className="p-3 text-right">{p.qty}</td>
+                  <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
+                  <td className={`p-3 text-right ${p.current_stock === 0 ? "text-red-600 font-semibold" : ""}`}>{p.current_stock == null ? "—" : p.current_stock}</td>
+                  <td className="p-3">{p.best_size || "—"}</td>
+                  <td className="p-3" title={(p.platform_breakdown || []).map(x => `${platLabel(x.platform)}: ${x.qty}`).join(", ")}>
+                    {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border">

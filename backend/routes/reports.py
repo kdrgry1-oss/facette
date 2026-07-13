@@ -106,32 +106,37 @@ async def sales(
 
 @router.get("/products/top")
 async def top_products(
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(1000, ge=1, le=5000),   # varsayılan TÜM ürünler (yüksek tavan)
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     source: Optional[str] = Query(None, description="all|site|trendyol|hepsiburada|temu"),
     current_user: dict = Depends(require_admin),
 ):
+    """ÜRÜN bazında satış raporu. Aynı ürünün farklı beden/renk kalemleri TEK satırda
+    birleşir (mükerrer yok). Her ürün için: toplam adet + ciro + sipariş, güncel stok,
+    EN ÇOK SATAN BEDEN ve PLATFORM DAĞILIMI döner. Frontend cirodan yükseğe sıralar/filtreler."""
     s, e = _iso_range(start_date, end_date, days_default=90)
     pipeline = [
         {"$match": _base_match(s, e, source)},
+        # Sipariş platformu: platform > marketplace > 'site'
+        {"$addFields": {"_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}}},
         {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
-        # Kalem adı SİTE'de items.name, PAZARYERİ'nde items.product_name / items.productName tutulur.
-        # Barkod (varsa) hem gruplama hem ürün eşleştirme için kullanılır.
         {"$addFields": {
             "_nm": {"$ifNull": ["$items.name",
                      {"$ifNull": ["$items.product_name",
                        {"$ifNull": ["$items.productName", ""]}]}]},
             "_bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
             "_pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
+            "_sz": {"$toString": {"$ifNull": ["$items.size", ""]}},
         }},
-        # Gruplama anahtarı: barkod > product_id > ad (aynı ürünün farklı beden/renk kalemleri birleşir).
+        # Kalem anahtarı: barkod > product_id > ad. Beden ve platform gruplamaya dahil edilir
+        # ki EN ÇOK SATAN BEDEN + platform dağılımı çıkarılabilsin (parent birleştirme Python'da).
         {"$addFields": {"_key": {"$switch": {"branches": [
             {"case": {"$ne": ["$_bc", ""]}, "then": {"$concat": ["bc:", "$_bc"]}},
             {"case": {"$ne": ["$_pid", ""]}, "then": {"$concat": ["pid:", "$_pid"]}},
         ], "default": {"$concat": ["nm:", "$_nm"]}}}}},
         {"$group": {
-            "_id": "$_key",
+            "_id": {"k": "$_key", "sz": "$_sz", "plat": "$_plat"},
             "name": {"$first": "$_nm"},
             "barcode": {"$first": "$_bc"},
             "pid": {"$first": "$_pid"},
@@ -139,13 +144,11 @@ async def top_products(
             "revenue": {"$sum": {"$multiply": [{"$ifNull": ["$items.price", 0]}, {"$ifNull": ["$items.quantity", 1]}]}},
             "orders": {"$sum": 1},
         }},
-        {"$sort": {"revenue": -1}},
-        {"$limit": limit},
     ]
     raw = []
     async for r in db.orders.aggregate(pipeline):
         raw.append(r)
-    # Ürün adı/stok: item'da boş/pazaryeri ise products'tan BARKOD veya id ile eşleştir.
+    # Ürün eşleştirme: barkod/pid -> PARENT ürün (id, ad, stok). Birleştirme parent id ile yapılır.
     pids = [r.get("pid") for r in raw if r.get("pid")]
     bcs = [r.get("barcode") for r in raw if r.get("barcode")]
     by_id, by_bc = {}, {}
@@ -158,23 +161,51 @@ async def top_products(
         async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
-            info = {"name": p.get("name") or "", "stock": stock}
+            info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock}
             by_id[str(p.get("id"))] = info
             if p.get("barcode"):
                 by_bc[str(p["barcode"])] = info
             for v in variants:
                 if v.get("barcode"):
                     by_bc[str(v["barcode"])] = info
-    out = []
+    # PARENT ürün bazında birleştir → mükerrer beden/renk satırları tek ürün olur.
+    merged = {}
     for r in raw:
         pm = by_bc.get(r.get("barcode") or "") or by_id.get(r.get("pid") or "") or {}
         name = pm.get("name") or r.get("name") or "(isimsiz ürün)"
+        # Grup anahtarı: çözülen parent id > pid > ad (isim NFC normalize edilerek NFD mükerreri de birleşsin)
+        import unicodedata as _ud
+        _nkey = _ud.normalize("NFC", name).strip().lower()
+        gkey = pm.get("id") or (r.get("pid") or None) or f"nm:{_nkey}"
+        m = merged.get(gkey)
+        if not m:
+            m = merged[gkey] = {
+                "product_id": pm.get("id") or r.get("pid"), "name": name,
+                "qty": 0, "revenue": 0.0, "orders": 0,
+                "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
+            }
+        _q = int(r["qty"])
+        m["qty"] += _q
+        m["revenue"] += float(r["revenue"])
+        m["orders"] += int(r["orders"])
+        _sz = (r["_id"].get("sz") or "").strip() or "—"
+        m["_sizes"][_sz] = m["_sizes"].get(_sz, 0) + _q
+        _pl = (r["_id"].get("plat") or "site").strip().lower() or "site"
+        m["_plats"][_pl] = m["_plats"].get(_pl, 0) + _q
+    out = []
+    for m in merged.values():
+        _sizes = sorted(m.pop("_sizes").items(), key=lambda x: -x[1])
+        _plats = sorted(m.pop("_plats").items(), key=lambda x: -x[1])
         out.append({
-            "product_id": r.get("pid") or None, "name": name,
-            "qty": r["qty"], "revenue": round(r["revenue"], 2), "orders": r["orders"],
-            "current_stock": pm.get("stock", None),
+            **m,
+            "revenue": round(m["revenue"], 2),
+            "best_size": _sizes[0][0] if _sizes else "—",
+            "size_breakdown": [{"size": k, "qty": v} for k, v in _sizes],
+            "top_platform": _plats[0][0] if _plats else "site",
+            "platform_breakdown": [{"platform": k, "qty": v} for k, v in _plats],
         })
-    return {"items": out}
+    out.sort(key=lambda x: -x["revenue"])
+    return {"items": out[:limit]}
 
 
 @router.get("/categories")
