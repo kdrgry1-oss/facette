@@ -32,11 +32,11 @@ export function CartProvider({ children }) {
       );
 
       if (existing) {
-        return prev.map((item) =>
-          (variant ? item.variantId === variant.id : item.productId === product.id && !item.variantId)
-            ? { ...item, quantity: item.quantity + quantity }
-            : item
-        );
+        return prev.map((item) => {
+          if (!(variant ? item.variantId === variant.id : item.productId === product.id && !item.variantId)) return item;
+          const cap = item.stock || Infinity;   // stok tavanı (eski sepet kalemlerinde stock yoksa sınırsız)
+          return { ...item, quantity: Math.min(item.quantity + quantity, cap) };
+        });
       }
 
       // Fiyat: para hesabı için sale_price tabanı (kampanya sepet/sunucu tarafında uygulanır).
@@ -63,7 +63,8 @@ export function CartProvider({ children }) {
           color: variant?.color || null,
           stockCode: variant?.stock_code || product.stock_code || null,
           barcode: variant?.barcode || product.barcode || null,
-          quantity,
+          stock: (variant ? variant.stock : product.stock) ?? null,   // stok tavanı (oversell engeli)
+          quantity: Math.min(quantity, (variant ? variant.stock : product.stock) || Infinity),
         },
       ];
     });
@@ -80,7 +81,11 @@ export function CartProvider({ children }) {
       return;
     }
     setItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, quantity } : item))
+      prev.map((item) =>
+        item.id === itemId
+          ? { ...item, quantity: Math.min(quantity, item.stock || Infinity) }  // stok üstüne çıkma (oversell engeli)
+          : item
+      )
     );
   };
 

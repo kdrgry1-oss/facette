@@ -249,7 +249,12 @@ export default function Checkout() {
 
   // Madde 4 — Kampanya motoru: otomatik kampanyalar + (varsa) girilen kodu BIRLIKTE hesaplar.
   // Sunucudaki /coupons/evaluate ile ayni sonuc (onizleme = siparis).
+  // YARIS KORUMASI: kupon/ödeme yöntemi hızlı değişince birden çok istek uçar; en son
+  // DÖNEN değil en son GÖNDERİLEN kazanmalı — yoksa eski (stale) indirim tutarı gösterilip
+  // gönderilebiliyordu. Sıra numarasıyla yalnız en güncel isteğin cevabını uygula.
+  const recalcSeq = useRef(0);
   const recalcPromotions = async (code = "") => {
+    const seq = ++recalcSeq.current;
     try {
       const res = await axios.post(`${API}/coupons/evaluate`, {
         cart_total: total,
@@ -260,12 +265,14 @@ export default function Checkout() {
         payment_method: paymentMethod,
         excluded_ids: excludedIds,
       });
+      if (seq !== recalcSeq.current) return null;   // daha yeni bir istek var → bu (stale) cevabı yut
       const d = res.data || {};
       setAppliedPromotions(d.applied || []);
       setEligiblePromotions(d.eligible || []);
       setDiscount(Number(d.total_discount || 0));
       return d;
     } catch {
+      if (seq !== recalcSeq.current) return null;
       setAppliedPromotions([]);
       setEligiblePromotions([]);
       setDiscount(0);

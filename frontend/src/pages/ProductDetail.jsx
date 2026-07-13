@@ -459,7 +459,9 @@ export default function ProductDetail() {
   // İndirim görünümü TEK KAYNAK (lib/price) — vitrin kartlarıyla BİREBİR aynı; ürün detayı
   // ile kartlar arasında "kartta indirimli ama detayda liste fiyatı" tutarsızlığı olmaz.
   const _pv = priceView(product);
-  const variantPriceDiff = selectedVariant?.price_diff || 0;
+  // Sepetle AYNI mantık: bir varyant price_adjustment taşıyıp price_diff taşımıyorsa
+  // PDP farksız fiyat gösterip sepete farklı (yüksek) fiyat ekliyordu → gösterilen=çekilen.
+  const variantPriceDiff = selectedVariant?.price_diff || selectedVariant?.price_adjustment || 0;
   const hasDiscount = _pv.hasDiscount;
   const listUnit = _pv.list + variantPriceDiff;
   const displayPrice = _pv.display + variantPriceDiff;
