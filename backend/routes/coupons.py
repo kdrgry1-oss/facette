@@ -159,9 +159,16 @@ async def available_coupons(payload: dict):
             _ors.append({"user_id": user_id})
         if em:
             _ors.append({"customer_email": em})
-        # İlk siparişe özel (hoşgeldin): user_id VEYA email ile onceki siparis varsa GIZLE
+        # İlk siparişe özel (hoşgeldin): user_id VEYA email ile GEÇERLİ önceki sipariş varsa GİZLE.
+        # C1 fix: BAŞARISIZ/ödenmemiş (failed/expired) siparişleri "önceki sipariş" SAYMA — aksi
+        # halde 3DS reddi/yarım kalan deneme hoşgeldin kuponunu yakıyordu (elle-giriş yolu #368
+        # zaten böyle süzüyordu; iki yol artık tutarlı).
         if c.get("first_order_only") and _ors:
-            prior = await db.orders.count_documents({"$or": _ors, "status": {"$ne": "cancelled"}})
+            prior = await db.orders.count_documents({
+                "$or": _ors,
+                "status": {"$nin": ["cancelled"]},
+                "payment_status": {"$nin": ["failed", "expired"]},
+            })
             if prior > 0:
                 continue
         # Kullanım limiti (toplam)

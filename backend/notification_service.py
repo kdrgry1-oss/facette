@@ -358,6 +358,12 @@ async def send_notification(
                 results["sms"] = {"success": False, "response": str(e)}
                 await _log_event(db, event=event, channel="sms", to=to, status="error",
                                  response=str(e), variables=variables)
+        else:
+            # H1 fix: durum ayarı "SMS gönder" dedi ama bu event için ŞABLON YOK / PASİF →
+            # eskiden iz bırakmadan atlanıyordu (admin gitti sanıyordu). Artık "skipped" loglanır.
+            results["sms"] = {"success": False, "response": "sms-template-missing-or-disabled"}
+            await _log_event(db, event=event, channel="sms", to=to, status="skipped",
+                             response="şablon yok veya pasif (event=%s)" % event, variables=variables)
 
     # --- WhatsApp ---
     if "whatsapp" in active_channels and to_phone and cfg.get("whatsapp_active"):
