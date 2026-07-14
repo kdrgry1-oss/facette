@@ -258,6 +258,28 @@ export default function Returns() {
   const [gpExporting, setGpExporting] = useState(false);
   const [gpFrom, setGpFrom] = useState("");
   const [gpTo, setGpTo] = useState("");
+  // Hazır tarih aralıkları — "son 30 gün" gibi çekimleri tek tıkla, elle yazmadan doldurur.
+  // Yerel (TR) tarihi YYYY-MM-DD üretir; type="date" bu formatı bekler.
+  const _ymd = (dt) => {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+  const applyGpPreset = (key) => {
+    const now = new Date();
+    let from = new Date(now), to = new Date(now);
+    if (key === "today") { /* from=to=bugün */ }
+    else if (key === "7") { from.setDate(now.getDate() - 6); }
+    else if (key === "30") { from.setDate(now.getDate() - 29); }
+    else if (key === "month") { from = new Date(now.getFullYear(), now.getMonth(), 1); }
+    else if (key === "prevmonth") {
+      from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      to = new Date(now.getFullYear(), now.getMonth(), 0);
+    }
+    setGpFrom(_ymd(from));
+    setGpTo(_ymd(to));
+  };
   const exportGiderPusulasi = async () => {
     setGpExporting(true);
     try {
@@ -546,11 +568,20 @@ export default function Returns() {
               </div>
               <button onClick={exportGiderPusulasi} disabled={gpExporting}
                 data-testid="export-gider-pusulasi-btn"
-                title="Tüm gider pusulalarını (seçili tarih aralığında) muhasebe formatında Excel indir"
+                title="Tüm gider pusulalarını (seçili tarih aralığında, iade talep tarihine göre) muhasebe formatında Excel indir"
                 className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors disabled:opacity-50">
                 <Download size={16} />
                 {gpExporting ? "Hazırlanıyor..." : "Gider Pusulası Excel"}
               </button>
+              {/* Hazır aralık: elle tarih yazmadan tek tık. "Son 30 gün" iade talep tarihine göre. */}
+              <div className="flex items-center gap-1 flex-wrap">
+                {[["today", "Bugün"], ["7", "Son 7 gün"], ["30", "Son 30 gün"], ["month", "Bu ay"], ["prevmonth", "Geçen ay"]].map(([k, lbl]) => (
+                  <button key={k} type="button" onClick={() => applyGpPreset(k)}
+                    className="px-2.5 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-100 hover:text-black transition-colors">
+                    {lbl}
+                  </button>
+                ))}
+              </div>
             </div>
             {/* Manuel "Güncelle" kaldırıldı — iadeler 5 dk'da bir otomatik güncelleniyor. */}
           </div>
