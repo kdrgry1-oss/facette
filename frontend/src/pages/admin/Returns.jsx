@@ -535,12 +535,12 @@ export default function Returns() {
                 Excel butonları KALDIRILDI. */}
             <div className="flex items-end gap-2 flex-wrap">
               <div className="flex flex-col">
-                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Baş. Tarihi</label>
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade talep tarihi (müşterinin iadeyi açtığı tarih) — iadeler tablosundaki 'İade Talep Tarihi' ile aynı">İade Talep Baş.</label>
                 <input type="date" value={gpFrom} onChange={(e) => setGpFrom(e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
               <div className="flex flex-col">
-                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Bit. Tarihi</label>
+                <label className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5" title="İade talep tarihi (müşterinin iadeyi açtığı tarih) — iadeler tablosundaki 'İade Talep Tarihi' ile aynı">İade Talep Bit.</label>
                 <input type="date" value={gpTo} onChange={(e) => setGpTo(e.target.value)}
                   className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
               </div>
@@ -670,7 +670,7 @@ export default function Returns() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kargo</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tutar<span className="block text-[9px] font-normal normal-case text-gray-400">Brüt / İskonto / Net</span></th>
-                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Tarih</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İade Talep Tarihi<span className="block text-[9px] font-normal normal-case text-gray-400">müşterinin iadeyi açtığı tarih</span></th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Durum</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">İşlemler</th>
               </tr>

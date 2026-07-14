@@ -6157,22 +6157,47 @@ async def export_gider_pusulasi_excel(
     def _status_ok(st):
         return str(st or "").strip().lower() not in _DENY_STATUS
 
-    # Site iade durum haritaları (voucher kaydında durum yok → return_id / order_number ile bağla).
+    # Site iade durum + TALEP TARİHİ haritaları (voucher kaydında durum/talep tarihi yok →
+    # return_id / order_number ile bağla). Talep tarihi = iade talep edilen tarih (created_at).
     ret_status_by_id, ret_status_by_num = {}, {}
+    ret_reqdate_by_id, ret_reqdate_by_num = {}, {}
     async for _r in db.customer_returns.find(
-            {}, {"_id": 0, "id": 1, "status": 1, "order_number": 1}):
+            {}, {"_id": 0, "id": 1, "status": 1, "order_number": 1, "created_at": 1, "date": 1}):
         _st = _r.get("status") or ""
+        _rqd = _r.get("created_at") or _r.get("date") or ""
         if _r.get("id"):
             ret_status_by_id[str(_r["id"])] = _st
+            ret_reqdate_by_id[str(_r["id"])] = _rqd
         if _r.get("order_number"):
             ret_status_by_num.setdefault(str(_r["order_number"]), _st)
+            ret_reqdate_by_num.setdefault(str(_r["order_number"]), _rqd)
+
+    # ── TARİH ESASI: TÜM satırlar İADE TALEP TARİHİ'ne göre süzülür (Trendyol claimDate /
+    #    site created_at). Böylece "son 30 gün" export'u iadeler sayfasındaki "Tarih" sütunu
+    #    (claim.created_date) ile BİREBİR aynı olur → tutarsızlık biter. Kesilmiş pusulalar da
+    #    kendi kesim tarihine göre DEĞİL, bağlı iadenin TALEP tarihine göre süzülür.
+    def _req_date_for(gp):
+        cid = str(gp.get("claim_id") or "")
+        if cid and claim_by_id.get(cid):
+            _d = claim_by_id[cid].get("created_date")
+            if _d:
+                return _d
+        rid = str(gp.get("return_id") or "")
+        if rid and ret_reqdate_by_id.get(rid):
+            return ret_reqdate_by_id[rid]
+        onum = str(gp.get("order_number") or "")
+        if onum and ret_reqdate_by_num.get(onum):
+            return ret_reqdate_by_num[onum]
+        # Talep tarihi çözülemezse pusulanın kendi tarihine düş (eski davranış — hiç düşürme).
+        return gp.get("date") or gp.get("created_at")
 
     # ── 1) Var olan gider pusulaları (kesilmiş) — doğru seri + düzeltilmiş tutar ──
     all_vouchers = await db.gider_pusulasi.find({}, {"_id": 0}).to_list(None)
     seen_claim, seen_return = set(), set()
     records = []
     for gp in all_vouchers:
-        if not _in_range(gp.get("date") or gp.get("created_at")):
+        # Süzgeç TALEP tarihine göre (iadeler sayfasıyla tutarlı) — pusula kesim tarihine göre değil.
+        if not _in_range(_req_date_for(gp)):
             continue
         # kaynak süzgeci: site pusulası source=site; TY/HB pusulasında claim_id var → platform claim'den
         cid = str(gp.get("claim_id") or "")
