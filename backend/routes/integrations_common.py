@@ -1704,28 +1704,39 @@ async def import_xml_products(
 
 
 async def restore_xml_missing_products_once():
-    """TEK SEFERLİK OTOMATİK TELAFİ: bozuk/eksik feed yüzünden 'ticimax_xml_missing' ile pasife
-    alınmış ürünleri geri AKTİF eder. Settings bayrağıyla yalnız BİR KEZ çalışır (deploy'da);
-    böylece her açılışta çalışıp gelecekteki meşru pasifleştirmelerle savaşmaz. Sonraki İYİ feed
-    senkronu (güvenlik kilidi geçerse) gerçekten eksik olanları normal şekilde yine pasife alır."""
+    """OTOMATİK TELAFİ: kullanıcının SİLMEDİĞİ (is_deleted=True DEĞİL) hâlde pasif görünen tüm
+    ürünleri geri AKTİF eder. Kullanıcı kuralı: "sil tuşuna basmadıysam ürün görünmeli."
+
+    KAPSAM (geri açılır): is_active != True  VE  is_deleted != True  VE  manual_deactivated != True
+      → yani feed glitch'i / eski otomatik pasifleştirme ile kaybolan ürünler (ekru vb. renk
+        varyantları dahil) geri gelir.
+    DOKUNULMAZ:
+      - is_deleted=True  → kullanıcı SİL'e bastı (bilinçli kaldırma).
+      - manual_deactivated=True → kullanıcı ELLE pasife aldı (ürün toggle işareti).
+
+    Settings bayrağı (v2) ile deploy başına BİR KEZ çalışır; sonraki elle pasifleştirmelerle
+    savaşmaz (onlar manual_deactivated işaretli). v1'den v2'ye çıkıldı çünkü v1 yalnız
+    'ticimax_xml_missing' etiketlileri kapsıyordu; etiketsiz eski pasifler geri gelmiyordu."""
     try:
-        flag = await db.settings.find_one({"id": "xml_missing_restore_v1"}, {"_id": 0})
+        flag = await db.settings.find_one({"id": "xml_missing_restore_v2"}, {"_id": 0})
         if flag and flag.get("done"):
             return {"restored": 0, "skipped": "already-done"}
         now_iso = datetime.now(timezone.utc).isoformat()
         res = await db.products.update_many(
-            {"deactivated_reason": "ticimax_xml_missing", "is_active": {"$ne": True}},
+            {"is_active": {"$ne": True},
+             "is_deleted": {"$ne": True},
+             "manual_deactivated": {"$ne": True}},
             {"$set": {"is_active": True, "updated_at": now_iso},
              "$unset": {"deactivated_reason": ""}},
         )
         await db.settings.update_one(
-            {"id": "xml_missing_restore_v1"},
-            {"$set": {"id": "xml_missing_restore_v1", "done": True,
+            {"id": "xml_missing_restore_v2"},
+            {"$set": {"id": "xml_missing_restore_v2", "done": True,
                       "restored": res.modified_count, "at": now_iso}},
             upsert=True,
         )
         if res.modified_count:
-            logger.info(f"[xml-feed] TELAFI: {res.modified_count} pasife alinan urun geri aktiflestirildi (tek seferlik)")
+            logger.info(f"[urun-telafi] {res.modified_count} silinmemis pasif urun geri aktiflestirildi (v2, tek seferlik)")
         return {"restored": res.modified_count}
     except Exception as e:
         logger.warning(f"[xml-feed] restore_xml_missing_products_once hata: {e}")

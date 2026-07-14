@@ -2038,11 +2038,17 @@ async def toggle_product_active(
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     
     new_status = not product.get("is_active", True)
-    await db.products.update_one(
-        {"id": product_id},
-        {"$set": {"is_active": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    
+    _now = datetime.now(timezone.utc).isoformat()
+    if new_status:
+        # ELLE AKTİF: pasif işaretlerini temizle.
+        _op = {"$set": {"is_active": True, "updated_at": _now},
+               "$unset": {"manual_deactivated": "", "deactivated_reason": ""}}
+    else:
+        # ELLE PASİF: manual_deactivated işareti bırak → otomatik telafi (restore) bunu GERİ AÇMAZ.
+        _op = {"$set": {"is_active": False, "manual_deactivated": True,
+                        "manual_deactivated_at": _now, "updated_at": _now}}
+    await db.products.update_one({"id": product_id}, _op)
+
     return {"is_active": new_status}
 
 @router.get("/search/popular")
