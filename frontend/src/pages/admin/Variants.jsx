@@ -29,8 +29,11 @@ export default function AdminVariants() {
   const [aggregating, setAggregating] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set()); // toplu seçim
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
+    setSelectedIds(new Set()); // tür değişince seçim sıfırlansın
     fetchVariants();
   }, [activeTab]);
 
@@ -145,6 +148,45 @@ export default function AdminVariants() {
     });
   };
 
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = (ids) => {
+    setSelectedIds(prev => {
+      const allSelected = ids.length > 0 && ids.every(id => prev.has(id));
+      return allSelected ? new Set() : new Set(ids);
+    });
+  };
+  const handleBulkDelete = () => {
+    const count = selectedIds.size;
+    if (!count) return;
+    toast(`Seçili ${count} değeri silmek istediğinize emin misiniz?`, {
+      action: {
+        label: 'Toplu Sil',
+        onClick: async () => {
+          setBulkDeleting(true);
+          try {
+            const res = await axios.post(`${API}/variants/bulk-delete`,
+              { ids: Array.from(selectedIds) }, { headers: authHeaders() });
+            toast.success(res.data.message || `${count} değer silindi`);
+            setSelectedIds(new Set());
+            fetchVariants();
+          } catch (err) {
+            toast.error("Toplu silme başarısız");
+          } finally {
+            setBulkDeleting(false);
+          }
+        }
+      },
+      cancel: { label: 'İptal', onClick: () => {} },
+      duration: 6000,
+    });
+  };
+
   const handleSaveOrder = async () => {
     setSaving(true);
     try {
@@ -234,8 +276,19 @@ export default function AdminVariants() {
         {/* Right Pane - Values */}
         <div className="w-3/4 flex flex-col min-h-0 bg-white">
           <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0 bg-white">
-            <h2 className="text-lg font-bold text-gray-800">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-3">
               {activeTab === 'size' ? 'Beden' : 'Renk'} Değerleri Havuzu
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600 disabled:opacity-50 transition-colors"
+                  title="Seçili değerleri toplu sil"
+                >
+                  <Trash2 size={14} />
+                  Seçili {selectedIds.size} değeri sil
+                </button>
+              )}
             </h2>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -253,6 +306,15 @@ export default function AdminVariants() {
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="px-4 py-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-orange-500 cursor-pointer"
+                      title="Tümünü seç"
+                      checked={filteredVariants.length > 0 && filteredVariants.every(v => selectedIds.has(v.id))}
+                      onChange={() => toggleSelectAll(filteredVariants.map(v => v.id))}
+                    />
+                  </th>
                   <th className="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider w-24 text-center">Sıra</th>
                   <th className="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider">Değer</th>
                   <th className="px-6 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider w-40 text-center">İşlemler</th>
@@ -261,7 +323,7 @@ export default function AdminVariants() {
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={3} className="py-20 text-center">
+                    <td colSpan={4} className="py-20 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <RefreshCw className="animate-spin text-gray-400" size={32} />
                         <span className="text-sm text-gray-500 font-medium">Yükleniyor...</span>
@@ -270,16 +332,24 @@ export default function AdminVariants() {
                   </tr>
                 ) : filteredVariants.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-20 text-center">
+                    <td colSpan={4} className="py-20 text-center">
                       <p className="text-gray-400 text-sm">Burada henüz bir değer yok.</p>
                     </td>
                   </tr>
                 ) : (
                   filteredVariants.map((variant, index) => (
-                    <tr key={variant.id} className="group hover:bg-gray-50/80 transition-colors">
+                    <tr key={variant.id} className={`group transition-colors ${selectedIds.has(variant.id) ? 'bg-orange-50/60' : 'hover:bg-gray-50/80'}`}>
+                      <td className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-orange-500 cursor-pointer"
+                          checked={selectedIds.has(variant.id)}
+                          onChange={() => toggleSelect(variant.id)}
+                        />
+                      </td>
                       <td className="px-6 py-3 text-center">
-                        <input 
-                          type="number" 
+                        <input
+                          type="number"
                           value={variant.sort_order}
                           onChange={(e) => handleManualOrderChange(index, e.target.value)}
                           className="w-14 text-center border border-gray-200 rounded py-1 text-sm focus:ring-1 focus:ring-orange-500 outline-none bg-white font-medium"

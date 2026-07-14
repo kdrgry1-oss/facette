@@ -71,6 +71,17 @@ async def reorder_variants(items: List[dict], admin=Depends(require_admin)):
     
     return {"success": False, "message": "Geçerli veri bulunamadı"}
 
+@router.post("/bulk-delete")
+async def bulk_delete_variants(payload: dict, admin=Depends(require_admin)):
+    """Seçili birden fazla varyant değerini TOPLU siler. payload: {"ids": ["...", "..."]}"""
+    ids = payload.get("ids") or []
+    ids = [str(i) for i in ids if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Silinecek değer seçilmedi")
+    result = await db.variant_options.delete_many({"id": {"$in": ids}})
+    return {"success": True, "deleted": result.deleted_count,
+            "message": f"{result.deleted_count} değer silindi"}
+
 @router.delete("/{variant_id}")
 async def delete_variant(variant_id: str, admin=Depends(require_admin)):
     result = await db.variant_options.delete_one({"id": variant_id})
