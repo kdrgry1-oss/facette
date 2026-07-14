@@ -127,9 +127,14 @@ async def auto_cancel_unpaid_card_orders():
                     {"id": order["id"], "payment_status": {"$nin": ["paid", "refunded"]},
                      "status": {"$in": ["pending", "awaiting_payment"]}},
                     {"$set": {
-                        "status": "cancelled",
+                        # status="cancelled" DEĞİL "payment_failed": bu siparişin parası HİÇ alınmadı.
+                        # "İptal Edildi" yazılırsa ekip "ödeme alınmıştı" sanıp yanlışlıkla PARA İADESİ
+                        # yapıyordu. "payment_failed" = Ödeme Alınamadı → iade GEREKMEZ, ana listede
+                        # görünmez. (Gerçekten para çekilmiş olsaydı reconcile job 24s dolmadan
+                        # 'paid' yapardı; bu guard paid'i zaten atlıyor.)
+                        "status": "payment_failed",
                         "payment_status": "expired",
-                        "cancel_reason": "Ödeme 24 saat içinde tamamlanmadı (otomatik iptal)",
+                        "cancel_reason": "Ödeme 24 saat içinde tamamlanmadı — para HİÇ alınmadı (iade gerekmez)",
                         "auto_cancelled": True,
                         "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat(),

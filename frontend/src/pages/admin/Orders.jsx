@@ -73,6 +73,9 @@ const statusOptions = [
   { value: "cancel_requested", label: "İptal Talebi Alındı (İade Bekliyor)", class: "status-pending" },
   { value: "cancelled", label: "İptal Edildi", class: "status-cancelled" },
   { value: "cancel_refunded", label: "İptal Ödemesi Yapıldı", class: "status-cancelled" },
+  // Ödemesi HİÇ alınamamış (başarısız kart) sipariş — para alınmadığı için İADE GEREKMEZ.
+  // "İptal Edildi"den AYRI: ekip bunu "ödeme alınmıştı" sanmasın.
+  { value: "payment_failed", label: "Ödeme Alınamadı (para alınmadı)", class: "status-undelivered" },
 ];
 
 const cargoCompanies = [

@@ -194,6 +194,16 @@ async def lifespan(app: FastAPI):
         except Exception as _re:
             logger.error(f"[urun-telafi] xml-missing restore hatasi: {_re}")
 
+        # TELAFİ: parası HİÇ alınmadığı hâlde 'İptal Edildi' görünen (auto-cancel) kart siparişlerini
+        # 'payment_failed' (Ödeme Alınamadı) yap → ekip yanlışlıkla PARA İADESİ yapmasın. İdempotent.
+        try:
+            from routes.orders import reclassify_auto_cancelled_unpaid_orders
+            _rf = await reclassify_auto_cancelled_unpaid_orders()
+            if _rf.get("reclassified"):
+                logger.warning(f"[odeme-telafi] {_rf['reclassified']} odenmemis 'iptal' siparis 'payment_failed' yapildi.")
+        except Exception as _rfe:
+            logger.error(f"[odeme-telafi] reclassify hatasi: {_rfe}")
+
         # Create indexes
         await db.products.create_index("slug")
         await db.products.create_index("stock_code")

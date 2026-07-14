@@ -430,6 +430,10 @@ async def get_orders(
     skip = (page - 1) * limit
     query = {}
     _show_hidden = str(show_hidden).lower() in ("1", "true", "yes")
+    # Belirli sipariş araması mı? (Sipariş No / Fatura / Kargo / Telefon / E-posta / Kupon / genel arama)
+    # → ödeme başarısız/junk siparişler bile no ile BULUNABİLMELİ; varsayılan gizleme uygulanmaz.
+    _specific_search = bool(search or order_number or invoice_number or cargo_tracking
+                            or phone or email or coupon_code)
 
     if status:
         _st = [x.strip() for x in str(status).split(",") if x.strip()]
@@ -455,6 +459,7 @@ async def get_orders(
         query["status"] = {"$nin": [
             "cancelled", "returned", "refunded", "return_approved",
             "return_requested", "return_in_transit", "return_rejected", "partial_refunded",
+            "payment_failed",  # ödemesi hiç alınamamış (başarısız kart) sipariş → ana listede GÖRÜNMEZ
         ]}
     if phone:
         query["shipping_address.phone"] = {"$regex": re.escape(str(phone)), "$options": "i"}  # ReDoS koruması
@@ -525,7 +530,14 @@ async def get_orders(
         pass
     elif payment_view == "unpaid":
         query.setdefault("$and", []).append(_junk_cond)
-    elif payment_view == "valid":
+    elif _specific_search:
+        # Belirli sipariş araması → ödeme başarısız/junk dahil BUL (no ile aranan sipariş kaybolmasın).
+        pass
+    else:
+        # VARSAYILAN ("all") + "valid": ödemesi hiç alınamamış (başarısız/bekleyen web kart
+        # denemesi) siparişleri GİZLE. Böylece "başarısız ödeme panele yansımasın" — ekip bunları
+        # 'ödeme alındı' sanıp yanlışlıkla PARA İADESİ yapmaz. (Ödeme alanı gerçekten alınanlar
+        # payment_status='paid' olduğu için junk süzgecine takılmaz, listede kalır.)
         query.setdefault("$and", []).append({"$nor": [_junk_cond]})
 
     # PERF: find ve count'u paralel çalıştır (ardışık değil) + count'u kısa süre
@@ -2138,18 +2150,52 @@ async def auto_cancel_expired_orders(
     cancelled = 0
     async for order in db.orders.find(query, {"_id": 0}):
         moves = await _restock_order_once(order, "auto_cancel_expired")
+        # ÖNEMLİ: status="cancelled" DEĞİL "payment_failed" yazılır. Bu siparişlerin parası HİÇ
+        # alınmadı; "cancelled" (İptal Edildi) yazılırsa ekip "ödeme alınmıştı, iptal edildi" sanıp
+        # yanlışlıkla PARA İADESİ yapıyordu. "payment_failed" = "Ödeme Alınamadı" → iade GEREKMEZ ve
+        # ana listede görünmez (varsayılan gizli statü + junk süzgeci).
         await db.orders.update_one(
             {"id": order["id"]},
             {"$set": {
-                "status": "cancelled",
+                "status": "payment_failed",
                 "payment_status": "expired",
-                "cancel_reason": f"Ödeme {hours} saat içinde tamamlanmadı",
+                "cancel_reason": f"Ödeme {hours} saat içinde tamamlanmadı (para HİÇ alınmadı)",
                 "cancelled_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }}
         )
         cancelled += 1
     return {"success": True, "cancelled": cancelled, "hours": hours}
+
+
+async def reclassify_auto_cancelled_unpaid_orders():
+    """TELAFİ (otomatik, başlangıçta): Daha önce 'cancelled' (İptal Edildi) olarak işaretlenmiş ama
+    parası HİÇ alınmamış (auto_cancelled + payment_status expired/failed, hiç 'paid' olmamış) kart
+    siparişlerini 'payment_failed' (Ödeme Alınamadı) statüsüne çeker.
+
+    NEDEN: Bu siparişler 'İptal Edildi' göründüğü için ekip 'ödeme alınmıştı, iptal edildi' sanıp
+    yanlışlıkla PARA İADESİ yapıyordu. Gerçekte para alınmadığı için iade GEREKMEZ. Reclassify
+    sonrası bu kayıtlar ana listede görünmez ve iade akışına düşmez.
+
+    GÜVENLİK: Yalnız auto_cancelled=True + payment_status∈{expired,failed} + paid_at YOK + hiç
+    refund_* alanı YOK olanlar. Gerçekten ödenip iptal/iade edilmiş (payment_status paid/refunded)
+    siparişlere DOKUNULMAZ. İdempotent — tekrar çalışması güvenli."""
+    try:
+        q = {
+            "status": "cancelled",
+            "auto_cancelled": True,
+            "payment_status": {"$in": ["expired", "failed"]},
+            "paid_at": {"$in": [None, ""]},
+            "refund_paid_at": {"$exists": False},
+            "refund_payment": {"$exists": False},
+        }
+        res = await db.orders.update_many(q, {"$set": {
+            "status": "payment_failed",
+            "reclassified_payment_failed_at": datetime.now(timezone.utc).isoformat(),
+        }})
+        return {"reclassified": res.modified_count}
+    except Exception as e:
+        return {"reclassified": 0, "error": str(e)[:160]}
 
 
 @router.post("/recover-charged")

@@ -36,6 +36,9 @@ ORDER_STATUS_CATALOG = [
     {"key": "partial_refunded", "label": "Kısmi İade Yapıldı", "customer_label": "Kısmi İadeniz Yapıldı", "event": "order_partial_refunded", "color": "#DB2777", "group": "İade", "default_active": True, "default_sms": True, "default_email": True},
     {"key": "cancelled", "label": "İptal Edildi", "customer_label": "Siparişiniz İptal Edildi", "event": "order_cancelled", "color": "#6B7280", "group": "Son", "default_active": True, "default_sms": False, "default_email": False},
     {"key": "cancel_refunded", "label": "İptal Ödemesi Yapıldı", "customer_label": "İptal Bedeliniz İade Edildi", "event": "order_cancel_refunded", "color": "#7C3AED", "group": "Son", "default_active": True, "default_sms": True, "default_email": True},
+    # Ödemesi HİÇ alınamamış (başarısız kart) sipariş. "İptal Edildi"den AYRI: para alınmadığı için
+    # İADE GEREKMEZ. Müşteriye bildirim GİTMEZ (default pasif). Ana listede görünmez.
+    {"key": "payment_failed", "label": "Ödeme Alınamadı", "customer_label": "Ödeme Alınamadı", "event": "order_payment_failed", "color": "#EF4444", "group": "Son", "default_active": False, "default_sms": False, "default_email": False},
 ]
 
 _BY_KEY = {s["key"]: s for s in ORDER_STATUS_CATALOG}
