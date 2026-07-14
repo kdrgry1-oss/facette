@@ -92,7 +92,12 @@ async def import_products_color_based():
     
     print(f"Found {len(product_groups)} unique products (each color is separate)")
     
-    # Delete existing products
+    # GÜVENLİK KİLİDİ: bu tek-seferlik migration betiği TÜM ürünleri siliyordu (delete_many({})).
+    # Kazara çalıştırma canlı katalogu yok ediyordu ("ürünler kayboldu"). Artık yalnızca
+    # ALLOW_WIPE_IMPORT=1 ortam değişkeni AÇIKÇA verilirse siler; aksi halde durur.
+    if os.getenv("ALLOW_WIPE_IMPORT") != "1":
+        print("GUVENLIK: ALLOW_WIPE_IMPORT=1 verilmedi — TUM urunleri silen import iptal edildi.")
+        return
     await db.products.delete_many({})
     print("Cleared existing products")
     

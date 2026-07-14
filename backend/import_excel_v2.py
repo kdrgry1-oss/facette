@@ -112,7 +112,11 @@ async def import_products_with_variants():
     
     print(f"Found {len(product_groups)} unique base products")
     
-    # Delete existing products and insert fresh
+    # GÜVENLİK KİLİDİ: kazara çalıştırmada TÜM ürünleri silmesin (canlı katalog koruması).
+    # Yalnızca ALLOW_WIPE_IMPORT=1 açıkça verilirse siler.
+    if os.getenv("ALLOW_WIPE_IMPORT") != "1":
+        print("GUVENLIK: ALLOW_WIPE_IMPORT=1 verilmedi — TUM urunleri silen import iptal edildi.")
+        return
     await db.products.delete_many({})
     print("Cleared existing products")
     

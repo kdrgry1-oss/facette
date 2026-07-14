@@ -1357,7 +1357,14 @@ async def upload_rooftr_products_excel(
                 variants.append(v)
                 stats["variants_total"] += 1
 
-            existing = await db.products.find_one({"urun_karti_id": kart_id})
+            # RENK-DUYARLI eşleşme: aynı ürün kartı altında AYRI renk-ürünleri olabilir
+            # ("...Ceket Ekru" ve "...Ceket Siyah"). Önce kart_id + RENK ile TAM doğru
+            # renk-ürününü bul; yanlış renk-kardeşini yakalayıp adını EZMEYİ önler.
+            existing = None
+            if renk:
+                existing = await db.products.find_one({"urun_karti_id": kart_id, "color": renk.title()})
+            if not existing:
+                existing = await db.products.find_one({"urun_karti_id": kart_id})
             if not existing and parent_stock_code:
                 existing = await db.products.find_one({
                     "$or": [
@@ -1397,8 +1404,15 @@ async def upload_rooftr_products_excel(
 
             if existing:
                 _set_doc = dict(update_doc)
-                # Yeni ürün oluşturmuyoruz: indirim yoksa mevcut sale_price'a dokunma (yukarıda
-                # zaten eklenmedi). Gerçek indirim varsa üstteki blok ekledi → güncellenir.
+                # ── KRİTİK KORUMA (ürün kaybolma/renk adı değişme onarımı) ──────────────────
+                # Mevcut bir ürünü içe-aktarımda ASLA yeniden ADLANDIRMA ve RENGİNİ DEĞİŞTİRME.
+                # Önceden kart_id ile yanlış renk-kardeşi eşleşip 'name'/'color' eziliyordu →
+                # "...Ceket Ekru" ürünü "...Siyah"a dönüp kayboluyordu. Ad/renk artık YALNIZ
+                # YENİ üründe yazılır; mevcut kayıtta Facette panelindeki küratörlü ad korunur.
+                _set_doc.pop("name", None)
+                if existing.get("color") and str(existing.get("color")).strip().lower() != (renk or "").strip().lower():
+                    _set_doc.pop("color", None)
+                # slug'ı da (name'e bağlı) bozmamak için dokunmuyoruz (zaten update_doc'ta yok).
                 await db.products.update_one({"id": existing["id"]}, {"$set": _set_doc})
                 stats["parents_updated_db"] += 1
             else:

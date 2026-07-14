@@ -1995,6 +1995,8 @@ async def delete_product(
             "is_active": False,
             "prev_active": product.get("is_active", True),
             "deleted_at": datetime.now(timezone.utc).isoformat(),
+            # ELLE silme işareti: otomatik telafi (restore) bunu geri getirmez.
+            "manual_deleted": True,
         }}
     )
     return {"message": "Ürün çöp kutusuna taşındı"}
