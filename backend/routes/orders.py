@@ -3289,6 +3289,56 @@ async def create_invoice_for_order(
         trendyol_upload = {"ok": False, "error": str(_te)}
         logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_te}")
 
+    # ─── Hepsiburada: fatura kesilir kesilmez ANINDA HB'ye yükle ───────────
+    # (Trendyol için vardı, HB için YOKTU → HB faturaları kesiliyor ama HB'ye hiç
+    # aktarılmıyordu. Artık HB de otomatik; manuel "gönder" adımına gerek kalmaz.)
+    hb_upload = None
+    try:
+        if order.get("platform") == "hepsiburada":
+            _hweb = ((dogan_result or {}).get("web_key") or order.get("invoice_pdf_url") or "").strip()
+            _htmpl = (dogan_settings.get("earsiv_link_template") or "").strip()
+            if _hweb.startswith("http"):
+                _hlink = _hweb
+            elif _htmpl and _hweb:
+                _hlink = _htmpl.replace("{web_key}", _hweb)
+            else:
+                _hlink = ""
+            # HB fatura API'si PAKET numarası ister. Order'da paket no varsa onu, yoksa
+            # HB sipariş no'sunu kullan (çoğu tek-paket siparişte aynıdır).
+            _hpkg = str(order.get("hepsiburada_package_number")
+                        or order.get("hepsiburada_order_number")
+                        or order.get("order_number") or "").strip()
+            if _hlink and _hpkg:
+                import asyncio as _aio_hb
+                from hepsiburada_client import HepsiburadaError as _HBErr
+                from routes.category_mapping import _get_hb_client
+                _hcli, _hcerr = await _get_hb_client()
+                if _hcerr:
+                    hb_upload = {"ok": False, "error": _hcerr}
+                    await db.orders.update_one({"id": order_id}, {"$set": {
+                        "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:1000]}})
+                else:
+                    try:
+                        await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _hlink)
+                        hb_upload = {"ok": True, "link": _hlink}
+                        await db.orders.update_one({"id": order_id}, {"$set": {
+                            "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                    except Exception as _hbe:
+                        _herr = str(_hbe)
+                        hb_upload = {"ok": False, "error": _herr}
+                        await db.orders.update_one({"id": order_id}, {"$set": {
+                            "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
+                        logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
+            else:
+                _herr = "HB fatura linki veya paket no üretilemedi (Dogan web_key/earsiv_link_template kontrol edin)."
+                hb_upload = {"ok": False, "error": _herr}
+                await db.orders.update_one({"id": order_id}, {"$set": {
+                    "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
+                logger.warning(f"[hb invoice] {order.get('order_number')}: {_herr}")
+    except Exception as _hte:
+        hb_upload = {"ok": False, "error": str(_hte)}
+        logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_hte}")
+
     return {
         "success": True,
         "message": "Fatura oluşturuldu",
@@ -3296,6 +3346,7 @@ async def create_invoice_for_order(
         "invoice_type": invoice_type,
         "provider": active,
         "trendyol_upload": trendyol_upload,
+        "hb_upload": hb_upload,
     }
 
 
