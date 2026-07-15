@@ -72,7 +72,23 @@ function NavItem({ item, closeMobile }) {
       {open && (
         <div className="hidden lg:block absolute left-0 mt-1 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-[60] overflow-hidden">
           {item.children.map((child) => {
-            const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
+            const isActive = location.pathname === child.path || (child.path && location.pathname.startsWith(child.path + "/"));
+            // Dış bağlantı (ör. Zoho Webmail) → yeni sekmede aç.
+            if (child.external) {
+              return (
+                <a
+                  key={child.href}
+                  href={child.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { setOpen(false); }}
+                  className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-white hover:bg-gray-800"
+                >
+                  <child.icon size={15} className="text-gray-300" />
+                  {child.label}
+                </a>
+              );
+            }
             return (
               <Link
                 key={child.path}
@@ -94,7 +110,22 @@ function NavItem({ item, closeMobile }) {
       {open && (
         <div className="lg:hidden ml-4 mt-1 space-y-1">
           {item.children.map((child) => {
-            const isActive = location.pathname === child.path || location.pathname.startsWith(child.path + "/");
+            const isActive = location.pathname === child.path || (child.path && location.pathname.startsWith(child.path + "/"));
+            if (child.external) {
+              return (
+                <a
+                  key={child.href}
+                  href={child.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { setOpen(false); if (closeMobile) closeMobile(); }}
+                  className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors text-white hover:bg-gray-800"
+                >
+                  <child.icon size={15} />
+                  {child.label}
+                </a>
+              );
+            }
             return (
               <Link
                 key={child.path}
