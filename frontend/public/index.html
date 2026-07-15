@@ -218,6 +218,13 @@
             // uygulanmış mı kontrol et; uygulanmadıysa cache-bust'lı bir kez tazele (sessionStorage
             // bayrağı sonsuz döngüyü önler).
             (function () {
+                // Bir kez tazelendiyse TEKRAR deneme. Guard hem URL param (_r) hem sessionStorage:
+                // in-app tarayıcıda (Instagram/FB/WhatsApp) sessionStorage sıfırlanabildiğinden URL
+                // param'ı KALICI guard'dır → sonsuz reload döngüsü OLMAZ.
+                function healedAlready() {
+                    if (/[?&]_r=/.test(location.search)) return true;
+                    try { return sessionStorage.getItem("__heal") === "1"; } catch (e) { return false; }
+                }
                 function cssApplied() {
                     var links = document.querySelectorAll('link[rel="stylesheet"][href*="/static/css/"]');
                     if (!links.length) return true; // CSS linki yoksa (inline stil) kontrol etme
@@ -232,18 +239,30 @@
                     }
                     return false;
                 }
+                // MOBİL BEYAZ EKRAN: eski cache'lenmiş index.html silinmiş JS bundle'a 404 verince
+                // React #root'a HİÇBİR ŞEY basamaz → bomboş ekran. Bunu "mount oldu mu" ile yakala.
+                function appMounted() {
+                    var r = document.getElementById("root");
+                    return !!(r && r.children && r.children.length > 0);
+                }
                 function check() {
                     try {
-                        if (cssApplied()) { sessionStorage.removeItem("__css_heal"); return; }
-                        if (sessionStorage.getItem("__css_heal")) return; // zaten bir kez denendi
-                        sessionStorage.setItem("__css_heal", "1");
-                        var u = location.pathname + location.search +
-                            (location.search ? "&" : "?") + "_r=" + Date.now();
-                        location.replace(u); // cache-bust ile taze index.html
+                        if (appMounted() && cssApplied()) {
+                            try { sessionStorage.removeItem("__heal"); } catch (e) {}
+                            return; // her şey yolunda
+                        }
+                        if (healedAlready()) return; // bir kez denendi; kalıcı hata reload'la çözülmez → döngü YOK
+                        try { sessionStorage.setItem("__heal", "1"); } catch (e) {}
+                        var u = location.pathname +
+                            (location.search ? location.search + "&" : "?") + "_r=" + Date.now() +
+                            location.hash;
+                        location.replace(u); // cache-bust ile TAZE index.html + taze bundle çek
                     } catch (e) {}
                 }
-                if (document.readyState === "complete") setTimeout(check, 1200);
-                else window.addEventListener("load", function () { setTimeout(check, 1200); });
+                // React mount + CSS için cömert süre (yavaş mobil ağda erken/yanlış reload etme).
+                function schedule() { setTimeout(check, 3500); }
+                if (document.readyState === "complete") schedule();
+                else window.addEventListener("load", schedule);
             })();
         </script>
     </body>

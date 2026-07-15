@@ -5,6 +5,7 @@ import { CartProvider } from "./context/CartContext";
 import { AuthProvider } from "./context/AuthContext";
 import { FavoritesProvider } from "./context/FavoritesContext";
 import { bootstrapNative, isNative } from "./lib/native";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // Storefront — sadece ana sayfa (LCP) eager; gerisi route'a girilince yüklenir.
 // Bu, ilk açılışta indirilen JS'i ciddi şekilde küçültür (mobil TBT/LCP/FCP iyileşir).
@@ -72,6 +73,7 @@ function App() {
   }, []);
 
   return (
+    <ErrorBoundary>
     <AuthProvider>
       <CartProvider>
         <FavoritesProvider>
@@ -127,6 +129,7 @@ function App() {
         </FavoritesProvider>
       </CartProvider>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
