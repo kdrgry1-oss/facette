@@ -331,7 +331,7 @@ async def get_email_smtp(current_user: dict = Depends(require_admin)):
     s = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
     return {
         "enabled": bool(s.get("enabled", False)),
-        "host": s.get("host", "smtp.zoho.com"),
+        "host": s.get("host", "smtp.zoho.eu"),
         "port": int(s.get("port", 465)),
         "secure": s.get("secure", "ssl"),
         "username": s.get("username", ""),
@@ -347,7 +347,7 @@ async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
     data = {
         "id": "email_smtp",
         "enabled": bool(payload.get("enabled", False)),
-        "host": (str(payload.get("host") or "smtp.zoho.com")).strip(),
+        "host": (str(payload.get("host") or "smtp.zoho.eu")).strip(),
         "port": int(payload.get("port") or 465),
         "secure": (str(payload.get("secure") or "ssl")).strip().lower(),
         "username": (str(payload.get("username") or "")).strip(),

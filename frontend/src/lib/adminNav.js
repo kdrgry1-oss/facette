@@ -167,7 +167,7 @@ export const navigationGroups = [
       { label: "Gönderici / Depo Adresi", path: "/admin/ayarlar/gonderici-adresi", icon: Building2 },
       { label: "Bildirim Ayarları", path: "/admin/ayarlar/bildirim", icon: Settings },
       { label: "E-posta (SMTP)", path: "/admin/ayarlar/eposta", icon: Mail },
-      { label: "Webmail'e Git (Zoho)", href: "https://mail.zoho.com", external: true, icon: Mail },
+      { label: "Webmail'e Git (Zoho)", href: "https://mail.zoho.eu", external: true, icon: Mail },
       { label: "Bildirim Şablonları", path: "/admin/ayarlar/bildirim/sablonlar", icon: FileText },
       { label: "Sipariş Durumları", path: "/admin/ayarlar/siparis-durumlari", icon: ShoppingCart },
       { label: "Pazarlama Pixelleri", path: "/admin/ayarlar/pixel", icon: Code },

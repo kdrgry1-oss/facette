@@ -22,8 +22,11 @@ def is_configured(cfg: dict) -> bool:
 
 
 def _endpoint(cfg: dict) -> str:
+    # Facette hesabi Zoho EU (Avrupa) veri merkezinde → varsayilan EU endpoint.
+    # Yalnizca host ACIKCA ".com" (US) ise US endpoint kullanilir. Boylece host bos/eksik
+    # olsa bile EU'ya gider (US endpoint EU token'ini reddedip "mail gitmiyor"a yol aciyordu).
     host = (cfg.get("host") or "").lower()
-    base = "https://api.zeptomail.eu" if "eu" in host else "https://api.zeptomail.com"
+    base = "https://api.zeptomail.com" if "com" in host else "https://api.zeptomail.eu"
     return base + "/v1.1/email"
 
 
