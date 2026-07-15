@@ -3303,12 +3303,7 @@ async def create_invoice_for_order(
                 _hlink = _htmpl.replace("{web_key}", _hweb)
             else:
                 _hlink = ""
-            # HB fatura API'si PAKET numarası ister. Order'da paket no varsa onu, yoksa
-            # HB sipariş no'sunu kullan (çoğu tek-paket siparişte aynıdır).
-            _hpkg = str(order.get("hepsiburada_package_number")
-                        or order.get("hepsiburada_order_number")
-                        or order.get("order_number") or "").strip()
-            if _hlink and _hpkg:
+            if _hlink:
                 import asyncio as _aio_hb
                 from hepsiburada_client import HepsiburadaError as _HBErr
                 from routes.category_mapping import _get_hb_client
@@ -3318,17 +3313,37 @@ async def create_invoice_for_order(
                     await db.orders.update_one({"id": order_id}, {"$set": {
                         "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:1000]}})
                 else:
-                    try:
-                        await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _hlink)
-                        hb_upload = {"ok": True, "link": _hlink}
-                        await db.orders.update_one({"id": order_id}, {"$set": {
-                            "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
-                    except Exception as _hbe:
-                        _herr = str(_hbe)
+                    # HB fatura API'si PAKET numarası ister (sipariş no DEĞİL → 404 verir).
+                    # Order'da saklı değilse OMS detayından items[].packageNumber ile çöz + sakla.
+                    _hpkg = str(order.get("hepsiburada_package_number") or "").strip()
+                    if not _hpkg:
+                        _hraw = str(order.get("hepsiburada_order_number") or "").strip()
+                        try:
+                            _det = await _aio_hb.to_thread(_hcli.get_order_detail, _hraw)
+                            for _it in ((_det or {}).get("items") or []):
+                                if _it.get("packageNumber"):
+                                    _hpkg = str(_it["packageNumber"]); break
+                            if _hpkg:
+                                await db.orders.update_one({"id": order_id}, {"$set": {"hepsiburada_package_number": _hpkg}})
+                        except Exception as _pe:
+                            logger.warning(f"[hb invoice] paket no cozulemedi {order.get('order_number')}: {_pe}")
+                    if not _hpkg:
+                        _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
                         hb_upload = {"ok": False, "error": _herr}
                         await db.orders.update_one({"id": order_id}, {"$set": {
-                            "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
-                        logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
+                            "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
+                    else:
+                        try:
+                            await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _hlink)
+                            hb_upload = {"ok": True, "link": _hlink, "package": _hpkg}
+                            await db.orders.update_one({"id": order_id}, {"$set": {
+                                "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                        except Exception as _hbe:
+                            _herr = str(_hbe)
+                            hb_upload = {"ok": False, "error": _herr}
+                            await db.orders.update_one({"id": order_id}, {"$set": {
+                                "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr[:1000]}})
+                            logger.error(f"[hb invoice auto-upload] {order.get('order_number')}: {_herr}")
             else:
                 _herr = "HB fatura linki veya paket no üretilemedi (Dogan web_key/earsiv_link_template kontrol edin)."
                 hb_upload = {"ok": False, "error": _herr}
