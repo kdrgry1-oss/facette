@@ -1960,9 +1960,30 @@ async def update_product(
         product_data["category_ids"] = await _expand_category_ids(_sel)
         if _sel:
             product_data["category_id"] = _sel[0]
-            _pc = await db.categories.find_one({"id": _sel[0]}, {"_id": 0, "name": 1})
-            if _pc and _pc.get("name"):
-                product_data["category_name"] = _pc["name"]
+            # KRİTİK: Birincil kategoriden TÜREYEN alanları (category_name / category_slug /
+            # breadcrumb) YENİDEN yaz. Aksi halde bir kategoriden çıkarılan ürün, ESKİ
+            # breadcrumb/category_slug/category_name yüzünden site kategori sorgusunda (çoklu-alan
+            # OR eşleşmesi) o kategoride GÖRÜNMEYE DEVAM ediyordu ("çıkardığım kategoride hâlâ çıkıyor").
+            _cmap = {}
+            async for _c in db.categories.find({}, {"_id": 0, "id": 1, "name": 1, "slug": 1, "parent_id": 1}):
+                if _c.get("id"):
+                    _cmap[_c["id"]] = _c
+            _prim = _cmap.get(_sel[0], {})
+            _pname = _prim.get("name") or ""
+            product_data["category_name"] = _pname
+            product_data["category_slug"] = _prim.get("slug") or (generate_slug(_pname) if _pname else "")
+            # breadcrumb = birincil kategori + ataları (kök→yaprak), ">" ile birleştir.
+            _names, _cur, _g = [], _sel[0], 0
+            while _cur and _cur in _cmap and _g < 50:
+                _names.append(_cmap[_cur].get("name") or "")
+                _cur = _cmap[_cur].get("parent_id"); _g += 1
+            product_data["breadcrumb"] = ">".join([n for n in reversed(_names) if n])
+        else:
+            # Tüm kategoriler çıkarıldı → TÜREV alanları TEMİZLE ki site sorgusu artık eşleşmesin.
+            product_data["category_id"] = None
+            product_data["category_name"] = ""
+            product_data["category_slug"] = ""
+            product_data["breadcrumb"] = ""
 
     # Form "Urun Kart ID" alani ticimax_fields.URUNKARTIID'e yazar -> ust-seviye ile senkronla
     _tf_u = product_data.get("ticimax_fields") or {}
