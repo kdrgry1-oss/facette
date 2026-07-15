@@ -2618,7 +2618,11 @@ async def hb_send_invoice(package_number: str, req: HbInvoiceReq, current_user: 
         await log_integration_event("hepsiburada", "send_invoice", "package", package_number, "success", "Fatura iletildi")
         return {"success": True, "data": data}
     except HepsiburadaError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        # 5xx DÖNDÜRME: Cloudflare origin 5xx'i kendi HTML sayfasıyla değiştirip HB'nin gerçek
+        # hata metnini gizliyordu. 200 + gövdede gerçek hata ile ilet (panelde görünür olsun).
+        _err = str(e)
+        await log_integration_event("hepsiburada", "send_invoice", "package", package_number, "error", _err[:500])
+        return {"success": False, "error": _err}
 @router.get("/hepsiburada/packages/{package_number}/label")
 async def hb_cargo_label(package_number: str, fmt: str = "base64zpl", current_user: dict = Depends(require_admin)):
     """Hepsiburada kargo etiketini döner (zpl | base64zpl | png)."""
