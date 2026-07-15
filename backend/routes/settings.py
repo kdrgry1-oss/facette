@@ -368,12 +368,20 @@ async def test_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
     to = (str(payload.get("to") or "")).strip()
     if not to:
         raise HTTPException(status_code=400, detail="Test için alıcı e-posta gerekli")
-    from email_smtp import send_smtp_email
+    from email_smtp import send_smtp_email, get_smtp_config, _endpoint
+    cfg = await get_smtp_config(db)
     res = await send_smtp_email(
         db, to,
         "Facette SMTP Test",
         "<p>Bu bir test e-postasıdır. Zoho SMTP ayarlarınız çalışıyor 🎉</p>",
     )
     if not res.get("success"):
-        raise HTTPException(status_code=502, detail=f"Gönderilemedi: {res.get('response')}")
+        # ÖNEMLİ: 5xx DÖNDÜRME. Cloudflare, origin'den gelen 5xx'i kendi HTML hata sayfasıyla
+        # değiştirip ZeptoMail'in gerçek hata metnini gizliyordu → panelde hep "sunucuya
+        # ulaşılamadı" görünüyordu. 200 + gövdede gerçek hata ile ZeptoMail cevabını iletiyoruz.
+        return {
+            "success": False,
+            "error": str(res.get("response") or "bilinmeyen hata"),
+            "endpoint": _endpoint(cfg),
+        }
     return {"success": True, "message": "Test e-postası gönderildi"}

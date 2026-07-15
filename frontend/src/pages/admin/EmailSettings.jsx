@@ -71,11 +71,15 @@ export default function EmailSettings() {
     if (!testTo.trim()) { toast.error("Test için alıcı e-posta girin"); return; }
     try {
       setTesting(true);
-      await axios.post(`${API}/settings/email-smtp/test`, { to: testTo.trim() }, auth());
-      toast.success("Test e-postası gönderildi — gelen kutunu kontrol et");
+      const r = await axios.post(`${API}/settings/email-smtp/test`, { to: testTo.trim() }, { ...auth(), timeout: 35000 });
+      if (r.data?.success) {
+        toast.success("Test e-postası gönderildi — gelen kutunu kontrol et");
+      } else {
+        // ZeptoMail'in GERÇEK hata metni (Cloudflare 5xx maskesini aşmak için 200+body geldi).
+        toast.error(`ZeptoMail hatası [${r.data?.endpoint || "?"}]: ${r.data?.error || "bilinmeyen"}`, { duration: 20000 });
+      }
     } catch (e) {
-      // Backend, ZeptoMail'in döndürdüğü gerçek hatayı detail içinde iletir.
-      toast.error(e.response?.data?.detail || "Test gönderilemedi (sunucuya ulaşılamadı)");
+      toast.error("İstek başarısız: " + (e.response?.data?.detail || e.message || "sunucuya ulaşılamadı"), { duration: 15000 });
     } finally {
       setTesting(false);
     }
