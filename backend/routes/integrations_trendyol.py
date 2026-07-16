@@ -2420,6 +2420,56 @@ async def _sync_trendyol_status_passes(client, start_date_ms, end_date_ms, widen
                         _reason = ("Trendyol iptali" if st == "Cancelled"
                                    else ("Teslim edilemedi (Trendyol)" if st == "UnDelivered"
                                          else "Trendyol iadesi"))
+                    # ── KISMİ İPTAL KORUMASI ───────────────────────────────────────────
+                    # Trendyol kısmi iptalde siparişi ÇOK PAKETE böler (biri iptal, biri AKTİF).
+                    # Sistem tek orderNumber kaydı tuttuğundan, iptal paketi aktif paketi EZİP
+                    # siparişi komple "cancelled" gösteriyordu → kalan ürüne fatura kesilemiyordu.
+                    # Bu yüzden bir siparişi Cancelled yapmadan ÖNCE orderNumber'ın TÜM paketlerini
+                    # Trendyol'dan çek: AKTİF (iptal/iade/teslim-edilemedi OLMAYAN) paket varsa
+                    # siparişi İPTAL ETME → aktif paketin kalem/tutar/durumuna çek (kısmi iptal).
+                    # Tamamen defensive: herhangi bir hata olursa eski (tam-iptal) akışa düşer.
+                    if st == "Cancelled":
+                        _active_pkg = None
+                        try:
+                            _allp = await client.get_orders(
+                                order_number=onum,
+                                start_date_ms=max(0, end_date_ms - 120 * 24 * 3600 * 1000),
+                                end_date_ms=end_date_ms, size=100,
+                            )
+                            _DEAD_ST = ("Cancelled", "Returned", "UnDelivered", "UnSupplied")
+                            for _pk in (_allp.get("content") or []):
+                                _pst = str(_pk.get("shipmentPackageStatus") or _pk.get("status") or "")
+                                if _pst and _pst not in _DEAD_ST:
+                                    _active_pkg = _pk
+                                    break
+                        except Exception as _pce:
+                            logger.warning(f"[trendyol kismi-iptal kontrol {onum}] {_pce}")
+                            _active_pkg = None
+                        if _active_pkg:
+                            try:
+                                _amap = map_trendyol_order(_active_pkg)
+                                _pset = {
+                                    "status": _amap.get("status") or "confirmed",
+                                    "items": _amap.get("items"),
+                                    "trendyol_status_raw": (_active_pkg.get("shipmentPackageStatus")
+                                                            or _active_pkg.get("status")),
+                                    "trendyol_active_package_id": str(_active_pkg.get("id") or ""),
+                                    "partial_cancelled": True,
+                                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                                }
+                                if _amap.get("total") is not None:
+                                    _pset["total"] = _amap.get("total")
+                                await db.orders.update_one(
+                                    {"order_number": onum, "platform": "trendyol"},
+                                    {"$set": _pset},
+                                )
+                                updated += 1
+                                logger.info(f"[trendyol kismi-iptal] {onum}: aktif paket "
+                                            f"{_active_pkg.get('id')} yansitildi, siparis iptal EDILMEDI")
+                                continue  # tam-iptal bloğunu ATLA
+                            except Exception as _pae:
+                                logger.error(f"[trendyol kismi-iptal uygula {onum}] {_pae}")
+                                # düşerse normal (tam) iptal akışına devam — güvenli
                     _set = {
                         "status": mapped.get("status"),
                         "trendyol_status_raw": _raw_status,
