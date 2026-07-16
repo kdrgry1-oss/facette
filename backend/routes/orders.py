@@ -3003,6 +3003,17 @@ async def create_invoice_for_order(
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET earsiv: {dogan_result}")
+            # NUMARA GERİ AL (e-Fatura ile aynı): mükerrer/kayıtlı DEĞİLSE Doğan faturayı kaydetmedi
+            # → FCT numarası boşa gitmesin, sıradaki denemede tekrar kullanılsın (ardışıklık).
+            _msg_l2 = str(dogan_result.get("message", "")).lower()
+            _is_dup2 = any(_t in _msg_l2 for _t in ("zaten", "mükerrer", "mukerrer", "duplicate",
+                                                    "already", "10009", "kayıtlı", "kayitli", "mevcut"))
+            if not _is_dup2:
+                try:
+                    await db.counters.find_one_and_update({"_id": seq_key, "seq": seq},
+                                                          {"$inc": {"seq": -1}})
+                except Exception:
+                    pass
             # Hatayı log'a yaz, mock fallback ile devam etme — gerçek hata bildir
             await db.orders.update_one({"id": order_id}, {"$set": {
                 "invoice_in_progress": False,
@@ -3195,6 +3206,19 @@ async def create_invoice_for_order(
 
         if not dogan_result.get("success"):
             logger.error(f"DOGAN_RET efatura: {dogan_result}")
+            # NUMARA GERİ AL: hata MÜKERRER/kayıtlı değilse (INVALID XML, validation, red) Doğan
+            # faturayı KAYDETMEDİ → bu FCE numarası boşa gitmesin, sıradaki denemede TEKRAR
+            # kullanılsın (GİB ardışıklığı; "4-5 no atlama" düzeltmesi). Compare-and-set: yalnız
+            # sayaç hâlâ bizim seq'imizdeyse azalt (eşzamanlı başka fatura ilerlettiyse dokunma).
+            _msg_l = str(dogan_result.get("message", "")).lower()
+            _is_dup = any(_t in _msg_l for _t in ("zaten", "mükerrer", "mukerrer", "duplicate",
+                                                  "already", "10009", "kayıtlı", "kayitli", "mevcut"))
+            if not _is_dup:
+                try:
+                    await db.counters.find_one_and_update({"_id": seq_key, "seq": seq},
+                                                          {"$inc": {"seq": -1}})
+                except Exception:
+                    pass
             await db.orders.update_one({"id": order_id}, {"$set": {
                 "invoice_in_progress": False,
                 "invoice_last_error": f"e-Fatura: {dogan_result.get('message')}",
