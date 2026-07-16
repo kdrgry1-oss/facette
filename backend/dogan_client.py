@@ -1321,25 +1321,11 @@ class DoganClient:
       <cac:AdditionalItemIdentification>
         <cbc:ID schemeID="GTIN">{escape(_barcode)}</cbc:ID>
       </cac:AdditionalItemIdentification>""" if _barcode else "")
-            # Faturadaki BARKOD / RENK / BEDEN SÜTUNLARI kalem-seviyesi AdditionalItemProperty'den
-            # okunur (Note'tan değil → önceden sütunlar BOŞ kalıyordu). Renk/Beden/Barkod'u
-            # yapısal olarak ekle (UBL sırası: AdditionalItemIdentification'dan SONRA geçerli).
-            _iprops = []
-            _icol = _clean(it.get("color"))
-            _isz = _clean(it.get("size"))
-            if _icol:
-                _iprops.append(("Renk", _icol))
-            if _isz:
-                _iprops.append(("Beden", _isz))
-            if _barcode:
-                _iprops.append(("Barkod", _barcode))
-            item_props_xml = "".join(
-                f"""
-      <cac:AdditionalItemProperty>
-        <cbc:Name>{escape(_pn)}</cbc:Name>
-        <cbc:Value>{escape(_pv)}</cbc:Value>
-      </cac:AdditionalItemProperty>""" for _pn, _pv in _iprops
-            )
+            # NOT: AdditionalItemProperty (Renk/Beden) EKLENMEZ — GİB UBL-TR Item şeması bu
+            # pozisyonda kabul etmiyor ("INVALID XML: Expected AdditionalItemIdentification /
+            # OriginCountry"). Sütun doldurma denemesi faturayı bozuyordu → geri alındı.
+            # Fatura ÇALIŞIR halde; Renk/Beden bilgisi fatura-altı Note'ta zaten var.
+            item_props_xml = ""
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
     <cbc:ID>{idx}</cbc:ID>
