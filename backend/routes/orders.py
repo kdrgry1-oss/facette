@@ -2743,10 +2743,12 @@ async def create_invoice_for_order(
     invoice_number = f"{prefix}{year_str}{seq:09d}"
 
     # ── E-FATURA "BOŞLUK DOLDURMA" KURALI (SADECE e-Fatura) ─────────────────────
-    # Başarısız denemelerden kalan boşlukları doldur: kesilmiş (invoice_issued) FCE
-    # numaralarını topla; EN DÜŞÜK kesilmiş no'dan başlayıp KULLANILMAMIŞ ilk numarayı
-    # seç (kesilmiş olanları atla). Böylece 034'ten doldurur, 054/058 gibi kesilmişleri
-    # atlar, sonra 059+ sıradan devam eder — GİB ardışıklığı korunur, numara boşa gitmez.
+    # Başlangıç no'sundan (einvoice_start_number, örn. 34) başlayıp KULLANILMAMIŞ ilk
+    # numarayı seç; kesilmiş (invoice_issued) FCE numaralarını atla. Böylece 034'ten
+    # başlar, aradaki boşlukları doldurur, 054/055/058 gibi kesilmişleri atlar, sonra
+    # 059+ sıradan devam eder — GİB ardışıklığı korunur, numara boşa gitmez.
+    # TABAN = einvoice_start_number (varsa); yoksa en düşük kesilmiş no. Böylece portalda
+    # kesilen son no'nun DEVAMINDAN (34) doldurmaya başlar, min(used)'e takılmaz.
     # (e-Arşiv değişmez; atomik sayaç aynen çalışır. Eşzamanlılık: aynı no seçilirse
     #  Doğan 10009 döner, aşağıdaki mükerrer-retry döngüsü bir sonrakine geçer.)
     if invoice_type == "e-fatura":
@@ -2760,13 +2762,16 @@ async def create_invoice_for_order(
                     _used.add(int(str(_uo.get("invoice_number") or "")[len(_epref):]))
                 except Exception:
                     pass
-            if _used:
+            # Taban: ayarlı başlangıç no (34) > 0 ise oradan; değilse en düşük kesilmiş no.
+            if base_start > 0:
+                _n = base_start
+            elif _used:
                 _n = min(_used)
-                while _n in _used:
-                    _n += 1
-                seq = _n
-            elif base_start > 0:
-                seq = base_start
+            else:
+                _n = seq
+            while _n in _used:
+                _n += 1
+            seq = _n
             invoice_number = f"{prefix}{year_str}{seq:09d}"
         except Exception as _ge:
             logger.warning(f"[e-fatura bosluk-doldur] {_ge}")
