@@ -1313,10 +1313,14 @@ class DoganClient:
             _barcode = _clean(it.get("barcode"))
             li_note = escape(_clean(it.get("note")))   # barkod ARTIK not'a değil, kendi hanesine
             note_xml = f"<cbc:Note>{li_note}</cbc:Note>" if li_note else ""
+            # GİB UBL-TR Item şeması 'StandardItemIdentification'ı KABUL ETMEZ → e-Fatura
+            # "INVALID XML! cvc-complex-type.2.4a: Expected ... AdditionalItemIdentification"
+            # hatası veriyordu. Barkod/GTIN, GİB Item'ında GEÇERLİ olan
+            # AdditionalItemIdentification ile verilir (tutar/vergi etkilenmez).
             std_item_xml = (f"""
-      <cac:StandardItemIdentification>
+      <cac:AdditionalItemIdentification>
         <cbc:ID schemeID="GTIN">{escape(_barcode)}</cbc:ID>
-      </cac:StandardItemIdentification>""" if _barcode else "")
+      </cac:AdditionalItemIdentification>""" if _barcode else "")
 
             invoice_lines_xml.append(f"""<cac:InvoiceLine>
     <cbc:ID>{idx}</cbc:ID>
