@@ -2741,6 +2741,36 @@ async def create_invoice_for_order(
     ) or {}
     seq = int(_seq_doc.get("seq", 1))
     invoice_number = f"{prefix}{year_str}{seq:09d}"
+
+    # ── E-FATURA "BOŞLUK DOLDURMA" KURALI (SADECE e-Fatura) ─────────────────────
+    # Başarısız denemelerden kalan boşlukları doldur: kesilmiş (invoice_issued) FCE
+    # numaralarını topla; EN DÜŞÜK kesilmiş no'dan başlayıp KULLANILMAMIŞ ilk numarayı
+    # seç (kesilmiş olanları atla). Böylece 034'ten doldurur, 054/058 gibi kesilmişleri
+    # atlar, sonra 059+ sıradan devam eder — GİB ardışıklığı korunur, numara boşa gitmez.
+    # (e-Arşiv değişmez; atomik sayaç aynen çalışır. Eşzamanlılık: aynı no seçilirse
+    #  Doğan 10009 döner, aşağıdaki mükerrer-retry döngüsü bir sonrakine geçer.)
+    if invoice_type == "e-fatura":
+        try:
+            _epref = f"{prefix}{year_str}"
+            _used = set()
+            async for _uo in db.orders.find(
+                {"invoice_issued": True, "invoice_number": {"$regex": f"^{re.escape(_epref)}"}},
+                {"_id": 0, "invoice_number": 1}):
+                try:
+                    _used.add(int(str(_uo.get("invoice_number") or "")[len(_epref):]))
+                except Exception:
+                    pass
+            if _used:
+                _n = min(_used)
+                while _n in _used:
+                    _n += 1
+                seq = _n
+            elif base_start > 0:
+                seq = base_start
+            invoice_number = f"{prefix}{year_str}{seq:09d}"
+        except Exception as _ge:
+            logger.warning(f"[e-fatura bosluk-doldur] {_ge}")
+
     invoice_uuid = generate_id()  # UUID-like
 
     now = datetime.now(timezone.utc)
@@ -3189,9 +3219,9 @@ async def create_invoice_for_order(
         _ef_tries = 0
         while (not dogan_result.get("success")) and _ef_tries < 5 and any(_t in str(dogan_result.get("message","")).lower() for _t in ("zaten","mükerrer","mukerrer","duplicate","already","10009","kayıtlı","kayitli","mevcut")):
             _ef_tries += 1
-            await db.counters.update_one({"_id": seq_key}, {"$inc": {"seq": 1}}, upsert=True)
-            _sd = await db.counters.find_one({"_id": seq_key}) or {}
-            seq = int(_sd.get("seq", 1))
+            # BOŞLUK-DOLDURMA ile uyumlu: mükerrer no'da atomik sayaca DEĞİL, yerel seq'e +1
+            # (bir sonraki boşluğa/serbest no'ya geç). Sayaç ileriye kaçmaz.
+            seq += 1
             invoice_number = f"{prefix}{year_str}{seq:09d}"
             invoice_uuid = generate_id()
             _efatura_kwargs["invoice_number"] = invoice_number
