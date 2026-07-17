@@ -108,7 +108,11 @@ async def auto_cancel_unpaid_card_orders():
     from routes.deps import db  # lazy import
     from routes.orders import _restock_order_once
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        # 3 SAAT: 3DS başlatılıp ödenmeyen kart siparişleri fazla beklemesin (müşteri "sipariş
+        # oluştu ama ödenmedi" görüyordu). Güvenli: webhook (saniyeler) + reconcile (her 15dk)
+        # gerçekten çekilen ödemeyi bu süreden ÇOK önce 'paid' yapar; hâlâ ödenmemişse para HİÇ
+        # alınmamıştır → payment_failed + stok iadesi güvenli. (COD/havale hariç — aşağıda filtreli.)
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
         _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
                      "bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "transfer"]
         query = {
@@ -134,7 +138,7 @@ async def auto_cancel_unpaid_card_orders():
                         # 'paid' yapardı; bu guard paid'i zaten atlıyor.)
                         "status": "payment_failed",
                         "payment_status": "expired",
-                        "cancel_reason": "Ödeme 24 saat içinde tamamlanmadı — para HİÇ alınmadı (iade gerekmez)",
+                        "cancel_reason": "Ödeme 3 saat içinde tamamlanmadı — para HİÇ alınmadı (iade gerekmez)",
                         "auto_cancelled": True,
                         "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -147,7 +151,7 @@ async def auto_cancel_unpaid_card_orders():
             except Exception as e_item:
                 logger.error(f"Failed to cancel card order {order.get('order_number')}: {e_item}")
         if cancelled:
-            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid/failed card orders (>24h)")
+            logger.info(f"[scheduler] Auto-cancelled {cancelled} unpaid/failed card orders (>3h)")
     except Exception as e:
         logger.exception(f"[scheduler] auto_cancel_unpaid_card_orders failed: {e}")
 
@@ -1561,7 +1565,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # KRİTİK: başarısız/ödenmemiş KART siparişleri — 24 saat sonra iptal + stok iadesi.
+    # KRİTİK: başarısız/ödenmemiş KART siparişleri — 3 saat sonra iptal + stok iadesi.
     # Önceden HİÇ zamanlanmamıştı → başarısız kart ödemeleri stoğu kalıcı sızdırıyordu.
     _scheduler.add_job(
         auto_cancel_unpaid_card_orders,
