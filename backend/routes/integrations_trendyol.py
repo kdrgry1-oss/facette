@@ -870,6 +870,155 @@ async def trendyol_ghost_scanner(
         "ghosts_count": len(ghosts),
         "ghosts": ghosts,
     }
+
+
+@router.post("/trendyol/coverage-gaps")
+async def trendyol_coverage_gaps(
+    payload: dict = Body(default={}),
+    current_user: dict = Depends(require_admin),
+):
+    """Sistemdeki AKTİF ürün varyantlarından (BEDEN) Trendyol'da CANLI olmayanları
+    (hiç yüklenmemiş / arşivli / onaysız / barkodsuz) listeler — "aktarılmamış bedenler".
+
+    ghost-scanner'ın TERSİ yönü: orada Trendyol'da olup DB'de olmayanlar; burada DB'de
+    (aktif) olup Trendyol'da (canlı) olmayanlar.
+
+    payload:
+      - only_in_stock (bool, default True): sadece stoğu > 0 olan eksik bedenleri getir.
+      - page_limit (int, default 60): Trendyol ürün sayfası limiti (60x200=12K ürün).
+    Salt-okunur; Trendyol'a hiçbir yazma yapmaz.
+    """
+    config = await get_trendyol_config()
+    if not config["is_active"]:
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+
+    import sys as _sys
+    import os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from trendyol_client import TrendyolClient
+
+    cli = TrendyolClient(
+        supplier_id=config["supplier_id"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        mode=config["mode"],
+    )
+
+    only_in_stock = bool(payload.get("only_in_stock", True))
+    page_limit = int(payload.get("page_limit", 60))
+
+    # 1) Trendyol'daki TÜM ürünleri (arşivli dahil) barkod bazında topla + durumları
+    ty_by_bc: dict = {}
+    ty_stockcodes: set = set()
+    page = 0
+    total_ty = 0
+    while page < page_limit:
+        try:
+            res = await cli.get_filtered_products(page=page, size=200, archived=None)
+        except Exception as e:
+            return {"error": f"Trendyol ürünleri çekilemedi: {e}", "scanned_trendyol": total_ty}
+        content = res.get("content") or []
+        total_pages = res.get("totalPages") or 0
+        if not content:
+            break
+        for row in content:
+            bc = str(row.get("barcode") or "").strip()
+            sc = str(row.get("stockCode") or "").strip()
+            if bc:
+                ty_by_bc[bc] = {
+                    "approved": bool(row.get("approved")),
+                    "archived": bool(row.get("archived")),
+                    "onSale": bool(row.get("onSale")),
+                    "quantity": row.get("quantity"),
+                }
+                total_ty += 1
+            if sc:
+                ty_stockcodes.add(sc)
+        page += 1
+        if page >= total_pages:
+            break
+
+    def _live(bc: str, sc: str):
+        """Trendyol'da CANLI mı? (onaylı + arşivsiz). Yoksa neden döner."""
+        st = ty_by_bc.get(bc)
+        if not st and sc and sc in ty_by_bc:
+            st = ty_by_bc.get(sc)
+        if not st:
+            # stockCode listesinde geçiyorsa 'var ama barkod farklı' olabilir
+            if (bc and bc in ty_stockcodes) or (sc and sc in ty_stockcodes):
+                return (False, "barkod_uyusmuyor")
+            return (False, "yok")
+        if st.get("archived"):
+            return (False, "arsivli")
+        if not st.get("approved"):
+            return (False, "onaysiz")
+        return (True, "canli")
+
+    # 2) Aktif ürünleri gez, varyant (beden) bazında eksikleri çıkar
+    gaps = []
+    scanned_products = 0
+    async for p in db.products.find(
+        {"is_active": True, "is_deleted": {"$ne": True}, "manual_deactivated": {"$ne": True}},
+        {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "variants": 1},
+    ):
+        scanned_products += 1
+        present = 0
+        missing = []
+        for v in (p.get("variants") or []):
+            bc = str(v.get("barcode") or "").strip()
+            sc = str(v.get("stock_code") or "").strip()
+            stock = 0
+            try:
+                stock = int(v.get("stock") or 0)
+            except Exception:
+                stock = 0
+            if not bc and not sc:
+                reason = "barkodsuz"
+                ok = False
+            else:
+                ok, reason = _live(bc, sc)
+            if ok:
+                present += 1
+                continue
+            if only_in_stock and stock <= 0:
+                continue
+            missing.append({
+                "size": v.get("size"),
+                "color": v.get("color"),
+                "barcode": bc or None,
+                "stock_code": sc or None,
+                "stock": stock,
+                "reason": reason,  # yok / arsivli / onaysiz / barkodsuz / barkod_uyusmuyor
+            })
+        if missing:
+            gaps.append({
+                "product_id": p.get("id"),
+                "name": p.get("name"),
+                "stock_code": p.get("stock_code"),
+                "variants_live_on_trendyol": present,
+                "missing_count": len(missing),
+                "missing": missing,
+            })
+
+    # partial = TY'de bazı bedenleri CANLI ama bazıları eksik (net "aktarılmamış beden")
+    partial = [g for g in gaps if g["variants_live_on_trendyol"] > 0]
+    fully = [g for g in gaps if g["variants_live_on_trendyol"] == 0]
+    total_missing = sum(g["missing_count"] for g in gaps)
+    partial.sort(key=lambda g: g["missing_count"], reverse=True)
+    fully.sort(key=lambda g: g["missing_count"], reverse=True)
+
+    return {
+        "only_in_stock": only_in_stock,
+        "trendyol_products_scanned": total_ty,
+        "active_products_scanned": scanned_products,
+        "total_missing_variants": total_missing,
+        "partial_products_count": len(partial),   # asıl hedef: kısmen yüklü ürünler
+        "fully_missing_products_count": len(fully),
+        "partial": partial[:300],
+        "fully_missing": fully[:300],
+    }
+
+
 @router.post("/trendyol/archive-barcodes")
 async def trendyol_archive_barcodes(
     payload: dict = Body(...),
