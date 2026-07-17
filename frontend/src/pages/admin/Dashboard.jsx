@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { 
-  TrendingUp, Package, ShoppingCart, Users, DollarSign, 
+import {
+  TrendingUp, Package, ShoppingCart, Users, DollarSign,
   BarChart3, Calendar, ArrowUp, ArrowDown, RefreshCw,
-  CheckSquare, AlertCircle, ChevronRight
+  CheckSquare, AlertCircle, ChevronRight,
+  Layers, Boxes, MessageSquare, CreditCard, ShoppingBag
 } from "lucide-react";
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import axios from "axios";
 import { toast } from "sonner";
 
@@ -72,7 +74,13 @@ export default function Dashboard() {
     shipped_orders: 0,
     recent_orders: [],
     top_products: [],
-    daily_revenue: [],
+    daily_series: [],
+    payment_type_breakdown: {},
+    abandoned_carts: { count: 0, item_count: 0, total_value: 0 },
+    total_categories: 0,
+    total_stock: 0,
+    pending_messages: 0,
+    avg_cart: 0,
     order_status_breakdown: {}
   });
   const [dateRange, setDateRange] = useState("30"); // days
@@ -90,41 +98,29 @@ export default function Dashboard() {
       const res = await axios.get(`${API}/admin/dashboard-stats?days=${dateRange}`, { headers });
       setStats(res.data);
     } catch (err) {
-      // Generate mock data for demo
-      setStats({
-        total_orders: 156,
-        total_revenue: 187450.00,
-        total_products: 290,
-        total_customers: 89,
-        pending_orders: 12,
-        shipped_orders: 34,
-        orders_today: 8,
-        revenue_today: 4250.00,
-        growth_orders: 12.5,
-        growth_revenue: 18.3,
-        recent_orders: [
-          { id: "1", order_number: "FC1774158743", total: 2090, status: "pending", created_at: new Date().toISOString() },
-          { id: "2", order_number: "FC1774153012", total: 1200, status: "shipped", created_at: new Date().toISOString() },
-          { id: "3", order_number: "FC1774152575", total: 3450, status: "confirmed", created_at: new Date().toISOString() },
-        ],
-        top_products: [
-          { name: "Tina Straight Fit Jean Mavi", sold: 45, revenue: 94050 },
-          { name: "Basic Kısa Kol Triko Kazak", sold: 38, revenue: 45600 },
-          { name: "Oversize Gömlek Beyaz", sold: 32, revenue: 38400 },
-          { name: "Wide Leg Pantolon Siyah", sold: 28, revenue: 47600 },
-          { name: "Crop Top Bluz", sold: 25, revenue: 22500 },
-        ],
-        order_status_breakdown: {
-          pending: 12,
-          confirmed: 24,
-          shipped: 34,
-          delivered: 78,
-          cancelled: 8
-        }
-      });
+      // Gerçek veri gelemezse SAHTE demo verisi GÖSTERME (yanıltıcı olur) — sıfırla + uyar.
+      toast.error("İstatistikler yüklenemedi");
+      setStats((s) => ({
+        ...s,
+        total_orders: 0, total_revenue: 0, total_products: 0, total_customers: 0,
+        pending_orders: 0, shipped_orders: 0, orders_today: 0, revenue_today: 0,
+        growth_orders: 0, growth_revenue: 0, recent_orders: [], top_products: [],
+        daily_series: [], payment_type_breakdown: {},
+        abandoned_carts: { count: 0, item_count: 0, total_value: 0 },
+        total_categories: 0, total_stock: 0, pending_messages: 0, avg_cart: 0,
+        order_status_breakdown: {},
+      }));
     } finally {
       setLoading(false);
     }
+  };
+
+  const fmtTL = (n) => `₺${Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 })}`;
+  const PAYMENT_LABELS = {
+    card: "Kredi Kartı", credit_card: "Kredi Kartı", iyzico: "Kredi Kartı",
+    bank_transfer: "Havale/EFT", havale: "Havale/EFT", eft: "Havale/EFT",
+    cash_on_delivery: "Kapıda Ödeme", kapida: "Kapıda Ödeme", cod: "Kapıda Ödeme",
+    trendyol: "Trendyol", hepsiburada: "Hepsiburada", "diğer": "Diğer",
   };
 
   const StatCard = ({ title, value, icon: Icon, trend, trendValue, color }) => (
@@ -258,6 +254,92 @@ export default function Dashboard() {
               <p className="text-2xl font-bold text-green-800">₺{(stats.revenue_today || 0).toLocaleString('tr-TR')}</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Katalog + sepet ortalaması + cevap bekleyen (Ticimax "İstatistikler" seti) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <StatCard title="Sepet Ortalaması" value={fmtTL(stats.avg_cart)} icon={ShoppingBag} color="bg-indigo-500" />
+        <StatCard title="Satıştaki Kategori" value={stats.total_categories || 0} icon={Layers} color="bg-teal-500" />
+        <StatCard title="Satıştaki Toplam Stok" value={(stats.total_stock || 0).toLocaleString("tr-TR")} icon={Boxes} color="bg-cyan-500" />
+        <Link to="/admin/tickets" className="block">
+          <StatCard title="Cevap Bekleyen Mesaj" value={stats.pending_messages || 0} icon={MessageSquare} color="bg-rose-500" />
+        </Link>
+      </div>
+
+      {/* Sipariş Karşılaştırma Grafiği — günlük sipariş adedi + ciro (çift eksen) */}
+      <div className="bg-white rounded-xl border p-6 mb-8">
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <BarChart3 size={18} /> Sipariş Karşılaştırma Grafiği
+          <span className="text-xs font-normal text-gray-400">· son {dateRange} gün</span>
+        </h3>
+        {(stats.daily_series || []).length === 0 ? (
+          <div className="text-center text-gray-400 py-12 text-sm">Seçili aralıkta veri yok</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <ComposedChart data={stats.daily_series || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d) => (d || "").slice(5)} />
+              <YAxis yAxisId="left" tick={{ fontSize: 11 }} allowDecimals={false} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+              <Tooltip
+                formatter={(v, n) => (n === "Ciro (₺)" ? fmtTL(v) : v)}
+                labelFormatter={(d) => new Date(d).toLocaleDateString("tr-TR")}
+              />
+              <Legend />
+              <Bar yAxisId="left" dataKey="orders" fill="#3b82f6" name="Sipariş" radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Line yAxisId="right" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Ciro (₺)" />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Terk Edilen Sepet + Ödeme Tipine Göre Siparişler */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="bg-white rounded-xl border p-6">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <ShoppingCart size={18} className="text-amber-600" /> Terk Edilen Sepet İstatistikleri
+          </h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <p className="text-2xl font-bold text-amber-800">{stats.abandoned_carts?.count || 0}</p>
+              <p className="text-xs text-amber-700 mt-1">Sepet Adet</p>
+            </div>
+            <div className="text-center p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <p className="text-2xl font-bold text-amber-800">{stats.abandoned_carts?.item_count || 0}</p>
+              <p className="text-xs text-amber-700 mt-1">Ürün Adet</p>
+            </div>
+            <div className="text-center p-3 bg-amber-50 rounded-lg border border-amber-100">
+              <p className="text-xl font-bold text-amber-800">{fmtTL(stats.abandoned_carts?.total_value)}</p>
+              <p className="text-xs text-amber-700 mt-1">Sepet Tutarı</p>
+            </div>
+          </div>
+          <Link to="/admin/terkedilmis-sepet" className="text-xs text-blue-600 hover:underline inline-flex items-center mt-3">
+            Detaylar <ChevronRight size={12} />
+          </Link>
+        </div>
+
+        <div className="bg-white rounded-xl border p-6">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <CreditCard size={18} className="text-blue-600" /> Ödeme Tipine Göre Siparişler
+          </h3>
+          {Object.keys(stats.payment_type_breakdown || {}).length === 0 ? (
+            <div className="text-center text-gray-400 py-6 text-sm">Seçili aralıkta sipariş yok</div>
+          ) : (
+            <div className="space-y-2">
+              {Object.entries(stats.payment_type_breakdown || {})
+                .sort((a, b) => (b[1].count || 0) - (a[1].count || 0))
+                .map(([pt, v]) => (
+                  <div key={pt} className="flex items-center justify-between py-2 border-b last:border-0 text-sm">
+                    <span className="text-gray-700">{PAYMENT_LABELS[pt] || pt}</span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-gray-500">{v.count} sipariş</span>
+                      <span className="font-medium w-24 text-right">{fmtTL(v.revenue)}</span>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       </div>
 

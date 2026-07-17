@@ -85,7 +85,82 @@ async def get_dashboard_stats(
                 "sold": p["sold"],
                 "revenue": p["revenue"]
             })
-        
+
+        # ── Ticimax-benzeri EK metrikler (görünüm bizim panel; veri seti oradan esinlenildi) ──
+        # Sepet ortalaması (ciro / sipariş adedi)
+        _cnt_range = len(orders_in_range)
+        avg_cart = round(total_revenue / _cnt_range, 2) if _cnt_range else 0
+
+        # Günlük seri (seçili aralık): tarih → {orders, revenue} — karşılaştırma grafiği için
+        _daily = {}
+        for o in orders_in_range:
+            _d = str(o.get("created_at") or "")[:10]
+            if not _d:
+                continue
+            b = _daily.setdefault(_d, {"orders": 0, "revenue": 0.0})
+            b["orders"] += 1
+            b["revenue"] += float(o.get("total") or 0)
+        daily_series = []
+        for i in range(days, -1, -1):
+            d = (end_date - timedelta(days=i)).strftime("%Y-%m-%d")
+            b = _daily.get(d, {"orders": 0, "revenue": 0.0})
+            daily_series.append({"date": d, "orders": b["orders"], "revenue": round(b["revenue"], 2)})
+        # Grafik çok uzamasın: 60 noktadan fazlaysa son 60 gün
+        if len(daily_series) > 60:
+            daily_series = daily_series[-60:]
+
+        # Ödeme tipine göre siparişler (aralıkta)
+        _pay = {}
+        for o in orders_in_range:
+            pt = str(o.get("payment_method") or o.get("payment_type") or "diğer").strip() or "diğer"
+            b = _pay.setdefault(pt, {"count": 0, "revenue": 0.0})
+            b["count"] += 1
+            b["revenue"] += float(o.get("total") or 0)
+        payment_type_breakdown = {k: {"count": v["count"], "revenue": round(v["revenue"], 2)} for k, v in _pay.items()}
+
+        # Terk edilen sepet istatistikleri (cart_sessions: dolu + >1sa güncellenmemiş)
+        try:
+            _ab_cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+            _ab_q = {"updated_at": {"$lte": _ab_cutoff}, "total": {"$gt": 0},
+                     "$expr": {"$gt": [{"$size": {"$ifNull": ["$items", []]}}, 0]}}
+            _ab_count = 0
+            _ab_items = 0
+            _ab_total = 0.0
+            async for c in db.cart_sessions.find(_ab_q, {"_id": 0, "total": 1, "items": 1}):
+                _ab_count += 1
+                _ab_total += float(c.get("total") or 0)
+                for it in (c.get("items") or []):
+                    _ab_items += int(it.get("quantity") or 1)
+            abandoned_carts = {"count": _ab_count, "item_count": _ab_items, "total_value": round(_ab_total, 2)}
+        except Exception:
+            abandoned_carts = {"count": 0, "item_count": 0, "total_value": 0}
+
+        # Katalog: toplam kategori + satıştaki toplam stok adedi
+        try:
+            total_categories = await db.categories.count_documents({})
+        except Exception:
+            total_categories = 0
+        try:
+            _stock_pipe = [
+                {"$match": {"is_active": True}},
+                {"$project": {"s": {"$cond": [
+                    {"$gt": [{"$size": {"$ifNull": ["$variants", []]}}, 0]},
+                    {"$sum": "$variants.stock"},
+                    {"$ifNull": ["$stock", 0]},
+                ]}}},
+                {"$group": {"_id": None, "total": {"$sum": "$s"}}},
+            ]
+            _sr = await db.products.aggregate(_stock_pipe).to_list(1)
+            total_stock = int((_sr[0]["total"] if _sr else 0) or 0)
+        except Exception:
+            total_stock = 0
+
+        # Cevap bekleyen mesajlar (open + in_progress ticket)
+        try:
+            pending_messages = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
+        except Exception:
+            pending_messages = 0
+
         return {
             "total_orders": total_orders,
             "total_revenue": total_revenue,
@@ -99,7 +174,16 @@ async def get_dashboard_stats(
             "growth_revenue": round(growth_revenue, 1),
             "recent_orders": recent_orders,
             "top_products": top_products,
-            "order_status_breakdown": status_breakdown
+            "order_status_breakdown": status_breakdown,
+            # Ek metrikler
+            "orders_in_range": _cnt_range,
+            "avg_cart": avg_cart,
+            "daily_series": daily_series,
+            "payment_type_breakdown": payment_type_breakdown,
+            "abandoned_carts": abandoned_carts,
+            "total_categories": total_categories,
+            "total_stock": total_stock,
+            "pending_messages": pending_messages,
         }
         
     except Exception as e:
