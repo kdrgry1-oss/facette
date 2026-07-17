@@ -388,7 +388,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <TasksWidget />
+        {/* "Bugün Yapılacaklar" (görevler) widget'ı kullanıcı isteğiyle kaldırıldı. */}
         <div className="lg:col-span-2 bg-white rounded-xl border p-6">
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             <BarChart3 size={18} />
