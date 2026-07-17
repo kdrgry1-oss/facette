@@ -213,7 +213,10 @@ async def create_manual_order(payload: dict, current_user: dict = Depends(requir
         "total": float(payload.get("total") or subtotal),
         "payment_method": payload.get("payment_method", "cash"),
         "payment_status": payload.get("payment_status", "paid"),
-        "status": payload.get("status", "processing"),
+        # DENETİM FIX: 'Ödeme Bekliyor' seçilse bile status sabit 'processing' yazılıyordu →
+        # ödenmemiş sipariş 'işleme alındı' görünüyordu. Ödeme durumundan türet.
+        "status": payload.get("status") or (
+            "processing" if str(payload.get("payment_status", "paid")).lower() == "paid" else "awaiting_payment"),
         "source": "admin_manual",
         "created_by_admin": current_user.get("email", ""),
         "note": payload.get("note", ""),

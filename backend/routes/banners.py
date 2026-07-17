@@ -67,8 +67,12 @@ async def update_banner(
     if not existing:
         raise HTTPException(status_code=404, detail="Banner bulunamadı")
     
+    # DENETİM FIX: filtresiz $set şema kaymasına/alan enjeksiyonuna açıktı. Değişmez alanları
+    # (id/_id/created_at) update dışında tut.
+    for _k in ("id", "_id", "created_at"):
+        banner_data.pop(_k, None)
     banner_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.banners.update_one({"id": banner_id}, {"$set": banner_data})
     return {"message": "Banner güncellendi"}
 

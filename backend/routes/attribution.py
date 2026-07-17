@@ -103,11 +103,14 @@ def detect_channel(utm_source: str, utm_medium: str, referrer: str,
 
     # Direct utm_source signals (organic social, marketplaces)
     if s:
+        # DENETİM FIX: d.split('.')[0] çok-parçalı host anahtarlarını tek-harfe düşürüyordu
+        # ('l.instagram.com'→'l', 'm.facebook.com'→'m', 't.co'→'t') → utm_source'ları toplu
+        # yanlış sınıflandırıyordu. Kanonik LABEL veya tam domain ile eşleştir.
         for d, label in SOCIAL_DOMAINS.items():
-            if d.split(".")[0] in s:
+            if label in s or d in s:
                 return f"{label}_organic" if m in {"social", "organic", ""} else label
         for d, label in MARKETPLACE_DOMAINS.items():
-            if d.split(".")[0] in s:
+            if label in s or d in s:
                 return label
         if "google" in s:
             return "google_organic"
