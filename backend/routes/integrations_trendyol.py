@@ -1530,6 +1530,30 @@ async def sync_products_to_trendyol(
                     trendyol_cat_id = cat_doc["trendyol_category_id"]
                     category = cat_doc
 
+            # 1c.5 ÜRÜNÜN KENDİ kategori listesi (İKİNCİL/ÜÇÜNCÜL) — kullanıcı isteği:
+            # birincil kategori "EN YENİLER" gibi bir koleksiyon olsa da, ürünün
+            # categories[]/category_ids[] içinde Trendyol'a EŞLEŞEN bir kategori varsa ONUNLA
+            # gönder. Sırayla dener, ilk eşleşen mapping'i kullanır.
+            if not trendyol_cat_id:
+                _own = []
+                for _f in ("category_ids", "categories"):
+                    _v = product.get(_f)
+                    if isinstance(_v, list):
+                        _own += [str(x) for x in _v if x]
+                _seen_own = set()
+                for _cid in _own:
+                    if _cid in _seen_own or str(_cid) == str(cat_id):
+                        continue
+                    _seen_own.add(_cid)
+                    _ocm = await db.category_mappings.find_one(
+                        {"category_id": str(_cid), "marketplace": "trendyol"}, {"_id": 0})
+                    if _ocm and _ocm.get("marketplace_category_id"):
+                        trendyol_cat_id = _ocm["marketplace_category_id"]
+                        category = _ocm
+                        logger.info(f"[trendyol] {product.get('name')} birincil kategoride mapping yok "
+                                    f"→ ürünün ikincil kategorisi kullanıldı (cat_id={_cid})")
+                        break
+
             # 1d. KARDEŞ-FALLBACK (denetim Finding 3): birincil kategori bir KOLEKSİYON
             # (ör. "EN YENİLER") olup mapping yoksa, AYNI ürünün renk-kardeşinin (aynı
             # urun_karti_id / stock_code) EŞLEŞTİRİLMİŞ kategorisini kullan. Böylece Siyah
