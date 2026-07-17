@@ -70,8 +70,10 @@ async def get_dashboard_stats(
         growth_orders = ((cnt_range - prev_cnt) / max(prev_cnt, 1)) * 100 if prev_cnt else 0
         growth_revenue = ((total_revenue - prev_revenue) / max(prev_revenue, 1)) * 100 if prev_revenue else 0
 
-        pending_orders = await db.orders.count_documents(_with({"status": "pending"}))
-        shipped_orders = await db.orders.count_documents(_with({"status": "shipped"}))
+        # Bekleyen/Kargodaki: TÜM-zaman yerine platform + seçili aralık (anlamlı/aksiyon bekleyen).
+        # Eski hâli 11.914 gibi pazaryeri-şişkin toplamlar gösteriyordu.
+        pending_orders = await db.orders.count_documents(_with({"status": "pending", "created_at": {"$gte": start_iso}}))
+        shipped_orders = await db.orders.count_documents(_with({"status": "shipped", "created_at": {"$gte": start_iso}}))
 
         # Günlük seri (aggregation — limitsiz)
         daily_agg = await db.orders.aggregate([

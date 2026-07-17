@@ -240,14 +240,14 @@ export default function Dashboard() {
           title="Toplam Sipariş"
           value={stats.total_orders}
           icon={ShoppingCart}
-          trend={stats.growth_orders || 12.5}
+          trend={stats.growth_orders}
           color="bg-blue-500"
         />
         <StatCard
           title="Toplam Gelir"
           value={`₺${(stats.total_revenue || 0).toLocaleString('tr-TR')}`}
           icon={DollarSign}
-          trend={stats.growth_revenue || 18.3}
+          trend={stats.growth_revenue}
           color="bg-green-500"
         />
         <StatCard

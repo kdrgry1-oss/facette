@@ -21,6 +21,46 @@ export function CartProvider({ children }) {
     localStorage.setItem("cart", JSON.stringify(items));
   }, [items]);
 
+  // TERK EDİLEN SEPET TAKİBİ: sepet değişince (debounce 2.5sn) backend'e kaydet
+  // (POST /api/cart/track). Daha önce storefront bunu HİÇ çağırmıyordu → cart_sessions
+  // boş kalıyor, "Terk Edilen Sepet" paneli hep 0 gösteriyordu. Sipariş sonrası sepet
+  // boşalınca (items=[]) kayıt "total 0" olur ve admin listesinde (total>0 filtresi) çıkmaz.
+  useEffect(() => {
+    if (!items || items.length === 0) return;
+    const t = setTimeout(() => {
+      try {
+        const API = process.env.REACT_APP_BACKEND_URL;
+        if (!API) return;
+        let sid = localStorage.getItem("cart_session_id");
+        if (!sid) {
+          sid = (window.crypto?.randomUUID?.() || (String(Date.now()) + Math.random().toString(36).slice(2)));
+          localStorage.setItem("cart_session_id", sid);
+        }
+        const payload = {
+          session_id: sid,
+          items: items.map((it) => ({
+            product_id: it.productId, name: it.name, qty: it.quantity,
+            price: it.price, image: it.image,
+          })),
+          total: items.reduce((s, it) => s + (Number(it.price) || 0) * (it.quantity || 1), 0),
+        };
+        try {
+          const u = JSON.parse(localStorage.getItem("user") || "null");
+          if (u && u.email) payload.email = u.email;
+          if (u && u.id) payload.user_id = u.id;
+          if (u && u.phone) payload.phone = u.phone;
+        } catch (_) { /* yoksay */ }
+        fetch(`${API}/api/cart/track`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          keepalive: true,
+        }).catch(() => {});
+      } catch (_) { /* sessiz */ }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [items]);
+
   const addItem = (product, variant = null, quantity = 1) => {
     // Y28: Kimliksiz (uydurma) varyantı varyantsız gibi işle — aksi halde variantId=null ile
     // her ekleme yeni satır oluşturup birleşmiyordu.
