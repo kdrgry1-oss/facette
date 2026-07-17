@@ -67,6 +67,7 @@ from routes.extras import (
 )
 from routes.catalog_extras import (
     brands_router, tags_router, member_groups_router, announcements_router, popups_router,
+    storefront_extras_router,
     alerts_public_router, alerts_admin_router,
     havale_public_router, havale_admin_router,
     admin_orders_router,
@@ -689,6 +690,7 @@ api_router.include_router(seo_admin_router)
 # Ticimax P1 — catalog extras, ops, reports, communications
 for _r in (
     brands_router, tags_router, member_groups_router, announcements_router, popups_router,
+    storefront_extras_router,
     alerts_public_router, alerts_admin_router,
     havale_public_router, havale_admin_router,
     admin_orders_router,

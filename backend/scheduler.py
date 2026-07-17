@@ -1591,6 +1591,74 @@ async def _notify_back_in_stock():
                         notified += 1
                     except Exception as ie:
                         logger.warning(f"[scheduler] back-in-stock send failed ({email}): {ie}")
+
+        # DENETİM FIX (#23): "Gelince Haber Ver" (db.stock_notifications) talepleri hiç
+        # bildirilmiyordu (orphaned collection). notified=False kayıtları taranır; ürün+beden
+        # stoğa girmişse e-posta gönderilir ve notified=True + notified_at yazılır (beden bazlı
+        # eşleşme: varyant 'size' ile). Aynı ürün+beden için stok cache'lenir (tek DB okuması).
+        try:
+            pending = await db.stock_notifications.find(
+                {"notified": {"$ne": True}}, {"_id": 0}
+            ).to_list(5000)
+        except Exception:
+            pending = []
+        _prod_cache: dict = {}
+        for req in pending:
+            pid = req.get("product_id")
+            size = (req.get("size") or "").strip()
+            email = (req.get("email") or "").strip()
+            if not pid or not email or "@" not in email:
+                continue
+            prod = _prod_cache.get(pid)
+            if prod is None:
+                prod = await db.products.find_one(
+                    {"id": pid}, {"_id": 0, "id": 1, "name": 1, "slug": 1, "stock": 1,
+                                  "variants": 1, "is_active": 1})
+                _prod_cache[pid] = prod or {}
+            if not prod:
+                continue
+            if prod.get("is_active", True) is False:
+                continue
+            variants = prod.get("variants") or []
+            if size and variants:
+                # Beden bazlı: yalnız o bedene ait varyant(lar)ın stoğuna bak
+                sz_stock = 0
+                for v in variants:
+                    if not isinstance(v, dict):
+                        continue
+                    vsize = (v.get("size") or v.get("name") or "").strip()
+                    if vsize.lower() == size.lower():
+                        sz_stock += int(v.get("stock") or 0)
+                available = sz_stock > 0
+            elif variants:
+                available = sum(int(v.get("stock") or 0) for v in variants if isinstance(v, dict)) > 0
+            else:
+                available = int(prod.get("stock") or 0) > 0
+            if not available:
+                continue
+            link = f"{site}/urun/{prod.get('slug') or prod.get('id')}"
+            _pname = prod.get("name") or "Ürün"
+            if size:
+                _pname = f"{_pname} ({size} beden)"
+            try:
+                await send_notification(
+                    db, "wishlist_back_in_stock",
+                    to_email=email,
+                    variables={
+                        "customer_name": "değerli müşterimiz",
+                        "product_name": _pname,
+                        "product_link": link,
+                    },
+                    channels=["email"],
+                )
+                await db.stock_notifications.update_one(
+                    {"id": req.get("id")},
+                    {"$set": {"notified": True, "notified_at": now_iso}},
+                )
+                notified += 1
+            except Exception as ie:
+                logger.warning(f"[scheduler] stock-notify send failed ({email}): {ie}")
+
         if notified:
             logger.info(f"[scheduler] back-in-stock notified={notified}")
     except Exception as e:

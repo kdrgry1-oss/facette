@@ -78,6 +78,36 @@ popups_router = _simple_crud("popups", "/admin/popups", "admin-popups",
                              extra_allowed=("content", "image", "link", "delay_seconds", "trigger", "show_once", "start_at", "end_at"))
 
 
+# DENETİM FIX (#35): Popup ve Duyuru için PUBLIC endpoint yoktu → storefront hiç okuyamıyor,
+# oluşturulan popup/duyurular hiçbir yerde görünmüyordu. Aktif + tarih aralığındaki kayıtları
+# döndüren korumasız GET uçları eklenir (start_at<=now<=end_at, boş tarih = sınırsız).
+storefront_extras_router = APIRouter(prefix="/storefront", tags=["storefront-extras"])
+
+
+def _active_dated_filter():
+    """is_active=True ve (start_at yok ya da <=now) ve (end_at yok ya da >=now)."""
+    now = _now()
+    return {
+        "is_active": {"$ne": False},
+        "$and": [
+            {"$or": [{"start_at": {"$in": [None, ""]}}, {"start_at": {"$exists": False}}, {"start_at": {"$lte": now}}]},
+            {"$or": [{"end_at": {"$in": [None, ""]}}, {"end_at": {"$exists": False}}, {"end_at": {"$gte": now}}]},
+        ],
+    }
+
+
+@storefront_extras_router.get("/announcements")
+async def public_announcements():
+    items = await db.announcements.find(_active_dated_filter(), {"_id": 0}).sort("sort_order", 1).to_list(50)
+    return {"items": items}
+
+
+@storefront_extras_router.get("/popups")
+async def public_popups():
+    items = await db.popups.find(_active_dated_filter(), {"_id": 0}).sort("sort_order", 1).to_list(20)
+    return {"items": items}
+
+
 # ---------- Stock / Price Alerts (public + admin) ----------
 alerts_public_router = APIRouter(prefix="/alerts", tags=["alerts"])
 alerts_admin_router = APIRouter(prefix="/admin/alerts", tags=["admin-alerts"])
@@ -592,12 +622,24 @@ async def send_bulk(payload: dict, current_user: dict = Depends(require_admin)):
 
     # Resolve recipients
     recipients: set = set()
+
+    async def _add_newsletter_subscribers():
+        # DENETİM FIX (#49): Footer bülten aboneleri ayrı koleksiyonda (newsletter_subscribers)
+        # tutuluyor ve toplu maile hiç dahil edilmiyordu. active olanları union'la.
+        async for s in db.newsletter_subscribers.find(
+            {"$or": [{"active": True}, {"active": {"$exists": False}}]}, {"_id": 0, "email": 1}
+        ):
+            if s.get("email"):
+                recipients.add(str(s["email"]).strip().lower())
+
     if segment == "all":
         async for u in db.users.find({"is_admin": {"$ne": True}, "is_active": {"$ne": False}}, {"_id": 0, "email": 1}):
             if u.get("email"): recipients.add(u["email"])
+        await _add_newsletter_subscribers()
     elif segment == "newsletter":
         async for u in db.users.find({"accepts_marketing": True}, {"_id": 0, "email": 1}):
             if u.get("email"): recipients.add(u["email"])
+        await _add_newsletter_subscribers()
     elif segment == "abandoned":
         async for s in db.cart_sessions.find({"email": {"$ne": ""}, "total": {"$gt": 0}}, {"_id": 0, "email": 1}):
             if s.get("email"): recipients.add(s["email"])
