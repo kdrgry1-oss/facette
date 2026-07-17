@@ -1091,7 +1091,13 @@ async def sync_products_to_trendyol(
     if not config["is_active"]:
         raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
     
-    payload = await request.json()
+    # DENETİM FIX (#52): boş gövde POST'unda request.json() 500 veriyordu — dayanıklı parse.
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     product_ids = payload.get("product_ids", [])
     category_filters = payload.get("category_filters", [])
     # Yeni: Barkod/stok kodu ile filtre (kullanıcı UI'da yazıp aktarabilsin)
@@ -1156,7 +1162,16 @@ async def sync_products_to_trendyol(
         else:
             query = {"is_active": True}
     else:
-        # Sync only active products if no specific IDs are provided
+        # DENETİM FIX (#52): hiçbir filtre yoksa (product_ids/barcodes/stock_codes/card_ids/
+        # category_filters ve tarih aralığı da yok) SESSİZCE tüm aktif ürünleri üretime itmek
+        # tehlikeli — yanlışlıkla binlerce ürün gönderilebilir. Tarih aralığı tek başına
+        # yeterli bir daraltmadır; onun dışında en az bir hedef seçimi zorunlu.
+        if not (date_from or date_to):
+            raise HTTPException(
+                status_code=400,
+                detail="En az bir hedef seçin: ürün, barkod/stok kodu, kart ID, kategori "
+                       "veya tarih aralığı. Filtresiz toplu aktarım güvenlik için engellendi.",
+            )
         query = {"is_active": True}
 
     # Tarih aralığı filtresi (created_at) — diğer filtrelerle AND ile birleşir

@@ -93,21 +93,67 @@ async def list_members(
     if source:
         query["acquisition_source"] = source
 
-    total = await db.users.count_documents(query)
     skip = (page - 1) * limit
-    projection = {
-        "_id": 0, "password": 0,  # never leak password
-    }
-    rows = await db.users.find(query, projection).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
 
-    enriched = []
-    for u in rows:
-        u = await _annotate(u)
-        if segment and u.get("segment") != segment:
-            continue
-        enriched.append(u)
+    # DENETİM FIX (#39): segment sunucuda materyalize edilir. Eskiden segment yalnız
+    # o SAYFAYA gelen kayıtlar üzerinde Python'da kırpılıyordu → 'total' yanlış, sayfalar
+    # eksik/boş kalıyordu. Artık orders istatistiği tek $lookup ile hesaplanır, segment
+    # $addFields ile türetilir, filtre uygulandıktan SONRA total sayılır ve skip/limit
+    # $facet içinde yapılır. Sonuç: doğru sayfalama + doğru toplam.
+    base_pipeline: list = [
+        {"$match": query},
+        {"$lookup": {
+            "from": "orders",
+            "let": {"uid": "$id", "em": {"$toLower": {"$ifNull": ["$email", ""]}}},
+            "pipeline": [
+                {"$match": {"$expr": {"$and": [
+                    {"$ne": ["$status", "cancelled"]},
+                    {"$or": [
+                        {"$eq": ["$user_id", "$$uid"]},
+                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$email", ""]}}, "$$em"]}]},
+                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$shipping_address.email", ""]}}, "$$em"]}]},
+                        {"$and": [{"$ne": ["$$em", ""]}, {"$eq": [{"$toLower": {"$ifNull": ["$billing_address.email", ""]}}, "$$em"]}]},
+                    ]},
+                ]}}},
+                {"$group": {"_id": None, "orders": {"$sum": 1},
+                            "total_spent": {"$sum": {"$ifNull": ["$total", 0]}},
+                            "last_order_at": {"$max": "$created_at"}}},
+            ],
+            "as": "_ostats",
+        }},
+        {"$addFields": {
+            "orders_count": {"$ifNull": [{"$arrayElemAt": ["$_ostats.orders", 0]}, 0]},
+            "total_spent": {"$round": [{"$ifNull": [{"$arrayElemAt": ["$_ostats.total_spent", 0]}, 0]}, 2]},
+            "last_order_at": {"$arrayElemAt": ["$_ostats.last_order_at", 0]},
+        }},
+        {"$addFields": {
+            "segment": {"$switch": {"branches": [
+                {"case": {"$gte": ["$total_spent", 5000]}, "then": "vip"},
+                {"case": {"$gte": ["$orders_count", 2]}, "then": "returning"},
+                {"case": {"$eq": ["$orders_count", 1]}, "then": "new"},
+            ], "default": "prospect"}},
+        }},
+    ]
+    if segment:
+        base_pipeline.append({"$match": {"segment": segment}})
+    base_pipeline.append({"$facet": {
+        "meta": [{"$count": "total"}],
+        "items": [
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$project": {"_id": 0, "password": 0, "_ostats": 0}},
+        ],
+    }})
 
-    return {"items": enriched, "total": total, "page": page, "pages": (total + limit - 1) // limit}
+    agg_out = None
+    async for row in db.users.aggregate(base_pipeline):
+        agg_out = row
+    items = (agg_out or {}).get("items", [])
+    meta = (agg_out or {}).get("meta", [])
+    total = int(meta[0]["total"]) if meta else 0
+
+    return {"items": items, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
 
 @router.get("/stats")

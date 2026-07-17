@@ -1190,9 +1190,26 @@ async def _dhl_cargo_poll_tick():
         logger.warning(f"[scheduler][dhl] import skip: {e}")
         return
 
+    # DENETİM FIX (#10): İzleme paneli 'dhl_poll_health' dokümanını okuyor ama hiç yazılmıyordu.
+    # Başlangıç/bitiş + sayaçlar (matched/processed/shipped/delivered/errors/duration) yazılır.
+    _run_started = datetime.now(timezone.utc)
+
+    async def _write_health(status: str, **extra):
+        try:
+            doc = {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+            doc.update(extra)
+            await db.settings.update_one({"id": "dhl_poll_health"}, {"$set": doc}, upsert=True)
+        except Exception as _he:
+            logger.warning(f"[scheduler][dhl] health write err: {_he}")
+
     s = await _get_mng_settings()
     if not s.get("is_active") or not s.get("username"):
         logger.info("[scheduler][dhl] atlandi: MNG/DHL ayarlari aktif degil ya da kullanici adi yok")
+        await _write_health("inactive", last_run_at=_run_started.isoformat(),
+                            last_finish_at=datetime.now(timezone.utc).isoformat(),
+                            matched=0, processed=0, shipped=0, delivered=0, errors=0,
+                            duration_ms=0, interval_min=5,
+                            note="MNG/DHL ayarları aktif değil ya da kullanıcı adı yok")
         return
     user, pw = s["username"], s["password"]
 
@@ -1214,7 +1231,17 @@ async def _dhl_cargo_poll_tick():
         cfg = {"notify": {}}
     notify = cfg.get("notify") or {}
 
+    try:
+        matched = await db.orders.count_documents(q)
+    except Exception:
+        matched = 0
+    await _write_health("running", last_run_at=_run_started.isoformat(),
+                        matched=matched, interval_min=5)
+
     processed = 0
+    n_shipped = 0
+    n_delivered = 0
+    n_errors = 0
     try:
         async for order in db.orders.find(q, {"_id": 0}).limit(120):
             siparis_no = str(order.get("order_number") or order.get("id") or "").strip()
@@ -1226,6 +1253,7 @@ async def _dhl_cargo_poll_tick():
                 )
             except Exception as e:
                 logger.warning(f"[scheduler][dhl] status err {siparis_no}: {e}")
+                n_errors += 1
                 await asyncio.sleep(0.2)
                 continue
             if not info or not info.get("ok"):
@@ -1286,6 +1314,11 @@ async def _dhl_cargo_poll_tick():
                 upd["updated_at"] = now_iso
                 await db.orders.update_one({"id": order["id"]}, {"$set": upd})
 
+            if new_status == "shipped":
+                n_shipped += 1
+            elif new_status == "delivered":
+                n_delivered += 1
+
             if new_status in ("shipped", "delivered"):
                 ev = "order_shipped" if new_status == "shipped" else "order_delivered"
                 nz = notify.get(new_status) or {}
@@ -1314,9 +1347,23 @@ async def _dhl_cargo_poll_tick():
 
             processed += 1
             await asyncio.sleep(0.25)
+        _final_status = "ok"
     except Exception as e:
         logger.exception(f"[scheduler][dhl] poll tick failed: {e}")
-    logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi")
+        n_errors += 1
+        _final_status = "error"
+    _fin = datetime.now(timezone.utc)
+    _dur_ms = int((_fin - _run_started).total_seconds() * 1000)
+    await _write_health(
+        _final_status,
+        last_run_at=_run_started.isoformat(),
+        last_finish_at=_fin.isoformat(),
+        matched=matched, processed=processed,
+        shipped=n_shipped, delivered=n_delivered, errors=n_errors,
+        duration_ms=_dur_ms, interval_min=5,
+    )
+    logger.info(f"[scheduler][dhl] tick bitti — {processed} site siparisi sorgulandi "
+                f"(shipped={n_shipped} delivered={n_delivered} err={n_errors})")
 
 
 async def _return_cargo_poll_tick():

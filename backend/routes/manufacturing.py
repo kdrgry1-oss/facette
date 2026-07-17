@@ -205,12 +205,34 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
                 variants = product.get("variants") or []
                 size_dist = rec.get("size_distribution") or {}
                 total_increment = 0
+                # DENETİM FIX (#32): dağıtım yalnız BEDEN ile anahtarlıysa (ör. {"S":10}) ve ürün
+                # birden çok RENGE sahipse, eski kod aynı bedendeki TÜM varyantları artırıp stoğu
+                # mükerrer şişiriyordu. Artık:
+                #  - "Renk|Beden" (ör. "Kırmızı|S") biçimli anahtarlar RENK+BEDEN ile birebir eşleşir;
+                #  - çıplak beden anahtarları o beden için YALNIZCA BİR varyanta uygulanır (anahtar
+                #    tüketilir) → mükerrer artış olmaz.
+                _consumed = set()
+
+                def _vcolor(vd):
+                    c = vd.get("color") or vd.get("renk") or ""
+                    if not c and isinstance(vd.get("attributes"), dict):
+                        c = vd["attributes"].get("color") or vd["attributes"].get("renk") or ""
+                    return str(c).strip()
+
                 for v in variants:
                     size_name = (v.get("size") or v.get("name") or "").strip()
-                    qty = int(size_dist.get(size_name, 0) or 0)
+                    color_name = _vcolor(v)
+                    composite = f"{color_name}|{size_name}" if color_name else None
+                    key = None
+                    if composite and composite in size_dist and composite not in _consumed:
+                        key = composite
+                    elif size_name in size_dist and size_name not in _consumed:
+                        key = size_name
+                    qty = int(size_dist.get(key, 0) or 0) if key else 0
                     if qty > 0:
                         v["stock"] = int(v.get("stock", 0) or 0) + qty
                         total_increment += qty
+                        _consumed.add(key)
                 if not variants and size_dist:
                     # Product-level stock fallback
                     total_increment = sum(int(v or 0) for v in size_dist.values())

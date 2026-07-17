@@ -872,6 +872,21 @@ async def create_order(
         block_query.append({"user_id": uid})
     if client_ip:
         block_query.append({"ip": client_ip})
+    # DENETİM FIX (#38): e-posta ile bloklama da uygulansın — hem oturumdaki kullanıcının
+    # e-postası hem de teslimat/fatura adresindeki e-posta kontrol edilir. Blok kayıtları
+    # e-postayı küçük harf sakladığı için karşılaştırma normalize edilir.
+    _blk_emails = set()
+    if current_user and current_user.get("email"):
+        _blk_emails.add(str(current_user["email"]).strip().lower())
+    for _addr_key in ("shipping_address", "billing_address", "billing_info"):
+        _addr = order_data.get(_addr_key)
+        if isinstance(_addr, dict) and _addr.get("email"):
+            _blk_emails.add(str(_addr["email"]).strip().lower())
+    if order_data.get("email"):
+        _blk_emails.add(str(order_data["email"]).strip().lower())
+    for _e in _blk_emails:
+        if _e:
+            block_query.append({"email": _e})
     if block_query:
         bl = await db.blocked_customers.find_one({"$or": block_query, "active": True}, {"_id": 0})
         if bl:
