@@ -1966,12 +1966,17 @@ async def sync_products_to_trendyol(
                     for sc in stock_codes_in_play:
                         # DB'deki barkodlar (bu stockCode için)
                         if sc not in db_barcodes_per_sc:
-                            db_prod = await db.products.find_one(
-                                {"$or": [{"stock_code": sc}, {"sku": sc}, {"variants.stock_code": sc}]},
-                                {"_id": 0, "barcode": 1, "variants.barcode": 1, "stock_code": 1}
-                            )
+                            # H1 FIX (VERİ KAYBI): aynı stock_code BİRDEN FAZLA ürün dokümanında
+                            # paylaşılır (renk varyantları `stock|name` olarak AYRI doc). Eski
+                            # find_one YALNIZCA bir rengin barkodlarını getiriyordu → diğer renklerin
+                            # CANLI barkodları "DB'de yok" sanılıp ARŞİVLENİYOR, yani canlı/stokta
+                            # ürünler Trendyol'dan siliniyordu ("kaybolan ürünler"). Artık TÜM
+                            # eşleşen dokümanları gezip barkodları BİRLEŞTİRİYORUZ.
                             db_bcs = set()
-                            if db_prod:
+                            async for db_prod in db.products.find(
+                                {"$or": [{"stock_code": sc}, {"sku": sc}, {"variants.stock_code": sc}]},
+                                {"_id": 0, "barcode": 1, "variants.barcode": 1}
+                            ):
                                 if db_prod.get("barcode"):
                                     db_bcs.add(str(db_prod.get("barcode")))
                                 for v in (db_prod.get("variants") or []):
@@ -2434,7 +2439,27 @@ async def _sync_inventory_to_trendyol(products: list):
     try:
         res = await client.update_price_and_inventory(items_to_send)
         batch_id = res.get("batchRequestId", "")
-        
+
+        # M1 FIX: batchRequestId YOKSA Trendyol isteği REDDETTİ (client HTTP hatasında
+        # e.response.json() döndürüyor → batchRequestId olmaz). Eskiden yine "success" deniyordu
+        # → tamamen reddedilen stok/fiyat pushları başarı sanılıp SESSİZ stok/fiyat sürüklenmesi
+        # oluyordu. Artık batch_id yoksa HATA raporla.
+        if not batch_id:
+            _err = str(res.get("errors") or res.get("message") or res)[:500]
+            log_doc = {
+                "id": generate_id(),
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "status": "error",
+                "products_attempted": len(products),
+                "products_sent": len(items_to_send),
+                "batch_request_id": "",
+                "errors": [_err],
+                "message": f"Trendyol stok/fiyat güncellemesini reddetti: {_err}",
+            }
+            await db.trendyol_sync_logs.insert_one(log_doc)
+            return {"success": False, "message": f"Trendyol stok/fiyat reddetti: {_err}", "batch_id": ""}
+
         # Log to the new sync logs screen
         log_doc = {
             "id": generate_id(),
@@ -2448,7 +2473,7 @@ async def _sync_inventory_to_trendyol(products: list):
             "message": "Stok ve fiyat güncellemesi başarıyla gönderildi."
         }
         await db.trendyol_sync_logs.insert_one(log_doc)
-        
+
         return {"success": True, "message": f"{len(items_to_send)} kalem ürünün stok/fiyat bilgisi Trendyol'a gönderildi.", "batch_id": batch_id}
     except Exception as e:
         logger.error(f"Trendyol inventory sync error: {str(e)}")
