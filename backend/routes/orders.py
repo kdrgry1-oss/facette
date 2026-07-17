@@ -2676,6 +2676,17 @@ async def create_invoice_for_order(
         active = "dogan"
     else:
         pcfg = providers[active]
+        # DENETİM FIX (#8): Yalnızca Doğan e-Dönüşüm gerçek gönderim yapıyor. Doğan aktif değilken
+        # başka bir entegratör seçiliyse ALTTAKİ gönderim blokları (hepsi `dogan_active` koşullu)
+        # ATLANIR → dogan_result None kalır AMA en sonda invoice_issued=True yazılıp SIRA NUMARASI
+        # YAKILIYORDU (fatura gerçekte GÖNDERİLMEDEN 'faturalandı' görünüyordu). Bu yüzden Doğan-dışı
+        # sağlayıcı canlıya alınana kadar burada reddedilir — numara boşa yakılmaz.
+        raise HTTPException(
+            status_code=501,
+            detail=(f"Seçili e-fatura entegratörü ('{active}') için gerçek gönderim henüz "
+                    "implemente değil. Lütfen Ayarlar > E-Dönüşüm ekranından Doğan e-Dönüşüm'ü "
+                    "etkinleştirin (kullanıcı adı/şifre girip 'Aktif' yapın)."),
+        )
 
     # ─── AKILLI HİBRİT MOD ─────────────────────────────────────────────
     # invoice_type="auto" (default): VKN/TCKN dolu ise Doğan CheckUser ile
@@ -3604,20 +3615,43 @@ async def _get_mng_settings() -> dict:
     gizli olmadığından sabit kalır."""
     import os as _os
     s = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0}) or {}
-    # GÜVENLİK: parola at-rest şifreli (v1:...) olabilir → çöz. decrypt() düz-metni
-    # geçirdiği için eski kayıt / env fallback da sorunsuz çalışır.
-    _pw = s.get("password") or _os.environ.get("MNG_PASSWORD", "")
+
+    # DENETİM FIX (#9): "Kargo Firması Ayarları" formu credential'ları providers_config
+    # (kind='cargo', active_provider='mng') altına yazıyor; eski _get_mng_settings ise yalnız
+    # settings.mng_kargo'yu okuyordu → formdaki bilgiler HİÇ KULLANILMIYORDU. Artık cargo
+    # config birincil kaynak: mng aktifse oradaki username/password/customer_number kullanılır
+    # (customer_number ↔ customer_code hizalanır). settings.mng_kargo + env yedek kalır.
+    _cargo = {}
     try:
-        from security.crypto import decrypt as _dec_secret
-        _pw = _dec_secret(_pw) if _pw else _pw
+        _cc = await db.providers_config.find_one({"kind": "cargo"}, {"_id": 0}) or {}
+        if (_cc.get("active_provider") == "mng"):
+            _cargo = ((_cc.get("providers") or {}).get("mng") or {})
     except Exception:
-        pass
+        _cargo = {}
+
+    def _dec(v):
+        if not v:
+            return v
+        try:
+            from security.crypto import decrypt as _dec_secret
+            return _dec_secret(v)
+        except Exception:
+            return v
+
+    _username = _cargo.get("username") or s.get("username") or _os.environ.get("MNG_USERNAME", "")
+    _pw_raw = _cargo.get("password") or s.get("password") or _os.environ.get("MNG_PASSWORD", "")
+    _pw = _dec(_pw_raw)
+    _cust = (_cargo.get("customer_number") or _cargo.get("customer_code")
+             or s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.")
+    # env: cargo config 'prod' → canlı; 'test' → test. is_active: cargo dolu ya da settings.
+    _cargo_active = bool(_cargo.get("username") and _cargo.get("password"))
     return {
-        "username": s.get("username") or _os.environ.get("MNG_USERNAME", ""),
+        "username": _username,
         "password": _pw,
-        "customer_code": s.get("customer_code") or "FACETTE DIŞ TİC.A.Ş.",
-        "tax_no": s.get("tax_no") or "6080712084",
-        "is_active": s.get("is_active", True),
+        "customer_code": _cust,
+        "tax_no": _cargo.get("identity_no") or s.get("tax_no") or "6080712084",
+        "env": _cargo.get("env") or s.get("env") or "",
+        "is_active": _cargo_active or s.get("is_active", True),
     }
 
 
