@@ -613,6 +613,16 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
     else:
         # Y1: ZATEN ödenmiş bir siparişi 'failed'a düşürme (replay / sahte failure koruması).
         update["payment_status"] = "failed"
+        # KÖK NEDEN #1: iyzico paymentId dönmüşse (kart ÇEKİLMİŞ olabilir; tutar/eşleşme
+        # doğrulaması tuttuğu için 'failed' işaretlendi) → paymentId'yi ÜST DÜZEYDE sakla ve
+        # needs_reconciliation bayrağı koy. Böylece 15 dk'lık reconcile cron'u (scheduler)
+        # iyzico'dan paymentId ile doğrulayıp OTOMATİK kurtarabilir. Aksi halde paymentId
+        # yalnız iyzico_retrieve_response içinde kalıyor, cron göremiyor ve sipariş
+        # "Ödeme Kaydı Bulunmayan Siparişler"de kalıcı takılıyordu (müşterinin kartı çekilmiş).
+        _pid_failed = data.get("paymentId")
+        if _pid_failed:
+            update["reconcile_payment_id"] = str(_pid_failed)
+            update["needs_reconciliation"] = True
         await db.orders.update_one(
             {"id": order_id, "payment_status": {"$ne": "paid"}}, {"$set": update})
     logger.info(f"iyzico kart odeme {'PAID' if paid else 'FAILED'} order_id={order_id} pid={data.get('paymentId')}")
@@ -877,12 +887,19 @@ def _webhook_signature_ok(secret: str, headers, payload: dict) -> bool:
     tok = str(payload.get("token") or "")
     conv = str(payload.get("paymentConversationId") or payload.get("conversationId") or "")
     status = str(payload.get("status") or payload.get("paymentStatus") or "")
-    candidates = set()
+    import base64 as _b64
+    candidates_hex = set()
+    candidates_b64 = set()
     for msg in (secret + evt + pid + tok + conv + status,   # dokümandaki birleşim
                 evt + pid + tok + conv + status):           # secret yalnız key ise
-        candidates.add(hmac.new(secret.encode("utf-8"), msg.encode("utf-8"),
-                                hashlib.sha256).hexdigest().lower())
-    return sig.lower() in candidates
+        _d = hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256)
+        candidates_hex.add(_d.hexdigest().lower())
+        # KÖK NEDEN #4: iyzico V3 imzası çoğunlukla BASE64 (ham HMAC byte'ları), hex DEĞİL.
+        # Yalnız hex karşılaştırılıyordu → gerçek webhook'lar hep 401 ile reddediliyor, birincil
+        # güvenlik ağı ölüydü. base64 adayını da ekle (secret hâlâ zorunlu → güvenlik korunur).
+        candidates_b64.add(_b64.b64encode(_d.digest()).decode("ascii"))
+    # hex: büyük/küçük harf duyarsız; base64: DUYARLI (lower() base64'ü bozar).
+    return (sig.lower() in candidates_hex) or (sig in candidates_b64)
 
 
 @router.post("/webhook")

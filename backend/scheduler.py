@@ -180,11 +180,20 @@ async def reconcile_charged_but_unrecorded_orders():
         recovered = 0
         candidates = await db.orders.find(
             query, {"_id": 0, "id": 1, "reconcile_payment_id": 1,
-                    "iyzico_payment_id": 1, "payment_id": 1, "order_number": 1}
+                    "iyzico_payment_id": 1, "payment_id": 1, "order_number": 1,
+                    "iyzico_retrieve_response": 1}
         ).sort("created_at", -1).to_list(50)
         for order in candidates:
+            # KÖK NEDEN #1: eski 'failed' siparişlerde paymentId ÜST DÜZEYDE yok, yalnızca
+            # iyzico_retrieve_response.paymentId içinde saklı. O yüzden nested alanı da OKU →
+            # bayrağı olmayan mevcut takılı siparişler de otomatik kurtarılabilsin.
+            _nested_pid = ""
+            try:
+                _nested_pid = str((order.get("iyzico_retrieve_response") or {}).get("paymentId") or "").strip()
+            except Exception:
+                _nested_pid = ""
             pid = str(order.get("reconcile_payment_id") or order.get("iyzico_payment_id")
-                      or order.get("payment_id") or "").strip()
+                      or order.get("payment_id") or _nested_pid or "").strip()
             if not pid:
                 continue  # paymentId yok → otomatik doğrulanamaz (webhook/callback bekler)
             try:
