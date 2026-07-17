@@ -50,6 +50,10 @@ export default function ProductionPlan() {
   const [dirty, setDirty] = useState({}); // {rowId: true}
   const [saving, setSaving] = useState({});
   const dirtyTimers = useRef({});
+  // DENETİM FIX (#30/#31): satır bazında biriken kirli alanlar. Debounce timer'ı bu ref'teki
+  // TÜM alanları birlikte gönderir; eskiden yalnız SON alan kaydediliyordu → hızlı çoklu-alan
+  // düzenlemesinde (ve üretici seçiminde manufacturer_id) veri kaybı oluyordu.
+  const pendingPatch = useRef({}); // {rowId: {field: value, ...}}
 
   const token = localStorage.getItem("token");
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -99,20 +103,28 @@ export default function ProductionPlan() {
     } finally { setSaving((s) => ({ ...s, [id]: false })); }
   };
 
-  const localPatch = (row, field, value) => {
-    setRows((rs) => rs.map((x) => x.id === row.id ? { ...x, [field]: value } : x));
+  // Birden çok alanı tek seferde biriktirmek için (ör. üretici seçimi id+name)
+  const localPatchMany = (row, patchObj) => {
+    setRows((rs) => rs.map((x) => x.id === row.id ? { ...x, ...patchObj } : x));
     setDirty((d) => ({ ...d, [row.id]: true }));
-    // Debounced auto-save
+    // Biriken patch'e ekle (önceki kirli alanlar korunur)
+    pendingPatch.current[row.id] = { ...(pendingPatch.current[row.id] || {}), ...patchObj };
+    // Debounced auto-save — timer ateşlenince biriken TÜM alanları birlikte gönder
     if (dirtyTimers.current[row.id]) clearTimeout(dirtyTimers.current[row.id]);
     dirtyTimers.current[row.id] = setTimeout(() => {
-      // Son güncel satırı yakala
-      setRows((cur) => {
-        const latest = cur.find((r) => r.id === row.id);
-        if (latest) saveRow(latest, { [field]: value });
-        return cur;
-      });
+      const accumulated = pendingPatch.current[row.id];
+      pendingPatch.current[row.id] = {};
+      if (accumulated && Object.keys(accumulated).length) {
+        setRows((cur) => {
+          const latest = cur.find((r) => r.id === row.id);
+          if (latest) saveRow(latest, accumulated);
+          return cur;
+        });
+      }
     }, 800);
   };
+
+  const localPatch = (row, field, value) => localPatchMany(row, { [field]: value });
 
   const removeRow = async (row) => {
     if (!await window.appConfirm("Bu satırı silmek istediğinize emin misiniz?")) return;
@@ -141,8 +153,9 @@ export default function ProductionPlan() {
 
   const handleManufacturerSelect = (row, id) => {
     const v = manufacturers.find((x) => x.id === id);
-    localPatch(row, "manufacturer_id", id);
-    if (v) localPatch(row, "manufacturer_name", v.name);
+    // DENETİM FIX (#31): id ve name TEK patch'te gönderilir — eskiden iki ayrı debounce
+    // çağrısı çakışıp manufacturer_id kayboluyordu.
+    localPatchMany(row, { manufacturer_id: id, manufacturer_name: v?.name || "" });
   };
 
   // Resim upload — QC için basit base64 url

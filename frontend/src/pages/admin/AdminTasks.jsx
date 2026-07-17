@@ -86,7 +86,7 @@ export default function AdminTasks() {
   const [summary, setSummary] = useState({ due_now: 0, overdue: 0, completed_this_week: 0 });
   const [history, setHistory] = useState({ streak: [], total: 0 });
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", category: "other", frequency: "weekly", priority: "normal", action_path: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "other", frequency: "weekly", priority: "normal", action_path: "", custom_days: 7 });
 
   const load = async () => {
     const [a, s, hi] = await Promise.all([
@@ -118,7 +118,7 @@ export default function AdminTasks() {
     if (!form.title) return toast.warning("Başlık zorunlu");
     await axios.post(`${API}/admin/tasks`, form, { headers: h() });
     toast.success("Görev eklendi"); setShowNew(false);
-    setForm({ title: "", description: "", category: "other", frequency: "weekly", priority: "normal", action_path: "" });
+    setForm({ title: "", description: "", category: "other", frequency: "weekly", priority: "normal", action_path: "", custom_days: 7 });
     load();
   };
   const seedDefaults = async () => {
@@ -250,6 +250,19 @@ export default function AdminTasks() {
                   <select value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })} className="w-full mt-1 px-3 py-2 border rounded text-sm">
                     {Object.entries(FREQ_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
+                  {/* DENETİM FIX (#44): 'Özel' seçilince custom_days toplanmıyordu → backend sessizce
+                      7 güne düşüyordu. Artık kaç günde bir tekrarlanacağı sorulur ve POST edilir. */}
+                  {form.frequency === "custom" && (
+                    <div className="mt-2">
+                      <label className="text-xs">Kaç günde bir</label>
+                      <input
+                        type="number" min="1"
+                        value={form.custom_days ?? 7}
+                        onChange={(e) => setForm({ ...form, custom_days: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="w-full mt-1 px-3 py-2 border rounded text-sm"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div><label className="text-xs">Aksiyon Path</label><input value={form.action_path} onChange={(e) => setForm({ ...form, action_path: e.target.value })} placeholder="/admin/..." className="w-full mt-1 px-3 py-2 border rounded text-sm" /></div>
               </div>

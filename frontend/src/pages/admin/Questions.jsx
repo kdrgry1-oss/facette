@@ -428,14 +428,28 @@ export default function AdminQuestions() {
                 />
               </div>
 
-              {selectedQuestion.status === "WAITING_FOR_ANSWER" && (
-                <div className="flex justify-end pt-2">
-                  <button onClick={sendAnswer} disabled={sendingAnswer || !answerText.trim()} data-testid="send-answer-btn"
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                    {sendingAnswer ? "Gönderiliyor..." : <><Send size={14} /> Gönder</>}
-                  </button>
-                </div>
-              )}
+              {selectedQuestion.status === "WAITING_FOR_ANSWER" && (() => {
+                // DENETİM FIX (#42): yalnız Trendyol'da cevap müşteriye otomatik gider. Diğer
+                // kanallarda (HB/Temu/WhatsApp/Instagram/Messenger/Site) buton "Yerel Kaydet"
+                // olur ve gönderim vaadi verilmez; bir uyarı satırı gösterilir.
+                const _ch = selectedQuestion.marketplace || "trendyol";
+                const _autoSend = _ch === "trendyol";
+                return (
+                  <div className="flex flex-col items-end gap-1 pt-2">
+                    {!_autoSend && (
+                      <span className="text-[11px] text-amber-600">
+                        Bu kanalda otomatik gönderim yok — cevap yalnızca panelde kaydedilir.
+                      </span>
+                    )}
+                    <button onClick={sendAnswer} disabled={sendingAnswer || !answerText.trim()} data-testid="send-answer-btn"
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                      {sendingAnswer
+                        ? (_autoSend ? "Gönderiliyor..." : "Kaydediliyor...")
+                        : <><Send size={14} /> {_autoSend ? "Gönder" : "Yerel Kaydet"}</>}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </DialogContent>

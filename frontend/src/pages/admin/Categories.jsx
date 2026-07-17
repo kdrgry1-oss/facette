@@ -160,7 +160,12 @@ export default function AdminCategories() {
     }
   };
 
-  const handleTrendyolCategoryStockPrice = async (categoryId, categoryName) => {
+  // DENETİM FIX (#22): turuncu buton CANLI Trendyol stok/fiyat push'u tetikliyordu — onaysız
+  // ve çift tıklamaya açıktı. Artık önce onay istenir, işlem sırasında buton devre dışı/spinner olur.
+  const [pushingCat, setPushingCat] = useState(null);
+
+  const doTrendyolCategoryStockPrice = async (categoryId, categoryName) => {
+    setPushingCat(categoryId);
     try {
       const token = localStorage.getItem('token');
       toast.info(`${categoryName} kategorisi için stok/fiyat güncelleniyor...`);
@@ -170,7 +175,21 @@ export default function AdminCategories() {
       toast.success(res.data?.message || "Stok/fiyat güncellendi");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Stok/fiyat güncelleme başarısız");
+    } finally {
+      setPushingCat(null);
     }
+  };
+
+  const handleTrendyolCategoryStockPrice = (categoryId, categoryName) => {
+    if (pushingCat) return;
+    toast(`"${categoryName}" kategorisindeki ürünlerin stok/fiyatını CANLI Trendyol'a göndersin mi?`, {
+      action: {
+        label: 'Gönder',
+        onClick: () => doTrendyolCategoryStockPrice(categoryId, categoryName),
+      },
+      cancel: { label: 'İptal', onClick: () => {} },
+      duration: 8000,
+    });
   };
 
   const openEditModal = (category) => {
@@ -281,12 +300,13 @@ export default function AdminCategories() {
                 <button onClick={() => openEditModal(node)} className="p-1 hover:bg-gray-100 rounded text-blue-600" title="Düzenle">
                   <Edit size={16} />
                 </button>
-                <button 
-                  onClick={() => handleTrendyolCategoryStockPrice(node.id, node.name)} 
-                  className="p-1 hover:bg-orange-50 rounded text-orange-500" 
+                <button
+                  onClick={() => handleTrendyolCategoryStockPrice(node.id, node.name)}
+                  disabled={pushingCat === node.id}
+                  className="p-1 hover:bg-orange-50 rounded text-orange-500 disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Trendyol Stok/Fiyat Güncelle"
                 >
-                  <RefreshCw size={16} />
+                  <RefreshCw size={16} className={pushingCat === node.id ? "animate-spin" : ""} />
                 </button>
                 <button onClick={() => handleDelete(node.id)} className="p-1 hover:bg-gray-100 rounded text-red-500" title="Sil">
                   <Trash2 size={16} />
