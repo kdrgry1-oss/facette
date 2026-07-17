@@ -109,8 +109,13 @@ export default function AdminQuestions() {
       const endpoint = ch === "trendyol"
         ? `${API}/integrations/trendyol/questions/${selectedQuestion.question_id}/answer`
         : `${API}/integrations/${ch}/questions/${selectedQuestion.question_id}/answer`;
-      await axios.post(endpoint, { answer: answerText }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success("Cevap gönderildi");
+      const res = await axios.post(endpoint, { answer: answerText }, { headers: { Authorization: `Bearer ${token}` } });
+      // DENETİM FIX: sabit "gönderildi" yanıltıcıydı — Trendyol dışı kanallarda (HB/Temu/WhatsApp/
+      // Instagram/Site) cevap müşteriye GİTMİYOR olabilir. Backend'in gerçek mesajını göster;
+      // yoksa entegrasyonsuz kanalda "gönderildi" değil "kaydedildi" de.
+      const _msg = res?.data?.message
+        || (ch === "trendyol" ? "Cevap müşteriye gönderildi" : "Cevap kaydedildi (bu kanalda otomatik gönderim yok)");
+      toast.success(_msg);
       setAnswerOpen(false);
       fetchQuestions();
     } catch (err) {

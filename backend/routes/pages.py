@@ -98,6 +98,12 @@ async def update_page(page_id: str, payload: dict, current_user: dict = Depends(
         raise HTTPException(status_code=404, detail="Sayfa bulunamadı")
     allowed = ("title", "slug", "content", "meta_title", "meta_description", "is_active")
     update_set = {k: payload[k] for k in allowed if k in payload}
+    # DENETİM FIX: slug değişiyorsa benzersizlik kontrolü — çakışan slug ulaşılamayan sayfa yapar.
+    _new_slug = (update_set.get("slug") or "").strip()
+    if _new_slug and _new_slug != (existing.get("slug") or ""):
+        _clash = await db.pages.find_one({"slug": _new_slug, "id": {"$ne": existing["id"]}}, {"_id": 0, "id": 1})
+        if _clash:
+            raise HTTPException(status_code=400, detail="Bu slug zaten kullanılıyor")
     update_set["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.pages.update_one({"id": existing["id"]}, {"$set": update_set})
     return {"ok": True}

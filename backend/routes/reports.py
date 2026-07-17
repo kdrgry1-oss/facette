@@ -474,19 +474,36 @@ async def category_report(
 
 @router.get("/stock")
 async def stock_report(current_user: dict = Depends(require_admin)):
-    # Low-stock & out-of-stock
-    low = await db.products.find({"stock": {"$gt": 0, "$lte": 5}}, {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "stock": 1}).sort("stock", 1).to_list(100)
-    out_of_stock = await db.products.find({"stock": {"$lte": 0}}, {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "stock": 1}).to_list(200)
-    total_value_pipeline = [
-        {"$group": {"_id": None, "units": {"$sum": {"$ifNull": ["$stock", 0]}}, "value": {"$sum": {"$multiply": [{"$ifNull": ["$stock", 0]}, {"$ifNull": ["$price", 0]}]}}}},
-    ]
-    tot = None
-    async for r in db.products.aggregate(total_value_pipeline):
-        tot = r
+    # DENETİM FIX: stok varyantlı üründe top-level 'stock'ta DEĞİL variants[].stock'ta tutulur.
+    # Eski rapor yalnız top-level 'stock'a bakıyordu → varyantlı ürünler yanlışlıkla 'tükendi'
+    # sayılıyor, toplam adet/değer ve kritik/tükenen listeleri hatalı çıkıyordu. Efektif stok:
+    # varyant varsa varyant toplamı, yoksa top-level stock.
+    _eff = {"$cond": [{"$gt": [{"$size": {"$ifNull": ["$variants", []]}}, 0]},
+                      {"$sum": {"$map": {"input": "$variants", "as": "v",
+                                         "in": {"$convert": {"input": "$$v.stock", "to": "int", "onError": 0, "onNull": 0}}}}},
+                      {"$convert": {"input": "$stock", "to": "int", "onError": 0, "onNull": 0}}]}
+    low, out_of_stock = [], []
+    units = 0
+    value = 0.0
+    async for r in db.products.aggregate([
+        {"$project": {"_id": 0, "id": 1, "name": 1, "stock_code": 1, "price": 1, "eff": _eff}}
+    ]):
+        s = int(r.get("eff") or 0)
+        units += s
+        try:
+            value += s * float(r.get("price") or 0)
+        except Exception:
+            pass
+        row = {"id": r.get("id"), "name": r.get("name"), "stock_code": r.get("stock_code"), "stock": s}
+        if s <= 0:
+            out_of_stock.append(row)
+        elif s <= 5:
+            low.append(row)
+    low.sort(key=lambda x: x["stock"])
     return {
-        "low_stock": low,
-        "out_of_stock": out_of_stock,
-        "totals": {"units": tot["units"] if tot else 0, "value": round(tot["value"], 2) if tot else 0},
+        "low_stock": low[:100],
+        "out_of_stock": out_of_stock[:200],
+        "totals": {"units": units, "value": round(value, 2)},
     }
 
 

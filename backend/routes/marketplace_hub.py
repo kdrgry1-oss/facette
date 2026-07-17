@@ -512,7 +512,9 @@ async def list_logs(
     if date_from or date_to:
         q["created_at"] = {}
         if date_from: q["created_at"]["$gte"] = date_from
-        if date_to: q["created_at"]["$lte"] = date_to
+        # DENETİM FIX: bitiş günü tamamen dışlanıyordu (string karşılaştırma) → gün sonu ekle.
+        if date_to:
+            q["created_at"]["$lte"] = date_to if "T" in str(date_to) else f"{date_to}T23:59:59.999999"
 
     total = await db.integration_logs.count_documents(q)
     cursor = db.integration_logs.find(q, {"_id": 0}).sort("created_at", -1) \
