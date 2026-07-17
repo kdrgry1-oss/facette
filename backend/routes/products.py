@@ -150,12 +150,13 @@ def _build_merchant_xml(prods, site, shop, target="google", in_stock_only=False,
         # ---- Google / Generic: ürün-seviyesi tek satır ----
         stock = pr.get("stock") or 0
         if variants:
+            # DENETİM FIX: varyant varsa ürün-seviyesi stoğu KOŞULSUZ varyant toplamıyla değiştir.
+            # Eski `if vsum:` — tüm varyantlar 0 iken (vsum=0 falsy) bayat ürün-seviyesi stoğu
+            # (ör. 10) kalıyor → tükenen ürün feed'de 'in stock' görünüp oversell'e yol açıyordu.
             try:
-                vsum = sum(int(v.get("stock") or 0) for v in variants)
-                if vsum:
-                    stock = vsum
+                stock = sum(int(v.get("stock") or 0) for v in variants)
             except Exception:
-                pass
+                stock = 0
         if in_stock_only and not (stock and stock > 0):
             continue
         avail = "in stock" if (stock and stock > 0) else "out of stock"

@@ -186,8 +186,19 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # F11: On "teslim_alindi" increment stock per size distribution
-    if new_stage == "teslim_alindi" and rec.get("product_id"):
+    # F11: On "teslim_alindi" increment stock per size distribution.
+    # DENETİM FIX (idempotent): stok artışı SADECE BİR KEZ yapılmalı. Eskiden 'teslim_alindi'ye
+    # tekrar geçince (veya eşzamanlı çift tıkta) stok mükerrer artıyordu. Atomik koşullu bayrakla
+    # (stock_incremented) yalnız KAZANAN istek artışı yapar.
+    _do_increment = False
+    if new_stage == "teslim_alindi" and rec.get("product_id") and not rec.get("stock_incremented"):
+        _claim = await db.manufacturing.update_one(
+            {"id": record_id, "stock_incremented": {"$ne": True}},
+            {"$set": {"stock_incremented": True,
+                      "delivered_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        _do_increment = (_claim.modified_count == 1)
+    if _do_increment:
         try:
             product = await db.products.find_one({"id": rec["product_id"]}, {"_id": 0, "id": 1, "variants": 1, "stock": 1})
             if product:
