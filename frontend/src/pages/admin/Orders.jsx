@@ -734,7 +734,7 @@ export default function AdminOrders({ unpaidView = false }) {
     }
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${API}/orders/bulk/status?status=${status}`, 
+      await axios.post(`${API}/orders/bulk-status?status=${status}`,
         selectedOrders, 
         { headers: { Authorization: `Bearer ${token}` } }
       );

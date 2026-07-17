@@ -4346,6 +4346,31 @@ async def bulk_create_cargo_barcode(
     }
 
 
+@router.post("/bulk-status")
+async def bulk_update_status(
+    order_ids: List[str],
+    status: str = Query(...),
+    current_user: dict = Depends(require_admin)
+):
+    """Birden çok siparişin durumunu TOPLUCA güncelle.
+
+    NOT: Path BİLEREK tek segment ('/bulk-status'). Frontend eskiden '/orders/bulk/status'
+    POST ediyordu; '/{order_id}/status' PUT route'u bu path'i yutup 405 döndürüyor, "Toplu
+    Durum Güncelle" HİÇ çalışmıyordu (bulk-cargo-barcode ile aynı sorun/çözüm).
+    """
+    success, errors = [], []
+    for oid in order_ids or []:
+        try:
+            await update_order_status(order_id=oid, status=status, current_user=current_user)
+            success.append(oid)
+        except HTTPException as he:
+            errors.append({"order_id": oid, "error": he.detail})
+        except Exception as e:
+            errors.append({"order_id": oid, "error": str(e)})
+    return {"success": True, "success_count": len(success),
+            "error_count": len(errors), "errors": errors}
+
+
 @router.post("/bulk-create-invoice")
 async def bulk_create_invoice(
     order_ids: List[str],
