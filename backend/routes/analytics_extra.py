@@ -173,9 +173,13 @@ async def marketplace_profit(
     }
 
     pipeline = [
-        {"$match": {"created_at": {"$gte": cutoff}}},
+        # Denetim: iptal/başarısız siparişler brüt/net kâra girmesin (yalnız gerçek satışlar).
+        {"$match": {"created_at": {"$gte": cutoff},
+                    "status": {"$nin": ["cancelled", "payment_failed"]}}},
         {"$group": {
-            "_id": {"$ifNull": ["$channel", "web"]},
+            # Denetim: var olmayan 'channel' alanı yüzünden HER sipariş 'web'e düşüyordu.
+            # Gerçek kaynak platform/marketplace'ten: trendyol/hepsiburada/temu/site.
+            "_id": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
             "orders": {"$sum": 1},
             "gross": {"$sum": {"$ifNull": ["$total", "$total_amount"]}},
             "shipping_cost": {"$sum": {"$ifNull": ["$shipping_cost", 0]}},
@@ -195,7 +199,7 @@ async def marketplace_profit(
     result = []
     totals = {"orders": 0, "gross": 0, "commission": 0, "shipping_cost": 0, "refunded": 0, "net": 0}
     for r in agg:
-        ch = r["_id"] or "web"
+        ch = r["_id"] or "site"
         cfg = comm_map.get(ch, {"type": "none", "value": 0})
         commission = 0
         if cfg["type"] == "percent":

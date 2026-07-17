@@ -499,7 +499,7 @@ async def profit_by_channel(
         {"$project": {
             # Y16: Kanal `platform` alanında tutulur (marketplace/source değil). Ayrıca 2-arg
             # $ifNull kullanılır (3-arg Mongo 5.0 gerektiriyordu, eski sürümde patlıyordu).
-            "channel": {"$ifNull": ["$platform", "site"]},
+            "channel": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]},
             "status": 1, "items": 1, "total": 1, "shipping_cost": 1,
         }},
     ]

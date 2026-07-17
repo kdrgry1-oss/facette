@@ -49,12 +49,15 @@ async def get_dashboard_stats(
                 m.update(e)
             return m
 
+        # Ciro/sipariş sayımı: iptal/başarısız/iade edilmiş siparişler GELİR DEĞİL → dışla
+        # (denetim: total_revenue eskiden iptal+ödenmemişi de topluyordu, ciro şişiyordu).
+        _NON_REVENUE = ["cancelled", "payment_failed", "refunded"]
         async def _sum_range(dt_from, dt_to=None):
             dtq = {"$gte": dt_from}
             if dt_to:
                 dtq["$lt"] = dt_to
             r = await db.orders.aggregate([
-                {"$match": _with({"created_at": dtq})},
+                {"$match": _with({"created_at": dtq, "status": {"$nin": _NON_REVENUE}})},
                 {"$group": {"_id": None, "count": {"$sum": 1}, "revenue": {"$sum": _rev}}},
             ]).to_list(1)
             return (r[0]["count"], r[0]["revenue"] or 0) if r else (0, 0)

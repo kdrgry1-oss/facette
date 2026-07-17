@@ -46,20 +46,27 @@ def is_iyzico_configured() -> bool:
     return bool(IYZICO_API_KEY and IYZICO_SECRET_KEY and IYZICO_API_KEY != "sandbox-api-key")
 
 
-def _iyzico_auth_header(settings: dict, uri: str, body: dict) -> dict:
-    """Iyzico v1 auth header builder (PKI string tabanlı — eski format ama iade için çalışır)."""
+def _iyzico_auth_header(settings: dict, uri: str, body: dict):
+    """iyzico IYZWSv2 HMAC-SHA256 auth (randomKey + path + body imzalanır) — payment.py `_v2_headers`
+    ile AYNI. Eski sürüm SHA1/PKI imza + json=body kullanıyordu; iyzico bunu reddediyor, TÜM iadeler
+    auth hatasıyla dönüyordu. Döner: (headers, body_str). body_str AYNEN content olarak gönderilmeli
+    (imza gövdesiyle byte-byte eşleşsin)."""
+    import hmac as _hmac
+    import secrets as _secrets
     api_key = settings.get("api_key", "")
     from security.crypto import decrypt as _dec_secret  # at-rest şifreli sır; düz-metin passthrough
     secret = _dec_secret(settings.get("api_secret", "")) or ""
-    rnd = str(random.randint(10**15, 10**16 - 1))
-    payload = api_key + rnd + secret
-    h = hashlib.sha1(payload.encode("utf-8")).hexdigest()
-    token = base64.b64encode((api_key + ":" + h).encode("utf-8")).decode("utf-8")
-    return {
-        "Authorization": f"IYZWSv2 {token}",
-        "x-iyzi-rnd": rnd,
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    random_key = _secrets.token_hex(16)
+    to_sign = f"{random_key}{uri}{body_str}"
+    sig = _hmac.new(secret.encode("utf-8"), to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    auth_str = f"apiKey:{api_key}&randomKey:{random_key}&signature:{sig}"
+    b64 = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
+    return ({
+        "Authorization": f"IYZWSv2 {b64}",
+        "x-iyzi-rnd": random_key,
         "Content-Type": "application/json",
-    }
+    }, body_str)
 
 
 @router.get("/payment/status")
@@ -204,8 +211,8 @@ async def iyzico_refund(payload: dict, current_user: dict = Depends(require_perm
     uri = "/payment/refund"
     try:
         async with httpx.AsyncClient(timeout=30) as c:
-            headers = _iyzico_auth_header(settings, uri, body)
-            resp = await c.post(f"{base}{uri}", json=body, headers=headers)
+            headers, body_str = _iyzico_auth_header(settings, uri, body)
+            resp = await c.post(f"{base}{uri}", content=body_str.encode("utf-8"), headers=headers)
             data = (
                 resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
