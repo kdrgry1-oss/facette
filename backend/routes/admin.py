@@ -11,52 +11,101 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 @router.get("/dashboard-stats")
 async def get_dashboard_stats(
     days: int = Query(30, ge=1, le=365),
+    platform: str = Query("all"),
     current_user: dict = Depends(require_admin)
 ):
-    """Get dashboard statistics for admin"""
+    """Admin dashboard istatistikleri.
+
+    days: aralık (gün). platform: 'all' | 'site' | 'trendyol' | 'hepsiburada' | 'ticimax' | ...
+    TÜM hesaplar MongoDB aggregation ile yapılır (eski .to_list(1000) limiti KALDIRILDI) →
+    28k+ siparişte grafik/ciro/gün eksiksiz gelir; önceki günler/aylar 0 görünmez.
+    """
     try:
-        # Calculate date range
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         prev_start = start_date - timedelta(days=days)
-        
-        # Get totals
-        total_orders = await db.orders.count_documents({})
+        start_iso = start_date.isoformat()
+        prev_start_iso = prev_start.isoformat()
+        today_iso = end_date.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        # ── Platform filtresi (sadece site / sadece trendyol / sadece hb ...) ──
+        _pf = (platform or "all").strip().lower()
+        if _pf in ("", "all", "hepsi", "tumu", "tümü"):
+            plat_match = {}
+        elif _pf in ("site", "facette", "web", "storefront"):
+            plat_match = {"$or": [
+                {"platform": {"$in": ["facette", "web", "site", "storefront"]}},
+                {"platform": {"$in": [None, ""]}},
+                {"platform": {"$exists": False}},
+            ]}
+        else:
+            plat_match = {"platform": _pf}
+
+        _rev = {"$convert": {"input": "$total", "to": "double", "onError": 0, "onNull": 0}}
+
+        def _with(*extra):
+            m = dict(plat_match)
+            for e in extra:
+                m.update(e)
+            return m
+
+        async def _sum_range(dt_from, dt_to=None):
+            dtq = {"$gte": dt_from}
+            if dt_to:
+                dtq["$lt"] = dt_to
+            r = await db.orders.aggregate([
+                {"$match": _with({"created_at": dtq})},
+                {"$group": {"_id": None, "count": {"$sum": 1}, "revenue": {"$sum": _rev}}},
+            ]).to_list(1)
+            return (r[0]["count"], r[0]["revenue"] or 0) if r else (0, 0)
+
+        cnt_range, total_revenue = await _sum_range(start_iso)
+        prev_cnt, prev_revenue = await _sum_range(prev_start_iso, start_iso)
+        cnt_today, revenue_today = await _sum_range(today_iso)
+
+        total_orders = await db.orders.count_documents(plat_match if plat_match else {})
         total_products = await db.products.count_documents({"is_active": True})
         total_customers = await db.users.count_documents({"is_admin": {"$ne": True}})
-        
-        # Get orders in date range
-        orders_in_range = await db.orders.find({
-            "created_at": {"$gte": start_date.isoformat()}
-        }, {"_id": 0}).to_list(1000)
-        
-        # Calculate revenue
-        total_revenue = sum(o.get("total", 0) for o in orders_in_range)
-        
-        # Previous period for comparison
-        prev_orders = await db.orders.find({
-            "created_at": {
-                "$gte": prev_start.isoformat(),
-                "$lt": start_date.isoformat()
-            }
-        }, {"_id": 0}).to_list(1000)
-        prev_revenue = sum(o.get("total", 0) for o in prev_orders)
-        
-        # Growth calculations
-        growth_orders = ((len(orders_in_range) - len(prev_orders)) / max(len(prev_orders), 1)) * 100 if prev_orders else 0
+
+        growth_orders = ((cnt_range - prev_cnt) / max(prev_cnt, 1)) * 100 if prev_cnt else 0
         growth_revenue = ((total_revenue - prev_revenue) / max(prev_revenue, 1)) * 100 if prev_revenue else 0
-        
-        # Today's stats
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        orders_today = [o for o in orders_in_range if o.get("created_at", "") >= today_start.isoformat()]
-        revenue_today = sum(o.get("total", 0) for o in orders_today)
-        
-        # Order status breakdown
-        status_breakdown = {}
-        for order in orders_in_range:
-            status = order.get("status", "pending")
-            status_breakdown[status] = status_breakdown.get(status, 0) + 1
-        # Kanonik katalogdan Türkçe etiket + renk (ham İngilizce anahtar GÖSTERİLMESİN)
+
+        pending_orders = await db.orders.count_documents(_with({"status": "pending"}))
+        shipped_orders = await db.orders.count_documents(_with({"status": "shipped"}))
+
+        # Günlük seri (aggregation — limitsiz)
+        daily_agg = await db.orders.aggregate([
+            {"$match": _with({"created_at": {"$gte": start_iso}})},
+            {"$group": {"_id": {"$substr": [{"$toString": "$created_at"}, 0, 10]},
+                        "orders": {"$sum": 1}, "revenue": {"$sum": _rev}}},
+        ]).to_list(500)
+        daily_map = {r["_id"]: r for r in daily_agg}
+        daily_series = []
+        for i in range(days, -1, -1):
+            d = (end_date - timedelta(days=i)).strftime("%Y-%m-%d")
+            b = daily_map.get(d)
+            daily_series.append({"date": d, "orders": (b["orders"] if b else 0),
+                                 "revenue": round((b["revenue"] if b else 0) or 0, 2)})
+        if len(daily_series) > 92:
+            daily_series = daily_series[-92:]
+
+        avg_cart = round(total_revenue / cnt_range, 2) if cnt_range else 0
+
+        # Ödeme tipine göre
+        pay_agg = await db.orders.aggregate([
+            {"$match": _with({"created_at": {"$gte": start_iso}})},
+            {"$group": {"_id": {"$ifNull": ["$payment_method", {"$ifNull": ["$payment_type", "diğer"]}]},
+                        "count": {"$sum": 1}, "revenue": {"$sum": _rev}}},
+        ]).to_list(50)
+        payment_type_breakdown = {str(r["_id"] or "diğer"): {"count": r["count"], "revenue": round(r["revenue"] or 0, 2)}
+                                  for r in pay_agg}
+
+        # Durum dağılımı
+        status_agg = await db.orders.aggregate([
+            {"$match": _with({"created_at": {"$gte": start_iso}})},
+            {"$group": {"_id": {"$ifNull": ["$status", "pending"]}, "count": {"$sum": 1}}},
+        ]).to_list(60)
+        status_breakdown = {str(r["_id"] or "pending"): r["count"] for r in status_agg}
         try:
             from order_statuses import ORDER_STATUS_CATALOG as _CAT
             _smeta = {s["key"]: {"label": s.get("label") or s["key"], "color": s.get("color") or "#9CA3AF"} for s in _CAT}
@@ -67,76 +116,32 @@ async def get_dashboard_stats(
             _m = _smeta.get(_k) or {"label": str(_k).replace("_", " ").title(), "color": "#9CA3AF"}
             status_breakdown_list.append({"key": _k, "label": _m["label"], "color": _m["color"], "count": _cnt})
         status_breakdown_list.sort(key=lambda x: x["count"], reverse=True)
-        
-        # Pending and shipped counts
-        pending_orders = await db.orders.count_documents({"status": "pending"})
-        shipped_orders = await db.orders.count_documents({"status": "shipped"})
-        
-        # Recent orders
+
+        # Son siparişler
         recent_orders = await db.orders.find(
-            {}, {"_id": 0, "id": 1, "order_number": 1, "total": 1, "status": 1, "created_at": 1}
+            _with({}), {"_id": 0, "id": 1, "order_number": 1, "total": 1, "status": 1,
+                        "created_at": 1, "platform": 1}
         ).sort("created_at", -1).limit(5).to_list(5)
-        
-        # Top selling products
-        pipeline = [
+
+        # En çok satan ürünler
+        top_agg = await db.orders.aggregate([
+            {"$match": _with({"created_at": {"$gte": start_iso}})},
             {"$unwind": "$items"},
-            {"$group": {
-                "_id": "$items.name",
-                "sold": {"$sum": "$items.quantity"},
-                "revenue": {"$sum": {"$multiply": ["$items.price", "$items.quantity"]}}
-            }},
-            {"$sort": {"sold": -1}},
-            {"$limit": 5}
-        ]
-        top_products_cursor = db.orders.aggregate(pipeline)
-        top_products = []
-        async for p in top_products_cursor:
-            top_products.append({
-                "name": p["_id"],
-                "sold": p["sold"],
-                "revenue": p["revenue"]
-            })
+            {"$group": {"_id": "$items.name",
+                        "sold": {"$sum": {"$convert": {"input": "$items.quantity", "to": "int", "onError": 0, "onNull": 0}}},
+                        "revenue": {"$sum": {"$multiply": [
+                            {"$convert": {"input": "$items.price", "to": "double", "onError": 0, "onNull": 0}},
+                            {"$convert": {"input": "$items.quantity", "to": "int", "onError": 0, "onNull": 0}}]}}}},
+            {"$sort": {"sold": -1}}, {"$limit": 5},
+        ]).to_list(5)
+        top_products = [{"name": r["_id"], "sold": r["sold"], "revenue": round(r["revenue"] or 0, 2)} for r in top_agg]
 
-        # ── Ticimax-benzeri EK metrikler (görünüm bizim panel; veri seti oradan esinlenildi) ──
-        # Sepet ortalaması (ciro / sipariş adedi)
-        _cnt_range = len(orders_in_range)
-        avg_cart = round(total_revenue / _cnt_range, 2) if _cnt_range else 0
-
-        # Günlük seri (seçili aralık): tarih → {orders, revenue} — karşılaştırma grafiği için
-        _daily = {}
-        for o in orders_in_range:
-            _d = str(o.get("created_at") or "")[:10]
-            if not _d:
-                continue
-            b = _daily.setdefault(_d, {"orders": 0, "revenue": 0.0})
-            b["orders"] += 1
-            b["revenue"] += float(o.get("total") or 0)
-        daily_series = []
-        for i in range(days, -1, -1):
-            d = (end_date - timedelta(days=i)).strftime("%Y-%m-%d")
-            b = _daily.get(d, {"orders": 0, "revenue": 0.0})
-            daily_series.append({"date": d, "orders": b["orders"], "revenue": round(b["revenue"], 2)})
-        # Grafik çok uzamasın: 60 noktadan fazlaysa son 60 gün
-        if len(daily_series) > 60:
-            daily_series = daily_series[-60:]
-
-        # Ödeme tipine göre siparişler (aralıkta)
-        _pay = {}
-        for o in orders_in_range:
-            pt = str(o.get("payment_method") or o.get("payment_type") or "diğer").strip() or "diğer"
-            b = _pay.setdefault(pt, {"count": 0, "revenue": 0.0})
-            b["count"] += 1
-            b["revenue"] += float(o.get("total") or 0)
-        payment_type_breakdown = {k: {"count": v["count"], "revenue": round(v["revenue"], 2)} for k, v in _pay.items()}
-
-        # Terk edilen sepet istatistikleri (cart_sessions: dolu + >1sa güncellenmemiş)
+        # Terk edilen sepet (platformdan bağımsız — site sepeti)
         try:
             _ab_cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
             _ab_q = {"updated_at": {"$lte": _ab_cutoff}, "total": {"$gt": 0},
                      "$expr": {"$gt": [{"$size": {"$ifNull": ["$items", []]}}, 0]}}
-            _ab_count = 0
-            _ab_items = 0
-            _ab_total = 0.0
+            _ab_count = 0; _ab_items = 0; _ab_total = 0.0
             async for c in db.cart_sessions.find(_ab_q, {"_id": 0, "total": 1, "items": 1}):
                 _ab_count += 1
                 _ab_total += float(c.get("total") or 0)
@@ -146,7 +151,6 @@ async def get_dashboard_stats(
         except Exception:
             abandoned_carts = {"count": 0, "item_count": 0, "total_value": 0}
 
-        # Katalog: toplam kategori + satıştaki toplam stok adedi
         try:
             total_categories = await db.categories.count_documents({})
         except Exception:
@@ -156,39 +160,35 @@ async def get_dashboard_stats(
                 {"$match": {"is_active": True}},
                 {"$project": {"s": {"$cond": [
                     {"$gt": [{"$size": {"$ifNull": ["$variants", []]}}, 0]},
-                    {"$sum": "$variants.stock"},
-                    {"$ifNull": ["$stock", 0]},
-                ]}}},
+                    {"$sum": "$variants.stock"}, {"$ifNull": ["$stock", 0]}]}}},
                 {"$group": {"_id": None, "total": {"$sum": "$s"}}},
             ]
             _sr = await db.products.aggregate(_stock_pipe).to_list(1)
             total_stock = int((_sr[0]["total"] if _sr else 0) or 0)
         except Exception:
             total_stock = 0
-
-        # Cevap bekleyen mesajlar (open + in_progress ticket)
         try:
             pending_messages = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
         except Exception:
             pending_messages = 0
 
         return {
+            "platform": _pf,
             "total_orders": total_orders,
-            "total_revenue": total_revenue,
+            "total_revenue": round(total_revenue or 0, 2),
             "total_products": total_products,
             "total_customers": total_customers,
             "pending_orders": pending_orders,
             "shipped_orders": shipped_orders,
-            "orders_today": len(orders_today),
-            "revenue_today": revenue_today,
+            "orders_today": cnt_today,
+            "revenue_today": round(revenue_today or 0, 2),
             "growth_orders": round(growth_orders, 1),
             "growth_revenue": round(growth_revenue, 1),
             "recent_orders": recent_orders,
             "top_products": top_products,
             "order_status_breakdown": status_breakdown,
-            "order_status_list": status_breakdown_list,  # Türkçe etiket + renk (katalogdan)
-            # Ek metrikler
-            "orders_in_range": _cnt_range,
+            "order_status_list": status_breakdown_list,
+            "orders_in_range": cnt_range,
             "avg_cart": avg_cart,
             "daily_series": daily_series,
             "payment_type_breakdown": payment_type_breakdown,
@@ -197,7 +197,7 @@ async def get_dashboard_stats(
             "total_stock": total_stock,
             "pending_messages": pending_messages,
         }
-        
+
     except Exception as e:
         logger.error(f"Dashboard stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

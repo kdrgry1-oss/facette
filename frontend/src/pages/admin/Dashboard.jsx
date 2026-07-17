@@ -84,10 +84,12 @@ export default function Dashboard() {
     order_status_breakdown: {}
   });
   const [dateRange, setDateRange] = useState("30"); // days
+  const [platform, setPlatform] = useState("all"); // all | site | trendyol | hepsiburada | ...
 
   useEffect(() => {
     fetchStats();
-  }, [dateRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, platform]);
 
   const fetchStats = async () => {
     setLoading(true);
@@ -95,7 +97,7 @@ export default function Dashboard() {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const res = await axios.get(`${API}/admin/dashboard-stats?days=${dateRange}`, { headers });
+      const res = await axios.get(`${API}/admin/dashboard-stats?days=${dateRange}&platform=${platform}`, { headers });
       setStats(res.data);
     } catch (err) {
       // Gerçek veri gelemezse SAHTE demo verisi GÖSTERME (yanıltıcı olur) — sıfırla + uyar.
@@ -199,6 +201,19 @@ export default function Dashboard() {
           <p className="text-sm text-gray-500 mt-1">Mağaza performansı ve istatistikleri</p>
         </div>
         <div className="flex items-center gap-3">
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            className="border px-3 py-2 rounded-lg text-sm"
+            title="Platforma göre filtrele"
+          >
+            <option value="all">Tüm Platformlar</option>
+            <option value="site">Sadece Site</option>
+            <option value="trendyol">Trendyol</option>
+            <option value="hepsiburada">Hepsiburada</option>
+            <option value="ticimax">Ticimax</option>
+            <option value="temu">Temu</option>
+          </select>
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
