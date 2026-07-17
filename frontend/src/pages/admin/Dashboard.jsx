@@ -152,15 +152,44 @@ export default function Dashboard() {
     cancelled: "bg-red-500"
   };
 
+  // Ham İngilizce anahtar GÖSTERİLMESİN diye tam Türkçe fallback (backend katalogla aynı).
   const STATUS_LABELS = {
-    pending: "Beklemede",
+    pending: "Onay Bekliyor",
+    awaiting_payment: "Ödeme Bekleniyor",
+    payment_notified: "Ödeme Bildirimi Alındı",
     confirmed: "Onaylandı",
-    shipped: "Kargoda",
-    delivered: "Teslim",
-    cancelled: "İptal"
+    preparing: "Hazırlanıyor",
+    processing: "İşleme Alındı",
+    ready_to_ship: "Kargoya Hazır",
+    shipped: "Kargoya Verildi",
+    in_transit: "Taşınıyor",
+    out_for_delivery: "Dağıtımda",
+    delivered: "Teslim Edildi",
+    undelivered: "Teslim Edilemedi",
+    return_requested: "İade Talebi Oluşturuldu",
+    return_approved: "İade Onaylandı",
+    return_rejected: "İade Reddedildi",
+    return_in_transit: "İade Kargoda",
+    returned: "İade Tamamlandı",
+    refunded: "İade Bedeli Ödendi",
+    partial_refunded: "Kısmi İade Yapıldı",
+    cancelled: "İptal Edildi",
+    cancel_refunded: "İptal Ödemesi Yapıldı",
+    payment_failed: "Ödeme Alınamadı",
   };
 
-  const totalStatusOrders = Object.values(stats.order_status_breakdown || {}).reduce((a, b) => a + b, 0);
+  // Durum listesi: backend Türkçe etiket+renk verirse onu kullan; yoksa dict + fallback etiket.
+  const statusList = (stats.order_status_list && stats.order_status_list.length)
+    ? stats.order_status_list
+    : Object.entries(stats.order_status_breakdown || {}).map(([key, count]) => ({
+        key, count, label: STATUS_LABELS[key] || key, color: null,
+      }));
+  const statusLabel = (k) => {
+    const hit = (stats.order_status_list || []).find((s) => s.key === k);
+    return (hit && hit.label) || STATUS_LABELS[k] || k;
+  };
+
+  const totalStatusOrders = statusList.reduce((a, s) => a + (s.count || 0), 0);
 
   return (
     <div data-testid="admin-dashboard">
@@ -351,18 +380,18 @@ export default function Dashboard() {
             Sipariş Durumu Dağılımı
           </h3>
           <div className="space-y-3">
-            {Object.entries(stats.order_status_breakdown || {}).map(([status, count]) => {
-              const percentage = totalStatusOrders > 0 ? (count / totalStatusOrders * 100) : 0;
+            {statusList.map((s) => {
+              const percentage = totalStatusOrders > 0 ? (s.count / totalStatusOrders * 100) : 0;
               return (
-                <div key={status}>
+                <div key={s.key}>
                   <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-gray-600">{STATUS_LABELS[status] || status}</span>
-                    <span className="font-medium">{count} ({percentage.toFixed(0)}%)</span>
+                    <span className="text-gray-600">{s.label}</span>
+                    <span className="font-medium">{s.count} ({percentage.toFixed(0)}%)</span>
                   </div>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full ${STATUS_COLORS[status] || 'bg-gray-400'} rounded-full transition-all`}
-                      style={{ width: `${percentage}%` }}
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${percentage}%`, backgroundColor: s.color || "#9CA3AF" }}
                     />
                   </div>
                 </div>
@@ -436,7 +465,7 @@ export default function Dashboard() {
                         order.status === 'delivered' ? 'bg-green-100 text-green-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {STATUS_LABELS[order.status] || order.status}
+                        {statusLabel(order.status)}
                       </span>
                     </td>
                     <td className="py-3 text-right font-medium">

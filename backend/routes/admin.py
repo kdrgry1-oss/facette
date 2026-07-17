@@ -56,6 +56,17 @@ async def get_dashboard_stats(
         for order in orders_in_range:
             status = order.get("status", "pending")
             status_breakdown[status] = status_breakdown.get(status, 0) + 1
+        # Kanonik katalogdan Türkçe etiket + renk (ham İngilizce anahtar GÖSTERİLMESİN)
+        try:
+            from order_statuses import ORDER_STATUS_CATALOG as _CAT
+            _smeta = {s["key"]: {"label": s.get("label") or s["key"], "color": s.get("color") or "#9CA3AF"} for s in _CAT}
+        except Exception:
+            _smeta = {}
+        status_breakdown_list = []
+        for _k, _cnt in status_breakdown.items():
+            _m = _smeta.get(_k) or {"label": str(_k).replace("_", " ").title(), "color": "#9CA3AF"}
+            status_breakdown_list.append({"key": _k, "label": _m["label"], "color": _m["color"], "count": _cnt})
+        status_breakdown_list.sort(key=lambda x: x["count"], reverse=True)
         
         # Pending and shipped counts
         pending_orders = await db.orders.count_documents({"status": "pending"})
@@ -175,6 +186,7 @@ async def get_dashboard_stats(
             "recent_orders": recent_orders,
             "top_products": top_products,
             "order_status_breakdown": status_breakdown,
+            "order_status_list": status_breakdown_list,  # Türkçe etiket + renk (katalogdan)
             # Ek metrikler
             "orders_in_range": _cnt_range,
             "avg_cart": avg_cart,
