@@ -193,10 +193,57 @@ export default function Checkout() {
   // Sipariş tutarları (türetilmiş) — useEffect'lerden ÖNCE tanımlanmalı (TDZ hatası önlenir)
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
+
+  // DENETİM FIX (#46): Kargo Kuralları (shipping_rules) sepet tutarına göre kargo bedelini
+  // belirlesin. Eşleşen kural varsa onun bedeli kullanılır; yoksa genel settings.shipping_fee'ye
+  // düşülür (fallback → regresyon yok). Ücretsiz kargo kuponu/eşiği yine önceliklidir.
+  const [ruleShipCost, setRuleShipCost] = useState(null); // null = kural yok/yüklenmedi
+  useEffect(() => {
+    if (!total) { setRuleShipCost(null); return; }
+    let cancel = false;
+    axios
+      .get(`${API}/admin/rules/shipping/resolve?cart_total=${total}`)
+      .then((r) => { if (!cancel) setRuleShipCost(r.data?.matched ? Number(r.data.shipping_cost || 0) : null); })
+      .catch(() => { if (!cancel) setRuleShipCost(null); });
+    return () => { cancel = true; };
+  }, [total]);
+
+  // DENETİM FIX (#45): Ödeme Tipi İndirimleri (payment_discounts) — seçili ödeme yöntemine göre
+  // aktif indirim uygulanır. Havale (bank_transfer) zaten bankPct ile ele alındığından çift
+  // sayımı önlemek için burada hariç tutulur; asıl değer credit_card/diğer yöntemlerdedir.
+  const [payDiscounts, setPayDiscounts] = useState({});
+  useEffect(() => {
+    let cancel = false;
+    axios
+      .get(`${API}/admin/rules/payment-discounts/resolve`)
+      .then((r) => { if (!cancel) setPayDiscounts(r.data?.discounts || {}); })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, []);
+
+  // DENETİM FIX (#41): Oturum açan üyenin üye-grubu indirimi (yüzde) uygulanır.
+  const [memberDiscPct, setMemberDiscPct] = useState(0);
+  const [memberGroupName, setMemberGroupName] = useState("");
+  useEffect(() => {
+    if (!user?.id) { setMemberDiscPct(0); return; }
+    let cancel = false;
+    const token = localStorage.getItem("token");
+    axios
+      .get(`${API}/storefront/member-discount`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => {
+        if (cancel) return;
+        setMemberDiscPct(Number(r.data?.discount_percent) || 0);
+        setMemberGroupName(r.data?.group_name || "");
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, [user?.id]);
+
   // Y25: Ücretsiz kargo kuponu uygulandıysa kargo 0 gösterilir (önceden etiket "Ücretsiz Kargo"
   // yazsa da tutara kargo ekleniyordu). Eşik ya da kupon → kargo bedava.
   const hasFreeShippingPromo = (appliedPromotions || []).some((p) => p && p.free_shipping);
-  const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : shippingFee;
+  const baseShipFee = ruleShipCost != null ? ruleShipCost : shippingFee;
+  const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : baseShipFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
   const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
   const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
@@ -205,7 +252,18 @@ export default function Checkout() {
   const bankTransferDiscount = (isBankTransfer && bankPct > 0)
     ? Math.round((total - discount) * (bankPct / 100) * 100) / 100
     : 0;
-  const grandTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - pointsDeduction + giftWrapTotal + codFee);
+  // Genelleştirilmiş ödeme tipi indirimi (havale hariç — o bankTransferDiscount ile geliyor)
+  const _payRule = payDiscounts[paymentMethod];
+  const paymentMethodDiscount = (_payRule && !isBankTransfer)
+    ? (((_payRule.percent || 0) > 0)
+        ? Math.round((total - discount) * ((_payRule.percent || 0) / 100) * 100) / 100
+        : (Number(_payRule.amount) || 0))
+    : 0;
+  // Üye grubu indirimi — kupon indiriminden sonraki tutar üzerinden yüzde.
+  const memberGroupDiscount = memberDiscPct > 0
+    ? Math.round((total - discount) * (memberDiscPct / 100) * 100) / 100
+    : 0;
+  const grandTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - paymentMethodDiscount - memberGroupDiscount - pointsDeduction + giftWrapTotal + codFee);
 
   // Seçili taksitin GERÇEK ödeme değerleri — özet "Toplam" ve "Ödeme Yap" butonu
   // peşin grandTotal'ı değil, seçilen taksitin totalPrice/installmentPrice'ını yansıtır.
@@ -1216,6 +1274,8 @@ export default function Checkout() {
                   </div>
                   {discount > 0 && <div className="flex justify-between text-green-600"><span>Kupon{appliedCoupon?.code ? ` (${appliedCoupon.code})` : ""}</span><span>-{discount.toFixed(2)} TL</span></div>}
                   {bankTransferDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Havale/EFT İndirimi (%{bankPct})</span><span>-{bankTransferDiscount.toFixed(2)} TL</span></div>}
+                  {paymentMethodDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>{_payRule?.label || "Ödeme İndirimi"}</span><span>-{paymentMethodDiscount.toFixed(2)} TL</span></div>}
+                  {memberGroupDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Üye İndirimi{memberGroupName ? ` (${memberGroupName})` : ""} (%{memberDiscPct})</span><span>-{memberGroupDiscount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}

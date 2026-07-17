@@ -108,6 +108,30 @@ async def public_popups():
     return {"items": items}
 
 
+@storefront_extras_router.get("/member-discount")
+async def member_group_discount(current_user: Optional[dict] = Depends(get_current_user)):
+    """DENETİM FIX (#41): Oturum açan üyenin üye-grubu indirimini döndürür (checkout tüketir).
+    Üye bir gruba (users.group_id) atanmışsa ve grup discount_percent tanımlıysa → o yüzde.
+    Anonim / grupsuz / indirimsiz → 0."""
+    if not current_user:
+        return {"discount_percent": 0, "group_name": None}
+    gid = current_user.get("group_id")
+    if not gid:
+        # users dokümanı token'da group_id taşımıyor olabilir → DB'den oku
+        u = await db.users.find_one({"id": current_user.get("id")}, {"_id": 0, "group_id": 1})
+        gid = (u or {}).get("group_id")
+    if not gid:
+        return {"discount_percent": 0, "group_name": None}
+    grp = await db.member_groups.find_one({"id": gid}, {"_id": 0})
+    if not grp:
+        return {"discount_percent": 0, "group_name": None}
+    try:
+        pct = float(grp.get("discount_percent") or 0)
+    except Exception:
+        pct = 0
+    return {"discount_percent": max(0, min(pct, 90)), "group_name": grp.get("name") or ""}
+
+
 # ---------- Stock / Price Alerts (public + admin) ----------
 alerts_public_router = APIRouter(prefix="/alerts", tags=["alerts"])
 alerts_admin_router = APIRouter(prefix="/admin/alerts", tags=["admin-alerts"])

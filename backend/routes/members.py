@@ -272,7 +272,8 @@ async def create_member(payload: dict, current_user: dict = Depends(require_admi
 
 @router.put("/{mid}")
 async def update_member(mid: str, payload: dict, current_user: dict = Depends(require_admin)):
-    allowed = ("first_name", "last_name", "phone", "is_active", "accepts_marketing", "acquisition_source", "notes", "segment_tags")
+    # DENETİM FIX (#41): group_id atanabilir olmalı — Üye Grupları indirimi gruba bağlı üyeye uygulanır.
+    allowed = ("first_name", "last_name", "phone", "is_active", "accepts_marketing", "acquisition_source", "notes", "segment_tags", "group_id")
     update = {k: v for k, v in payload.items() if k in allowed}
     if payload.get("password"):
         update["password"] = hash_password(payload["password"])
