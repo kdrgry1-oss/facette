@@ -81,11 +81,14 @@ async def list_members(
 ):
     query: dict = {"is_admin": {"$ne": True}}
     if search:
+        # DENETİM FIX: kaçışsız regex özel karakterlerde ('(' '[' vb.) 500 / ReDoS veriyordu.
+        import re as _re
+        _s = _re.escape(str(search).strip())
         query["$or"] = [
-            {"email": {"$regex": search, "$options": "i"}},
-            {"first_name": {"$regex": search, "$options": "i"}},
-            {"last_name": {"$regex": search, "$options": "i"}},
-            {"phone": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": _s, "$options": "i"}},
+            {"first_name": {"$regex": _s, "$options": "i"}},
+            {"last_name": {"$regex": _s, "$options": "i"}},
+            {"phone": {"$regex": _s, "$options": "i"}},
         ]
     if source:
         query["acquisition_source"] = source

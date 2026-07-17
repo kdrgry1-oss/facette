@@ -379,6 +379,13 @@ async def generate_draft_answer(
             pass
         handoff = m.group(2).lower().startswith("y")
         draft_text = text[: m.start()].strip()
+    # DENETİM FIX: regex tutmasa bile '---META---' sonrası HİÇBİR şey müşteriye gitmesin
+    # (model biçimi bozarsa 'CONFIDENCE/HANDOFF' bloğu cevaba sızıyordu). Savunma amaçlı kes.
+    draft_text = re.split(r"-{2,}\s*META", draft_text, 1)[0].strip()
+    try:
+        confidence = max(0.0, min(1.0, float(confidence)))
+    except Exception:
+        confidence = 0.75
 
     threshold = float(settings.get("confidence_threshold", 0.7) or 0.7)
     if confidence < threshold:

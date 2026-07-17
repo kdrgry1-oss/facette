@@ -449,7 +449,9 @@ async def preview_hepsiburada_orders(req: HbOrderPreviewReq, current_user: dict 
             "attempted_url": attempted,
             "raw_sample": (grouped[:2] if isinstance(grouped, list) else grouped)}
 @router.get("/hepsiburada/oms-diag")
-async def hepsiburada_oms_diag(on: str = "", key: str = ""):
+async def hepsiburada_oms_diag(on: str = "", key: str = "", current_user: dict = Depends(require_admin)):
+    # DENETİM FIX: require_admin eklendi — sabit gömülü anahtar (repo'da açık) tek başına
+    # koruma değildi; teşhis ucu efektif olarak public'ti.
     """GEÇİCİ TEŞHİS UCU: Railway backend'inden HB OMS-SIT'e bağlantıyı ölçer. HER ZAMAN 200 döner.
     Tarayıcı adres çubuğundan aç:  /api/integrations/hepsiburada/oms-diag?key=facette_oms_diag&on=<sipariş_no>
     Yorum: list_1.ok=true+düşük ms => OMS erişilebilir (sorun frontend/cache);

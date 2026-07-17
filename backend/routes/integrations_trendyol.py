@@ -80,7 +80,11 @@ async def get_trendyol_config():
         main_markup_f = None
 
     if settings:
+        # DENETİM FIX: panel 'Canlı' için mode='prod' gönderiyor; eski kod yalnız =='live'
+        # kontrol ettiğinden CANLI istekler SESSİZCE STAGING'e gidiyordu. Normalize et.
         mode = settings.get("mode", "sandbox")
+        if str(mode).lower() in ("prod", "production", "canli", "canlı", "live"):
+            mode = "live"
         local_markup = settings.get("default_markup", 0) or 0
         effective_markup = main_markup_f if main_markup_f is not None else local_markup
         # GÜVENLİK: api_secret at-rest şifreli (v1:...) olabilir → çöz. decrypt() düz-metni
@@ -105,6 +109,8 @@ async def get_trendyol_config():
     
     # Fallback to env
     mode = os.environ.get('TRENDYOL_MODE', 'sandbox')
+    if str(mode).lower() in ("prod", "production", "canli", "canlı", "live"):
+        mode = "live"
     return {
         "api_key": os.environ.get('TRENDYOL_API_KEY', ''),
         "api_secret": os.environ.get('TRENDYOL_API_SECRET', ''),
@@ -264,7 +270,8 @@ async def get_trendyol_status():
         "supplier_id": config["supplier_id"] if config["is_active"] else None
     }
 @router.get("/trendyol/debug")
-async def debug_trendyol_orders():
+async def debug_trendyol_orders(current_user: dict = Depends(require_admin)):
+    # DENETİM FIX: auth eklendi — bu uç kimlik doğrulamasız gerçek sipariş/müşteri PII sızdırıyordu.
     config = await get_trendyol_config()
     import sys
     import os
