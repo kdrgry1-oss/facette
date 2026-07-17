@@ -3124,6 +3124,32 @@ async def create_invoice_for_order(
                 "note": "",
             })
 
+        # DENETİM FIX: e-Fatura'da da kupon/kampanya/havale indirimini UYGULA. Eskiden discount=0.0
+        # geçiliyordu → indirimli/havale ödeyen kurumsal müşteride fatura matrahı BRÜT kalıyor,
+        # PayableAmount müşterinin ödediğinden fazla düzenleniyordu. e-Arşiv'deki mantığın aynısı:
+        # fatura brütü (kalem+kargo) − ödenen (order.total) = indirim; ürün birim fiyatlarına
+        # oransal dağıt (kargo hariç), son satır yuvarlama kalanını alır → GİB-uyumlu satır matrahı.
+        _items_gross_ef = sum(float(i.get("price") or 0) * int(i.get("quantity") or 1)
+                              for i in (order.get("items") or []))
+        _inv_gross_ef = _items_gross_ef + float(order.get("shipping_cost") or 0)
+        _paid_ef = float(order.get("total") or _inv_gross_ef)
+        _inv_disc_ef = round(_inv_gross_ef - _paid_ef, 2)
+        if _inv_disc_ef < 0.01:
+            _inv_disc_ef = round(float(order.get("discount") or 0), 2)
+        if _inv_disc_ef < 0:
+            _inv_disc_ef = 0.0
+        if _inv_disc_ef > 0 and line_items:
+            _pg = sum((li["unit_price"] or 0) * (li["qty"] or 1) for li in line_items)
+            if _pg > 0:
+                _dd = min(_inv_disc_ef, round(_pg, 2))
+                _al = 0.0
+                for _k, li in enumerate(line_items):
+                    _g = (li["unit_price"] or 0) * (li["qty"] or 1)
+                    _d = round(_dd * _g / _pg, 2) if _k < len(line_items) - 1 else round(_dd - _al, 2)
+                    _al += _d
+                    _q = li["qty"] or 1
+                    li["unit_price"] = round((_g - _d) / _q, 4) if _q else (_g - _d)
+
         # Taşıyan (kargo firması) — Trendyol'da beyan edilen kargodan DİNAMİK (e-Arşiv ile aynı eşleme)
         _cpn = (order.get("cargo_provider_name") or "")
         _cpl = _cpn.lower()
