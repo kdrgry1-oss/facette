@@ -36,6 +36,8 @@ import CookieConsent from "./components/CookieConsent";
 // DENETİM FIX (#35): admin Duyuru/Popup'larını storefront'ta gösteren bileşenler
 const AnnouncementBar = lazy(() => import("./components/AnnouncementBar"));
 const SitePopup = lazy(() => import("./components/SitePopup"));
+// DENETİM FIX (#5/#6): 301/302 yönlendirme + per-path meta override tüketimi
+const SeoManager = lazy(() => import("./components/SeoManager"));
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -88,6 +90,7 @@ function App() {
             {/* Storefront Duyuru barı + Popup (native uygulamada gösterme) */}
             {!isNative && (
               <Suspense fallback={null}>
+                <SeoManager />
                 <AnnouncementBar />
                 <SitePopup />
               </Suspense>

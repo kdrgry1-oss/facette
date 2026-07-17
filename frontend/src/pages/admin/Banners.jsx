@@ -121,6 +121,14 @@ export default function AdminBanners() {
 
   return (
     <div data-testid="admin-banners">
+      {/* DENETİM FIX (#34): Asıl vitrin banner yönetimi Sayfa Tasarımı blok sistemidir; bu ekran
+          ikincil/legacy API tüketicileri içindir. Karışıklığı önlemek için bilgilendirme. */}
+      <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <strong>Not:</strong> Ana sayfa vitrin banner'ları <strong>Sayfa Tasarımı</strong> (blok sistemi)
+        üzerinden yönetilir ve mağazada oradan gösterilir. Bu ekrandaki banner'lar ikincil/legacy
+        entegrasyonlar içindir; ana sayfada otomatik görünmez.
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Bannerlar</h1>
         <button 
