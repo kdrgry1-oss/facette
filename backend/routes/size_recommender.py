@@ -65,7 +65,16 @@ async def recommend_size(product_id: str, user=Depends(get_current_user)):
 
     # 1) Brand size chart varsa kullan
     chart = None
-    if p.get("size_chart_id"):
+    # DENETİM FIX: admin ölçü tablosunu `size_tables` koleksiyonuna (product_id ile) kaydediyor;
+    # recommender yalnız `size_charts`+size_chart_id okuduğu için ASLA eşleşmiyor, hep boş dönüyordu.
+    # Önce ürünün kendi ölçü tablosunu (size_tables) dene.
+    try:
+        _st = await db.size_tables.find_one({"product_id": product_id}, {"_id": 0})
+        if _st and (_st.get("sizes") or _st.get("rows")):
+            chart = {"sizes": _st.get("sizes") or _st.get("rows")}
+    except Exception:
+        pass
+    if not chart and p.get("size_chart_id"):
         chart = await db.size_charts.find_one({"id": p["size_chart_id"]}, {"_id": 0})
     if not chart and p.get("brand"):
         chart = await db.size_charts.find_one(

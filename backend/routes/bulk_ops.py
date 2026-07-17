@@ -178,50 +178,57 @@ async def apply_upload(file: UploadFile = File(...),
             key_used = "barcode"; ref = bc
         else:
             skipped += 1; continue
-        product = await db.products.find_one(query, {"_id": 0, "id": 1, "variants": 1})
-        if not product:
+        # DENETİM FIX: find_one → TÜM eşleşen ürünler. Renk-kardeşleri stock_code'u paylaşır;
+        # eskiden yalnız BİR ürün güncelleniyordu.
+        products = await db.products.find(query, {"_id": 0, "id": 1, "variants": 1}).to_list(200)
+        if not products:
             fail += 1; continue
 
-        root_updates = {}
-        if r.get("price") not in (None, ""):
-            try: root_updates["price"] = float(r["price"])
-            except: pass
-        if r.get("sale_price") not in (None, ""):
-            try: root_updates["sale_price"] = float(r["sale_price"])
-            except: pass
-        if r.get("status") not in (None, ""):
-            root_updates["status"] = str(r["status"]).strip()
+        _row_applied = False
+        for product in products:
+            root_updates = {}
+            if r.get("price") not in (None, ""):
+                try: root_updates["price"] = float(r["price"])
+                except: pass
+            if r.get("sale_price") not in (None, ""):
+                try: root_updates["sale_price"] = float(r["sale_price"])
+                except: pass
+            if r.get("status") not in (None, ""):
+                # DENETİM FIX: görünürlük is_active (bool) alanına bağlı; 'status' yazmak no-op'tu.
+                _st = str(r["status"]).strip().lower()
+                root_updates["is_active"] = _st in ("active", "aktif", "1", "true", "yayında", "yayinda", "on", "evet")
 
-        # Stok: varyant bazlı güncelle (doğru eşleşen varyant tek ise onun stock'u)
-        variant_updated = False
-        if r.get("stock") not in (None, ""):
-            try:
-                new_stock = int(float(r["stock"]))
-            except:
-                new_stock = None
-            if new_stock is not None:
-                variants = product.get("variants") or []
-                target_idx = None
-                for i, v in enumerate(variants):
-                    if key_used == "stock_code" and v.get("stock_code") == ref:
-                        target_idx = i; break
-                    if key_used == "barcode" and v.get("barcode") == ref:
-                        target_idx = i; break
-                if target_idx is not None:
-                    await db.products.update_one(
-                        {"id": product["id"]},
-                        {"$set": {f"variants.{target_idx}.stock": new_stock, "updated_at": now}}
-                    )
-                    variant_updated = True
-                else:
-                    # Ürün seviyesinde stock tutuluyorsa root'a yaz
-                    root_updates["stock"] = new_stock
+            # Stok: varyant bazlı güncelle (doğru eşleşen varyant tek ise onun stock'u)
+            variant_updated = False
+            if r.get("stock") not in (None, ""):
+                try:
+                    new_stock = int(float(r["stock"]))
+                except:
+                    new_stock = None
+                if new_stock is not None:
+                    variants = product.get("variants") or []
+                    target_idx = None
+                    for i, v in enumerate(variants):
+                        if key_used == "stock_code" and v.get("stock_code") == ref:
+                            target_idx = i; break
+                        if key_used == "barcode" and v.get("barcode") == ref:
+                            target_idx = i; break
+                    if target_idx is not None:
+                        await db.products.update_one(
+                            {"id": product["id"]},
+                            {"$set": {f"variants.{target_idx}.stock": new_stock, "updated_at": now}}
+                        )
+                        variant_updated = True
+                    else:
+                        root_updates["stock"] = new_stock
 
-        if root_updates:
-            root_updates["updated_at"] = now
-            await db.products.update_one({"id": product["id"]}, {"$set": root_updates})
+            if root_updates:
+                root_updates["updated_at"] = now
+                await db.products.update_one({"id": product["id"]}, {"$set": root_updates})
+            if root_updates or variant_updated:
+                _row_applied = True
 
-        if root_updates or variant_updated: ok += 1
+        if _row_applied: ok += 1
         else: skipped += 1
 
     return {"success": True, "applied": ok, "failed": fail, "skipped": skipped,
