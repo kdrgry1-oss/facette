@@ -1830,22 +1830,14 @@ export default function AdminProducts() {
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
-      
-      const newProduct = {
-        ...product,
-        name: `${product.name} (Kopya)`,
-        slug: `${product.slug}-kopya-${Date.now()}`,
-        stock_code: product.stock_code ? `${product.stock_code}-COPY` : '',
-        barcode: '',
-      };
-      delete newProduct.id;
-      delete newProduct._id;
-      
-      await axios.post(`${API}/products`, newProduct, { headers });
+      // DENETİM FIX: eski kopya, tüm alanları (varyant barkodları, urun_id, urun_karti_id,
+      // csv_card_id) aynen kopyalayıp çakışan barkod/"renk-kardeşi" kopyalar yaratıyordu.
+      // Backend'in /duplicate ucu yeni kart id + yeni barkod + temiz urun_id üretir.
+      await axios.post(`${API}/products/${product.id}/duplicate`, {}, { headers });
       toast.success("Ürün kopyalandı");
       fetchProducts();
     } catch (err) {
-      toast.error("Kopyalama başarısız");
+      toast.error(err.response?.data?.detail || "Kopyalama başarısız");
     }
   };
 

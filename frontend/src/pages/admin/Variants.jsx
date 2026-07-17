@@ -94,24 +94,22 @@ export default function AdminVariants() {
     }
   };
 
-  const moveUp = (index) => {
-    if (index === 0) return;
+  // DENETİM FIX: taşıma, filtrelenmiş listenin index'iyle değil variant.id ile GERÇEK
+  // index üzerinden yapılır (arama aktifken yanlış varyant taşınıyordu).
+  const moveUp = (id) => {
+    const index = variants.findIndex(v => v.id === id);
+    if (index <= 0) return;
     const newVariants = [...variants];
-    const temp = newVariants[index];
-    newVariants[index] = newVariants[index - 1];
-    newVariants[index - 1] = temp;
-    
+    [newVariants[index - 1], newVariants[index]] = [newVariants[index], newVariants[index - 1]];
     newVariants.forEach((v, i) => v.sort_order = i + 1);
     setVariants(newVariants);
   };
 
-  const moveDown = (index) => {
-    if (index === variants.length - 1) return;
+  const moveDown = (id) => {
+    const index = variants.findIndex(v => v.id === id);
+    if (index < 0 || index >= variants.length - 1) return;
     const newVariants = [...variants];
-    const temp = newVariants[index];
-    newVariants[index] = newVariants[index + 1];
-    newVariants[index + 1] = temp;
-    
+    [newVariants[index], newVariants[index + 1]] = [newVariants[index + 1], newVariants[index]];
     newVariants.forEach((v, i) => v.sort_order = i + 1);
     setVariants(newVariants);
   };
@@ -360,19 +358,19 @@ export default function AdminVariants() {
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex justify-center items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={() => moveUp(index)}
-                            disabled={index === 0}
+                          <button
+                            onClick={() => moveUp(variant.id)}
+                            disabled={!!searchTerm}
+                            title={searchTerm ? "Sıralama için aramayı temizleyin" : "Yukarı Taşı"}
                             className="p-2 bg-white border border-gray-200 rounded-md hover:border-orange-200 hover:text-orange-600 disabled:opacity-30 transition-all shadow-sm"
-                            title="Yukarı Taşı"
                           >
                             <ArrowUp size={14} />
                           </button>
-                          <button 
-                            onClick={() => moveDown(index)}
-                            disabled={index === variants.length - 1}
+                          <button
+                            onClick={() => moveDown(variant.id)}
+                            disabled={!!searchTerm}
+                            title={searchTerm ? "Sıralama için aramayı temizleyin" : "Aşağı Taşı"}
                             className="p-2 bg-white border border-gray-200 rounded-md hover:border-orange-200 hover:text-orange-600 disabled:opacity-30 transition-all shadow-sm"
-                            title="Aşağı Taşı"
                           >
                             <ArrowDown size={14} />
                           </button>

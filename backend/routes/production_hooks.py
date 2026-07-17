@@ -46,14 +46,14 @@ async def add_to_production_plan(items: List[ProductionPlanItem], admin=Depends(
             }, "$setOnInsert": {"id": generate_id(), "created_at": now}},
             upsert=True,
         ))
-    res = await db.production_plan.bulk_write(ops)
+    res = await db.production_forecast.bulk_write(ops)  # DENETİM FIX: ayrı koleksiyon (İmalat Planı şemasıyla çakışmasın)
     return {"ok": True, "added": res.upserted_count, "updated": res.modified_count}
 
 
 @router.get("/plan")
 async def list_production_plan(status: str = "planned", admin=Depends(require_admin)):
     items = []
-    async for d in db.production_plan.find({"status": status}, {"_id": 0}).sort("created_at", -1).limit(500):
+    async for d in db.production_forecast.find({"status": status}, {"_id": 0}).sort("created_at", -1).limit(500):
         items.append(d)
     return {"items": items, "total": len(items)}
 
