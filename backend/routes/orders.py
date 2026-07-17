@@ -1521,6 +1521,11 @@ async def update_order_status(
             raise HTTPException(status_code=403,
                 detail="'İptal Ödemesi Yapıldı' durumu yalnızca Finans (muhasebe) yetkisine sahip kullanıcı tarafından seçilebilir.")
 
+    # DENETİM FIX: reaktivasyon (iptal/iade → aktif fulfillment) stok re-decrement'i için
+    # ÖNCEKİ durumu güncellemeden ÖNCE yakala.
+    _prev_doc = await db.orders.find_one({"id": order_id}, {"_id": 0, "status": 1})
+    _prev_status = (_prev_doc or {}).get("status")
+
     _now = datetime.now(timezone.utc).isoformat()
     _set = {"status": status, "updated_at": _now}
     if status == "return_approved":
@@ -1754,8 +1759,32 @@ async def update_order_status(
             # daha önce iade ettiyse ikinci kez stok EKLENMEZ (önceden yalnızca 'order_cancelled'
             # tipine bakıldığı için çift iade oluyordu).
             await _restock_order_once(order_doc, "order_cancelled")
+        else:
+            # DENETİM FIX (oversell): iptal/iade grubundan AKTİF fulfillment durumuna geri
+            # çekilince stok TEKRAR DÜŞÜLMELİ. Eskiden düşülmediği için iade edilmiş +1 stok
+            # üzerinde kalıp aynı ürün ikinci kez satılabiliyordu. İdempotent: yalnız daha önce
+            # restock EDİLDİYSE (restore hareketi var) bir kez düş, sonra restore hareketini sil.
+            _ACTIVE_FULFILL = {"confirmed", "preparing", "processing", "ready_to_ship",
+                               "shipped", "in_transit", "out_for_delivery", "delivered"}
+            _RESTORE_GRP = {"cancelled", "returned", "refunded", "return_approved",
+                            "return_in_transit", "partial_refunded"}
+            if _prev_status in _RESTORE_GRP and status in _ACTIVE_FULFILL and order_doc:
+                _restore_mv = await db.stock_movements.find_one(
+                    {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}}, {"_id": 1})
+                if _restore_mv:
+                    _dec = await _stock_delta_for_order(order_doc, -1)
+                    await db.stock_movements.delete_many(
+                        {"order_id": order_id, "type": {"$in": list(_RESTORE_MOVE_TYPES)}})
+                    await db.stock_movements.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "type": "reactivate_decrement",
+                        "order_id": order_id,
+                        "order_number": order_doc.get("order_number", ""),
+                        "items": _dec,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
     except Exception as stock_err:
-        logger.error(f"Stock restore on cancel failed: {stock_err}")
+        logger.error(f"Stock restore/re-decrement on status change failed: {stock_err}")
 
     return {"message": f"Sipariş durumu '{status}' olarak güncellendi"}
 
