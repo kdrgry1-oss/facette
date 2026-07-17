@@ -5206,8 +5206,13 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
         # Common attributes for all variants
         common_attrs = []
         for am in attr_mappings:
-            ty_attr_id = int(am["trendyol_attr_id"])
-            local_name = am["local_attr"]
+            # Kanonik db.category_mappings YENİ anahtar `mp_attr_id` kullanır; eski veri
+            # `trendyol_attr_id`. Doğrudan am["trendyol_attr_id"] KeyError → tüm sync 500 veriyordu.
+            _raw_aid = am.get("mp_attr_id") or am.get("trendyol_attr_id")
+            local_name = am.get("local_attr")
+            if not _raw_aid or not local_name:
+                continue
+            ty_attr_id = int(_raw_aid)
             # Find value in product attributes
             val = next((a["value"] for a in product.get("attributes", []) if a["type"] == local_name), None)
             # Try default if not found
@@ -5227,9 +5232,12 @@ async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends
                 
                 # Map Size (Beden) and Color (Renk)
                 for am in attr_mappings:
-                    ty_attr_id = str(am["trendyol_attr_id"])
-                    local_name = am["local_attr"]
-                    
+                    _raw_aid = am.get("mp_attr_id") or am.get("trendyol_attr_id")
+                    local_name = am.get("local_attr")
+                    if not _raw_aid or not local_name:
+                        continue
+                    ty_attr_id = str(_raw_aid)
+
                     # Check if it's Beden or Renk
                     if local_name.lower() == "beden":
                         sz = v.get("size")
