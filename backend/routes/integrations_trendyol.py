@@ -1530,6 +1530,36 @@ async def sync_products_to_trendyol(
                     trendyol_cat_id = cat_doc["trendyol_category_id"]
                     category = cat_doc
 
+            # 1d. KARDEŞ-FALLBACK (denetim Finding 3): birincil kategori bir KOLEKSİYON
+            # (ör. "EN YENİLER") olup mapping yoksa, AYNI ürünün renk-kardeşinin (aynı
+            # urun_karti_id / stock_code) EŞLEŞTİRİLMİŞ kategorisini kullan. Böylece Siyah
+            # "Pantolon"a eşliyken Ekru/Acı Kahve "EN YENİLER"e düşse bile Trendyol'a doğru
+            # (Pantolon) eşleştirmeyle gider — MAĞAZA kategorisi DEĞİŞMEZ (storefront'a dokunmaz).
+            if not trendyol_cat_id:
+                _sc = product.get("stock_code") or product.get("sku")
+                _anchor = product.get("urun_karti_id") or product.get("csv_card_id")
+                _sib_q = None
+                if _anchor:
+                    _sib_q = {"$or": [{"urun_karti_id": _anchor}, {"csv_card_id": _anchor}]}
+                elif _sc:
+                    _sib_q = {"$or": [{"stock_code": _sc}, {"variants.stock_code": _sc}]}
+                if _sib_q:
+                    async for _sib in db.products.find(
+                        _sib_q, {"_id": 0, "id": 1, "category_id": 1}):
+                        if str(_sib.get("id")) == str(product.get("id")):
+                            continue
+                        _scat = _sib.get("category_id")
+                        if not _scat:
+                            continue
+                        _scm = await db.category_mappings.find_one(
+                            {"category_id": str(_scat), "marketplace": "trendyol"}, {"_id": 0})
+                        if _scm and _scm.get("marketplace_category_id"):
+                            trendyol_cat_id = _scm["marketplace_category_id"]
+                            category = _scm
+                            logger.info(f"[trendyol] {product.get('name')} birincil kategoride mapping "
+                                        f"yok → renk-kardeşinin kategorisi kullanıldı (cat_id={_scat})")
+                            break
+
             if not trendyol_cat_id:
                 errors.append(f"{product.get('name')} - Trendyol kategori eşleştirmesi (Mapping) yok.")
                 continue
