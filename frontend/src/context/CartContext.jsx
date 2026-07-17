@@ -130,6 +130,20 @@ export function CartProvider({ children }) {
   };
 
   const clearCart = () => {
+    // Sipariş sonrası (veya elle boşaltma) sunucudaki terk-sepet kaydını SİL → satın alan
+    // müşteri "terkedilmiş sepet" sayılıp hatırlatma maili almasın (denetim bulgusu #38).
+    try {
+      const API = process.env.REACT_APP_BACKEND_URL;
+      const sid = localStorage.getItem("cart_session_id");
+      if (API && sid) {
+        fetch(`${API}/api/cart/mark-ordered`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sid }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch (_) { /* sessiz */ }
     setItems([]);
     setIsOpen(false);
   };
