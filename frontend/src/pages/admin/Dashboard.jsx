@@ -205,14 +205,15 @@ export default function Dashboard() {
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
             className="border px-3 py-2 rounded-lg text-sm"
-            title="Platforma göre filtrele"
+            title="Sipariş kaynağına göre filtrele"
           >
-            <option value="all">Tüm Platformlar</option>
+            <option value="all">Tüm Kaynaklar</option>
             <option value="site">Sadece Site</option>
-            <option value="trendyol">Trendyol</option>
-            <option value="hepsiburada">Hepsiburada</option>
-            <option value="ticimax">Ticimax</option>
-            <option value="temu">Temu</option>
+            {(stats.available_platforms || []).map((p) => (
+              <option key={p.platform} value={p.platform}>
+                {(p.platform.charAt(0).toUpperCase() + p.platform.slice(1))} ({p.count})
+              </option>
+            ))}
           </select>
           <select
             value={dateRange}
@@ -234,81 +235,42 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard
-          title="Toplam Sipariş"
-          value={stats.total_orders}
-          icon={ShoppingCart}
-          trend={stats.growth_orders}
-          color="bg-blue-500"
-        />
-        <StatCard
-          title="Toplam Gelir"
-          value={`₺${(stats.total_revenue || 0).toLocaleString('tr-TR')}`}
-          icon={DollarSign}
-          trend={stats.growth_revenue}
-          color="bg-green-500"
-        />
-        <StatCard
-          title="Toplam Ürün"
-          value={stats.total_products}
-          icon={Package}
-          color="bg-purple-500"
-        />
-        <StatCard
-          title="Toplam Üye"
-          value={stats.total_customers}
-          icon={Users}
-          color="bg-orange-500"
-        />
-      </div>
-
-      {/* Secondary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-xl p-5 border border-yellow-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-yellow-200 rounded-lg">
-              <Package size={20} className="text-yellow-700" />
-            </div>
-            <div>
-              <p className="text-sm text-yellow-700">Bekleyen Siparişler</p>
-              <p className="text-2xl font-bold text-yellow-800">{stats.pending_orders}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-5 border border-purple-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-purple-200 rounded-lg">
-              <TrendingUp size={20} className="text-purple-700" />
-            </div>
-            <div>
-              <p className="text-sm text-purple-700">Kargodaki Siparişler</p>
-              <p className="text-2xl font-bold text-purple-800">{stats.shipped_orders}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-5 border border-green-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-200 rounded-lg">
-              <DollarSign size={20} className="text-green-700" />
-            </div>
-            <div>
-              <p className="text-sm text-green-700">Bugünkü Gelir</p>
-              <p className="text-2xl font-bold text-green-800">₺{(stats.revenue_today || 0).toLocaleString('tr-TR')}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Katalog + sepet ortalaması + cevap bekleyen (Ticimax "İstatistikler" seti) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* KPI kartları (para/sipariş) — headline */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard title="Toplam Sipariş" value={(stats.total_orders || 0).toLocaleString("tr-TR")} icon={ShoppingCart} trend={stats.growth_orders} color="bg-blue-500" />
+        <StatCard title="Toplam Gelir" value={fmtTL(stats.total_revenue)} icon={DollarSign} trend={stats.growth_revenue} color="bg-green-500" />
         <StatCard title="Sepet Ortalaması" value={fmtTL(stats.avg_cart)} icon={ShoppingBag} color="bg-indigo-500" />
-        <StatCard title="Satıştaki Kategori" value={stats.total_categories || 0} icon={Layers} color="bg-teal-500" />
-        <StatCard title="Satıştaki Toplam Stok" value={(stats.total_stock || 0).toLocaleString("tr-TR")} icon={Boxes} color="bg-cyan-500" />
-        <Link to="/admin/tickets" className="block">
-          <StatCard title="Cevap Bekleyen Mesaj" value={stats.pending_messages || 0} icon={MessageSquare} color="bg-rose-500" />
-        </Link>
+        <StatCard title="Bugünkü Gelir" value={fmtTL(stats.revenue_today)} icon={DollarSign} color="bg-emerald-500" />
+      </div>
+
+      {/* Kompakt İstatistikler + Operasyon — tek küçük alanda liste (Ticimax tarzı) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold mb-2 flex items-center gap-2"><Boxes size={16} className="text-gray-500" /> İstatistikler</h3>
+          <div className="divide-y">
+            {[
+              ["Satıştaki Toplam Ürün", (stats.total_products || 0).toLocaleString("tr-TR")],
+              ["Satıştaki Toplam Stok Adedi", (stats.total_stock || 0).toLocaleString("tr-TR")],
+              ["Satıştaki Toplam Kategori", stats.total_categories || 0],
+              ["Satıştaki Toplam Marka", stats.total_brands || 0],
+              ["Toplam Üye", (stats.total_customers || 0).toLocaleString("tr-TR")],
+            ].map(([k, v]) => (
+              <div key={k} className="flex items-center justify-between py-2.5 text-sm">
+                <span className="text-gray-600">{k}</span>
+                <span className="font-semibold">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold mb-2 flex items-center gap-2"><Package size={16} className="text-gray-500" /> Operasyon <span className="text-xs font-normal text-gray-400">· son {dateRange} gün</span></h3>
+          <div className="divide-y">
+            <div className="flex items-center justify-between py-2.5 text-sm"><span className="text-gray-600">Bekleyen Siparişler</span><span className="font-semibold text-yellow-700">{stats.pending_orders || 0}</span></div>
+            <div className="flex items-center justify-between py-2.5 text-sm"><span className="text-gray-600">Kargodaki Siparişler</span><span className="font-semibold text-purple-700">{stats.shipped_orders || 0}</span></div>
+            <div className="flex items-center justify-between py-2.5 text-sm"><span className="text-gray-600">Bugünkü Sipariş</span><span className="font-semibold">{stats.orders_today || 0}</span></div>
+            <Link to="/admin/tickets" className="flex items-center justify-between py-2.5 text-sm hover:bg-gray-50 rounded px-1 -mx-1"><span className="text-gray-600">Cevap Bekleyen Mesaj</span><span className="font-semibold text-rose-600">{stats.pending_messages || 0}</span></Link>
+          </div>
+        </div>
       </div>
 
       {/* Sipariş Karşılaştırma Grafiği — günlük sipariş adedi + ciro (çift eksen) */}
@@ -388,32 +350,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* "Bugün Yapılacaklar" (görevler) widget'ı kullanıcı isteğiyle kaldırıldı. */}
-        <div className="lg:col-span-2 bg-white rounded-xl border p-6">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <BarChart3 size={18} />
-            Sipariş Durumu Dağılımı
-          </h3>
-          <div className="space-y-3">
-            {statusList.map((s) => {
-              const percentage = totalStatusOrders > 0 ? (s.count / totalStatusOrders * 100) : 0;
-              return (
-                <div key={s.key}>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-gray-600">{s.label}</span>
-                    <span className="font-medium">{s.count} ({percentage.toFixed(0)}%)</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${percentage}%`, backgroundColor: s.color || "#9CA3AF" }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        {/* "Bugün Yapılacaklar" ve "Sipariş Durumu Dağılımı" widget'ları kullanıcı isteğiyle kaldırıldı. */}
 
         {/* Top Products */}
         <div className="bg-white rounded-xl border p-6">

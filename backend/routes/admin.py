@@ -125,11 +125,15 @@ async def get_dashboard_stats(
                         "created_at": 1, "platform": 1}
         ).sort("created_at", -1).limit(5).to_list(5)
 
-        # En çok satan ürünler
+        # En çok satan ürünler — ürün adını name/title/product_name'den ÇÖZ (pazaryeri
+        # kalemlerinde 'name' boş olabiliyor → adsız dev bir kalem #1 çıkıyordu). Boş adları ele.
         top_agg = await db.orders.aggregate([
             {"$match": _with({"created_at": {"$gte": start_iso}})},
             {"$unwind": "$items"},
-            {"$group": {"_id": "$items.name",
+            {"$addFields": {"_pname": {"$ifNull": ["$items.name",
+                {"$ifNull": ["$items.title", {"$ifNull": ["$items.product_name", "$items.productName"]}]}]}}},
+            {"$match": {"_pname": {"$nin": [None, ""]}}},
+            {"$group": {"_id": "$_pname",
                         "sold": {"$sum": {"$convert": {"input": "$items.quantity", "to": "int", "onError": 0, "onNull": 0}}},
                         "revenue": {"$sum": {"$multiply": [
                             {"$convert": {"input": "$items.price", "to": "double", "onError": 0, "onNull": 0}},
@@ -173,6 +177,26 @@ async def get_dashboard_stats(
             pending_messages = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
         except Exception:
             pending_messages = 0
+        # Satıştaki toplam marka
+        try:
+            _brands = await db.products.distinct("brand", {"is_active": True})
+            total_brands = len([b for b in _brands if b and str(b).strip()])
+        except Exception:
+            total_brands = 0
+        # Sipariş gelen KAYNAKLAR (dinamik platform filtresi için) — pazaryeri değerleri
+        try:
+            _pl_agg = await db.orders.aggregate([
+                {"$group": {"_id": "$platform", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+            ]).to_list(50)
+            available_platforms = []
+            for r in _pl_agg:
+                _key = r.get("_id")
+                if _key in (None, "", "facette", "web", "site", "storefront"):
+                    continue  # 'Sadece Site' seçeneği ayrı ekleniyor
+                available_platforms.append({"platform": str(_key), "count": r.get("count", 0)})
+        except Exception:
+            available_platforms = []
 
         return {
             "platform": _pf,
@@ -197,7 +221,9 @@ async def get_dashboard_stats(
             "abandoned_carts": abandoned_carts,
             "total_categories": total_categories,
             "total_stock": total_stock,
+            "total_brands": total_brands,
             "pending_messages": pending_messages,
+            "available_platforms": available_platforms,
         }
 
     except Exception as e:
