@@ -5133,225 +5133,26 @@ async def upload_invoice_to_trendyol(order_number: str, payload: dict, current_u
         raise HTTPException(status_code=500, detail=str(e))
 @router.post("/trendyol/products/{product_id}/sync")
 async def sync_product_to_trendyol(product_id: str, current_user: dict = Depends(require_admin)):
-    """Full product synchronization to Trendyol"""
-    config = await get_trendyol_config()
-    if not config["is_active"]:
-        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    """Tekil ürün senkronu — TOPLU (doğru/validasyonlu) yola DELEGE eder.
 
-    from datetime import datetime, timezone
-    started_at = datetime.now(timezone.utc).isoformat()
-    product = None
-    
+    Eski tekil implementasyon ayrı ve eksik bir kopyaydı: required-attribute gap-fill,
+    Facette sabit varsayılanları, kategori meta/allowCustom doğrulaması ve value-id
+    doğrulaması YOKTU. Bu yüzden mp_attr_id KeyError, int('XXS') çökmesi ve enum reddi
+    gibi hatalar veriyor; per-ürün "Trendyol'a Gönder" ve "Başarısız Aktarımlar → tekrar
+    dene" butonlarını kırıyordu. Artık toplu senkron gövdesine yönlendirir → tek ve doğru
+    kod yolu (kategori eşleştirme/zorunlu özellik doğrulaması aynen uygulanır)."""
+    class _ReqShim:
+        async def json(self):
+            return {"product_ids": [product_id]}
+    res = await sync_products_to_trendyol(_ReqShim(), current_user)
+    # Tekil UX: ürün tümüyle başarısızsa HTTP hata olarak yükselt (buton kırmızı görsün,
+    # Trendyol'un gerçek sebebini göstersin: görsel/mapping/beden vb.).
     try:
-        product = await db.products.find_one({"id": product_id}, {"_id": 0})
-        if not product:
-            raise Exception("Ürün bulunamadı")
-
-        ty_cat_id = product.get("trendyol_category_id")
-        if not ty_cat_id:
-            # Try finding in the category mapped to this product
-            cat = await db.categories.find_one({"name": product.get("category_name")})
-            if not cat:
-                cat = await db.categories.find_one({"id": product.get("category_id")})
-            
-            if cat and cat.get("trendyol_category_id"):
-                ty_cat_id = cat.get("trendyol_category_id")
-            else:
-                raise Exception("Ürün için Trendyol kategorisi seçilmemiş")
-
-        # O7: Mapping'i CANONICAL kaynaktan (db.category_mappings) oku — diğer tüm yol/yazıcılar
-        # burayı kullanır ve value_mappings anahtarları `attrId|value` (pipe) formatındadır.
-        # Önceki kod db.categories'ten okuyup `attrId:value` (kolon) arıyordu → eşleşme HİÇ tutmaz,
-        # enum değerleri hep customAttributeValue gider ve allowCustom=false attribute'larda reddedilir.
-        mapping_cat = None
-        _pcat_id = product.get("category_id")
-        if _pcat_id:
-            mapping_cat = await db.category_mappings.find_one(
-                {"category_id": str(_pcat_id), "marketplace": "trendyol"}, {"_id": 0})
-        if not mapping_cat and product.get("category_name"):
-            _sys = await db.categories.find_one({"name": product.get("category_name")}, {"_id": 0, "id": 1})
-            if _sys and _sys.get("id"):
-                mapping_cat = await db.category_mappings.find_one(
-                    {"category_id": str(_sys["id"]), "marketplace": "trendyol"}, {"_id": 0})
-        if not mapping_cat:  # legacy fallback
-            mapping_cat = await db.categories.find_one({"trendyol_category_id": ty_cat_id}, {"_id": 0})
-        attr_mappings = mapping_cat.get("attribute_mappings", []) if mapping_cat else []
-        val_mappings = mapping_cat.get("value_mappings", {}) if mapping_cat else {}
-        default_mappings = mapping_cat.get("default_mappings", {}) if mapping_cat else {}
-
-        from trendyol_client import TrendyolClient
-        client = TrendyolClient(
-            supplier_id=config["supplier_id"],
-            api_key=config["api_key"],
-            api_secret=config["api_secret"],
-            mode=config["mode"]
-        )
-
-        # Calculate prices
-        base_price = product.get("price", 0)
-        list_price = calculate_trendyol_price(base_price, product, config)
-        sale_price = calculate_trendyol_price(base_price, product, config)  # Trendyol: indirimsiz satis fiyati
-
-        # Build items
-        items = []
-        variants = product.get("variants", [])
-        
-        def _vm(attr_id, value):
-            """value_mappings'ten Trendyol value-id'sini al. Hem YENİ pipe (`id|value`) hem
-            ESKİ kolon (`id:value`) anahtar formatını dener → veri hangi formatta olursa olsun
-            eşleşir (O7 sonrası eski verilerde bozulma olmaması için)."""
-            return (val_mappings.get(f"{attr_id}|{value}")
-                    or val_mappings.get(f"{attr_id}:{value}"))
-
-        # Common attributes for all variants
-        common_attrs = []
-        for am in attr_mappings:
-            # Kanonik db.category_mappings YENİ anahtar `mp_attr_id` kullanır; eski veri
-            # `trendyol_attr_id`. Doğrudan am["trendyol_attr_id"] KeyError → tüm sync 500 veriyordu.
-            _raw_aid = am.get("mp_attr_id") or am.get("trendyol_attr_id")
-            local_name = am.get("local_attr")
-            if not _raw_aid or not local_name:
-                continue
-            ty_attr_id = int(_raw_aid)
-            # Find value in product attributes
-            val = next((a["value"] for a in product.get("attributes", []) if a["type"] == local_name), None)
-            # Try default if not found
-            if not val:
-                val = default_mappings.get(str(ty_attr_id))
-
-            if val:
-                ty_val_id = _vm(ty_attr_id, val)
-                if ty_val_id:
-                    common_attrs.append({"attributeId": ty_attr_id, "attributeValueId": int(ty_val_id)})
-                else:
-                    common_attrs.append({"attributeId": ty_attr_id, "customAttributeValue": val})
-
-        if variants:
-            for v in variants:
-                v_attrs = common_attrs.copy()
-                
-                # Map Size (Beden) and Color (Renk)
-                for am in attr_mappings:
-                    _raw_aid = am.get("mp_attr_id") or am.get("trendyol_attr_id")
-                    local_name = am.get("local_attr")
-                    if not _raw_aid or not local_name:
-                        continue
-                    ty_attr_id = str(_raw_aid)
-
-                    # Check if it's Beden or Renk
-                    if local_name.lower() == "beden":
-                        sz = v.get("size")
-                        if sz:
-                            v_id = _vm(ty_attr_id, sz)  # pipe + kolon dener
-                            if v_id:
-                                v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
-                            else:
-                                v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": sz})
-                    
-                    elif local_name.lower() == "renk":
-                        clr = v.get("color")
-                        if clr:
-                            v_id = _vm(ty_attr_id, clr)  # pipe + kolon dener
-                            if v_id:
-                                v_attrs.append({"attributeId": int(ty_attr_id), "attributeValueId": int(v_id)})
-                            else:
-                                v_attrs.append({"attributeId": int(ty_attr_id), "customAttributeValue": clr})
-
-                # Pricing with price_diff
-                diff = float(v.get("price_diff", 0) or 0)
-                v_list = round(list_price + diff, 2)
-                v_sale = round(sale_price + diff, 2)
-
-                item = {
-                    "barcode": v.get("barcode") or product.get("barcode"),
-                    "title": product.get("name"),
-                    "productMainId": product.get("stock_code"),
-                    "brandId": product.get("trendyol_brand_id") or config.get("default_brand_id") or 975755,
-                    "categoryId": int(ty_cat_id),
-                    "quantity": v.get("stock", 0),
-                    "stockCode": v.get("stock_code") or product.get("stock_code"),
-                    "dimensionalWeight": product.get("cargo_weight") or 1,
-                    "description": product.get("description", ""),
-                    "currencyType": "TRY",
-                    "listPrice": v_list,
-                    "salePrice": v_sale,
-                    "vatRate": product.get("vat_rate", config.get("default_vat_rate") or 20),
-                    "cargoCompanyId": int(config.get("default_cargo_company_id") or 10),
-                    "images": [{"url": img} for img in product.get("images", [])],
-                    "attributes": v_attrs
-                }
-                items.append(item)
-        else:
-            # Single product
-            item = {
-                "barcode": product.get("barcode"),
-                "title": product.get("name"),
-                "productMainId": product.get("stock_code"),
-                "brandId": product.get("trendyol_brand_id") or config.get("default_brand_id") or 975755,
-                "categoryId": int(ty_cat_id),
-                "quantity": product.get("stock", 0),
-                "stockCode": product.get("stock_code"),
-                "dimensionalWeight": product.get("cargo_weight") or 1,
-                "description": product.get("description", ""),
-                "currencyType": "TRY",
-                "listPrice": list_price,
-                "salePrice": sale_price,
-                "vatRate": product.get("vat_rate", config.get("default_vat_rate") or 20),
-                "cargoCompanyId": int(config.get("default_cargo_company_id") or 10),
-                "images": [{"url": img} for img in product.get("images", [])],
-                "attributes": common_attrs
-            }
-            items.append(item)
-
-        result = await client.create_products(items)
-        batch_id = result.get("batchRequestId", "")
-        
-        # Log to the new sync logs screen
-        log_doc = {
-            "id": generate_id(),
-            "started_at": started_at,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": "success",
-            "products_attempted": 1,
-            "products_sent": len(items),
-            "batch_request_id": batch_id,
-            "errors": [],
-            "message": f"'{product.get('name')}' ürünü tekli olarak aktarıldı."
-        }
-        await db.trendyol_sync_logs.insert_one(log_doc)
-
-        await log_integration_event(
-            platform="trendyol",
-            action="product_sync",
-            entity_type="product",
-            entity_id=product_id,
-            status="success",
-            message=f"Sync initiated. Batch ID: {batch_id}",
-            details={"batch_id": batch_id, "items_count": len(items)}
-        )
-        
-        await db.products.update_one(
-            {"id": product_id},
-            {"$set": {
-                "trendyol_sync_batch": str(batch_id),
-                "trendyol_sync_last": datetime.now(timezone.utc).isoformat(),
-                "trendyol_status": "synced"
-            }}
-        )
-        
-        return {"success": True, "message": "Eşleştirme başlatıldı", "batch_id": batch_id}
-    except Exception as e:
-        logger.error(f"Trendyol sync error: {str(e)}")
-        log_doc = {
-            "id": generate_id(),
-            "started_at": started_at if 'started_at' in locals() else datetime.now(timezone.utc).isoformat(),
-            "status": "error",
-            "products_attempted": 1,
-            "products_sent": 0,
-            "batch_request_id": None,
-            "errors": [f"Hata: {str(e)}"],
-            "message": f"'{product.get('name') if product else product_id}' aktarımı sırasında hata oluştu."
-        }
-        await db.trendyol_sync_logs.insert_one(log_doc)
-        await log_integration_event("trendyol", "product_sync", "product", product_id, "error", str(e))
-        raise HTTPException(status_code=400 if "Ürün" in str(e) or "kategori" in str(e).lower() else 500, detail=f"Trendyol senkronizasyon hatası: {str(e)}")
+        if isinstance(res, dict) and not res.get("successful") and (res.get("failed") or res.get("errors")):
+            _errs = "; ".join(res.get("errors") or []) or res.get("message") or "Trendyol aktarımı başarısız"
+            raise HTTPException(status_code=400, detail=_errs)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    return res
