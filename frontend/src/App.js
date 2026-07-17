@@ -87,8 +87,17 @@ function App() {
             <Toaster position="top-center" richColors />
             <MarketingPixelsInjector />
             <CookieConsent />
-            {/* ACİL: Duyuru barı + Popup + SeoManager geçici olarak KAPALI — görünüm
-                sorununu izole etmek için. Sorun giderilince kademeli geri açılacak. */}
+            {/* Storefront Duyuru barı + Popup + SEO (native uygulamada gösterme).
+                Görünüm bozulmasının gerçek nedeni lock-file (yarn.lock) değişikliğiydi;
+                düzeltildi. Bu bileşenler güvenli (aktif popup/duyuru/yönlendirme yoksa
+                hiçbir şey render etmez), geri açıldı. */}
+            {!isNative && (
+              <Suspense fallback={null}>
+                <SeoManager />
+                <AnnouncementBar />
+                <SitePopup />
+              </Suspense>
+            )}
             <MaintenanceGate>
               <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
                 <Routes>
