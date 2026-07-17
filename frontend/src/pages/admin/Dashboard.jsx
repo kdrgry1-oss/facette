@@ -120,7 +120,7 @@ export default function Dashboard() {
     card: "Kredi Kartı", credit_card: "Kredi Kartı", iyzico: "Kredi Kartı",
     bank_transfer: "Havale/EFT", havale: "Havale/EFT", eft: "Havale/EFT",
     cash_on_delivery: "Kapıda Ödeme", kapida: "Kapıda Ödeme", cod: "Kapıda Ödeme",
-    trendyol: "Trendyol", hepsiburada: "Hepsiburada", "diğer": "Diğer",
+    marketplace: "Pazaryeri", trendyol: "Trendyol", hepsiburada: "Hepsiburada", "diğer": "Diğer",
   };
 
   const StatCard = ({ title, value, icon: Icon, trend, trendValue, color }) => (
