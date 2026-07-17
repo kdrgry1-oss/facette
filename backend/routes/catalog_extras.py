@@ -423,6 +423,26 @@ async def resolve_shipping(cart_total: float = Query(0)):
     return {"matched": False, "shipping_cost": None}
 
 
+# DENETİM FIX (#45): "Ödeme Tipi İndirimleri" hiçbir yerde tüketilmiyordu — public resolve
+# ucu ile checkout, seçili ödeme yöntemine göre aktif indirimi çözebilir. Yalnız aktif kayıtlar.
+@rules_router.get("/payment-discounts/resolve")
+async def resolve_payment_discounts():
+    items = await db.payment_discounts.find({"is_active": {"$ne": False}}, {"_id": 0}).to_list(100)
+    # method → {type: 'percent'|'fixed', value: X, label}
+    out = {}
+    for it in items:
+        m = (it.get("method") or it.get("payment_method") or "").strip()
+        if not m:
+            continue
+        out[m] = {
+            "type": (it.get("type") or ("percent" if it.get("percent") is not None else "fixed")),
+            "percent": float(it.get("percent") or 0),
+            "amount": float(it.get("amount") or 0),
+            "label": it.get("label") or it.get("name") or "",
+        }
+    return {"discounts": out}
+
+
 # ---------- Extra Reports: hourly sales, city, profit, stock movements ----------
 extra_reports_router = APIRouter(prefix="/admin/reports-extra", tags=["admin-reports-extra"])
 
