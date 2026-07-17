@@ -1538,11 +1538,14 @@ async def sync_products_to_trendyol(
             if not trendyol_cat_id:
                 _sc = product.get("stock_code") or product.get("sku")
                 _anchor = product.get("urun_karti_id") or product.get("csv_card_id")
-                _sib_q = None
+                # Renk varyantları AYNI stock_code'u paylaşır ama urun_karti_id RENK BAZLI
+                # olabilir → her iki anahtarı da $or ile dene (stock_code en güvenilir bağ).
+                _or = []
                 if _anchor:
-                    _sib_q = {"$or": [{"urun_karti_id": _anchor}, {"csv_card_id": _anchor}]}
-                elif _sc:
-                    _sib_q = {"$or": [{"stock_code": _sc}, {"variants.stock_code": _sc}]}
+                    _or += [{"urun_karti_id": _anchor}, {"csv_card_id": _anchor}]
+                if _sc:
+                    _or += [{"stock_code": _sc}, {"variants.stock_code": _sc}]
+                _sib_q = {"$or": _or} if _or else None
                 if _sib_q:
                     async for _sib in db.products.find(
                         _sib_q, {"_id": 0, "id": 1, "category_id": 1}):
