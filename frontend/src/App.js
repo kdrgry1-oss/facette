@@ -33,6 +33,9 @@ import MarketingPixelsInjector from "./components/MarketingPixelsInjector";
 import SlugRouter from "./components/SlugRouter";
 import MaintenanceGate from "./components/MaintenanceGate";
 import CookieConsent from "./components/CookieConsent";
+// DENETİM FIX (#35): admin Duyuru/Popup'larını storefront'ta gösteren bileşenler
+const AnnouncementBar = lazy(() => import("./components/AnnouncementBar"));
+const SitePopup = lazy(() => import("./components/SitePopup"));
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -82,6 +85,13 @@ function App() {
             <Toaster position="top-center" richColors />
             <MarketingPixelsInjector />
             <CookieConsent />
+            {/* Storefront Duyuru barı + Popup (native uygulamada gösterme) */}
+            {!isNative && (
+              <Suspense fallback={null}>
+                <AnnouncementBar />
+                <SitePopup />
+              </Suspense>
+            )}
             <MaintenanceGate>
               <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>Yükleniyor…</div>}>
                 <Routes>
