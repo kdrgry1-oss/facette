@@ -104,8 +104,8 @@ export default function AttributeImport() {
       const res = await axios.get(`${API}/integrations/trendyol/categories`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      // We get top-level categories; user can then pick one to fetch attrs
-      setTrendyolAttrs(res.data?.slice(0, 200) || []);
+      // DENETİM FIX: uç {categories:[...]} döndürüyor; res.data.slice (obje) çalışmıyordu → liste hep boştu.
+      setTrendyolAttrs((res.data?.categories || []).slice(0, 200));
     } catch (err) {
       console.error(err);
     }
@@ -126,7 +126,7 @@ export default function AttributeImport() {
       const res = await axios.get(`${API}/integrations/trendyol/categories/${catId}/attributes`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setCatAttrList(res.data?.categoryAttributes || []);
+      setCatAttrList(res.data?.attributes || res.data?.categoryAttributes || []);
     } catch (err) {
       toast.error("Kategori özellikleri alınamadı");
     } finally {

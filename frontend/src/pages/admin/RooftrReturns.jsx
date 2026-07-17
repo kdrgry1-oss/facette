@@ -264,6 +264,15 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   // Sipariş durumunu değiştir (mevcut endpoint — bildirim de buradan gider)
   const changeStatus = async (row, newStatus) => {
     if (newStatus === row.status) return;
+    // DENETİM FIX: 'İade Bedeli Ödendi'/'Kısmi İade' müşteriye "iadeniz ödendi" bildirimi
+    // gönderir ama tutar/yöntem/işlem kaydı OLUŞTURMAZ. Yanlışlıkla göndermeyi önlemek için
+    // onay iste (gerçek iade ödemesi iyzico/havale ile ayrıca yapılmalı).
+    if (newStatus === "refunded" || newStatus === "partial_refunded") {
+      const ok = await window.appConfirm(
+        `"${lbl(newStatus)}" seçmek müşteriye iade bildirimi gönderir ancak gerçek para iadesini KAYDETMEZ. ` +
+        `İade ödemesini (iyzico/havale) ayrıca yaptığınızdan emin misiniz? Devam edilsin mi?`);
+      if (!ok) return; // kontrollü select otomatik eski değere döner
+    }
     setBusyId(row.id);
     const prev = row.status;
     setRows((rs) => rs.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));

@@ -43,11 +43,13 @@ const ACTION_LABELS = {
 function retryEndpoint(log) {
   const mk = log.marketplace;
   const ref = log.ref_id;
+  // DENETİM FIX: ürün/stok sync uçları yalnız Trendyol'da var; HB/diğerlerinde 404 verip
+  // "hata" sayılıyordu. Desteklenmeyen pazaryeri+aksiyon için null → buton devre dışı.
   switch (log.action) {
     case "product_push":
-      return ref ? `${API}/integrations/${mk}/products/${ref}/sync` : null;
+      return (mk === "trendyol" && ref) ? `${API}/integrations/trendyol/products/${ref}/sync` : null;
     case "stock_update":
-      return ref ? `${API}/integrations/${mk}/products/${ref}/sync-inventory` : null;
+      return (mk === "trendyol" && ref) ? `${API}/integrations/trendyol/products/${ref}/sync-inventory` : null;
     case "order_pull":
       return `${API}/integrations/${mk}/orders/import`;
     default:
