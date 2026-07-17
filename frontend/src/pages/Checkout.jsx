@@ -85,12 +85,50 @@ export default function Checkout() {
   const [eligiblePromotions, setEligiblePromotions] = useState([]); // tum uygulanabilirler (musteri secsin)
   const [excludedIds, setExcludedIds] = useState([]); // musterinin X ile kaldirdigi kampanyalar
 
-  // ÇİFT SİPARİŞ KORUMASI: checkout başına idempotency anahtarı. Sepet değişince yenilenir
-  // (farklı sepet = farklı sipariş); aynı sepette tekrar/çift gönderimde sunucu YENİ sipariş
-  // açmaz, mevcut olanı döndürür (bkz. create_order idempotency_key).
+  // ÇİFT SİPARİŞ KORUMASI: idempotency anahtarı. KÖK NEDEN #2 düzeltmesi — anahtar
+  // sepet imzasına göre sessionStorage'da SAKLANIR. 3DS akışında sayfa document.write ile
+  // ezilip banka dönüşünde TAM SAYFA yeniden yüklendiği için eski useRef her remount'ta YENİ
+  // anahtar üretiyordu → her deneme YENİ sipariş + tekrar stok düşümü + müşteri 2-3 kez
+  // deneyince mükerrer sipariş. Artık AYNI sepette (retry/reload) anahtar SABİT kalır →
+  // sunucu mevcut siparişi döndürür (çift sipariş/stok/çekim yok); sepet değişince yenilenir.
   const _newIdemKey = () => (window.crypto?.randomUUID?.() || (String(Date.now()) + "-" + Math.random().toString(36).slice(2)));
-  const idemKeyRef = useRef(_newIdemKey());
-  useEffect(() => { idemKeyRef.current = _newIdemKey(); }, [items]);
+  const _cartSig = () => {
+    try {
+      return (items || [])
+        .map((it) => `${it.id || it.product_id || ""}:${it.variant_id || it.variantId || it.size || ""}:${it.quantity || 1}`)
+        .sort()
+        .join("|");
+    } catch { return ""; }
+  };
+  const _idemStoreKey = () => {
+    const sig = _cartSig();
+    let h = "empty";
+    try { if (sig) h = btoa(unescape(encodeURIComponent(sig))).replace(/[^A-Za-z0-9]/g, "").slice(0, 40); } catch { h = String(sig).length + "_" + (sig.length ? sig.charCodeAt(0) : 0); }
+    return "facette_idem_" + h;
+  };
+  const _getIdemKey = () => {
+    const storeKey = _idemStoreKey();
+    try {
+      let k = window.sessionStorage.getItem(storeKey);
+      if (!k) { k = _newIdemKey(); window.sessionStorage.setItem(storeKey, k); }
+      return k;
+    } catch { return _newIdemKey(); }
+  };
+  // Başarılı ödeme sonrası TÜM idem anahtarlarını temizle → aynı sepet daha sonra tekrar
+  // alınırsa eski (ödenmiş) sipariş döndürülmesin, yeni sipariş açılsın.
+  const _clearIdemKeys = () => {
+    try {
+      const rm = [];
+      for (let i = 0; i < window.sessionStorage.length; i++) {
+        const key = window.sessionStorage.key(i);
+        if (key && key.indexOf("facette_idem_") === 0) rm.push(key);
+      }
+      rm.forEach((k) => window.sessionStorage.removeItem(k));
+    } catch { /* yoksay */ }
+  };
+  const idemKeyRef = useRef(null);
+  if (idemKeyRef.current == null) idemKeyRef.current = _getIdemKey();
+  useEffect(() => { idemKeyRef.current = _getIdemKey(); }, [items]);
 
   // Payment options
   const [paymentMethod, setPaymentMethod] = useState("credit_card");
@@ -380,6 +418,7 @@ export default function Checkout() {
 
   const handlePaymentSuccess = async (orderNumber) => {
     if (!orderNumber) return;
+    _clearIdemKeys();  // ödeme başarılı → idem anahtarlarını temizle (sonraki aynı-sepet alımı yeni sipariş açsın)
     setPaymentStep("processing");
     let amount = grandTotal;
     try {
@@ -670,6 +709,7 @@ export default function Checkout() {
         });
         // ÖNCE paymentStep'i "success"'e çevir (useEffect'in /sepet'e yönlendirmesini önler)
         setPaymentStep("success");
+        _clearIdemKeys();  // sipariş alındı → idem anahtarlarını temizle
         clearCart();
         toast.success("Siparişiniz alındı!");
         // Guest veya logged-in: doğrudan OrderSuccess sayfasına yönlendir (havale/EFT dahil —
