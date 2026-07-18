@@ -3650,6 +3650,62 @@ def _einvoice_pdf_link(order_id: str) -> str:
     return f"{base}/api/orders/{order_id}/einvoice-pdf?sig={_einvoice_pdf_sig(order_id)}"
 
 
+@router.post("/repush-invoice-links")
+async def repush_invoice_links(payload: dict = None, current_user: dict = Depends(require_admin)):
+    """Faturası kesilmiş ama pazaryerine LİNKİ gitmemiş siparişlerin fatura linkini yeniden gönderir.
+    (e-Fatura link düzeltmesinden ÖNCE kesilenler için — özellikle 'web_key url degil' hatası alanlar.)
+    payload: {order_id?: str, hours?: int=72, platform?: 'trendyol'|'hepsiburada'}
+    Belirli bir order_id verilirse yalnız onu; verilmezse son `hours` içindeki uploaded!=true olanları dener."""
+    payload = payload or {}
+    oid = (payload.get("order_id") or "").strip()
+    hours = int(payload.get("hours") or 72)
+    plat = (payload.get("platform") or "trendyol").strip()
+
+    if oid:
+        q = {"id": oid}
+    else:
+        _since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        q = {"platform": plat, "invoice_issued": True,
+             "trendyol_invoice_uploaded": {"$ne": True},
+             "invoice_issued_at": {"$gte": _since}}
+    orders = await db.orders.find(q, {"_id": 0}).to_list(500)
+    results = []
+    for order in orders:
+        _order_id = order.get("id")
+        _itype = order.get("invoice_type")
+        _web = (order.get("invoice_pdf_url") or "").strip()
+        if _web.startswith("http"):
+            _link = _web
+        elif _itype == "e-fatura":
+            _link = _einvoice_pdf_link(_order_id)
+        else:
+            _link = ""  # e-arşiv web_key yoksa (nadir) atla
+        if not _link:
+            results.append({"order": order.get("order_number"), "ok": False, "error": "link üretilemedi"})
+            continue
+        try:
+            if order.get("platform") == "trendyol":
+                from .integrations import upload_invoice_to_trendyol
+                await upload_invoice_to_trendyol(
+                    order.get("order_number"),
+                    {"invoice_link": _link, "invoice_number": order.get("invoice_number")},
+                    current_user,
+                )
+            else:
+                results.append({"order": order.get("order_number"), "ok": False, "error": "yalnız trendyol destekli"})
+                continue
+            await db.orders.update_one({"id": _order_id},
+                                       {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}})
+            results.append({"order": order.get("order_number"), "ok": True, "link": _link})
+        except Exception as e:
+            _err = str(getattr(e, "detail", e))
+            await db.orders.update_one({"id": _order_id},
+                                       {"$set": {"trendyol_invoice_error": _err[:500]}})
+            results.append({"order": order.get("order_number"), "ok": False, "error": _err[:200]})
+    ok_n = sum(1 for r in results if r.get("ok"))
+    return {"success": True, "total": len(results), "uploaded": ok_n, "results": results}
+
+
 @router.get("/{order_id}/einvoice-pdf-debug")
 async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require_admin)):
     """TEŞHİS (admin): Doğan e-Fatura PDF çekimini dener; PDF baytını DÖNDÜRMEZ, yalnızca
