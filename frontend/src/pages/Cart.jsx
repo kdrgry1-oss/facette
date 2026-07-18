@@ -290,10 +290,10 @@ export default function Cart() {
           </div>
         </div>
 
-        {/* Görünümü Tamamla — mobile: yatay snap, desktop: 4-col grid */}
+        {/* Stilini Tamamla — mobile: yatay snap, desktop: 4-col grid */}
         {(suggestions.length > 0 || suggestionsLoading) && (
           <div className="mt-12 md:mt-16 pt-8 md:pt-12 border-t border-black/10" data-testid="cart-suggestions-block">
-            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Görünümü Tamamla</h2>
+            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Stilini Tamamla</h2>
             {/* Mobile snap-scroll */}
             <div className="md:hidden -mx-4 px-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>

@@ -933,10 +933,10 @@ export default function ProductDetail() {
               );
             })()}
 
-            {/* Görünümü Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
+            {/* Stilini Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
             {comboProducts.length > 0 && (
               <div className="mb-6 pb-2" data-testid="product-combo-mini">
-                <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Görünümü Tamamla</p>
+                <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Stilini Tamamla</p>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 lg:mx-0 lg:px-0">
                   {comboProducts.slice(0, 6).map((p) => {
                     const img = (p.images && p.images[0]) || p.image || "/placeholder.jpg";
@@ -1021,7 +1021,7 @@ export default function ProductDetail() {
         {/* Combo Products — mobile: yatay snap-scroll, desktop: 4-col grid */}
         {comboProducts.length > 0 && (
           <section className="mt-12 md:mt-16 pt-8 md:pt-10 border-t border-black/10" data-testid="product-combo-section">
-            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Görünümü Tamamla</h2>
+            <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Stilini Tamamla</h2>
             {/* Mobile horizontal scroll */}
             <div className="md:hidden -mx-4 px-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
               <div className="flex gap-3" style={{ minWidth: "max-content" }}>
