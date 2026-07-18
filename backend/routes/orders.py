@@ -3699,9 +3699,16 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
             results.append({"order": order.get("order_number"), "ok": True, "link": _link})
         except Exception as e:
             _err = str(getattr(e, "detail", e))
+            # 409 / "already exist" → link Trendyol'da ZATEN VAR = başarı (idempotent).
+            if ("already exist" in _err.lower()) or ("zaten mevcut" in _err.lower()) or ("409" in _err):
+                await db.orders.update_one({"id": _order_id},
+                                           {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}})
+                results.append({"order": order.get("order_number"), "ok": True,
+                                "link": _link, "note": "zaten Trendyol'da mevcut"})
+                continue
             await db.orders.update_one({"id": _order_id},
                                        {"$set": {"trendyol_invoice_error": _err[:500]}})
-            results.append({"order": order.get("order_number"), "ok": False, "error": _err[:200]})
+            results.append({"order": order.get("order_number"), "ok": False, "error": _err[:200], "link": _link})
     ok_n = sum(1 for r in results if r.get("ok"))
     return {"success": True, "total": len(results), "uploaded": ok_n, "results": results}
 
