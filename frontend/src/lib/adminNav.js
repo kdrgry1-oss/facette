@@ -162,6 +162,7 @@ export const navigationGroups = [
     children: [
       { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
       { label: "İşletme Kuralları", path: "/admin/ayarlar/isletme-kurallari", icon: Settings },
+      { label: "Özel Tema (CSS/JS)", path: "/admin/ayarlar/ozel-tema", icon: Code },
       { label: "Menü Düzeni", path: "/admin/ayarlar/menu-duzeni", icon: LayoutDashboard },
       { label: "E-Arşiv / E-Fatura", path: "/admin/ayarlar/e-fatura", icon: FileText },
       { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },

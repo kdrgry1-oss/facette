@@ -38,6 +38,8 @@ const AnnouncementBar = lazy(() => import("./components/AnnouncementBar"));
 const SitePopup = lazy(() => import("./components/SitePopup"));
 // DENETİM FIX (#5/#6): 301/302 yönlendirme + per-path meta override tüketimi
 const SeoManager = lazy(() => import("./components/SeoManager"));
+// Özel Tema (CSS/JS) — yalnız storefront'ta enjekte eder (admin'de asla)
+const CustomThemeInjector = lazy(() => import("./components/CustomThemeInjector"));
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -94,6 +96,7 @@ function App() {
             {!isNative && (
               <Suspense fallback={null}>
                 <SeoManager />
+                <CustomThemeInjector />
                 <AnnouncementBar />
                 <SitePopup />
               </Suspense>

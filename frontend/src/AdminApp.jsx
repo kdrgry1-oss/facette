@@ -49,6 +49,7 @@ import {
 } from "./pages/admin/CatalogExtras";
 import AdminTasks from "./pages/admin/AdminTasks";
 import BusinessRules from "./pages/admin/BusinessRules";
+import CustomTheme from "./pages/admin/CustomTheme";
 import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
 import NotificationSettings from "./pages/admin/NotificationSettings";
@@ -121,6 +122,7 @@ export default function AdminApp() {
         <Route path="sayfalar" element={<AdminPages />} />
         <Route path="ayarlar" element={<AdminSettings />} />
         <Route path="ayarlar/isletme-kurallari" element={<BusinessRules />} />
+        <Route path="ayarlar/ozel-tema" element={<CustomTheme />} />
         <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />
         <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
         <Route path="ayarlar/kargo" element={<CargoSettings />} />
