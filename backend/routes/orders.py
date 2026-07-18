@@ -3681,8 +3681,10 @@ async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require
         "ok": bool(res.get("success")),
         "has_uuid": bool(_uuid), "has_invoice_id": bool(_iid),
         "operation_used": res.get("operation"),
-        "pdf_bytes": len(res.get("pdf") or b"") if res.get("success") else 0,
+        "kind": res.get("kind"),
+        "doc_bytes": len(res.get("pdf") or b"") if res.get("success") else 0,
         "error": res.get("error"),
+        "structure": res.get("structure"),
         "signatures": sigs,
     }
 
@@ -3719,10 +3721,18 @@ async def serve_einvoice_pdf(order_id: str, sig: str = ""):
         raise HTTPException(status_code=502, detail=f"e-Fatura PDF alınamadı: {e}")
     if not res.get("success") or not res.get("pdf"):
         logger.warning(f"[einvoice-pdf {order_id}] başarısız: {res.get('error')} "
-                       f"ops={res.get('available_operations')}")
+                       f"struct={res.get('structure')}")
         raise HTTPException(status_code=502,
-                            detail=f"e-Fatura PDF alınamadı: {res.get('error')}")
+                            detail=f"e-Fatura belgesi alınamadı: {res.get('error')}")
     fname = (order.get("invoice_number") or order.get("order_number") or "fatura")
+    kind = res.get("kind") or "pdf"
+    if kind == "xml":
+        # Resmî imzalı UBL-XML — gömülü XSLT ile tarayıcıda fatura olarak görüntülenir.
+        return Response(
+            content=res["pdf"],
+            media_type="application/xml; charset=utf-8",
+            headers={"Content-Disposition": f'inline; filename="{fname}.xml"'},
+        )
     return Response(
         content=res["pdf"],
         media_type="application/pdf",
