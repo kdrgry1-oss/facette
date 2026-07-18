@@ -3670,6 +3670,12 @@ async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require
         ops = await run_in_threadpool(_cli._list_efatura_operations)
     except Exception as e:
         ops = [f"(ops list err: {e})"]
+    sigs = {}
+    for _op in ("GetInvoiceWithType", "GetInvoice", "LoadInvoice", "GetInvoiceResponse"):
+        try:
+            sigs[_op] = await run_in_threadpool(_cli._efatura_op_signature, _op)
+        except Exception as e:
+            sigs[_op] = f"(err: {e})"
     res = await run_in_threadpool(_cli.get_efatura_pdf, _uuid, _iid)
     return {
         "ok": bool(res.get("success")),
@@ -3677,7 +3683,7 @@ async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require
         "operation_used": res.get("operation"),
         "pdf_bytes": len(res.get("pdf") or b"") if res.get("success") else 0,
         "error": res.get("error"),
-        "available_operations": res.get("available_operations") or ops,
+        "signatures": sigs,
     }
 
 

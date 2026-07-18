@@ -181,6 +181,23 @@ class DoganClient:
         except Exception:
             return []
 
+    def _efatura_op_signature(self, op_name: str) -> str:
+        """Bir e-Fatura operasyonunun giriş imzasını (parametre adları/tipleri) döndürür.
+        Doğru parametre adlarını (ör. GetInvoiceWithType'ın format alanı) bulmak için."""
+        try:
+            client = self._get_efatura_client()
+            for service in client.wsdl.services.values():
+                for port in service.ports.values():
+                    ops = getattr(port.binding, "_operations", {})
+                    if op_name in ops:
+                        try:
+                            return str(ops[op_name].input.signature())
+                        except Exception as e:
+                            return f"(signature err: {e})"
+            return "(operation not found)"
+        except Exception as e:
+            return f"(err: {e})"
+
     @staticmethod
     def _extract_pdf_bytes(obj) -> bytes:
         """Doğan yanıtından PDF ikili verisini (bytes ya da base64 string) çıkarır.
