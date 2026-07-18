@@ -1691,11 +1691,18 @@ class DoganClient:
                 }
 
             invoice_id = ser.get("INVOICE_ID") or invoice_number
+            # e-Fatura yanıtında Doğan bazı kurulumlarda görüntüleme URL'i / WEB_KEY döndürebilir.
+            # Varsa yakala (e-Arşiv'deki web_key gibi kullanılır); yoksa boş kalır ve orders.py
+            # einvoice_link_template ile UUID'den link kurar. (Salt-okuma; e-Arşiv'i etkilemez.)
+            _rr = ser.get("REQUEST_RETURN") or {}
+            _ef_web = (ser.get("WEB_KEY") or ser.get("URL") or ser.get("INVOICE_URL")
+                       or _rr.get("WEB_KEY") or _rr.get("URL") or "")
             return {
                 "success": True,
                 "code": "0",
                 "message": "OK",
                 "invoice_id": str(invoice_id),
+                "web_key": str(_ef_web or ""),
                 "intl_txn_id": str(intl_txn_id or ""),
                 "uuid": invoice_uuid,
                 "receiver_alias": receiver_alias,

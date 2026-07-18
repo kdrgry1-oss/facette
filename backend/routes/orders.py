@@ -3395,6 +3395,23 @@ async def create_invoice_for_order(
                 _inv_link = _tmpl.replace("{web_key}", _web)
             else:
                 _inv_link = ""
+            # e-FATURA LİNK (e-Arşiv YOLU DEĞİŞMEDEN): e-Arşiv Doğan'dan WEB_KEY (tam URL) döner
+            # ve yukarıda kullanılır. e-Fatura'da WEB_KEY DÖNMEZ → link yukarıda boş kalır.
+            # e-Fatura görüntüleme linki einvoice_link_template ile UUID/INVOICE_ID üzerinden
+            # kurulur (Doğan e-Fatura portal görüntüleme URL şablonu). Şablon boşsa link
+            # üretilmez ve aşağıda net bir hata kaydı düşer (yanlış link Trendyol'a GİTMEZ).
+            if (not _inv_link) and invoice_type == "e-fatura":
+                _eftmpl = (dogan_settings.get("einvoice_link_template") or "").strip()
+                if _eftmpl:
+                    _ef_uuid = str((dogan_result or {}).get("uuid") or invoice_uuid or "")
+                    _ef_iid = str((dogan_result or {}).get("invoice_id") or "")
+                    _ef_itxn = str((dogan_result or {}).get("intl_txn_id") or "")
+                    _inv_link = (_eftmpl
+                                 .replace("{uuid}", _ef_uuid)
+                                 .replace("{ettn}", _ef_uuid)
+                                 .replace("{invoice_id}", _ef_iid)
+                                 .replace("{invoice_number}", invoice_number)
+                                 .replace("{intl_txn_id}", _ef_itxn)).strip()
             if _inv_link:
                 from .integrations import upload_invoice_to_trendyol
                 try:
@@ -3417,8 +3434,13 @@ async def create_invoice_for_order(
                     )
                     logger.error(f"[trendyol invoice auto-upload] {order.get('order_number')}: {_err}")
             else:
-                _err = ("Gecerli fatura linki uretilemedi: Dogan web_key bir URL degil ve "
-                        "earsiv_link_template ayarli degil (Ayarlar > E-Arsiv / E-Fatura).")
+                if invoice_type == "e-fatura":
+                    _err = ("e-Fatura icin gorunturleme linki uretilemedi: einvoice_link_template "
+                            "ayarli degil. Ayarlar > E-Donusum ekranindan Dogan e-Fatura portal "
+                            "goruntuleme URL sablonunu girin (ornek: https://.../view?uuid={uuid}).")
+                else:
+                    _err = ("Gecerli fatura linki uretilemedi: Dogan web_key bir URL degil ve "
+                            "earsiv_link_template ayarli degil (Ayarlar > E-Arsiv / E-Fatura).")
                 trendyol_upload = {"ok": False, "error": _err}
                 await db.orders.update_one(
                     {"id": order_id},
@@ -3443,6 +3465,17 @@ async def create_invoice_for_order(
                 _hlink = _htmpl.replace("{web_key}", _hweb)
             else:
                 _hlink = ""
+            # e-Fatura link (e-Arşiv yolu değişmeden) — Trendyol bloğuyla aynı şablon mantığı.
+            if (not _hlink) and invoice_type == "e-fatura":
+                _heftmpl = (dogan_settings.get("einvoice_link_template") or "").strip()
+                if _heftmpl:
+                    _hef_uuid = str((dogan_result or {}).get("uuid") or invoice_uuid or "")
+                    _hlink = (_heftmpl
+                              .replace("{uuid}", _hef_uuid)
+                              .replace("{ettn}", _hef_uuid)
+                              .replace("{invoice_id}", str((dogan_result or {}).get("invoice_id") or ""))
+                              .replace("{invoice_number}", invoice_number)
+                              .replace("{intl_txn_id}", str((dogan_result or {}).get("intl_txn_id") or ""))).strip()
             if _hlink:
                 import asyncio as _aio_hb
                 from hepsiburada_client import HepsiburadaError as _HBErr
