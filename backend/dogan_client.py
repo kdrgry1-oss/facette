@@ -290,9 +290,21 @@ class DoganClient:
 
             from zeep.helpers import serialize_object
             structure = {}
-            for op_name in candidates:
+            _idkey = {"UUID": uuid} if uuid else {"ID": invoice_id}
+            # GetInvoiceWithType: Desteklenen TYPE = PDF/HTML/XML; DIRECTION zorunlu (giden=OUT).
+            # Önce PDF iste; olmazsa HTML/XML (yine de görüntülenebilir belge).
+            attempts = []
+            if "GetInvoiceWithType" in ops:
+                for _t in ("PDF", "HTML", "XML"):
+                    attempts.append(("GetInvoiceWithType",
+                                     {**_idkey, "TYPE": _t, "DIRECTION": "OUT"}))
+            for _op in candidates:
+                if _op != "GetInvoiceWithType":
+                    attempts.append((_op, {**_idkey, "DIRECTION": "OUT"}))
+
+            for op_name, search_key in attempts:
                 op = getattr(client.service, op_name)
-                search_key = {"UUID": uuid} if uuid else {"ID": invoice_id}
+                _tag = f"{op_name}:{search_key.get('TYPE','')}"
                 try:
                     result = op(REQUEST_HEADER=self._make_header(),
                                 INVOICE_SEARCH_KEY=search_key, HEADER_ONLY="N")
@@ -301,15 +313,14 @@ class DoganClient:
                         result = op(REQUEST_HEADER=self._make_header(),
                                     INVOICE_SEARCH_KEY=search_key)
                     except Exception as _e2:
-                        structure[op_name] = f"call-err: {_e2}"
+                        structure[_tag] = f"call-err: {_e2}"
                         continue
                 ser = serialize_object(result)
-                # CONTENT / PDF / benzeri alanları rekürsif çöz
                 kind, data = self._find_document(ser)
-                structure[op_name] = self._structure_preview(ser)
+                structure[_tag] = self._structure_preview(ser)
                 if data:
                     return {"success": True, "kind": kind, "pdf": data,
-                            "operation": op_name, "structure": structure}
+                            "operation": _tag, "structure": structure}
             return {"success": False, "error": "Yanitta belge (PDF/XML) bulunamadi",
                     "operation": candidates[0], "structure": structure,
                     "available_operations": ops}
