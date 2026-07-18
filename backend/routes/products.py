@@ -2393,6 +2393,61 @@ async def auto_assign_combine_all(
     }
 
 
+@router.post("/combine/clear-auto")
+async def clear_auto_combine_products(
+    payload: dict = None,
+    current_user: dict = Depends(require_admin),
+):
+    """TEK SEFERLİK: Sistemin OTOMATİK atadığı kombin ('Görünümü Tamamla') ürünlerini temizler.
+    Otomatik atamalar `combine_auto_generated_at` damgası taşır; MANUEL atamalar taşımaz →
+    yalnız otomatik olanlar silinir, elle eklenenler KORUNUR.
+
+    payload: {dry_run: bool (varsayılan True), mode: 'auto'|'all'}
+      - dry_run=True  → hiçbir şey silmez, sadece kaç ürünün etkileneceğini sayar
+      - mode='auto'   → yalnız otomatik damgalı ürünler (varsayılan, güvenli)
+      - mode='all'    → combine_products dolu TÜM ürünler (damga aranmaz)
+    """
+    payload = payload or {}
+    dry_run = payload.get("dry_run", True)
+    mode = (payload.get("mode") or "auto").lower()
+
+    auto_q = {"combine_auto_generated_at": {"$exists": True}}
+    all_q = {"combine_products": {"$exists": True, "$ne": []}}
+    manual_q = {"combine_products": {"$exists": True, "$ne": []},
+                "combine_auto_generated_at": {"$exists": False}}
+
+    auto_cnt = await db.products.count_documents(auto_q)
+    all_cnt = await db.products.count_documents(all_q)
+    manual_cnt = await db.products.count_documents(manual_q)
+
+    target_q = all_q if mode == "all" else auto_q
+
+    if dry_run:
+        return {
+            "dry_run": True, "mode": mode,
+            "auto_assigned_count": auto_cnt,
+            "with_any_combine_count": all_cnt,
+            "manual_only_count": manual_cnt,
+            "would_clear": (all_cnt if mode == "all" else auto_cnt),
+            "message": f"KURU ÇALIŞMA — mode={mode}: {(all_cnt if mode=='all' else auto_cnt)} ürün "
+                       f"temizlenecek (otomatik={auto_cnt}, elle={manual_cnt}). "
+                       f"Silmek için dry_run:false gönderin.",
+        }
+
+    res = await db.products.update_many(
+        target_q,
+        {"$set": {"combine_products": [],
+                  "updated_at": datetime.now(timezone.utc).isoformat()},
+         "$unset": {"combine_auto_generated_at": ""}},
+    )
+    return {
+        "success": True, "dry_run": False, "mode": mode,
+        "cleared": res.modified_count,
+        "message": f"{res.modified_count} üründe otomatik kombin ('Görünümü Tamamla') temizlendi. "
+                   f"Artık manuel ekleyebilirsiniz.",
+    }
+
+
 @router.post("/cart-suggestions")
 async def get_cart_suggestions(payload: dict):
     """Sepetteki ürünlere göre öneriler döner (public).
