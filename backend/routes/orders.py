@@ -6171,7 +6171,8 @@ async def _create_return_shipment(ref: str, kiymet: float, icerik: str, recipien
 
 
 async def _within_return_window(order: dict) -> bool:
-    """Sipariş teslim tarihinden itibaren 14 gün içinde mi? (barkod yeniden üretimi için)"""
+    """Sipariş teslim tarihinden itibaren iade penceresi içinde mi? (barkod yeniden üretimi için)
+    Süre admin panelinden (İşletme Kuralları > İade süresi) yönetilir; varsayılan 14 gün."""
     delivered_at = order.get("delivered_at")
     if not delivered_at:
         return False
@@ -6181,7 +6182,12 @@ async def _within_return_window(order: dict) -> bool:
             d = d.replace(tzinfo=timezone.utc)
     except Exception:
         return False
-    return datetime.now(timezone.utc) <= (d + timedelta(days=14))
+    try:
+        import business_rules as _BR
+        _days = int(await _BR.get_rule(db, "return.window_days", 14) or 14)
+    except Exception:
+        _days = 14
+    return datetime.now(timezone.utc) <= (d + timedelta(days=_days))
 
 
 @router.post("/returns/{return_id}/reissue-barcode")

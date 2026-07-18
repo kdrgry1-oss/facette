@@ -2242,8 +2242,13 @@ async def update_combine_products(
         raise HTTPException(status_code=400, detail="combine_products bir liste olmalıdır")
     # Self-reference temizliği
     combine_ids = [str(cid) for cid in combine_ids if str(cid) != product_id]
-    # En fazla 12 kombin ürün
-    combine_ids = combine_ids[:12]
+    # Azami kombin ürün sayısı — admin panelinden (İşletme Kuralları) yönetilir; varsayılan 12.
+    try:
+        import business_rules as _BR
+        _maxc = int(await _BR.get_rule(db, "product.max_combine", 12) or 12)
+    except Exception:
+        _maxc = 12
+    combine_ids = combine_ids[:_maxc]
 
     # Var olan ürün ID'lerini doğrula — fake/stale id'leri filtrele
     if combine_ids:

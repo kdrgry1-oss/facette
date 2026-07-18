@@ -143,8 +143,14 @@ export default function Checkout() {
   const [enabledPM, setEnabledPM] = useState({ credit_card: true, bank_transfer: true, cash_on_delivery: false });
   const [bankPct, setBankPct] = useState(5); // Havale/EFT teşvik indirimi (%) — ayardan gelir
 
-  // Gift options + terms + quick signup
-  const GIFT_WRAP_PRICE = 130;
+  // İşletme Kuralları (admin panelinden yönetilir) — kodda sabit değil.
+  const [bizRules, setBizRules] = useState({});
+  useEffect(() => {
+    axios.get(`${API}/business-rules`).then((r) => setBizRules(r.data || {})).catch(() => {});
+  }, []);
+  const GIFT_WRAP_PRICE = Number(bizRules["product.gift_wrap_price"] ?? 130);
+  const COD_FEE = Number(bizRules["shipping.cod_fee"] ?? 10);
+  const POINTS_MAX_PCT = Number(bizRules["payment.points_redeem_max_pct"] ?? 10);
   const [giftNote, setGiftNote] = useState("");
   const [giftWrap, setGiftWrap] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
@@ -245,8 +251,8 @@ export default function Checkout() {
   const baseShipFee = ruleShipCost != null ? ruleShipCost : shippingFee;
   const shippingCost = (hasFreeShippingPromo || (freeShippingThreshold != null && total >= freeShippingThreshold)) ? 0 : baseShipFee;
   const giftWrapTotal = giftWrap ? GIFT_WRAP_PRICE : 0;
-  const codFee = paymentMethod === "cash_on_delivery" ? 10 : 0;
-  const pointsDeduction = usePoints ? Math.min(userPoints, total * 0.1) : 0;
+  const codFee = paymentMethod === "cash_on_delivery" ? COD_FEE : 0;
+  const pointsDeduction = usePoints ? Math.min(userPoints, total * (POINTS_MAX_PCT / 100)) : 0;
   // Havale/EFT indirimi — kupon indiriminden SONRAKİ tutar üzerinden (sunucu ile aynı mantık).
   const isBankTransfer = paymentMethod === "bank_transfer";
   const bankTransferDiscount = (isBankTransfer && bankPct > 0)

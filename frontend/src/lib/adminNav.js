@@ -161,6 +161,7 @@ export const navigationGroups = [
     icon: Settings,
     children: [
       { label: "Genel Ayarlar", path: "/admin/ayarlar", icon: Settings },
+      { label: "İşletme Kuralları", path: "/admin/ayarlar/isletme-kurallari", icon: Settings },
       { label: "Menü Düzeni", path: "/admin/ayarlar/menu-duzeni", icon: LayoutDashboard },
       { label: "E-Arşiv / E-Fatura", path: "/admin/ayarlar/e-fatura", icon: FileText },
       { label: "Kargo Firması Ayarları", path: "/admin/ayarlar/kargo", icon: Truck },

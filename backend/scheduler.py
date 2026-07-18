@@ -18,9 +18,12 @@ async def auto_cancel_unpaid_havale_orders():
     """Cancel havale/transfer orders that remain unpaid after 72 hours and restock."""
     from routes.deps import db  # lazy import
     from routes.orders import _restock_order_once
+    import business_rules as _BR
 
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+        # AYAR: süre admin panelinden (İşletme Kuralları) yönetilir; varsayılan 72 saat.
+        _hrs = int(await _BR.get_rule(db, "order.havale_cancel_hours", 72) or 72)
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_hrs)).isoformat()
         # Accept both payment_method names.
         # ÖNEMLİ: Havale siparişleri "awaiting_payment" durumunda bekler (create_order öyle set eder);
         # eski sorgu yalnız pending/confirmed'e bakıyordu → awaiting_payment havaleler HİÇ iptal
@@ -107,12 +110,13 @@ async def auto_cancel_unpaid_card_orders():
     (_restock_order_once — 'auto_cancel_expired' hareketi bir kez eklenir)."""
     from routes.deps import db  # lazy import
     from routes.orders import _restock_order_once
+    import business_rules as _BR
     try:
-        # 3 SAAT: 3DS başlatılıp ödenmeyen kart siparişleri fazla beklemesin (müşteri "sipariş
-        # oluştu ama ödenmedi" görüyordu). Güvenli: webhook (saniyeler) + reconcile (her 15dk)
-        # gerçekten çekilen ödemeyi bu süreden ÇOK önce 'paid' yapar; hâlâ ödenmemişse para HİÇ
-        # alınmamıştır → payment_failed + stok iadesi güvenli. (COD/havale hariç — aşağıda filtreli.)
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        # AYAR (varsayılan 3 saat): 3DS başlatılıp ödenmeyen kart siparişleri fazla beklemesin.
+        # Güvenli: webhook (saniyeler) + reconcile (her 15dk) gerçekten çekilen ödemeyi bu süreden
+        # ÇOK önce 'paid' yapar. Süre admin panelinden (İşletme Kuralları) yönetilir.
+        _uch = int(await _BR.get_rule(db, "order.unpaid_card_cancel_hours", 3) or 3)
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_uch)).isoformat()
         _cod_bank = ["cash_on_delivery", "kapida", "kapida_odeme", "cod",
                      "bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "transfer"]
         query = {
