@@ -2678,9 +2678,9 @@ export default function AdminProducts() {
                           title="Ürün sayfasında beden seçiminin yanında öneri yazısı çıkar"
                         >
                           <option value="">Belirtme</option>
-                          <option value="dar">Dar kalıp → bir beden büyük öner</option>
-                          <option value="normal">Normal kalıp → kendi bedenini al</option>
-                          <option value="bol">Bol kalıp → bir beden küçük öner</option>
+                          <option value="dar">Dar / Slim Fit → bir beden büyük öner</option>
+                          <option value="normal">Normal / Regular → kendi bedenini al</option>
+                          <option value="bol">Bol / Oversize → bir beden küçük öner</option>
                         </select>
                       </div>
                       <div>
