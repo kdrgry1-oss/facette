@@ -1295,6 +1295,16 @@ export default function ProductDetail() {
                       />
                     </>
                   )}
+                  {/* "suud" örneği: Ürün Bedeni + Manken ölçüleri */}
+                  {sizeTableData.product_size && (
+                    <p className="text-sm text-gray-700 mt-3"><span className="font-semibold text-gray-800">Ürün Bedeni:</span> {sizeTableData.product_size}</p>
+                  )}
+                  {sizeTableData.model_info && Object.keys(sizeTableData.model_info).length > 0 && (
+                    <p className="text-sm text-gray-700 mt-1.5">
+                      <span className="font-semibold text-gray-800">Manken:</span>{" "}
+                      {Object.entries(sizeTableData.model_info).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k} ${v} cm`).join(", ")}
+                    </p>
+                  )}
                 </div>
               </div>
               {/* Ölçü tablosu — TRANSPOZE: satır=ölçü (Göğüs/Bel/Boy), kolon=beden (34/36/38/40) */}

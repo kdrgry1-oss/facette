@@ -42,6 +42,8 @@ def render_size_table_image(
     values: dict,         # {"S": {"Göğüs": "96", "Bel": "80", ...}, ...}
     brand: str = "FACETTE",
     unit: str = "cm",
+    product_size: str = "",
+    model_info: dict = None,
 ) -> bytes:
     """Render a 1200x1800 JPEG size-table with a mannequin silhouette (suudcollection-tarzı)."""
     W, H = 1200, 1800
@@ -60,8 +62,15 @@ def render_size_table_image(
     draw.text((60, 40), "ÖLÇÜ TABLOSU", fill="white", font=font_title)
     draw.text((60, 115), product_name[:70], fill=(203, 213, 225), font=font_subtitle)
 
-    # Meta line
-    draw.text((60, 190), f"Tüm ölçüler {unit} cinsindendir.", fill=(107, 114, 128), font=font_subtitle)
+    # Meta line + Ürün Bedeni / Manken ("suud" örneği)
+    _meta = f"Tüm ölçüler {unit} cinsindendir."
+    if product_size:
+        _meta += f"   ·   Ürün Bedeni: {product_size}"
+    draw.text((60, 190), _meta, fill=(107, 114, 128), font=font_subtitle)
+    if model_info:
+        _mparts = [f"{k} {v} cm" for k, v in model_info.items() if str(v).strip()]
+        if _mparts:
+            draw.text((60, 238), "Manken: " + ", ".join(_mparts), fill=(107, 114, 128), font=font_sm)
 
     # --- MANKEN SİLUETİ (sol panel) + ölçü çizgileri ---
     # Ölçü sütun adlarına göre hangi çizgilerin gösterileceğini belirle.
@@ -213,6 +222,9 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
         "sizes": sizes,
         "columns": columns,
         "values": values,
+        # "suud" örneği: Ürün Bedeni + Manken ölçüleri (Boy/Göğüs/Bel/Basen ...)
+        "product_size": str(payload.get("product_size") or "").strip(),
+        "model_info": payload.get("model_info") if isinstance(payload.get("model_info"), dict) else {},
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": current_user.get("email", ""),
     }
@@ -238,6 +250,8 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
         sizes=st.get("sizes") or [],
         columns=st.get("columns") or [],
         values=st.get("values") or {},
+        product_size=st.get("product_size") or "",
+        model_info=st.get("model_info") or {},
     )
     data_url = "data:image/jpeg;base64," + base64.b64encode(png).decode("ascii")
 
@@ -259,7 +273,7 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
         {"product_id": product_id},
         {"$set": {"last_rendered_at": datetime.now(timezone.utc).isoformat()}}
     )
-    return {"success": True, "data_url_length": len(data_url), "image_bytes": len(png)}
+    return {"success": True, "data_url": data_url, "image_bytes": len(png)}
 
 
 # Public endpoint for storefront – no auth
@@ -279,4 +293,6 @@ async def get_public_size_table(product_id: str):
         "sizes": st.get("sizes") or [],
         "columns": st.get("columns") or [],
         "values": st.get("values") or {},
+        "product_size": st.get("product_size") or "",
+        "model_info": st.get("model_info") or {},
     }

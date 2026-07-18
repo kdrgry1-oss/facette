@@ -11,6 +11,9 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
   const [sizes, setSizes] = useState([]);
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [values, setValues] = useState({});
+  // "suud" örneği: Ürün Bedeni + Manken ölçüleri
+  const [productSize, setProductSize] = useState("");
+  const [modelInfo, setModelInfo] = useState({ Boy: "", Göğüs: "", Bel: "", Basen: "" });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -32,6 +35,10 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
         setSizes(d.sizes || []);
         setColumns(d.columns && d.columns.length ? d.columns : DEFAULT_COLUMNS);
         setValues(d.values || {});
+        setProductSize(d.product_size || "");
+        if (d.model_info && Object.keys(d.model_info).length) {
+          setModelInfo({ Boy: "", Göğüs: "", Bel: "", Basen: "", ...d.model_info });
+        }
       }
     } catch (err) {
       /* İlk yüklemede beden tablosu henüz yoksa 404 beklenir — kasıtlı sessiz geçiş */
@@ -103,7 +110,7 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
     try {
       const token = localStorage.getItem("token");
       await axios.post(`${API}/size-tables/${productId}`,
-        { sizes, columns, values },
+        { sizes, columns, values, product_size: productSize, model_info: modelInfo },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       onToast?.("Ölçü tablosu kaydedildi");
@@ -122,13 +129,20 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
       const token = localStorage.getItem("token");
       // Save first to ensure latest data is on server
       await axios.post(`${API}/size-tables/${productId}`,
-        { sizes, columns, values },
+        { sizes, columns, values, product_size: productSize, model_info: modelInfo },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const res = await axios.post(`${API}/size-tables/${productId}/generate-image`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      onToast?.(`Görsel oluşturuldu (${Math.round(res.data.image_bytes / 1024)} KB). Ürünün son görseli olarak eklendi.`);
+      // B3: görseli otomatik indir (JPEG) — ayrıca ürünün son görseli olarak eklendi.
+      if (res.data?.data_url) {
+        const a = document.createElement("a");
+        a.href = res.data.data_url;
+        a.download = `beden-tablosu-${productId}.jpg`;
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+      onToast?.(`Görsel oluşturuldu (${Math.round(res.data.image_bytes / 1024)} KB), indirildi ve ürünün son görseli olarak eklendi.`);
     } catch (err) {
       onToast?.(err.response?.data?.detail || "Görsel oluşturulamadı", "err");
     } finally {
@@ -171,6 +185,22 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
           Ürün henüz kaydedilmedi. Önce ürünü oluşturun, sonra bu sekmeden ölçü tablosunu ekleyin.
         </div>
       )}
+
+      {/* "suud" örneği: Ürün Bedeni + Manken ölçüleri (beden kılavuzunda gösterilir) */}
+      <div className="mb-5 grid sm:grid-cols-5 gap-3 bg-gray-50/60 border rounded-lg p-3">
+        <div>
+          <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Ürün Bedeni</label>
+          <input value={productSize} onChange={(e) => setProductSize(e.target.value)} placeholder="34"
+            className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
+        </div>
+        {["Boy", "Göğüs", "Bel", "Basen"].map((k) => (
+          <div key={k}>
+            <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Manken {k} (cm)</label>
+            <input value={modelInfo[k] || ""} onChange={(e) => setModelInfo({ ...modelInfo, [k]: e.target.value })}
+              placeholder="—" className="w-full border px-2 py-1.5 rounded text-sm focus:outline-none focus:border-pink-500" />
+          </div>
+        ))}
+      </div>
 
       {loading ? (
         <div className="text-center py-8 text-gray-400">Yükleniyor...</div>
