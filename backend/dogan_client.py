@@ -166,6 +166,119 @@ class DoganClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _list_efatura_operations(self) -> list:
+        """E-Fatura (EFaturaOIB) WSDL'indeki operasyon adlarını döndürür."""
+        try:
+            client = self._get_efatura_client()
+            names = set()
+            for service in client.wsdl.services.values():
+                for port in service.ports.values():
+                    try:
+                        names.update(port.binding._operations.keys())
+                    except Exception:
+                        pass
+            return sorted(names)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _extract_pdf_bytes(obj) -> bytes:
+        """Doğan yanıtından PDF ikili verisini (bytes ya da base64 string) çıkarır.
+        Yanıt şeması sürüme göre değiştiği için yapıyı rekürsif tararız: bytes değeri
+        doğrudan alınır; '%PDF' ile başlayan / base64 çözülünce '%PDF' veren string
+        PDF olarak kabul edilir."""
+        import base64 as _b64
+        best = b""
+
+        def _walk(v):
+            nonlocal best
+            if best:
+                return
+            if isinstance(v, (bytes, bytearray)):
+                b = bytes(v)
+                if b[:4] == b"%PDF" or len(b) > 1000:
+                    best = b
+                return
+            if isinstance(v, str):
+                s = v.strip()
+                if len(s) < 100:
+                    return
+                try:
+                    dec = _b64.b64decode(s, validate=False)
+                    if dec[:4] == b"%PDF":
+                        best = dec
+                except Exception:
+                    pass
+                return
+            if isinstance(v, dict):
+                for x in v.values():
+                    _walk(x)
+            elif isinstance(v, (list, tuple)):
+                for x in v:
+                    _walk(x)
+
+        _walk(obj)
+        return best
+
+    def get_efatura_pdf(self, uuid: str = "", invoice_id: str = "") -> dict:
+        """Gönderilmiş bir e-Faturanın PDF'ini Doğan'dan çeker (e-Arşiv WEB_KEY karşılığı).
+
+        e-Fatura'da e-Arşiv gibi hazır WEB_KEY URL dönmediği için, faturanın resmî PDF'i
+        e-Fatura servisinden UUID/ID ile talep edilir. Operasyon adı sürüme göre değiştiği
+        için WSDL'den DİNAMİK bulunur (iptal operasyonundaki aynı desen). Başarısızlıkta
+        mevcut operasyon adları döndürülür ki gerçek metod netleşsin.
+        Döner: {success, pdf(bytes), operation} ya da {success:False, error, available_operations}.
+        """
+        try:
+            client = self._get_efatura_client()
+            ops = self._list_efatura_operations()
+            # Aday PDF/görüntüleme operasyonları — en olasıdan başlayarak
+            preferred = ("GetInvoicePDF", "GetOutboxInvoicePDF", "GetInvoicePdf",
+                         "GetInvoiceWithGUID", "GetInvoiceHTML", "DownloadInvoice",
+                         "GetInvoice", "GetOutboxInvoice")
+            pdf_op = next((c for c in preferred if c in ops), None)
+            if not pdf_op:
+                pdf_op = next((o for o in ops if "pdf" in o.lower()), None)
+            if not pdf_op:
+                pdf_op = next((o for o in ops if ("getinvoice" in o.lower()
+                              or "download" in o.lower() or "html" in o.lower())), None)
+            if not pdf_op:
+                return {"success": False, "error": "e-Fatura PDF operasyonu WSDL'de bulunamadi",
+                        "available_operations": ops}
+
+            op = getattr(client.service, pdf_op)
+            search_key = {"UUID": uuid} if uuid else {"ID": invoice_id}
+            # Yaygın imza varyantlarını sırayla dene
+            result = None
+            last_err = None
+            for kwargs in (
+                {"REQUEST_HEADER": self._make_header(), "INVOICE_SEARCH_KEY": search_key},
+                {"REQUEST_HEADER": self._make_header(), "UUID": uuid or invoice_id},
+                {"REQUEST_HEADER": self._make_header(), "GUID": uuid or invoice_id},
+                {"REQUEST_HEADER": self._make_header(), "ID": invoice_id or uuid},
+            ):
+                try:
+                    result = op(**kwargs)
+                    if result is not None:
+                        break
+                except Exception as _e:
+                    last_err = str(_e)
+                    continue
+            if result is None:
+                return {"success": False, "error": f"e-Fatura PDF cagrisi basarisiz: {last_err}",
+                        "operation": pdf_op, "available_operations": ops}
+
+            from zeep.helpers import serialize_object
+            ser = serialize_object(result)
+            pdf = self._extract_pdf_bytes(ser if ser is not None else result)
+            if not pdf:
+                return {"success": False, "error": "Yanitta PDF verisi bulunamadi",
+                        "operation": pdf_op, "raw": str(ser)[:400]}
+            return {"success": True, "pdf": pdf, "operation": pdf_op}
+        except Exception as e:
+            logger.error(f"get_efatura_pdf error: {e}")
+            return {"success": False, "error": str(e)}
+
     def _list_earsiv_operations(self) -> list:
         """E-Arşiv (EFaturaArchive) WSDL'indeki tüm operasyon adlarını döndürür.
         İptal operasyonunu dinamik bulmak ve hata ayıklamak için kullanılır."""

@@ -3412,6 +3412,10 @@ async def create_invoice_for_order(
                                  .replace("{invoice_id}", _ef_iid)
                                  .replace("{invoice_number}", invoice_number)
                                  .replace("{intl_txn_id}", _ef_itxn)).strip()
+                if not _inv_link:
+                    # OTOMATİK: Doğan'dan resmî e-Fatura PDF'ini çekip bizim imzalı public
+                    # linkimizle sun (e-Arşiv WEB_KEY karşılığı). Kullanıcıdan hiçbir şey istenmez.
+                    _inv_link = _einvoice_pdf_link(order_id)
             if _inv_link:
                 from .integrations import upload_invoice_to_trendyol
                 try:
@@ -3476,6 +3480,8 @@ async def create_invoice_for_order(
                               .replace("{invoice_id}", str((dogan_result or {}).get("invoice_id") or ""))
                               .replace("{invoice_number}", invoice_number)
                               .replace("{intl_txn_id}", str((dogan_result or {}).get("intl_txn_id") or ""))).strip()
+                if not _hlink:
+                    _hlink = _einvoice_pdf_link(order_id)
             if _hlink:
                 import asyncio as _aio_hb
                 from hepsiburada_client import HepsiburadaError as _HBErr
@@ -3624,6 +3630,67 @@ async def print_invoice_html(order_id: str, token: str = None):
 </body></html>
 """
     return HTMLResponse(content=html)
+
+
+# ─── e-Fatura PDF public link (e-Arşiv WEB_KEY karşılığı) ───────────────────────
+# e-Arşiv'de Doğan hazır bir WEB_KEY URL'i döner ve Trendyol/HB'ye o gönderilir.
+# e-Fatura'da böyle bir URL DÖNMEZ → faturanın resmî PDF'i Doğan'dan çekilip BİZİM
+# sunucumuzdan imzalı (order'a özel HMAC) bir link ile sunulur. Böylece e-Fatura da
+# e-Arşiv gibi OTOMATİK linke kavuşur; kullanıcıdan hiçbir şey istenmez.
+def _einvoice_pdf_sig(order_id: str) -> str:
+    import hmac as _hmac, hashlib as _hl
+    from .deps import JWT_SECRET as _sec
+    return _hmac.new(str(_sec).encode(), f"einv:{order_id}".encode(), _hl.sha256).hexdigest()[:32]
+
+
+def _einvoice_pdf_link(order_id: str) -> str:
+    import os as _os
+    base = (_os.environ.get("PUBLIC_API_URL") or _os.environ.get("BACKEND_URL")
+            or "https://api.facette.com.tr").rstrip("/")
+    return f"{base}/api/orders/{order_id}/einvoice-pdf?sig={_einvoice_pdf_sig(order_id)}"
+
+
+@router.get("/{order_id}/einvoice-pdf")
+async def serve_einvoice_pdf(order_id: str, sig: str = ""):
+    """Sipariş e-Faturasının resmî PDF'ini Doğan'dan çekip servis eder (imzalı public link).
+    GÜVENLİK: order'a özel HMAC imzası doğrulanır — kimliksiz PII/fatura sızıntısı yok."""
+    import hmac as _hmac
+    if not sig or not _hmac.compare_digest(sig, _einvoice_pdf_sig(order_id)):
+        raise HTTPException(status_code=403, detail="Geçersiz imza")
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    _uuid = (order.get("invoice_uuid") or "").strip()
+    _iid = (order.get("invoice_dogan_id") or "").strip()
+    if not (_uuid or _iid):
+        raise HTTPException(status_code=404, detail="Bu siparişte e-Fatura kaydı yok")
+
+    dogan_settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    if not (dogan_settings.get("enabled") and dogan_settings.get("username")):
+        raise HTTPException(status_code=400, detail="Doğan e-Dönüşüm yapılandırılmamış")
+    try:
+        from dogan_client import DoganClient
+        from fastapi.concurrency import run_in_threadpool
+        _cli = DoganClient(
+            username=dogan_settings["username"],
+            password=dogan_settings["password"],
+            is_test=dogan_settings.get("is_test", True),
+        )
+        res = await run_in_threadpool(_cli.get_efatura_pdf, _uuid, _iid)
+    except Exception as e:
+        logger.error(f"[einvoice-pdf {order_id}] {e}")
+        raise HTTPException(status_code=502, detail=f"e-Fatura PDF alınamadı: {e}")
+    if not res.get("success") or not res.get("pdf"):
+        logger.warning(f"[einvoice-pdf {order_id}] başarısız: {res.get('error')} "
+                       f"ops={res.get('available_operations')}")
+        raise HTTPException(status_code=502,
+                            detail=f"e-Fatura PDF alınamadı: {res.get('error')}")
+    fname = (order.get("invoice_number") or order.get("order_number") or "fatura")
+    return Response(
+        content=res["pdf"],
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}.pdf"'},
+    )
 
 
 
