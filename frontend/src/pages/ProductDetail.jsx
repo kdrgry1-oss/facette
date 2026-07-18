@@ -56,21 +56,33 @@ const TR_PUBLIC_HOLIDAYS = new Set([
   "10-29", // Cumhuriyet Bayramı
   // Dini bayramlar (değişken tarihli) — örn: "2026-03-20", "2026-05-27" ...
 ]);
-function _isHolidayDate(d) {
+function _isHolidayDate(d, extraHolidays) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return TR_PUBLIC_HOLIDAYS.has(`${mm}-${dd}`) || TR_PUBLIC_HOLIDAYS.has(`${d.getFullYear()}-${mm}-${dd}`);
+  const iso = `${d.getFullYear()}-${mm}-${dd}`;
+  if (extraHolidays && extraHolidays.has(iso)) return true;
+  return TR_PUBLIC_HOLIDAYS.has(`${mm}-${dd}`) || TR_PUBLIC_HOLIDAYS.has(iso);
 }
-function _isWorkingDay(d) {
-  const wd = d.getDay();
-  return wd !== 0 && wd !== 6 && !_isHolidayDate(d);
+function _isWorkingDay(d, cfg) {
+  const wd = d.getDay(); // 0=Paz..6=Cmt
+  const iso = wd === 0 ? 7 : wd; // 1=Pzt..7=Paz
+  const workDays = (cfg && cfg.workDays) || [1, 2, 3, 4, 5];
+  const holidays = cfg && cfg.holidays;
+  const exclude = !cfg || cfg.exclude !== false;
+  if (!workDays.includes(iso)) return false;
+  if (exclude && _isHolidayDate(d, holidays)) return false;
+  return true;
 }
-function shippingCutoff(cutoffHour = 10, cutoffMinute = 30) {
+// AYAR: kesim saati / çalışma günleri / resmî tatiller İşletme Kuralları'ndan (cfg) gelir;
+// cfg verilmezse varsayılan 10:30 + hafta içi + sabit millî tatiller.
+function shippingCutoff(cfg) {
+  const cutoffHour = cfg && cfg.cutoffHour != null ? cfg.cutoffHour : 10;
+  const cutoffMinute = cfg && cfg.cutoffMinute != null ? cfg.cutoffMinute : 30;
   const now = new Date();
   const cutoff = new Date(now); cutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
 
   // İş günü ve cutoff'tan önce → bugün kargoda + geri sayım (saat + dakika)
-  if (_isWorkingDay(now) && now.getTime() < cutoff.getTime()) {
+  if (_isWorkingDay(now, cfg) && now.getTime() < cutoff.getTime()) {
     const remMs = cutoff.getTime() - now.getTime();
     const h = Math.floor(remMs / 3600000);
     const m = Math.floor((remMs % 3600000) / 60000);
@@ -80,7 +92,7 @@ function shippingCutoff(cutoffHour = 10, cutoffMinute = 30) {
 
   // Cutoff geçti veya bugün iş günü değil → sonraki İŞ GÜNÜ (hafta sonu + tatil atlanır)
   const next = new Date(now); next.setHours(0, 0, 0, 0);
-  do { next.setDate(next.getDate() + 1); } while (!_isWorkingDay(next));
+  do { next.setDate(next.getDate() + 1); } while (!_isWorkingDay(next, cfg));
   const tomorrow = new Date(now); tomorrow.setHours(0, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
   const isTomorrow = next.toDateString() === tomorrow.toDateString();
   const label = isTomorrow ? "yarın" : _TR_DAYS[next.getDay()];
@@ -108,6 +120,23 @@ export default function ProductDetail() {
   const { isFavorite, toggleFavorite } = useFavorites();
   const { freeShippingThreshold } = useShipping();
   const { user } = useAuth();
+  // A5: kargo geri sayım kuralları (kesim saati / çalışma günleri / resmî tatiller) İşletme
+  // Kuralları'ndan gelir — kodda sabit değil. Her dakika yeniden hesaplanır.
+  const [shipCfg, setShipCfg] = useState(null);
+  const [, _tickShip] = useState(0);
+  useEffect(() => {
+    axios.get(`${API}/business-rules`).then((r) => {
+      const d = r.data || {};
+      const [ch, cm] = String(d["shipping.same_day_cutoff"] || "10:30").split(":").map((x) => parseInt(x, 10));
+      setShipCfg({
+        cutoffHour: ch, cutoffMinute: cm,
+        workDays: Array.isArray(d["shipping.work_days"]) ? d["shipping.work_days"] : [1, 2, 3, 4, 5],
+        holidays: new Set(d["official_holidays"] || []),
+        exclude: d["shipping.exclude_official_holidays"] !== false,
+      });
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { const t = setInterval(() => _tickShip((n) => n + 1), 60000); return () => clearInterval(t); }, []);
   // Üyenin boy/kilosuna göre önerilen beden (harf) — beden butonunda rozet gösterilir.
   const recLetter = user ? recommendLetterSize(user.height_cm, user.weight_kg) : null;
   const [product, setProduct] = useState(null);
@@ -875,7 +904,7 @@ export default function ProductDetail() {
 
                   {/* Kargo aciliyeti/geri sayımı — 10:30 cutoff: bugün kargoda (S saat D dakika içinde) / yarın kargoda */}
                   {(() => {
-                    const c = shippingCutoff();
+                    const c = shippingCutoff(shipCfg);
                     return (
                       <p className="mt-3 text-xs flex items-center gap-1.5" data-testid="pdp-shipping-cutoff">
                         <Clock size={14} strokeWidth={1.7} className={c.urgent ? "text-emerald-600" : "text-gray-500"} />
