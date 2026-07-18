@@ -3650,6 +3650,37 @@ def _einvoice_pdf_link(order_id: str) -> str:
     return f"{base}/api/orders/{order_id}/einvoice-pdf?sig={_einvoice_pdf_sig(order_id)}"
 
 
+@router.get("/{order_id}/einvoice-pdf-debug")
+async def debug_einvoice_pdf(order_id: str, current_user: dict = Depends(require_admin)):
+    """TEŞHİS (admin): Doğan e-Fatura PDF çekimini dener; PDF baytını DÖNDÜRMEZ, yalnızca
+    başarı/hatayı, kullanılan operasyonu ve WSDL'deki mevcut operasyon adlarını verir.
+    Böylece doğru Doğan metodu ağ erişimi olan ortamda netleşir. PII sızdırmaz."""
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    _uuid = (order.get("invoice_uuid") or "").strip()
+    _iid = (order.get("invoice_dogan_id") or "").strip()
+    ds = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0}) or {}
+    if not (ds.get("enabled") and ds.get("username")):
+        return {"ok": False, "error": "Doğan yapılandırılmamış"}
+    from dogan_client import DoganClient
+    from fastapi.concurrency import run_in_threadpool
+    _cli = DoganClient(username=ds["username"], password=ds["password"], is_test=ds.get("is_test", True))
+    try:
+        ops = await run_in_threadpool(_cli._list_efatura_operations)
+    except Exception as e:
+        ops = [f"(ops list err: {e})"]
+    res = await run_in_threadpool(_cli.get_efatura_pdf, _uuid, _iid)
+    return {
+        "ok": bool(res.get("success")),
+        "has_uuid": bool(_uuid), "has_invoice_id": bool(_iid),
+        "operation_used": res.get("operation"),
+        "pdf_bytes": len(res.get("pdf") or b"") if res.get("success") else 0,
+        "error": res.get("error"),
+        "available_operations": res.get("available_operations") or ops,
+    }
+
+
 @router.get("/{order_id}/einvoice-pdf")
 async def serve_einvoice_pdf(order_id: str, sig: str = ""):
     """Sipariş e-Faturasının resmî PDF'ini Doğan'dan çekip servis eder (imzalı public link).
