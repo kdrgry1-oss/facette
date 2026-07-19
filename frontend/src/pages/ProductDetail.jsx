@@ -133,6 +133,10 @@ export default function ProductDetail() {
         workDays: Array.isArray(d["shipping.work_days"]) ? d["shipping.work_days"] : [1, 2, 3, 4, 5],
         holidays: new Set(d["official_holidays"] || []),
         exclude: d["shipping.exclude_official_holidays"] !== false,
+        // Vitrin görünüm anahtarları (İşletme Kuralları → varsayılan açık)
+        showSizeGuide: d["product.size_guide_enabled"] !== false,
+        showCompleteLook: d["product.complete_the_look_enabled"] !== false,
+        showCountdown: d["product.shipping_countdown_enabled"] !== false,
       });
     }).catch(() => {});
   }, []);
@@ -831,8 +835,8 @@ export default function ProductDetail() {
                   );
                 })}
                 </div>
-                {/* Beden Tablosu — beden butonlarıyla aynı satırda, alt hizada sağda */}
-                {(sizeTableData || sizeTableImg) && (
+                {/* Beden Tablosu — beden butonlarıyla aynı satırda, alt hizada sağda (İşletme Kuralları ile açılır/kapanır) */}
+                {(sizeTableData || sizeTableImg) && (shipCfg?.showSizeGuide !== false) && (
                   <button onClick={() => setShowSizeChart(true)} className="text-xs underline underline-offset-2 hover:no-underline whitespace-nowrap shrink-0" data-testid="show-size-table-btn">
                     Beden Tablosu
                   </button>
@@ -902,8 +906,8 @@ export default function ProductDetail() {
                     </button>
                   </div>
 
-                  {/* Kargo aciliyeti/geri sayımı — 10:30 cutoff: bugün kargoda (S saat D dakika içinde) / yarın kargoda */}
-                  {(() => {
+                  {/* Kargo aciliyeti/geri sayımı — 10:30 cutoff (İşletme Kuralları ile açılır/kapanır) */}
+                  {(shipCfg?.showCountdown !== false) && (() => {
                     const c = shippingCutoff(shipCfg);
                     return (
                       <p className="mt-3 text-xs flex items-center gap-1.5" data-testid="pdp-shipping-cutoff">
@@ -963,7 +967,7 @@ export default function ProductDetail() {
             })()}
 
             {/* Stilini Tamamla — küçük resimler (sepete ekle ile açıklama arası) */}
-            {comboProducts.length > 0 && (
+            {comboProducts.length > 0 && (shipCfg?.showCompleteLook !== false) && (
               <div className="mb-6 pb-2" data-testid="product-combo-mini">
                 <p className="text-[10px] tracking-[0.25em] uppercase text-black/60 mb-3">Stilini Tamamla</p>
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 lg:mx-0 lg:px-0">
@@ -1047,8 +1051,8 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* Combo Products — mobile: yatay snap-scroll, desktop: 4-col grid */}
-        {comboProducts.length > 0 && (
+        {/* Combo Products — mobile: yatay snap-scroll, desktop: 4-col grid (İşletme Kuralları ile açılır/kapanır) */}
+        {comboProducts.length > 0 && (shipCfg?.showCompleteLook !== false) && (
           <section className="mt-12 md:mt-16 pt-8 md:pt-10 border-t border-black/10" data-testid="product-combo-section">
             <h2 className="text-base md:text-xl font-light tracking-tight mb-5 md:mb-8 px-1">Stilini Tamamla</h2>
             {/* Mobile horizontal scroll */}

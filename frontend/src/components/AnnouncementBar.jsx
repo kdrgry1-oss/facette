@@ -17,6 +17,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function AnnouncementBar() {
   const [items, setItems] = useState([]);
   const [closed, setClosed] = useState(false);
+  const [enabled, setEnabled] = useState(true);  // İşletme Kuralları: storefront.announcement_bar_enabled
 
   useEffect(() => {
     let alive = true;
@@ -28,6 +29,10 @@ export default function AnnouncementBar() {
         setItems(list.filter((a) => a && (a.content || a.name)));
       })
       .catch(() => {});
+    // Duyuru şeridi İşletme Kuralları'ndan kapatılabilir (varsayılan açık)
+    axios.get(`${API}/business-rules`)
+      .then((r) => { if (alive && r?.data?.["storefront.announcement_bar_enabled"] === false) setEnabled(false); })
+      .catch(() => {});
     // Bu oturumda kapatıldıysa gösterme
     try {
       if (sessionStorage.getItem("facette_ann_closed") === "1") setClosed(true);
@@ -35,7 +40,7 @@ export default function AnnouncementBar() {
     return () => { alive = false; };
   }, []);
 
-  if (closed || items.length === 0) return null;
+  if (!enabled || closed || items.length === 0) return null;
 
   // İlk aktif duyuruyu göster (birden çoksa sırayla değil, en üsttekini)
   const a = items[0];

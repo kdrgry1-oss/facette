@@ -86,6 +86,20 @@ RULE_CATALOG = [
      "type": "number", "default": 60, "unit": "dakika", "options": [15, 30, 60, 120, 0],
      "help": "Panelde bu süre işlem yapılmazsa otomatik çıkış yapılır ve filtreler sıfırlanır. 0 = kapalı."},
 
+    # ---- Vitrin & Ürün Sayfası (storefront görünüm anahtarları — canlı bağlı) ----
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.size_guide_enabled", "label": "Ürün sayfasında beden tablosu göster",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Kapalıyken ürün sayfasındaki 'Beden Tablosu' butonu ve ölçü tablosu gizlenir."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.complete_the_look_enabled", "label": "'Stilini Tamamla' önerilerini göster",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Ürün sayfasındaki kombin ('Stilini Tamamla') öneri bölümünü açar/kapatır."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.shipping_countdown_enabled", "label": "Kargo geri sayımını göster",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Ürün sayfasında 'bu saate kadar sipariş ver, yarın kargoda' geri sayımını açar/kapatır."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "storefront.announcement_bar_enabled", "label": "Üst duyuru şeridini göster",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Sitenin en üstündeki duyuru/kampanya şeridini açar/kapatır."},
+
     # ---- Pazarlama & Stok ----
     {"group": "Pazarlama & Stok", "key": "marketing.abandoned_cart_min_hours", "label": "Terkedilmiş sepet — en erken hatırlatma",
      "type": "number", "default": 2, "unit": "saat", "options": [1, 2, 3, 6],
