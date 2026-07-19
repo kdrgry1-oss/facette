@@ -202,10 +202,14 @@ async def top_products(
             q["$or"].append({"id": {"$in": pids}})
         if bcs:
             q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
-        async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1}):
+        async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1,
+                                             "barcode": 1, "collection": 1, "created_at": 1, "stock_code": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
-            info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock}
+            info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock,
+                    "collection": (p.get("collection") or "").strip(),
+                    "created_at": p.get("created_at") or None,
+                    "stock_code": (p.get("stock_code") or "").strip()}
             by_id[str(p.get("id"))] = info
             if p.get("barcode"):
                 by_bc[str(p["barcode"])] = info
@@ -227,6 +231,9 @@ async def top_products(
                 "product_id": pm.get("id") or r.get("pid"), "name": name,
                 "qty": 0, "revenue": 0.0, "orders": 0,
                 "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
+                "collection": pm.get("collection") or "",
+                "created_at": pm.get("created_at"),
+                "stock_code": pm.get("stock_code") or "",
             }
         _q = int(r["qty"])
         m["qty"] += _q
@@ -236,6 +243,26 @@ async def top_products(
         m["_sizes"][_sz] = m["_sizes"].get(_sz, 0) + _q
         _pl = (r["_id"].get("plat") or "site").strip().lower() or "site"
         m["_plats"][_pl] = m["_plats"].get(_pl, 0) + _q
+    # D4 — Satış hızı (velocity) renk kodu. Seçili tarih aralığının hafta sayısına göre
+    # HAFTALIK ortalama satış hesaplanır: yeşil ≥5/hafta, sarı 1-4/hafta, kırmızı <1/hafta (~ayda 0-2).
+    try:
+        _sd = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        _ed = datetime.fromisoformat(str(e).replace("Z", "+00:00"))
+        _range_days = max(1.0, (_ed - _sd).total_seconds() / 86400.0)
+    except Exception:
+        _range_days = float(90)
+    _weeks = max(1.0, _range_days / 7.0)
+
+    def _velocity(qty: int):
+        wr = qty / _weeks
+        if wr >= 5:
+            code, label = "green", "Hızlı (haftada 5+)"
+        elif wr >= 1:
+            code, label = "yellow", "Orta (haftada 1-4)"
+        else:
+            code, label = "red", "Yavaş (ayda 0-2)"
+        return {"weekly_rate": round(wr, 1), "code": code, "label": label}
+
     out = []
     for m in merged.values():
         _sizes = sorted(m.pop("_sizes").items(), key=lambda x: -x[1])
@@ -247,9 +274,10 @@ async def top_products(
             "size_breakdown": [{"size": k, "qty": v} for k, v in _sizes],
             "top_platform": _plats[0][0] if _plats else "site",
             "platform_breakdown": [{"platform": k, "qty": v} for k, v in _plats],
+            "velocity": _velocity(int(m["qty"])),
         })
     out.sort(key=lambda x: -x["revenue"])
-    return {"items": out[:limit]}
+    return {"items": out[:limit], "range_days": round(_range_days, 1), "weeks": round(_weeks, 1)}
 
 
 # ============================================================================

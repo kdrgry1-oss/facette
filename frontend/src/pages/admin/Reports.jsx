@@ -153,6 +153,8 @@ export function ProductsReport() {
   const [sortDir, setSortDir] = useState("desc");
   const [platFilter, setPlatFilter] = useState("");
   const [sizeFilter, setSizeFilter] = useState("");
+  const [collFilter, setCollFilter] = useState("");   // D5 — koleksiyon (FcFw/FCss…)
+  const [velFilter, setVelFilter] = useState("");      // D4 — satış hızı (green/yellow/red)
   const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
@@ -171,14 +173,19 @@ export function ProductsReport() {
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
   const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
+  const collOptions = Array.from(new Set(top.map(p => (p.collection || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "tr"));
+  const velMeta = { green: { label: "Hızlı (haftada 5+)", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta (haftada 1-4)", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş (ayda 0-2)", cls: "bg-red-100 text-red-700 border-red-200" } };
   const rows = (() => {
     const f = q.trim().toLocaleLowerCase("tr");
     let r = f ? top.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f)) : [...top];
     if (platFilter) r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter));
     if (sizeFilter) r = r.filter(p => (p.size_breakdown || []).some(x => x.size === sizeFilter));
+    if (collFilter) r = r.filter(p => (p.collection || "").trim() === collFilter);
+    if (velFilter) r = r.filter(p => (p.velocity || {}).code === velFilter);
     r.sort((a, b) => {
+      if (sortKey === "velocity") { const va = (a.velocity || {}).weekly_rate ?? -1, vb = (b.velocity || {}).weekly_rate ?? -1; return sortDir === "asc" ? va - vb : vb - va; }
       let va = a[sortKey], vb = b[sortKey];
-      if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
+      if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform" || sortKey === "collection") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
       va = va ?? -1; vb = vb ?? -1; return sortDir === "asc" ? va - vb : vb - va;
     });
     return r;
@@ -230,6 +237,18 @@ export function ProductsReport() {
               <option value="">Tüm Bedenler</option>
               {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+            {collOptions.length > 0 && (
+              <select value={collFilter} onChange={e => setCollFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+                <option value="">Tüm Koleksiyonlar</option>
+                {collOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
+            <select value={velFilter} onChange={e => setVelFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+              <option value="">Tüm Hızlar</option>
+              <option value="green">🟢 Hızlı (haftada 5+)</option>
+              <option value="yellow">🟡 Orta (haftada 1-4)</option>
+              <option value="red">🔴 Yavaş (ayda 0-2)</option>
+            </select>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Ürün ara…" className="border rounded-lg px-3 py-1.5 text-sm w-48" />
           </div>
         </div>
@@ -238,6 +257,7 @@ export function ProductsReport() {
             <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
               <tr>
                 <SortTh k="name">Ürün</SortTh>
+                <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="qty" right>Adet</SortTh>
                 <SortTh k="revenue" right>Ciro</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
@@ -254,6 +274,14 @@ export function ProductsReport() {
                 <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(key)}>
                   <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
                     <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
+                    {p.collection ? <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-500 rounded">{p.collection}</span> : null}
+                  </td>
+                  <td className="p-3">
+                    {p.velocity ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border ${(velMeta[p.velocity.code] || {}).cls || ""}`} title={`${p.velocity.weekly_rate}/hafta`}>
+                        {(velMeta[p.velocity.code] || {}).label || p.velocity.code}
+                      </span>
+                    ) : "—"}
                   </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
@@ -265,7 +293,7 @@ export function ProductsReport() {
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={6} className="px-8 py-3">
+                    <td colSpan={7} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
@@ -290,7 +318,7 @@ export function ProductsReport() {
                 </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
         </div>
