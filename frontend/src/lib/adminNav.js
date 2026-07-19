@@ -9,7 +9,7 @@ import {
   Megaphone, FileText, Settings, Palette, Plug, RotateCcw, Store, GitMerge, XCircle, Trash2,
   Cable, Building2, Shield, Factory, Users, Ruler, MessageSquare, PenTool,
   Truck, CreditCard, AlertTriangle, TrendingUp, Link2, BellRing, CheckSquare, Code, Lock, Brain, Mail, Rss,
-  Instagram,
+  Instagram, GraduationCap,
 } from "lucide-react";
 
 // Default sıralama (kullanıcı tercihi yoksa kullanılır):
@@ -107,6 +107,12 @@ export const navigationGroups = [
     label: "Görevler",
     path: "/admin/gorevler",
     icon: CheckSquare,
+  },
+  {
+    key: "egitim",
+    label: "Eğitim & Yardım",
+    path: "/admin/egitim",
+    icon: GraduationCap,
   },
   {
     key: "pazarlama",

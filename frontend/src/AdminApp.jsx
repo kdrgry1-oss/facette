@@ -50,6 +50,7 @@ import {
 import AdminTasks from "./pages/admin/AdminTasks";
 import BusinessRules from "./pages/admin/BusinessRules";
 import CustomTheme from "./pages/admin/CustomTheme";
+import TrainingPanel from "./pages/admin/TrainingPanel";
 import EInvoiceSettings from "./pages/admin/EInvoiceSettings";
 import CargoSettings from "./pages/admin/CargoSettings";
 import NotificationSettings from "./pages/admin/NotificationSettings";
@@ -123,6 +124,7 @@ export default function AdminApp() {
         <Route path="ayarlar" element={<AdminSettings />} />
         <Route path="ayarlar/isletme-kurallari" element={<BusinessRules />} />
         <Route path="ayarlar/ozel-tema" element={<CustomTheme />} />
+        <Route path="egitim" element={<TrainingPanel />} />
         <Route path="ayarlar/menu-duzeni" element={<MenuSettings />} />
         <Route path="ayarlar/e-fatura" element={<EInvoiceSettings />} />
         <Route path="ayarlar/kargo" element={<CargoSettings />} />
