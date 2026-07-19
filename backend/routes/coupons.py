@@ -14,6 +14,7 @@ Admin:  /api/admin/coupons  CRUD + stats
 from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timezone
 from typing import Optional, List
+import re
 import uuid
 
 from .deps import db, require_admin, require_auth, logger
