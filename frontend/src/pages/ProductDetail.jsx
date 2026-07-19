@@ -200,11 +200,6 @@ export default function ProductDetail() {
   const [justAdded, setJustAdded] = useState(false);
   // Size Table (HTML) - fetched via public endpoint. Hooks must live at top level.
   const [sizeTableData, setSizeTableData] = useState(null);
-  // Beden tablosu görselleri eskiden {is_size_table:true} dict'i olarak işaretliydi; bir
-  // görsel taşıma işlemi bu işareti düşürüp düz URL'e çevirmiş → 1200×1800 ölçü tablosu
-  // görselleri müşteri galerisine sızıyor ve "Beden Tablosu" görünmüyor. Çözüm: tarayıcıda
-  // gerçek boyutu ölç; TAM 1200×1800 (ölçü tablosu tuvali) olanları beden tablosu say.
-  const [detectedChartUrls, setDetectedChartUrls] = useState(() => new Set());
   // "Gelince Haber Ver" — stokta olmayan beden için e-posta toplama
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState("");
@@ -330,35 +325,6 @@ export default function ProductDetail() {
     axios.get(`${API}/size-tables-public/${pid}`)
       .then(res => { if (res.data?.exists) setSizeTableData(res.data); })
       .catch(() => { /* no table */ });
-  }, [product?.id]);
-
-  // İşareti kaybolmuş ölçü tablosu görsellerini tarayıcıda ölçerek yakala (TAM 1200×1800).
-  // Kapak (index 0) asla gizlenmez; zaten is_size_table işaretli dict'ler ayrıca ele alınır.
-  useEffect(() => {
-    const imgs = product?.images || [];
-    const norm = (im) => (typeof im === "object" && im !== null ? (im.url || im.src || im.image || "") : im);
-    if (!imgs.length) { setDetectedChartUrls(new Set()); return; }
-    let cancelled = false;
-    const found = new Set();
-    let pending = 0;
-    const flush = () => { if (!cancelled) setDetectedChartUrls(new Set(found)); };
-    imgs.forEach((im, i) => {
-      if (i === 0) return;                                       // kapak görselini koru
-      if (typeof im === "object" && im !== null && im.is_size_table) return;  // zaten işaretli
-      const url = norm(im);
-      if (!url || typeof url !== "string") return;
-      pending++;
-      const probe = new window.Image();
-      probe.onload = () => {
-        if (probe.naturalWidth === 1200 && probe.naturalHeight === 1800) found.add(url);
-        if (--pending === 0) flush();
-      };
-      probe.onerror = () => { if (--pending === 0) flush(); };
-      probe.src = url;
-    });
-    if (pending === 0) setDetectedChartUrls(new Set());
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id]);
 
   useEffect(() => {
@@ -581,11 +547,6 @@ export default function ProductDetail() {
     for (const img of allImages) {
       if (typeof img === "object" && img !== null && img.is_size_table && img.url) return img.url;
     }
-    // İşareti kaybolmuş ama 1200×1800 olarak saptanan görsel → beden tablosu görseli.
-    for (const img of allImages) {
-      const u = (typeof img === "object" && img !== null) ? (img.url || img.src || img.image || "") : img;
-      if (u && detectedChartUrls.has(u)) return u;
-    }
     return null;
   })();
 
@@ -594,8 +555,7 @@ export default function ProductDetail() {
   const displayImages = uniqueImages
     .filter((img) => !(typeof img === 'object' && img !== null && img.is_size_table))
     .map((img) => (typeof img === 'object' && img !== null ? (img.url || img.src || img.image || '') : img))
-    .filter(Boolean)
-    .filter((u) => !detectedChartUrls.has(u));  // 1200×1800 ölçü tablosunu müşteri galerisinden çıkar
+    .filter(Boolean);
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({

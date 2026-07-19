@@ -285,6 +285,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"CAPI retry loop start warning: {e}")
 
+    # Tek seferlik onarım: ölçü tablosu görsellerinin kaybolan is_size_table işareti
+    # (bayrakla korunur — yalnız bir kez çalışır; arka planda, startup'ı bloklamaz)
+    try:
+        import asyncio as _asyncio
+        from routes.size_tables import repair_size_table_markers
+        _asyncio.create_task(repair_size_table_markers())
+    except Exception as e:
+        logger.warning(f"Size-table marker repair start warning: {e}")
+
     # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
     # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
     # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve

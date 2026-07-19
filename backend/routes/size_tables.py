@@ -276,6 +276,75 @@ async def generate_size_table_image(product_id: str, current_user: dict = Depend
     return {"success": True, "data_url": data_url, "image_bytes": len(png)}
 
 
+# ---------------------------------------------------------------------------
+# TEK SEFERLİK ONARIM: ölçü tablosu görsellerinin kaybolan is_size_table işareti.
+# Bir görsel taşıma/dönüştürme işlemi {url, is_size_table:true} dict'lerini düz URL
+# string'ine çevirmiş → tablo görselleri müşteri galerisine sızdı ve "Beden Tablosu"
+# butonu kayboldu. Tespit (gerçek veriyle doğrulandı): tablo görselleri 1200×1800 ve
+# DÖRT kenar şeridi SAF BEYAZ (mean=255) — ürün fotoğrafları (stüdyo fonu) asla değil.
+# Yalnız /uploads/ string URL'leri taranır; kapak (index 0) asla işaretlenmez.
+# ---------------------------------------------------------------------------
+
+def _is_chart_image_sync(url: str) -> bool:
+    import requests as _req
+    from PIL import ImageStat
+    r = _req.get(url, timeout=25)
+    r.raise_for_status()
+    im = Image.open(BytesIO(r.content))
+    if im.size != (1200, 1800):
+        return False
+    g = im.convert("L")
+    w, h = g.size
+    b = 25
+    for box in [(0, 0, w, b), (0, h - b, w, h), (0, 0, b, h), (w - b, 0, w, h)]:
+        if ImageStat.Stat(g.crop(box)).mean[0] < 254.0:
+            return False
+    return True
+
+
+async def repair_size_table_markers():
+    """Startup'ta bir kez çalışır (settings bayrağıyla korunur)."""
+    import asyncio
+    flag = await db.settings.find_one({"id": "size_table_marker_repair"}, {"_id": 0})
+    if flag and flag.get("done"):
+        return
+    scanned = marked = prods = 0
+    cursor = db.products.find(
+        {"images": {"$elemMatch": {"$regex": "/uploads/"}}},
+        {"_id": 0, "id": 1, "images": 1},
+    )
+    async for p in cursor:
+        imgs = p.get("images") or []
+        new_imgs, changed = [], False
+        for i, im in enumerate(imgs):
+            if i > 0 and isinstance(im, str) and "/uploads/" in im:
+                scanned += 1
+                try:
+                    is_chart = await asyncio.to_thread(_is_chart_image_sync, im)
+                except Exception:
+                    is_chart = False
+                if is_chart:
+                    new_imgs.append({
+                        "id": str(uuid.uuid4()), "url": im, "is_size_table": True,
+                        "alt": "Ölçü Tablosu",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    changed = True
+                    marked += 1
+                    continue
+            new_imgs.append(im)
+        if changed:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"images": new_imgs}})
+            prods += 1
+    await db.settings.update_one(
+        {"id": "size_table_marker_repair"},
+        {"$set": {"done": True, "scanned": scanned, "marked": marked, "products": prods,
+                  "at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    logger.info(f"[size-table repair] tarandı={scanned} işaretlendi={marked} ürün={prods}")
+
+
 # Public endpoint for storefront – no auth
 public_router = APIRouter(prefix="/size-tables-public", tags=["size-tables-public"])
 
