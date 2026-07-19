@@ -996,11 +996,24 @@ async def get_products(
             }},
             {"$addFields": {"_in_stock": {"$cond": [{"$gt": ["$_eff_stock", 0]}, 1, 0]}}},
             {"$addFields": {"_card_num": {"$convert": {"input": "$urun_karti_id", "to": "long", "onError": 0, "onNull": 0}}}},
-            ({"$sort": {"_in_stock": -1, "_card_num": -1, "_id": -1}} if _card_sort
-             else {"$sort": {"_in_stock": -1, sort: sort_order, "_id": 1}}),
+        ]
+        # ALAKA (E3): arama varken İSİMDE geçen ürün önce gelsin (stoktakiler arasında).
+        # Böylece "büstiyer" arayınca yalnız açıklamada geçen alakasız ürün üste çıkmaz.
+        if search:
+            _rx = _search_tr_regex(search)
+            pipeline.append({"$addFields": {"_rel": {"$add": [
+                {"$cond": [{"$regexMatch": {"input": {"$toString": {"$ifNull": ["$name", ""]}}, "regex": _rx, "options": "i"}}, 100, 0]},
+                {"$cond": [{"$regexMatch": {"input": {"$toString": {"$ifNull": ["$category_name", ""]}}, "regex": _rx, "options": "i"}}, 30, 0]},
+            ]}}})
+            pipeline.append({"$sort": {"_in_stock": -1, "_rel": -1, sort: sort_order, "_id": 1}})
+        elif _card_sort:
+            pipeline.append({"$sort": {"_in_stock": -1, "_card_num": -1, "_id": -1}})
+        else:
+            pipeline.append({"$sort": {"_in_stock": -1, sort: sort_order, "_id": 1}})
+        pipeline += [
             {"$skip": skip},
             {"$limit": limit},
-            {"$project": {"_id": 0, "_eff_stock": 0, "_in_stock": 0, "_card_num": 0}},
+            {"$project": {"_id": 0, "_eff_stock": 0, "_in_stock": 0, "_card_num": 0, "_rel": 0}},
         ]
         products = await db.products.aggregate(pipeline, allowDiskUse=True).to_list(limit)
     else:
