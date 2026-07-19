@@ -8,6 +8,13 @@ const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("toke
 
 // Trendyol Facette mağazasından 4-5★ yorumları toplu çekme paneli. Ürünleri barkodla
 // Trendyol listelemesine eşleştirir, public storefront'tan yorumları çeker, product_reviews'a yazar.
+const SYNC_STATUS_META = {
+  cekildi:   { label: "Çekildi",     cls: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  yorum_yok: { label: "Yorum yok",   cls: "bg-gray-100 text-gray-600 border-gray-200" },
+  eslesmedi: { label: "Eşleşmedi",   cls: "bg-amber-100 text-amber-800 border-amber-200" },
+  hata:      { label: "Hata",        cls: "bg-red-100 text-red-700 border-red-200" },
+};
+
 function TrendyolReviewSync() {
   const [minRating, setMinRating] = useState(3);
   const [busy, setBusy] = useState(false);
@@ -15,12 +22,37 @@ function TrendyolReviewSync() {
   const [workerUrl, setWorkerUrl] = useState("");
   const [cfgSaved, setCfgSaved] = useState(false);
   const [byProduct, setByProduct] = useState(null);
+  // Arka plan senkron durumu: {state:{status,done_products,total_products,...}, counts, products}
+  const [sync, setSync] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("");
 
   const loadByProduct = () => {
     axios.get(`${API}/integrations/trendyol/reviews/by-product?limit=500`, { headers: authHeaders() })
       .then((r) => setByProduct(r.data))
       .catch(() => {});
   };
+
+  const loadSyncStatus = () => {
+    return axios.get(`${API}/integrations/trendyol/reviews/sync-status`, { headers: authHeaders() })
+      .then((r) => { setSync(r.data); return r.data; })
+      .catch(() => null);
+  };
+
+  // Senkron çalışırken 4 sn'de bir durumu tazele; bitince ürün listesini yenile.
+  useEffect(() => {
+    if (sync?.state?.status !== "running") return;
+    const t = setInterval(async () => {
+      const d = await loadSyncStatus();
+      if (d && d.state?.status !== "running") {
+        clearInterval(t);
+        loadByProduct();
+        if (d.state?.status === "done") toast.success("Yorum senkronu tamamlandı");
+        else if (d.state?.status === "error") toast.error(`Senkron hata verdi: ${d.state?.error || ""}`);
+      }
+    }, 4000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync?.state?.status]);
 
   useEffect(() => {
     axios.get(`${API}/integrations/trendyol/reviews/fetch-config`, { headers: authHeaders() })
@@ -30,6 +62,7 @@ function TrendyolReviewSync() {
       })
       .catch(() => {});
     loadByProduct();
+    loadSyncStatus();
   }, []);
 
   const saveWorker = async () => {
@@ -42,19 +75,21 @@ function TrendyolReviewSync() {
     } catch { toast.error("Kaydedilemedi"); }
   };
 
-  const run = async (dryRun) => {
+  // Senkron artık ARKA PLANDA çalışır (uzun tarama HTTP zaman aşımına takılıp
+  // "senkron başarısız" görünüyordu). Tekrar basıldığında yalnız daha önce yorum
+  // çekilemeyen ürünler denenir (only_missing) — "Tümünü baştan" ile hepsi.
+  const run = async (onlyMissing = true) => {
     setBusy(true); setResult(null);
     try {
       const { data } = await axios.post(
         `${API}/integrations/trendyol/reviews/sync-all`,
-        { min_rating: Number(minRating), limit: 0, dry_run: dryRun },
-        { headers: authHeaders(), timeout: 600000 },
+        { min_rating: Number(minRating), limit: 0, dry_run: false, only_missing: onlyMissing },
+        { headers: authHeaders(), timeout: 30000 },
       );
-      setResult(data);
-      toast.success(dryRun ? "Önizleme tamamlandı" : `${data?.total_inserted ?? 0} yorum eklendi`);
-      if (!dryRun) loadByProduct();
+      toast.success(data?.message || "Senkron arka planda başladı");
+      await loadSyncStatus();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Senkron başarısız");
+      toast.error(e?.response?.data?.detail || "Senkron başlatılamadı");
     } finally { setBusy(false); }
   };
 
@@ -101,15 +136,99 @@ function TrendyolReviewSync() {
             <option value={5}>Sadece 5 yıldız</option>
           </select>
         </label>
-        <button onClick={() => run(true)} disabled={busy}
-          className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
-          Önizle (yazmadan say)
+        <button onClick={() => run(true)} disabled={busy || sync?.state?.status === "running"}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50"
+          title="Daha önce yorumu çekilemeyen ürünler denenir">
+          <Download size={14} className={busy ? "animate-pulse" : ""} />
+          {sync?.state?.status === "running" ? "Çekiliyor (arka planda)…" : "Yorumları Çek (yalnız eksikler)"}
         </button>
-        <button onClick={() => run(false)} disabled={busy}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50">
-          <Download size={14} className={busy ? "animate-pulse" : ""} /> {busy ? "Çekiliyor…" : "Yorumları Çek"}
+        <button onClick={() => run(false)} disabled={busy || sync?.state?.status === "running"}
+          className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+          title="Tüm ürünler baştan taranır (uzun sürer)">
+          Tümünü Baştan Çek
         </button>
       </div>
+
+      {/* Canlı ilerleme — senkron arka planda çalışırken */}
+      {sync?.state?.status === "running" && (
+        <div className="mt-3 bg-orange-50 border border-orange-200 rounded-lg p-3" data-testid="review-sync-progress">
+          <div className="flex justify-between text-xs text-orange-800 mb-1.5">
+            <span className="font-semibold">
+              Senkron çalışıyor… {sync.state.done_products ?? 0} / {sync.state.total_products ?? "?"} ürün
+              {sync.state.skipped_already > 0 && <> · {sync.state.skipped_already} ürün zaten çekilmiş (atlandı)</>}
+            </span>
+            <span>{sync.state.inserted ?? 0} yorum eklendi</span>
+          </div>
+          <div className="h-1.5 bg-orange-200 rounded overflow-hidden">
+            <div className="h-full bg-orange-600 transition-all duration-500"
+              style={{ width: `${Math.min(100, ((sync.state.done_products || 0) / Math.max(1, sync.state.total_products || 1)) * 100)}%` }} />
+          </div>
+          {sync.state.last_product && (
+            <p className="text-[11px] text-orange-700 mt-1.5">Şu an: {sync.state.last_product}</p>
+          )}
+        </div>
+      )}
+      {sync?.state?.status === "error" && (
+        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+          Son senkron hata verdi: {sync.state.error || "bilinmeyen hata"} — "Yorumları Çek" ile yeniden deneyin (yalnız eksikler denenir).
+        </div>
+      )}
+
+      {/* Ürün bazında çekildi/çekilemedi listesi */}
+      {sync?.products?.length > 0 && (
+        <div className="mt-4 border-t pt-3" data-testid="review-sync-product-status">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <h3 className="text-sm font-bold">Senkron Durumu — Ürün Bazında</h3>
+            <div className="flex gap-1.5 flex-wrap">
+              <button onClick={() => setStatusFilter("")}
+                className={`text-[11px] px-2 py-1 rounded border ${statusFilter === "" ? "bg-black text-white border-black" : "bg-white text-gray-600"}`}>
+                Tümü ({sync.products.length})
+              </button>
+              {Object.entries(SYNC_STATUS_META).map(([k, m]) => (
+                (sync.counts?.[k] || 0) > 0 && (
+                  <button key={k} onClick={() => setStatusFilter(k)}
+                    className={`text-[11px] px-2 py-1 rounded border ${statusFilter === k ? "bg-black text-white border-black" : m.cls}`}>
+                    {m.label} ({sync.counts[k]})
+                  </button>
+                )
+              ))}
+            </div>
+          </div>
+          <div className="max-h-96 overflow-y-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
+                <tr>
+                  <th className="text-left p-2.5">Ürün</th>
+                  <th className="text-left p-2.5">Durum</th>
+                  <th className="text-right p-2.5">Çekilen</th>
+                  <th className="text-right p-2.5">Eklenen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sync.products.filter((r) => !statusFilter || r.status === statusFilter).map((r) => {
+                  const m = SYNC_STATUS_META[r.status] || { label: r.status, cls: "bg-gray-100 text-gray-600" };
+                  return (
+                    <tr key={r.product_id} className="border-t">
+                      <td className="p-2.5">
+                        <a href={`/admin/urunler/${r.product_id}`} className="hover:underline">{r.name || r.product_id}</a>
+                        {r.error && <div className="text-[10px] text-red-500 truncate max-w-md">{r.error}</div>}
+                      </td>
+                      <td className="p-2.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${m.cls}`}>{m.label}</span>
+                      </td>
+                      <td className="p-2.5 text-right tabular-nums">{r.fetched ?? 0}</td>
+                      <td className="p-2.5 text-right tabular-nums font-semibold">{r.inserted ?? 0}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1.5">
+            "Yorumları Çek" tekrar basıldığında yalnız <b>Çekildi olmayan</b> (eşleşmedi / yorum yok / hata) ürünler yeniden denenir.
+          </p>
+        </div>
+      )}
       {result && (
         <div className="mt-3 text-xs bg-gray-50 border rounded-lg p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div><span className="text-gray-500">Trendyol ürün:</span> <b>{result.trendyol_products_indexed ?? "—"}</b></div>

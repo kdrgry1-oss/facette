@@ -791,7 +791,24 @@ async def _recalc_product_rating(local_pid: str) -> None:
         )
 
 
-async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dry_run: bool = False) -> dict:
+async def _review_sync_state_bump(done=0, matched=0, fetched=0, inserted=0, err=0, last_name=""):
+    """İlerleme sayaçları + kalp atışı — panel canlı izler."""
+    inc = {}
+    if done: inc["done_products"] = done
+    if matched: inc["matched"] = matched
+    if fetched: inc["fetched"] = fetched
+    if inserted: inc["inserted"] = inserted
+    if err: inc["errors"] = err
+    upd = {"$set": {"heartbeat": datetime.now(timezone.utc).isoformat()}}
+    if last_name:
+        upd["$set"]["last_product"] = last_name[:80]
+    if inc:
+        upd["$inc"] = inc
+    await db.settings.update_one({"id": "trendyol_review_sync_state"}, upd, upsert=True)
+
+
+async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dry_run: bool = False,
+                                         only_missing: bool = False) -> dict:
     """
     TÜM aktif site ürünleri için Trendyol public yorumlarını (>= min_rating) çeker.
 
@@ -863,6 +880,31 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
     if limit and limit > 0:
         products = products[:limit]
 
+    # "Yalnız eksikleri çek": daha önce yorumu BAŞARIYLA çekilmiş ürünler atlanır —
+    # tekrar basıldığında yalnız çekilemeyenler (eşleşmeyen/hatalı/yorumsuz) denenir.
+    skipped_already = 0
+    if only_missing:
+        done_ids = set()
+        async for r in db.trendyol_review_sync_products.find(
+                {"fetched": {"$gt": 0}}, {"_id": 0, "product_id": 1}):
+            done_ids.add(r.get("product_id"))
+        before = len(products)
+        products = [p for p in products if p.get("id") not in done_ids]
+        skipped_already = before - len(products)
+
+    # İlerleme durumu — arka plan senkronu panelden canlı izlenir.
+    await db.settings.update_one(
+        {"id": "trendyol_review_sync_state"},
+        {"$set": {"status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
+                  "total_products": len(products), "done_products": 0, "matched": 0,
+                  "fetched": 0, "inserted": 0, "errors": 0, "dry_run": dry_run,
+                  "only_missing": only_missing, "skipped_already": skipped_already,
+                  "last_product": "", "error": "",
+                  "heartbeat": datetime.now(timezone.utc).isoformat()},
+         "$unset": {"finished_at": ""}},
+        upsert=True,
+    )
+
     summary = {
         "trendyol_products_indexed": len(bc_to_cid),
         "site_products": len(products),
@@ -894,10 +936,20 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
             cid = bc_to_cid.get(bc)
             if cid and cid not in cids:
                 cids.append(cid)
+        _prod_base = {"product_id": pid, "name": p.get("name") or "",
+                      "last_sync_at": datetime.now(timezone.utc).isoformat()}
         if not cids:
             summary["unmatched_products"] += 1
+            if not dry_run:
+                await db.trendyol_review_sync_products.update_one(
+                    {"product_id": pid},
+                    {"$set": {**_prod_base, "status": "eslesmedi", "fetched": 0, "inserted": 0, "error": ""}},
+                    upsert=True)
+            await _review_sync_state_bump(done=1, last_name=p.get("name") or "")
             continue
         summary["matched_products"] += 1
+        _p_fetched = _p_inserted = 0
+        _p_err = ""
         for cid in cids:
             # Trendyol hız sınırını aşmamak için istekler arası kısa bekleme (rate-limit → 502).
             await asyncio.sleep(0.35)
@@ -905,9 +957,11 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
                 fetched = await _fetch_reviews_for_content_id(cid, min_rating)
             except Exception as e:
                 summary["errors"].append({"product_id": pid, "content_id": cid, "error": str(e)[:160]})
+                _p_err = str(e)[:160]
                 continue
             summary["content_ids_scraped"] += 1
             summary["total_fetched"] += len(fetched)
+            _p_fetched += len(fetched)
             if dry_run:
                 summary["total_inserted"] += sum(1 for r in fetched if int(r.get("rate") or 0) >= min_rating)
                 continue
@@ -916,14 +970,29 @@ async def sync_all_trendyol_reviews_core(min_rating: int = 4, limit: int = 0, dr
             summary["total_updated"] += res.get("updated", 0)
             summary["skipped_low_rating"] += res["skipped_low_rating"]
             summary["skipped_existing"] += res["skipped_existing"]
+            _p_inserted += res["inserted"]
         if not dry_run:
             await _recalc_product_rating(pid)
+            _p_status = "cekildi" if _p_fetched > 0 else ("hata" if _p_err else "yorum_yok")
+            await db.trendyol_review_sync_products.update_one(
+                {"product_id": pid},
+                {"$set": {**_prod_base, "status": _p_status, "fetched": _p_fetched,
+                          "inserted": _p_inserted, "error": _p_err}},
+                upsert=True)
+        await _review_sync_state_bump(done=1, matched=1, fetched=_p_fetched,
+                                      inserted=_p_inserted, err=1 if _p_err else 0,
+                                      last_name=p.get("name") or "")
 
     # Teşhis: hangi bağlantı hedefi çalıştı / kaç aday denendi (530 sorunu için).
     debug["public_candidates"] = _pin_state.get("candidates")
     debug["public_good_target"] = None if _pin_state.get("good") in (_UNSET, None) else _pin_state.get("good")
     debug["review_proxy_set"] = bool(_pin_state.get("proxy"))
     debug["review_worker_set"] = bool(_pin_state.get("worker"))
+    await db.settings.update_one(
+        {"id": "trendyol_review_sync_state"},
+        {"$set": {"status": "done", "finished_at": datetime.now(timezone.utc).isoformat(),
+                  "heartbeat": datetime.now(timezone.utc).isoformat()}},
+    )
     return summary
 
 
@@ -951,16 +1020,59 @@ async def sync_all_trendyol_reviews(
     min_rating = max(1, min(5, min_rating))
     limit = int(payload.get("limit", 0) or 0)
     dry_run = bool(payload.get("dry_run", False))
+    # Varsayılan: yalnız daha önce yorumu çekilemeyen ürünler denenir (tekrar basınca
+    # baştan hepsini taramaz). "Tümünü baştan" için only_missing:false gönderilir.
+    only_missing = bool(payload.get("only_missing", True))
 
-    summary = await sync_all_trendyol_reviews_core(min_rating=min_rating, limit=limit, dry_run=dry_run)
-    try:
-        await log_integration_event(
-            "trendyol", "review_sync_all", "bulk", "all", "success",
-            f"matched={summary['matched_products']} inserted={summary['total_inserted']} dry_run={dry_run}",
-        )
-    except Exception:
-        pass
-    return {"success": True, **summary}
+    # Zaten çalışan bir senkron varsa ikinciyi başlatma (10 dk kalp atışı toleransı).
+    st = await db.settings.find_one({"id": "trendyol_review_sync_state"}, {"_id": 0}) or {}
+    if st.get("status") == "running":
+        try:
+            _hb = datetime.fromisoformat(str(st.get("heartbeat")))
+            if (datetime.now(timezone.utc) - _hb).total_seconds() < 600:
+                raise HTTPException(status_code=409, detail="Senkron zaten çalışıyor — ilerlemeyi listeden izleyin")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # bozuk/eski kalp atışı → yeni senkrona izin ver
+
+    # ARKA PLANDA çalıştır: tüm katalog taraması dakikalar sürer, HTTP isteği
+    # Cloudflare/Railway zaman aşımına takılıp "senkron başarısız" görünüyordu.
+    async def _runner():
+        try:
+            summary = await sync_all_trendyol_reviews_core(
+                min_rating=min_rating, limit=limit, dry_run=dry_run, only_missing=only_missing)
+            try:
+                await log_integration_event(
+                    "trendyol", "review_sync_all", "bulk", "all", "success",
+                    f"matched={summary['matched_products']} inserted={summary['total_inserted']} dry_run={dry_run}",
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            await db.settings.update_one(
+                {"id": "trendyol_review_sync_state"},
+                {"$set": {"status": "error", "error": str(e)[:300],
+                          "finished_at": datetime.now(timezone.utc).isoformat(),
+                          "heartbeat": datetime.now(timezone.utc).isoformat()}},
+                upsert=True)
+
+    asyncio.create_task(_runner())
+    return {"success": True, "started": True,
+            "message": "Senkron arka planda başladı — ilerleme aşağıdaki listede canlı görünür"}
+
+
+@router.get("/trendyol/reviews/sync-status")
+async def trendyol_review_sync_status(current_user: dict = Depends(require_admin)):
+    """Arka plan yorum senkronunun canlı durumu + ürün bazında çekildi/çekilemedi listesi."""
+    st = await db.settings.find_one({"id": "trendyol_review_sync_state"}, {"_id": 0}) or {}
+    rows = await db.trendyol_review_sync_products.find({}, {"_id": 0}) \
+        .sort([("status", 1), ("last_sync_at", -1)]).to_list(3000)
+    counts: dict = {}
+    for r in rows:
+        k = r.get("status") or "?"
+        counts[k] = counts.get(k, 0) + 1
+    return {"state": st, "counts": counts, "products": rows}
 
 
 @router.get("/trendyol/reviews/by-product")
