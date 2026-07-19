@@ -373,8 +373,14 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
     if not c.get("is_active"):
         return {"valid": False, "reason": "Kupon pasif", "discount": 0}
     # Odeme yontemi filtresi: kampanyanin payment_methods listesi doluysa, secili yontem listede olmali.
+    # ÖNEMLİ (önizleme): Sepet/vitrin değerlendirmesinde henüz ödeme yöntemi SEÇİLMEMİŞ olur
+    # (payment_method boş). Bu durumda kampanyayı reddetmek, ödeme-kısıtlı kampanyalı ürünü
+    # sepette "indirimsiz" gösteriyordu (rozet 10% var ama sepet tam fiyat). Bu yüzden yöntem
+    # BOŞken kısıt UYGULANMAZ — indirim iyimser gösterilir; müşteri bir yöntem seçince (ve sipariş
+    # oluşturmada payment_method HER ZAMAN dolu geldiğinden) kısıt orada gerçekten uygulanır →
+    # çekilen tutar doğru kalır.
     _pms = c.get("payment_methods") or []
-    if _pms and _norm_pm(payment_method) not in [_norm_pm(x) for x in _pms]:
+    if _pms and payment_method and _norm_pm(payment_method) not in [_norm_pm(x) for x in _pms]:
         return {"valid": False, "reason": "Bu kampanya bu ödeme yönteminde geçerli değil", "discount": 0}
     now = datetime.now(timezone.utc)
     if c.get("start_at") and c["start_at"] > now.isoformat():
