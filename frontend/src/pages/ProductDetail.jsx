@@ -667,10 +667,12 @@ export default function ProductDetail() {
               )}
             </div>
 
-            {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü) */}
-            <div className="hidden lg:flex gap-4">
+            {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü).
+                Küçük resimler biraz büyük (92px), ana görsel max-genişlikle sınırlı
+                (aşırı uzamasın) — kullanıcı isteği. */}
+            <div className="hidden lg:flex gap-4 justify-center">
               {displayImages.length > 1 && (
-                <div className="flex flex-col gap-2 w-[70px] shrink-0">
+                <div className="flex flex-col gap-2 w-[92px] shrink-0">
                   {displayImages.map((img, index) => (
                     <button
                       key={index}
@@ -693,7 +695,7 @@ export default function ProductDetail() {
                   ))}
                 </div>
               )}
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 lg:max-w-[480px]">
                 <div
                   className="relative aspect-[2/3] bg-stone-50 overflow-hidden cursor-zoom-in"
                   onMouseEnter={() => setZoom((z) => ({ ...z, on: true }))}
@@ -1321,8 +1323,10 @@ export default function ProductDetail() {
               <button onClick={() => setShowSizeChart(false)} className="p-1"><X size={18} /></button>
             </div>
             {!sizeTableData && sizeTableImg && (
-              <div className="p-4" data-testid="size-table-image">
-                <img src={optimizeImg(sizeTableImg, 1000)} alt="Beden Tablosu" className="w-full h-auto" />
+              <div className="p-4 flex justify-center" data-testid="size-table-image">
+                {/* object-contain + max-yükseklik: orantı bozulmadan, gereksiz uzamadan sığar */}
+                <img src={optimizeImg(sizeTableImg, 1000)} alt="Beden Tablosu"
+                     className="max-w-full max-h-[75vh] w-auto h-auto object-contain" />
               </div>
             )}
             {sizeTableData && (
@@ -1333,7 +1337,8 @@ export default function ProductDetail() {
                   <img
                     src={optimizeImg(product.images?.[0] || product.image, 500)}
                     alt={product.name}
-                    className="w-40 sm:w-44 aspect-[3/4] object-cover object-top flex-shrink-0 bg-gray-50"
+                    /* self-start: sağdaki uzun metin yüzünden dikey ESNEMESİN; 3/4 oranı korunur */
+                    className="w-40 sm:w-44 aspect-[3/4] object-cover object-top flex-shrink-0 self-start bg-gray-50"
                     loading="lazy"
                   />
                 )}
