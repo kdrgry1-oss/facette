@@ -38,6 +38,7 @@ import Members from "./pages/admin/Members";
 import Attribution from "./pages/admin/Attribution";
 import SizeTablesList from "./pages/admin/SizeTablesList";
 import Coupons from "./pages/admin/Coupons";
+import GiftCards from "./pages/admin/GiftCards";
 import ProductReviews from "./pages/admin/ProductReviews";
 import AbandonedCarts from "./pages/admin/AbandonedCarts";
 import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
@@ -174,6 +175,7 @@ export default function AdminApp() {
         <Route path="temu-eslestir" element={<Navigate to="/admin/kategori-eslestir" replace />} />
         <Route path="olcu-tablolari" element={<SizeTablesList />} />
         <Route path="kuponlar" element={<Coupons />} />
+        <Route path="hediye-cekleri" element={<GiftCards />} />
         <Route path="yorumlar" element={<ProductReviews />} />
         <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
         <Route path="raporlar/karlilik" element={<ProfitabilityAnalysis />} />

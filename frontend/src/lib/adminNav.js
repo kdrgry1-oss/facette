@@ -122,6 +122,7 @@ export const navigationGroups = [
       { label: "Kampanyalar", path: "/admin/kampanyalar", icon: Megaphone },
       { label: "Kargo/Ödeme Kuralları", path: "/admin/kargo-odeme-kurallari", icon: Truck },
       { label: "Kuponlar", path: "/admin/kuponlar", icon: Tags },
+      { label: "Hediye Çekleri", path: "/admin/hediye-cekleri", icon: Tags },
       { label: "Toplu Mail", path: "/admin/toplu-mail", icon: MessageSquare },
       { label: "Ürün Yorumları", path: "/admin/yorumlar", icon: MessageSquare },
       { label: "Terkedilmiş Sepetler", path: "/admin/terkedilmis-sepet", icon: ShoppingCart },

@@ -14,6 +14,11 @@ değişiklikten önce bu bölümü oku, sonunda testleri çalıştır.**
    ve `status="confirmed"` olur.** Tek yetkili yol: `payment.py::_mark_order_from_payment`
    → `_is_paid(data)` **VE** `_payment_matches_order(data, order)` (tutar+sipariş eşleşmesi).
    Başka hiçbir yerde bir siparişi "paid"/"confirmed" yapma. İstemci girdisine ASLA güvenme.
+   **Tek belgeli istisna (C2):** `orders.py::create_order` içinde tutarın TAMAMI hediye
+   çekiyle karşılanırsa (`gift_cards.redeem_gift_card_for_order` bakiyeyi ATOMİK düşer,
+   sunucu hesaplar — istemciye güvenilmez) sipariş `paid/confirmed` +
+   `paid_with_gift_card_only=True` açılır. İptalde bakiye `refund_gift_card_once` ile
+   idempotent iade edilir (`_restock_order_once` kancası). Bu yolu genişletme.
 2. **Ödeme gerektiren sipariş (kart + havale/EFT) oluşturulurken `status="awaiting_payment"`
    (Ödeme Bekleniyor) başlar** (`orders.py::create_order`). Kart siparişi "pending"
    BAŞLATILMAZ — 3DS yarıda kalırsa panelde normal/onaylanabilir görünür (yasak).

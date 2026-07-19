@@ -1148,6 +1148,34 @@ async def create_order(
     order["gift_wrap_price"] = round(_gift, 2)
     order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
 
+    # 💳 HEDİYE ÇEKİ / MAĞAZA KREDİSİ (C2) — tüm indirimlerden SONRA, toplamın üstünden.
+    # Sunucu-otoriter: bakiye ATOMİK rezerve edilir (gift_cards.redeem_gift_card_for_order),
+    # iptalde _restock_order_once kancası idempotent iade eder. Tutarın TAMAMI çekle
+    # karşılanırsa sipariş paid/confirmed açılır — istemci girdisi DEĞİL, sunucunun kendi
+    # yakaladığı değer olduğundan "yalnız gerçek ödeme = paid" değişmezinin belgeli 2. yoludur
+    # (CLAUDE.md). Kod geçersizse sipariş REDDEDİLİR (müşteri çeksiz sipariş vermiş olmasın).
+    _gc_code = str(order_data.get("gift_card_code") or "").strip().upper()
+    if _gc_code:
+        try:
+            from business_rules import get_rule as _gc_rule
+            _gc_enabled = await _gc_rule(db, "giftcard.enabled", True) is not False
+        except Exception:
+            _gc_enabled = True
+        if not _gc_enabled:
+            raise HTTPException(status_code=400, detail="Hediye çeki kullanımı şu an kapalı")
+        from .gift_cards import redeem_gift_card_for_order
+        _gc = await redeem_gift_card_for_order(_gc_code, order, float(order["total"]))
+        if not _gc.get("ok"):
+            raise HTTPException(status_code=400, detail=_gc.get("error") or "Hediye çeki uygulanamadı")
+        order["gift_card"] = {"code": _gc["code"], "amount": _gc["amount"], "refunded": False}
+        order["total"] = round(max(0.0, float(order["total"]) - _gc["amount"]), 2)
+        if order["total"] <= 0.009:
+            order["total"] = 0.0
+            order["payment_status"] = "paid"
+            order["status"] = "confirmed"
+            order["paid_with_gift_card_only"] = True
+            order["paid_at"] = datetime.now(timezone.utc).isoformat()
+
     # 🧾 İNDİRİM DÖKÜMÜ — müşteri VE admin siparişte her indirimi AYRI AYRI görsün.
     # Her kampanya/kupon ayrı satır (hoşgeldin, otomatik %10, kod…), havale ayrı satır.
     _breakdown = []
@@ -1461,6 +1489,10 @@ async def create_order(
     return {
         "order_id": order["id"],
         "order_number": order["order_number"],
+        # C2: tutarın tamamı hediye çekiyle karşılandıysa frontend ödeme adımını atlar.
+        "payment_status": order.get("payment_status") or "",
+        "total": order.get("total"),
+        "gift_card_applied": (order.get("gift_card") or {}).get("amount") or 0,
         "message": "Sipariş oluşturuldu"
     }
 
@@ -2241,6 +2273,15 @@ async def _restock_order_once(order: dict, move_type: str) -> list:
     """Sipariş kalemlerini stoğa GERİ ekler — ama yalnızca daha önce iade edilmediyse.
     İade hareketi zaten kayıtlıysa hiçbir şey yapmaz (çift iade engellenir)."""
     oid = order.get("id")
+    # C2: Sipariş İPTAL yollarında hediye çeki bakiyesi de iade edilir (idempotent —
+    # refund_gift_card_once kendi atomik kilidini kullanır). İade (return) yollarında
+    # DEĞİL: teslim edilmiş ürün iadesinde para iadesi ayrı süreçtir.
+    if move_type in ("order_cancelled", "auto_cancel_expired", "havale_auto_cancel"):
+        try:
+            from .gift_cards import refund_gift_card_once
+            await refund_gift_card_once(order)
+        except Exception as _gc_err:
+            logger.warning(f"[gift-card] iptal iadesi başarısız (sipariş {oid}): {_gc_err}")
     if oid and await db.stock_movements.find_one(
             {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
         return []  # zaten iade edilmiş

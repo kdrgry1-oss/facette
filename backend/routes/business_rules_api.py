@@ -36,6 +36,7 @@ _PUBLIC_KEYS = [
     "product.social_share_enabled",
     "storefront.whatsapp_enabled", "storefront.whatsapp_number", "storefront.whatsapp_message",
     "product.low_stock_badge_enabled", "product.low_stock_badge_threshold",
+    "giftcard.enabled",
 ]
 
 

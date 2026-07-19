@@ -144,6 +144,9 @@ RULE_CATALOG = [
      "help": "Ürün-varyant stoğu bu değere veya altına düşünce günlük düşük-stok uyarı e-postasına dahil edilir."},
 
     # ---- Sadakat & Referans (Bölüm C) ----
+    {"group": "Sadakat & Referans", "key": "giftcard.enabled", "label": "Hediye çeki / mağaza kredisi",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Açıkken ödeme sayfasında hediye çeki kodu girilebilir; bakiye kısmi kullanılabilir, kalan sonraki siparişe devreder. Çekler admin panelinden (Pazarlama > Hediye Çekleri) oluşturulur."},
     {"group": "Sadakat & Referans", "key": "referral.enabled", "label": "Referans (arkadaşını getir) programı",
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Açıkken müşteri kendi referans koduyla arkadaş davet eder; davet edilen ilk siparişini verince hem davet eden hem edilen indirim kuponu kazanır."},

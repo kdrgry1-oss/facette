@@ -139,6 +139,10 @@ export default function Checkout() {
   const [selectedInstallment, setSelectedInstallment] = useState(1);
   const [usePoints, setUsePoints] = useState(false);
   const [userPoints] = useState(0); // future: fetch from /api/users/me
+  // C2 Hediye çeki / mağaza kredisi
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [giftCardApplied, setGiftCardApplied] = useState(null); // {code, balance, kind}
+  const [giftCardBusy, setGiftCardBusy] = useState(false);
   // Aktif ödeme yöntemleri — admin "Ödeme Yöntemleri" ayarından gelir (public /settings).
   // Varsayılan: kart & havale AÇIK, kapıda ödeme KAPALI.
   const [enabledPM, setEnabledPM] = useState({ credit_card: true, bank_transfer: true, cash_on_delivery: false });
@@ -270,7 +274,11 @@ export default function Checkout() {
   const memberGroupDiscount = memberDiscPct > 0
     ? Math.round((total - discount) * (memberDiscPct / 100) * 100) / 100
     : 0;
-  const grandTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - paymentMethodDiscount - memberGroupDiscount - pointsDeduction + giftWrapTotal + codFee);
+  const preGiftTotal = Math.max(0, total + shippingCost - discount - bankTransferDiscount - paymentMethodDiscount - memberGroupDiscount - pointsDeduction + giftWrapTotal + codFee);
+  // C2 Hediye çeki: tüm indirimlerden SONRA, ödenecek tutardan düşer (sunucu-otoriter;
+  // burada yalnız gösterim). Bakiye kısmi kullanılır, kalan çekte kalır.
+  const giftCardDeduction = giftCardApplied ? Math.min(Number(giftCardApplied.balance) || 0, preGiftTotal) : 0;
+  const grandTotal = Math.max(0, Math.round((preGiftTotal - giftCardDeduction) * 100) / 100);
 
   // Ürün-seviyesi indirim (sale_price + otomatik kampanya) — Sepet sayfasıyla BİREBİR aynı
   // gösterim. Böylece kasada da her kalem indirimli birim fiyatıyla (üstü çizili liste +
@@ -559,6 +567,27 @@ export default function Checkout() {
 
   const handleApplyCoupon = () => applyCode(couponCode);
 
+  // C2: Hediye çeki doğrula + uygula (bakiye sunucudan; asıl düşüm sipariş oluşturmada atomik)
+  const handleApplyGiftCard = async () => {
+    const code = giftCardCode.trim().toUpperCase();
+    if (!code || giftCardBusy) return;
+    setGiftCardBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/gift-cards/check`, {
+        code, email: shippingAddress.email || user?.email || "",
+      });
+      if (data?.valid) {
+        setGiftCardApplied({ code, balance: Number(data.balance) || 0, kind: data.kind || "gift" });
+        toast.success(`Hediye çeki uygulandı — bakiye: ${(Number(data.balance) || 0).toFixed(2)} TL`);
+      } else {
+        setGiftCardApplied(null);
+        toast.error(data?.error || "Hediye çeki geçersiz");
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Hediye çeki doğrulanamadı");
+    } finally { setGiftCardBusy(false); }
+  };
+
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
     setCouponCode("");
@@ -686,6 +715,7 @@ export default function Checkout() {
         subtotal: total,
         shipping_cost: shippingCost,
         discount, coupon_code: appliedCoupon?.code || "",
+        gift_card_code: giftCardApplied?.code || "",
         applied_promotions: appliedPromotions,
         gift_note: giftNote || "", gift_wrap: giftWrap, gift_wrap_price: giftWrapTotal,
         use_points: usePoints, points_used: pointsDeduction,
@@ -717,6 +747,15 @@ export default function Checkout() {
       // İdempotency: aynı sepet zaten ÖDENMİŞ bir siparişe bağlıysa tekrar ödeme başlatma
       // (çift çekim önlemi) — doğrudan başarı sayfasına götür.
       if (orderRes.data.idempotent && orderRes.data.payment_status === "paid") {
+        setPaymentStep("success");
+        clearCart();
+        navigate(`/order-success/${_successNum}`, { replace: true });
+        return;
+      }
+
+      // C2: Tutarın TAMAMI hediye çekiyle karşılandı → sunucu siparişi paid/confirmed açtı,
+      // ödeme adımı atlanır (iyzico'ya 0 TL gitmez).
+      if (orderRes.data.payment_status === "paid" && Number(orderRes.data.total) === 0) {
         setPaymentStep("success");
         clearCart();
         navigate(`/order-success/${_successNum}`, { replace: true });
@@ -1289,6 +1328,31 @@ export default function Checkout() {
                       className="text-xs text-gray-500 underline hover:text-stone-900"
                       data-testid="show-coupon-btn">Promosyon kodun var mı?</button>
                   )}
+                  {/* C2: Hediye çeki / mağaza kredisi (İşletme Kuralları ile açılır/kapanır) */}
+                  {bizRules["giftcard.enabled"] !== false && (
+                    giftCardApplied ? (
+                      <div className="mt-2 flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-xs" data-testid="gift-card-applied">
+                        <span className="text-emerald-800">
+                          🎁 {giftCardApplied.kind === "credit" ? "Mağaza kredisi" : "Hediye çeki"} <b>{giftCardApplied.code}</b> — bakiye {Number(giftCardApplied.balance).toFixed(2)} TL
+                        </span>
+                        <button type="button" onClick={() => { setGiftCardApplied(null); setGiftCardCode(""); }}
+                          className="text-emerald-700 underline" data-testid="remove-gift-card-btn">Kaldır</button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex gap-2">
+                        <input type="text" value={giftCardCode}
+                          onChange={(e) => setGiftCardCode(e.target.value.toUpperCase())}
+                          placeholder="Hediye çeki kodu (HED-...)"
+                          className="flex-1 border rounded px-3 py-2 text-sm"
+                          data-testid="gift-card-input" />
+                        <button type="button" onClick={handleApplyGiftCard} disabled={giftCardBusy || !giftCardCode.trim()}
+                          className="text-xs px-3 border rounded hover:bg-stone-50 disabled:opacity-50"
+                          data-testid="apply-gift-card-btn">
+                          {giftCardBusy ? "..." : "Uygula"}
+                        </button>
+                      </div>
+                    )
+                  )}
                 </div>
 
                 {/* Totals */}
@@ -1311,6 +1375,7 @@ export default function Checkout() {
                   {paymentMethodDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>{_payRule?.label || "Ödeme İndirimi"}</span><span>-{paymentMethodDiscount.toFixed(2)} TL</span></div>}
                   {memberGroupDiscount > 0 && <div className="flex justify-between" style={{ color: "#7b1e2b" }}><span>Üye İndirimi{memberGroupName ? ` (${memberGroupName})` : ""} (%{memberDiscPct})</span><span>-{memberGroupDiscount.toFixed(2)} TL</span></div>}
                   {pointsDeduction > 0 && <div className="flex justify-between text-black"><span>Puan Kullanımı</span><span>-{pointsDeduction.toFixed(2)} TL</span></div>}
+                  {giftCardDeduction > 0 && <div className="flex justify-between text-emerald-700" data-testid="gift-card-row"><span>Hediye Çeki ({giftCardApplied?.code})</span><span>-{giftCardDeduction.toFixed(2)} TL</span></div>}
                   {giftWrap && <div className="flex justify-between"><span className="text-gray-600">Hediye paketi</span><span>+{GIFT_WRAP_PRICE.toFixed(2)} TL</span></div>}
                   {codFee > 0 && <div className="flex justify-between"><span className="text-gray-600">Kapıda Ödeme</span><span>+{codFee.toFixed(2)} TL</span></div>}
                   <div className="flex justify-between text-base font-semibold pt-2 border-t">
