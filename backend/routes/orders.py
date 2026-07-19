@@ -1135,7 +1135,38 @@ async def create_order(
     order["discount_breakdown"] = _breakdown
     order["discount_total"] = round(_server_discount + _pm_disc, 2)
 
-    await db.orders.insert_one(order)
+    # A2.5b — OVERSELL ENGELLE (kullanıcı kararı). Sipariş insert'inden ÖNCE stok koşullu
+    # atomik düşülür: bir kalem bile yetmezse düşürülenler geri alınır ve 409 ile reddedilir
+    # (karşılanamayacak sipariş HİÇ oluşmaz). Ayar block_oversell=false ise (backorder/ön-sipariş
+    # isteyen firma) eski davranışa döner: düşüm insert SONRASI koşulsuz yapılır. Pazaryeri
+    # (trendyol/hepsiburada/temu) siparişi dışarıda satıldığından bu kapıya girse de engellenmez.
+    _oversell_moves = None
+    _plat_lc = str(order.get("platform") or "").lower()
+    _is_marketplace = _plat_lc in ("trendyol", "hepsiburada", "temu")
+    try:
+        from business_rules import get_rule as _get_rule
+        _block_oversell = await _get_rule(db, "order.block_oversell", True) is not False
+    except Exception:
+        _block_oversell = True
+    if _block_oversell and not _is_marketplace:
+        _dec = await _decrement_stock_atomic(order)
+        if not _dec.get("success"):
+            _nm = _dec.get("name") or _dec.get("barcode") or "ürün"
+            logger.warning(f"[OVERSELL] sipariş reddedildi — stok yetersiz: {_dec.get('barcode')} ({_nm})")
+            raise HTTPException(status_code=409,
+                                detail=f"Üzgünüz, '{_nm}' için yeterli stok kalmadı. Lütfen sepeti güncelleyip tekrar deneyin.")
+        _oversell_moves = _dec.get("movements") or []
+
+    try:
+        await db.orders.insert_one(order)
+    except Exception as _ins_err:
+        # Insert başarısız olduysa önceden düşülen stoğu geri al (sızıntı olmasın).
+        if _oversell_moves:
+            try:
+                await _reverse_stock_moves(_oversell_moves)
+            except Exception:
+                pass
+        raise
     logger.info(f"Order created: {order['order_number']}")
 
     # İYS — ticari ileti izni kaydı + dijital bildirim (arka planda). E-posta izni doğrudan;
@@ -1352,9 +1383,15 @@ async def create_order(
             logger.warning(f"admin push (new_order) atlandı: {e}")
     _spawn(_notify_admins_push())
 
-    # FAZ 1 - C1: otomatik stok düşümü
+    # FAZ 1 - C1: otomatik stok düşümü.
+    # A2.5b: oversell-engelli yolda stok zaten insert ÖNCESİ atomik düşüldü (_oversell_moves);
+    # burada YALNIZ hareket kaydı yazılır (çift düşüm olmaz). Aksi halde (backorder/pazaryeri
+    # veya block_oversell kapalı) eski koşulsuz düşüm uygulanır.
     try:
-        moves = await _stock_delta_for_order(order, -1)
+        if _oversell_moves is not None:
+            moves = _oversell_moves
+        else:
+            moves = await _stock_delta_for_order(order, -1)
         if moves:
             await db.stock_movements.insert_one({
                 "id": str(uuid.uuid4()),
@@ -1918,6 +1955,85 @@ async def restore_deleted_order(
 
 
 # ==================== FAZ 1: STOCK AUTO-FLOW + AUTO-CANCEL + NOTES ====================
+
+async def _reverse_stock_moves(moves: list) -> None:
+    """A2.5b geri-alma: verilen düşüm hareketlerini (delta<0) simetrik +qty ile geri ekler.
+    Yalnız oversell reddinde / insert hatasında çağrılır (kısmi düşülen stok sızmasın)."""
+    now = datetime.now(timezone.utc).isoformat()
+    for mv in moves or []:
+        bc = mv.get("barcode")
+        delta = int(mv.get("delta") or 0)
+        pid = mv.get("product_id")
+        if not bc or delta == 0:
+            continue
+        back = -delta  # düşüm delta<0 → back>0 (geri ekle)
+        if mv.get("level") == "product":
+            await db.products.update_one({"id": pid} if pid else {"barcode": bc},
+                                         {"$inc": {"stock": back}, "$set": {"updated_at": now}})
+        else:
+            await db.products.update_one(
+                {"variants.barcode": bc},
+                {"$inc": {"variants.$[v].stock": back}, "$set": {"updated_at": now}},
+                array_filters=[{"v.barcode": bc}])
+            if pid:
+                await db.products.update_one(
+                    {"id": pid},
+                    [{"$set": {"stock": {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                        "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+
+
+async def _decrement_stock_atomic(order: dict) -> dict:
+    """A2.5b — OVERSELL ENGELLE. Her kalem için stok yeterliyse KOŞULLU atomik $inc ile düşer.
+    Bir kalem bile karşılanamıyorsa şimdiye kadar düşürülenleri GERİ ALIR ve
+    {"success": False, "barcode", "name"} döndürür → çağıran siparişi 409 ile reddeder
+    (karşılanamayacak sipariş hiç oluşmaz). Barkodu çözülemeyen / stok alanı olmayan kalem
+    kontrol edilemez → geçirilir (mevcut davranış korunur, movement yazılmaz).
+    Başarıda {"success": True, "movements": [...]} döner (stok_movements kaydı için)."""
+    items = order.get("items") or order.get("lines") or []
+    applied = []  # geri-alma için düşürülen hareketler
+    now = datetime.now(timezone.utc).isoformat()
+    for it in items:
+        barcode = it.get("barcode") or it.get("sku") or ""
+        qty = int(it.get("quantity", 1) or 1)
+        if not barcode or qty < 1:
+            continue
+        # 1) Varyant düzeyinde KOŞULLU düşüm: yalnız stock>=qty ise eşleşir ve düşer.
+        res = await db.products.update_one(
+            {"variants": {"$elemMatch": {"barcode": barcode, "stock": {"$gte": qty}}}},
+            {"$inc": {"variants.$[v].stock": -qty}, "$set": {"updated_at": now}},
+            array_filters=[{"v.barcode": barcode}])
+        if res.modified_count > 0:
+            prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
+            pid = prod["id"] if prod else None
+            if pid:
+                await db.products.update_one(
+                    {"id": pid},
+                    [{"$set": {"stock": {"$sum": {"$map": {
+                        "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                        "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}}}}}}])
+            mv = {"barcode": barcode, "delta": -qty, "product_id": pid, "level": "variant"}
+            applied.append(mv)
+            continue
+        # Varyant var ama stok yetmedi mi? (yoksa hiç varyant yok mu?) — ayırt et.
+        if await db.products.find_one({"variants.barcode": barcode}, {"_id": 1}):
+            await _reverse_stock_moves(applied)  # oversell → geri al + reddet
+            return {"success": False, "barcode": barcode, "name": it.get("name", "")}
+        # 2) Varyantsız ürün düzeyinde barkod: aynı koşullu düşüm.
+        res2 = await db.products.update_one(
+            {"barcode": barcode, "stock": {"$gte": qty}},
+            {"$inc": {"stock": -qty}, "$set": {"updated_at": now}})
+        if res2.modified_count > 0:
+            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
+            applied.append({"barcode": barcode, "delta": -qty,
+                            "product_id": (p2["id"] if p2 else None), "level": "product"})
+            continue
+        if await db.products.find_one({"barcode": barcode}, {"_id": 1}):
+            await _reverse_stock_moves(applied)  # ürün var, stok yetmedi → oversell
+            return {"success": False, "barcode": barcode, "name": it.get("name", "")}
+        # Barkod hiçbir yerde yok → kontrol edilemez, stok düşülmez (mevcut davranış).
+    return {"success": True, "movements": applied}
+
 
 async def _stock_delta_for_order(order: dict, delta: int) -> list:
     """Apply stock delta (+1 or -1 per unit) for every order item. Returns movement list."""

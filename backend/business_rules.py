@@ -44,6 +44,9 @@ RULE_CATALOG = [
     {"group": "Sipariş & İptal", "key": "order.cancel_reason_required", "label": "İade/iptal talebinde sebep zorunlu",
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Açıkken müşteri iade/iptal sebebini doldurmadan talebi gönderemez."},
+    {"group": "Sipariş & İptal", "key": "order.block_oversell", "label": "Stok yetersizse siparişi engelle (oversell koruması)",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Açıkken sepetteki bir üründen stokta kalandan fazlası sipariş edilemez; stok yetmezse sipariş oluşturulmaz. Kapatılırsa ön-sipariş/backorder olur (stok eksiye düşebilir). Pazaryeri (Trendyol/Hepsiburada) siparişleri her hâlükârda engellenmez."},
 
     # ---- Kargo & Teslimat ----
     {"group": "Kargo & Teslimat", "key": "shipping.cod_fee", "label": "Kapıda ödeme ücreti",
