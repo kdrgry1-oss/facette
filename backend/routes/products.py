@@ -1030,6 +1030,23 @@ async def get_products(
                 {"$project": {"_id": 0, "_eff_stock": 0}},
             ]
             products = await db.products.aggregate(stock_pipeline, allowDiskUse=True).to_list(limit)
+        elif search:
+            # ALAKA SIRALAMASI: arama varken İSİMDE geçen ürünler önce gelsin (aksi halde
+            # yalnız açıklama/özellikte geçen alakasız ürün üste çıkabiliyordu — "büstiyer"
+            # arayınca isimsiz Takım'ın en üstte gelmesi gibi). name > kategori > diğer.
+            _rx = _search_tr_regex(search)
+            rel_pipeline = [
+                {"$match": query},
+                {"$addFields": {"_rel": {"$add": [
+                    {"$cond": [{"$regexMatch": {"input": {"$toString": {"$ifNull": ["$name", ""]}}, "regex": _rx, "options": "i"}}, 100, 0]},
+                    {"$cond": [{"$regexMatch": {"input": {"$toString": {"$ifNull": ["$category_name", ""]}}, "regex": _rx, "options": "i"}}, 30, 0]},
+                ]}}},
+                {"$sort": {"_rel": -1, sort: sort_order, "_id": 1}},
+                {"$skip": skip},
+                {"$limit": limit},
+                {"$project": {"_id": 0, "_rel": 0}},
+            ]
+            products = await db.products.aggregate(rel_pipeline, allowDiskUse=True).to_list(limit)
         else:
             products = await db.products.find(query, {"_id": 0}).sort(sort, sort_order).skip(skip).limit(limit).to_list(limit)
     total = await db.products.count_documents(query)
