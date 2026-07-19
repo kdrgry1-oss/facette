@@ -478,6 +478,21 @@ async def _notify_paid_order_confirmed(order_id: str) -> None:
         logger.info(
             f"order_confirmed (ödeme sonrası) gönderildi order={order.get('order_number')}"
         )
+        # Admin ANLIK PUSH: kart siparişinde "yeni sipariş" push'u OLUŞTURMADA değil, ödeme
+        # ONAYLANINCA buradan gider (yarıda kalan 3DS'te admin'e sahte yeni-sipariş gitmesin).
+        try:
+            from .push import send_push_to_admins
+            _tl = float(order.get("total") or 0)
+            _who = (f"{ship.get('first_name','')} {ship.get('last_name','')}".strip()
+                    or ship.get("full_name") or "Müşteri")
+            await send_push_to_admins(
+                f"🛍️ Yeni Sipariş (ödendi) · {_tl:,.2f} TL".replace(",", "."),
+                f"{order.get('order_number','')} · {_who} · Kart",
+                {"type": "new_order", "order_id": str(order.get("id") or ""),
+                 "order_number": str(order.get("order_number") or "")},
+            )
+        except Exception as _pe:
+            logger.warning(f"admin push (kart ödeme sonrası) atlandı: {_pe}")
     except Exception as e:
         logger.warning(
             f"order_confirmed (ödeme sonrası) gönderilemedi order_id={order_id}: {e}"

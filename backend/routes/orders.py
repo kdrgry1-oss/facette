@@ -990,10 +990,19 @@ async def create_order(
     except Exception as inf_err:
         logger.warning(f"Influencer link failed: {inf_err}")
 
-    # Havale/EFT siparisleri: "Siparisiniz Alindi · Odeme Bekleniyor" durumunda baslar
+    # ÖDEME BEKLEYEN durumu: hem havale/EFT hem de KART siparişi "awaiting_payment" başlar.
+    # KÖK NEDEN (tekrar eden): kart siparişi eskiden "pending" açılıyordu → 3DS başlatılıp
+    # tamamlanmayan (yarıda kalan) kart siparişi "pending" olarak kalıp panelde NORMAL/onaylanabilir
+    # sipariş gibi görünüyordu. Artık ödeme onaylanana (payment callback: paid→confirmed) kadar
+    # her ödeme-gerektiren sipariş "Ödeme Bekleniyor"dur; ödeme gelmezse auto-cancel süpürür.
+    # Kart için oluşturma anında MÜŞTERİYE MAİL GİTMEZ (aşağıda gating var) — havale mailinden farklı.
     _pm0 = (order.get("payment_method") or "").lower()
-    if _pm0 in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale"):
-        order["status"] = "awaiting_payment"
+    _BANK_METHODS = ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale")
+    _CARD_METHODS = ("credit_card", "card", "kredi_karti", "kart", "iyzico", "creditcard")
+    if _pm0 in _BANK_METHODS or _pm0 in _CARD_METHODS:
+        # Zaten ödenmiş (nadir: anlık non-3DS onaylanmış) gelmedikçe ödeme bekleniyor.
+        if (order.get("payment_status") or "").lower() != "paid":
+            order["status"] = "awaiting_payment"
 
     # Guvenlik: kapida odeme admin tarafindan KAPALIYSA, eski istemci veya dogrudan
     # API cagrisi ile gelen kapida odeme siparislerini sunucu tarafinda da reddet.
@@ -1342,7 +1351,14 @@ async def create_order(
                 _hv_bank = next((b for b in _banks if b.get("is_default")), None) or (_banks[0] if _banks else {})
 
             variables = await _order_notify_vars(order)
-            if order.get("status") == "awaiting_payment":
+            _pm_notify = (order.get("payment_method") or "").lower()
+            _is_bank_notify = _pm_notify in ("bank_transfer", "havale", "eft", "havale_eft", "banka_havale")
+            if order.get("status") == "awaiting_payment" and not _is_bank_notify:
+                # KART ödeme bekliyor: oluşturma anında MÜŞTERİYE MAİL GİTMEZ (havale bank-detay
+                # maili KART'a gönderilmemeli). Ödeme onaylanınca (payment callback) "confirmed"
+                # maili gider. Ödeme gelmezse auto-cancel süpürür, müşteriye yanlış "alındı" gitmez.
+                logger.info(f"[order created] kart ödeme bekleniyor — oluşturma maili ertelendi order={order.get('order_number')}")
+            elif order.get("status") == "awaiting_payment":
                 from order_statuses import get_status_config
                 _cfg = await get_status_config(db)
                 _nz = (_cfg.get("notify") or {}).get("awaiting_payment") or {}
@@ -1389,6 +1405,12 @@ async def create_order(
     _spawn(_notify_order_created())
 
     # Mobil admin uygulamasına ANLIK PUSH: yeni sipariş bildirimi (best-effort; yoksa sessiz).
+    # KART siparişinde push OLUŞTURMADA GÖNDERİLMEZ — 3DS yarıda kalırsa admin'e sahte "yeni
+    # sipariş" gitmesin. Kart için push, ödeme onaylanınca (payment: paid→confirmed) çıkar.
+    # Havale/EFT/kapıda ödemede oluşturmada push gider (gerçek aksiyon bekleyen sipariş).
+    _pm_push = (order.get("payment_method") or "").lower()
+    _defer_push = (_pm_push in ("credit_card", "card", "kredi_karti", "kart", "iyzico", "creditcard")
+                   and (order.get("payment_status") or "").lower() != "paid")
     async def _notify_admins_push():
         try:
             from .push import send_push_to_admins
@@ -1405,7 +1427,10 @@ async def create_order(
             )
         except Exception as e:
             logger.warning(f"admin push (new_order) atlandı: {e}")
-    _spawn(_notify_admins_push())
+    if not _defer_push:
+        _spawn(_notify_admins_push())
+    else:
+        logger.info(f"[admin push ERTELENDİ] kart ödeme bekleniyor order={order.get('order_number')}")
 
     # FAZ 1 - C1: otomatik stok düşümü.
     # A2.5b: oversell-engelli yolda stok zaten insert ÖNCESİ atomik düşüldü (_oversell_moves);
