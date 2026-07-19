@@ -1,6 +1,7 @@
-import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { Trash2, Plus, Minus } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
+import { Trash2, Plus, Minus, Share2 } from "lucide-react";
+import { toast } from "sonner";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
 import Header from "../components/Header";
@@ -15,8 +16,70 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const PLACEHOLDER = "/placeholder.jpg";
 
 export default function Cart() {
-  const { items, removeItem, updateQuantity, total, itemCount } = useCart();
+  const { items, addItem, removeItem, updateQuantity, total, itemCount } = useCart();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // ── SEPETİ PAYLAŞ ────────────────────────────────────────────────────────
+  // Paylaş: sepet kalemleri sunucuya yazılır → kısa link panoya kopyalanır.
+  // Alma: /sepet?paylasim=<id> ile gelen ziyaretçinin sepetine kalemler eklenir
+  // (fiyat otoritesi sunucu — link açıldığı andaki güncel fiyat geçerli).
+  const [sharing, setSharing] = useState(false);
+  const shareLoadedRef = useRef(false); // StrictMode çift-effect / tekrar ekleme koruması
+
+  const handleShareCart = async () => {
+    if (items.length === 0 || sharing) return;
+    setSharing(true);
+    try {
+      const res = await axios.post(`${API}/shared-carts`, {
+        items: items.map((it) => ({
+          product_id: it.productId,
+          variant_id: it.variantId || null,
+          quantity: it.quantity,
+        })),
+      });
+      const url = `${window.location.origin}/sepet?paylasim=${res.data.id}`;
+      // Mobilde yerel paylaşım menüsü; olmazsa panoya kopyala
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: "Sepetim", text: "Sepetimdeki ürünlere göz at:", url });
+          return;
+        } catch (_) { /* kullanıcı iptal etti → kopyalamaya düş */ }
+      }
+      await navigator.clipboard.writeText(url);
+      toast.success("Sepet linki kopyalandı — dilediğin kişiyle paylaşabilirsin");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Sepet paylaşılamadı");
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  useEffect(() => {
+    const shareId = searchParams.get("paylasim");
+    if (!shareId || shareLoadedRef.current) return;
+    // Aynı link ikinci kez açılırsa (yenileme dahil) mükerrer ekleme olmasın
+    const seenKey = `shared_cart_loaded_${shareId}`;
+    if (sessionStorage.getItem(seenKey)) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    shareLoadedRef.current = true;
+    axios.get(`${API}/shared-carts/${shareId}`)
+      .then((res) => {
+        const list = res.data?.items || [];
+        list.forEach(({ product, variant, quantity }) => {
+          if (product?.id) addItem(product, variant || null, quantity || 1);
+        });
+        if (list.length) toast.success(`Paylaşılan sepetten ${list.length} ürün eklendi`);
+        sessionStorage.setItem(seenKey, "1");
+      })
+      .catch((e) => {
+        toast.error(e.response?.data?.detail || "Paylaşılan sepet yüklenemedi");
+      })
+      .finally(() => setSearchParams({}, { replace: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const { shippingFee, freeShippingThreshold } = useShipping();
   const freeShippingLimit = freeShippingThreshold || 0;
   const remaining = freeShippingThreshold != null ? Math.max(0, freeShippingThreshold - total) : 0;
@@ -119,11 +182,24 @@ export default function Cart() {
       <Header />
 
       <div className="container-main py-6 md:py-12">
-        <div className="mb-8 md:mb-10">
-          <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">SEPETİM</p>
-          <h1 className="text-2xl sm:text-3xl font-light tracking-tight">
-            {itemCount} ürün
-          </h1>
+        <div className="mb-8 md:mb-10 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-[10px] tracking-[0.3em] text-black/50 uppercase mb-2">SEPETİM</p>
+            <h1 className="text-2xl sm:text-3xl font-light tracking-tight">
+              {itemCount} ürün
+            </h1>
+          </div>
+          {/* Sepeti Paylaş — sepet linki oluşturup panoya kopyalar / paylaşım menüsü açar */}
+          <button
+            onClick={handleShareCart}
+            disabled={sharing}
+            data-testid="share-cart-btn"
+            className="inline-flex items-center gap-2 h-10 px-4 border border-black/15 text-[11px] uppercase tracking-[0.2em] hover:border-black transition-colors disabled:opacity-50"
+            title="Sepetini linkle paylaş"
+          >
+            <Share2 size={14} />
+            {sharing ? "Hazırlanıyor..." : "Sepeti Paylaş"}
+          </button>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8 lg:gap-12">
