@@ -883,9 +883,17 @@ async def _send_abandoned_cart_reminders():
     if not is_configured(await get_smtp_config(db)):
         return  # E-posta (SMTP/Zoho) yapılandırılmamış → sessizce atla
     now = datetime.now(timezone.utc)
-    # 2 saatten eski, 48 saatten yeni aktif sepetler
-    start = (now - timedelta(hours=48)).isoformat()
-    end = (now - timedelta(hours=2)).isoformat()
+    # Terkedilmiş sepet penceresi — İşletme Kuralları'ndan (varsayılan 2-48 saat).
+    try:
+        from business_rules import get_rule as _get_rule
+        _min_h = int(await _get_rule(db, "marketing.abandoned_cart_min_hours", 2))
+        _max_h = int(await _get_rule(db, "marketing.abandoned_cart_max_hours", 48))
+    except Exception:
+        _min_h, _max_h = 2, 48
+    if _max_h <= _min_h:
+        _max_h = _min_h + 1
+    start = (now - timedelta(hours=_max_h)).isoformat()
+    end = (now - timedelta(hours=_min_h)).isoformat()
     q = {
         "updated_at": {"$gte": start, "$lte": end},
         "total": {"$gt": 0},
@@ -922,15 +930,22 @@ async def _send_abandoned_cart_reminders():
         logger.exception(f"[scheduler] abandoned cart reminders failed: {e}")
 
 
-async def _send_daily_stock_alert(threshold: int = 3):
-    """Her gün, stoğu `threshold` (varsayılan 3) veya altına düşmüş ürün-varyant
-    kombinasyonlarını bulup admin kullanıcılara (is_admin=True) özet e-posta gönderir.
+async def _send_daily_stock_alert(threshold: int = None):
+    """Her gün, stoğu `threshold` veya altına düşmüş ürün-varyant kombinasyonlarını
+    bulup admin kullanıcılara (is_admin=True) özet e-posta gönderir. Eşik verilmezse
+    İşletme Kuralları'ndan okunur (stock.low_stock_alert_threshold, varsayılan 3).
 
     2026-07-02: notification_service.py'de 'stock_alert' bildirim tipi tanımlıydı
     ('Stok Uyarısı (Admin)') ama hiçbir yerde tetiklenmiyordu. Sorgu mantığı
     routes/bulk_ops.py:GET /stock-alerts ile aynı (kopyalandı, davranış korunuyor).
     """
     from routes.deps import db
+    if threshold is None:
+        try:
+            from business_rules import get_rule as _get_rule
+            threshold = int(await _get_rule(db, "stock.low_stock_alert_threshold", 3))
+        except Exception:
+            threshold = 3
     try:
         from routes.catalog_extras import _send_email_via_resend  # lazy
     except Exception as e:

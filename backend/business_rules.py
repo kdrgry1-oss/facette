@@ -85,6 +85,17 @@ RULE_CATALOG = [
     {"group": "Panel & Oturum", "key": "panel.auto_logout_minutes", "label": "Panel otomatik çıkış (inaktivite)",
      "type": "number", "default": 60, "unit": "dakika", "options": [15, 30, 60, 120, 0],
      "help": "Panelde bu süre işlem yapılmazsa otomatik çıkış yapılır ve filtreler sıfırlanır. 0 = kapalı."},
+
+    # ---- Pazarlama & Stok ----
+    {"group": "Pazarlama & Stok", "key": "marketing.abandoned_cart_min_hours", "label": "Terkedilmiş sepet — en erken hatırlatma",
+     "type": "number", "default": 2, "unit": "saat", "options": [1, 2, 3, 6],
+     "help": "Sepet terk edildikten sonra hatırlatma e-postası için beklenecek en az süre (çok erken gönderim spam etkisi yaratmasın)."},
+    {"group": "Pazarlama & Stok", "key": "marketing.abandoned_cart_max_hours", "label": "Terkedilmiş sepet — en geç hatırlatma",
+     "type": "number", "default": 48, "unit": "saat", "options": [24, 48, 72, 96],
+     "help": "Bu süreden daha eski terk edilmiş sepetlere hatırlatma gönderilmez (çok geç kalmış sepetler atlanır)."},
+    {"group": "Pazarlama & Stok", "key": "stock.low_stock_alert_threshold", "label": "Düşük stok uyarı eşiği",
+     "type": "number", "default": 3, "unit": "adet", "options": [1, 2, 3, 5, 10],
+     "help": "Ürün-varyant stoğu bu değere veya altına düşünce günlük düşük-stok uyarı e-postasına dahil edilir."},
 ]
 
 _CATALOG_BY_KEY = {r["key"]: r for r in RULE_CATALOG}
