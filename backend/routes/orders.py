@@ -516,7 +516,12 @@ async def get_orders(
     # Ödeme kaydı bulunmayan (web kart denemesi, hiç ödenmemiş) ayrımı
     _web_cond = {"$or": [{"platform": "facette"}, {"platform": {"$in": [None, ""]}}, {"platform": {"$exists": False}}]}
     _settled_pay = ["paid", "completed", "success", "succeeded", "captured"]
-    _offline_pm = ["bank_transfer", "cash_on_delivery"]
+    # Havale/EFT ve kapıda ödeme siparişleri ödenmemiş olsa da "junk" (kayıp web kart denemesi)
+    # DEĞİLDİR — listede kalmalı. Bu yüzden TÜM alias'lar dahil (sadece kanonik iki string değil;
+    # aksi halde 'havale'/'kapida' alias'lı meşru sipariş varsayılan listeden kayboluyordu — denetim #1).
+    # NOT: KART (credit_card) burada YOK — ödenmemiş kart siparişi (yarıda kalan 3DS) gizli kalmalı.
+    _offline_pm = ["bank_transfer", "havale", "eft", "havale_eft", "banka_havale", "transfer",
+                   "cash_on_delivery", "kapida", "kapida_odeme", "cod"]
     _fulfilled_status = ["confirmed", "processing", "preparing", "shipped", "delivered", "completed", "undelivered", "cancelled"]
     _junk_cond = {"$and": [
         _web_cond,

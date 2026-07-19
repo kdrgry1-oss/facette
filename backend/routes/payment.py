@@ -174,7 +174,11 @@ def _is_paid(data: dict) -> bool:
         return False
     if not data.get("paymentId"):
         return False
-    if str(data.get("fraudStatus", 1)) == "-1":
+    # Denetim #3: fraudStatus 1 = güvenli (fon garanti). 0 = iyzico FRAUD İNCELEMESİNDE
+    # (kabul edildi ama fon garanti DEĞİL, geri çevrilebilir) → HENÜZ 'paid' sayma; sipariş
+    # ödeme-bekleniyor + needs_reconciliation kalır, inceleme geçince (fraudStatus 1) reconcile
+    # onaylar. -1 = fraud reddi. Alan yoksa varsayılan 1 (klasik başarı — çoğu yanıt böyle).
+    if str(data.get("fraudStatus", 1)) in ("-1", "0"):
         return False
     ps = data.get("paymentStatus")
     return ps in (None, "", "SUCCESS")
@@ -686,6 +690,24 @@ async def _mark_order_from_payment(order_id: str, data: dict) -> bool:
         update["paid_at"] = datetime.now(timezone.utc).isoformat()
         update["status"] = "confirmed"
         await db.orders.update_one({"id": order_id}, {"$set": update})
+        # Denetim #2: Bu sipariş daha önce auto-cancel ile RESTOCK edilmiş ve şimdi geç reconcile/
+        # callback ile GERÇEKTEN ödendiği ortaya çıktıysa (para çekilmiş), stoğu TEKRAR düş —
+        # aksi halde create(-1)+restock(+1)+confirm(0) = net 0 kalıp ürün fiilen sevk edilirken
+        # stok fazla görünüyordu (oversell). İdempotent: bir kez düşer.
+        try:
+            _o2 = await db.orders.find_one(
+                {"id": order_id, "_restocked_by_autocancel": True,
+                 "_redecremented_after_reconcile": {"$ne": True}}, {"_id": 0})
+            if _o2:
+                from .orders import _stock_delta_for_order
+                _moves = await _stock_delta_for_order(_o2, -1)
+                await db.orders.update_one(
+                    {"id": order_id},
+                    {"$set": {"_redecremented_after_reconcile": True},
+                     "$unset": {"_restocked_by_autocancel": ""}})
+                logger.info(f"[reconcile] restock sonrası tekrar-ödendi → stok yeniden düşüldü order_id={order_id} moves={len(_moves or [])}")
+        except Exception as _rse:
+            logger.warning(f"[reconcile] tekrar-stok-düşümü hatası order_id={order_id}: {_rse}")
     else:
         # Y1: ZATEN ödenmiş bir siparişi 'failed'a düşürme (replay / sahte failure koruması).
         update["payment_status"] = "failed"

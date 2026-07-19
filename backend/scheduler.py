@@ -144,6 +144,10 @@ async def auto_cancel_unpaid_card_orders():
                         "payment_status": "expired",
                         "cancel_reason": "Ödeme 3 saat içinde tamamlanmadı — para HİÇ alınmadı (iade gerekmez)",
                         "auto_cancelled": True,
+                        # Denetim #2: bu sipariş restock edildi. Geç reconcile (iyzico'dan para
+                        # çekildiği ortaya çıkarsa) tekrar paid+confirmed olursa stok TEKRAR
+                        # düşülmeli (oversell önle) — payment._mark_order_from_payment bu işareti okur.
+                        "_restocked_by_autocancel": True,
                         "cancelled_at": datetime.now(timezone.utc).isoformat(),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }}
