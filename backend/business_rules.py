@@ -102,6 +102,12 @@ RULE_CATALOG = [
     {"group": "Vitrin & Ürün Sayfası", "key": "product.social_share_enabled", "label": "Ürün sayfasında sosyal paylaşım butonları",
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Ürün sayfasında WhatsApp/X/Facebook paylaşım ve bağlantı kopyalama butonlarını gösterir."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.low_stock_badge_enabled", "label": "'Son X ürün!' stok aciliyet rozeti",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Seçili bedenin stoğu eşiğin altına düşünce ürün sayfasında 'Son X ürün!' uyarısı gösterir."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.low_stock_badge_threshold", "label": "Stok aciliyet rozeti eşiği",
+     "type": "number", "default": 5, "unit": "adet", "options": [3, 5, 8, 10],
+     "help": "Seçili beden stoğu bu değere veya altına düşünce 'Son X ürün!' rozeti çıkar."},
 
     # ---- Destek & İletişim ----
     {"group": "Destek & İletişim", "key": "storefront.whatsapp_enabled", "label": "WhatsApp destek butonu (yüzen)",

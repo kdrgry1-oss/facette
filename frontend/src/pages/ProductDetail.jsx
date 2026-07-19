@@ -138,6 +138,8 @@ export default function ProductDetail() {
         showCompleteLook: d["product.complete_the_look_enabled"] !== false,
         showCountdown: d["product.shipping_countdown_enabled"] !== false,
         showSocialShare: d["product.social_share_enabled"] !== false,
+        lowStockBadge: d["product.low_stock_badge_enabled"] !== false,
+        lowStockThreshold: Number(d["product.low_stock_badge_threshold"] ?? 5),
       });
     }).catch(() => {});
   }, []);
@@ -857,6 +859,16 @@ export default function ProductDetail() {
             </div>
 
             {/* Quantity input removed by request — sepete her zaman 1 adet eklenir */}
+
+            {/* Stok aciliyet rozeti — seçili beden azaldıysa "Son X ürün!" (İşletme Kuralları) */}
+            {(shipCfg?.lowStockBadge !== false) && selectedVariant &&
+              Number(selectedVariant.stock) > 0 &&
+              Number(selectedVariant.stock) <= (shipCfg?.lowStockThreshold ?? 5) && (
+              <p className="mb-3 text-xs font-medium text-red-600 flex items-center gap-1.5" data-testid="pdp-low-stock">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                Son {Number(selectedVariant.stock)} ürün!
+              </p>
+            )}
 
             {/* Add to Cart */}
             {(() => {

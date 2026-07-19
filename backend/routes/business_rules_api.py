@@ -35,6 +35,7 @@ _PUBLIC_KEYS = [
     "product.shipping_countdown_enabled", "storefront.announcement_bar_enabled",
     "product.social_share_enabled",
     "storefront.whatsapp_enabled", "storefront.whatsapp_number", "storefront.whatsapp_message",
+    "product.low_stock_badge_enabled", "product.low_stock_badge_threshold",
 ]
 
 
