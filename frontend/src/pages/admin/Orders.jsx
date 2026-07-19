@@ -1418,20 +1418,30 @@ export default function AdminOrders({ unpaidView = false }) {
                             </button>
                           );
                         })()}
-                        {/* Hediye Paketi butonu — 🎁; ücretli paket alındıysa RENKLİ, hediye notu varsa belirteç */}
+                        {/* Hediye Paketi butonu — "ücretli" YALNIZ gerçek ek ücret (gift_wrap_price>0)
+                            varsa. Ücret ödenmeden gelen hediye NOTU artık "ücretli" gösterilmez;
+                            not ayrı belirteçle (pembe nokta) işaretlenir. */}
                         {(() => {
                           const giftNote = (order.gift_note || "").trim();
-                          const giftPaid = Number(order.gift_wrap_price || 0) > 0 || !!order.gift_wrap;
-                          const hasAny = giftPaid || !!giftNote;
+                          const giftPrice = Number(order.gift_wrap_price || 0);
+                          const giftPaid = giftPrice > 0;                 // gerçekten ÜCRETLİ paket
+                          const giftFree = !giftPaid && !!order.gift_wrap; // paket seçili ama ücretsiz
+                          const hasAny = giftPaid || giftFree || !!giftNote;
+                          const title = giftPaid
+                            ? (giftNote ? `Hediye paketi (ücretli: ${giftPrice.toFixed(2)} TL) · Not: ${giftNote}` : `Hediye paketi (ücretli: ${giftPrice.toFixed(2)} TL)`)
+                            : giftFree
+                              ? (giftNote ? `Hediye paketi (ücretsiz) · Not: ${giftNote}` : "Hediye paketi (ücretsiz)")
+                              : (giftNote ? `Hediye notu: ${giftNote}` : "Hediye paketi/notu yok");
                           return (
                             <button
                               onClick={() => setGiftModalOrder(order)}
-                              title={giftPaid ? (giftNote ? `Hediye paketi (ücretli) · Not: ${giftNote}` : "Hediye paketi alındı (ücretli)") : (giftNote ? `Hediye notu: ${giftNote}` : "Hediye paketi yok")}
+                              title={title}
                               data-testid={`gift-btn-${order.id}`}
                               className={`tci-btn ${giftPaid ? 'tci-btn-pink-active' : 'tci-btn-gray'}`}
                             >
                               <span className={`text-[15px] leading-none ${giftPaid ? '' : 'grayscale opacity-50'}`}>🎁</span>
-                              {giftNote && (
+                              {/* Sadece hediye NOTU (ücretsiz) → pembe nokta belirteci */}
+                              {giftNote && !giftPaid && (
                                 <span className="absolute -top-1 -right-1 bg-pink-600 w-2.5 h-2.5 rounded-full border border-white" title="Hediye notu var" />
                               )}
                             </button>
@@ -2079,16 +2089,19 @@ export default function AdminOrders({ unpaidView = false }) {
             <DialogTitle>🎁 Hediye Paketi {giftModalOrder?.order_number ? `- ${giftModalOrder.order_number}` : ""}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 pt-2">
-            {Number(giftModalOrder?.gift_wrap_price || 0) > 0 || giftModalOrder?.gift_wrap ? (
+            {Number(giftModalOrder?.gift_wrap_price || 0) > 0 ? (
               <div className="bg-pink-50 border-l-4 border-pink-500 p-3 rounded">
-                <p className="text-sm font-semibold text-pink-700">Hediye paketi alındı</p>
-                {Number(giftModalOrder?.gift_wrap_price || 0) > 0 && (
-                  <p className="text-xs text-pink-600 mt-0.5">Ücret: {Number(giftModalOrder.gift_wrap_price).toFixed(2)} TL</p>
-                )}
+                <p className="text-sm font-semibold text-pink-700">Hediye paketi alındı (ücretli)</p>
+                <p className="text-xs text-pink-600 mt-0.5">Ücret: {Number(giftModalOrder.gift_wrap_price).toFixed(2)} TL</p>
+              </div>
+            ) : giftModalOrder?.gift_wrap ? (
+              <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded">
+                <p className="text-sm font-semibold text-amber-700">Hediye paketi seçili (ücretsiz)</p>
+                <p className="text-xs text-amber-600 mt-0.5">Ek ücret alınmadı.</p>
               </div>
             ) : (
               <div className="bg-gray-50 border-l-4 border-gray-200 p-3 rounded">
-                <p className="text-sm text-gray-500">Bu siparişte hediye paketi yok.</p>
+                <p className="text-sm text-gray-500">Bu siparişte ücretli hediye paketi yok{giftModalOrder?.gift_note?.trim() ? " — yalnızca hediye notu var" : ""}.</p>
               </div>
             )}
             {giftModalOrder?.gift_note?.trim() && (
