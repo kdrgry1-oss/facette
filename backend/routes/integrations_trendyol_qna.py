@@ -942,7 +942,12 @@ async def sync_all_trendyol_reviews(
     from .integrations import log_integration_event
 
     payload = payload or {}
-    min_rating = int(payload.get("min_rating", 4))
+    if payload.get("min_rating") is not None:
+        min_rating = int(payload.get("min_rating"))
+    else:
+        _s = await db.settings.find_one({"id": "trendyol"}, {"_id": 0, "review_min_rating": 1}) or {}
+        min_rating = int(_s.get("review_min_rating") or 3)   # ayar yoksa 3 yıldız ve üzeri
+    min_rating = max(1, min(5, min_rating))
     limit = int(payload.get("limit", 0) or 0)
     dry_run = bool(payload.get("dry_run", False))
 
@@ -999,7 +1004,9 @@ async def weekly_trendyol_review_sync():
         if not has_relay:
             log.info("[trendyol-reviews] haftalik sync atlandi — worker/proxy ayarli degil")
             return
-        summary = await sync_all_trendyol_reviews_core(min_rating=4, limit=0, dry_run=False)
+        _mr = int(s.get("review_min_rating") or 3)          # admin ayarı; varsayılan 3 yıldız ve üzeri
+        _mr = max(1, min(5, _mr))
+        summary = await sync_all_trendyol_reviews_core(min_rating=_mr, limit=0, dry_run=False)
         log.info("[trendyol-reviews] haftalik sync: eslesen=%s eklenen=%s hata=%s",
                  summary.get("matched_products"), summary.get("total_inserted"), len(summary.get("errors") or []))
     except Exception as e:
@@ -1013,6 +1020,7 @@ async def get_review_fetch_config(current_user: dict = Depends(require_admin)):
     return {
         "review_worker_url": s.get("review_worker_url", ""),
         "review_proxy_set": bool(s.get("review_proxy")),
+        "review_min_rating": int(s.get("review_min_rating") or 3),   # kaç yıldız ve üzeri çekilsin (varsayılan 3)
     }
 
 
@@ -1024,7 +1032,12 @@ async def set_review_fetch_config(payload: dict, current_user: dict = Depends(re
         upd["review_worker_url"] = str(payload.get("review_worker_url") or "").strip()
     if "review_proxy" in (payload or {}):
         upd["review_proxy"] = str(payload.get("review_proxy") or "").strip()
+    if "review_min_rating" in (payload or {}):
+        try:
+            upd["review_min_rating"] = max(1, min(5, int(payload.get("review_min_rating"))))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="review_min_rating 1-5 arası olmalı")
     if not upd:
-        raise HTTPException(status_code=400, detail="review_worker_url veya review_proxy gerekli")
+        raise HTTPException(status_code=400, detail="review_worker_url, review_proxy veya review_min_rating gerekli")
     await db.settings.update_one({"id": "trendyol"}, {"$set": upd, "$setOnInsert": {"id": "trendyol"}}, upsert=True)
     return {"success": True}

@@ -9,7 +9,7 @@ const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("toke
 // Trendyol Facette mağazasından 4-5★ yorumları toplu çekme paneli. Ürünleri barkodla
 // Trendyol listelemesine eşleştirir, public storefront'tan yorumları çeker, product_reviews'a yazar.
 function TrendyolReviewSync() {
-  const [minRating, setMinRating] = useState(4);
+  const [minRating, setMinRating] = useState(3);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [workerUrl, setWorkerUrl] = useState("");
@@ -24,15 +24,19 @@ function TrendyolReviewSync() {
 
   useEffect(() => {
     axios.get(`${API}/integrations/trendyol/reviews/fetch-config`, { headers: authHeaders() })
-      .then((r) => setWorkerUrl(r.data?.review_worker_url || ""))
+      .then((r) => {
+        setWorkerUrl(r.data?.review_worker_url || "");
+        if (r.data?.review_min_rating) setMinRating(Number(r.data.review_min_rating));
+      })
       .catch(() => {});
     loadByProduct();
   }, []);
 
   const saveWorker = async () => {
     try {
+      // Alt yıldız da kaydedilir → HAFTALIK otomatik çekim de aynı eşiği kullanır.
       await axios.put(`${API}/integrations/trendyol/reviews/fetch-config`,
-        { review_worker_url: workerUrl.trim() }, { headers: authHeaders() });
+        { review_worker_url: workerUrl.trim(), review_min_rating: Number(minRating) }, { headers: authHeaders() });
       setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2000);
       toast.success("Kaydedildi");
     } catch { toast.error("Kaydedilemedi"); }
@@ -92,9 +96,9 @@ function TrendyolReviewSync() {
           Alt yıldız:
           <select value={minRating} onChange={(e) => setMinRating(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm">
+            <option value={3}>3, 4 ve 5 yıldız</option>
             <option value={4}>4 ve 5 yıldız</option>
             <option value={5}>Sadece 5 yıldız</option>
-            <option value={3}>3, 4 ve 5 yıldız</option>
           </select>
         </label>
         <button onClick={() => run(true)} disabled={busy}
@@ -125,7 +129,8 @@ function TrendyolReviewSync() {
 
       {/* Haftalık otomatik çekim bilgisi */}
       <p className="text-[11px] text-gray-400 mt-3">
-        🔁 Bu çekim <b>haftada bir otomatik</b> de çalışır (4-5 yıldız). Yeni yorumlar eklenir, mevcutlar tekrar eklenmez.
+        🔁 Bu çekim <b>haftada bir otomatik</b> de çalışır (kayıtlı alt yıldız eşiğiyle — "Kaydet" ile ayarlanır).
+        Yeni yorumlar eklenir, mevcutlar tekrar eklenmez.
       </p>
 
       {/* Hangi ürüne kaç yorum çekildi — liste */}
