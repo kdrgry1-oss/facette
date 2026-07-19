@@ -80,6 +80,7 @@ from routes.catalog_extras import (
 from routes.admin_tasks import router as admin_tasks_router
 from routes.business_rules_api import admin_router as business_rules_admin_router, public_router as business_rules_public_router
 from routes.custom_theme import admin_router as custom_theme_admin_router, public_router as custom_theme_public_router
+from routes.help_center import admin_router as help_center_admin_router, public_router as help_center_public_router
 from routes.barcode_cards import router as barcode_cards_router
 from routes.provider_settings import router as provider_settings_router
 from routes.iys import router as iys_consent_router  # /iys — OTP + ticari ileti izni (iys_router ile ÇAKIŞMASIN)
@@ -708,6 +709,8 @@ api_router.include_router(business_rules_admin_router)
 api_router.include_router(business_rules_public_router)
 api_router.include_router(custom_theme_admin_router)
 api_router.include_router(custom_theme_public_router)
+api_router.include_router(help_center_admin_router)
+api_router.include_router(help_center_public_router)
 # Barcode cards (products & variants) — tek tek veya toplu yazdırılabilir HTML
 # kartlar. Products.jsx'deki "Barkod Yazdır" akışları buraya bağlıdır.
 api_router.include_router(barcode_cards_router)
