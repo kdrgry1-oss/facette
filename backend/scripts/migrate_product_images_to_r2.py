@@ -97,6 +97,11 @@ def main(apply: bool, limit: int):
         changed = {}
         new_images = []
         for i, u in enumerate(p.get("images") or []):
+            # Dict-form görselleri (ör. {url, is_size_table:true}) OLDUĞU GİBİ koru —
+            # str()'e çevirmek işareti düşürür ve ölçü tablosu galeriye sızardı.
+            if isinstance(u, dict):
+                new_images.append(u)
+                continue
             u = str(u)
             if TCMX in u:
                 try:
