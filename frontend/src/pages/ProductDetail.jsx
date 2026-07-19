@@ -727,10 +727,10 @@ export default function ProductDetail() {
                 (aşırı uzamasın) — kullanıcı isteği. */}
             <div className="hidden lg:flex gap-4 justify-center items-start">
               {displayImages.length > 1 && (
-                /* 5 kutucuk alt alta (1 kolon); 6.–8. görsel yeni kolona (SAĞA) sarar — tek uzun
-                   şerit yerine yan yana. max-h ~5 kutucuk yüksekliği (140px × 3/2 = 210px). */
-                <div className="flex flex-col flex-wrap content-start gap-2.5 max-h-[1092px] shrink-0 [&>button]:w-[140px]">
-                  {displayImages.map((img, index) => (
+                /* Sol şerit: YALNIZ ilk 5 kutucuk, tek kolon alt alta. 6.–8. görseller sağa
+                   ayrı kolona DEĞİL, ana ürün görselinin ALTINA (aşağıya) yerleşir. */
+                <div className="flex flex-col gap-2.5 shrink-0 [&>button]:w-[140px]">
+                  {displayImages.slice(0, 5).map((img, index) => (
                     <button
                       key={index}
                       onClick={() => setSelectedImage(index)}
@@ -796,6 +796,34 @@ export default function ProductDetail() {
                     decoding="async"
                   />
                 </div>
+                {/* 6.–8. görsel: ana görselin ALTINDA yatay şerit (kullanıcı isteği). */}
+                {displayImages.length > 5 && (
+                  <div className="flex flex-wrap gap-2.5 mt-2.5 [&>button]:w-[140px]">
+                    {displayImages.slice(5).map((img, i) => {
+                      const index = i + 5;
+                      return (
+                        <button
+                          key={index}
+                          onClick={() => setSelectedImage(index)}
+                          onMouseEnter={() => setSelectedImage(index)}
+                          className={`relative aspect-[2/3] bg-stone-50 overflow-hidden border transition-colors ${
+                            index === selectedImage ? "border-black" : "border-transparent hover:border-gray-300"
+                          }`}
+                          aria-label={`Görsel ${index + 1}`}
+                          data-testid={`pdp-thumb-${index}`}
+                        >
+                          <img
+                            src={optimizeImg(img, 300)}
+                            alt=""
+                            className="w-full h-full object-cover object-top"
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1396,7 +1424,7 @@ export default function ProductDetail() {
                   <img
                     src={optimizeImg(product.images?.[0] || product.image, 500)}
                     alt={product.name}
-                    className="w-28 sm:w-32 aspect-[3/4] object-cover object-top flex-shrink-0 self-start bg-gray-50"
+                    className="w-28 sm:w-32 h-auto object-contain flex-shrink-0 self-start bg-gray-50"
                     loading="lazy"
                   />
                 )}
