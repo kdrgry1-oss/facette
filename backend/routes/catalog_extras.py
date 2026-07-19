@@ -5,7 +5,7 @@ Popups, Announcements, Tickets, Bulk Mail, Currency, Member Groups.
 
 One file on purpose — many tiny CRUD domains with the same shape.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
@@ -138,20 +138,39 @@ alerts_admin_router = APIRouter(prefix="/admin/alerts", tags=["admin-alerts"])
 
 
 @alerts_public_router.post("")
-async def register_alert(payload: dict):
+async def register_alert(payload: dict, request: Request):
     t = (payload.get("type") or "stock").lower()  # stock | price
     if t not in {"stock", "price"}:
         raise HTTPException(status_code=400, detail="Geçersiz tip")
     if not payload.get("product_id") or not payload.get("email"):
         raise HTTPException(status_code=400, detail="product_id ve email gerekli")
+    _email = payload["email"].lower().strip()
+    # A3: user_id istemciden ALINMAZ — varsa Bearer token'dan türet (sahte sahiplik yazılmasın).
+    _uid = None
+    try:
+        _auth = request.headers.get("authorization") or ""
+        if _auth.lower().startswith("bearer "):
+            from .deps import _decode_jwt_strict
+            _uid = (_decode_jwt_strict(_auth.split(" ", 1)[1].strip()) or {}).get("user_id")
+    except Exception:
+        _uid = None
+    # A3: Ürünün varlığını doğrula (rastgele product_id ile çöp kayıt engellenir).
+    if not await db.products.find_one({"id": payload["product_id"]}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    # A3: Aynı (tip, ürün, varyant, e-posta) için bekleyen kayıt varsa idempotent — spam büyümesini önler.
+    _dup = await db.stock_alerts.find_one({
+        "type": t, "product_id": payload["product_id"],
+        "variant_id": payload.get("variant_id"), "email": _email, "notified": False}, {"_id": 0, "id": 1})
+    if _dup:
+        return {"success": True, "id": _dup["id"], "message": "Zaten kayıtlısınız. Koşul gerçekleştiğinde bilgilendirileceksiniz."}
     doc = {
         "id": str(uuid.uuid4()),
         "type": t,
         "product_id": payload["product_id"],
         "variant_id": payload.get("variant_id"),
-        "email": payload["email"].lower().strip(),
+        "email": _email,
         "phone": (payload.get("phone") or "").strip(),
-        "user_id": payload.get("user_id"),
+        "user_id": _uid,
         "target_price": float(payload.get("target_price") or 0) or None,
         "notified": False,
         "created_at": _now(),
@@ -195,6 +214,15 @@ async def customer_havale_notify(payload: dict):
     order_id = payload.get("order_id")
     if not order_id:
         raise HTTPException(status_code=400, detail="order_id gerekli")
+    # A3: Siparişin varlığını doğrula (rastgele order_id ile sahte bildirim/çöp engellenir).
+    _ord = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0, "id": 1})
+    if not _ord:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    order_id = _ord["id"]
+    # A3: Aynı sipariş için bekleyen bildirim varsa idempotent — spam/çift kayıt önlenir.
+    _dup = await db.havale_notifications.find_one({"order_id": order_id, "status": "pending"}, {"_id": 0, "id": 1})
+    if _dup:
+        return {"success": True, "id": _dup["id"], "message": "Bildiriminiz zaten alındı, en kısa sürede kontrol edilecek."}
     doc = {
         "id": str(uuid.uuid4()),
         "order_id": order_id,

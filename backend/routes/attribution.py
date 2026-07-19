@@ -238,7 +238,10 @@ async def track_visit(payload: dict, request: Request):
 
 @router.get("/session/{sid}")
 async def get_session(sid: str):
-    doc = await db.attribution_sessions.find_one({"session_id": sid}, {"_id": 0})
+    # A3: kimliksiz uç — ham IP/User-Agent (PII) döndürülmez; yalnız atıf alanları.
+    doc = await db.attribution_sessions.find_one(
+        {"session_id": sid},
+        {"_id": 0, "ip": 0, "user_agent": 0, "ua": 0, "ip_address": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Oturum bulunamadı")
     return doc
