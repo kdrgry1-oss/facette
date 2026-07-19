@@ -259,27 +259,51 @@ async def register_failed_login_ip(ip: str) -> None:
         )
 
 
+# A1.3 (GÜVENLİK): Cloudflare'in eklediği paylaşımlı gizli header ile "istek gerçekten
+# CF üzerinden mi geldi" doğrulaması. CF Transform Rule ile her isteğe
+# `X-Facette-Edge: <secret>` eklenir; origin bu secret'ı bilir. Böylece origin'e
+# DOĞRUDAN (CF'i baypas ederek) gelen bir saldırgan `cf-connecting-ip` header'ını
+# spoof edip rate-limit/lockout/blocklist anahtarını rotasyonlayamaz.
+#   - CF_EDGE_SECRET set + header eşleşiyorsa → cf-connecting-ip güvenilir (gerçek client).
+#   - CF_EDGE_SECRET set + header YOK/yanlış → istek CF'i baypas etmiş; cf-connecting-ip
+#     güvenilmez, gerçek TCP peer (spoof edilemez) anahtar olur.
+#   - CF_EDGE_SECRET set DEĞİL → eski davranış korunur (regresyon yok). Beyaz-etiket
+#     onboarding: yeni firmada bu secret + CF Transform Rule kurulmalı.
+_CF_EDGE_SECRET = (os.environ.get("CF_EDGE_SECRET") or "").strip()
+
+
+def _edge_trusted(request) -> bool:
+    """CF_EDGE_SECRET yapılandırılmışsa: istek geçerli edge secret'ı taşıyor mu?
+    Yapılandırılmamışsa True (eski davranış)."""
+    if not _CF_EDGE_SECRET:
+        return True
+    try:
+        import hmac as _hmac
+        hdr = (request.headers.get("x-facette-edge") or "").strip()
+        return bool(hdr) and _hmac.compare_digest(hdr, _CF_EDGE_SECRET)
+    except Exception:
+        return False
+
+
 def client_ip_from_request(request) -> str:
     """Return the real client IP.
 
-    Öncelik sırası (2026-07-01 teşhisi sonucu düzeltildi):
-    1. CF-Connecting-IP — Cloudflare'in kendi tarafında set ettiği, spoof
-       edilemez gerçek client IP header'ı. Bu deploy'da doğrulandı: Railway'e
-       ulaşan X-Forwarded-For zinciri gerçek client IP'yi İÇERMİYOR (sadece
-       ara-katman/Cloudflare edge IP'leri taşıyor, ör. 'xff_raw=104.22.64.117,
-       152.233.47.68' iken gerçek client cf_connecting_ip=136.113.108.52 idi).
-    2. X-Forwarded-For ilk hop — Cloudflare arkasında olmayan istekler için
-       (ör. doğrudan health-check) fallback.
-    3. TCP bağlantısının kaynağı — hiçbiri yoksa son çare.
+    1. CF-Connecting-IP — YALNIZCA istek CF üzerinden geldiyse (edge secret doğrulanır);
+       Cloudflare'in set ettiği spoof-edilemez gerçek client IP.
+    2. Edge doğrulanmadıysa (doğrudan origin erişimi) veya cf-ip yoksa → gerçek TCP peer
+       (request.client.host) — saldırgan bunu spoof edemez.
+    3. X-Forwarded-For ilk hop — CF arkasında olmayan meşru istekler için ara fallback.
     """
     if not request:
         return ""
-    cf_ip = request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP")
-    if cf_ip:
-        return cf_ip.strip()
-    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-    if xff:
-        return xff.split(",")[0].strip()
+    if _edge_trusted(request):
+        cf_ip = request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP")
+        if cf_ip:
+            return cf_ip.strip()
+        xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+    # Edge güvenilmez VEYA cf/xff yok → spoof edilemez TCP peer'ı kullan.
     try:
         return request.client.host if request.client else ""
     except Exception:
@@ -292,16 +316,10 @@ try:
     from slowapi.util import get_remote_address as _gra
 
     def _rate_key(request):
-        # CF-Connecting-IP öncelikli — bkz. client_ip_from_request docstring'i.
-        # 2026-07-01: X-Forwarded-For ilk hop'un Railway'de Cloudflare edge IP'si
-        # taşıdığı (gerçek client değil) canlı loglarla kanıtlandıktan sonra düzeltildi.
-        cf_ip = request.headers.get("cf-connecting-ip") if request else None
-        if cf_ip:
-            return cf_ip.strip()
-        xff = request.headers.get("x-forwarded-for") if request else None
-        if xff:
-            return xff.split(",")[0].strip()
-        return _gra(request)
+        # A1.3: cf-connecting-ip yalnız edge doğrulanırsa güvenilir (spoof koruması);
+        # değilse gerçek TCP peer. client_ip_from_request ile aynı mantık — tek kaynak.
+        ip = client_ip_from_request(request)
+        return ip or _gra(request)
 
     limiter = Limiter(key_func=_rate_key, default_limits=[])
 except Exception as _limiter_init_exc:  # pragma: no cover
