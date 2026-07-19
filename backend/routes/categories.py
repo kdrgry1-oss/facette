@@ -125,13 +125,97 @@ async def update_category(
     await db.categories.update_one({"id": category_id}, {"$set": category_data})
     return {"message": "Kategori güncellendi"}
 
+def _id_variants(v):
+    """Kategori id'si DB'de int VEYA string olabilir — ikisini de eşlemek için liste döndürür."""
+    out = [v]
+    s = str(v)
+    out.append(s)
+    try:
+        out.append(int(s))
+    except (TypeError, ValueError):
+        pass
+    # tekilleştir (sırayı koru)
+    seen, uniq = set(), []
+    for x in out:
+        k = (type(x).__name__, str(x))
+        if k not in seen:
+            seen.add(k); uniq.append(x)
+    return uniq
+
+
+@router.post("/merge")
+async def merge_categories(payload: dict, current_user: dict = Depends(require_admin)):
+    """İki kategoriyi GÜVENLİ birleştirir (mükerrer/çift yapıyı temizlemek için).
+    source kategorisi altındaki ALT KATEGORİLER ve ürün referansları target'a taşınır,
+    sonra source silinir. Ürünler asla yetim kalmaz.
+
+    payload: {"source_id": <id>, "target_id": <id>}
+    Reassign edilenler: alt kategori parent_id; ürün category_ids[] / category_id /
+    category_slug / category_name (yalnız source'a EŞİT olanlar).
+    """
+    src_id = payload.get("source_id")
+    tgt_id = payload.get("target_id")
+    if src_id is None or tgt_id is None:
+        raise HTTPException(status_code=400, detail="source_id ve target_id gerekli")
+    if str(src_id) == str(tgt_id):
+        raise HTTPException(status_code=400, detail="source ve target aynı olamaz")
+
+    src = await db.categories.find_one({"id": {"$in": _id_variants(src_id)}}, {"_id": 0})
+    tgt = await db.categories.find_one({"id": {"$in": _id_variants(tgt_id)}}, {"_id": 0})
+    if not src:
+        raise HTTPException(status_code=404, detail="Kaynak kategori bulunamadı")
+    if not tgt:
+        raise HTTPException(status_code=404, detail="Hedef kategori bulunamadı")
+
+    src_real = src["id"]; tgt_real = tgt["id"]
+    src_vars = _id_variants(src_real)
+    report = {"source": {"id": src_real, "name": src.get("name")},
+              "target": {"id": tgt_real, "name": tgt.get("name")}}
+
+    # 1) Alt kategorileri target'a taşı
+    r_children = await db.categories.update_many(
+        {"parent_id": {"$in": src_vars}}, {"$set": {"parent_id": tgt_real}})
+    report["children_moved"] = r_children.modified_count
+
+    # 2) Ürün category_ids[] dizisinde source → target
+    #    Önce target'ı ekle (source içerenlere), sonra source'u çıkar.
+    await db.products.update_many(
+        {"category_ids": {"$in": src_vars}}, {"$addToSet": {"category_ids": tgt_real}})
+    r_arr = await db.products.update_many(
+        {"category_ids": {"$in": src_vars}}, {"$pull": {"category_ids": {"$in": src_vars}}})
+    report["products_category_ids"] = r_arr.modified_count
+
+    # 3) Skaler category_id source → target
+    r_scalar = await db.products.update_many(
+        {"category_id": {"$in": src_vars}}, {"$set": {"category_id": tgt_real}})
+    report["products_category_id"] = r_scalar.modified_count
+
+    # 4) category_slug source.slug → target.slug (yalnız tam eşleşen)
+    if src.get("slug"):
+        r_slug = await db.products.update_many(
+            {"category_slug": src["slug"]}, {"$set": {"category_slug": tgt.get("slug") or src["slug"]}})
+        report["products_category_slug"] = r_slug.modified_count
+
+    # 5) category_name source.name → target.name (yalnız tam eşleşen)
+    if src.get("name"):
+        r_name = await db.products.update_many(
+            {"category_name": src["name"]}, {"$set": {"category_name": tgt.get("name") or src["name"]}})
+        report["products_category_name"] = r_name.modified_count
+
+    # 6) source kategorisini sil
+    await db.categories.delete_one({"id": src_real})
+    report["source_deleted"] = True
+    logger.info(f"[category-merge] {src_real}({src.get('name')}) → {tgt_real}({tgt.get('name')}) {report}")
+    return {"message": "Kategoriler birleştirildi", "report": report}
+
+
 @router.delete("/{category_id}")
 async def delete_category(
     category_id: str,
     current_user: dict = Depends(require_admin)
 ):
     """Delete category (admin only)"""
-    result = await db.categories.delete_one({"id": category_id})
+    result = await db.categories.delete_one({"id": {"$in": _id_variants(category_id)}})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kategori bulunamadı")
     return {"message": "Kategori silindi"}
