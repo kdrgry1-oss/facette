@@ -1434,6 +1434,41 @@ async def _attach_campaign_badges(prods: list) -> list:
     return prods
 
 
+@router.post("/cart-pricing")
+async def cart_pricing(payload: dict):
+    """Sepet kalemleri için CANLI fiyat/indirim verisi — sepet açılınca frontend bunu
+    çağırıp kalemlerin price/sale_price/campaign_discount_percent alanlarını tazeler.
+    Böylece eski sepet kalemi (kampanya kaydedilmeden eklenmiş) veya sonradan değişen
+    fiyat/kampanya, sepette/kasada DOĞRU indirimli birim fiyatı gösterir.
+    payload: {product_ids: [...], variant_ids?: [...]}. Döner: {items:{id:{...}}}."""
+    ids = [str(x) for x in (payload.get("product_ids") or []) if x][:200]
+    if not ids:
+        return {"items": {}}
+    prods = await db.products.find(
+        {"id": {"$in": ids}},
+        {"_id": 0, "id": 1, "price": 1, "sale_price": 1, "category_id": 1,
+         "category_ids": 1, "variants": 1, "is_active": 1}).to_list(200)
+    prods = await _attach_campaign_badges(prods)   # otomatik kampanya yüzdesini ekle
+    out = {}
+    for p in prods:
+        vmap = {}
+        for v in (p.get("variants") or []):
+            if v.get("id"):
+                vmap[str(v["id"])] = {
+                    "stock": v.get("stock"),
+                    "price_diff": v.get("price_diff") or v.get("price_adjustment") or 0,
+                }
+        out[str(p["id"])] = {
+            "price": p.get("price"),
+            "sale_price": p.get("sale_price"),
+            "campaign_discount_percent": p.get("campaign_discount_percent") or 0,
+            "campaign_label": p.get("campaign_label") or "",
+            "is_active": p.get("is_active", True),
+            "variants": vmap,
+        }
+    return {"items": out}
+
+
 async def _sort_variants_by_pool(variants: list) -> list:
     """Ürün varyantlarını `variant_options` (type=size) sort_order'ına göre sıralar.
     Havuzda olmayan bedenler (kombinasyonlar/numeric) orijinal sırada en sona eklenir

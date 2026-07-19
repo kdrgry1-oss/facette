@@ -21,6 +21,64 @@ export function CartProvider({ children }) {
     localStorage.setItem("cart", JSON.stringify(items));
   }, [items]);
 
+  // CANLI FİYAT/İNDİRİM TAZELEME — sepet kalemlerinin fiyat/indirimli fiyat/otomatik kampanya
+  // alanlarını mevcut ürün verisinden günceller. Böylece:
+  //  • Kampanya kaydedilmeden (eski) eklenmiş kalem → indirim artık DOĞRU görünür,
+  //  • Admin sonradan fiyat/kampanya değiştirmişse → sepet/kasa güncel indirimli fiyatı gösterir.
+  // Sunucu fiyatı zaten otoriter (çekim); bu yalnız GÖRÜNÜMÜ canlıya çeker. Değişiklik yoksa
+  // state'e dokunmaz (gereksiz re-render/döngü olmaz).
+  const _refreshKey = (items || []).map((it) => `${it.productId}:${it.variantId || ""}`).join(",");
+  useEffect(() => {
+    const list = items || [];
+    if (list.length === 0) return;
+    const API = process.env.REACT_APP_BACKEND_URL;
+    if (!API) return;
+    let cancel = false;
+    const ids = [...new Set(list.map((it) => it.productId).filter(Boolean))];
+    fetch(`${API}/api/products/cart-pricing`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_ids: ids }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancel || !data || !data.items) return;
+        setItems((prev) => {
+          let changed = false;
+          const next = prev.map((it) => {
+            const info = data.items[it.productId];
+            if (!info) return it;
+            const listBase = Number(info.price) || 0;
+            const sp = Number(info.sale_price) || 0;
+            const saleBase = sp > 0 && sp < listBase ? sp : listBase;
+            const nextCamp = Number(info.campaign_discount_percent) || 0;
+            let pd = null;
+            if (it.variantId) {
+              const vinfo = (info.variants || {})[it.variantId];
+              pd = vinfo ? (Number(vinfo.price_diff) || 0) : null; // varyant bulunamazsa fiyata dokunma
+            } else {
+              pd = 0;
+            }
+            let nextPrice = Number(it.price);
+            let nextList = Number(it.listPrice);
+            if (pd !== null && listBase > 0) {
+              nextPrice = Math.round((saleBase + pd) * 100) / 100;
+              nextList = Math.round((listBase + pd) * 100) / 100;
+            }
+            if (nextPrice === Number(it.price) && nextList === Number(it.listPrice) && nextCamp === Number(it.campaignPct || 0)) {
+              return it;
+            }
+            changed = true;
+            return { ...it, price: nextPrice, listPrice: nextList, campaignPct: nextCamp };
+          });
+          return changed ? next : prev;
+        });
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_refreshKey]);
+
   // TERK EDİLEN SEPET TAKİBİ: sepet değişince (debounce 2.5sn) backend'e kaydet
   // (POST /api/cart/track). Daha önce storefront bunu HİÇ çağırmıyordu → cart_sessions
   // boş kalıyor, "Terk Edilen Sepet" paneli hep 0 gösteriyordu. Sipariş sonrası sepet
@@ -72,10 +130,20 @@ export function CartProvider({ children }) {
       );
 
       if (existing) {
+        // Var olan kalemde adet artır + fiyat/indirim/kampanya alanlarını eldeki GÜNCEL ürün
+        // verisinden tazele (eski kalemde kampanya eksikse bile artık doğru indirim görünür).
+        const _listBase = Number(product.price) || 0;
+        const _saleBase = product.sale_price && product.sale_price < _listBase ? product.sale_price : _listBase;
+        const _pd = variant?.price_diff || variant?.price_adjustment || 0;
         return prev.map((item) => {
           if (!(variant ? item.variantId === variant.id : item.productId === product.id && !item.variantId)) return item;
           const cap = item.stock || Infinity;   // stok tavanı (eski sepet kalemlerinde stock yoksa sınırsız)
-          return { ...item, quantity: Math.min(item.quantity + quantity, cap) };
+          const patch = _listBase > 0 ? {
+            price: Math.round((_saleBase + _pd) * 100) / 100,
+            listPrice: Math.round((_listBase + _pd) * 100) / 100,
+            campaignPct: Number(product.campaign_discount_percent || 0),
+          } : {};
+          return { ...item, ...patch, quantity: Math.min(item.quantity + quantity, cap) };
         });
       }
 
