@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useShipping } from "../lib/shipping";
-import { X, Plus, Minus, ShoppingBag, Sparkles } from "lucide-react";
+import { X, Plus, Minus, ShoppingBag, Sparkles, Share2 } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { priceView, cartLineView } from "../lib/price";
 import { trackRemoveFromCart } from "../lib/dataLayer";
+import { shareCart } from "../lib/shareCart";
 
 // Çekmece öneri fiyatı — indirim varsa üstü çizili liste + indirimli (tutarlı).
 function MiniPrice({ p }) {
@@ -276,6 +277,15 @@ export default function CartDrawer() {
             >
               Sepete Git
             </Link>
+            {/* Sepeti Paylaş — link üretip panoya kopyalar / mobil paylaşım menüsü açar */}
+            <button
+              onClick={() => shareCart(items)}
+              className="flex items-center justify-center gap-1.5 w-full pt-1 text-[11px] uppercase tracking-[0.2em] text-black/55 hover:text-black underline underline-offset-4 transition-colors"
+              data-testid="drawer-share-cart"
+            >
+              <Share2 size={12} />
+              Sepeti Paylaş
+            </button>
             </div>
           </>
         )}

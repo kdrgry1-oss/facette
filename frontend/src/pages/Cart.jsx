@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { Trash2, Plus, Minus, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
+import { shareCart } from "../lib/shareCart";
 import { useShipping } from "../lib/shipping";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -30,29 +31,7 @@ export default function Cart() {
   const handleShareCart = async () => {
     if (items.length === 0 || sharing) return;
     setSharing(true);
-    try {
-      const res = await axios.post(`${API}/shared-carts`, {
-        items: items.map((it) => ({
-          product_id: it.productId,
-          variant_id: it.variantId || null,
-          quantity: it.quantity,
-        })),
-      });
-      const url = `${window.location.origin}/sepet?paylasim=${res.data.id}`;
-      // Mobilde yerel paylaşım menüsü; olmazsa panoya kopyala
-      if (navigator.share) {
-        try {
-          await navigator.share({ title: "Sepetim", text: "Sepetimdeki ürünlere göz at:", url });
-          return;
-        } catch (_) { /* kullanıcı iptal etti → kopyalamaya düş */ }
-      }
-      await navigator.clipboard.writeText(url);
-      toast.success("Sepet linki kopyalandı — dilediğin kişiyle paylaşabilirsin");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Sepet paylaşılamadı");
-    } finally {
-      setSharing(false);
-    }
+    try { await shareCart(items); } finally { setSharing(false); }
   };
 
   useEffect(() => {
@@ -341,11 +320,7 @@ export default function Cart() {
                   <span className="font-medium">Toplam</span>
                   <span className="font-medium tabular-nums">{grandTotal.toFixed(2)} TL</span>
                 </div>
-                {grandTotal > 0 && (
-                  <p className="text-[11px] text-black/50 pt-1" data-testid="cart-installment-hint">
-                    💳 9 taksite kadar · {(grandTotal / 9).toFixed(2)} TL/ay'dan başlayan taksitlerle
-                  </p>
-                )}
+                {/* Taksit yazısı kaldırıldı (kullanıcı isteği) */}
               </div>
 
               <Link
