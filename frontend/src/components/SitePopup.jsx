@@ -21,6 +21,8 @@ export default function SitePopup() {
   useEffect(() => {
     let alive = true;
     let timer = null;
+    let onExit = null;   // exit-intent (mouseout) dinleyicisi
+    const cleanupExit = () => { if (onExit) { document.removeEventListener("mouseout", onExit); onExit = null; } };
     axios
       .get(`${API}/storefront/popups`)
       .then((r) => {
@@ -35,11 +37,26 @@ export default function SitePopup() {
           } catch { /* yoksay */ }
         }
         setPopup(p);
-        const delay = Math.max(0, Number(p.delay_seconds) || 0) * 1000;
-        timer = setTimeout(() => { if (alive) setVisible(true); }, delay);
+        const show = () => { if (alive) { setVisible(true); cleanupExit(); if (timer) clearTimeout(timer); } };
+        // Tetikleyici: 'exit_intent' → fare pencereden (üstten) çıkınca; değilse gecikmeli.
+        const trigger = String(p.trigger || "delay");
+        const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+        if (trigger === "exit_intent" && !isTouch) {
+          // Masaüstü: imleç viewport'un üstünden çıkarsa (sekme/kapatma niyeti)
+          onExit = (e) => { if (e.clientY <= 0 && !e.relatedTarget) show(); };
+          document.addEventListener("mouseout", onExit);
+          // Emniyet: dokunmatik olmayan ama fare çıkışı yakalanmayan durumlar için 45sn sonra göster
+          timer = setTimeout(show, 45000);
+        } else if (trigger === "exit_intent" && isTouch) {
+          // Dokunmatik cihazda exit-intent olmaz → makul bir gecikmeyle göster (kaybolmasın)
+          timer = setTimeout(show, 20000);
+        } else {
+          const delay = Math.max(0, Number(p.delay_seconds) || 0) * 1000;
+          timer = setTimeout(show, delay);
+        }
       })
       .catch(() => {});
-    return () => { alive = false; if (timer) clearTimeout(timer); };
+    return () => { alive = false; if (timer) clearTimeout(timer); cleanupExit(); };
   }, []);
 
   if (!popup || !visible) return null;
