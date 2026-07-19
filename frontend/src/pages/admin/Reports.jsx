@@ -252,6 +252,9 @@ export function ProductsReport() {
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Ürün ara…" className="border rounded-lg px-3 py-1.5 text-sm w-48" />
           </div>
         </div>
+        <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
+          <span><span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — listeyi aşağı kaydırarak tümünü görebilirsiniz.</span>
+        </div>
         <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
