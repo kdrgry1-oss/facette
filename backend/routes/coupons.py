@@ -323,6 +323,38 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
     return round(discount, 2)
 
 
+async def _coupon_used_count(coupon_id: str, coupon_code: str = "", restrict_ors: list = None) -> int:
+    """A1.2: Kupon kullanım sayısı = kesin redemption ∪ HENÜZ ÖDENMEMİŞ (in-flight) siparişler.
+    Sadece redemption saymak, 'çok pending sipariş oluştur sonra hepsini öde' baypasına açıktı;
+    ödemesi tamamlanmamış ama kuponu uygulamış siparişleri de sayarak limit atomik-benzeri korunur.
+    restrict_ors verilirse (per-user) hem redemption hem sipariş bu koşulla filtrelenir."""
+    order_ids = set()
+    # 1) Kesin redemption'lar
+    rq = {"coupon_id": coupon_id}
+    if restrict_ors:
+        rq["$or"] = restrict_ors
+    async for r in db.coupon_redemptions.find(rq, {"_id": 0, "order_id": 1}):
+        if r.get("order_id"):
+            order_ids.add(str(r["order_id"]))
+    # 2) In-flight (ödenmemiş, iptal/başarısız olmayan) siparişler — kuponu uygulamış
+    coup_or = [{"applied_promotions.coupon_id": coupon_id}]
+    if coupon_code:
+        coup_or.append({"coupon_code": {"$regex": f"^{re.escape(str(coupon_code))}$", "$options": "i"}})
+    oq = {
+        "$and": [
+            {"$or": coup_or},
+            {"status": {"$nin": ["cancelled", "returned", "refunded", "return_approved", "returned_partial"]}},
+            {"payment_status": {"$nin": ["paid", "failed", "expired", "refunded"]}},
+        ]
+    }
+    if restrict_ors:
+        oq["$and"].append({"$or": restrict_ors})
+    async for o in db.orders.find(oq, {"_id": 0, "id": 1}).limit(1000):
+        if o.get("id"):
+            order_ids.add(str(o["id"]))
+    return len(order_ids)
+
+
 async def _evaluate_single(c: dict, cart_total: float, items: list,
                            user_id=None, email: str = "", payment_method: str = "") -> dict:
     """Tek kuponu dogrular + indirimini hesaplar. apply_coupon VE motor ayni cekirdegi kullanir."""
@@ -347,7 +379,8 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
     if c.get("min_cart_total", 0) and cart_total < c["min_cart_total"]:
         return {"valid": False, "reason": f"Minimum sepet tutarı ₺{c['min_cart_total']:.2f}", "discount": 0}
     if c.get("usage_limit"):
-        used = await db.coupon_redemptions.count_documents({"coupon_id": c["id"]})
+        # A1.2: redemption + in-flight (ödenmemiş) siparişler birlikte sayılır (baypas kapatıldı).
+        used = await _coupon_used_count(c["id"], c.get("code", ""))
         if used >= c["usage_limit"]:
             return {"valid": False, "reason": "Kupon kullanım limiti dolmuş", "discount": 0}
     if c.get("usage_limit_per_user"):
@@ -357,8 +390,9 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
             _ors.append({"user_id": user_id})
         if _em:
             _ors.append({"customer_email": _em})
+            _ors.append({"email": _em})  # sipariş e-postayı 'email' altında da tutabilir
         if _ors:
-            used_by_user = await db.coupon_redemptions.count_documents({"coupon_id": c["id"], "$or": _ors})
+            used_by_user = await _coupon_used_count(c["id"], c.get("code", ""), restrict_ors=_ors)
             if used_by_user >= c["usage_limit_per_user"]:
                 return {"valid": False, "reason": "Bu kupon için kullanım hakkınız kalmadı", "discount": 0}
     if c.get("first_order_only"):
