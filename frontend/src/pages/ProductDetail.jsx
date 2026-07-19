@@ -395,19 +395,9 @@ export default function ProductDetail() {
         try {
           const comboRes = await axios.get(`${API}/products/${res.data.id}/combine-products`);
           const comboItems = comboRes.data?.items || [];
+          // YALNIZ admin'in atadığı kombin gösterilir; otomatik öneri fallback'i KALDIRILDI
+          // (kullanıcı isteği: kombin silinince alan boşalsın, kategori-bazlı ürünler dolmasın).
           setComboProducts(comboItems);
-          // Fallback: kombin atanmamışsa cart-suggestions çağırarak kategori bazlı öner
-          if (comboItems.length === 0) {
-            try {
-              const fb = await axios.post(`${API}/products/cart-suggestions`, {
-                product_ids: [res.data.id],
-                limit: 4,
-              });
-              setComboProducts(fb.data?.items || []);
-            } catch {
-              // ignore
-            }
-          }
         } catch {
           setComboProducts([]);
         }
@@ -695,9 +685,11 @@ export default function ProductDetail() {
             {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü).
                 Küçük resimler BÜYÜK (140px), ana görsel max-genişlikle sınırlı
                 (aşırı uzamasın) — kullanıcı isteği. */}
-            <div className="hidden lg:flex gap-4 justify-center">
+            <div className="hidden lg:flex gap-4 justify-center items-start">
               {displayImages.length > 1 && (
-                <div className="flex flex-col gap-2.5 w-[140px] shrink-0">
+                /* 5 kutucuk alt alta (1 kolon); 6.–8. görsel yeni kolona (SAĞA) sarar — tek uzun
+                   şerit yerine yan yana. max-h ~5 kutucuk yüksekliği (140px × 3/2 = 210px). */
+                <div className="flex flex-col flex-wrap content-start gap-2.5 max-h-[1092px] shrink-0 [&>button]:w-[140px]">
                   {displayImages.map((img, index) => (
                     <button
                       key={index}
@@ -720,7 +712,7 @@ export default function ProductDetail() {
                   ))}
                 </div>
               )}
-              <div className="flex-1 min-w-0 lg:max-w-[480px]">
+              <div className="flex-1 min-w-0 lg:max-w-[560px]">
                 <div
                   className="relative aspect-[2/3] bg-stone-50 overflow-hidden cursor-zoom-in"
                   onMouseEnter={() => setZoom((z) => ({ ...z, on: true }))}
@@ -1356,35 +1348,34 @@ export default function ProductDetail() {
               </div>
             )}
             {sizeTableData && (
-            <div className="p-6" data-testid="size-table-html">
+            /* KOMPAKT: küçük punto + dar boşluk → modal tek ekrana sığar, kaydırma gerekmez. */
+            <div className="p-4" data-testid="size-table-html">
               {/* Üst blok: sol ürün görseli + sağda ad & Ürün Özellikleri (örnek düzen) */}
-              <div className="flex flex-col sm:flex-row gap-6 mb-6">
+              <div className="flex flex-row gap-4 mb-3">
                 {(product.images?.[0] || product.image) && (
                   <img
                     src={optimizeImg(product.images?.[0] || product.image, 500)}
                     alt={product.name}
-                    /* self-start: sağdaki uzun metin yüzünden dikey ESNEMESİN; 3/4 oranı korunur */
-                    className="w-40 sm:w-44 aspect-[3/4] object-cover object-top flex-shrink-0 self-start bg-gray-50"
+                    className="w-28 sm:w-32 aspect-[3/4] object-cover object-top flex-shrink-0 self-start bg-gray-50"
                     loading="lazy"
                   />
                 )}
                 <div className="min-w-0">
-                  <h4 className="text-lg text-gray-700 mb-3">{product.name}</h4>
+                  <h4 className="text-sm font-medium text-gray-800 mb-1.5">{product.name}</h4>
                   {product.description && (
                     <>
-                      <p className="text-sm font-semibold text-gray-800 mb-1.5">Ürün Özellikleri</p>
+                      <p className="text-[11px] font-semibold text-gray-800 mb-1">Ürün Özellikleri</p>
                       <div
-                        className="text-sm text-gray-600 leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-0.5"
+                        className="text-[11px] text-gray-600 leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-0 [&_p]:mb-1"
                         dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) }}
                       />
                     </>
                   )}
-                  {/* "suud" örneği: Ürün Bedeni + Manken ölçüleri */}
                   {sizeTableData.product_size && (
-                    <p className="text-sm text-gray-700 mt-3"><span className="font-semibold text-gray-800">Ürün Bedeni:</span> {sizeTableData.product_size}</p>
+                    <p className="text-[11px] text-gray-700 mt-2"><span className="font-semibold text-gray-800">Ürün Bedeni:</span> {sizeTableData.product_size}</p>
                   )}
                   {sizeTableData.model_info && Object.keys(sizeTableData.model_info).length > 0 && (
-                    <p className="text-sm text-gray-700 mt-1.5">
+                    <p className="text-[11px] text-gray-700 mt-1">
                       <span className="font-semibold text-gray-800">Manken:</span>{" "}
                       {Object.entries(sizeTableData.model_info).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k} ${v} cm`).join(", ")}
                     </p>
@@ -1393,28 +1384,28 @@ export default function ProductDetail() {
               </div>
               {/* Ölçü tablosu — TRANSPOZE: satır=ölçü (Göğüs/Bel/Boy), kolon=beden (34/36/38/40) */}
               <div className="overflow-x-auto border border-gray-200">
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-[11px] border-collapse">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="text-left px-5 py-3 font-semibold text-gray-800">Ölçüler</th>
+                      <th className="text-left px-3 py-1.5 font-semibold text-gray-800">Ölçüler</th>
                       {sizeTableData.sizes.map(s => (
-                        <th key={s} className="text-center px-5 py-3 font-semibold text-gray-800 border-l border-gray-200">{s}</th>
+                        <th key={s} className="text-center px-3 py-1.5 font-semibold text-gray-800 border-l border-gray-200">{s}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {sizeTableData.columns.map((c, ri) => (
                       <tr key={c} className={`border-b border-gray-100 ${ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
-                        <td className="px-5 py-3 text-gray-700">{c}</td>
+                        <td className="px-3 py-1.5 text-gray-700">{c}</td>
                         {sizeTableData.sizes.map(s => (
-                          <td key={s} className="px-5 py-3 text-center text-gray-600 border-l border-gray-100">{sizeTableData.values?.[s]?.[c] || '—'}</td>
+                          <td key={s} className="px-3 py-1.5 text-center text-gray-600 border-l border-gray-100">{sizeTableData.values?.[s]?.[c] || '—'}</td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 mt-4">Tüm ölçüler cm cinsindendir; ± 1-2 cm tolerans taşıyabilir.</p>
+              <p className="text-[10px] text-gray-400 mt-2">Tüm ölçüler cm cinsindendir; ± 1-2 cm tolerans taşıyabilir.</p>
             </div>
             )}
           </div>
