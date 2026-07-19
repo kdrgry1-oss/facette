@@ -203,9 +203,20 @@ function DetailModal({ influencerId, onClose }) {
   };
 
   const delCampaign = async (cid) => {
-    if (!window.confirm("Kampanya silinsin mi?")) return;
+    if (!window.confirm("Kampanya silinsin mi? (Düşülen stok varsa otomatik geri yüklenir)")) return;
     await axios.delete(`${API}/influencer-campaigns/${cid}`, auth());
     load();
+  };
+
+  const uncommitStock = async (cid) => {
+    if (!window.confirm("Bu kampanyanın ürünleri stoğa GERİ yüklensin mi?")) return;
+    try {
+      await axios.post(`${API}/influencer-campaigns/${cid}/uncommit-products`, {}, auth());
+      toast.success("Stok geri yüklendi");
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Geri alınamadı");
+    }
   };
 
   if (!inf) return <Modal title="Yükleniyor..." onClose={onClose}><div className="py-8 text-center text-gray-400">...</div></Modal>;
@@ -251,11 +262,33 @@ function DetailModal({ influencerId, onClose }) {
               <span>Ürün: {money(c.product_cost)}</span>
               <span>Kargo: {money(c.cargo_cost)}</span>
               {c.cargo_barcode && <span className="text-blue-600">Barkod: {c.cargo_barcode}</span>}
+              {c.cargo_tracking_no && <span className="text-blue-600">Takip: {c.cargo_tracking_no}</span>}
             </div>
-            <div className="flex gap-2 mt-3">
+            {/* Gönderilen ürünler + stok durumu */}
+            {(c.sent_products || []).length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2" data-testid={`sent-products-${c.id}`}>
+                {(c.sent_products || []).map((p, pi) => (
+                  <span key={pi} className="text-[10px] bg-stone-100 border rounded px-1.5 py-0.5">
+                    {p.name}{p.size ? ` (${p.size})` : ""} ×{p.qty || 1}
+                  </span>
+                ))}
+                {c.stock_deducted ? (
+                  <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5">stok düşüldü ✓</span>
+                ) : (
+                  <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">stok düşülmedi</span>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2 mt-3 flex-wrap">
               <button onClick={() => createCargo(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
                 <Truck size={12} /> Kargo Oluştur
               </button>
+              {c.stock_deducted && (
+                <button onClick={() => uncommitStock(c.id)} title="Yanlış seçim/vazgeçme: ürünleri stoğa geri yükler"
+                  className="text-xs inline-flex items-center gap-1 border border-amber-300 text-amber-700 px-2 py-1 rounded hover:bg-amber-50">
+                  Stok Geri Al
+                </button>
+              )}
               <button onClick={() => confirmShare(c.id)} className="text-xs inline-flex items-center gap-1 border px-2 py-1 rounded hover:bg-gray-50">
                 <Share2 size={12} /> Paylaşıldı
               </button>
@@ -274,20 +307,111 @@ function DetailModal({ influencerId, onClose }) {
   );
 }
 
+/* Gönderilecek ürün seçici: ürün ara → beden/varyant seç → adet → listeye ekle.
+   Kaydette backend commit-products ile sent_products yazılır + STOK DÜŞÜLÜR. */
+function ProductPicker({ picked, setPicked }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const { data } = await axios.get(`${API}/products`, {
+          ...auth(), params: { search: q.trim(), limit: 8, admin_view: 1 },
+        });
+        setResults(data.products || data || []);
+      } catch { setResults([]); }
+      finally { setSearching(false); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const addVariant = (p, v) => {
+    const bc = v?.barcode || p.barcode;
+    if (!bc) { toast.error("Bu varyantın barkodu yok"); return; }
+    if (picked.some((x) => x.barcode === bc)) { toast.error("Zaten listede"); return; }
+    setPicked([...picked, { barcode: bc, name: p.name, size: v?.size || "", stock: v ? v.stock : p.stock, qty: 1 }]);
+    setQ(""); setResults([]);
+  };
+
+  return (
+    <div>
+      <input className="inp" value={q} onChange={(e) => setQ(e.target.value)}
+        placeholder="Ürün ara (en az 2 harf)..." data-testid="seeding-product-search" />
+      {searching && <p className="text-[11px] text-gray-400 mt-1">Aranıyor…</p>}
+      {results.length > 0 && (
+        <div className="border rounded-lg mt-1 max-h-52 overflow-y-auto divide-y">
+          {results.map((p) => (
+            <div key={p.id} className="p-2">
+              <p className="text-xs font-medium">{p.name}</p>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {(p.variants || []).length > 0 ? (p.variants || []).map((v) => (
+                  <button key={v.barcode || v.id} type="button" onClick={() => addVariant(p, v)}
+                    disabled={Number(v.stock) <= 0}
+                    className="text-[11px] border rounded px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40 disabled:line-through">
+                    {v.size || "STD"} · stok {v.stock ?? "?"}
+                  </button>
+                )) : (
+                  <button type="button" onClick={() => addVariant(p, null)}
+                    className="text-[11px] border rounded px-2 py-0.5 hover:bg-gray-50">
+                    Ekle · stok {p.stock ?? "?"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {picked.length > 0 && (
+        <div className="mt-2 space-y-1.5" data-testid="seeding-picked-list">
+          {picked.map((it, i) => (
+            <div key={it.barcode} className="flex items-center gap-2 bg-gray-50 border rounded px-2 py-1.5 text-xs">
+              <span className="flex-1 truncate">{it.name} {it.size && <b>({it.size})</b>}</span>
+              <input type="number" min={1} max={it.stock || 99} value={it.qty}
+                onChange={(e) => {
+                  const qv = Math.max(1, Math.min(Number(e.target.value) || 1, it.stock || 99));
+                  setPicked(picked.map((x, xi) => (xi === i ? { ...x, qty: qv } : x)));
+                }}
+                className="w-14 border rounded px-1.5 py-0.5 text-center" />
+              <button type="button" onClick={() => setPicked(picked.filter((_, xi) => xi !== i))}
+                className="text-red-500 hover:text-red-700"><Trash2 size={12} /></button>
+            </div>
+          ))}
+          <p className="text-[10px] text-gray-400">Kaydedince bu ürünler kampanyaya işlenir ve STOKTAN DÜŞÜLÜR.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CampaignModal({ influencerId, onClose, onCreated }) {
   const [form, setForm] = useState({ title: "", fee_paid: 0, product_cost: 0, cargo_cost: 0, directives: "" });
+  const [picked, setPicked] = useState([]);
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const save = async () => {
     if (!form.title.trim()) return toast.error("Başlık gerekli");
     setSaving(true);
     try {
-      await axios.post(`${API}/influencers/${influencerId}/campaigns`, {
+      const r = await axios.post(`${API}/influencers/${influencerId}/campaigns`, {
         title: form.title, fee_paid: Number(form.fee_paid) || 0,
         product_cost: Number(form.product_cost) || 0, cargo_cost: Number(form.cargo_cost) || 0,
         directives: form.directives,
       }, auth());
-      toast.success("Kampanya oluşturuldu");
+      const cid = r.data?.campaign?.id;
+      if (cid && picked.length > 0) {
+        // Ürünleri işle + stok düş (maliyet elle girilmediyse otomatik hesaplanır)
+        await axios.post(`${API}/influencer-campaigns/${cid}/commit-products`, {
+          products: picked.map((p) => ({ barcode: p.barcode, qty: p.qty })),
+          auto_cost: !(Number(form.product_cost) > 0),
+        }, auth());
+        toast.success(`Kampanya oluşturuldu — ${picked.length} ürün stoktan düşüldü`);
+      } else {
+        toast.success("Kampanya oluşturuldu");
+      }
       onCreated();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Oluşturulamadı");
@@ -300,9 +424,12 @@ function CampaignModal({ influencerId, onClose, onCreated }) {
       <div className="grid grid-cols-2 gap-3">
         <Field label="Başlık *" full><input data-testid="camp-title" className="inp" value={form.title} onChange={(e) => set("title", e.target.value)} /></Field>
         <Field label="Ödenen Ücret"><input type="number" className="inp" value={form.fee_paid} onChange={(e) => set("fee_paid", e.target.value)} /></Field>
-        <Field label="Ürün Maliyeti"><input type="number" className="inp" value={form.product_cost} onChange={(e) => set("product_cost", e.target.value)} /></Field>
+        <Field label="Ürün Maliyeti (boşsa seçilen ürünlerden otomatik)"><input type="number" className="inp" value={form.product_cost} onChange={(e) => set("product_cost", e.target.value)} /></Field>
         <Field label="Kargo Maliyeti"><input type="number" className="inp" value={form.cargo_cost} onChange={(e) => set("cargo_cost", e.target.value)} /></Field>
       </div>
+      <Field label="Gönderilecek Ürünler (beden seçin — kaydetmede stoktan düşer)" full>
+        <ProductPicker picked={picked} setPicked={setPicked} />
+      </Field>
       <Field label="İçerik Talimatları (boşsa 9:16 dikey format standardı otomatik eklenir)" full>
         <textarea className="inp h-24" value={form.directives} onChange={(e) => set("directives", e.target.value)} placeholder="Boş bırakırsanız zorunlu içerik standartları (9:16 dikey format, @facette mention) otomatik eklenir." />
       </Field>

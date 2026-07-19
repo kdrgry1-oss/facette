@@ -13,6 +13,7 @@ Sipariş eşleştirme: orders.create_order, resolve_influencer_for_order() çağ
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from datetime import datetime, timezone
 from typing import Optional
+import uuid as _uuid
 
 from .deps import db, logger, require_admin, generate_id
 from models import Influencer, InfluencerCampaign, DEFAULT_CAMPAIGN_DIRECTIVES
@@ -204,16 +205,148 @@ async def update_campaign(campaign_id: str, payload: dict, current_user: dict = 
     update = {k: v for k, v in payload.items() if k in allowed}
     update["updated_at"] = _now_iso()
     await db.influencer_campaigns.update_one({"id": campaign_id}, {"$set": update})
+    # Kampanya iptal edilirse düşülen seeding stoğu otomatik geri döner (idempotent).
+    if update.get("status") == "cancelled" and existing.get("stock_deducted"):
+        try:
+            await _seeding_restock({**existing, **update, "id": campaign_id}, reason="campaign_cancelled")
+        except Exception as e:
+            logger.warning(f"[influencer] iptalde stok iadesi başarısız {campaign_id}: {e}")
     doc = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
     return {"success": True, "campaign": doc}
 
 
 @router.delete("/influencer-campaigns/{campaign_id}")
 async def delete_campaign(campaign_id: str, current_user: dict = Depends(require_admin)):
+    # Stok düşülmüş kampanya silinirse ürünler stoğa geri döner (kayıp olmasın).
+    camp = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if camp and camp.get("stock_deducted"):
+        try:
+            await _seeding_restock(camp, reason="campaign_deleted")
+        except Exception as e:
+            logger.warning(f"[influencer] silmede stok iadesi başarısız {campaign_id}: {e}")
     res = await db.influencer_campaigns.delete_one({"id": campaign_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
     return {"success": True}
+
+
+# =============================================================================
+# SEEDING — Gönderilecek ürünler: seçim + STOK DÜŞÜMÜ (atomik, idempotent)
+# =============================================================================
+
+async def _resolve_seeding_items(products: list) -> list:
+    """[{barcode, qty}] → doğrulanmış [{barcode, quantity, product_id, name, size, unit_cost}].
+    Barkod varyantta veya üründe aranır; bulunamayan/stok yetmeyen kalem hata verir."""
+    items = []
+    for p in products or []:
+        bc = str((p or {}).get("barcode") or "").strip()
+        try:
+            qty = max(1, int((p or {}).get("qty") or (p or {}).get("quantity") or 1))
+        except Exception:
+            qty = 1
+        if not bc:
+            continue
+        prod = await db.products.find_one(
+            {"$or": [{"variants.barcode": bc}, {"barcode": bc}]},
+            {"_id": 0, "id": 1, "name": 1, "price": 1, "cost_price": 1, "variants": 1, "stock": 1})
+        if not prod:
+            raise HTTPException(status_code=400, detail=f"Barkod bulunamadı: {bc}")
+        size = ""
+        stock = prod.get("stock")
+        for v in (prod.get("variants") or []):
+            if str(v.get("barcode") or "").strip() == bc:
+                size = v.get("size") or ""
+                stock = v.get("stock")
+                break
+        if stock is not None and int(stock or 0) < qty:
+            raise HTTPException(status_code=409,
+                                detail=f"Stok yetersiz: {prod.get('name')} {size} (stok {stock}, istenen {qty})")
+        # Birim maliyet: manuel product_costs > products.cost_price > fiyatın %50'si (rapor motoruyla aynı kural)
+        cost_rec = await db.product_costs.find_one({"product_id": prod["id"]}, {"_id": 0, "cost_price": 1})
+        unit_cost = float((cost_rec or {}).get("cost_price") or prod.get("cost_price") or 0) \
+            or float(prod.get("price") or 0) * 0.5
+        items.append({"barcode": bc, "quantity": qty, "product_id": prod["id"],
+                      "name": prod.get("name") or "", "size": size,
+                      "unit_cost": round(unit_cost, 2)})
+    if not items:
+        raise HTTPException(status_code=400, detail="Geçerli ürün seçilmedi")
+    return items
+
+
+async def _seeding_restock(camp: dict, reason: str) -> None:
+    """Kampanyanın düşülen stoğunu İDEMPOTENT geri yükler (atomik bayrak kilidi)."""
+    lock = await db.influencer_campaigns.update_one(
+        {"id": camp["id"], "stock_deducted": True},
+        {"$set": {"stock_deducted": False, "updated_at": _now_iso()}})
+    if not lock.modified_count:
+        return  # zaten iade edilmiş / hiç düşülmemiş
+    from .orders import _stock_delta_for_order
+    items = [{"barcode": p.get("barcode"), "quantity": p.get("qty") or p.get("quantity") or 1}
+             for p in (camp.get("sent_products") or []) if p.get("barcode")]
+    moves = await _stock_delta_for_order({"items": items}, +1)
+    await db.stock_movements.insert_one({
+        "id": str(_uuid.uuid4()), "type": "influencer_seeding_restock",
+        "campaign_id": camp["id"], "influencer_id": camp.get("influencer_id"),
+        "reason": reason, "items": moves, "created_at": _now_iso()})
+    logger.info(f"[influencer] seeding stok iadesi: kampanya {camp['id']} ({reason})")
+
+
+@router.post("/influencer-campaigns/{campaign_id}/commit-products")
+async def commit_campaign_products(campaign_id: str, payload: dict,
+                                   current_user: dict = Depends(require_admin)):
+    """Gönderilecek ürünleri kampanyaya işler ve STOKTAN DÜŞER.
+
+    Body: {"products": [{"barcode": "868...", "qty": 1}], "auto_cost": true}
+    - sent_products doldurulur (ad/beden/barkod/adet), stok stock_movements'a
+      'influencer_seeding' hareketiyle düşülür (çift işleme atomik bayrakla kapalı).
+    - auto_cost (varsayılan açık): ürün maliyeti toplamı product_cost'a yazılır
+      (rapordaki maliyet kuralıyla aynı: manuel maliyet > cost_price > fiyat*0.5) → ROI gerçekçi.
+    """
+    camp = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    if camp.get("stock_deducted"):
+        raise HTTPException(status_code=409,
+                            detail="Bu kampanyanın stoğu zaten düşülmüş — önce 'Stok İadesini Geri Al' kullanın")
+    items = await _resolve_seeding_items((payload or {}).get("products"))
+
+    # Atomik kilit: aynı anda iki commit gelirse yalnız biri düşer.
+    lock = await db.influencer_campaigns.update_one(
+        {"id": campaign_id, "stock_deducted": {"$ne": True}},
+        {"$set": {"stock_deducted": True, "updated_at": _now_iso()}})
+    if not lock.modified_count:
+        raise HTTPException(status_code=409, detail="Stok bu kampanya için zaten düşülmüş")
+
+    from .orders import _stock_delta_for_order
+    moves = await _stock_delta_for_order({"items": items}, -1)
+    await db.stock_movements.insert_one({
+        "id": str(_uuid.uuid4()), "type": "influencer_seeding",
+        "campaign_id": campaign_id, "influencer_id": camp.get("influencer_id"),
+        "items": moves, "created_by": current_user.get("email", ""),
+        "created_at": _now_iso()})
+
+    sent = [{"name": it["name"], "barcode": it["barcode"], "size": it["size"], "qty": it["quantity"]}
+            for it in items]
+    upd = {"sent_products": sent, "updated_at": _now_iso()}
+    total_cost = round(sum(it["unit_cost"] * it["quantity"] for it in items), 2)
+    if (payload or {}).get("auto_cost", True) and total_cost > 0:
+        upd["product_cost"] = total_cost
+    await db.influencer_campaigns.update_one({"id": campaign_id}, {"$set": upd})
+    doc = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    return {"success": True, "campaign": doc, "stock_moves": len(moves), "product_cost": total_cost}
+
+
+@router.post("/influencer-campaigns/{campaign_id}/uncommit-products")
+async def uncommit_campaign_products(campaign_id: str, current_user: dict = Depends(require_admin)):
+    """Düşülen seeding stoğunu geri yükler (yanlış seçim / kampanya vazgeçildi)."""
+    camp = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+    if not camp.get("stock_deducted"):
+        raise HTTPException(status_code=400, detail="Bu kampanya için düşülmüş stok yok")
+    await _seeding_restock(camp, reason="manual_uncommit")
+    doc = await db.influencer_campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    return {"success": True, "campaign": doc}
 
 
 # =============================================================================
