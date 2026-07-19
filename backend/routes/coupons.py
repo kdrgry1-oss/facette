@@ -61,8 +61,10 @@ async def create_coupon(payload: dict, current_user: dict = Depends(require_admi
         "id": str(uuid.uuid4()),
         "code": code,
         "title": payload.get("title", ""),
-        "type": payload.get("type", "percent"),  # percent | fixed
+        "type": payload.get("type", "percent"),  # percent | fixed | nth_discount | bundle
         "value": float(payload.get("value", 0) or 0),
+        # C4 — bundle: 'products' listesindeki ürünlerin hepsi sepetteyse tek paket fiyatı
+        "bundle_price": float(payload.get("bundle_price", 0) or 0) or None,
         "min_cart_total": float(payload.get("min_cart_total", 0) or 0),
         "max_discount": float(payload.get("max_discount", 0) or 0) or None,  # cap for percent
         "categories": payload.get("categories", []),
@@ -100,7 +102,7 @@ async def update_coupon(cid: str, payload: dict, current_user: dict = Depends(re
         "title", "type", "value", "min_cart_total", "max_discount",
         "categories", "products", "usage_limit", "usage_limit_per_user",
         "start_at", "end_at", "is_active", "first_order_only", "free_shipping", "auto_apply",
-        "min_quantity", "buy_quantity", "free_quantity", "get_discount",
+        "min_quantity", "buy_quantity", "free_quantity", "get_discount", "bundle_price",
         "priority", "combinable", "stack_group", "combinable_with", "payment_methods",
     )
     update = {k: v for k, v in payload.items() if k in allowed}
@@ -315,6 +317,22 @@ def _compute_discount(c: dict, cart_total: float, items: list) -> float:
         n_disc = groups * fq
         for k in range(min(n_disc, len(units))):
             discount += units[k] * (gd / 100.0)
+    elif ctype == "bundle":
+        # C4 — Ürün paketi (tek fiyat): tanımlı ürünlerin HEPSİ sepetteyse, her birinden
+        # 1'er adedin toplam fiyatı yerine bundle_price uygulanır → indirim = taban - paket fiyatı.
+        # Ürünlerden biri eksikse indirim 0 (paket koşulu sağlanmadı).
+        bundle_pids = {str(x) for x in (c.get("products") or []) if x is not None}
+        if bundle_pids:
+            in_cart = {str(it.get("product_id")) for it in items if int(it.get("qty", 0) or 0) > 0}
+            if bundle_pids.issubset(in_cart):
+                base_b = 0.0
+                for pid in bundle_pids:
+                    prices = [float(it.get("price", 0) or 0) for it in items
+                              if str(it.get("product_id")) == pid and float(it.get("price", 0) or 0) > 0]
+                    base_b += min(prices) if prices else 0.0
+                bp = float(c.get("bundle_price") or 0)
+                if bp > 0 and base_b > bp:
+                    discount = base_b - bp
     elif ctype == "percent":
         discount = base * (c.get("value", 0) / 100.0)
         if c.get("max_discount"):
@@ -532,6 +550,8 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         type_db = "fixed"
     elif ctype == "nth_discount":
         type_db = "nth_discount"
+    elif ctype == "bundle":
+        type_db = "bundle"  # C4 — ürün paketi (tek fiyat)
     else:
         type_db = "percent"  # "percentage" ve "free_shipping" yuzde tabanli calisir
     return {
@@ -551,6 +571,7 @@ def _campaign_to_coupon_fields(payload: dict) -> dict:
         "buy_quantity": int(payload.get("buy_quantity", 0) or 0) or None,
         "free_quantity": int(payload.get("free_quantity", 1) or 1),
         "get_discount": float(payload.get("get_discount", 0) or 0),
+        "bundle_price": float(payload.get("bundle_price", 0) or 0) or None,  # C4 — paket fiyatı
         "start_at": payload.get("start_date") or payload.get("start_at"),
         "end_at": payload.get("end_date") or payload.get("end_at"),
         "is_active": bool(payload.get("is_active", True)),

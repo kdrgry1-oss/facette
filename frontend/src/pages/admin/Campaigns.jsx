@@ -71,7 +71,7 @@ const blankForm = () => ({
   end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
   is_active: true, auto_apply: false, usage_limit: 0,
   first_order_only: false, usage_limit_per_user: 0, min_quantity: 0,
-  buy_quantity: 2, free_quantity: 1, get_discount: 50,
+  buy_quantity: 2, free_quantity: 1, get_discount: 50, bundle_price: 0,
   priority: 0, combinable: false, stack_group: "", combinable_with: [],
   categories: [], products: [], payment_methods: [],
 });
@@ -177,6 +177,7 @@ export default function AdminCampaigns() {
       buy_quantity: c.buy_quantity || 2,
       free_quantity: c.free_quantity || 1,
       get_discount: c.get_discount || 50,
+      bundle_price: c.bundle_price || 0,
       priority: c.priority || 0,
       combinable: !!c.combinable,
       stack_group: c.stack_group || "",
@@ -214,12 +215,14 @@ export default function AdminCampaigns() {
     fixed: "Sabit İndirim",
     free_shipping: "Ücretsiz Kargo",
     nth_discount: "X Al Y Öde",
+    bundle: "Ürün Paketi",
   }[type] || type);
 
   const valueLabel = (c) => {
     if (c.type === "percentage") return `%${c.value}`;
     if (c.type === "fixed") return `${c.value} TL`;
     if (c.type === "nth_discount") return `${c.buy_quantity || 2} al · en ucuz ${c.free_quantity || 1}'e %${c.get_discount || 0}`;
+    if (c.type === "bundle") return `Paket: ${c.bundle_price || 0} TL`;
     return "-";
   };
 
@@ -378,15 +381,30 @@ export default function AdminCampaigns() {
                   <option value="fixed">Sabit İndirim (TL)</option>
                   <option value="free_shipping">Ücretsiz Kargo</option>
                   <option value="nth_discount">X Al Y Öde / N. Ürüne İndirim</option>
+                  <option value="bundle">Ürün Paketi (tek fiyat)</option>
                 </select>
               </div>
-              {formData.type !== "nth_discount" && formData.type !== "free_shipping" && (
+              {formData.type !== "nth_discount" && formData.type !== "free_shipping" && formData.type !== "bundle" && (
                 <div>
                   <label className={lblCls}>Değer {formData.type === "percentage" ? "(%)" : "(TL)"}</label>
                   <input type="number" value={formData.value} onChange={(e) => setFormData({ ...formData, value: parseFloat(e.target.value) || 0 })} className={inputCls} />
                 </div>
               )}
+              {formData.type === "bundle" && (
+                <div>
+                  <label className={lblCls}>Paket Fiyatı (TL)</label>
+                  <input type="number" min="1" value={formData.bundle_price} onChange={(e) => setFormData({ ...formData, bundle_price: parseFloat(e.target.value) || 0 })} className={inputCls} data-testid="bundle-price-input" />
+                </div>
+              )}
             </div>
+
+            {formData.type === "bundle" && (
+              <p className="text-[11px] bg-violet-50 border border-violet-200 text-violet-700 rounded p-2.5">
+                📦 <b>Ürün Paketi:</b> Aşağıdan paket ürünlerini seçin (en az 2). Müşteri seçilen ürünlerin
+                <b> hepsini</b> sepete eklediğinde, her birinden 1'er adet toplam liste fiyatı yerine
+                <b> paket fiyatı</b> üzerinden hesaplanır (fark otomatik indirim olur). "Otomatik uygula" açık olmalı.
+              </p>
+            )}
 
             {formData.type === "nth_discount" && (
               <div className="grid grid-cols-3 gap-3 bg-amber-50 border border-amber-200 rounded p-3">
