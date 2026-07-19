@@ -56,7 +56,7 @@ RULE_CATALOG = [
      "type": "number", "default": 10, "unit": "₺", "options": [0, 10, 15, 20, 25],
      "help": "Kapıda ödeme seçilince sipariş toplamına eklenen hizmet bedeli."},
     {"group": "Kargo & Teslimat", "key": "shipping.same_day_cutoff", "label": "Aynı gün kargo son saati",
-     "type": "time", "default": "10:30", "options": ["09:00", "10:00", "10:30", "12:00", "14:00", "16:00"],
+     "type": "time", "default": "12:00", "options": ["09:00", "10:00", "10:30", "12:00", "14:00", "16:00"],
      "help": "Mesai gününde bu saate kadar verilen siparişler aynı gün kargolanır (ürün kartındaki geri sayım bu saate göre çalışır)."},
     {"group": "Kargo & Teslimat", "key": "shipping.work_days", "label": "Çalışma (kargo) günleri",
      "type": "multiselect", "default": [1, 2, 3, 4, 5], "options": [1, 2, 3, 4, 5, 6, 7],

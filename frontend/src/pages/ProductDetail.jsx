@@ -74,29 +74,54 @@ function _isWorkingDay(d, cfg) {
   return true;
 }
 // AYAR: kesim saati / çalışma günleri / resmî tatiller İşletme Kuralları'ndan (cfg) gelir;
-// cfg verilmezse varsayılan 10:30 + hafta içi + sabit millî tatiller.
+// cfg verilmezse varsayılan 12:00 + hafta içi + sabit millî tatiller.
+// KURAL (kullanıcı isteği): HER ZAMAN canlı geri sayım göster (mesai saatlerine göre).
+//  • İş günü ve cutoff'tan (12:00) ÖNCE → "X saat Y dakika içinde sipariş verirsen bugün kargoda"
+//    ("bugün kargoda" yeşil). Aynı gün → direkt saat/dakika sayar.
+//  • Cutoff geçti / hafta sonu / tatil → sonraki İŞ GÜNÜ cutoff'una kadar geri sayım
+//    "1 gün X saat içinde sipariş verirsen en geç yarın kargoda" ("yarın kargoda" yeşil).
 function shippingCutoff(cfg) {
-  const cutoffHour = cfg && cfg.cutoffHour != null ? cfg.cutoffHour : 10;
-  const cutoffMinute = cfg && cfg.cutoffMinute != null ? cfg.cutoffMinute : 30;
+  const cutoffHour = cfg && cfg.cutoffHour != null ? cfg.cutoffHour : 12;
+  const cutoffMinute = cfg && cfg.cutoffMinute != null ? cfg.cutoffMinute : 0;
   const now = new Date();
-  const cutoff = new Date(now); cutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
 
-  // İş günü ve cutoff'tan önce → bugün kargoda + geri sayım (saat + dakika)
-  if (_isWorkingDay(now, cfg) && now.getTime() < cutoff.getTime()) {
-    const remMs = cutoff.getTime() - now.getTime();
-    const h = Math.floor(remMs / 3600000);
-    const m = Math.floor((remMs % 3600000) / 60000);
-    const left = h >= 1 ? `${h} saat ${m} dakika` : `${m} dakika`;
-    return { urgent: true, countdown: true, text: "Siparişin", strong: `${left} içinde kargoda.` };
+  const todayCutoff = new Date(now); todayCutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
+  const sameDay = _isWorkingDay(now, cfg) && now.getTime() < todayCutoff.getTime();
+
+  let target, greenLabel, sameDayMode;
+  if (sameDay) {
+    target = todayCutoff;
+    greenLabel = "bugün kargoda";
+    sameDayMode = true;
+  } else {
+    // Sonraki İŞ GÜNÜ (hafta sonu + tatil atlanır) cutoff'u
+    const next = new Date(now); next.setHours(0, 0, 0, 0);
+    do { next.setDate(next.getDate() + 1); } while (!_isWorkingDay(next, cfg));
+    target = new Date(next); target.setHours(cutoffHour, cutoffMinute, 0, 0);
+    const tomorrow = new Date(now); tomorrow.setHours(0, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
+    const isTomorrow = next.toDateString() === tomorrow.toDateString();
+    greenLabel = `${isTomorrow ? "yarın" : _TR_DAYS[next.getDay()]} kargoda`;
+    sameDayMode = false;
   }
 
-  // Cutoff geçti veya bugün iş günü değil → sonraki İŞ GÜNÜ (hafta sonu + tatil atlanır)
-  const next = new Date(now); next.setHours(0, 0, 0, 0);
-  do { next.setDate(next.getDate() + 1); } while (!_isWorkingDay(next, cfg));
-  const tomorrow = new Date(now); tomorrow.setHours(0, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
-  const isTomorrow = next.toDateString() === tomorrow.toDateString();
-  const label = isTomorrow ? "yarın" : _TR_DAYS[next.getDay()];
-  return { urgent: false, countdown: false, text: "Siparişin", strong: `${label} kargoda.` };
+  // Geri sayım (hedef cutoff'a kadar). Gün varsa "G gün S saat", yoksa "S saat D dakika".
+  const remMs = Math.max(0, target.getTime() - now.getTime());
+  const days = Math.floor(remMs / 86400000);
+  const h = Math.floor((remMs % 86400000) / 3600000);
+  const m = Math.floor((remMs % 3600000) / 60000);
+  let left;
+  if (days >= 1) left = `${days} gün ${h} saat`;
+  else if (h >= 1) left = `${h} saat ${m} dakika`;
+  else left = `${m} dakika`;
+
+  return {
+    countdown: true,
+    // Aynı gün → "...sipariş verirsen bugün kargoda"; değilse → "...en geç yarın kargoda"
+    prefix: sameDayMode
+      ? `${left} içinde sipariş verirsen`
+      : `${left} içinde sipariş verirsen en geç`,
+    green: greenLabel,   // yeşil vurgulanacak kısım
+  };
 }
 
 // Son gezilen ürünler — localStorage'da küçük anlık görüntü (snapshot) listesi.
@@ -127,7 +152,7 @@ export default function ProductDetail() {
   useEffect(() => {
     axios.get(`${API}/business-rules`).then((r) => {
       const d = r.data || {};
-      const [ch, cm] = String(d["shipping.same_day_cutoff"] || "10:30").split(":").map((x) => parseInt(x, 10));
+      const [ch, cm] = String(d["shipping.same_day_cutoff"] || "12:00").split(":").map((x) => parseInt(x, 10));
       setShipCfg({
         cutoffHour: ch, cutoffMinute: cm,
         workDays: Array.isArray(d["shipping.work_days"]) ? d["shipping.work_days"] : [1, 2, 3, 4, 5],
@@ -921,14 +946,15 @@ export default function ProductDetail() {
                     </button>
                   </div>
 
-                  {/* Kargo aciliyeti/geri sayımı — 10:30 cutoff (İşletme Kuralları ile açılır/kapanır) */}
+                  {/* Kargo geri sayımı — HER ZAMAN mesai saatlerine göre canlı; "bugün/yarın kargoda" yeşil.
+                      Kesim saati (varsayılan 12:00) İşletme Kuralları'ndan; şerit açılır/kapanır. */}
                   {(shipCfg?.showCountdown !== false) && (() => {
                     const c = shippingCutoff(shipCfg);
                     return (
                       <p className="mt-3 text-xs flex items-center gap-1.5" data-testid="pdp-shipping-cutoff">
-                        <Clock size={14} strokeWidth={1.7} className={c.urgent ? "text-emerald-600" : "text-gray-500"} />
-                        <span className={c.urgent ? "text-gray-700" : "text-gray-600"}>
-                          {c.text} <span className={`font-semibold ${c.urgent ? "text-emerald-700" : "text-black"}`}>{c.strong}</span>
+                        <Clock size={14} strokeWidth={1.7} className="text-emerald-600" />
+                        <span className="text-gray-700">
+                          {c.prefix} <span className="font-semibold text-emerald-700">{c.green}</span>
                         </span>
                       </p>
                     );
