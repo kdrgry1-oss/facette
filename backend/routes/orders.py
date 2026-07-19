@@ -5730,11 +5730,21 @@ async def get_return_info(order_id: str, current_user: dict = Depends(get_curren
     if not current_user:
         raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor")
     oid = order_id
-    o = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0, "id": 1, "user_id": 1})
+    o = await db.orders.find_one(
+        {"$or": [{"id": order_id}, {"order_number": order_id}]},
+        {"_id": 0, "id": 1, "user_id": 1, "email": 1, "customer_email": 1, "phone": 1,
+         "customer_phone": 1, "shipping_address": 1, "billing_address": 1, "billing_info": 1})
     if o:
         oid = o.get("id", order_id)
-        if o.get("user_id") and current_user.get("id") and o["user_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+        if o.get("user_id"):
+            # Üyeye ait sipariş → sahiplik user_id ile.
+            if current_user.get("id") and o["user_id"] != current_user["id"]:
+                raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
+        else:
+            # A2.10: Misafir sipariş (user_id yok) → giriş yapan kullanıcının e-posta/telefonu
+            # siparişteki iletişimle EŞLEŞMELİ (BOLA/IDOR koruması, create_return_request ile aynı).
+            if not _order_contact_matches(o, current_user.get("email", ""), current_user.get("phone", "")):
+                raise HTTPException(status_code=403, detail="Bu sipariş size ait değil")
     rec = await db.customer_returns.find_one({"order_id": oid}, {"_id": 0}, sort=[("created_at", -1)])
     if not rec:
         raise HTTPException(status_code=404, detail="İade kaydı bulunamadı")

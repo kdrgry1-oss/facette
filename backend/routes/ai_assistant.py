@@ -354,10 +354,15 @@ async def auto_answer_batch(
     """
     cfg = payload or {}
     channel = cfg.get("channel", "trendyol")
-    max_count = int(cfg.get("max_count") or 10)
+    max_count = min(int(cfg.get("max_count") or 10), 50)   # A2.2: sunucu-tarafı cap (denial-of-wallet)
     min_conf = float(cfg.get("min_confidence") or 0.85)
     dry_run = bool(cfg.get("dry_run", False))
-    do_send = bool(cfg.get("send", False))
+    # A1.4 (GÜVENLİK): AI cevabı ARTIK OTOMATİK GÖNDERİLMEZ. Prompt-injection ile
+    # güven eşiği/handoff modelin serbest metninden sahtelenip satıcı adına kamuya
+    # zararlı içerik yayınlanabildiğinden, gönderim İNSAN ONAYI gerektirir: taslaklar
+    # ai_suggestions'a kuyruklanır; admin QnA panelinden manuel gönderir
+    # (POST /trendyol/questions/{id}/answer). 'send' parametresi yok sayılır.
+    do_send = False
 
     if channel not in MARKETPLACE_TO_COLL:
         raise HTTPException(status_code=400, detail="channel desteklenmiyor")
@@ -427,6 +432,8 @@ async def auto_answer_batch(
                 pass
             handoff = m.group(2).lower().startswith("y")
             draft = text[: m.start()].strip()
+        # A2.1: META bloğu regex tutmazsa da draft'a SIZMASIN (ortak temizlik).
+        draft = re.split(r"-{2,}\s*META", draft, 1)[0].strip()
 
         # 2) Yetersiz cevap dedektörü (kısa cevaplar için)
         is_sufficient = True
