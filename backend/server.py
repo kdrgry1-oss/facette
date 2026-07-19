@@ -295,6 +295,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Size-table marker repair start warning: {e}")
 
+    # Tek seferlik onarım: eski Trendyol yorumlarının created_at'i gerçek yorum tarihine
+    # çekilir (bayrak korumalı; ham comment_date kayıtlı olanlar — ağ gerekmez).
+    try:
+        import asyncio as _asyncio
+        from routes.integrations_trendyol_qna import backfill_review_dates
+        _asyncio.create_task(backfill_review_dates())
+    except Exception as e:
+        logger.warning(f"Review date backfill start warning: {e}")
+
     # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
     # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
     # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve

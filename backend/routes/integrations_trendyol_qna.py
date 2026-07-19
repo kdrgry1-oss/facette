@@ -774,6 +774,33 @@ async def _store_reviews(fetched: List[dict], local_pid: Optional[str], content_
     return {"inserted": inserted, "updated": updated, "skipped_low_rating": skipped_low, "skipped_existing": skipped_existing}
 
 
+async def backfill_review_dates():
+    """TEK SEFERLİK (bayrak korumalı): eskiden çekilmiş Trendyol yorumlarının created_at'i
+    çekim tarihi olarak kalmıştı. Kayıtlı ham tarih (comment_date) parse edilip created_at
+    GERÇEK yorum tarihine çekilir — panel + site yorumları Trendyol'daki tarihiyle görünür.
+    Ham tarihi hiç kaydedilmemiş çok eski kayıtlar ağ olmadan düzelemez; onlar
+    "Tümünü Baştan Çek" senkronunda _store_reviews güncellemesiyle düzelir."""
+    flag = await db.settings.find_one({"id": "ty_review_date_backfill"}, {"_id": 0})
+    if flag and flag.get("done"):
+        return
+    fixed = scanned = 0
+    cursor = db.product_reviews.find(
+        {"source": "trendyol_public", "comment_date": {"$nin": ["", None]}},
+        {"_id": 1, "comment_date": 1, "created_at": 1})
+    async for r in cursor:
+        scanned += 1
+        iso = _parse_ty_date(r.get("comment_date"))
+        if iso and iso[:10] != str(r.get("created_at") or "")[:10]:
+            await db.product_reviews.update_one({"_id": r["_id"]}, {"$set": {"created_at": iso}})
+            fixed += 1
+    await db.settings.update_one(
+        {"id": "ty_review_date_backfill"},
+        {"$set": {"done": True, "scanned": scanned, "fixed": fixed,
+                  "at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    logger.info(f"[ty-review-date-backfill] tarandı={scanned} düzeltildi={fixed}")
+
+
 async def _recalc_product_rating(local_pid: str) -> None:
     """Bir ürünün onaylı yorumlarından ortalama puan + adet hesaplayıp products dokümanına yazar."""
     agg = await db.product_reviews.aggregate([
