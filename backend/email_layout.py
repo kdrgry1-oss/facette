@@ -45,6 +45,33 @@ TIKTOK_URL    = "https://www.tiktok.com/@facette"
 # facette.com.tr/logo.png frontend/public içinde yayınlanır (Cloudflare CDN).
 LOGO_URL      = "https://facette.com.tr/logo.png"
 
+# BEYAZ ETİKET — e-posta markası ayardan gelir (koddan değil). send_smtp_email her gönderim
+# öncesi set_brand(company) çağırır; ayar boşsa aşağıdaki FACETTE varsayılanları kullanılır.
+_BRAND = {
+    "store_name": "FACETTE",
+    "logo_url": LOGO_URL,
+    "site": "facette.com.tr",
+    "instagram": INSTAGRAM_URL,
+    "tiktok": TIKTOK_URL,
+}
+
+
+def set_brand(company: dict) -> None:
+    """company.py'den gelen firma bilgisini e-posta markasına uygular (yalnız dolu alanlar)."""
+    if not isinstance(company, dict):
+        return
+    if company.get("store_name"):
+        _BRAND["store_name"] = str(company["store_name"])
+    if company.get("logo_url"):
+        _BRAND["logo_url"] = str(company["logo_url"])
+    _site = company.get("website") or company.get("site_url") or ""
+    if _site:
+        _BRAND["site"] = str(_site).replace("https://", "").replace("http://", "").rstrip("/")
+    if company.get("instagram"):
+        _BRAND["instagram"] = str(company["instagram"])
+    if company.get("tiktok"):
+        _BRAND["tiktok"] = str(company["tiktok"])
+
 _FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 
 
@@ -65,10 +92,14 @@ def _icon_box(glyph: str) -> str:
 def email_shell(*, eyebrow="", title="", intro_html="", icon="",
                 cta_text="", cta_url="", fallback_url="",
                 note_title="", note_html="", body_html="",
-                preheader="", year=None, site="facette.com.tr") -> str:
+                preheader="", year=None, site=None) -> str:
     """Markalı tam-HTML e-posta döndürür. Tüm argümanlar opsiyoneldir; verilmeyen
     bölümler atlanır. İçerik argümanları {placeholder} içerebilir — korunur."""
     yr = str(year or datetime.now(timezone.utc).year)
+    if site is None:
+        site = _BRAND.get("site") or "facette.com.tr"
+    _store = _BRAND.get("store_name") or "FACETTE"
+    _logo = _BRAND.get("logo_url") or LOGO_URL
     P = []
     # Sentinel — render_email zaten markalı maili tekrar sarmasın diye.
     P.append("<!--fct-shell-->")
@@ -89,7 +120,7 @@ def email_shell(*, eyebrow="", title="", intro_html="", icon="",
     # Header — gerçek logo görseli (resim engellenirse alt="FACETTE" görünür)
     P.append(
         '<tr><td style="padding:32px 24px 28px;text-align:center;">'
-        '<img src="' + LOGO_URL + '" alt="FACETTE" width="150" '
+        '<img src="' + _logo + '" alt="' + _store + '" width="150" '
         'style="display:inline-block;width:150px;max-width:62%;height:auto;'
         'border:0;outline:none;text-decoration:none;" />'
         '</td></tr>'
@@ -152,13 +183,13 @@ def email_shell(*, eyebrow="", title="", intro_html="", icon="",
     P.append(
         '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" '
         'style="width:600px;max-width:600px;"><tr><td style="padding:26px 24px 8px;text-align:center;">'
-        '<a href="' + INSTAGRAM_URL + '" style="font-size:11px;letter-spacing:2px;color:' + _MUTED + ';'
+        '<a href="' + _BRAND.get("instagram", INSTAGRAM_URL) + '" style="font-size:11px;letter-spacing:2px;color:' + _MUTED + ';'
         'text-decoration:none;">INSTAGRAM</a>'
         '<span style="color:' + _FAINT + ';padding:0 12px;">·</span>'
-        '<a href="' + TIKTOK_URL + '" style="font-size:11px;letter-spacing:2px;color:' + _MUTED + ';'
+        '<a href="' + _BRAND.get("tiktok", TIKTOK_URL) + '" style="font-size:11px;letter-spacing:2px;color:' + _MUTED + ';'
         'text-decoration:none;">TIKTOK</a>'
         '<div style="font-size:11px;color:' + _FAINT + ';margin:16px 0 4px;letter-spacing:0.3px;">'
-        '© ' + yr + ' FACETTE · Tüm hakları saklıdır</div>'
+        '© ' + yr + ' ' + _store + ' · Tüm hakları saklıdır</div>'
         '<div style="font-size:11px;color:' + _FAINT + ';letter-spacing:0.3px;">'
         'Bu e-posta ' + site + ' hesabınızla ilişkili adrese gönderildi.</div>'
         '</td></tr></table>'

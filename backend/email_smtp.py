@@ -58,6 +58,13 @@ async def send_smtp_email(db, to: str, subject: str, html: str,
 
     if wrap:
         try:
+            # BEYAZ ETİKET: e-posta markasını (logo/site/sosyal) ayardaki firma bilgisinden uygula.
+            try:
+                from company import get_company
+                from email_layout import set_brand as _set_brand
+                _set_brand(await get_company(db))
+            except Exception:
+                pass  # marka uygulanamazsa FACETTE varsayılanıyla devam
             from email_layout import render_email
             html = render_email(subject, html or "")
         except Exception:

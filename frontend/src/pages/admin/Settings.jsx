@@ -468,6 +468,62 @@ export default function AdminSettings() {
                 onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), city: e.target.value}})}
                 className="w-full border px-3 py-2 rounded text-sm" placeholder="KÜÇÜKÇEKMECE/ İstanbul" />
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Firma E-postası</label>
+              <input type="email" value={settings.company_info?.email || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), email: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="info@facette.com.tr" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Firma Telefonu</label>
+              <input type="text" value={settings.company_info?.phone || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), phone: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="0212 000 00 00" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">IBAN</label>
+              <input type="text" value={settings.company_info?.iban || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), iban: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm font-mono" placeholder="TR00 0000 0000 0000 0000 0000 00" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">WhatsApp (destek numarası)</label>
+              <input type="text" value={settings.company_info?.whatsapp || ""}
+                onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), whatsapp: e.target.value}})}
+                className="w-full border px-3 py-2 rounded text-sm" placeholder="905000000000" />
+            </div>
+          </div>
+          <div className="mt-5 pt-4 border-t">
+            <p className="text-xs font-medium text-gray-600 mb-3">Sosyal Medya (e-posta ve site alt bilgisinde kullanılır)</p>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Instagram</label>
+                <input type="text" value={settings.company_info?.instagram || ""}
+                  onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), instagram: e.target.value}})}
+                  className="w-full border px-3 py-2 rounded text-sm" placeholder="https://instagram.com/markaniz" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">TikTok</label>
+                <input type="text" value={settings.company_info?.tiktok || ""}
+                  onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), tiktok: e.target.value}})}
+                  className="w-full border px-3 py-2 rounded text-sm" placeholder="https://tiktok.com/@markaniz" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Facebook</label>
+                <input type="text" value={settings.company_info?.facebook || ""}
+                  onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), facebook: e.target.value}})}
+                  className="w-full border px-3 py-2 rounded text-sm" placeholder="https://facebook.com/markaniz" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">X (Twitter)</label>
+                <input type="text" value={settings.company_info?.x || ""}
+                  onChange={(e) => setSettings({...settings, company_info: {...(settings.company_info || {}), x: e.target.value}})}
+                  className="w-full border px-3 py-2 rounded text-sm" placeholder="https://x.com/markaniz" />
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-3">
+              Bu bilgiler beyaz-etiket firma kimliğidir: e-posta şablonları (logo/sosyal), e-fatura tedarikçi ve site alt bilgisi bu alanlardan beslenir. Yeni bir firma yalnızca bu formu doldurarak koda dokunmadan geçirilebilir.
+            </p>
           </div>
         </div>
 
