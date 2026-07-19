@@ -62,6 +62,11 @@ export function AuthProvider({ children }) {
 
   const register = async (data) => {
     // O19: Kimlik bilgilerini gövdede gönder (şifre query'de sızmasın).
+    // Referans kodu: parametre yoksa URL'deki ?ref= otomatik alınır (davet linki akışı).
+    let refCode = data.referral_code || "";
+    if (!refCode && typeof window !== "undefined") {
+      try { refCode = new URLSearchParams(window.location.search).get("ref") || ""; } catch { /* yok */ }
+    }
     const res = await axios.post(`${API}/auth/register`, {
       email: data.email || "",
       password: data.password || "",
@@ -70,6 +75,8 @@ export function AuthProvider({ children }) {
       phone: data.phone || "",
       height_cm: data.height_cm || null,
       weight_kg: data.weight_kg || null,
+      birth_date: data.birth_date || "",
+      referral_code: refCode,
     });
     const { token: newToken, user: userData } = res.data;
     localStorage.setItem("token", newToken);

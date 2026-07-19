@@ -22,7 +22,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import {
   User, Package, MapPin, Bookmark, LogOut, ChevronRight, ChevronDown,
   Eye, Truck, CheckCircle, Clock, X, Edit2, Trash2, Plus, Star,
-  ShoppingBag, Calendar, Mail, Phone, Lock
+  ShoppingBag, Calendar, Mail, Phone, Lock, Gift, Copy
 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ const MENU_ITEMS = [
   { id: "orders",    label: "Siparişlerim", icon: Package },
   { id: "addresses", label: "Adreslerim",   icon: MapPin },
   { id: "favorites", label: "Kaydedilenler", icon: Bookmark },
+  { id: "referral",  label: "Davet Et",     icon: Gift },
   { id: "security",  label: "Şifre",        icon: Lock },
 ];
 
@@ -108,6 +109,8 @@ export default function Account() {
   });
 
   const [mkt, setMkt] = useState({ email: false, sms: false });
+  const [refData, setRefData] = useState(null);
+  const [refCopied, setRefCopied] = useState(false);
   useEffect(() => {
     if (user) {
       setProfileForm({
@@ -138,7 +141,16 @@ export default function Account() {
   useEffect(() => {
     if (activeTab === "orders") fetchOrders();
     else if (activeTab === "addresses") fetchAddresses();
+    else if (activeTab === "referral" && !refData) fetchReferral();
   }, [activeTab]);
+
+  const fetchReferral = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API}/referrals/my`, { headers: { Authorization: `Bearer ${token}` } });
+      setRefData(res.data);
+    } catch { setRefData({ enabled: false }); }
+  };
 
   useEffect(() => {
     const orderNum = searchParams.get("order");
@@ -324,6 +336,50 @@ export default function Account() {
         {activeTab === "orders"    && <OrdersPane loading={loading} orders={orders} expandedOrder={expandedOrder} setExpandedOrder={setExpandedOrder} onChanged={fetchOrders} />}
         {activeTab === "addresses" && <AddressesPane loading={loading} addresses={addresses} editing={editingAddress} setEditing={setEditingAddress} form={addressForm} setForm={setAddressForm} onSubmit={handleSaveAddress} onDelete={handleDeleteAddress} />}
         {activeTab === "favorites" && <FavoritesPane />}
+        {activeTab === "referral"  && (
+          <div className="bg-white">
+            {refData && refData.enabled === false ? (
+              <div className="text-center text-gray-500 py-16 text-sm">Referans programı şu anda aktif değil.</div>
+            ) : !refData ? (
+              <div className="text-center text-gray-400 py-16 text-sm">Yükleniyor…</div>
+            ) : (
+              <div className="max-w-xl mx-auto text-center py-6">
+                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-stone-100 mb-4">
+                  <Gift size={24} strokeWidth={1.5} className="text-stone-800" />
+                </div>
+                <h2 className="text-xl font-light text-black mb-2">Arkadaşını davet et, kazan</h2>
+                <p className="text-sm text-gray-600 leading-relaxed mb-6">
+                  Davet linkini paylaş. Arkadaşın ilk alışverişini yaptığında
+                  {refData.referee_reward?.value ? (
+                    <> hem sana hem ona <strong>{refData.referee_reward.type === "percent" ? `%${refData.referee_reward.value}` : `${refData.referee_reward.value}₺`} indirim</strong> kuponu</>
+                  ) : <> ikinize de indirim kuponu</>} verilir.
+                </p>
+                <div className="flex items-stretch gap-2 max-w-md mx-auto mb-3">
+                  <input readOnly value={refData.share_url || ""}
+                    className="flex-1 bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-700 focus:outline-none" />
+                  <button onClick={() => {
+                    try { navigator.clipboard.writeText(refData.share_url || ""); setRefCopied(true); setTimeout(() => setRefCopied(false), 1800); } catch { /* yok */ }
+                  }} className="bg-stone-900 hover:bg-stone-800 text-white px-4 flex items-center gap-1.5 text-xs tracking-wider uppercase">
+                    <Copy size={14} /> {refCopied ? "Kopyalandı" : "Kopyala"}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mb-8">
+                  Referans kodun: <span className="font-mono font-semibold text-black">{refData.code}</span>
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto">
+                  <div className="border border-gray-100 rounded p-4">
+                    <div className="text-2xl font-light text-black">{refData.invited ?? 0}</div>
+                    <div className="text-[11px] tracking-wide uppercase text-gray-500 mt-1">Davet edilen</div>
+                  </div>
+                  <div className="border border-gray-100 rounded p-4">
+                    <div className="text-2xl font-light text-emerald-700">{refData.rewarded ?? 0}</div>
+                    <div className="text-[11px] tracking-wide uppercase text-gray-500 mt-1">Ödül kazanılan</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {activeTab === "security"  && <SecurityPane />}
       </main>
 
