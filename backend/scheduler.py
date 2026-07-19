@@ -1684,13 +1684,65 @@ async def _notify_back_in_stock():
         logger.exception(f"[scheduler] back_in_stock failed: {e}")
 
 
+# ==================== A2.8: TEK-LİDER (distributed leader lease) ====================
+# APScheduler her PROCESS'te çalışır; Railway yatay ölçeklenirse (>1 instance) tüm zamanlı
+# işler HER instance'ta tekrar koşar → çift iptal / çift reconcile / çift bildirim. Mongo
+# tabanlı kısa süreli lease ile aynı anda YALNIZ bir instance "lider" olur ve işleri o koşar.
+# Tek-instance dağıtımda (varsayılan) davranış değişmez. Lease okunamazsa (Mongo hatası)
+# tek-instance varsayımıyla iş yine koşar (regresyon yok).
+_INSTANCE_ID = str(uuid.uuid4())
+_LEASE_TTL_SEC = 120
+
+
+async def _acquire_or_renew_leadership() -> bool:
+    from routes.deps import db  # lazy
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    exp_iso = (now + timedelta(seconds=_LEASE_TTL_SEC)).isoformat()
+    # 1) Bize aitse yenile, süresi dolmuşsa devral — tek-döküman atomik koşullu update.
+    res = await db.scheduler_leader.update_one(
+        {"_id": "scheduler_leader",
+         "$or": [{"holder": _INSTANCE_ID}, {"expires_at": {"$lt": now_iso}}]},
+        {"$set": {"holder": _INSTANCE_ID, "expires_at": exp_iso, "renewed_at": now_iso}},
+    )
+    if res.matched_count > 0:
+        return True
+    # 2) Henüz kayıt yok → atomik oluştur (benzersiz _id iki liderliği engeller).
+    try:
+        await db.scheduler_leader.insert_one(
+            {"_id": "scheduler_leader", "holder": _INSTANCE_ID,
+             "expires_at": exp_iso, "renewed_at": now_iso})
+        return True
+    except Exception:
+        return False  # başka instance kaydı oluşturdu/tutuyor
+
+
+def _lead(fn):
+    """İşi yalnız lider instance koşsun diye sarmalar. Lease hatasında tek-instance
+    varsayımıyla koşar (regresyon önleme)."""
+    async def _w(*a, **k):
+        try:
+            if not await _acquire_or_renew_leadership():
+                return None
+        except Exception as _e:
+            logger.warning(f"[scheduler] liderlik kontrolü atlandı ({_e}) — iş yine koşuyor")
+        return await fn(*a, **k)
+    _w.__name__ = getattr(fn, "__name__", "job")
+    _w.__qualname__ = _w.__name__
+    return _w
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
         return _scheduler
     _scheduler = AsyncIOScheduler(timezone="UTC")
+
+    def _add(fn, *a, **k):
+        # A2.8: her iş lider-sarmalıyla eklenir (çok-instance'ta çift çalışmayı önler).
+        return _scheduler.add_job(_lead(fn), *a, **k)
     # Run every 30 minutes; catches orders promptly as they cross the 48h mark
-    _scheduler.add_job(
+    _add(
         auto_cancel_unpaid_havale_orders,
         "interval",
         minutes=30,
@@ -1701,7 +1753,7 @@ def start_scheduler():
     )
     # KRİTİK: başarısız/ödenmemiş KART siparişleri — 3 saat sonra iptal + stok iadesi.
     # Önceden HİÇ zamanlanmamıştı → başarısız kart ödemeleri stoğu kalıcı sızdırıyordu.
-    _scheduler.add_job(
+    _add(
         auto_cancel_unpaid_card_orders,
         "interval",
         minutes=30,
@@ -1712,7 +1764,7 @@ def start_scheduler():
     )
     # iyzico OTOMATİK reconcile: para çekilmiş ama 'ödendi' işaretlenmemiş kart siparişlerini
     # her 15 dk'da iyzico'dan doğrulayıp finalize eder (elle recover-charged gerekmez).
-    _scheduler.add_job(
+    _add(
         reconcile_charged_but_unrecorded_orders,
         "interval",
         minutes=15,
@@ -1723,7 +1775,7 @@ def start_scheduler():
     )
     # İYS: bildirilmemiş izinleri her 30 dk'da NetGSM'e yeniden gönder. NetGSM modülü
     # aktif olur olmaz (yansıma/aktivasyon gecikmesi sonrası) bekleyenler otomatik geçer.
-    _scheduler.add_job(
+    _add(
         retry_pending_iys_consents,
         "interval",
         minutes=30,
@@ -1735,7 +1787,7 @@ def start_scheduler():
     # Instagram akışı — auto_sync açık + token varsa her 30 dk @facette gönderilerini tazeler.
     try:
         from routes.instagram import auto_sync_instagram
-        _scheduler.add_job(
+        _add(
             auto_sync_instagram,
             "interval",
             minutes=30,
@@ -1749,7 +1801,7 @@ def start_scheduler():
     # Trendyol yorumları — HAFTADA BİR 4-5 yıldız yorumları otomatik çeker (worker/proxy varsa).
     try:
         from routes.integrations_trendyol_qna import weekly_trendyol_review_sync
-        _scheduler.add_job(
+        _add(
             weekly_trendyol_review_sync,
             "interval",
             days=7,
@@ -1763,7 +1815,7 @@ def start_scheduler():
     # Marketplace auto-sync tick — her 1 dk'da çalışır, sonra tek tek
     # account'lara ait interval'lere göre ürün/sipariş senkronu planlar.
     # Bu sayede "3 dk'da bir ürün gönder" gibi ince ayarlar çalışır.
-    _scheduler.add_job(
+    _add(
         _marketplace_sync_tick,
         "interval",
         minutes=1,
@@ -1773,7 +1825,7 @@ def start_scheduler():
         coalesce=True,
     )
     # Tek seferlik: Hepsiburada senkronunu 2 dk'ya çek (stok + sipariş). Bayrakla bir kez çalışır.
-    _scheduler.add_job(
+    _add(
         _ensure_hb_2min_sync,
         "date",
         run_date=datetime.now(timezone.utc) + timedelta(seconds=20),
@@ -1781,7 +1833,7 @@ def start_scheduler():
     )
     # Trendyol İPTAL HIZLI tarama — her 5 DK (eskiden 60 sn idi; site yavaşlamasının
     # sebebi buydu). Sadece Cancelled + 14g dar pencere → hafif. Yeni iptaller ~5 dk'da düşer.
-    _scheduler.add_job(
+    _add(
         _run_trendyol_cancel_pass,
         "interval",
         minutes=5,
@@ -1792,7 +1844,7 @@ def start_scheduler():
     )
     # Trendyol GENİŞ durum taraması — SAATTE BİR. Cancelled 45g + Returned/UnDelivered 30g.
     # Sık taramanın kaçırdığı eski/geç durum değişikliklerini kapatır (sık değil → hafif).
-    _scheduler.add_job(
+    _add(
         _run_trendyol_status_wide_pass,
         "interval",
         minutes=60,
@@ -1803,7 +1855,7 @@ def start_scheduler():
     )
     # Trendyol claims (iade/iptal) senkronu — her 30 DK. Müşterinin seçtiği GERÇEK iptal/iade
     # sebebini çeker ve claim'leri eşleşen iptal siparişlerine bağlar.
-    _scheduler.add_job(
+    _add(
         _run_trendyol_claims_sync,
         "interval",
         minutes=30,
@@ -1813,7 +1865,7 @@ def start_scheduler():
         coalesce=True,
     )
     # Hepsiburada claims (iade) senkronu — her 30 DK (Trendyol ile simetrik).
-    _scheduler.add_job(
+    _add(
         _run_hepsiburada_claims_sync,
         "interval",
         minutes=30,
@@ -1824,7 +1876,7 @@ def start_scheduler():
     )
     # Trendyol claims TEK SEFERLİK derin backfill (3 yıl) — geçmiş onaylı/reddedilen iadeler
     # de sekme sayılarına insin. Flag korumalı (trendyol_claims_deep_backfill.done) → bir kez.
-    _scheduler.add_job(
+    _add(
         _run_trendyol_claims_deep_backfill_once,
         "interval",
         hours=6,
@@ -1836,7 +1888,7 @@ def start_scheduler():
     # Trendyol TEK SEFERLİK terminal backfill — geçmişteki TÜM iptalleri (satıcı dahil) taşır.
     # Flag korumalı (db.settings.trendyol_terminal_backfill.done) → bir kez çalışır, sonra no-op.
     # 3 saatte bir tetiklenir ama done ise hiçbir şey yapmaz (sadece ucuz flag kontrolü).
-    _scheduler.add_job(
+    _add(
         _run_trendyol_deep_backfill_once,
         "interval",
         hours=3,
@@ -1849,7 +1901,7 @@ def start_scheduler():
     # Önceki `interval hours=24 + next_run_time=now+2dk` her PROCESS RESTART'ında çalışıyor ve
     # düşük-stok e-postası sent-flag'i olmadığından her deploy'da MÜKERRER mail gidiyordu; ayrıca
     # "günlük" saat her restart'ta kayıyordu. cron ile gün içinde tam olarak bir kez tetiklenir.
-    _scheduler.add_job(
+    _add(
         _send_abandoned_cart_reminders,
         "cron",
         hour=7, minute=0,
@@ -1857,7 +1909,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    _scheduler.add_job(
+    _add(
         _send_daily_stock_alert,
         "cron",
         hour=7, minute=10,
@@ -1867,7 +1919,7 @@ def start_scheduler():
     )
     # Favori ürün tekrar stokta — her 30 dk favorilenen ürünlerin stoğunu kontrol eder;
     # 'yok'→'var' geçişinde o ürünü favorileyenlere markalı e-posta atar (döngü başına 1 kez).
-    _scheduler.add_job(
+    _add(
         _notify_back_in_stock,
         "interval",
         minutes=30,
@@ -1877,7 +1929,7 @@ def start_scheduler():
         coalesce=True,
     )
     # Ticimax site siparişlerini periyodik çek — 6 saatte bir (günde 4 kez)
-    _scheduler.add_job(
+    _add(
         _ticimax_sync_orders,
         "interval",
         hours=6,
@@ -1906,7 +1958,7 @@ def start_scheduler():
         except Exception as e:
             logger.warning(f"[scheduler] stockout alert failed: {e}")
     from apscheduler.triggers.cron import CronTrigger
-    _scheduler.add_job(
+    _add(
         _daily_stockout_alert,
         CronTrigger(hour=9, minute=0),
         id="daily_stockout_alert",
@@ -1914,7 +1966,7 @@ def start_scheduler():
     )
     # Amazon DPP — PII saklama süresi dolan siparişlerde kişisel verileri anonimleştir
     # (her gün 03:00 UTC). Amazon "Restricted" rol uyumu için kritik kontrol.
-    _scheduler.add_job(
+    _add(
         _pii_retention_purge,
         CronTrigger(hour=3, minute=0),
         id="pii_retention_purge",
@@ -1922,7 +1974,7 @@ def start_scheduler():
         max_instances=1, coalesce=True,
     )
     # DHL/MNG kargo durum taramasi — her 30 dk (site siparisleri; takip linki -> Kargoya Verildi, teslim -> Teslim Edildi)
-    _scheduler.add_job(
+    _add(
         _dhl_cargo_poll_tick,
         "interval",
         minutes=30,
@@ -1931,7 +1983,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    _scheduler.add_job(
+    _add(
         _return_cargo_poll_tick,
         "interval",
         minutes=5,

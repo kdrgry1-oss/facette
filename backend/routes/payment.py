@@ -30,8 +30,69 @@ from fastapi import APIRouter, HTTPException, Request, Form
 from fastapi.responses import RedirectResponse
 
 from .deps import db, logger, limiter
+try:
+    from .deps import client_ip_from_request as _client_ip
+except Exception:  # pragma: no cover
+    def _client_ip(request):
+        try:
+            return request.client.host if request and request.client else ""
+        except Exception:
+            return ""
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
+
+
+def _card_bin(card: dict) -> str:
+    num = "".join(ch for ch in str((card or {}).get("cardNumber") or "") if ch.isdigit())
+    return num[:6] if len(num) >= 6 else ""
+
+
+async def _card_velocity_guard(request, order_id: str) -> None:
+    """A2.6 — Kart-testi (card-testing) hız sınırı. Kart hırsızları çalınmış kart listelerini
+    doğrulamak için tek IP'den kısa sürede çok sayıda BAŞARISIZ ödeme dener. Aynı IP'den
+    pencere içinde eşik kadar başarısız deneme olduysa 429 ile blokla. Eşik/pencere admin-
+    düzenlenebilir (white-label). Başarılı ödeme sayaca girmez."""
+    try:
+        ip = _client_ip(request) or ""
+    except Exception:
+        ip = ""
+    if not ip:
+        return
+    try:
+        from business_rules import get_rule as _gr
+        win_min = int(await _gr(db, "payment.card_velocity_window_min", 15) or 15)
+        max_fails = int(await _gr(db, "payment.card_velocity_max_fails", 8) or 8)
+    except Exception:
+        win_min, max_fails = 15, 8
+    if max_fails < 1:
+        return
+    since_ts = datetime.now(timezone.utc).timestamp() - win_min * 60
+    try:
+        fails = await db.card_attempts.count_documents(
+            {"ip": ip, "status": {"$ne": "success"}, "ts": {"$gt": since_ts}})
+    except Exception:
+        return
+    if fails >= max_fails:
+        logger.warning(f"[KART-TESTI] IP hız sınırı aşıldı ip={ip} fails={fails} win={win_min}dk order={order_id}")
+        raise HTTPException(status_code=429,
+                            detail="Çok fazla başarısız ödeme denemesi yapıldı. Güvenliğiniz için bir süre sonra tekrar deneyin.")
+
+
+async def _record_card_attempt(request, card: dict, order_id: str, status: str) -> None:
+    """Kart denemesini (başarı/başarısızlık) hız-sınırı için kaydeder. PII saklamaz —
+    yalnız IP, ilk-6 (BIN), sipariş no, durum, zaman."""
+    try:
+        ip = _client_ip(request) or ""
+    except Exception:
+        ip = ""
+    now = datetime.now(timezone.utc)
+    try:
+        await db.card_attempts.insert_one({
+            "ip": ip, "bin": _card_bin(card), "order_id": order_id,
+            "status": status, "ts": now.timestamp(), "created_at": now.isoformat(),
+        })
+    except Exception:
+        pass
 
 
 def _safe_return_base(return_url: str, request) -> str:
@@ -654,6 +715,7 @@ async def initialize_3ds_payment(payload: dict, request: Request):
        order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
         raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
+    await _card_velocity_guard(request, order_id)  # A2.6: kart-testi hız sınırı
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, callback_url, is_3ds=True)
     # Taksit seçildiyse paidPrice'i o taksitin gerçek toplamına (vade farkı dahil) eşitle
@@ -674,6 +736,7 @@ async def initialize_3ds_payment(payload: dict, request: Request):
 
     if data.get("status") != "success":
         logger.warning(f"iyzico 3ds init failed order={order_id}: {data.get('errorCode')} {data.get('errorMessage')}")
+        await _record_card_attempt(request, card, order_id, "init_failed")  # A2.6
         return {"success": False, "error": data.get("errorMessage") or "Ödeme başlatılamadı", "errorCode": data.get("errorCode")}
 
     await db.orders.update_one(
@@ -777,6 +840,7 @@ async def card_pay_non3ds(payload: dict, request: Request):
        order.get("status") in ("confirmed", "shipped", "delivered", "cancelled"):
         raise HTTPException(status_code=400, detail="Bu sipariş için ödeme alınamaz")
 
+    await _card_velocity_guard(request, order_id)  # A2.6: kart-testi hız sınırı
     settings = await _get_iyzico_settings()
     body = _build_card_payment_payload(order, card, installment, "", is_3ds=False)
     if installment > 1:
@@ -801,6 +865,7 @@ async def card_pay_non3ds(payload: dict, request: Request):
         raise HTTPException(status_code=502, detail=f"iyzico bağlantı hatası: {e}")
 
     paid = await _mark_order_from_payment(order_id, data)
+    await _record_card_attempt(request, card, order_id, "success" if paid else "auth_failed")  # A2.6
     if paid:
         return {"success": True, "order_number": order.get("order_number")}
     return {"success": False, "error": data.get("errorMessage") or "Ödeme başarısız", "errorCode": data.get("errorCode")}

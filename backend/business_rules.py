@@ -88,6 +88,12 @@ RULE_CATALOG = [
      "help": "Ürün kalıbına göre 'bir beden büyük/küçük alın' önerisini ürün kartında gösterir."},
 
     # ---- Bildirim & Oturum ----
+    {"group": "Ödeme & İndirim", "key": "payment.card_velocity_max_fails", "label": "Kart-testi: azami başarısız ödeme (IP)",
+     "type": "number", "default": 8, "unit": "deneme", "options": [5, 8, 10, 15, 20],
+     "help": "Aynı IP'den belirlenen pencerede bu kadar başarısız kart denemesi olursa ödeme geçici bloklanır (çalıntı kart doğrulama/card-testing saldırısına karşı)."},
+    {"group": "Ödeme & İndirim", "key": "payment.card_velocity_window_min", "label": "Kart-testi: sayım penceresi",
+     "type": "number", "default": 15, "unit": "dakika", "options": [5, 10, 15, 30, 60],
+     "help": "Başarısız kart denemelerinin sayıldığı zaman penceresi. Pencere içindeki denemeler eşik ile karşılaştırılır."},
     {"group": "Panel & Oturum", "key": "panel.auto_logout_minutes", "label": "Panel otomatik çıkış (inaktivite)",
      "type": "number", "default": 60, "unit": "dakika", "options": [15, 30, 60, 120, 0],
      "help": "Panelde bu süre işlem yapılmazsa otomatik çıkış yapılır ve filtreler sıfırlanır. 0 = kapalı."},
