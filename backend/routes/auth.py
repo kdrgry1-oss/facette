@@ -59,6 +59,16 @@ async def register(request: Request):
             return None
     height_cm = _num_or_none((_body or {}).get("height_cm"), 100, 230)
     weight_kg = _num_or_none((_body or {}).get("weight_kg"), 30, 250)
+    # Doğum tarihi (opsiyonel) — "YYYY-MM-DD" beklenir; geçersizse yok sayılır (kayıt bloklanmaz).
+    _birth_date = ""
+    _bd_raw = str((_body or {}).get("birth_date") or (_body or {}).get("dob") or "").strip()
+    import re as _re_bd
+    if _re_bd.match(r"^\d{4}-\d{2}-\d{2}$", _bd_raw):
+        try:
+            datetime.strptime(_bd_raw, "%Y-%m-%d")
+            _birth_date = _bd_raw
+        except Exception:
+            _birth_date = ""
     email = safe_str(email or "", 256).lower().strip()
     password = safe_str(password or "", 200)
     if not is_safe_email(email):
@@ -88,6 +98,7 @@ async def register(request: Request):
         "phone": phone_norm,
         "height_cm": height_cm,
         "weight_kg": weight_kg,
+        "birth_date": _birth_date,  # Bölüm C: doğum günü kuponu otomasyonu için (opsiyonel)
         "is_admin": False,
         "is_active": True,
         "email_verified": False,  # yumuşak doğrulama — hesabı bloke etmez, sadece işaretler
@@ -96,6 +107,17 @@ async def register(request: Request):
 
     await db.users.insert_one(user)
     token = create_token(user["id"])
+
+    # Bölüm C — Referans kaydı (kod girildiyse) + hoş geldin kuponu (etkinse). Best-effort:
+    # kayıt akışını ASLA bloklamaz.
+    try:
+        from .referrals import record_referral_on_register, issue_welcome_coupon
+        _ref_code = (_body.get("referral_code") or _body.get("ref") or "").strip()
+        if _ref_code:
+            await record_referral_on_register(user, _ref_code)
+        await issue_welcome_coupon(user)
+    except Exception as _rce:
+        logger.warning(f"referans/hoş geldin işlemi atlandı: {_rce}")
     # E-POSTA DOĞRULAMA (yumuşak): checkout'u bloke etmez; sahte-e-posta caydırıcısı +
     # gelecekte gating için temel. Doğrulama linki e-posta ile gider (best-effort).
     try:

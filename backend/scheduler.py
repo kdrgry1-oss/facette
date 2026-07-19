@@ -1684,6 +1684,24 @@ async def _notify_back_in_stock():
         logger.exception(f"[scheduler] back_in_stock failed: {e}")
 
 
+async def _run_award_referrals():
+    """Bölüm C: davet edilenin ilk siparişi oluştuysa referans ödüllerini ver (idempotent)."""
+    try:
+        from routes.referrals import award_pending_referrals
+        await award_pending_referrals()
+    except Exception as e:
+        logger.exception(f"[scheduler] referans ödül job hata: {e}")
+
+
+async def _run_birthday_coupons():
+    """Bölüm C: bugün doğum günü olan müşterilere kupon gönder (yıl-başına idempotent)."""
+    try:
+        from routes.referrals import send_birthday_coupons
+        await send_birthday_coupons()
+    except Exception as e:
+        logger.exception(f"[scheduler] doğum günü job hata: {e}")
+
+
 # ==================== A2.8: TEK-LİDER (distributed leader lease) ====================
 # APScheduler her PROCESS'te çalışır; Railway yatay ölçeklenirse (>1 instance) tüm zamanlı
 # işler HER instance'ta tekrar koşar → çift iptal / çift reconcile / çift bildirim. Mongo
@@ -1989,6 +2007,26 @@ def start_scheduler():
         minutes=5,
         id="return_cargo_poll",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Bölüm C — Referans ödülleri (davet edilenin ilk siparişi geldiyse) her 20 dk.
+    _add(
+        _run_award_referrals,
+        "interval",
+        minutes=20,
+        id="referral_award",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # Bölüm C — Doğum günü kuponları: her gün 07:00 UTC (~10:00 TR).
+    _add(
+        _run_birthday_coupons,
+        "cron",
+        hour=7,
+        minute=0,
+        id="birthday_coupons",
         max_instances=1,
         coalesce=True,
     )
