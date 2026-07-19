@@ -216,7 +216,7 @@ async def _sms_generic(cfg: Dict, to: str, message: str) -> Dict:
     """Henüz bağlanmamış sağlayıcılar için placeholder (Verimor, MutluCep, Mobildev, PostaGüvercini).
     Y19: Önceden success=True dönüyordu → SMS hiç gitmediği halde notification_logs 'başarılı'
     kaydediyordu (sessiz kesinti). Artık success=False döner ki gerçek durum görünür olsun."""
-    logger.warning(f"[SMS] Sağlayıcı henüz uygulanmadı — SMS GÖNDERİLMEDİ, to={to}, msg={message[:80]}")
+    logger.warning(f"[SMS] Sağlayıcı henüz uygulanmadı — SMS GÖNDERİLMEDİ, to=***{str(to)[-4:]}")  # A3: telefon+OTP loglanmaz
     return {"success": False, "response": "provider-not-implemented", "mock": True,
             "error": "SMS sağlayıcısı entegre değil"}
 

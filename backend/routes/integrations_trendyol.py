@@ -1146,7 +1146,8 @@ async def sync_products_to_trendyol(
             
             cat_q = {"category_name": cat.get("name")}
             if filters.get("stock_code"):
-                cat_q["stock_code"] = {"$regex": filters["stock_code"], "$options": "i"}
+                # A3: kullanıcı girdisini re.escape ile kaçır — ham regex/ReDoS enjeksiyonu önlenir.
+                cat_q["stock_code"] = {"$regex": re.escape(str(filters["stock_code"])), "$options": "i"}
             if filters.get("date_range"):
                 try:
                     from datetime import datetime, timezone

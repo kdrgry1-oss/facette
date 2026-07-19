@@ -25,10 +25,10 @@ async def get_dogan_settings(current_user: dict = Depends(require_admin)):
     settings = await db.settings.find_one({"id": "dogan_edonusum"}, {"_id": 0})
     if not settings:
         return {"id": "dogan_edonusum", "enabled": False, "username": "", "password": "", "is_test": True}
-    # Mask password
+    # Mask password — A3: ilk-3-karakter sızıntısı (password_masked) kaldırıldı, yalnız var/yok bilgisi.
     if settings.get("password"):
-        settings["password_masked"] = settings["password"][:3] + "***"
         settings["password"] = "********"
+        settings["has_password"] = True
     return settings
 
 

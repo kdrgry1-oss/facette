@@ -276,8 +276,8 @@ async def public_order_tracking(tracking_code: str):
         "timeline": timeline,
         "shipping_address": masked,
         "cargo": ({"company": carrier, "tracking_number": tn, "tracking_url": track_link} if tn else None),
-        "total": order.get("total"),
-        "item_count": len(order.get("items", [])),
+        # A3: total / item_count kaldırıldı — kimliksiz uç, sipariş no ardışık olduğundan
+        # tutar/kalem sayısı numaraları tarayarak sızabiliyordu (iş-istihbaratı + enumeration).
     }
 
 

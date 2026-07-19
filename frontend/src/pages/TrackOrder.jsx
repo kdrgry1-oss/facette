@@ -182,25 +182,9 @@ export default function TrackOrder() {
               </div>
             )}
 
-            {/* Order Summary — indirimler ayrı ayrı görünür */}
-            <div className="border-t pt-4 mt-4 space-y-1.5 text-sm">
-              {(order.subtotal != null) && (
-                <div className="flex justify-between text-gray-600"><span>Ara Toplam</span><span>{Number(order.subtotal || 0).toFixed(2)} TL</span></div>
-              )}
-              {Array.isArray(order.discount_breakdown) && order.discount_breakdown.map((d, i) => (
-                <div key={i} className="flex justify-between text-emerald-700">
-                  <span>{d.label}{d.code ? ` · ${d.code}` : ""}</span>
-                  <span>-{Number(d.amount || 0).toFixed(2)} TL</span>
-                </div>
-              ))}
-              {(order.shipping_cost != null) && (
-                <div className="flex justify-between text-gray-600"><span>Kargo</span><span>{Number(order.shipping_cost || 0) === 0 ? "Ücretsiz" : `${Number(order.shipping_cost).toFixed(2)} TL`}</span></div>
-              )}
-              <div className="flex justify-between border-t pt-2 mt-1">
-                <span className="text-gray-500">{order.item_count} ürün</span>
-                <span className="font-medium">{order.total?.toFixed(2)} TL</span>
-              </div>
-            </div>
+            {/* A3: Kimliksiz takip sayfasında finansal özet (tutar/kalem/indirim) gösterilmez —
+                sipariş no ardışık olduğundan enumeration ile sızmasın. Tutar detayı için
+                müşteri giriş yapıp "Siparişlerim"den görür. */}
           </div>
         )}
 
