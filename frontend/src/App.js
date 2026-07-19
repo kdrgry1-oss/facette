@@ -40,6 +40,7 @@ const SitePopup = lazy(() => import("./components/SitePopup"));
 const SeoManager = lazy(() => import("./components/SeoManager"));
 // Özel Tema (CSS/JS) — yalnız storefront'ta enjekte eder (admin'de asla)
 const CustomThemeInjector = lazy(() => import("./components/CustomThemeInjector"));
+const WhatsAppButton = lazy(() => import("./components/WhatsAppButton"));
 import { trackVisit } from "./lib/attribution";
 
 import "./App.css";
@@ -99,6 +100,7 @@ function App() {
                 <CustomThemeInjector />
                 <AnnouncementBar />
                 <SitePopup />
+                <WhatsAppButton />
               </Suspense>
             )}
             <MaintenanceGate>

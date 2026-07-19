@@ -34,6 +34,7 @@ _PUBLIC_KEYS = [
     "product.size_guide_enabled", "product.complete_the_look_enabled",
     "product.shipping_countdown_enabled", "storefront.announcement_bar_enabled",
     "product.social_share_enabled",
+    "storefront.whatsapp_enabled", "storefront.whatsapp_number", "storefront.whatsapp_message",
 ]
 
 

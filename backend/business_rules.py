@@ -103,6 +103,17 @@ RULE_CATALOG = [
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Ürün sayfasında WhatsApp/X/Facebook paylaşım ve bağlantı kopyalama butonlarını gösterir."},
 
+    # ---- Destek & İletişim ----
+    {"group": "Destek & İletişim", "key": "storefront.whatsapp_enabled", "label": "WhatsApp destek butonu (yüzen)",
+     "type": "toggle", "default": False, "options": [True, False],
+     "help": "Sitenin sağ altında yüzen WhatsApp destek butonu gösterir. Açmak için numara da girin."},
+    {"group": "Destek & İletişim", "key": "storefront.whatsapp_number", "label": "WhatsApp numarası (uluslararası)",
+     "type": "text", "default": "", "options": [],
+     "help": "Uluslararası biçimde, başında 90 ile ve boşluksuz. Örn: 905321234567. Boşsa buton görünmez."},
+    {"group": "Destek & İletişim", "key": "storefront.whatsapp_message", "label": "WhatsApp hazır mesajı",
+     "type": "text", "default": "Merhaba, yardımcı olur musunuz?", "options": [],
+     "help": "Müşteri butona tıklayınca WhatsApp'ta hazır gelen mesaj."},
+
     # ---- Pazarlama & Stok ----
     {"group": "Pazarlama & Stok", "key": "marketing.abandoned_cart_min_hours", "label": "Terkedilmiş sepet — en erken hatırlatma",
      "type": "number", "default": 2, "unit": "saat", "options": [1, 2, 3, 6],
