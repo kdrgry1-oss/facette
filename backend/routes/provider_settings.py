@@ -44,6 +44,12 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from .deps import db, require_admin
+try:
+    from security.crypto import encrypt as _encrypt, decrypt as _decrypt, is_encrypted as _is_enc
+except Exception:  # kripto yoksa güvenli-degrade (yine de çalışsın)
+    def _encrypt(v): return v
+    def _decrypt(v): return v
+    def _is_enc(v): return False
 
 router = APIRouter(prefix="/provider-settings", tags=["Provider Settings"])
 
@@ -438,6 +444,24 @@ def _secret_fields_for(kind: str, provider_key: str) -> set:
     return keys
 
 
+def decrypt_provider_doc(kind: str, doc: dict) -> dict:
+    """A1.1: Tüketiciler için — providers.<key>.<secret> alanlarını ÇÖZ (decrypt).
+    Eski düz-metin değerler crypto.decrypt tarafından olduğu gibi geçirilir (kesintisiz
+    migrasyon). Bu fonksiyonu SIRRI KULLANAN yerler çağırmalı (admin GET DEĞİL — o maskeli)."""
+    if not doc:
+        return doc
+    out = dict(doc)
+    providers = {}
+    for pkey, pval in (out.get("providers") or {}).items():
+        secrets_keys = _secret_fields_for(kind, pkey)
+        dec = {}
+        for fk, fv in (pval or {}).items():
+            dec[fk] = _decrypt(fv) if (fk in secrets_keys and isinstance(fv, str)) else fv
+        providers[pkey] = dec
+    out["providers"] = providers
+    return out
+
+
 def _mask_config_doc(kind: str, doc: dict) -> dict:
     """providers.<key>.<secret_field> değerlerini maskele (varlığını koru, değeri gizle)."""
     out = dict(doc or {})
@@ -515,6 +539,17 @@ async def save_config(kind: str, payload: dict,
                     pval[fk] = cur.get(fk)
                 else:
                     pval.pop(fk, None)
+
+    # A1.1: Gizli alanları AT-REST ŞİFRELE (düz metin disk/DB'ye yazılmasın).
+    # Maske-koruma yukarıda mevcut (zaten şifreli) değeri geri yazmış olabilir;
+    # yalnız henüz şifrelenmemiş gerçek değerleri şifrele (is_encrypted ile idempotent).
+    for pkey, pval in providers.items():
+        secrets_keys = _secret_fields_for(kind, pkey)
+        for fk in list((pval or {}).keys()):
+            if fk in secrets_keys:
+                v = pval.get(fk)
+                if isinstance(v, str) and v not in ("", _SECRET_MASK) and not _is_enc(v):
+                    pval[fk] = _encrypt(v)
 
     update_doc = {
         "kind": kind,

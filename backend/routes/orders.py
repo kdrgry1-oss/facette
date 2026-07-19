@@ -2658,6 +2658,11 @@ async def create_invoice_for_order(
     if order.get("is_micro_export"):
         invoice_type = "e-arsiv"
     cfg = await db.providers_config.find_one({"kind": "einvoice"}, {"_id": 0})
+    try:
+        from routes.provider_settings import decrypt_provider_doc as _dpd
+        cfg = _dpd("einvoice", cfg)   # A1.1: sırları çöz (at-rest şifreli)
+    except Exception:
+        pass
     active = (cfg or {}).get("active_provider")
     providers = (cfg or {}).get("providers") or {}
 
@@ -3868,6 +3873,11 @@ async def _get_mng_settings() -> dict:
     _cargo = {}
     try:
         _cc = await db.providers_config.find_one({"kind": "cargo"}, {"_id": 0}) or {}
+        try:
+            from routes.provider_settings import decrypt_provider_doc as _dpd
+            _cc = _dpd("cargo", _cc)   # A1.1: sırları çöz (at-rest şifreli)
+        except Exception:
+            pass
         if (_cc.get("active_provider") == "mng"):
             _cargo = ((_cc.get("providers") or {}).get("mng") or {})
     except Exception:

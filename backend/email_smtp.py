@@ -14,7 +14,15 @@ import httpx
 
 
 async def get_smtp_config(db) -> dict:
-    return await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    cfg = await db.settings.find_one({"id": "email_smtp"}, {"_id": 0}) or {}
+    # A1.1: şifre at-rest şifreli saklanır; kullanım için çöz (eski düz metin olduğu gibi geçer).
+    if cfg.get("password"):
+        try:
+            from security.crypto import decrypt as _dec
+            cfg = {**cfg, "password": _dec(cfg["password"])}
+        except Exception:
+            pass
+    return cfg
 
 
 def is_configured(cfg: dict) -> bool:

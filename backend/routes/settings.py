@@ -355,8 +355,13 @@ async def save_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     # Şifre yalnızca yeni değer girildiyse güncellenir; boş bırakılırsa mevcut korunur.
+    # A1.1: at-rest ŞİFRELE (düz metin saklanmaz). get_smtp_config okuma yolunda çözülür.
     if pwd:
-        data["password"] = str(pwd)
+        try:
+            from security.crypto import encrypt as _enc, is_encrypted as _ise
+            data["password"] = _enc(str(pwd)) if not _ise(str(pwd)) else str(pwd)
+        except Exception:
+            data["password"] = str(pwd)
     elif existing.get("password"):
         data["password"] = existing["password"]
     await db.settings.update_one({"id": "email_smtp"}, {"$set": data}, upsert=True)
