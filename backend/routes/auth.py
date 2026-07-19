@@ -295,6 +295,87 @@ async def login(request: Request):
         }
     }
 
+def _mask_email(e: str) -> str:
+    e = (e or "").strip()
+    if "@" not in e:
+        return "***"
+    local, _, dom = e.partition("@")
+    lm = (local[0] + "***") if local else "***"
+    return f"{lm}@{dom}"
+
+
+@router.post("/guest-convert/send-code")
+@(limiter.limit("4/minute") if limiter else (lambda f: f))
+async def guest_convert_send_code(payload: dict, request: Request):
+    """A2.4 — Misafir siparişini hesaba dönüştürmeden ÖNCE sipariş e-postasına 6 haneli kod
+    gönderir. Böylece (ardışık, tahmin edilebilir) sipariş numarasını bilen biri, e-postaya
+    erişmeden hesap açıp kurbanın PII'sini/oturumunu ele geçiremez — kod yalnız gerçek posta
+    kutusuna gider. Zaten hesabı olan e-posta için kod göndermez (girişe yönlendirir)."""
+    order_id = ((payload or {}).get("order_id") or "").strip()
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id gerekli")
+    order = await db.orders.find_one({"$or": [{"id": order_id}, {"order_number": order_id}]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
+    if order.get("user_id"):
+        raise HTTPException(status_code=400, detail="Bu sipariş zaten bir hesaba bağlı")
+    # Tazelik penceresi (convert ile aynı): eski numaraları tarayarak istismarı sınırlar.
+    try:
+        _created = order.get("created_at") or ""
+        _cdt = datetime.fromisoformat(_created.replace("Z", "+00:00")) if _created else None
+        if _cdt is not None:
+            if _cdt.tzinfo is None:
+                _cdt = _cdt.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - _cdt).total_seconds() / 3600.0 > 12:
+                raise HTTPException(status_code=400, detail="Bu sipariş hesaba dönüştürme için çok eski. Lütfen giriş yapın.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    addr = order.get("shipping_address") or {}
+    email = (addr.get("email") or order.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Sipariş e-postası bulunamadı")
+    # Zaten hesabı olan e-posta/telefon → kod gönderme, girişe yönlendir (ATO koruması).
+    from notification_service import normalize_phone_tr as _npn
+    _phone_norm = _npn(addr.get("phone") or order.get("phone") or "")
+    _last10 = _phone_norm[-10:]
+    existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+    if not existing and len(_last10) == 10 and _last10.isdigit():
+        existing = await db.users.find_one({"phone": {"$regex": _last10}}, {"_id": 0, "id": 1})
+    if existing:
+        return {"existing_account": True,
+                "message": "Bu e-posta ile zaten bir hesabınız var. Lütfen giriş yapın; siparişiniz hesabınızda görünecektir."}
+    import secrets as _secrets
+    now = datetime.now(timezone.utc)
+    # Bu sipariş için eski kullanılmamış kodları iptal et
+    await db.guest_convert_codes.update_many(
+        {"order_id": order["id"], "used": False}, {"$set": {"used": True, "invalidated": True}})
+    code = f"{_secrets.randbelow(1000000):06d}"
+    await db.guest_convert_codes.insert_one({
+        "order_id": order["id"],
+        "email": email,
+        "code_hash": _hash_otp(code),
+        "expires_at": now.timestamp() + 600,  # 10 dk
+        "used": False,
+        "attempts": 0,
+        "created_at": now.isoformat(),
+    })
+    try:
+        _html = (
+            f'<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#2a2a2a">'
+            f'<h2 style="font-weight:600">Hesap Oluşturma Doğrulama Kodu</h2>'
+            f'<p>Siparişinizi bir hesaba dönüştürmek için doğrulama kodunuz:</p>'
+            f'<p style="font-size:30px;font-weight:700;letter-spacing:6px;margin:20px 0">{code}</p>'
+            f'<p style="font-size:12px;color:#888">Kod 10 dakika geçerlidir. Bu işlemi siz yapmadıysanız bu e-postayı yok sayın.</p></div>'
+        )
+        from email_smtp import send_smtp_email
+        await send_smtp_email(db, email, "Hesap Doğrulama Kodu — FACETTE", _html)
+    except Exception as _e:
+        logger.warning(f"guest-convert kod maili başarısız: {_e}")
+    return {"sent": True, "email_masked": _mask_email(email)}
+
+
 @router.post("/convert-guest-order")
 @(limiter.limit("5/minute") if limiter else (lambda f: f))
 async def convert_guest_order(payload: dict, request: Request):
@@ -395,6 +476,29 @@ async def convert_guest_order(payload: dict, request: Request):
             "message": "Bu e-posta ile zaten bir hesabınız var. Lütfen giriş yapın; siparişiniz hesabınızda görünecektir.",
         }
 
+    # A2.4: E-POSTA DOĞRULAMA KODU zorunlu. Sipariş e-postasına gönderilen 6 haneli kod
+    # doğrulanmadan hesap açılmaz → sipariş numarasını tahmin eden saldırgan, posta kutusuna
+    # erişemeden kurbanın adına hesap açamaz (misafir-ATO penceresi kapanır).
+    code = str((payload or {}).get("code") or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="E-posta doğrulama kodu gerekli. Lütfen size gönderilen kodu girin.")
+    _now_ts = datetime.now(timezone.utc).timestamp()
+    _crec = await db.guest_convert_codes.find_one(
+        {"order_id": order["id"], "used": False, "expires_at": {"$gt": _now_ts}},
+        sort=[("created_at", -1)])
+    if not _crec:
+        raise HTTPException(status_code=400, detail="Kod geçersiz veya süresi dolmuş. Lütfen yeni kod isteyin.")
+    if _crec.get("attempts", 0) >= 5:
+        raise HTTPException(status_code=429, detail="Çok fazla hatalı deneme. Lütfen yeni kod isteyin.")
+    await db.guest_convert_codes.update_one({"_id": _crec["_id"]}, {"$inc": {"attempts": 1}})
+    import hmac as _hmac
+    if not _hmac.compare_digest(_hash_otp(code), str(_crec.get("code_hash") or "")):
+        raise HTTPException(status_code=400, detail="Kod hatalı")
+    # Kodun ait olduğu e-posta ile siparişin e-postası aynı olmalı (defans).
+    if (_crec.get("email") or "").lower().strip() != email:
+        raise HTTPException(status_code=400, detail="Kod bu siparişe ait değil")
+    await db.guest_convert_codes.update_one({"_id": _crec["_id"]}, {"$set": {"used": True}})
+
     # Yeni hesap oluştur
     user = {
         "id": generate_id(),
@@ -405,7 +509,7 @@ async def convert_guest_order(payload: dict, request: Request):
         "phone": phone_norm or phone,
         "role": "customer",
         "is_active": True,
-        "email_verified": False,  # misafir-dönüşüm — sağlayıcı doğrulaması yok
+        "email_verified": True,  # A2.4 — e-posta kodu doğrulandı (posta kutusu sahipliği kanıtlandı)
         "source": "checkout_guest_convert",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

@@ -25,6 +25,9 @@ export default function OrderSuccess() {
   const [signupPwd, setSignupPwd] = useState("");
   const [signupBusy, setSignupBusy] = useState(false);
   const [signupDone, setSignupDone] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);   // A2.4: e-posta doğrulama kodu gönderildi mi
+  const [signupCode, setSignupCode] = useState("");   // A2.4: kullanıcının girdiği 6 haneli kod
+  const [codeEmail, setCodeEmail] = useState("");      // maskeli e-posta (kod nereye gitti)
 
   useEffect(() => {
     if (!orderNumber) {
@@ -245,32 +248,74 @@ export default function OrderSuccess() {
               <p className="text-xs text-gray-700 leading-relaxed mb-6">
                 Bu siparişin <strong>otomatik hesabına bağlanır</strong>; iade & değişim, kargo durumu ve gelecek siparişlerin tek bir yerden yönetilir.
               </p>
-              <div className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
-                <input type="password" value={signupPwd} onChange={(e) => setSignupPwd(e.target.value)}
-                  placeholder="En az 6 karakter şifre"
-                  data-testid="guest-signup-password"
-                  className="flex-1 bg-white border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:border-stone-900" />
-                <button onClick={async () => {
-                  if (signupPwd.length < 6) { toast.error("Şifre en az 6 karakter olmalı"); return; }
-                  setSignupBusy(true);
-                  try {
-                    const r = await axios.post(`${API}/auth/convert-guest-order`, { order_id: orderNumber, password: signupPwd });
-                    localStorage.setItem("token", r.data.token);
-                    toast.success(r.data.existing_account ? "Hesabınıza bağlandı" : "Hesap oluşturuldu!");
-                    setSignupDone(true);
-                    if (refreshUser) await refreshUser();
-                  } catch (e) {
-                    toast.error(e?.response?.data?.detail || "İşlem başarısız");
-                  } finally { setSignupBusy(false); }
-                }} disabled={signupBusy}
-                  data-testid="guest-signup-create-btn"
-                  className="bg-stone-900 hover:bg-stone-800 text-white px-6 py-3 text-xs tracking-[0.2em] uppercase disabled:opacity-60">
-                  {signupBusy ? "..." : "Oluştur"}
-                </button>
-              </div>
-              <p className="text-[10px] text-gray-500 mt-4">
-                E-posta: {order?.shipping_address?.email || "—"}
-              </p>
+              {!codeSent ? (
+                <>
+                  <div className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
+                    <input type="password" value={signupPwd} onChange={(e) => setSignupPwd(e.target.value)}
+                      placeholder="En az 6 karakter şifre"
+                      data-testid="guest-signup-password"
+                      className="flex-1 bg-white border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:border-stone-900" />
+                    <button onClick={async () => {
+                      if (signupPwd.length < 6) { toast.error("Şifre en az 6 karakter olmalı"); return; }
+                      setSignupBusy(true);
+                      try {
+                        const r = await axios.post(`${API}/auth/guest-convert/send-code`, { order_id: orderNumber });
+                        if (r.data.existing_account) {
+                          toast(r.data.message || "Bu e-posta ile zaten hesabınız var. Lütfen giriş yapın.", { icon: "ℹ️" });
+                          navigate("/giris");
+                          return;
+                        }
+                        setCodeEmail(r.data.email_masked || "");
+                        setCodeSent(true);
+                        toast.success("Doğrulama kodu e-postanıza gönderildi.");
+                      } catch (e) {
+                        toast.error(e?.response?.data?.detail || "Kod gönderilemedi");
+                      } finally { setSignupBusy(false); }
+                    }} disabled={signupBusy}
+                      data-testid="guest-signup-create-btn"
+                      className="bg-stone-900 hover:bg-stone-800 text-white px-6 py-3 text-xs tracking-[0.2em] uppercase disabled:opacity-60">
+                      {signupBusy ? "..." : "Devam"}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-4">
+                    E-posta: {order?.shipping_address?.email || "—"}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-700 mb-4">
+                    <strong>{codeEmail}</strong> adresine gönderilen 6 haneli doğrulama kodunu girin.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
+                    <input type="text" inputMode="numeric" maxLength={6} value={signupCode}
+                      onChange={(e) => setSignupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="000000"
+                      data-testid="guest-signup-code"
+                      className="flex-1 bg-white border border-gray-200 px-4 py-3 text-sm tracking-[0.4em] text-center focus:outline-none focus:border-stone-900" />
+                    <button onClick={async () => {
+                      if (signupCode.length !== 6) { toast.error("6 haneli kodu girin"); return; }
+                      setSignupBusy(true);
+                      try {
+                        const r = await axios.post(`${API}/auth/convert-guest-order`, { order_id: orderNumber, password: signupPwd, code: signupCode });
+                        if (r.data.token) localStorage.setItem("token", r.data.token);
+                        toast.success(r.data.existing_account ? "Hesabınıza bağlandı" : "Hesap oluşturuldu!");
+                        setSignupDone(true);
+                        if (refreshUser) await refreshUser();
+                      } catch (e) {
+                        toast.error(e?.response?.data?.detail || "İşlem başarısız");
+                      } finally { setSignupBusy(false); }
+                    }} disabled={signupBusy}
+                      data-testid="guest-signup-verify-btn"
+                      className="bg-stone-900 hover:bg-stone-800 text-white px-6 py-3 text-xs tracking-[0.2em] uppercase disabled:opacity-60">
+                      {signupBusy ? "..." : "Onayla"}
+                    </button>
+                  </div>
+                  <button onClick={() => { setCodeSent(false); setSignupCode(""); }}
+                    className="text-[10px] text-gray-500 mt-4 underline hover:text-black">
+                    Kodu almadınız mı? Tekrar deneyin
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
