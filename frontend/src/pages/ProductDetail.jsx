@@ -668,11 +668,11 @@ export default function ProductDetail() {
             </div>
 
             {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü).
-                Küçük resimler biraz büyük (92px), ana görsel max-genişlikle sınırlı
+                Küçük resimler BÜYÜK (140px), ana görsel max-genişlikle sınırlı
                 (aşırı uzamasın) — kullanıcı isteği. */}
             <div className="hidden lg:flex gap-4 justify-center">
               {displayImages.length > 1 && (
-                <div className="flex flex-col gap-2 w-[92px] shrink-0">
+                <div className="flex flex-col gap-2.5 w-[140px] shrink-0">
                   {displayImages.map((img, index) => (
                     <button
                       key={index}
@@ -685,7 +685,7 @@ export default function ProductDetail() {
                       data-testid={`pdp-thumb-${index}`}
                     >
                       <img
-                        src={optimizeImg(img, 200)}
+                        src={optimizeImg(img, 300)}
                         alt=""
                         className="w-full h-full object-cover object-top"
                         loading="lazy"
