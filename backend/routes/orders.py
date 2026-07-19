@@ -4905,9 +4905,11 @@ async def mng_cargo_webhook(payload: dict, request: Request):
     if not _secret:
         _mset = await db.settings.find_one({"id": "mng_kargo"}, {"_id": 0, "webhook_secret": 1}) or {}
         _secret = (_mset.get("webhook_secret") or "").strip()
+    # A2.7: Gizli anahtar YALNIZ başlık veya URL query'den okunur. Gövdedeki 'secret' alanı
+    # kaldırıldı (gövde entegrasyon loglarında saklandığından sır sızıntısı riskiydi). MNG
+    # yalnız callback URL yapılandırmasına izin verdiğinden ?key= fallback'i korunur (TLS altında).
     _provided = (request.headers.get("x-webhook-secret")
-                 or request.query_params.get("key")
-                 or (payload.get("secret") if isinstance(payload, dict) else "") or "").strip()
+                 or request.query_params.get("key") or "").strip()
     if not _secret or not _provided or not _hmac.compare_digest(_provided, _secret):
         logger.warning("MNG webhook reddedildi: gizli anahtar eksik/yanlış")
         raise HTTPException(status_code=401, detail="Yetkisiz webhook")
@@ -4935,6 +4937,15 @@ async def mng_cargo_webhook(payload: dict, request: Request):
         query_or.append({"order_number": referans_no})
 
     order = await db.orders.find_one({"$or": query_or}, {"_id": 0, "id": 1, "order_number": 1, "cargo_status_history": 1})
+    if order:
+        # A2.7: İDEMPOTENSİ — aynı (barkod, işlem kodu, tarih) olayı tekrar gelirse (MNG retry /
+        # replay) yeniden işleme; teslim/iade gibi yan etkiler ikinci kez tetiklenmesin.
+        for _h in (order.get("cargo_status_history") or []):
+            if (str(_h.get("code") or "") == islem_kodu
+                    and str(_h.get("at") or "") == str(tarih)
+                    and str(_h.get("barkod") or "") == barkod):
+                return {"success": True, "matched": True, "duplicate": True,
+                        "order_id": order["id"], "order_number": order.get("order_number")}
     if not order:
         # Sessizce 200 dön — MNG retry yapmasın, sadece logla
         await db.integration_logs.insert_one({

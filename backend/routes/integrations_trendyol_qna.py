@@ -558,7 +558,8 @@ async def _fetch_reviews_for_content_id(content_id: str, min_rating: int, max_pa
     worker = _review_worker()
     if worker:
         fetched: List[dict] = []
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        # A2.9: worker JSON'u doğrudan döndürür; redirect izleme kapalı (redirect tabanlı SSRF baypası yok).
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             page = 0
             while page < max_pages:
                 sep = "&" if "?" in worker else "?"
@@ -1024,14 +1025,61 @@ async def get_review_fetch_config(current_user: dict = Depends(require_admin)):
     }
 
 
+def _assert_safe_relay_url(raw: str, field: str, require_https: bool = True) -> None:
+    """A2.9 — SSRF savunması (defense-in-depth). Admin'in girdiği vekil/worker adresinin
+    özel/loopback/link-local/metadata IP'ye çözülmediğini yazma anında doğrular. Böylece
+    ele geçirilmiş veya dikkatsiz bir admin token'ı sunucuyu iç ağa/metadata uçlarına
+    (169.254.169.254 vb.) yönlendiremez. Çözümleme başarısızsa (geçici DNS) engellemez."""
+    import ipaddress as _ip
+    import socket as _sock
+    from urllib.parse import urlparse as _urlparse
+    if not raw:
+        return
+    try:
+        u = _urlparse(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{field}: geçersiz URL")
+    scheme = (u.scheme or "").lower()
+    if require_https and scheme not in ("https",):
+        raise HTTPException(status_code=400, detail=f"{field}: yalnızca https adres kabul edilir")
+    if scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail=f"{field}: geçersiz şema")
+    host = u.hostname or ""
+    if not host:
+        raise HTTPException(status_code=400, detail=f"{field}: host eksik")
+    if host.lower() in ("localhost", "metadata.google.internal") or host.lower().endswith(".internal"):
+        raise HTTPException(status_code=400, detail=f"{field}: dahili adres reddedildi")
+    try:
+        infos = _sock.getaddrinfo(host, None)
+    except Exception:
+        return  # geçici DNS hatası → admin'i bloklama (best-effort)
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ipobj = _ip.ip_address(addr.split("%")[0])
+        except ValueError:
+            continue
+        if (ipobj.is_private or ipobj.is_loopback or ipobj.is_link_local
+                or ipobj.is_reserved or ipobj.is_multicast or ipobj.is_unspecified):
+            raise HTTPException(status_code=400,
+                                detail=f"{field}: özel/dahili IP'ye çözülüyor ({addr}) — reddedildi")
+
+
 @router.put("/trendyol/reviews/fetch-config")
 async def set_review_fetch_config(payload: dict, current_user: dict = Depends(require_admin)):
     """Cloudflare Worker URL veya proxy adresini kaydeder. Trendyol yorumları bunlar üzerinden çekilir."""
     upd = {}
     if "review_worker_url" in (payload or {}):
-        upd["review_worker_url"] = str(payload.get("review_worker_url") or "").strip()
+        _wu = str(payload.get("review_worker_url") or "").strip()
+        if _wu:
+            _assert_safe_relay_url(_wu, "review_worker_url", require_https=True)
+        upd["review_worker_url"] = _wu
     if "review_proxy" in (payload or {}):
-        upd["review_proxy"] = str(payload.get("review_proxy") or "").strip()
+        _px = str(payload.get("review_proxy") or "").strip()
+        if _px:
+            # Proxy http/https olabilir (residential proxy'ler çoğunlukla http CONNECT).
+            _assert_safe_relay_url(_px, "review_proxy", require_https=False)
+        upd["review_proxy"] = _px
     if "review_min_rating" in (payload or {}):
         try:
             upd["review_min_rating"] = max(1, min(5, int(payload.get("review_min_rating"))))
