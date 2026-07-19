@@ -888,7 +888,16 @@ async def create_order(
         if _e:
             block_query.append({"email": _e})
     if block_query:
-        bl = await db.blocked_customers.find_one({"$or": block_query, "active": True}, {"_id": 0})
+        # A3: süreli blok kaydında expires_at geçmişse blok UYGULANMAZ (kalıcı bloklar—
+        # expires_at yok/boş—aynen sürer). Böylece süresi dolmuş geçici blok müşteriyi
+        # sonsuza dek sipariş veremez bırakmaz.
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        bl = await db.blocked_customers.find_one({"$and": [
+            {"$or": block_query},
+            {"active": True},
+            {"$or": [{"expires_at": {"$exists": False}}, {"expires_at": None},
+                     {"expires_at": ""}, {"expires_at": {"$gt": _now_iso}}]},
+        ]}, {"_id": 0})
         if bl:
             logger.warning(f"Blocked order attempt: user={uid} ip={client_ip} reason={bl.get('reason')}")
             raise HTTPException(status_code=403, detail="Hesabınız sipariş veremez. Lütfen destek ile iletişime geçin.")
