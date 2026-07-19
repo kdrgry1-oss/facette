@@ -63,6 +63,18 @@ def _source_cond(source: Optional[str]) -> dict:
     return {}  # bilinmeyen kaynak → toplu
 
 
+def _collection_from_code(*codes) -> str:
+    """Stok kodu ön ekinden koleksiyon türetir: 'fcfw…' → FcFw (Sonbahar/Kış),
+    'fcss…' → FCss (İlkbahar/Yaz). Büyük/küçük harf duyarsız; ilk eşleşen kod kazanır."""
+    for c in codes:
+        cc = (str(c) if c is not None else "").strip().lower()
+        if cc.startswith("fcfw"):
+            return "FcFw"
+        if cc.startswith("fcss"):
+            return "FCss"
+    return ""
+
+
 def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
     """Tüm satış raporlarının ortak $match'i: tarih aralığı + iptal/iade hariç + kaynak."""
     m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
@@ -231,7 +243,10 @@ async def top_products(
                 "product_id": pm.get("id") or r.get("pid"), "name": name,
                 "qty": 0, "revenue": 0.0, "orders": 0,
                 "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
-                "collection": pm.get("collection") or "",
+                # Koleksiyon: stok kodu ön ekinden (fcfw/fcss) — filtre değerleri tek tip (FcFw/FCss)
+                # kalsın diye önce kod ön eki; kod yoksa serbest metin collection alanına düşer.
+                "collection": _collection_from_code(pm.get("stock_code"), r.get("barcode"), r.get("pid"))
+                              or (pm.get("collection") or "").strip(),
                 "created_at": pm.get("created_at"),
                 "stock_code": pm.get("stock_code") or "",
             }
