@@ -3140,20 +3140,27 @@ async def create_invoice_for_order(
             _vf_note = (f"Taksitli satış ({_inst_n} taksit). Vade farkı (₺{_vf:.2f}) "
                         f"satış bedeline dahil olup KDV matrahına eklenmiştir.")
 
+        # BEYAZ ETİKET: e-fatura tedarikçi bilgisi öncelik — e-fatura sağlayıcı ayarı →
+        # merkezî Firma Bilgileri (company_info) → gömülü FACETTE varsayılanı.
+        try:
+            from company import get_company as _get_company
+            _co = await _get_company(db)
+        except Exception:
+            _co = {}
         _earsiv_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
             issue_date=issue_date,
             issue_time=issue_time,
-            supplier_vkn=dogan_settings.get("vkn") or "7810816779",
-            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC. A.Ş.",
+            supplier_vkn=dogan_settings.get("vkn") or _co.get("tax_number") or "7810816779",
+            supplier_name=dogan_settings.get("supplier_name") or _co.get("company_name") or "FACETTE DIŞ TİC. A.Ş.",
             supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
             supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
-            supplier_street=dogan_settings.get("supplier_street") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
-            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
-            supplier_phone=dogan_settings.get("supplier_phone") or "",
-            supplier_email=dogan_settings.get("supplier_email") or "",
-            supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
+            supplier_street=dogan_settings.get("supplier_street") or _co.get("address") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
+            supplier_tax_office=dogan_settings.get("supplier_tax_office") or _co.get("tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
+            supplier_phone=dogan_settings.get("supplier_phone") or _co.get("phone") or "",
+            supplier_email=dogan_settings.get("supplier_email") or _co.get("email") or "",
+            supplier_website=dogan_settings.get("supplier_website") or _co.get("website") or "facette.com.tr",
             customer_vkn_or_tckn=customer_vkn,
             customer_name=customer_name,
             customer_district=ship_addr.get("district") or "",
@@ -3368,18 +3375,24 @@ async def create_invoice_for_order(
                 "sku": "VADEFARKI", "barcode": "", "note": "",
             })
 
+        # BEYAZ ETİKET: tedarikçi fallback — e-fatura sağlayıcı ayarı → Firma Bilgileri → varsayılan.
+        try:
+            from company import get_company as _get_company
+            _co = await _get_company(db)
+        except Exception:
+            _co = {}
         _efatura_kwargs = dict(
             invoice_uuid=invoice_uuid,
             invoice_number=invoice_number,
             issue_date=issue_date,
             issue_time=issue_time,
-            supplier_vkn=dogan_settings.get("vkn") or "7810816779",
-            supplier_name=dogan_settings.get("supplier_name") or "FACETTE DIŞ TİC. A.Ş.",
+            supplier_vkn=dogan_settings.get("vkn") or _co.get("tax_number") or "7810816779",
+            supplier_name=dogan_settings.get("supplier_name") or _co.get("company_name") or "FACETTE DIŞ TİC. A.Ş.",
             supplier_district=dogan_settings.get("supplier_district") or "KÜÇÜKÇEKMECE",
             supplier_city=dogan_settings.get("supplier_city") or "İstanbul",
-            supplier_street=dogan_settings.get("supplier_street") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
-            supplier_tax_office=dogan_settings.get("supplier_tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
-            supplier_website=dogan_settings.get("supplier_website") or "facette.com.tr",
+            supplier_street=dogan_settings.get("supplier_street") or _co.get("address") or "İkitelli O.S.B. İmsan San. Sit. D BLOK NO:3",
+            supplier_tax_office=dogan_settings.get("supplier_tax_office") or _co.get("tax_office") or "HALKALI VERGİ DAİRESİ BAŞKANLIĞI",
+            supplier_website=dogan_settings.get("supplier_website") or _co.get("website") or "facette.com.tr",
             customer_vkn=customer_vkn,
             customer_id_scheme=_ef_scheme,
             customer_tax_office=bill.get("tax_office") or "",

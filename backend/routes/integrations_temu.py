@@ -315,9 +315,16 @@ async def temu_create_product(req: ProductCreateReq, current_user=Depends(requir
     for k, v in FACETTE_FIXED_ATTR_DEFAULTS.items():
         if _fnorm(k) not in _have:
             attrs_in[k] = v
-    for label, val in (("Üretici Adı", FACETTE_COMPANY["company_name"]),
-                       ("Üretici Mail Adresi", FACETTE_COMPANY["email"]),
-                       ("Üretici Adres Bilgisi", FACETTE_COMPANY["address"])):
+    # BEYAZ ETİKET: GPSR üretici bilgisi merkezî Firma Bilgileri'nden (varsa) — koddan değil.
+    try:
+        from company import get_company as _get_company
+        from routes.deps import db as _db
+        _co = await _get_company(_db)
+    except Exception:
+        _co = {}
+    for label, val in (("Üretici Adı", _co.get("company_name") or FACETTE_COMPANY["company_name"]),
+                       ("Üretici Mail Adresi", _co.get("email") or FACETTE_COMPANY["email"]),
+                       ("Üretici Adres Bilgisi", _co.get("address") or FACETTE_COMPANY["address"])):
         if _fnorm(label) not in _have:
             attrs_in[label] = val
     payload = {

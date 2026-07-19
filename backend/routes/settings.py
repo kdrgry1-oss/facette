@@ -122,7 +122,14 @@ async def update_settings(
         await db.settings.insert_one(settings_data)
     else:
         await db.settings.update_one({"id": "main"}, {"$set": settings_data})
-    
+
+    # BEYAZ ETİKET: firma bilgisi cache'ini geçersiz kıl → düzenleme anında e-posta/e-fatura
+    # markasına yansısın (60 sn beklemeden).
+    try:
+        from company import invalidate as _co_inv
+        _co_inv()
+    except Exception:
+        pass
     return {"message": "Ayarlar güncellendi"}
 
 
