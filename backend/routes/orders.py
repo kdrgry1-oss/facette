@@ -1006,6 +1006,13 @@ async def create_order(
         async for _p in db.products.find({"id": {"$in": _pids}}, {"_id": 0}):
             _pmap[_p["id"]] = _p
     _subtotal = 0.0
+    try:
+        from business_rules import get_rule as _get_rule_q
+        _max_qty_per_item = int(await _get_rule_q(db, "order.max_qty_per_item", 50) or 50)
+    except Exception:
+        _max_qty_per_item = 50
+    if _max_qty_per_item < 1:
+        _max_qty_per_item = 50
     for it in _items:
         pid = it.get("product_id")
         prod = _pmap.get(pid) if pid else None
@@ -1030,9 +1037,17 @@ async def create_order(
                 it["price"] = 0.0
         except Exception:
             it["price"] = 0.0
-        qty = int(it.get("quantity", it.get("qty", 1)) or 1)
+        # A2.5: güvenli int parse + kalem başı üst sınır (kötü niyetli dev miktarlı sipariş /
+        # tamsayı taşması savunması). Geçersiz miktar → 400. Tavan ayardan (order.max_qty_per_item).
+        try:
+            qty = int(it.get("quantity", it.get("qty", 1)) or 1)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Sepette geçersiz ürün adedi var. Lütfen sepeti yenileyin.")
         if qty < 1:
             qty = 1
+        if qty > _max_qty_per_item:
+            raise HTTPException(status_code=400,
+                                detail=f"Bir üründen en fazla {_max_qty_per_item} adet sipariş edilebilir. Lütfen adedi düşürün.")
         it["quantity"] = qty
         _subtotal += float(it.get("price", 0) or 0) * qty
     _subtotal = round(_subtotal, 2)

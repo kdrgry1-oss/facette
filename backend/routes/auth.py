@@ -18,6 +18,11 @@ from .deps import (
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# A2.3: Login timing yan-kanalı savunması. Kullanıcı YOKKEN bcrypt hiç çalışmıyordu →
+# yanıt daha hızlı dönüp geçerli e-postalar zamanlamayla ayırt edilebiliyordu. Var-olmayan
+# kullanıcıda da bu sabit dummy hash'e karşı bcrypt.checkpw çalıştırıp süreyi eşitleriz.
+_DUMMY_PW_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO3G1xIS3vJhWvNqfa5eLPBz3XjE5rLZC"
+
 # Google OAuth Configuration
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "") or "49503095707-cahr1ntbc30lqeho6nj1pbggq3tatien.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
@@ -245,7 +250,9 @@ async def login(request: Request):
                             detail=f"Çok fazla başarısız deneme. {retry_after // 60 + 1} dk sonra tekrar deneyin.")
 
     user = await db.users.find_one({"email": email}, {"_id": 0})
-    if not user or not verify_password(password, user.get("password", "")):
+    # A2.3: sabit-zaman. Kullanıcı yoksa da bcrypt çalıştır (dummy hash) → enumeration timing yok.
+    _pw_ok = verify_password(password, user.get("password", "") if user else _DUMMY_PW_HASH)
+    if not user or not _pw_ok:
         await register_failed_login(email)
         # IP-level threshold de tetiklensin
         await register_failed_login_ip(ip)

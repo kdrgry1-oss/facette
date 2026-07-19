@@ -47,6 +47,9 @@ RULE_CATALOG = [
     {"group": "Sipariş & İptal", "key": "order.block_oversell", "label": "Stok yetersizse siparişi engelle (oversell koruması)",
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Açıkken sepetteki bir üründen stokta kalandan fazlası sipariş edilemez; stok yetmezse sipariş oluşturulmaz. Kapatılırsa ön-sipariş/backorder olur (stok eksiye düşebilir). Pazaryeri (Trendyol/Hepsiburada) siparişleri her hâlükârda engellenmez."},
+    {"group": "Sipariş & İptal", "key": "order.max_qty_per_item", "label": "Kalem başı azami sipariş adedi",
+     "type": "number", "default": 50, "unit": "adet", "options": [10, 20, 50, 100, 500],
+     "help": "Tek bir üründen tek siparişte istenebilecek azami adet. Kötü niyetli dev miktarlı siparişlere karşı koruma; aşılırsa sipariş reddedilir."},
 
     # ---- Kargo & Teslimat ----
     {"group": "Kargo & Teslimat", "key": "shipping.cod_fee", "label": "Kapıda ödeme ücreti",
