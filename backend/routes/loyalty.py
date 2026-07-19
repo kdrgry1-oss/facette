@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends
 
-from .deps import db, logger, get_current_user
+from .deps import db, logger, require_auth
 
 router = APIRouter(prefix="/loyalty", tags=["loyalty"])
 
@@ -184,7 +184,7 @@ async def award_loyalty_points(db_=None) -> int:
 
 
 @router.get("/me")
-async def loyalty_me(current_user: dict = Depends(get_current_user)):
+async def loyalty_me(current_user: dict = Depends(require_auth)):
     """Üyenin puan bakiyesi + kademesi (ödeme sayfası ve hesabım için)."""
     enabled = await _rule("loyalty.enabled", True) is not False
     u = await db.users.find_one({"id": current_user.get("id")}, {"_id": 0, "loyalty_points": 1, "loyalty_earned_total": 1})
