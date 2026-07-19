@@ -3661,12 +3661,13 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
     hours = int(payload.get("hours") or 72)
     plat = (payload.get("platform") or "trendyol").strip()
 
+    _uploaded_field = "hepsiburada_invoice_uploaded" if plat in ("hepsiburada", "hb") else "trendyol_invoice_uploaded"
     if oid:
         q = {"id": oid}
     else:
         _since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        q = {"platform": plat, "invoice_issued": True,
-             "trendyol_invoice_uploaded": {"$ne": True},
+        q = {"platform": ("hepsiburada" if plat in ("hepsiburada", "hb") else plat), "invoice_issued": True,
+             _uploaded_field: {"$ne": True},
              "invoice_issued_at": {"$gte": _since}}
     orders = await db.orders.find(q, {"_id": 0}).to_list(500)
     results = []
@@ -3683,31 +3684,64 @@ async def repush_invoice_links(payload: dict = None, current_user: dict = Depend
         if not _link:
             results.append({"order": order.get("order_number"), "ok": False, "error": "link üretilemedi"})
             continue
+        _plat = order.get("platform")
         try:
-            if order.get("platform") == "trendyol":
+            if _plat == "trendyol":
                 from .integrations import upload_invoice_to_trendyol
                 await upload_invoice_to_trendyol(
                     order.get("order_number"),
                     {"invoice_link": _link, "invoice_number": order.get("invoice_number")},
                     current_user,
                 )
-            else:
-                results.append({"order": order.get("order_number"), "ok": False, "error": "yalnız trendyol destekli"})
-                continue
-            await db.orders.update_one({"id": _order_id},
-                                       {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}})
-            results.append({"order": order.get("order_number"), "ok": True, "link": _link})
-        except Exception as e:
-            _err = str(getattr(e, "detail", e))
-            # 409 / "already exist" → link Trendyol'da ZATEN VAR = başarı (idempotent).
-            if ("already exist" in _err.lower()) or ("zaten mevcut" in _err.lower()) or ("409" in _err):
                 await db.orders.update_one({"id": _order_id},
                                            {"$set": {"trendyol_invoice_uploaded": True, "trendyol_invoice_error": ""}})
-                results.append({"order": order.get("order_number"), "ok": True,
-                                "link": _link, "note": "zaten Trendyol'da mevcut"})
+                results.append({"order": order.get("order_number"), "ok": True, "link": _link})
+            elif _plat == "hepsiburada":
+                # HB fatura API'si PAKET numarası ister; order'da yoksa OMS detayından çöz + sakla.
+                import asyncio as _aio_hb
+                from routes.category_mapping import _get_hb_client
+                _hcli, _hcerr = await _get_hb_client()
+                if _hcerr:
+                    await db.orders.update_one({"id": _order_id}, {"$set": {
+                        "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _hcerr[:500]}})
+                    results.append({"order": order.get("order_number"), "ok": False, "error": _hcerr[:200], "link": _link})
+                    continue
+                _hpkg = str(order.get("hepsiburada_package_number") or "").strip()
+                if not _hpkg:
+                    _hraw = str(order.get("hepsiburada_order_number") or "").strip()
+                    try:
+                        _det = await _aio_hb.to_thread(_hcli.get_order_detail, _hraw)
+                        for _it in ((_det or {}).get("items") or []):
+                            if _it.get("packageNumber"):
+                                _hpkg = str(_it["packageNumber"]); break
+                        if _hpkg:
+                            await db.orders.update_one({"id": _order_id}, {"$set": {"hepsiburada_package_number": _hpkg}})
+                    except Exception as _pe:
+                        logger.warning(f"[hb repush] paket no cozulemedi {order.get('order_number')}: {_pe}")
+                if not _hpkg:
+                    _herr = "HB paket numarası çözülemedi (OMS detayında packageNumber yok)."
+                    await db.orders.update_one({"id": _order_id}, {"$set": {
+                        "hepsiburada_invoice_uploaded": False, "hepsiburada_invoice_error": _herr}})
+                    results.append({"order": order.get("order_number"), "ok": False, "error": _herr, "link": _link})
+                    continue
+                await _aio_hb.to_thread(_hcli.send_invoice, _hpkg, _link)
+                await db.orders.update_one({"id": _order_id}, {"$set": {
+                    "hepsiburada_invoice_uploaded": True, "hepsiburada_invoice_error": ""}})
+                results.append({"order": order.get("order_number"), "ok": True, "link": _link, "package": _hpkg})
+            else:
+                results.append({"order": order.get("order_number"), "ok": False, "error": "yalnız trendyol/hepsiburada destekli"})
                 continue
-            await db.orders.update_one({"id": _order_id},
-                                       {"$set": {"trendyol_invoice_error": _err[:500]}})
+        except Exception as e:
+            _err = str(getattr(e, "detail", e))
+            _errf = "hepsiburada_invoice_error" if _plat == "hepsiburada" else "trendyol_invoice_error"
+            _upf = "hepsiburada_invoice_uploaded" if _plat == "hepsiburada" else "trendyol_invoice_uploaded"
+            # 409 / "already exist" → pazaryerinde ZATEN VAR = başarı (idempotent).
+            if ("already exist" in _err.lower()) or ("zaten mevcut" in _err.lower()) or ("already" in _err.lower()) or ("409" in _err):
+                await db.orders.update_one({"id": _order_id}, {"$set": {_upf: True, _errf: ""}})
+                results.append({"order": order.get("order_number"), "ok": True,
+                                "link": _link, "note": "pazaryerinde zaten mevcut"})
+                continue
+            await db.orders.update_one({"id": _order_id}, {"$set": {_errf: _err[:500]}})
             results.append({"order": order.get("order_number"), "ok": False, "error": _err[:200], "link": _link})
     ok_n = sum(1 for r in results if r.get("ok"))
     return {"success": True, "total": len(results), "uploaded": ok_n, "results": results}
