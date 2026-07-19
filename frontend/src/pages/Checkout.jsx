@@ -138,7 +138,21 @@ export default function Checkout() {
   const [installments, setInstallments] = useState([{ number: 1 }]);
   const [selectedInstallment, setSelectedInstallment] = useState(1);
   const [usePoints, setUsePoints] = useState(false);
-  const [userPoints] = useState(0); // future: fetch from /api/users/me
+  // C3: gerçek puan bakiyesi + kademe — üye girişliyse /loyalty/me'den gelir.
+  const [userPoints, setUserPoints] = useState(0);
+  const [loyaltyTier, setLoyaltyTier] = useState(null);
+  useEffect(() => {
+    const t = localStorage.getItem("token");
+    if (!t || !user) { setUserPoints(0); setLoyaltyTier(null); return; }
+    axios.get(`${API}/loyalty/me`, { headers: { Authorization: `Bearer ${t}` } })
+      .then((r) => {
+        if (r.data?.enabled === false) return;
+        setUserPoints(Number(r.data?.points) || 0);
+        setLoyaltyTier(r.data?.tier || null);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
   // C2 Hediye çeki / mağaza kredisi
   const [giftCardCode, setGiftCardCode] = useState("");
   const [giftCardApplied, setGiftCardApplied] = useState(null); // {code, balance, kind}
@@ -1243,9 +1257,18 @@ export default function Checkout() {
                         <Lock size={11} /> Kart bilgileriniz şifreli olarak iyzico altyapısıyla işlenir, sitemizde saklanmaz.
                       </div>
                       {userPoints > 0 && (
-                        <label className="inline-flex items-center gap-2 text-sm">
+                        <label className="inline-flex items-center gap-2 text-sm flex-wrap" data-testid="use-points-toggle">
                           <input type="checkbox" checked={usePoints} onChange={(e) => setUsePoints(e.target.checked)} className="accent-black" />
                           <span className="text-black font-semibold">{userPoints.toFixed(2)} ₺</span> Puan Kullan
+                          {loyaltyTier && (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                              loyaltyTier === "platinum" ? "bg-slate-100 text-slate-700 border-slate-300"
+                              : loyaltyTier === "gold" ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-gray-50 text-gray-500 border-gray-200"}`}>
+                              {loyaltyTier === "platinum" ? "PLATINUM" : loyaltyTier === "gold" ? "GOLD" : "SILVER"}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-gray-400">(sepetin en fazla %{POINTS_MAX_PCT}'i)</span>
                         </label>
                       )}
                     </div>

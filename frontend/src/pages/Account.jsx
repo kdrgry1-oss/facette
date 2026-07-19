@@ -150,7 +150,14 @@ export default function Account() {
       const res = await axios.get(`${API}/referrals/my`, { headers: { Authorization: `Bearer ${token}` } });
       setRefData(res.data);
     } catch { setRefData({ enabled: false }); }
+    // C3: puan bakiyesi + kademe (aynı sekmede gösterilir)
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.get(`${API}/loyalty/me`, { headers: { Authorization: `Bearer ${token}` } });
+      setLoyData(r.data);
+    } catch { setLoyData(null); }
   };
+  const [loyData, setLoyData] = useState(null);
 
   useEffect(() => {
     const orderNum = searchParams.get("order");
@@ -338,6 +345,32 @@ export default function Account() {
         {activeTab === "favorites" && <FavoritesPane />}
         {activeTab === "referral"  && (
           <div className="bg-white">
+            {/* C3: Sadakat puanı kartı — bakiye + kademe + kazanım oranı */}
+            {loyData && loyData.enabled !== false && (
+              <div className="max-w-xl mx-auto mb-6 border border-gray-100 rounded-lg p-5" data-testid="loyalty-card">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-[11px] tracking-[0.2em] uppercase text-gray-500 mb-1">Puanlarım</p>
+                    <p className="text-2xl font-light text-black">{Number(loyData.points || 0).toFixed(2)} ₺</p>
+                  </div>
+                  <div className="text-right">
+                    <span className={`inline-block text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
+                      loyData.tier === "platinum" ? "bg-slate-100 text-slate-700 border-slate-300"
+                      : loyData.tier === "gold" ? "bg-amber-50 text-amber-700 border-amber-200"
+                      : "bg-gray-50 text-gray-500 border-gray-200"}`}>
+                      {loyData.tier === "platinum" ? "PLATINUM" : loyData.tier === "gold" ? "GOLD" : "SILVER"} ÜYE
+                    </span>
+                    <p className="text-[11px] text-gray-500 mt-1.5">Her siparişte %{loyData.effective_earn_pct} puan kazanırsın</p>
+                  </div>
+                </div>
+                {loyData.next_threshold && (
+                  <p className="text-[11px] text-gray-400 mt-3">
+                    Son 12 ay harcaman: {Number(loyData.spend_12m || 0).toFixed(0)} ₺ — bir üst kademe için {Math.max(0, loyData.next_threshold - (loyData.spend_12m || 0)).toFixed(0)} ₺ kaldı
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">1 puan = 1 TL · Ödemede "Puan Kullan" ile harcanır (sepetin en fazla %{loyData.redeem_max_pct}'i).</p>
+              </div>
+            )}
             {refData && refData.enabled === false ? (
               <div className="text-center text-gray-500 py-16 text-sm">Referans programı şu anda aktif değil.</div>
             ) : !refData ? (

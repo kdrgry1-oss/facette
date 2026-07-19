@@ -84,6 +84,7 @@ from routes.help_center import admin_router as help_center_admin_router, public_
 from routes.referrals import public_router as referrals_public_router, admin_router as referrals_admin_router
 from routes.shared_carts import router as shared_carts_router
 from routes.gift_cards import router as gift_cards_router, admin_router as gift_cards_admin_router
+from routes.loyalty import router as loyalty_router
 from routes.barcode_cards import router as barcode_cards_router
 from routes.provider_settings import router as provider_settings_router
 from routes.iys import router as iys_consent_router  # /iys — OTP + ticari ileti izni (iys_router ile ÇAKIŞMASIN)
@@ -737,6 +738,7 @@ api_router.include_router(referrals_admin_router)
 api_router.include_router(shared_carts_router)
 api_router.include_router(gift_cards_router)
 api_router.include_router(gift_cards_admin_router)
+api_router.include_router(loyalty_router)
 # Barcode cards (products & variants) — tek tek veya toplu yazdırılabilir HTML
 # kartlar. Products.jsx'deki "Barkod Yazdır" akışları buraya bağlıdır.
 api_router.include_router(barcode_cards_router)

@@ -1697,6 +1697,15 @@ async def _run_award_referrals():
         logger.exception(f"[scheduler] referans ödül job hata: {e}")
 
 
+async def _run_award_loyalty():
+    """C3: ödemesi onaylanmış üye siparişlerine sadakat puanı yaz + iptal/iadede geri al (idempotent)."""
+    try:
+        from routes.loyalty import award_loyalty_points
+        await award_loyalty_points()
+    except Exception as e:
+        logger.exception(f"[scheduler] sadakat puanı job hata: {e}")
+
+
 async def _run_birthday_coupons():
     """Bölüm C: bugün doğum günü olan müşterilere kupon gönder (yıl-başına idempotent)."""
     try:
@@ -2021,6 +2030,16 @@ def start_scheduler():
         minutes=20,
         id="referral_award",
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=120),
+        max_instances=1,
+        coalesce=True,
+    )
+    # C3 — Sadakat puanları: ödenmiş siparişlere puan + iptalde geri alma, her 30 dk.
+    _add(
+        _run_award_loyalty,
+        "interval",
+        minutes=30,
+        id="loyalty_award",
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=180),
         max_instances=1,
         coalesce=True,
     )

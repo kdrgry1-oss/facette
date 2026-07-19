@@ -1148,6 +1148,28 @@ async def create_order(
     order["gift_wrap_price"] = round(_gift, 2)
     order["total"] = round(_subtotal - _server_discount - _pm_disc + _shipping + _gift, 2)
 
+    # ⭐ PUAN KULLANIMI (C3) — sunucu-otoriter: tavan (ara toplam - indirim) *
+    # payment.points_redeem_max_pct; bakiye ATOMİK düşülür (loyalty.spend_points_for_order).
+    # İptalde refund_points_once (_restock_order_once kancası) idempotent iade eder.
+    # 1 puan = 1 TL. Kart siparişinde kalan 1 TL altına indirilmez.
+    if order_data.get("use_points") and order.get("user_id"):
+        try:
+            from business_rules import get_rule as _ly_rule
+            _ly_enabled = await _ly_rule(db, "loyalty.enabled", True) is not False
+        except Exception:
+            _ly_enabled = True
+        if _ly_enabled:
+            from .loyalty import spend_points_for_order
+            _sp = await spend_points_for_order(
+                order.get("user_id"), order, float(order["total"]),
+                cap_base=(_subtotal - _server_discount))
+            if _sp.get("ok"):
+                order["points_used"] = _sp["points"]
+                order["points_refunded"] = False
+                order["total"] = round(max(0.0, float(order["total"]) - _sp["points"]), 2)
+            else:
+                logger.info(f"[loyalty] puan kullanılamadı: {_sp.get('error')}")
+
     # 💳 HEDİYE ÇEKİ / MAĞAZA KREDİSİ (C2) — tüm indirimlerden SONRA, toplamın üstünden.
     # Sunucu-otoriter: bakiye ATOMİK rezerve edilir (gift_cards.redeem_gift_card_for_order),
     # iptalde _restock_order_once kancası idempotent iade eder. Tutarın TAMAMI çekle
@@ -2282,6 +2304,12 @@ async def _restock_order_once(order: dict, move_type: str) -> list:
             await refund_gift_card_once(order)
         except Exception as _gc_err:
             logger.warning(f"[gift-card] iptal iadesi başarısız (sipariş {oid}): {_gc_err}")
+        # C3: kullanılan sadakat puanı da idempotent iade edilir.
+        try:
+            from .loyalty import refund_points_once
+            await refund_points_once(order)
+        except Exception as _ly_err:
+            logger.warning(f"[loyalty] iptal puan iadesi başarısız (sipariş {oid}): {_ly_err}")
     if oid and await db.stock_movements.find_one(
             {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
         return []  # zaten iade edilmiş
