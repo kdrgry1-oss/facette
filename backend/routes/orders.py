@@ -5080,6 +5080,17 @@ async def get_cargo_label(order_id: str, token: str = None):
     if not order:
         raise HTTPException(status_code=404, detail="Sipariş bulunamadı")
 
+    # Barkod YAZDIRMA takibi: etiket HTML'i yalnız yazdırma amaçlı çekilir (tekli +
+    # toplu yazdırma bu uçtan geçer). İlk çekimde damgala → panelde kamyon SARI
+    # (yazdırılmadı) yerine YEŞİL (yazdırıldı) görünür. İlk yazdırma zamanı korunur.
+    try:
+        await db.orders.update_one(
+            {"id": order_id, "cargo_label_printed_at": {"$exists": False}},
+            {"$set": {"cargo_label_printed_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    except Exception:
+        pass  # damga başarısız olsa da etiket üretimi engellenmez
+
     barkod = order.get("cargo_tracking_number") or ""
     cargo_obj = order.get("cargo") or {}
     mng_siparis_no = cargo_obj.get("mng_siparis_no") or ""

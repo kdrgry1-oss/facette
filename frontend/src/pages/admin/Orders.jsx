@@ -432,6 +432,8 @@ export default function AdminOrders({ unpaidView = false }) {
         }, 500);
       };
     }
+    // Etiket çekimi backend'de "yazdırıldı" damgası bırakır → listeyi tazele (kamyon sarı→yeşil).
+    setTimeout(() => fetchOrders(), 1500);
   };
 
   const handleTrendyolPrintLabel = async (cargoTrackingNumber) => {
@@ -612,6 +614,8 @@ export default function AdminOrders({ unpaidView = false }) {
       }
       w.document.write(doc);
       w.document.close();
+      // Etiket çekimleri backend'de "yazdırıldı" damgası bıraktı → kamyonlar sarı→yeşil.
+      fetchOrders();
     } catch (e) {
       toast.dismiss("bulklbl");
       toast.error("Etiket yazdırma başarısız");
@@ -1345,13 +1349,18 @@ export default function AdminOrders({ unpaidView = false }) {
                         }
                         // Sadece barkod oluşturulmuş — kargo firması takip no'yu henüz üretmedi (kargoda değil)
                         if (barcodeNo) {
-                          // Barkod oluşturuldu → kamyon YEŞİL yansır (kargoya hazır). Takip no
-                          // henüz gelmediği için "takip bekleniyor" yazısı silik kalır. Salt CSS;
-                          // kargo çalışma mantığı (barkod/takip no tespiti) değişmedi.
-                          return (
-                            <span className="inline-flex items-center gap-1.5" title={`Barkod hazır: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
+                          // Barkod var ama etiket henüz YAZDIRILMADI → kamyon SARI (aksiyon gerek).
+                          // Etiket yazdırıldıysa (cargo_label_printed_at) → YEŞİL, takip no beklenir.
+                          const printed = !!order.cargo_label_printed_at;
+                          return printed ? (
+                            <span className="inline-flex items-center gap-1.5" title={`Barkod yazdırıldı: ${barcodeNo} — kargo firması takip no'yu henüz üretmedi`}>
                               <Truck size={16} className="text-emerald-500" />
                               <span className="text-[10px] text-gray-400">takip bekleniyor</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5" title={`Barkod hazır: ${barcodeNo} — etiket HENÜZ YAZDIRILMADI`}>
+                              <Truck size={16} className="text-amber-500" />
+                              <span className="text-[10px] text-amber-600 font-medium">yazdırılmadı</span>
                             </span>
                           );
                         }
