@@ -1152,8 +1152,10 @@ async def slider_feed(
                     pp["campaign_label"] = label
     except Exception:
         pass
-    if not _admin_view:
-        prods = [_strip_internal_fields(_p) for _p in prods]
+    # slider-feed PUBLIC bir uçtur → iç alanlar her zaman temizlenir. (Önceki kod tanımsız
+    # _admin_view değişkenine bakıp NameError → 500 veriyordu; anasayfa ürün slider'ı bu
+    # yüzden boş kalıyordu.)
+    prods = [_strip_internal_fields(_p) for _p in prods]
     return {"products": prods, "source": source}
 
 
