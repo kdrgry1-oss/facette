@@ -269,14 +269,15 @@ export default function CartDrawer() {
             >
               Ödemeye Geç
             </Link>
-            <Link
-              to="/sepet"
-              className="flex items-center justify-center w-full h-11 border border-black text-xs uppercase tracking-[0.25em] hover:bg-black hover:text-white transition-colors"
+            {/* "Sepete Git" yerine "Alışverişe Devam Et" — çekmece zaten sepeti gösteriyor;
+                buton yalnız çekmeceyi kapatır → kullanıcı en son olduğu sayfada kalır. */}
+            <button
               onClick={() => setIsOpen(false)}
-              data-testid="go-to-cart"
+              className="flex items-center justify-center w-full h-11 border border-black text-xs uppercase tracking-[0.25em] hover:bg-black hover:text-white transition-colors"
+              data-testid="continue-shopping"
             >
-              Sepete Git
-            </Link>
+              Alışverişe Devam Et
+            </button>
             {/* Sepeti Paylaş — link üretip panoya kopyalar / mobil paylaşım menüsü açar */}
             <button
               onClick={() => shareCart(items)}
