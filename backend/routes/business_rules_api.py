@@ -33,6 +33,7 @@ _PUBLIC_KEYS = [
     # Vitrin görünüm anahtarları (storefront okur)
     "product.size_guide_enabled", "product.complete_the_look_enabled",
     "product.shipping_countdown_enabled", "storefront.announcement_bar_enabled",
+    "product.social_share_enabled",
 ]
 
 

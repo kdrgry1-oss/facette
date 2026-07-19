@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { sanitizeHtml } from "../lib/sanitizeHtml";
-import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock, Pencil, ZoomIn } from "lucide-react";
+import { X, Bookmark, ChevronUp, ChevronDown, Check, Truck, Star, RotateCcw, CreditCard, Clock, Pencil, ZoomIn, Share2, Link2 } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import Header from "../components/Header";
@@ -137,6 +137,7 @@ export default function ProductDetail() {
         showSizeGuide: d["product.size_guide_enabled"] !== false,
         showCompleteLook: d["product.complete_the_look_enabled"] !== false,
         showCountdown: d["product.shipping_countdown_enabled"] !== false,
+        showSocialShare: d["product.social_share_enabled"] !== false,
       });
     }).catch(() => {});
   }, []);
@@ -934,6 +935,42 @@ export default function ProductDetail() {
                       <span className="text-[10px] leading-tight text-black/65">Taksitli<br />Ödeme</span>
                     </div>
                   </div>
+
+                  {/* Sosyal paylaşım — Web Share API + WhatsApp/X/Facebook + linki kopyala */}
+                  {(shipCfg?.showSocialShare !== false) && (() => {
+                    const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+                    const shareTitle = product?.name || "";
+                    const enc = encodeURIComponent;
+                    const nativeShare = async () => {
+                      try {
+                        if (navigator.share) { await navigator.share({ title: shareTitle, url: shareUrl }); }
+                        else { await navigator.clipboard.writeText(shareUrl); toast.success("Bağlantı kopyalandı"); }
+                      } catch { /* kullanıcı iptal etti */ }
+                    };
+                    const copyLink = async () => {
+                      try { await navigator.clipboard.writeText(shareUrl); toast.success("Bağlantı kopyalandı"); }
+                      catch { toast.error("Kopyalanamadı"); }
+                    };
+                    return (
+                      <div className="mt-4 flex items-center gap-3 flex-wrap" data-testid="pdp-social-share">
+                        <span className="text-[11px] uppercase tracking-wider text-black/50 inline-flex items-center gap-1">
+                          <Share2 size={14} strokeWidth={1.5} /> Paylaş
+                        </span>
+                        <a href={`https://wa.me/?text=${enc(shareTitle + " " + shareUrl)}`} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-black/70 hover:text-black underline underline-offset-2" aria-label="WhatsApp'ta paylaş">WhatsApp</a>
+                        <a href={`https://twitter.com/intent/tweet?text=${enc(shareTitle)}&url=${enc(shareUrl)}`} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-black/70 hover:text-black underline underline-offset-2" aria-label="X'te paylaş">X</a>
+                        <a href={`https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}`} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-black/70 hover:text-black underline underline-offset-2" aria-label="Facebook'ta paylaş">Facebook</a>
+                        <button onClick={copyLink} className="text-xs text-black/70 hover:text-black inline-flex items-center gap-1" aria-label="Bağlantıyı kopyala">
+                          <Link2 size={13} /> Kopyala
+                        </button>
+                        {typeof navigator !== "undefined" && navigator.share && (
+                          <button onClick={nativeShare} className="text-xs text-black/70 hover:text-black underline underline-offset-2 md:hidden">Diğer…</button>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Stok bildirim formu */}
                   {oosSelected && notifyOpen && (

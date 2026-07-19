@@ -99,6 +99,9 @@ RULE_CATALOG = [
     {"group": "Vitrin & Ürün Sayfası", "key": "storefront.announcement_bar_enabled", "label": "Üst duyuru şeridini göster",
      "type": "toggle", "default": True, "options": [True, False],
      "help": "Sitenin en üstündeki duyuru/kampanya şeridini açar/kapatır."},
+    {"group": "Vitrin & Ürün Sayfası", "key": "product.social_share_enabled", "label": "Ürün sayfasında sosyal paylaşım butonları",
+     "type": "toggle", "default": True, "options": [True, False],
+     "help": "Ürün sayfasında WhatsApp/X/Facebook paylaşım ve bağlantı kopyalama butonlarını gösterir."},
 
     # ---- Pazarlama & Stok ----
     {"group": "Pazarlama & Stok", "key": "marketing.abandoned_cart_min_hours", "label": "Terkedilmiş sepet — en erken hatırlatma",
