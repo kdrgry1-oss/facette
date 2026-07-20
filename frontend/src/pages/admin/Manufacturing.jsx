@@ -284,11 +284,17 @@ export default function Manufacturing() {
     ...f, sizes: f.sizes.filter(x => x !== s),
     size_distribution: Object.fromEntries(Object.entries(f.size_distribution).filter(([k]) => (k.includes("|") ? k.split("|")[1] : k) !== s)),
   }));
+  // Onay değişiminde zaman damgası da tutulur (ödeme→okey süresi ölçümü için)
+  const _stampApproval = (cur, kind) => {
+    const on = !cur[kind];
+    return { ...cur, [kind]: on, [`${kind}_at`]: on ? new Date().toISOString() : null };
+  };
+
   // Listeden tek tıkla renk onayı değiştir (modal açmadan) — iyimser güncelle + sunucuya yaz
   const toggleRowApproval = async (item, color, kind) => {
     const key = color || "_tek";
     const cur = item.color_approvals?.[key] || {};
-    const next = { ...(item.color_approvals || {}), [key]: { ...cur, [kind]: !cur[kind] } };
+    const next = { ...(item.color_approvals || {}), [key]: _stampApproval(cur, kind) };
     setItems(prev => prev.map(x => x.id === item.id ? { ...x, color_approvals: next } : x));
     try {
       const token = localStorage.getItem("token");
@@ -302,7 +308,7 @@ export default function Manufacturing() {
   const toggleApproval = (color, kind) => setForm(f => {
     const key = color || "_tek";
     const cur = f.color_approvals?.[key] || {};
-    return { ...f, color_approvals: { ...(f.color_approvals || {}), [key]: { ...cur, [kind]: !cur[kind] } } };
+    return { ...f, color_approvals: { ...(f.color_approvals || {}), [key]: _stampApproval(cur, kind) } };
   });
 
   const rowTotal = (color) => form.sizes.reduce((s, sz) => s + cellVal(color, sz), 0);
@@ -391,6 +397,19 @@ export default function Manufacturing() {
                 const _delivered = item.current_stage === "teslim_alindi";
                 const _rowColors = (item.colors?.length ? item.colors
                   : [...new Set(Object.keys(item.size_distribution || {}).map(k => k.includes("|") ? k.split("|")[0] : ""))].filter(Boolean));
+                // Okey tamamlanma + süre ölçümü: astarlı üründe EN SON astar okeyi baz alınır
+                const _keys = (_rowColors.length ? _rowColors : [""]).map(c => c || "_tek");
+                const _ap = item.color_approvals || {};
+                const _okeysDone = _keys.every(k => _ap[k]?.fabric) && (!item.has_lining || _keys.every(k => _ap[k]?.lining));
+                const _okeyDates = _keys.map(k => _ap[k]?.fabric_at)
+                  .concat(item.has_lining ? _keys.map(k => _ap[k]?.lining_at) : []).filter(Boolean).sort();
+                const _lastOkey = (_okeysDone && _okeyDates.length) ? _okeyDates[_okeyDates.length - 1] : null;
+                const _okeyDays = (item.payment_done_at && _lastOkey)
+                  ? Math.max(0, Math.round((new Date(_lastOkey) - new Date(item.payment_done_at)) / 864e5)) : null;
+                // Kırmızı yanıp sönen hatırlatıcı: kumaş okeyinde okeyler tamamsa → kesime geç;
+                // kesim ve sonraki ara aşamalarda her zaman (ilerletme dış haberle yapılır)
+                const _showDot = (_okeysDone && item.current_stage === "kumas_okeyi")
+                  || ["kesim", "dikim", "kalite_kontrol"].includes(item.current_stage);
                 return (
                 <tr key={item.id} className="border-b hover:bg-gray-50" data-testid={`mfg-row-${item.code}`}>
                   <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
@@ -423,13 +442,15 @@ export default function Manufacturing() {
                     <p className={`text-[10px] font-bold mb-1 ${item.payment_done ? "text-emerald-600" : "text-amber-600"}`}>
                       {item.payment_done ? "ÖDENDİ" : "ÖDEME BEKLİYOR"}
                     </p>
-                    {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir */}
-                    <div className="flex flex-wrap gap-1 max-w-[180px]">
+                    {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir; KUMAŞ/ASTAR hizalı */}
+                    <div className="flex flex-wrap gap-1 max-w-[200px] items-center">
+                      <span className="text-[9px] text-emerald-600 font-bold uppercase w-11 shrink-0">Kumaş:</span>
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
                         const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
+                        const at = item.color_approvals?.[c || "_tek"]?.fabric_at;
                         return (
                           <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "fabric")}
-                            title={`${c || "Tek renk"} — kumaş ${ok ? "onaylı (kaldırmak için tıkla)" : "onaysız (onaylamak için tıkla)"}`}
+                            title={`${c || "Tek renk"} — kumaş ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız (onaylamak için tıkla)"}`}
                             className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-500 border-gray-300 hover:border-emerald-400"}`}>
                             {c || "Tek"} {ok ? "✓" : ""}
                           </button>
@@ -437,13 +458,14 @@ export default function Manufacturing() {
                       })}
                     </div>
                     {item.has_lining && (
-                      <div className="flex flex-wrap gap-1 max-w-[180px] mt-1 items-center">
-                        <span className="text-[9px] text-indigo-500 font-bold uppercase">Astar:</span>
+                      <div className="flex flex-wrap gap-1 max-w-[200px] mt-1 items-center">
+                        <span className="text-[9px] text-indigo-500 font-bold uppercase w-11 shrink-0">Astar:</span>
                         {(_rowColors.length ? _rowColors : [""]).map(c => {
                           const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
+                          const at = item.color_approvals?.[c || "_tek"]?.lining_at;
                           return (
                             <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "lining")}
-                              title={`${c || "Tek renk"} — astar ${ok ? "onaylı" : "onaysız"}`}
+                              title={`${c || "Tek renk"} — astar ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız"}`}
                               className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400"}`}>
                               {c || "Tek"} {ok ? "✓" : ""}
                             </button>
@@ -451,8 +473,23 @@ export default function Manufacturing() {
                         })}
                       </div>
                     )}
+                    {_okeyDays != null && (
+                      <p className="text-[9px] text-gray-500 mt-1" title="Ödeme Yapıldı tıklandığı andan son okeye (astarlıysa son astar okeyine) geçen süre">
+                        Ödeme → okey: <b className="text-gray-700">{_okeyDays === 0 ? "aynı gün" : `${_okeyDays} gün`}</b>
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {/* Kırmızı yanıp sönen hatırlatıcı: bir sonraki aşamaya ilerletme gerekiyor */}
+                    {_showDot && (
+                      <span className="relative inline-flex h-3 w-3 mr-2 align-middle"
+                        title={item.current_stage === "kumas_okeyi"
+                          ? "Okeyler tamamlandı — Kesim Başlangıcı'na ilerletin!"
+                          : "Bu aşama tamamlandıysa bir sonrakine ilerletin"}>
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                      </span>
+                    )}
                     {/* Son aşama: imalattan ürün kartı oluştur (kullanıcı isteği) */}
                     {["teslim_alindi", "fatura_kesildi"].includes(item.current_stage) && !item.product_created && (
                       <button
