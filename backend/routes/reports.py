@@ -723,14 +723,76 @@ async def payment_report(
     current_user: dict = Depends(require_admin),
 ):
     s, e = _iso_range(start_date, end_date)
+    # Pazaryeri siparişleri "marketplace" olarak tek kalemde toplanıyordu — artık
+    # platforma göre Trendyol / Hepsiburada / Temu olarak AYRI gösterilir.
+    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}}
     pipeline = [
         {"$match": _base_match(s, e, source)},
-        {"$group": {"_id": "$payment_method", "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$group": {"_id": {"$cond": [
+            {"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]},
+            _plat,
+            {"$ifNull": ["$payment_method", "—"]}]},
+            "orders": {"$sum": 1}, "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
         {"$sort": {"revenue": -1}},
     ]
-    out = []
+    _LABELS = {
+        "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu",
+        "credit_card": "Kredi Kartı", "card": "Kredi Kartı", "iyzico": "Kredi Kartı",
+        "bank_transfer": "Havale/EFT", "havale": "Havale/EFT", "eft": "Havale/EFT",
+        "havale_eft": "Havale/EFT", "banka_havale": "Havale/EFT",
+        "cash_on_delivery": "Kapıda Ödeme", "kapida": "Kapıda Ödeme", "cod": "Kapıda Ödeme",
+        "gift_card": "Hediye Çeki", "marketplace": "Pazaryeri (diğer)",
+    }
+    merged: dict = {}
     async for r in db.orders.aggregate(pipeline):
-        out.append({"method": r["_id"] or "—", "orders": r["orders"], "revenue": round(r["revenue"], 2)})
+        key = str(r["_id"] or "—").lower()
+        label = _LABELS.get(key, r["_id"] or "—")
+        m = merged.setdefault(label, {"orders": 0, "revenue": 0.0})
+        m["orders"] += r["orders"]
+        m["revenue"] += float(r["revenue"] or 0)
+    out = [{"method": k, "orders": v["orders"], "revenue": round(v["revenue"], 2)}
+           for k, v in sorted(merged.items(), key=lambda kv: -kv[1]["revenue"])]
+    return {"items": out}
+
+
+@router.get("/cancel-return-by-source")
+async def cancel_return_by_source(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Pazaryerlerine göre iade ve iptal durumları: Site / Trendyol / Hepsiburada / Temu
+    başına iptal + iade sipariş sayısı ve tutarı."""
+    s, e = _iso_range(start_date, end_date)
+    _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
+                  "returned", "refunded", "partial_refunded"]
+    _CANCEL_ST = ["cancelled", "cancel_refunded"]
+    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", ""]}]}}
+    pipeline = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e},
+                    "status": {"$in": _RETURN_ST + _CANCEL_ST}}},
+        {"$group": {
+            "_id": {"src": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]}, _plat, "site"]},
+                    "kind": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, "cancel", "return"]}},
+            "orders": {"$sum": 1},
+            "total": {"$sum": {"$ifNull": ["$total", 0]}}}},
+    ]
+    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    rows: dict = {}
+    async for r in db.orders.aggregate(pipeline):
+        src = _SRC.get(r["_id"]["src"], r["_id"]["src"])
+        d = rows.setdefault(src, {"source": src, "cancel_orders": 0, "cancel_total": 0.0,
+                                  "return_orders": 0, "return_total": 0.0})
+        if r["_id"]["kind"] == "cancel":
+            d["cancel_orders"] += r["orders"]
+            d["cancel_total"] += float(r["total"] or 0)
+        else:
+            d["return_orders"] += r["orders"]
+            d["return_total"] += float(r["total"] or 0)
+    out = sorted(rows.values(), key=lambda x: -(x["cancel_total"] + x["return_total"]))
+    for d in out:
+        d["cancel_total"] = round(d["cancel_total"], 2)
+        d["return_total"] = round(d["return_total"], 2)
     return {"items": out}
 
 

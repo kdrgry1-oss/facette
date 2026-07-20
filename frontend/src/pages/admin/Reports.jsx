@@ -55,7 +55,10 @@ export function SalesReport() {
       .then((r) => setHourData(r.data)).catch(() => {});
     axios.get(`${API}/admin/reports/sales-by-weekday`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setWeekdayData(r.data)).catch(() => {});
+    axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+      .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
   };
+  const [cancelRet, setCancelRet] = useState([]);
 
   // Saat/Gün analizi + Gün Detayı ("hangi günlerde ne sipariş edilmiş")
   const [hourData, setHourData] = useState(null);
@@ -189,6 +192,35 @@ export function SalesReport() {
         </div>
       </div>
 
+      {/* 🔄 Pazaryerlerine göre iade & iptal durumları */}
+      {cancelRet.length > 0 && (
+        <div className="bg-white border rounded-xl p-4" data-testid="cancel-return-by-source">
+          <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Pazaryerlerine Göre İade &amp; İptal</h2>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="text-left p-2">Kaynak</th>
+                <th className="text-right p-2">İptal (adet)</th>
+                <th className="text-right p-2">İptal Tutarı</th>
+                <th className="text-right p-2">İade (adet)</th>
+                <th className="text-right p-2">İade Tutarı</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cancelRet.map((r) => (
+                <tr key={r.source} className="border-t">
+                  <td className="p-2 font-medium">{r.source}</td>
+                  <td className="p-2 text-right tabular-nums">{r.cancel_orders}</td>
+                  <td className="p-2 text-right tabular-nums text-rose-600">{tl(r.cancel_total)}</td>
+                  <td className="p-2 text-right tabular-nums">{r.return_orders}</td>
+                  <td className="p-2 text-right tabular-nums text-amber-600">{tl(r.return_total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* 📋 Gün Detayı — seçilen günde NE sipariş edilmiş (ürün/beden bazında) */}
       <div className="bg-white border rounded-xl p-4" data-testid="day-detail">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
@@ -252,9 +284,10 @@ export function SalesReport() {
         </ResponsiveContainer>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-5">
-        <div className="bg-white rounded-xl border p-5">
-          <h3 className="font-semibold mb-3 flex items-center gap-2"><CreditCard size={16} /> Ödeme Yöntemi Dağılımı</h3>
+      {/* Ödeme Yöntemi Dağılımı — grafik + sipariş sayıları TEK blokta (Trendyol/HB ayrık) */}
+      <div className="bg-white rounded-xl border p-5" data-testid="payment-distribution">
+        <h3 className="font-semibold mb-3 flex items-center gap-2"><CreditCard size={16} /> Ödeme Yöntemi &amp; Sipariş Dağılımı</h3>
+        <div className="grid md:grid-cols-2 gap-5 items-center">
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
               <Pie data={paymentData} dataKey="revenue" nameKey="method" cx="50%" cy="50%" outerRadius={90} label={(e) => `${e.method}: ₺${e.revenue.toLocaleString("tr-TR")}`}>
@@ -263,17 +296,17 @@ export function SalesReport() {
               <Tooltip />
             </PieChart>
           </ResponsiveContainer>
-        </div>
-        <div className="bg-white rounded-xl border p-5">
-          <h3 className="font-semibold mb-3">Ödeme Yöntemlerine Göre Sipariş</h3>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500">
               <tr><th className="text-left p-2">Yöntem</th><th className="text-right p-2">Sipariş</th><th className="text-right p-2">Ciro</th></tr>
             </thead>
             <tbody>
-              {paymentData.map((p) => (
+              {paymentData.map((p, i) => (
                 <tr key={p.method} className="border-t">
-                  <td className="p-2 font-medium">{p.method}</td>
+                  <td className="p-2 font-medium">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: COLORS[i % COLORS.length] }} />
+                    {p.method}
+                  </td>
                   <td className="p-2 text-right">{p.orders}</td>
                   <td className="p-2 text-right font-semibold">₺{p.revenue.toLocaleString("tr-TR")}</td>
                 </tr>
