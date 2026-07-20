@@ -443,7 +443,9 @@ export default function Manufacturing() {
             <tbody>
               {items.map((item, idx) => {
                 // Kalan gün: tahmini teslim (sipariş tarihi + 21 gün kuralı) − bugün
-                const _exp = item.expected_delivery_date || (item.agreement_date ? _plus21(item.agreement_date) : "");
+                // KURAL: 21 gün ÖDEMEDEN itibaren sayılır; ödeme yoksa sipariş tarihi tabanlı tahmin
+                const _exp = (item.payment_done && item.payment_done_at ? _plus21(item.payment_done_at)
+                  : item.expected_delivery_date || (item.agreement_date ? _plus21(item.agreement_date) : ""));
                 const _days = _exp ? Math.ceil((new Date(String(_exp).substring(0, 10)) - new Date(new Date().toISOString().substring(0, 10))) / 864e5) : null;
                 const _delivered = item.current_stage === "teslim_alindi";
                 const _rowColors = (item.colors?.length ? item.colors

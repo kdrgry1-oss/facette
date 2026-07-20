@@ -145,6 +145,7 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "agreed_total": float(payload.get("agreed_total", 0) or 0),
         "payment_done": bool(payload.get("payment_done")),  # tek tik: ödeme yapıldı mı
         "payment_done_at": now_iso if payload.get("payment_done") else None,
+        # KURAL: 21 günlük üretim saati ÖDEME ile başlar — ödenmiş açılan kayıtta teslim = bugün+21
         "has_lining": bool(payload.get("has_lining")),      # astarlı ürün → renk bazlı astar okeyi
         "color_approvals": payload.get("color_approvals") or {},  # {"Renk": {fabric, lining}}
         "cutting_start_date": payload.get("cutting_start_date", ""),  # kesim başlangıç tarihi
@@ -168,6 +169,9 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "created_by": current_user.get("email", ""),
         "updated_at": now_iso,
     }
+
+    if doc["payment_done"]:
+        doc["expected_delivery_date"] = (datetime.now(timezone.utc) + timedelta(days=21)).strftime("%Y-%m-%d")
 
     # Paid/remaining helpers
     doc["paid_total"] = float(sum(p.get("amount", 0) for p in doc["payments"]))
@@ -198,7 +202,10 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         _pd = bool(payload.get("payment_done"))
         update["payment_done"] = _pd
         if _pd and not existing.get("payment_done"):
-            update["payment_done_at"] = datetime.now(timezone.utc).isoformat()
+            _now_dt = datetime.now(timezone.utc)
+            update["payment_done_at"] = _now_dt.isoformat()
+            # KURAL: 21 günlük üretim saati ÖDEMEYLE başlar → tahmini teslim = ödeme günü + 21
+            update["expected_delivery_date"] = (_now_dt + timedelta(days=21)).strftime("%Y-%m-%d")
         elif not _pd:
             update["payment_done_at"] = None
     if "size_distribution" in payload:
