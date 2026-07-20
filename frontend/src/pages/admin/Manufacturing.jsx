@@ -474,10 +474,10 @@ export default function Manufacturing() {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    {/* Ödeme durumu (kullanıcı isteği: bu sütunda da görünsün) */}
-                    <p className={`text-[10px] font-bold mb-1 ${item.payment_done ? "text-emerald-600" : "text-amber-600"}`}>
-                      {item.payment_done ? "ÖDENDİ" : "ÖDEME BEKLİYOR"}
-                    </p>
+                    {/* Ödeme bekliyorsa uyarı; ödendiyse tekrar yazılmaz (ürün sütununda zaten var) */}
+                    {!item.payment_done && (
+                      <p className="text-[10px] font-bold mb-1 text-amber-600">ÖDEME BEKLİYOR</p>
+                    )}
                     {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir; KUMAŞ/ASTAR hizalı */}
                     <div className="flex flex-wrap gap-1 max-w-[200px] items-center">
                       <span className="text-[9px] text-emerald-600 font-bold uppercase w-11 shrink-0">Kumaş:</span>
