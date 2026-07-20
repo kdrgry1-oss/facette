@@ -301,6 +301,37 @@ async def generate_report(body: GenerateBody, current_user: dict = Depends(requi
     return {"id": rid, "status": "running"}
 
 
+@router.post("/import")
+async def import_report(payload: dict, current_user: dict = Depends(require_admin)):
+    """Dışarıda üretilmiş (ör. derin analiz oturumu) hazır kurul raporunu panele ekler."""
+    rid = str(uuid.uuid4())
+    decisions = []
+    for i, d in enumerate((payload.get("decisions") or [])[:20], start=1):
+        decisions.append({
+            "id": f"KARAR-{i}",
+            "title": str(d.get("title") or "")[:200],
+            "urgency": d.get("urgency") if d.get("urgency") in ("acil", "bu_hafta", "bu_ay", "sezon_plani") else "bu_ay",
+            "action": str(d.get("action") or ""),
+            "rationale": str(d.get("rationale") or ""),
+            "products": [str(x) for x in (d.get("products") or [])[:8]],
+            "counterpoint": str(d.get("counterpoint") or ""),
+            "user_verdict": "", "user_comment": "", "commented_at": None,
+        })
+    now = datetime.now(timezone.utc).isoformat()
+    await db.decision_reports.insert_one({
+        "id": rid, "status": "done", "progress": "Tamamlandı (derin analiz — içe aktarıldı)",
+        "period_days": int(payload.get("period_days") or 30),
+        "created_at": now, "finished_at": now,
+        "created_by": current_user.get("email"),
+        "summary": str(payload.get("summary") or ""),
+        "methodology": str(payload.get("methodology") or ""),
+        "decisions": decisions,
+        "conflicts": str(payload.get("conflicts") or ""),
+        "rejected": str(payload.get("rejected") or ""),
+    })
+    return {"id": rid, "decisions": len(decisions)}
+
+
 @router.get("")
 async def list_reports(current_user: dict = Depends(require_admin)):
     rows = await db.decision_reports.find(

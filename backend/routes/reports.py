@@ -522,6 +522,12 @@ async def top_products(
     try:
         _sd = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
         _ed = datetime.fromisoformat(str(e).replace("Z", "+00:00"))
+        # tz'siz gelen sınır UTC varsayılır — aware−naive çıkarması TypeError atıp
+        # sessizce 90 güne düşüyordu (30g raporda hız 3× düşük görünüyordu).
+        if _sd.tzinfo is None:
+            _sd = _sd.replace(tzinfo=timezone.utc)
+        if _ed.tzinfo is None:
+            _ed = _ed.replace(tzinfo=timezone.utc)
         _range_days = max(1.0, (_ed - _sd).total_seconds() / 86400.0)
     except Exception:
         _range_days = float(90)
