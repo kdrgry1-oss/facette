@@ -36,9 +36,16 @@ const SearchableAttribute = ({
   const dropdownRef = useRef(null);
 
   const hasValue = !!value;
+  // "Kalıp" alanı: yalnız Regular / Oversize / Slim Fit seçilebilir (kullanıcı isteği) —
+  // diğer kütüphane değerleri (Battal, Dar Kesim vb.) listeden çıkarılır. Ürün sayfasındaki
+  // dinamik beden tavsiyesi bu üç değeri tanır.
+  const _isKalip = (attr.name || "").toLocaleLowerCase("tr").includes("kalıp");
+  const _rawValues = _isKalip
+    ? (attr.values || []).filter((v) => /regular|oversize|slim/i.test(String(v)))
+    : (attr.values || []);
   // #14: Değerler önce alfabetik (Türkçe), sonra sayısal sırada.
   const _isNumVal = (s) => /^\d+([.,]\d+)?$/.test(String(s).trim());
-  const opts = [...(attr.values || [])].sort((a, b) => {
+  const opts = [..._rawValues].sort((a, b) => {
     const an = _isNumVal(a), bn = _isNumVal(b);
     if (an && bn) return parseFloat(String(a).replace(",", ".")) - parseFloat(String(b).replace(",", "."));
     if (an !== bn) return an ? 1 : -1; // sayısal değerler en sona

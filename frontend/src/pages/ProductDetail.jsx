@@ -843,23 +843,26 @@ export default function ProductDetail() {
             <div className="mb-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs">
-                  Beden Seçiniz
+                  {(() => {
+                    // "Beden Seçiniz" yerine KALIBA göre dinamik tavsiye (kullanıcı isteği).
+                    // Kaynak: ürün formundaki size_advice VEYA Özellikler'deki "Kalıp" değeri.
+                    const _attrFit = ((product.attributes || []).find(
+                      (a) => (a.name || "").toLocaleLowerCase("tr").includes("kalıp"))?.value || "")
+                      .toLocaleLowerCase("tr");
+                    const _fit = product.size_advice
+                      || (_attrFit.includes("oversize") || _attrFit.includes("bol") ? "bol"
+                        : _attrFit.includes("slim") || _attrFit.includes("dar") ? "dar"
+                        : _attrFit.includes("regular") || _attrFit.includes("normal") ? "normal" : "");
+                    if (_fit === "normal") return "Müşteriler kendi bedeninizi almanızı tavsiye ediyor.";
+                    if (_fit === "bol") return "Müşteriler bir beden küçük almanızı tavsiye ediyor.";
+                    if (_fit === "dar") return "Müşteriler bir beden büyük almanızı tavsiye ediyor.";
+                    return "Beden Seçiniz";
+                  })()}
                   {selectedVariant && selectedVariant.stock === 0 && (
                     <span className="text-red-600 ml-2">Tükendi</span>
                   )}
                 </span>
               </div>
-              {/* Beden önerisi — admin ürün formundaki "Kalıp" seçimine göre. */}
-              {product.size_advice && (
-                <p className="text-[11px] text-gray-500 mb-2 flex items-center gap-1.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-black/50" />
-                  {product.size_advice === "dar"
-                    ? "Bu ürün dar kalıptır — bir beden büyük almanızı öneririz."
-                    : product.size_advice === "bol"
-                      ? "Bu ürün bol kalıptır — bir beden küçük almanızı öneririz."
-                      : "Standart kalıptır — normalde kullandığınız bedeni alabilirsiniz."}
-                </p>
-              )}
               <div className="flex items-end justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
                 {sizes.map((variant, index) => {
