@@ -233,9 +233,12 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
         "stage_history": history,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    # Kesim Başlangıcı'na geçerken kullanıcı kesim başlangıç tarihini girer (kullanıcı isteği)
-    if new_stage == "kesim" and payload.get("cutting_start_date"):
-        update["cutting_start_date"] = str(payload.get("cutting_start_date"))[:10]
+    # Her aşama geçişinde kullanıcı o aşamanın tarihini girer → stage_dates.{aşama}
+    _sd = str(payload.get("stage_date") or payload.get("cutting_start_date") or "").strip()[:10]
+    if _sd:
+        update[f"stage_dates.{new_stage}"] = _sd
+        if new_stage == "kesim":
+            update["cutting_start_date"] = _sd  # geriye uyumluluk
 
     # F11: On "teslim_alindi" increment stock per size distribution.
     # DENETİM FIX (idempotent): stok artışı SADECE BİR KEZ yapılmalı. Eskiden 'teslim_alindi'ye

@@ -216,20 +216,27 @@ export default function Manufacturing() {
     }
   };
 
+  // Her aşama geçişinde kullanıcı o aşamanın TARİHİNİ girer (kullanıcı isteği)
+  const _STAGE_DATE_LABELS = {
+    kumas_okeyi: "Kumaş okeyi tarihi",
+    kesim: "Kesim başlangıç tarihi",
+    dikim: "Dikiş başlangıç tarihi",
+    kalite_kontrol: "Kalite kontrol tarihi",
+    teslim_alindi: "Depo teslim tarihi",
+  };
   const advanceStage = async (item, newStage) => {
-    // Kesim Başlangıcı'na geçerken kesim başlangıç tarihi istenir (kullanıcı isteği)
-    let cuttingDate = "";
-    if (newStage === "kesim") {
-      cuttingDate = window.prompt("Kesim başlangıç tarihi (YYYY-AA-GG):", new Date().toISOString().substring(0, 10));
-      if (cuttingDate === null) return;
-      cuttingDate = (cuttingDate || "").trim();
+    let stageDate = "";
+    if (_STAGE_DATE_LABELS[newStage]) {
+      stageDate = window.prompt(`${_STAGE_DATE_LABELS[newStage]} (YYYY-AA-GG):`, new Date().toISOString().substring(0, 10));
+      if (stageDate === null) return;
+      stageDate = (stageDate || "").trim();
     }
     const note = window.prompt(`"${stageLabel(newStage)}" aşamasına geçiyorsunuz. Not (opsiyonel):`);
     if (note === null) return;
     try {
       const token = localStorage.getItem("token");
       await axios.post(`${API}/manufacturing/${item.id}/advance`,
-        { stage: newStage, note, ...(cuttingDate ? { cutting_start_date: cuttingDate } : {}) },
+        { stage: newStage, note, ...(stageDate ? { stage_date: stageDate } : {}) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success("Aşama güncellendi");
@@ -449,9 +456,15 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 text-sm font-bold text-right tabular-nums">{item.total_units}</td>
                   <td className="px-3 py-3 text-xs">
                     <p className="text-gray-700">{item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}</p>
-                    {item.cutting_start_date && (
-                      <p className="text-[10px] text-orange-600">Kesim: {new Date(item.cutting_start_date).toLocaleDateString('tr-TR')}</p>
-                    )}
+                    {(() => {
+                      // Girilen aşama tarihleri (eski kayıtlarda yalnız kesim tarihi olabilir)
+                      const sd = { ...(item.cutting_start_date && !(item.stage_dates || {}).kesim ? { kesim: item.cutting_start_date } : {}), ...(item.stage_dates || {}) };
+                      return Object.entries(sd).map(([k, v]) => (
+                        <p key={k} className="text-[9px] text-orange-600 whitespace-nowrap">
+                          {stageLabel(k)}: {new Date(v).toLocaleDateString('tr-TR')}
+                        </p>
+                      ));
+                    })()}
                     {_delivered ? (
                       <p className="text-[10px] font-bold text-emerald-600">Teslim alındı ✓</p>
                     ) : _days == null ? null : _days < 0 ? (
