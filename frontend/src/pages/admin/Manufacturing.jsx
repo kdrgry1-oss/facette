@@ -763,26 +763,18 @@ export default function Manufacturing() {
                     {(() => {
                       const _dels = item.deliveries || [];
                       if (!_dels.length) return <span className="text-xs text-gray-300">—</span>;
-                      const _shipped = _dels.reduce((a, d) =>
-                        a + Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0), 0);
-                      const _lastDate = _dels.map(d => d.date).filter(Boolean).sort().slice(-1)[0];
                       const _allImgs = _dels.flatMap(d => d.note_images || []);
-                      const _tip = _dels.map((d, i) => {
-                        const t = Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0);
-                        return `#${i + 1} ${d.date ? new Date(d.date).toLocaleDateString("tr-TR") : "?"}: ${t} adet`;
-                      }).join("\n");
                       return (
-                        <div className="space-y-1">
-                          {/* Hizalama sözleşmesi: 1. satır TARİH (son sevkiyat), 2. satır TOPLAM rozeti, 3. satır irsaliye görselleri */}
-                          <p className="text-xs text-gray-700 whitespace-nowrap h-4">
-                            {_lastDate ? new Date(_lastDate).toLocaleDateString("tr-TR") : ""}
-                          </p>
-                          <div className="min-h-[22px]">
-                            <p className="text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 inline-block whitespace-nowrap"
-                              title={_tip}>
-                              Toplam: {_shipped}/{item.total_units || 0}{_dels.length > 1 ? ` · ${_dels.length} sevkiyat` : ""}
-                            </p>
-                          </div>
+                        <div className="space-y-0.5">
+                          {/* Her sevkiyat AYRI satır (toplanmaz): adet + yanında tarih — İmalatçı ile aynı yazım */}
+                          {_dels.map((d, i) => {
+                            const t = Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0);
+                            return (
+                              <p key={i} className="text-sm font-semibold whitespace-nowrap">
+                                {t} adet · {d.date ? new Date(d.date).toLocaleDateString("tr-TR") : "—"}
+                              </p>
+                            );
+                          })}
                           {_allImgs.length > 0 && (
                             <a href={_imgUrl(_allImgs[0])} target="_blank" rel="noreferrer"
                               title={`${_allImgs.length} irsaliye görseli — açmak için tıklayın (tümü düzenleme ekranında)`}
