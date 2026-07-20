@@ -277,18 +277,33 @@ export function SalesReport() {
       </div>
 
       <div className="bg-white rounded-xl border p-5">
-        <h3 className="font-semibold mb-3">Günlük Ciro & Sipariş</h3>
+        {/* Başlık seçilen kırılımı söyler; az kovalı (haftalık/aylık) görünümde iki nokta
+            arasına çizgi çekmek yanıltıcıydı → gruplu görünümde ÇUBUK grafik kullanılır. */}
+        <h3 className="font-semibold mb-3">{{ day: "Günlük", week: "Haftalık", month: "Aylık" }[groupBy] || "Günlük"} Ciro & Sipariş</h3>
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={data?.rows || []}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-            <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-            <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-            <Tooltip />
-            <Legend />
-            <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Ciro (₺)" />
-            <Line yAxisId="right" type="monotone" dataKey="orders" stroke="#3b82f6" strokeWidth={2} name="Sipariş" />
-          </LineChart>
+          {groupBy === "day" ? (
+            <LineChart data={data?.rows || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+              <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} name="Ciro (₺)" />
+              <Line yAxisId="right" type="monotone" dataKey="orders" stroke="#3b82f6" strokeWidth={2} name="Sipariş" />
+            </LineChart>
+          ) : (
+            <BarChart data={data?.rows || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+              <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Bar yAxisId="left" dataKey="revenue" fill="#10b981" name="Ciro (₺)" radius={[3, 3, 0, 0]} />
+              <Bar yAxisId="right" dataKey="orders" fill="#3b82f6" name="Sipariş" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          )}
         </ResponsiveContainer>
       </div>
 
@@ -298,7 +313,9 @@ export function SalesReport() {
         <div className="grid md:grid-cols-2 gap-5 items-center">
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={paymentData} dataKey="revenue" nameKey="method" cx="50%" cy="50%" outerRadius={90} label={(e) => `${e.method}: ₺${e.revenue.toLocaleString("tr-TR")}`}>
+              <Pie data={paymentData} dataKey="revenue" nameKey="method" cx="50%" cy="50%" outerRadius={90}
+                label={(e) => (e.percent > 0.06 ? `${e.method}: ₺${e.revenue.toLocaleString("tr-TR")}` : "")}
+                labelLine={false}>
                 {paymentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
               </Pie>
               <Tooltip />
