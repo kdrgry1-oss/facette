@@ -40,7 +40,6 @@ export function SalesReport() {
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
   const [brk, setBrk] = useState(null);
-  const [summary, setSummary] = useState(null); // Genel Satış Özeti (anlık, tarih filtresinden bağımsız)
 
   const load = async () => {
     const [s, p, b] = await Promise.all([
@@ -51,8 +50,6 @@ export function SalesReport() {
     setData(s.data);
     setPayData(p.data.items || []);
     setBrk(b.data);
-    axios.get(`${API}/admin/reports/sales-summary`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setSummary(r.data)).catch(() => {});
     // Saat + Gün analizi (reklam planlaması) — aynı tarih aralığı ve kaynak filtresiyle
     axios.get(`${API}/admin/reports/sales-by-hour`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setHourData(r.data)).catch(() => {});
@@ -102,47 +99,6 @@ export function SalesReport() {
         </div>
       </div>
 
-      {/* 📊 GENEL SATIŞ ÖZETİ — anlık (bugün TR saatiyle); tarih filtresinden bağımsız */}
-      {summary && (
-        <div className="bg-white border rounded-xl p-4" data-testid="sales-summary-block">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider">
-              Genel Satış Özeti ({from} → {to})
-            </h2>
-            <span className="text-[11px] text-gray-400">Üstteki tarih aralığı + kaynak filtresine göre</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {(() => {
-              // Tarih filtresi uygulanmışsa kartlar SEÇİLİ ARALIĞI gösterir; yoksa bugünü.
-              // Özet HER ZAMAN seçili aralıktan beslenir (anlık mod kaldırıldı — kullanıcı isteği)
-              const P = summary.period || {};
-              const suf = "Aralık";
-              const cmp = summary.period_vs_prev_pct;
-              const cmpLbl = "Önceki döneme göre";
-              return [
-              { lbl: `Ciro (${suf})`, val: tl(P.revenue),
-                sub: cmp != null ? `${cmpLbl} ${cmp > 0 ? "+" : ""}${cmp}%`
-                  : `Önceki dönem: ${tl(summary.period_prev?.revenue)}`,
-                subCls: cmp > 0 ? "text-emerald-600" : cmp < 0 ? "text-red-500" : "text-gray-400" },
-              { lbl: "Bu Haftaki Ciro", val: tl(summary.week_revenue) },
-              { lbl: "Bu Ayki Ciro", val: tl(summary.month_revenue) },
-              { lbl: "Bu Yılki Ciro", val: tl(summary.year_revenue) },
-              { lbl: `Sipariş (${suf})`, val: P.orders ?? 0, sub: `${P.items ?? 0} ürün satıldı` },
-              { lbl: `Ort. Sepet (${suf})`, val: tl(P.aov), sub: `${P.items_per_order ?? 0} ürün/sipariş` },
-              { lbl: `İade Tutarı (${suf})`, val: tl(P.returns), cls: "text-amber-600" },
-              { lbl: `İptal Tutarı (${suf})`, val: tl(P.cancels), cls: "text-rose-600" },
-              { lbl: `Net Satış (${suf})`, val: tl(P.net), cls: "text-emerald-700" },
-              ];
-            })().map((k) => (
-              <div key={k.lbl} className="border border-gray-100 rounded-lg p-3">
-                <div className="text-[10px] uppercase text-gray-500 leading-tight">{k.lbl}</div>
-                <div className={`text-lg font-bold mt-0.5 tabular-nums ${k.cls || "text-gray-900"}`}>{k.val}</div>
-                {k.sub && <div className={`text-[10px] mt-0.5 ${k.subCls || "text-gray-400"}`}>{k.sub}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Ciro kırılımı — 4 kademe: dahil → sadece iptal → sadece iade → net (elde kalan) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -159,8 +115,15 @@ export function SalesReport() {
           </div>
         ))}
       </div>
-      {/* Ortalama sepet (net) küçük satır */}
-      <div className="text-sm text-gray-500 -mt-2">Ortalama Sepet (net): <b className="text-gray-800">{tl(data?.totals?.aov)}</b></div>
+      {/* Ortalama Sepet — belirgin kart (kullanıcı isteği) */}
+      <div className="inline-flex items-center gap-3 bg-white border-2 border-indigo-200 rounded-xl px-5 py-3 -mt-1 shadow-sm" data-testid="aov-card">
+        <span className="text-2xl">🛒</span>
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Ortalama Sepet (Net)</div>
+          <div className="text-2xl font-bold text-indigo-700 tabular-nums">{tl(data?.totals?.aov)}</div>
+        </div>
+        <span className="text-[11px] text-gray-400 ml-2">{data?.totals?.orders ?? 0} sipariş ortalaması</span>
+      </div>
 
       {/* ⏰ Saat Analizi + 📅 Gün Analizi — reklam planlaması için */}
       <div className="grid lg:grid-cols-2 gap-4">
