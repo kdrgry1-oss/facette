@@ -8,7 +8,7 @@ import CartDrawer from "./CartDrawer";
 import CountdownBar from "./CountdownBar";
 import { optimizeImg } from "../lib/img";
 import { slugify } from "../lib/slug";
-import { fetchHeaderMenu, slugFromLink } from "../lib/headerMenu";
+import { fetchHeaderMenu, slugFromLink, DEFAULT_MENU_TABS } from "../lib/headerMenu";
 import { priceView } from "../lib/price";
 import axios from "axios";
 
@@ -28,74 +28,36 @@ function MegaPrice({ p }) {
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Mega menu structure — VARSAYILAN (fallback). Gerçek menü Admin > Tasarım > Menü Yönetimi'nden
-// (page-blocks/header-menu API) gelir; fetch başarısızsa bu varsayılan kullanılır.
-const DEFAULT_GIYIM_MENU = {
-  "ÜST GİYİM": [
-    { name: "Elbise", slug: "elbise" },
-    { name: "Bluz", slug: "bluz" },
-    { name: "Kazak", slug: "kazak" },
-    { name: "Sweatshirt", slug: "sweatshirt" },
-    { name: "Takım", slug: "takim" },
-    { name: "Tişört", slug: "tisort" },
-    { name: "Gömlek", slug: "gomlek" },
-  ],
-  "ALT GİYİM": [
-    { name: "Etek", slug: "etek" },
-    { name: "Pantolon", slug: "pantolon" },
-    { name: "Şort", slug: "sort" },
-    { name: "Jean", slug: "jean" },
-  ],
-  "DIŞ GİYİM": [
-    { name: "Kaban", slug: "kaban" },
-    { name: "Mont", slug: "mont" },
-    { name: "Hırka", slug: "hirka" },
-    { name: "Trençkot", slug: "trenckot" },
-    { name: "Ceket", slug: "ceket" },
-  ]
-};
+// Menü — TEK KAYNAK panel (Admin > Tasarım > Menü Yönetimi → page-blocks/header-menu).
+// Sekmeler (ad/sıra/tip/stil) ve kolonlar TAMAMEN panelden gelir; fetch başarısızsa
+// DEFAULT_MENU_TABS (lib/headerMenu) kullanılır. Sabit GİYİM/AKSESUAR yapısı kaldırıldı —
+// panelde yapılan her değişiklik (sekme adı, yeni sekme, kolon/kategori) siteye birebir yansır.
 
-const DEFAULT_AKSESUAR_MENU = [
-  { name: "Çanta", slug: "canta" },
-  { name: "Şal", slug: "sal" },
-  { name: "Atkı", slug: "atki" },
-  { name: "Fular", slug: "fular" },
-  // NOT: Kemer & Şapka kaldırıldı (mağazada yok). CANLI menü panelden (Menü Yönetimi) beslendiği
-  // için canlıda da kaldırmak istersen Tasarım > Menü Yönetimi'nden bu iki satırı sil.
-];
-
-// API tab'ini (page-blocks/header-menu) mevcut render şekline dönüştürür.
-// GİYİM: { "KOLON BAŞLIĞI": [{name, slug}], ... }  — kolon başlık linki JSX'te slugify ile üretilir.
-function apiTabToGiyimMenu(tab) {
-  const obj = {};
-  for (const col of (tab?.columns || [])) {
-    if (!col || !col.title) continue;
-    obj[col.title] = (col.items || [])
-      .filter((it) => it && it.name)
-      .map((it) => ({ name: it.name, slug: slugFromLink(it.link) || slugify(it.name) }));
-  }
-  return Object.keys(obj).length ? obj : null;
-}
-// AKSESUAR: tüm kolonların item'ları düz liste [{name, slug}]
-// Kemer & Şapka mağazada YOK → panelde hâlâ tanımlı olsalar bile menüden GİZLE
-// (canlı menü panelden beslendiği için filtre burada zorlanır; panel elle temizlenmese de düşer).
+// Kemer & Şapka mağazada YOK → panelde hâlâ tanımlı olsalar bile aksesuar menüsünden GİZLE
+// (panel elle temizlenmese de düşer).
 const _AKSESUAR_HIDDEN = ["kemer", "sapka", "şapka"];
 function _isHiddenAksesuar(name, slug) {
   const n = String(name || "").toLocaleLowerCase("tr");
   const s = String(slug || "").toLocaleLowerCase("tr");
   return _AKSESUAR_HIDDEN.some((h) => n === h || s === h || n.startsWith(h + " ") || s.startsWith(h + "-"));
 }
-function apiTabToAksesuarMenu(tab) {
-  const arr = [];
+
+// Bir mega sekmenin kolonlarını render için normalize eder: başlık/link/slug + item listesi.
+function megaColumnsOf(tab) {
+  const cols = [];
   for (const col of (tab?.columns || [])) {
-    for (const it of (col?.items || [])) {
-      if (!it || !it.name) continue;
-      const slug = slugFromLink(it.link) || slugify(it.name);
-      if (_isHiddenAksesuar(it.name, slug)) continue;
-      arr.push({ name: it.name, slug });
-    }
+    if (!col || !col.title) continue;
+    let items = (col.items || [])
+      .filter((it) => it && it.name)
+      .map((it) => {
+        const slug = slugFromLink(it.link) || slugify(it.name);
+        return { name: it.name, slug, link: it.link || `/${slug}` };
+      });
+    if (tab?.id === "aksesuar") items = items.filter((it) => !_isHiddenAksesuar(it.name, it.slug));
+    const cslug = slugFromLink(col.link) || slugify(col.title);
+    cols.push({ title: col.title, slug: cslug, link: col.link || `/${cslug}`, items });
   }
-  return arr.length ? arr : null;
+  return cols;
 }
 
 // Menu images for right side
@@ -160,20 +122,16 @@ function MegaProductsPanel({ products, loading, fallback, fallbackLink, onNaviga
 export default function Header({ hideMenu = false }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // Üst menü: Admin > Tasarım > Menü Yönetimi'nden (page-blocks/header-menu) beslenir.
-  // Fetch gelene kadar / başarısızsa varsayılan sabitler kullanılır (header asla boş kalmaz).
-  const [giyimMenu, setGiyimMenu] = useState(DEFAULT_GIYIM_MENU);
-  const [aksesuarMenu, setAksesuarMenu] = useState(DEFAULT_AKSESUAR_MENU);
+  // Sekmeler dahil TÜM yapı panelden gelir; fetch gelene kadar varsayılan kullanılır.
+  const [menuTabs, setMenuTabs] = useState(DEFAULT_MENU_TABS);
   useEffect(() => {
     let alive = true;
     fetchHeaderMenu(API).then((tabs) => {
-      if (!alive || !Array.isArray(tabs)) return;
-      const g = tabs.find((t) => t && (t.id === "giyim" || t.link === "/giyim"));
-      const a = tabs.find((t) => t && (t.id === "aksesuar" || t.link === "/aksesuar"));
-      const gm = apiTabToGiyimMenu(g); if (gm) setGiyimMenu(gm);
-      const am = apiTabToAksesuarMenu(a); if (am) setAksesuarMenu(am);
+      if (alive && Array.isArray(tabs) && tabs.length) setMenuTabs(tabs);
     }).catch(() => { /* varsayılan kalır */ });
     return () => { alive = false; };
   }, []);
+  const visibleTabs = menuTabs.filter((t) => t && t.active !== false && t.label);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -234,8 +192,10 @@ export default function Header({ hideMenu = false }) {
 
   // Mega menü: hoveredCategory veya activeMenu için en çok satan ürünleri lazy fetch (3 ürün).
   // Kategori boş dönerse statik banner yerine genel popüler ürünlere düşülür → sağ panel her zaman dinamik.
+  const _activeTab = menuTabs.find((t) => t && t.id === activeMenu) || null;
+  const _tabSlug = (t) => (t ? (slugFromLink(t.link) || t.id) : null);
   useEffect(() => {
-    const slug = hoveredCategory || activeMenu;
+    const slug = hoveredCategory || _tabSlug(_activeTab);
     if (slug && megaProducts[slug] === undefined) {
       axios.get(`${API}/products?category=${slug}&limit=3&sort=popular`)
         .then(async (r) => {
@@ -248,10 +208,10 @@ export default function Header({ hideMenu = false }) {
         })
         .catch(() => setMegaProducts((prev) => ({ ...prev, [slug]: [] })));
     }
-  }, [hoveredCategory, activeMenu]);
+  }, [hoveredCategory, activeMenu, menuTabs]);
 
   // Aktif olarak gösterilecek ürün listesi: önce alt kategori hover, yoksa ana kategori (3 ürün)
-  const activeMegaSlug = hoveredCategory || activeMenu;
+  const activeMegaSlug = hoveredCategory || _tabSlug(_activeTab);
   const activeMegaProducts = (megaProducts[activeMegaSlug] || []).slice(0, 3);
   // Henüz fetch tamamlanmadıysa (undefined) yükleniyor → iskelet göster, fallback görsel flash etme
   const megaLoading = Boolean(activeMegaSlug) && megaProducts[activeMegaSlug] === undefined;
@@ -395,52 +355,37 @@ export default function Header({ hideMenu = false }) {
                   </Link>
 
                   <nav className="hidden lg:flex items-center gap-5">
-                    {/* YENİ KOLEKSİYON — premium flagship menü (Seçenek A: elmas işareti + animasyonlu hairline) */}
-                    <Link
-                      to="/en-yeniler"
-                      className="group relative text-xs font-medium tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5"
-                      data-testid="nav-yeni-koleksiyon"
-                    >
-                      <span className="inline-block w-[5px] h-[5px] rotate-45 bg-current opacity-55 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />
-                      YENİ KOLEKSİYON
-                      <span className="pointer-events-none absolute left-0 bottom-2.5 h-px w-full bg-current origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500 ease-out" aria-hidden="true" />
-                    </Link>
-
-                    {/* GİYİM - Mega Menu */}
-                    <div 
-                      className="relative"
-                      onMouseEnter={() => openMenu('giyim')}
-                      onMouseLeave={scheduleClose}
-                    >
-                      <Link
-                        to="/giyim"
-                        className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
-                      >
-                        GİYİM
-                      </Link>
-                    </div>
-
-                    {/* AKSESUAR */}
-                    <div 
-                      className="relative"
-                      onMouseEnter={() => openMenu('aksesuar')}
-                      onMouseLeave={scheduleClose}
-                    >
-                      <Link
-                        to="/aksesuar"
-                        className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60"
-                      >
-                        AKSESUAR
-                      </Link>
-                    </div>
-
-                    {/* SALE */}
-                    <Link
-                      to="/sale"
-                      className="text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60 text-red-700"
-                    >
-                      SALE
-                    </Link>
+                    {/* Sekmeler TAMAMEN panelden (Tasarım > Menü Yönetimi): ad, sıra, tip (link/mega), stil.
+                        style=accent → elmas işaretli premium stil; style=sale → kırmızı. */}
+                    {visibleTabs.map((tab) => {
+                      const isAccent = tab.style === "accent";
+                      const isSale = tab.style === "sale";
+                      const cls = isAccent
+                        ? "group relative text-xs font-medium tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5"
+                        : `text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60${isSale ? " text-red-700" : ""}`;
+                      const inner = (
+                        <>
+                          {isAccent && <span className="inline-block w-[5px] h-[5px] rotate-45 bg-current opacity-55 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />}
+                          {tab.label}
+                          {isAccent && <span className="pointer-events-none absolute left-0 bottom-2.5 h-px w-full bg-current origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500 ease-out" aria-hidden="true" />}
+                        </>
+                      );
+                      if (tab.type === "mega") {
+                        return (
+                          <div
+                            key={tab.id}
+                            className="relative"
+                            onMouseEnter={() => openMenu(tab.id)}
+                            onMouseLeave={scheduleClose}
+                          >
+                            <Link to={tab.link || "#"} className={cls} data-testid={`nav-tab-${tab.id}`}>{inner}</Link>
+                          </div>
+                        );
+                      }
+                      return (
+                        <Link key={tab.id} to={tab.link || "#"} className={cls} data-testid={`nav-tab-${tab.id}`}>{inner}</Link>
+                      );
+                    })}
                   </nav>
                 </>
               )}
@@ -489,34 +434,39 @@ export default function Header({ hideMenu = false }) {
           </div>
         </div>
 
-        {/* Full Width Mega Menu Dropdown - GİYİM */}
-        {activeMenu === 'giyim' && (
-          <div 
+        {/* Full Width Mega Menu Dropdown — aktif mega sekme panelden gelir (tüm sekmeler için TEK şablon) */}
+        {(() => {
+          const tab = visibleTabs.find((t) => t.id === activeMenu && t.type === "mega");
+          if (!tab) return null;
+          const cols = megaColumnsOf(tab);
+          if (!cols.length) return null;
+          return (
+          <div
             className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
             onMouseEnter={cancelClose}
             onMouseLeave={scheduleClose}
           >
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
-                {/* Categories — Üst/Alt/Dış Giyim birbirine yakın (genişliğe yayılmaz) */}
-                <div className={MEGA_LINK_GRID} style={megaCols(Object.keys(giyimMenu).length || 3)}>
-                  {Object.entries(giyimMenu).map(([category, items]) => (
+                {/* Kolonlar — panele girilen başlık + alt kategoriler (birbirine yakın, genişliğe yayılmaz) */}
+                <div className={MEGA_LINK_GRID} style={megaCols(cols.length || 3)}>
+                  {cols.map((col) => (
                     // Kolon başlığına/alanına gelince o ana kategorinin ürünleri sağda çıksın
-                    // (BEACHWEAR gibi alt-linki olmayan kolonlar dahil). Alt ürün hover'ı override eder.
-                    <div key={category} onMouseEnter={() => setHoveredCategory(slugify(category))}>
+                    // (item'sız kolonlar — ör. koleksiyon başlıkları — dahil). Alt ürün hover'ı override eder.
+                    <div key={col.title} onMouseEnter={() => setHoveredCategory(col.slug)}>
                       <Link
-                        to={`/${slugify(category)}`}
+                        to={col.link}
                         className="block text-xs font-bold tracking-wider mb-3 text-gray-900 hover:underline cursor-pointer"
                         onClick={() => setActiveMenu(null)}
-                        onMouseEnter={() => setHoveredCategory(slugify(category))}
+                        onMouseEnter={() => setHoveredCategory(col.slug)}
                       >
-                        {category}
+                        {col.title}
                       </Link>
                       <ul className="space-y-1">
-                        {items.map((item) => (
+                        {col.items.map((item) => (
                           <li key={item.slug}>
                             <Link
-                              to={`/${item.slug}`}
+                              to={item.link}
                               className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
                               onClick={() => setActiveMenu(null)}
                               onMouseEnter={() => setHoveredCategory(item.slug)}
@@ -527,7 +477,7 @@ export default function Header({ hideMenu = false }) {
                         ))}
                         <li className="pt-1.5">
                           <Link
-                            to={`/${slugify(category)}`}
+                            to={col.link}
                             className="text-xs font-medium underline hover:no-underline"
                             onClick={() => setActiveMenu(null)}
                           >
@@ -538,89 +488,23 @@ export default function Header({ hideMenu = false }) {
                     </div>
                   ))}
                 </div>
-                
+
                 {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
                 <div className="flex-shrink-0 flex gap-3 min-w-[564px] ml-auto">
                   <MegaProductsPanel
                     products={activeMegaProducts}
                     loading={megaLoading}
-                    fallback={MENU_IMAGES.giyim}
-                    fallbackLink="/giyim"
+                    fallback={MENU_IMAGES[tab.id] || MENU_IMAGES.giyim}
+                    fallbackLink={tab.link || "/"}
                     onNavigate={() => setActiveMenu(null)}
                   />
                 </div>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
-        {/* Full Width Mega Menu Dropdown - AKSESUAR */}
-        {activeMenu === 'aksesuar' && (
-          <div 
-            className="absolute left-0 right-0 top-full bg-white shadow-lg border-t z-50"
-            onMouseEnter={cancelClose}
-            onMouseLeave={scheduleClose}
-          >
-            <div className="max-w-screen-2xl mx-auto px-8 py-6">
-              <div className="flex gap-12">
-                {/* Categories */}
-                <div className="flex-1">
-                  <h3 className="text-xs font-bold tracking-wider mb-3 text-gray-900">AKSESUAR</h3>
-                  {/* Tek kolon: Şal/Kemer/Fular sağa taşmaz, hepsi SOLDA alt alta listelenir. */}
-                  <ul className={MEGA_LINK_GRID} style={megaCols(1)}>
-                    {aksesuarMenu.map((item) => (
-                      <li key={item.slug}>
-                        <Link
-                          to={`/${item.slug}`}
-                          className="block py-1 text-sm text-gray-600 hover:text-black transition-colors"
-                          onClick={() => setActiveMenu(null)}
-                          onMouseEnter={() => setHoveredCategory(item.slug)}
-                        >
-                          {item.name}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    to="/aksesuar"
-                    className="inline-block mt-3 text-xs font-medium underline hover:no-underline"
-                    onClick={() => setActiveMenu(null)}
-                  >
-                    Tümünü Gör
-                  </Link>
-                </div>
-                
-                {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
-                <div className="flex-shrink-0 flex gap-3 min-w-[564px] ml-auto">
-                  {activeMegaProducts.length > 0 ? (
-                    activeMegaProducts.map((p) => (
-                      <Link
-                        key={p.id}
-                        to={`/${p.slug || p.id}`}
-                        className="block w-52 group"
-                        onClick={() => setActiveMenu(null)}
-                      >
-                        <div className={MEGA_IMG_BOX}>
-                          <img
-                            src={optimizeImg((p.images && p.images[0]) || p.image || "", 500)}
-                            alt={p.name}
-                            className={MEGA_IMG}
-                          />
-                        </div>
-                        <p className="text-[11px] mt-2 line-clamp-1 text-black/85">{p.name}</p>
-                        <MegaPrice p={p} />
-                      </Link>
-                    ))
-                  ) : (
-                    <Link to="/aksesuar" className={`block ${MEGA_IMG_BOX}`} onClick={() => setActiveMenu(null)}>
-                      <img src={MENU_IMAGES.aksesuar[0]} alt="" className="w-full h-full object-cover" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
         </header>
       </div>
 
@@ -636,83 +520,65 @@ export default function Header({ hideMenu = false }) {
             </button>
           </div>
           <nav className="overflow-y-auto h-[calc(100vh-56px)] flex flex-col">
-            {/* Primary Categories */}
+            {/* Primary Categories — sekmeler panelden (Tasarım > Menü Yönetimi) */}
             <div className="px-5 pt-6 pb-4">
-              <Link
-                to="/en-yeniler"
-                className="flex items-center gap-2 py-3 text-sm tracking-[0.18em] uppercase font-medium"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <span className="inline-block w-[5px] h-[5px] rotate-45 bg-black" aria-hidden="true" />
-                Yeni Koleksiyon
-              </Link>
-
-              {/* GİYİM accordion */}
-              <details className="group border-t border-black/5">
-                <summary className="flex items-center justify-between py-3 cursor-pointer list-none">
-                  <span className="text-sm tracking-[0.15em] uppercase font-light">Giyim</span>
-                  <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
-                </summary>
-                <div className="pb-3 pl-1 space-y-3">
-                  {Object.entries(giyimMenu).map(([category, items]) => (
-                    <div key={category}>
-                      <Link
-                        to={`/${slugify(category)}`}
-                        className="block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
-                        onClick={() => setMobileMenuOpen(false)}
-                      >
-                        {category}
-                      </Link>
-                      {items.map((item) => (
+              {visibleTabs.map((tab, ti) => {
+                const isAccent = tab.style === "accent";
+                const isSale = tab.style === "sale";
+                const borderCls = ti === 0 ? "" : "border-t border-black/5";
+                if (tab.type === "mega") {
+                  const cols = megaColumnsOf(tab);
+                  return (
+                    <details key={tab.id} className={`group ${borderCls}`}>
+                      <summary className="flex items-center justify-between py-3 cursor-pointer list-none">
+                        <span className={`text-sm tracking-[0.15em] uppercase font-light${isSale ? " text-red-700" : ""}`}>{tab.label}</span>
+                        <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
+                      </summary>
+                      <div className="pb-3 pl-1 space-y-3">
+                        {cols.map((col) => (
+                          <div key={col.title}>
+                            <Link
+                              to={col.link}
+                              className="block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
+                              onClick={() => setMobileMenuOpen(false)}
+                            >
+                              {col.title}
+                            </Link>
+                            {col.items.map((item) => (
+                              <Link
+                                key={item.slug}
+                                to={item.link}
+                                className="block py-1.5 text-[13px] font-light text-black/75"
+                                onClick={() => setMobileMenuOpen(false)}
+                              >
+                                {item.name}
+                              </Link>
+                            ))}
+                          </div>
+                        ))}
                         <Link
-                          key={item.slug}
-                          to={`/${item.slug}`}
-                          className="block py-1.5 text-[13px] font-light text-black/75"
+                          to={tab.link || "/"}
+                          className="block py-1.5 mt-1 text-[13px] font-medium underline text-black/80"
                           onClick={() => setMobileMenuOpen(false)}
                         >
-                          {item.name}
+                          Tümünü Gör
                         </Link>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </details>
-
-              {/* AKSESUAR accordion */}
-              <details className="group border-t border-black/5">
-                <summary className="flex items-center justify-between py-3 cursor-pointer list-none">
-                  <span className="text-sm tracking-[0.15em] uppercase font-light">Aksesuar</span>
-                  <span className="text-base font-thin transition-transform group-open:rotate-45">+</span>
-                </summary>
-                <div className="pb-3 pl-1">
-                  {aksesuarMenu.map((item) => (
-                    <Link
-                      key={item.slug}
-                      to={`/${item.slug}`}
-                      className="block py-1.5 text-[13px] font-light text-black/75"
-                      onClick={() => setMobileMenuOpen(false)}
-                    >
-                      {item.name}
-                    </Link>
-                  ))}
-                  {/* Mobil: AKSESUAR en altında "Tümünü Gör" */}
+                      </div>
+                    </details>
+                  );
+                }
+                return (
                   <Link
-                    to="/aksesuar"
-                    className="block py-1.5 mt-1 text-[13px] font-medium underline text-black/80"
+                    key={tab.id}
+                    to={tab.link || "/"}
+                    className={`flex items-center gap-2 py-3 text-sm uppercase ${borderCls} ${isAccent ? "tracking-[0.18em] font-medium" : "tracking-[0.15em] font-light"}${isSale ? " text-red-700" : ""}`}
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    Tümünü Gör
+                    {isAccent && <span className="inline-block w-[5px] h-[5px] rotate-45 bg-black" aria-hidden="true" />}
+                    {tab.label}
                   </Link>
-                </div>
-              </details>
-
-              <Link
-                to="/sale"
-                className="block py-3 text-sm tracking-[0.15em] uppercase font-light text-red-700 border-t border-black/5"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Sale
-              </Link>
+                );
+              })}
             </div>
 
             {/* Bottom: Account + Service */}
@@ -754,9 +620,9 @@ export default function Header({ hideMenu = false }) {
             <div className="grid grid-cols-1 md:grid-cols-[170px_1fr_170px] gap-8 md:gap-12 items-start mb-5 md:mb-16">
               {/* SOL: kategoriler (desktop) */}
               <nav className="hidden md:flex flex-col gap-3.5 text-[11px] tracking-[0.18em] uppercase">
-                <Link to="/giyim" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Giyim</Link>
-                <Link to="/aksesuar" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Aksesuar</Link>
-                <Link to="/sale" onClick={closeSearch} className="text-red-700 hover:opacity-60 transition-opacity">Sale</Link>
+                {visibleTabs.map((t) => (
+                  <Link key={t.id} to={t.link || "/"} onClick={closeSearch} className={`hover:opacity-60 transition-opacity${t.style === "sale" ? " text-red-700" : ""}`}>{t.label}</Link>
+                ))}
                 <Link to="/" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Ana Sayfa</Link>
               </nav>
 
