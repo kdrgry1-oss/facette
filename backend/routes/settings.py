@@ -397,3 +397,23 @@ async def test_email_smtp(payload: Dict[str, Any], current_user: dict = Depends(
             "endpoint": _endpoint(cfg),
         }
     return {"success": True, "message": "Test e-postası gönderildi"}
+
+
+# ── Admin menü tercihleri (SUNUCU tarafı — cihazdan bağımsız) ────────────────
+# Sorun: menü sıra/gizleme tercihleri localStorage'daydı → başka cihaz/tarayıcıda
+# veya veri temizliğinde sıfırlanıp gizlenen sekme (ör. Görevler) geri geliyordu.
+# Çözüm: tercih kullanıcının hesabında tutulur; tüm cihazlarda aynı ve kalıcıdır.
+@router.get("/admin-menu-prefs")
+async def get_admin_menu_prefs(current_user: dict = Depends(require_admin)):
+    u = await db.users.find_one({"id": current_user.get("id")}, {"_id": 0, "admin_menu_prefs": 1})
+    return (u or {}).get("admin_menu_prefs") or {"order": None, "hidden": []}
+
+
+@router.put("/admin-menu-prefs")
+async def put_admin_menu_prefs(payload: dict, current_user: dict = Depends(require_admin)):
+    prefs = {
+        "order": payload.get("order") if isinstance(payload.get("order"), list) else None,
+        "hidden": [str(x) for x in (payload.get("hidden") or []) if x][:100],
+    }
+    await db.users.update_one({"id": current_user.get("id")}, {"$set": {"admin_menu_prefs": prefs}})
+    return {"success": True, **prefs}

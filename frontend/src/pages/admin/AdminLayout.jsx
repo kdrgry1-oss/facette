@@ -149,7 +149,26 @@ function NavItem({ item, closeMobile }) {
 export default function AdminLayout() {
   const { user, isAdmin, logout, loading } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navigation = useMemo(() => getNavigationFor(user?.id || user?.email), [user?.id, user?.email]);
+  // Menü tercihleri SUNUCUDAN eşitlenir (cihaz/tarayıcı bağımsız — "Görevler geri
+  // geliyor" bumerang sorunu localStorage'ın cihaz bazlı olmasındandı).
+  const [navBump, setNavBump] = useState(0);
+  useEffect(() => {
+    const uid = user?.id || user?.email;
+    if (!uid) return;
+    const t = localStorage.getItem("token");
+    if (!t) return;
+    fetch(`${process.env.REACT_APP_BACKEND_URL}/api/settings/admin-menu-prefs`, { headers: { Authorization: `Bearer ${t}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((prefs) => {
+        if (!prefs) return;
+        if (Array.isArray(prefs.hidden)) localStorage.setItem(`menuHidden:${uid}`, JSON.stringify(prefs.hidden));
+        if (Array.isArray(prefs.order)) localStorage.setItem(`menuOrder:${uid}`, JSON.stringify(prefs.order));
+        setNavBump((x) => x + 1);
+      })
+      .catch(() => {});
+  }, [user?.id, user?.email]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const navigation = useMemo(() => getNavigationFor(user?.id || user?.email), [user?.id, user?.email, navBump]);
 
   // Panel 1 saat işlemsiz kalınca otomatik çıkış + filtre sıfırlama (güvenlik).
   // Aktivite (fare/klavye/tık/scroll) olunca süre sıfırlanır. Hook'lar erken return'den ÖNCE.

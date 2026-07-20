@@ -59,6 +59,15 @@ export default function MenuSettings() {
     const order = items.map((i) => i.key);
     const hidden = items.filter((i) => i.hidden).map((i) => i.key);
     saveUserMenuPrefs(userId, { order, hidden });
+    // Sunucuya da yaz — tüm cihazlarda kalıcı (gizlenen sekme bir daha geri gelmez)
+    try {
+      const t = localStorage.getItem("token");
+      fetch(`${process.env.REACT_APP_BACKEND_URL}/api/settings/admin-menu-prefs`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+        body: JSON.stringify({ order, hidden }),
+      }).catch(() => {});
+    } catch { /* sessiz */ }
     setDirty(false);
     toast.success("Menü düzeniniz kaydedildi. Sayfa yenileniyor...");
     setTimeout(() => window.location.reload(), 800);
