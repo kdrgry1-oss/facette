@@ -753,35 +753,57 @@ export default function AdminProducts() {
     }
   };
 
+  // Excel Yükle — SİHİRBAZ: 1) dosya yazılmadan çözümlenir 2) hangi sütun + hangi
+  // kategoriler güncellenecek seçilir 3) yalnız seçilenler yazılır 4) bitiş ekranı.
+  const [importWizard, setImportWizard] = useState(null); // {file, analysis, selCols:Set, selCats:Set, step, stats, applying}
   const handleImport = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     setImporting(true);
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const toastId = toast.loading("Excel içeriği aktarılıyor...");
+    const toastId = toast.loading("Excel çözümleniyor (henüz hiçbir şey yazılmadı)...");
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.post(`${API}/products/import/excel`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await axios.post(`${API}/products/import/excel/analyze`, fd, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
       });
-
-      if (response.data.success) {
-        const { stats } = response.data;
-        toast.success(`Aktarım tamamlandı! (${stats.created} yeni, ${stats.updated} güncellendi, ${stats.errors} hata)`, { id: toastId });
-        fetchProducts();
-      }
+      toast.success(`Dosya uygun: ${r.data.rows} satır, ${r.data.matched_products} ürün eşleşti`, { id: toastId });
+      setImportWizard({
+        file,
+        analysis: r.data,
+        selCols: new Set(r.data.updatable_columns || []),
+        selCats: new Set(),   // boş = tüm kategoriler
+        step: "select",
+        applying: false,
+        stats: null,
+      });
     } catch (err) {
-      console.error("Import error:", err);
-      toast.error(err.response?.data?.detail || "Dosya aktarılamadı", { id: toastId });
+      toast.error(err.response?.data?.detail || "Dosya çözümlenemedi", { id: toastId });
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+  const applyImportWizard = async () => {
+    const w = importWizard;
+    if (!w || !w.selCols.size) { toast.error("En az bir sütun seçin"); return; }
+    setImportWizard({ ...w, applying: true });
+    try {
+      const token = localStorage.getItem("token");
+      const fd = new FormData();
+      fd.append("file", w.file);
+      fd.append("columns", [...w.selCols].join(","));
+      fd.append("categories", [...w.selCats].join(","));
+      const r = await axios.post(`${API}/products/import/excel`, fd, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" },
+        timeout: 300000,
+      });
+      setImportWizard({ ...w, applying: false, step: "done", stats: r.data?.stats || {} });
+      fetchProducts();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Güncelleme başarısız");
+      setImportWizard({ ...w, applying: false });
     }
   };
 
@@ -1941,6 +1963,96 @@ export default function AdminProducts() {
             accept=".xlsx, .xls"
             className="hidden"
           />
+
+          {/* Excel Yükleme Sihirbazı — çözümleme sonucu + sütun/kategori seçimi + bitiş ekranı */}
+          {importWizard && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" data-testid="import-wizard">
+              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5 text-left font-normal">
+                {importWizard.step === "select" ? (
+                  <>
+                    <h3 className="text-lg font-bold mb-1">Excel Güncelleme — Seçim</h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      <b>{importWizard.file?.name}</b> · {importWizard.analysis.rows} satır ·{" "}
+                      <b className="text-emerald-700">{importWizard.analysis.matched_products} ürün eşleşti</b>
+                      {" "}(barkodla) · Henüz hiçbir şey yazılmadı — yalnız aşağıda seçtikleriniz güncellenecek.
+                    </p>
+
+                    <p className="text-xs font-bold text-gray-600 uppercase mb-1.5">1) Güncellenecek sütunlar</p>
+                    <div className="flex flex-wrap gap-1.5 mb-4">
+                      {(importWizard.analysis.updatable_columns || []).map((c) => {
+                        const on = importWizard.selCols.has(c);
+                        return (
+                          <button key={c} type="button"
+                            onClick={() => setImportWizard(w => {
+                              const s = new Set(w.selCols); s.has(c) ? s.delete(c) : s.add(c);
+                              return { ...w, selCols: s };
+                            })}
+                            className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition ${on ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-500 border-gray-300 hover:border-blue-400"}`}>
+                            {c} {on ? "✓" : ""}
+                          </button>
+                        );
+                      })}
+                      {(importWizard.analysis.updatable_columns || []).length === 0 && (
+                        <p className="text-xs text-red-600">Dosyada güncellenebilir sütun bulunamadı (Stok, Satış Fiyatı, Sezon, Özellik: ... bekleniyor).</p>
+                      )}
+                    </div>
+
+                    <p className="text-xs font-bold text-gray-600 uppercase mb-1.5">
+                      2) Hangi kategoriler güncellensin? <span className="text-gray-400 font-normal normal-case">(hiçbiri seçilmezse TÜMÜ)</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mb-4 max-h-36 overflow-y-auto">
+                      {(importWizard.analysis.categories || []).map((c) => {
+                        const on = importWizard.selCats.has(c);
+                        return (
+                          <button key={c} type="button"
+                            onClick={() => setImportWizard(w => {
+                              const s = new Set(w.selCats); s.has(c) ? s.delete(c) : s.add(c);
+                              return { ...w, selCats: s };
+                            })}
+                            className={`px-2.5 py-1 rounded-full text-xs border transition ${on ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-500 border-gray-300 hover:border-gray-500"}`}>
+                            {c} {on ? "✓" : ""}
+                          </button>
+                        );
+                      })}
+                      {(importWizard.analysis.categories || []).length === 0 && (
+                        <p className="text-xs text-gray-400">Dosyada Kategori sütunu yok — tüm eşleşen satırlar güncellenir.</p>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-3 border-t">
+                      <button type="button" onClick={() => setImportWizard(null)}
+                        className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Vazgeç</button>
+                      <button type="button" onClick={applyImportWizard} disabled={importWizard.applying}
+                        data-testid="import-apply"
+                        className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50">
+                        {importWizard.applying ? "Güncelleniyor…" : `Güncellemeyi Başlat (${importWizard.selCols.size} sütun${importWizard.selCats.size ? ` · ${importWizard.selCats.size} kategori` : " · tüm kategoriler"})`}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-center py-4">
+                      <div className="text-4xl mb-2">✅</div>
+                      <h3 className="text-lg font-bold mb-1">Güncelleme Tamamlandı</h3>
+                      <p className="text-3xl font-bold text-emerald-600 my-3">
+                        {importWizard.stats?.updated_products ?? importWizard.stats?.updated ?? 0}
+                        <span className="text-sm text-gray-500 font-normal ml-1.5">üründe güncelleme yapıldı</span>
+                      </p>
+                      <div className="text-xs text-gray-500 space-y-0.5">
+                        <p>{importWizard.stats?.updated_rows ?? 0} satır işlendi · {importWizard.stats?.skipped ?? 0} satır filtre dışı/değişiklik yok</p>
+                        <p>{importWizard.stats?.no_match ?? 0} satır eşleşmedi · {importWizard.stats?.errors ?? 0} hata
+                          {importWizard.stats?.duration_sec != null && <> · {importWizard.stats.duration_sec} sn</>}</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-center pt-3 border-t">
+                      <button type="button" onClick={() => setImportWizard(null)}
+                        className="px-6 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-black font-semibold">Kapat</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           <button
             onClick={handleExport}
             disabled={exporting}

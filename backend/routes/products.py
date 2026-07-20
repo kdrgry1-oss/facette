@@ -8,7 +8,7 @@ import re
 
 from .deps import db, logger, get_current_user, require_admin, generate_id, generate_short_id, generate_barcode_from_range, build_used_barcode_set, generate_urun_karti_id, build_used_urun_id_set, next_urun_id, _search_tr_regex, tr_day_start_utc, tr_day_end_utc
 from product_schema import BOOL_COLS as PRODUCT_BOOL_COLS
-from fastapi import Response, UploadFile, File
+from fastapi import Response, UploadFile, File, Form
 import pandas as pd
 import io
 
@@ -2955,9 +2955,55 @@ def _norm_season_cell(val) -> str:
     }.get(folded, "")
 
 
+# Seçmeli güncellemede işlenebilen ürün/varyant sütunları (Özellik: * ayrıca desteklenir)
+_IMPORT_UPDATABLE = ["Piyasa Fiyatı", "Satış Fiyatı", "Stok", "Sezon", "Açıklama", "Aktif"]
+
+
+@router.post("/import/excel/analyze")
+async def analyze_products_excel(file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
+    """Excel'i YAZMADAN çözümler: format uygun mu, hangi sütunlar var, kaç satır/ürün
+    eşleşiyor, dosyada hangi kategoriler geçiyor. Panel bu bilgiyle 'hangi sütunlar +
+    hangi kategoriler güncellensin' seçtirir; asıl yazma /import/excel'e seçimlerle gider."""
+    contents = await file.read()
+    try:
+        df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel okunamadı: {str(e)[:200]}")
+    cols = [str(c) for c in df.columns]
+    if "Barkod" not in cols:
+        raise HTTPException(status_code=400, detail="Format uygun değil: 'Barkod' sütunu zorunlu. 'Excel İndir' çıktısını temel alın.")
+    updatable = [c for c in cols if c in _IMPORT_UPDATABLE or str(c).startswith("Özellik: ")]
+    barcodes = [str(b).strip() for b in df["Barkod"].tolist()
+                if str(b).strip() and str(b).strip().lower() != "nan"]
+    uniq = list(dict.fromkeys(barcodes))
+    matched = 0
+    for i in range(0, len(uniq), 5000):
+        matched += await db.products.count_documents({"variants.barcode": {"$in": uniq[i:i + 5000]}})
+    cats = []
+    if "Kategori" in cols:
+        cats = sorted({str(v).strip() for v in df["Kategori"].dropna().tolist()
+                       if str(v).strip() and str(v).strip().lower() != "nan"})
+    return {"success": True, "rows": int(len(df)), "unique_barcodes": len(uniq),
+            "matched_products": matched, "columns": cols,
+            "updatable_columns": updatable, "categories": cats[:300]}
+
+
 @router.post("/import/excel")
-async def import_products_excel(file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
-    """Import or update products from an Excel file"""
+async def import_products_excel(
+    file: UploadFile = File(...),
+    columns: str = Form(""),      # seçmeli mod: virgüllü sütun listesi (boş = eski tam aktarım)
+    categories: str = Form(""),   # seçmeli mod: yalnız bu kategorilerdeki satırlar güncellenir
+    current_user: dict = Depends(require_admin),
+):
+    """Import or update products from an Excel file.
+
+    `columns` doluysa SEÇMELİ GÜNCELLEME modu: yeni ürün AÇILMAZ, yalnız seçilen
+    sütunlar ve (verildiyse) seçilen kategorilerdeki satırlar güncellenir — toplu
+    sorgu + küçük yazımlarla eski tam aktarımdan çok daha hızlıdır."""
+    sel_cols = [c.strip() for c in (columns or "").split(",") if c.strip()]
+    sel_cats = {c.strip() for c in (categories or "").split(",") if c.strip()}
+    if sel_cols:
+        return await _selective_import(file, sel_cols, sel_cats)
     try:
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
@@ -3078,10 +3124,128 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                 stats["errors"] += 1
                 
         return {"success": True, "stats": stats}
-        
+
     except Exception as e:
         logger.error(f"Excel import error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _selective_import(file: UploadFile, sel_cols: list, sel_cats: set):
+    """Seçmeli güncelleme: yalnız seçilen sütunlar + (verildiyse) seçilen kategorilerdeki
+    satırlar. Yeni ürün AÇILMAZ. Barkod→ürün eşlemesi TOPLU sorgu ile önceden çekilir."""
+    import time as _time
+    _t0 = _time.monotonic()
+    contents = await file.read()
+    try:
+        df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Excel okunamadı: {str(e)[:200]}")
+    if "Barkod" not in [str(c) for c in df.columns]:
+        raise HTTPException(status_code=400, detail="'Barkod' sütunu zorunlu")
+
+    attr_cols = [c for c in sel_cols if c.startswith("Özellik: ")]
+    plain_cols = [c for c in sel_cols if not c.startswith("Özellik: ")]
+
+    # 1) Satırları topla
+    rows = []
+    for _, row in df.iterrows():
+        bc = str(row.get("Barkod", "")).strip()
+        if not bc or bc.lower() == "nan":
+            continue
+        rows.append((bc, row))
+
+    # 2) Barkod → ürün eşlemesi (toplu)
+    uniq = list(dict.fromkeys(bc for bc, _ in rows))
+    _proj = {"_id": 0, "id": 1, "variants.barcode": 1, "category_name": 1}
+    if attr_cols:
+        _proj["attributes"] = 1
+    bc_map = {}
+    for i in range(0, len(uniq), 5000):
+        async for p in db.products.find({"variants.barcode": {"$in": uniq[i:i + 5000]}}, _proj):
+            for v in (p.get("variants") or []):
+                b = str(v.get("barcode") or "").strip()
+                if b:
+                    bc_map[b] = p
+
+    stats = {"updated_rows": 0, "skipped": 0, "no_match": 0, "errors": 0}
+    updated_products = set()
+    _now = datetime.now(timezone.utc).isoformat()
+
+    def _num(row, col):
+        try:
+            v = row.get(col)
+            return float(v) if pd.notna(v) else None
+        except Exception:
+            return None
+
+    for bc, row in rows:
+        try:
+            p = bc_map.get(bc)
+            if not p:
+                stats["no_match"] += 1
+                continue
+            # Kategori süzgeci: önce dosyadaki hücre, boşsa üründeki kategori
+            if sel_cats:
+                _rc = str(row.get("Kategori", "") or "").strip()
+                _cat = _rc if _rc and _rc.lower() != "nan" else str(p.get("category_name") or "").strip()
+                if _cat not in sel_cats:
+                    stats["skipped"] += 1
+                    continue
+
+            vset = {"updated_at": _now}   # variants.$ hedefli
+            pset = {}                     # ürün düzeyi
+            if "Stok" in plain_cols:
+                _v = _num(row, "Stok")
+                if _v is not None:
+                    vset["variants.$.stock"] = int(_v)
+            if "Piyasa Fiyatı" in plain_cols:
+                _v = _num(row, "Piyasa Fiyatı")
+                if _v is not None:
+                    vset["variants.$.price"] = _v
+            if "Satış Fiyatı" in plain_cols:
+                _v = _num(row, "Satış Fiyatı")
+                if _v is not None:
+                    vset["variants.$.sale_price"] = _v
+            if "Sezon" in plain_cols:
+                _s = _norm_season_cell(row.get("Sezon"))
+                if _s:
+                    pset["season"] = _s
+            if "Açıklama" in plain_cols:
+                _d = str(row.get("Açıklama", "") or "").strip()
+                if _d and _d.lower() != "nan":
+                    pset["description"] = _d
+            if "Aktif" in plain_cols:
+                _a = str(row.get("Aktif", "") or "").strip().lower()
+                if _a in ("evet", "hayır", "hayir"):
+                    pset["is_active"] = (_a == "evet")
+            if attr_cols:
+                # Seçilen özellikleri mevcut listeye İSİMLE birleştir (diğer özellikler korunur)
+                attrs = [a for a in (p.get("attributes") or []) if isinstance(a, dict)]
+                for col in attr_cols:
+                    name = col.replace("Özellik: ", "").strip()
+                    val = str(row.get(col, "") or "").strip()
+                    if not val or val.lower() == "nan":
+                        continue
+                    attrs = [a for a in attrs if str(a.get("name") or a.get("type") or "").strip() != name]
+                    attrs.append({"type": name, "name": name, "value": val})
+                pset["attributes"] = attrs
+                p["attributes"] = attrs  # aynı ürünün sonraki satırları güncel listeyi görsün
+
+            if len(vset) <= 1 and not pset:
+                stats["skipped"] += 1
+                continue
+            _upd = {**vset, **pset} if len(vset) > 1 else {"updated_at": _now, **pset}
+            await db.products.update_one({"id": p["id"], "variants.barcode": bc}, {"$set": _upd})
+            stats["updated_rows"] += 1
+            updated_products.add(p["id"])
+        except Exception as row_err:
+            logger.error(f"Selective import row error ({bc}): {row_err}")
+            stats["errors"] += 1
+
+    stats["updated_products"] = len(updated_products)
+    stats["duration_sec"] = round(_time.monotonic() - _t0, 1)
+    stats["mode"] = "selective"
+    return {"success": True, "stats": stats}
 
 
 

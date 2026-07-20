@@ -518,7 +518,7 @@ async def top_products(
                     "created_at": p.get("created_at") or None,
                     "stock_code": (p.get("stock_code") or "").strip(),
                     # Sezon: önce ürün kartındaki zorunlu 'season' alanı; eskiler için öznitelik fallback
-                    "season": (p.get("season") or "").strip() or _season_from_attrs(p.get("attributes"))}
+                    "season": (p.get("season") or "").strip()}  # TEK KAYNAK: ürün kartındaki Sezon alanı
             by_id[str(p.get("id"))] = info
             if p.get("barcode"):
                 by_bc[str(p["barcode"])] = info
@@ -607,7 +607,7 @@ async def top_products(
             "_sizes": {}, "_plats": {},
             "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
             "created_at": p.get("created_at"), "stock_code": (p.get("stock_code") or "").strip(),
-            "season": (p.get("season") or "").strip() or _season_from_attrs(p.get("attributes")),
+            "season": (p.get("season") or "").strip(),  # TEK KAYNAK: ürün kartındaki Sezon alanı (öznitelik fallback kaldırıldı)
         }
 
     # İPTAL & İADE — ürün bazında, platform kırılımlı (aynı kalem-anahtar çözümüyle)
