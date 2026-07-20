@@ -6,6 +6,7 @@ import {
   Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package, CheckCircle2,
   Image as ImageIcon,
 } from "lucide-react";
+import { resolveColor, needsBorder } from "../../lib/colorMap";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../../components/ui/dialog";
@@ -617,11 +618,15 @@ export default function Manufacturing() {
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
                         const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
                         const at = item.color_approvals?.[c || "_tek"]?.fabric_at;
+                        const hex = resolveColor(c || "") || "#d1d5db";
                         return (
+                          // Rengin KENDİSİ küçük kare kutu + yanında onay tiki (oval/dolgu rozet yok)
                           <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "fabric")}
                             title={`${c || "Tek renk"} — kumaş ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız (onaylamak için tıkla)"}`}
-                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-500 border-gray-300 hover:border-emerald-400"}`}>
-                            {c || "Tek"} {ok ? "✓" : ""}
+                            className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-gray-100 transition">
+                            <span className="w-4 h-4 rounded-[3px] shrink-0"
+                              style={{ background: hex, ...(needsBorder(hex) ? { border: "1px solid #d1d5db" } : {}) }} />
+                            <span className={`w-3.5 h-3.5 rounded-[2px] text-[9px] leading-none flex items-center justify-center border ${ok ? "bg-black text-white border-black" : "bg-white border-gray-300 text-transparent"}`}>✓</span>
                           </button>
                         );
                       })}
@@ -634,11 +639,14 @@ export default function Manufacturing() {
                         {(_rowColors.length ? _rowColors : [""]).map(c => {
                           const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
                           const at = item.color_approvals?.[c || "_tek"]?.lining_at;
+                          const hex = resolveColor(c || "") || "#d1d5db";
                           return (
                             <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "lining")}
-                              title={`${c || "Tek renk"} — astar ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız"}`}
-                              className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400"}`}>
-                              {c || "Tek"} {ok ? "✓" : ""}
+                              title={`${c || "Tek renk"} — astar ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız (onaylamak için tıkla)"}`}
+                              className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-gray-100 transition">
+                              <span className="w-4 h-4 rounded-[3px] shrink-0"
+                                style={{ background: hex, ...(needsBorder(hex) ? { border: "1px solid #d1d5db" } : {}) }} />
+                              <span className={`w-3.5 h-3.5 rounded-[2px] text-[9px] leading-none flex items-center justify-center border ${ok ? "bg-black text-white border-black" : "bg-white border-gray-300 text-transparent"}`}>✓</span>
                             </button>
                           );
                         })}
