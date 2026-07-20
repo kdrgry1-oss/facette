@@ -37,6 +37,7 @@ export function SalesReport() {
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
   const [brk, setBrk] = useState(null);
+  const [summary, setSummary] = useState(null); // Genel Satış Özeti (anlık, tarih filtresinden bağımsız)
 
   const load = async () => {
     const [s, p, b] = await Promise.all([
@@ -47,6 +48,8 @@ export function SalesReport() {
     setData(s.data);
     setPayData(p.data.items || []);
     setBrk(b.data);
+    axios.get(`${API}/admin/reports/sales-summary`, { headers: authHeaders() })
+      .then((r) => setSummary(r.data)).catch(() => {});
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy, source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
@@ -74,6 +77,39 @@ export function SalesReport() {
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
       </div>
+
+      {/* 📊 GENEL SATIŞ ÖZETİ — anlık (bugün TR saatiyle); tarih filtresinden bağımsız */}
+      {summary && (
+        <div className="bg-white border rounded-xl p-4" data-testid="sales-summary-block">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Genel Satış Özeti (Anlık)</h2>
+            <span className="text-[11px] text-gray-400">Bugün — TR saatiyle canlı</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { lbl: "Bugünkü Ciro", val: tl(summary.today?.revenue),
+                sub: summary.vs_yesterday_pct != null
+                  ? `Düne göre ${summary.vs_yesterday_pct > 0 ? "+" : ""}${summary.vs_yesterday_pct}%`
+                  : `Dün: ${tl(summary.yesterday?.revenue)}`,
+                subCls: summary.vs_yesterday_pct > 0 ? "text-emerald-600" : summary.vs_yesterday_pct < 0 ? "text-red-500" : "text-gray-400" },
+              { lbl: "Bu Haftaki Ciro", val: tl(summary.week_revenue) },
+              { lbl: "Bu Ayki Ciro", val: tl(summary.month_revenue) },
+              { lbl: "Bu Yılki Ciro", val: tl(summary.year_revenue) },
+              { lbl: "Bugün Sipariş", val: summary.today?.orders ?? 0, sub: `${summary.today?.items ?? 0} ürün satıldı` },
+              { lbl: "Ort. Sepet (Bugün)", val: tl(summary.today?.aov), sub: `${summary.today?.items_per_order ?? 0} ürün/sipariş` },
+              { lbl: "İade Tutarı (Bugün)", val: tl(summary.today?.returns), cls: "text-amber-600" },
+              { lbl: "İptal Tutarı (Bugün)", val: tl(summary.today?.cancels), cls: "text-rose-600" },
+              { lbl: "Net Satış (Bugün)", val: tl(summary.today?.net), cls: "text-emerald-700" },
+            ].map((k) => (
+              <div key={k.lbl} className="border border-gray-100 rounded-lg p-3">
+                <div className="text-[10px] uppercase text-gray-500 leading-tight">{k.lbl}</div>
+                <div className={`text-lg font-bold mt-0.5 tabular-nums ${k.cls || "text-gray-900"}`}>{k.val}</div>
+                {k.sub && <div className={`text-[10px] mt-0.5 ${k.subCls || "text-gray-400"}`}>{k.sub}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Ciro kırılımı — 4 kademe: dahil → sadece iptal → sadece iade → net (elde kalan) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

@@ -84,6 +84,75 @@ def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
     return m
 
 
+@router.get("/sales-summary")
+async def sales_summary(current_user: dict = Depends(require_admin)):
+    """Genel Satış Özeti (anlık dashboard bloğu) — TR yerel güne göre:
+    bugünkü ciro (iptal+iade DAHİL brüt), dünle karşılaştırma, hafta/ay/yıl cirosu,
+    bugünkü sipariş adedi, satılan ürün adedi (adet toplamı), ortalama sepet,
+    sipariş başına ürün adedi, iade tutarı, iptal tutarı, net satış (iptal+iade hariç)."""
+    _tr = timedelta(hours=3)
+    now_tr = datetime.now(timezone.utc) + _tr
+    day0 = now_tr.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _u(dt_tr):  # TR yerel → UTC ISO (orders.created_at UTC saklanır)
+        return (dt_tr - _tr).isoformat()
+
+    _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
+                  "returned", "refunded", "partial_refunded"]
+    _CANCEL_ST = ["cancelled", "cancel_refunded"]
+
+    async def _agg(s_iso: str, e_iso: str) -> dict:
+        pipe = [
+            {"$match": {"created_at": {"$gte": s_iso, "$lt": e_iso}}},
+            {"$group": {
+                "_id": None,
+                "revenue_all": {"$sum": {"$ifNull": ["$total", 0]}},
+                "cancel_total": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, {"$ifNull": ["$total", 0]}, 0]}},
+                "return_total": {"$sum": {"$cond": [{"$in": ["$status", _RETURN_ST]}, {"$ifNull": ["$total", 0]}, 0]}},
+                "net_revenue": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0, {"$ifNull": ["$total", 0]}]}},
+                "net_orders": {"$sum": {"$cond": [{"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0, 1]}},
+                "items_sold": {"$sum": {"$cond": [
+                    {"$in": ["$status", _CANCEL_ST + _RETURN_ST]}, 0,
+                    {"$sum": {"$map": {"input": {"$ifNull": ["$items", []]}, "as": "it",
+                                       "in": {"$ifNull": ["$$it.quantity", 1]}}}}]}},
+            }},
+        ]
+        r = await db.orders.aggregate(pipe).to_list(1)
+        d = r[0] if r else {}
+        return {
+            "revenue": round(float(d.get("revenue_all") or 0), 2),
+            "net": round(float(d.get("net_revenue") or 0), 2),
+            "cancels": round(float(d.get("cancel_total") or 0), 2),
+            "returns": round(float(d.get("return_total") or 0), 2),
+            "orders": int(d.get("net_orders") or 0),
+            "items": int(d.get("items_sold") or 0),
+        }
+
+    now_iso = _u(now_tr)
+    today = await _agg(_u(day0), now_iso)
+    yesterday = await _agg(_u(day0 - timedelta(days=1)), _u(day0))
+    week = await _agg(_u(day0 - timedelta(days=day0.weekday())), now_iso)
+    month = await _agg(_u(day0.replace(day=1)), now_iso)
+    year = await _agg(_u(day0.replace(month=1, day=1)), now_iso)
+
+    _cmp = None
+    if yesterday["revenue"] > 0:
+        _cmp = round((today["revenue"] - yesterday["revenue"]) / yesterday["revenue"] * 100, 1)
+    return {
+        "today": {
+            **today,
+            "aov": round(today["net"] / today["orders"], 2) if today["orders"] else 0,
+            "items_per_order": round(today["items"] / today["orders"], 2) if today["orders"] else 0,
+        },
+        "yesterday": yesterday,
+        "vs_yesterday_pct": _cmp,
+        "week_revenue": week["revenue"],
+        "month_revenue": month["revenue"],
+        "year_revenue": year["revenue"],
+        "as_of": now_iso,
+    }
+
+
 @router.get("/sales")
 async def sales(
     start_date: Optional[str] = None,
