@@ -48,7 +48,7 @@ export function SalesReport() {
     setData(s.data);
     setPayData(p.data.items || []);
     setBrk(b.data);
-    axios.get(`${API}/admin/reports/sales-summary`, { headers: authHeaders() })
+    axios.get(`${API}/admin/reports/sales-summary`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setSummary(r.data)).catch(() => {});
     // Saat + Gün analizi (reklam planlaması) — aynı tarih aralığı ve kaynak filtresiyle
     axios.get(`${API}/admin/reports/sales-by-hour`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
@@ -101,25 +101,33 @@ export function SalesReport() {
       {summary && (
         <div className="bg-white border rounded-xl p-4" data-testid="sales-summary-block">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider">Genel Satış Özeti (Anlık)</h2>
-            <span className="text-[11px] text-gray-400">Bugün — TR saatiyle canlı</span>
+            <h2 className="text-sm font-bold uppercase tracking-wider">
+              Genel Satış Özeti {summary.period ? `(${from} → ${to})` : "(Anlık)"}
+            </h2>
+            <span className="text-[11px] text-gray-400">{summary.period ? "Seçili tarih aralığı + kaynak filtresi" : "Bugün — TR saatiyle canlı"}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              { lbl: "Bugünkü Ciro", val: tl(summary.today?.revenue),
-                sub: summary.vs_yesterday_pct != null
-                  ? `Düne göre ${summary.vs_yesterday_pct > 0 ? "+" : ""}${summary.vs_yesterday_pct}%`
-                  : `Dün: ${tl(summary.yesterday?.revenue)}`,
-                subCls: summary.vs_yesterday_pct > 0 ? "text-emerald-600" : summary.vs_yesterday_pct < 0 ? "text-red-500" : "text-gray-400" },
+            {(() => {
+              // Tarih filtresi uygulanmışsa kartlar SEÇİLİ ARALIĞI gösterir; yoksa bugünü.
+              const P = summary.period || summary.today || {};
+              const suf = summary.period ? "Aralık" : "Bugün";
+              const cmp = summary.period ? summary.period_vs_prev_pct : summary.vs_yesterday_pct;
+              const cmpLbl = summary.period ? "Önceki döneme göre" : "Düne göre";
+              return [
+              { lbl: `Ciro (${suf})`, val: tl(P.revenue),
+                sub: cmp != null ? `${cmpLbl} ${cmp > 0 ? "+" : ""}${cmp}%`
+                  : (summary.period ? `Önceki dönem: ${tl(summary.period_prev?.revenue)}` : `Dün: ${tl(summary.yesterday?.revenue)}`),
+                subCls: cmp > 0 ? "text-emerald-600" : cmp < 0 ? "text-red-500" : "text-gray-400" },
               { lbl: "Bu Haftaki Ciro", val: tl(summary.week_revenue) },
               { lbl: "Bu Ayki Ciro", val: tl(summary.month_revenue) },
               { lbl: "Bu Yılki Ciro", val: tl(summary.year_revenue) },
-              { lbl: "Bugün Sipariş", val: summary.today?.orders ?? 0, sub: `${summary.today?.items ?? 0} ürün satıldı` },
-              { lbl: "Ort. Sepet (Bugün)", val: tl(summary.today?.aov), sub: `${summary.today?.items_per_order ?? 0} ürün/sipariş` },
-              { lbl: "İade Tutarı (Bugün)", val: tl(summary.today?.returns), cls: "text-amber-600" },
-              { lbl: "İptal Tutarı (Bugün)", val: tl(summary.today?.cancels), cls: "text-rose-600" },
-              { lbl: "Net Satış (Bugün)", val: tl(summary.today?.net), cls: "text-emerald-700" },
-            ].map((k) => (
+              { lbl: `Sipariş (${suf})`, val: P.orders ?? 0, sub: `${P.items ?? 0} ürün satıldı` },
+              { lbl: `Ort. Sepet (${suf})`, val: tl(P.aov), sub: `${P.items_per_order ?? 0} ürün/sipariş` },
+              { lbl: `İade Tutarı (${suf})`, val: tl(P.returns), cls: "text-amber-600" },
+              { lbl: `İptal Tutarı (${suf})`, val: tl(P.cancels), cls: "text-rose-600" },
+              { lbl: `Net Satış (${suf})`, val: tl(P.net), cls: "text-emerald-700" },
+              ];
+            })().map((k) => (
               <div key={k.lbl} className="border border-gray-100 rounded-lg p-3">
                 <div className="text-[10px] uppercase text-gray-500 leading-tight">{k.lbl}</div>
                 <div className={`text-lg font-bold mt-0.5 tabular-nums ${k.cls || "text-gray-900"}`}>{k.val}</div>

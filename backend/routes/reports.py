@@ -36,7 +36,7 @@ _MARKETPLACES = ["trendyol", "hepsiburada", "temu"]
 # Ciro/sipariş tutarlarına DAHİL EDİLMEYECEK durumlar: iptal + iade grubu.
 # return_rejected (iade reddedildi) HARİÇ — satış geçerli sayıldığı için ciroda kalır.
 _EXCLUDED_STATUSES = [
-    "cancelled",
+    "cancelled", "cancel_refunded",
     "return_requested", "return_approved", "return_in_transit",
     "returned", "refunded", "partial_refunded",
 ]
@@ -85,7 +85,12 @@ def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
 
 
 @router.get("/sales-summary")
-async def sales_summary(current_user: dict = Depends(require_admin)):
+async def sales_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
     """Genel Satış Özeti (anlık dashboard bloğu) — TR yerel güne göre:
     bugünkü ciro (iptal+iade DAHİL brüt), dünle karşılaştırma, hafta/ay/yıl cirosu,
     bugünkü sipariş adedi, satılan ürün adedi (adet toplamı), ortalama sepet,
@@ -102,8 +107,12 @@ async def sales_summary(current_user: dict = Depends(require_admin)):
     _CANCEL_ST = ["cancelled", "cancel_refunded"]
 
     async def _agg(s_iso: str, e_iso: str) -> dict:
+        _m = {"created_at": {"$gte": s_iso, "$lt": e_iso}}
+        _sc = _source_cond(source)
+        if _sc:
+            _m.update(_sc)
         pipe = [
-            {"$match": {"created_at": {"$gte": s_iso, "$lt": e_iso}}},
+            {"$match": _m},
             {"$group": {
                 "_id": None,
                 "revenue_all": {"$sum": {"$ifNull": ["$total", 0]}},
@@ -138,7 +147,26 @@ async def sales_summary(current_user: dict = Depends(require_admin)):
     _cmp = None
     if yesterday["revenue"] > 0:
         _cmp = round((today["revenue"] - yesterday["revenue"]) / yesterday["revenue"] * 100, 1)
+
+    # SEÇİLİ ARALIK özeti (sayfadaki tarih filtresi) + bir önceki eşit uzunluktaki
+    # dönemle % karşılaştırma — "günlük seçtiysem günlük, aylık seçtiysem aylık".
+    period = period_prev = None
+    period_cmp = None
+    if start_date and end_date:
+        try:
+            s2, e2 = _iso_range(start_date, end_date)
+            period = await _agg(s2, e2)
+            period["aov"] = round(period["net"] / period["orders"], 2) if period["orders"] else 0
+            period["items_per_order"] = round(period["items"] / period["orders"], 2) if period["orders"] else 0
+            _sd = datetime.fromisoformat(str(s2).replace("Z", "+00:00"))
+            _ed = datetime.fromisoformat(str(e2).replace("Z", "+00:00"))
+            period_prev = await _agg((_sd - (_ed - _sd)).isoformat(), s2)
+            if period_prev["revenue"] > 0:
+                period_cmp = round((period["revenue"] - period_prev["revenue"]) / period_prev["revenue"] * 100, 1)
+        except Exception:
+            period = None
     return {
+        "period": period, "period_prev": period_prev, "period_vs_prev_pct": period_cmp,
         "today": {
             **today,
             "aov": round(today["net"] / today["orders"], 2) if today["orders"] else 0,
@@ -299,7 +327,7 @@ async def sales_breakdown(
     sc = _source_cond(source)
     if sc:
         base.update(sc)
-    _CANCEL = ["cancelled"]
+    _CANCEL = ["cancelled", "cancel_refunded"]
     # İade grubu (return_rejected HARİÇ — satış geçerli sayılır, ciroda kalır)
     _RETURN = ["return_requested", "return_approved", "return_in_transit",
                "returned", "refunded", "partial_refunded"]
