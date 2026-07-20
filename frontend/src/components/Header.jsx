@@ -736,11 +736,10 @@ export default function Header({ hideMenu = false }) {
 
       {/* Search Overlay */}
       {searchOpen && (
-        {/* Mobil klavye düzeltmesi: 100dvh (dinamik viewport) — klavye açılınca kap
-            küçülür, içerik klavyenin ARKASINDA kalmaz; overscroll-contain ile arka
-            sayfa kaymaz. Mobilde üst boşluklar kısaltıldı ki giriş + sonuçlar
-            klavyenin üstünde görünür kalsın. */}
         <div className="fixed inset-x-0 top-0 h-[100dvh] bg-white z-[60] overflow-y-auto overscroll-contain" style={{ animation: "facetteSearchIn .2s ease-out" }}>
+          {/* Mobil klavye düzeltmesi: 100dvh (dinamik viewport) — klavye açılınca kap
+              küçülür, içerik klavyenin arkasında kalmaz; overscroll-contain ile arka
+              sayfa kaymaz. Mobilde üst boşluklar kısaltıldı. */}
           <style>{`@keyframes facetteSearchIn{from{opacity:0}to{opacity:1}}@keyframes facetteSearchUp{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}`}</style>
           <div className="px-5 md:px-10 pt-4 md:pt-5 pb-40 md:pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
             {/* Üst bar: logo + kapat */}
