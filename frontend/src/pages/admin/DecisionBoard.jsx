@@ -13,7 +13,7 @@ const URGENCY = {
   sezon_plani: { label: "SEZON PLANI", cls: "bg-sky-500 text-white" },
 };
 
-export default function DecisionBoard() {
+export default function DecisionBoard({ embed = false }) {
   const [reports, setReports] = useState([]);
   const [selected, setSelected] = useState(null);   // tam rapor dokümanı
   const [period, setPeriod] = useState(30);
@@ -68,7 +68,11 @@ export default function DecisionBoard() {
     <div className="space-y-5" data-testid="decision-board-page">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><BrainCircuit className="text-violet-600" /> Karar Destek Kurulu</h1>
+          {embed ? (
+            <h2 className="text-lg font-bold flex items-center gap-2"><BrainCircuit className="text-violet-600" size={20} /> Karar Destek Kurulu</h2>
+          ) : (
+            <h1 className="text-2xl font-bold flex items-center gap-2"><BrainCircuit className="text-violet-600" /> Karar Destek Kurulu</h1>
+          )}
           <p className="text-sm text-gray-500 mt-1">
             6 uzman (Üretim · Pazarlama · Reklam · Trend · Operasyon · Finans) canlı satış verilerini tartışır,
             şüpheci ajan zayıf önerileri eler, size numaralı kararlar sunulur — her kararın altına yorumunuzu yazın.

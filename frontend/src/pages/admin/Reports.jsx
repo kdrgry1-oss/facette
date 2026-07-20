@@ -4,6 +4,7 @@ import axios from "axios";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { TrendingUp, Package, Users, Truck, CreditCard, RefreshCw } from "lucide-react";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
+import DecisionBoard from "./DecisionBoard";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -411,9 +412,10 @@ export function ProductsReport() {
   const [sortDir, setSortDir] = useState("desc");
   const [platFilter, setPlatFilter] = useState("");
   const [sizeFilter, setSizeFilter] = useState("");
-  const [collFilter, setCollFilter] = useState("");   // D5 — koleksiyon (FcFw/FCss…)
+  const [collFilter, setCollFilter] = useState("");   // Sezon filtresi (İlkbahar/Yaz/Sonbahar/Kış)
   const [velFilter, setVelFilter] = useState("");      // D4 — satış hızı (green/yellow/red)
   const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
+  const [showBoard, setShowBoard] = useState(false);         // Karar Destek Kurulu paneli (gömülü)
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const load = async () => {
@@ -433,30 +435,24 @@ export function ProductsReport() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
-  // Sezon = stok kodu koleksiyonundan: FCFW → Sonbahar/Kış, FCSS → İlkbahar/Yaz
-  const seasonLabel = (c) => {
-    const s = (c || "").toLowerCase();
-    if (s.includes("fcfw")) return "Sonbahar/Kış";
-    if (s.includes("fcss")) return "İlkbahar/Yaz";
-    return (c || "").trim() || "—";
-  };
+  // Sezon ürün kartındaki 'Sezon' özniteliğinden gelir (backend normalize eder); yoksa boş.
+  const SEASONS = ["İlkbahar", "Yaz", "Sonbahar", "Kış"];
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" ? "asc" : "desc"); } };
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
   const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
-  const collOptions = Array.from(new Set(top.map(p => (p.collection || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "tr"));
   const velMeta = { green: { label: "Hızlı (haftada 5+)", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta (haftada 1-4)", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş (ayda 0-2)", cls: "bg-red-100 text-red-700 border-red-200" } };
   const rows = (() => {
     const f = q.trim().toLocaleLowerCase("tr");
     let r = f ? top.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f)) : [...top];
     if (platFilter) r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter));
     if (sizeFilter) r = r.filter(p => (p.size_breakdown || []).some(x => x.size === sizeFilter));
-    if (collFilter) r = r.filter(p => (p.collection || "").trim() === collFilter);
+    if (collFilter) r = r.filter(p => (p.season || "") === collFilter);
     if (velFilter) r = r.filter(p => (p.velocity || {}).code === velFilter);
     r.sort((a, b) => {
       if (sortKey === "velocity") { const va = (a.velocity || {}).weekly_rate ?? -1, vb = (b.velocity || {}).weekly_rate ?? -1; return sortDir === "asc" ? va - vb : vb - va; }
       let va = a[sortKey], vb = b[sortKey];
-      if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform" || sortKey === "collection") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
+      if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform" || sortKey === "season") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
       va = va ?? -1; vb = vb ?? -1; return sortDir === "asc" ? va - vb : vb - va;
     });
     return r;
@@ -496,6 +492,18 @@ export function ProductsReport() {
         <span className="font-semibold">Bu raporda:</span> Seçili tarih aralığında (iptal & iade hariç) her ürünün toplam <b>satış adedi</b> ve <b>cirosu</b>, <b>güncel stok</b> durumu, <b>en çok satan bedeni</b> ve <b>hangi platformdan</b> ne kadar sattığı yer alır. Kolon başlıklarına tıklayarak (ör. cirodan yükseğe/düşüğe) sıralayabilir, arama ile ürün filtreleyebilirsiniz.
       </div>
 
+      {/* 🧠 Karar Destek Kurulu — ürün raporunun İÇİNDE (ayrı sekme değil, kullanıcı isteği) */}
+      <div className="bg-white border-2 border-violet-200 rounded-xl">
+        <button onClick={() => setShowBoard(v => !v)} data-testid="toggle-decision-board"
+          className="w-full flex items-center justify-between px-5 py-3 text-left">
+          <span className="font-bold text-violet-800 flex items-center gap-2">
+            🧠 Karar Destek Kurulu <span className="text-xs font-normal text-violet-500">— uzman ajanlar bu rapordaki verileri tartışır, kararların altına yorum yazarsınız</span>
+          </span>
+          <span className="text-violet-600 text-sm font-semibold">{showBoard ? "Gizle ▴" : "Raporu Aç ▾"}</span>
+        </button>
+        {showBoard && <div className="px-5 pb-5"><DecisionBoard embed /></div>}
+      </div>
+
       <div className="bg-white rounded-xl border p-5">
         <h3 className="font-semibold mb-3">En Çok Satan 10 Ürün (Ciro)</h3>
         <ResponsiveContainer width="100%" height={340}>
@@ -522,12 +530,10 @@ export function ProductsReport() {
               <option value="">Tüm Bedenler</option>
               {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            {collOptions.length > 0 && (
-              <select value={collFilter} onChange={e => setCollFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm" data-testid="season-filter">
-                <option value="">Tüm Sezonlar</option>
-                {collOptions.map(c => <option key={c} value={c}>{seasonLabel(c)}</option>)}
-              </select>
-            )}
+            <select value={collFilter} onChange={e => setCollFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm" data-testid="season-filter">
+              <option value="">Tüm Sezonlar</option>
+              {SEASONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
             <select value={velFilter} onChange={e => setVelFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
               <option value="">Tüm Hızlar</option>
               <option value="green">🟢 Hızlı (haftada 5+)</option>
@@ -564,7 +570,7 @@ export function ProductsReport() {
             <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
               <tr>
                 <SortTh k="name">Ürün</SortTh>
-                <SortTh k="collection">Sezon</SortTh>
+                <SortTh k="season">Sezon</SortTh>
                 <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="qty" right>Adet</SortTh>
                 <SortTh k="revenue" right>Ciro</SortTh>
@@ -585,7 +591,7 @@ export function ProductsReport() {
                   <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
                     <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
                   </td>
-                  <td className="p-3 text-xs whitespace-nowrap" title={p.collection || ""}>{seasonLabel(p.collection)}</td>
+                  <td className="p-3 text-xs whitespace-nowrap">{p.season || ""}</td>
                   <td className="p-3">
                     {p.velocity ? (
                       <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border ${(velMeta[p.velocity.code] || {}).cls || ""}`} title={`${p.velocity.weekly_rate}/hafta`}>

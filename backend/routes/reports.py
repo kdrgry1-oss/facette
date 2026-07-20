@@ -75,6 +75,31 @@ def _collection_from_code(*codes) -> str:
     return ""
 
 
+def _season_from_attrs(attrs) -> str:
+    """Ürünün 'Sezon' özniteliğini 4 sezona normalize eder: İlkbahar / Yaz / Sonbahar / Kış.
+    Veri yoksa BOŞ döner (varsayım yapılmaz). Kombine etiketlerde (SPRING-SUMMER,
+    FALL-WINTER) geç sezon esas alınır."""
+    val = ""
+    for a in (attrs or []):
+        if isinstance(a, dict) and str(a.get("name") or a.get("type") or "").strip().lower() in ("sezon", "season"):
+            v = str(a.get("value") or "").strip()
+            if v:
+                val = v
+                break
+    v = val.lower().replace("i̇", "i")
+    if not v:
+        return ""
+    if "kış" in v or "kis" in v or "winter" in v:
+        return "Kış"
+    if "sonbahar" in v or "fall" in v or "autumn" in v:
+        return "Sonbahar"
+    if "yaz" in v or "summer" in v:
+        return "Yaz"
+    if "ilkbahar" in v or "spring" in v or "bahar" in v:
+        return "İlkbahar"
+    return ""
+
+
 def _base_match(s: str, e: str, source: Optional[str] = None) -> dict:
     """Tüm satış raporlarının ortak $match'i: tarih aralığı + iptal/iade hariç + kaynak."""
     m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
@@ -388,20 +413,12 @@ async def products_export_xlsx(
                  "yellow": PatternFill("solid", fgColor="FFEB9C"),
                  "red": PatternFill("solid", fgColor="FFC7CE")}
     _VEL_LABEL = {"green": "Hızlı", "yellow": "Orta", "red": "Yavaş"}
-    # Panelle aynı sezon adlandırması: FCFW → Sonbahar/Kış, FCSS → İlkbahar/Yaz
-    def _season(c):
-        s = (c or "").lower()
-        if "fcfw" in s:
-            return "Sonbahar/Kış"
-        if "fcss" in s:
-            return "İlkbahar/Yaz"
-        return (c or "").strip()
     for r in data.get("items", []):
         _crd = "; ".join(f"{x['platform']}: iptal {x['cancel']} / iade {x['return']}"
                          for x in (r.get("cancel_return_by_platform") or []))
         _vel = r.get("velocity") or {}
         _vcode = _vel.get("code") or ""
-        ws.append([r.get("name"), _season(r.get("collection")), r.get("qty"), r.get("revenue"),
+        ws.append([r.get("name"), r.get("season") or "", r.get("qty"), r.get("revenue"),
                    r.get("orders"), r.get("current_stock"), r.get("best_size"),
                    r.get("top_platform"),
                    f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)",
@@ -474,13 +491,15 @@ async def top_products(
         if bcs:
             q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
         async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1,
-                                             "barcode": 1, "collection": 1, "created_at": 1, "stock_code": 1}):
+                                             "barcode": 1, "collection": 1, "created_at": 1, "stock_code": 1,
+                                             "attributes": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
             info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock,
                     "collection": (p.get("collection") or "").strip(),
                     "created_at": p.get("created_at") or None,
-                    "stock_code": (p.get("stock_code") or "").strip()}
+                    "stock_code": (p.get("stock_code") or "").strip(),
+                    "season": _season_from_attrs(p.get("attributes"))}
             by_id[str(p.get("id"))] = info
             if p.get("barcode"):
                 by_bc[str(p["barcode"])] = info
@@ -508,6 +527,7 @@ async def top_products(
                               or (pm.get("collection") or "").strip(),
                 "created_at": pm.get("created_at"),
                 "stock_code": pm.get("stock_code") or "",
+                "season": pm.get("season") or "",
             }
         _q = int(r["qty"])
         m["qty"] += _q
@@ -549,7 +569,7 @@ async def top_products(
     async for p in db.products.find(
             {"is_active": True, "is_deleted": {"$ne": True}},
             {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "collection": 1,
-             "created_at": 1, "stock_code": 1}):
+             "created_at": 1, "stock_code": 1, "attributes": 1}):
         if str(p.get("id")) in _seen_ids:
             continue
         variants = p.get("variants") or []
@@ -560,6 +580,7 @@ async def top_products(
             "_sizes": {}, "_plats": {},
             "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
             "created_at": p.get("created_at"), "stock_code": (p.get("stock_code") or "").strip(),
+            "season": _season_from_attrs(p.get("attributes")),
         }
 
     # İPTAL & İADE — ürün bazında, platform kırılımlı (aynı kalem-anahtar çözümüyle)
