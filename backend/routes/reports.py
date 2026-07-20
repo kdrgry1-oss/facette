@@ -325,6 +325,43 @@ async def sales_breakdown(
     return {"included": included, "cancels": cancels, "returns": returns, "net": net}
 
 
+@router.get("/products/export-xlsx")
+async def products_export_xlsx(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Ürün raporunun Excel çıktısı — ekrandaki listeyle aynı veri (tüm ürünler,
+    iptal/iade kolonları dahil). Kolon sıralamayı Excel içinde yapabilirsiniz."""
+    import openpyxl
+    from io import BytesIO as _BytesIO
+    from fastapi.responses import Response as _Response
+    data = await top_products(limit=5000, start_date=start_date, end_date=end_date,
+                              source=source, current_user=current_user)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ürün Raporu"
+    ws.append(["Ürün", "Koleksiyon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
+               "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
+               "İptal Adet", "İade Adet", "Platform İptal/İade Detay"])
+    for r in data.get("items", []):
+        _crd = "; ".join(f"{x['platform']}: iptal {x['cancel']} / iade {x['return']}"
+                         for x in (r.get("cancel_return_by_platform") or []))
+        ws.append([r.get("name"), r.get("collection") or "", r.get("qty"), r.get("revenue"),
+                   r.get("orders"), r.get("current_stock"), r.get("best_size"),
+                   r.get("top_platform"), (r.get("velocity") or {}).get("weekly_rate"),
+                   r.get("cancel_qty", 0), r.get("return_qty", 0), _crd])
+    for col, w in zip("ABCDEFGHIJKL", [42, 10, 12, 14, 10, 12, 16, 18, 12, 10, 10, 40]):
+        ws.column_dimensions[col].width = w
+    buf = _BytesIO()
+    wb.save(buf)
+    return _Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=urun-raporu.xlsx"})
+
+
 @router.get("/products/top")
 async def top_products(
     limit: int = Query(1000, ge=1, le=5000),   # varsayılan TÜM ürünler (yüksek tavan)
@@ -443,10 +480,57 @@ async def top_products(
             code, label = "red", "Yavaş (ayda 0-2)"
         return {"weekly_rate": round(wr, 1), "code": code, "label": label}
 
+    # SATIŞI OLMAYAN ürünler de listelensin ("143 ürün" yalnız satışı olanlardı) —
+    # aktif katalogda olup raporda görünmeyenler qty=0 satırıyla eklenir.
+    _seen_ids = {m.get("product_id") for m in merged.values() if m.get("product_id")}
+    async for p in db.products.find(
+            {"is_active": True, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "collection": 1,
+             "created_at": 1, "stock_code": 1}):
+        if str(p.get("id")) in _seen_ids:
+            continue
+        variants = p.get("variants") or []
+        stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
+        merged[f"zero:{p.get('id')}"] = {
+            "product_id": str(p.get("id")), "name": p.get("name") or "",
+            "qty": 0, "revenue": 0.0, "orders": 0, "current_stock": stock,
+            "_sizes": {}, "_plats": {},
+            "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
+            "created_at": p.get("created_at"), "stock_code": (p.get("stock_code") or "").strip(),
+        }
+
+    # İPTAL & İADE — ürün bazında, platform kırılımlı (aynı kalem-anahtar çözümüyle)
+    _CR_CANCEL = ["cancelled", "cancel_refunded"]
+    _CR_RETURN = ["return_requested", "return_approved", "return_in_transit",
+                  "returned", "refunded", "partial_refunded"]
+    _cr_pipe = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$in": _CR_CANCEL + _CR_RETURN}}},
+        {"$addFields": {"_plat": {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}},
+                        "_kind": {"$cond": [{"$in": ["$status", _CR_CANCEL]}, "cancel", "return"]}}},
+        {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$group": {"_id": {"bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
+                            "pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
+                            "nm": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", ""]}]},
+                            "kind": "$_kind", "plat": "$_plat"},
+                    "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}},
+    ]
+    import unicodedata as _ud3
+    cr_map: dict = {}
+    async for r in db.orders.aggregate(_cr_pipe):
+        i = r["_id"]
+        pm = by_bc.get(i.get("bc") or "") or by_id.get(i.get("pid") or "") or {}
+        _cname = pm.get("name") or i.get("nm") or "(isimsiz ürün)"
+        gk = pm.get("id") or (i.get("pid") or None) or f"nm:{_ud3.normalize('NFC', _cname).strip().lower()}"
+        d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}})
+        d[i["kind"]] += int(r["qty"])
+        bp = d["by_plat"].setdefault((i.get("plat") or "site"), {"cancel": 0, "return": 0})
+        bp[i["kind"]] += int(r["qty"])
+
     out = []
-    for m in merged.values():
+    for gkey, m in merged.items():
         _sizes = sorted(m.pop("_sizes").items(), key=lambda x: -x[1])
         _plats = sorted(m.pop("_plats").items(), key=lambda x: -x[1])
+        _cr = cr_map.get(m.get("product_id") or gkey) or cr_map.get(gkey) or {}
         out.append({
             **m,
             "revenue": round(m["revenue"], 2),
@@ -455,6 +539,11 @@ async def top_products(
             "top_platform": _plats[0][0] if _plats else "site",
             "platform_breakdown": [{"platform": k, "qty": v} for k, v in _plats],
             "velocity": _velocity(int(m["qty"])),
+            "cancel_qty": int(_cr.get("cancel", 0)),
+            "return_qty": int(_cr.get("return", 0)),
+            "cancel_return_by_platform": [
+                {"platform": k, "cancel": v["cancel"], "return": v["return"]}
+                for k, v in sorted((_cr.get("by_plat") or {}).items())],
         })
     out.sort(key=lambda x: -x["revenue"])
     return {"items": out[:limit], "range_days": round(_range_days, 1), "weeks": round(_weeks, 1)}

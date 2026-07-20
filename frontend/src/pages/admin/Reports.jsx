@@ -429,7 +429,18 @@ export function ProductsReport() {
           </div>
         </div>
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
-          <span><span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — listeyi aşağı kaydırarak tümünü görebilirsiniz.</span>
+          <span><span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — satışı olmayan ürünler de dahildir.</span>
+          <button onClick={async () => {
+            try {
+              const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
+              const b = await r.blob();
+              const u = URL.createObjectURL(b);
+              const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
+              URL.revokeObjectURL(u);
+            } catch { /* sessiz */ }
+          }} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700" data-testid="products-export-xlsx">
+            ⬇ Excel İndir
+          </button>
         </div>
         <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table className="w-full text-sm">
@@ -442,6 +453,8 @@ export function ProductsReport() {
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
                 <SortTh k="best_size">En Çok Beden</SortTh>
                 <SortTh k="top_platform">Platform</SortTh>
+                <SortTh k="cancel_qty" right>İptal</SortTh>
+                <SortTh k="return_qty" right>İade</SortTh>
               </tr>
             </thead>
             <tbody>
@@ -469,10 +482,18 @@ export function ProductsReport() {
                   <td className="p-3" title={(p.platform_breakdown || []).map(x => `${platLabel(x.platform)}: ${x.qty}`).join(", ")}>
                     {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
                   </td>
+                  <td className={`p-3 text-right tabular-nums ${p.cancel_qty > 0 ? "text-rose-600 font-semibold" : "text-gray-400"}`}
+                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iptal ${x.cancel}`).join(", ")}>
+                    {p.cancel_qty || 0}
+                  </td>
+                  <td className={`p-3 text-right tabular-nums ${p.return_qty > 0 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
+                    {p.return_qty || 0}
+                  </td>
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={7} className="px-8 py-3">
+                    <td colSpan={9} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
