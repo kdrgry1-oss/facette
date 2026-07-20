@@ -380,6 +380,7 @@ export function ProductsReport() {
         _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
         _mom: (prev != null && (wr > 0 || prev > 0)) ? wr - prev : null,
         _retpct: totQ > 0 ? (100 * (p.return_qty || 0)) / totQ : 0,
+        _gross: (p.qty || 0) + (p.cancel_qty || 0) + (p.return_qty || 0),
       };
     });
     if (f) r = r.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f));
@@ -476,7 +477,7 @@ export function ProductsReport() {
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
           <span>
             <span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — aktif katalog (satışı olmayanlar dahil) + seçili dönemde satış yapmış pasif ürünler.
-            <span className="text-gray-400"> Satış Adedi/Ciro NET'tir (iade+iptal hariç): tüm satışı iade edilen ürün 0 satış + iade sayısıyla görünür.</span>
+            <span className="text-gray-400"> Toplam Satış = Net Satış + İptal + İade. Net Satış ve Ciro, iade+iptal düşülmüş halidir.</span>
           </span>
           {/* Satış hızı dağılımı — filtrelenmiş listeye göre yüzde + adet */}
           {rows.length > 0 && (() => {
@@ -503,15 +504,16 @@ export function ProductsReport() {
                 <SortTh k="season">Sezon</SortTh>
                 <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="_mom">İvme</SortTh>
-                <SortTh k="qty" right>Satış Adedi</SortTh>
-                <SortTh k="revenue" right>Ciro</SortTh>
+                <SortTh k="_gross" right>Toplam Satış</SortTh>
+                <SortTh k="cancel_qty" right>İptal</SortTh>
+                <SortTh k="return_qty" right>İade</SortTh>
+                <SortTh k="_retpct" right>İade %</SortTh>
+                <SortTh k="qty" right>Net Satış</SortTh>
+                <SortTh k="revenue" right>Ciro (Net)</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
                 <SortTh k="_cover" right>Kapsama</SortTh>
                 <SortTh k="best_size">En Çok Beden</SortTh>
                 <SortTh k="top_platform">Platform</SortTh>
-                <SortTh k="cancel_qty" right>İptal</SortTh>
-                <SortTh k="return_qty" right>İade</SortTh>
-                <SortTh k="_retpct" right>İade %</SortTh>
               </tr>
             </thead>
             <tbody>
@@ -542,6 +544,19 @@ export function ProductsReport() {
                       return <span className="text-gray-400" title={`90g: ${prev.toFixed(1)}/hf → şimdi: ${wr.toFixed(1)}/hf`}>→ Stabil</span>;
                     })()}
                   </td>
+                  <td className="p-3 text-right font-semibold tabular-nums" title="Toplam sipariş edilen adet = Net Satış + İptal + İade">{p._gross}</td>
+                  <td className={`p-3 text-right tabular-nums ${p.cancel_qty > 0 ? "text-rose-600 font-semibold" : "text-gray-400"}`}
+                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iptal ${x.cancel}`).join(", ")}>
+                    {p.cancel_qty || 0}
+                  </td>
+                  <td className={`p-3 text-right tabular-nums ${p.return_qty > 0 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
+                    {p.return_qty || 0}
+                  </td>
+                  <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={p._retpct >= 15 ? "İade oranı %15+ — bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}>
+                    {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
+                  </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
                   <td className={`p-3 text-right ${p.current_stock === 0 ? "text-red-600 font-semibold" : ""}`}>{p.current_stock == null ? "—" : p.current_stock}</td>
@@ -560,22 +575,10 @@ export function ProductsReport() {
                   <td className="p-3" title={(p.platform_breakdown || []).map(x => `${platLabel(x.platform)}: ${x.qty}`).join(", ")}>
                     {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
                   </td>
-                  <td className={`p-3 text-right tabular-nums ${p.cancel_qty > 0 ? "text-rose-600 font-semibold" : "text-gray-400"}`}
-                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iptal ${x.cancel}`).join(", ")}>
-                    {p.cancel_qty || 0}
-                  </td>
-                  <td className={`p-3 text-right tabular-nums ${p.return_qty > 0 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
-                    {p.return_qty || 0}
-                  </td>
-                  <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
-                    title={p._retpct >= 15 ? "İade oranı %15+ — bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}>
-                    {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
-                  </td>
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={13} className="px-8 py-3">
+                    <td colSpan={14} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
@@ -600,7 +603,7 @@ export function ProductsReport() {
                 </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={13} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={14} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
         </div>
