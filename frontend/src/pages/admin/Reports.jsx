@@ -100,21 +100,22 @@ export function SalesReport() {
         <div className="bg-white border rounded-xl p-4" data-testid="sales-summary-block">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold uppercase tracking-wider">
-              Genel Satış Özeti {summary.period ? `(${from} → ${to})` : "(Anlık)"}
+              Genel Satış Özeti ({from} → {to})
             </h2>
-            <span className="text-[11px] text-gray-400">{summary.period ? "Seçili tarih aralığı + kaynak filtresi" : "Bugün — TR saatiyle canlı"}</span>
+            <span className="text-[11px] text-gray-400">Üstteki tarih aralığı + kaynak filtresine göre</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {(() => {
               // Tarih filtresi uygulanmışsa kartlar SEÇİLİ ARALIĞI gösterir; yoksa bugünü.
-              const P = summary.period || summary.today || {};
-              const suf = summary.period ? "Aralık" : "Bugün";
-              const cmp = summary.period ? summary.period_vs_prev_pct : summary.vs_yesterday_pct;
-              const cmpLbl = summary.period ? "Önceki döneme göre" : "Düne göre";
+              // Özet HER ZAMAN seçili aralıktan beslenir (anlık mod kaldırıldı — kullanıcı isteği)
+              const P = summary.period || {};
+              const suf = "Aralık";
+              const cmp = summary.period_vs_prev_pct;
+              const cmpLbl = "Önceki döneme göre";
               return [
               { lbl: `Ciro (${suf})`, val: tl(P.revenue),
                 sub: cmp != null ? `${cmpLbl} ${cmp > 0 ? "+" : ""}${cmp}%`
-                  : (summary.period ? `Önceki dönem: ${tl(summary.period_prev?.revenue)}` : `Dün: ${tl(summary.yesterday?.revenue)}`),
+                  : `Önceki dönem: ${tl(summary.period_prev?.revenue)}`,
                 subCls: cmp > 0 ? "text-emerald-600" : cmp < 0 ? "text-red-500" : "text-gray-400" },
               { lbl: "Bu Haftaki Ciro", val: tl(summary.week_revenue) },
               { lbl: "Bu Ayki Ciro", val: tl(summary.month_revenue) },
@@ -308,9 +309,20 @@ export function SalesReport() {
         <div className="grid md:grid-cols-2 gap-5 items-center">
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={paymentData} dataKey="revenue" nameKey="method" cx="50%" cy="50%" outerRadius={90}
-                label={(e) => (e.percent > 0.06 ? `${e.method}: ₺${e.revenue.toLocaleString("tr-TR")}` : "")}
-                labelLine={false}>
+              <Pie data={paymentData} dataKey="revenue" nameKey="method" cx="50%" cy="50%" outerRadius={85}
+                label={(pr) => {
+                  // Tüm dilimler ÇİZGİYLE etiketli; küçük dilimler kademeli yerleşir (üst üste binmez)
+                  const RAD = Math.PI / 180;
+                  const r = pr.outerRadius + 20 + (pr.percent < 0.1 ? (pr.index % 2) * 16 : 0);
+                  const x = pr.cx + r * Math.cos(-pr.midAngle * RAD);
+                  const y = pr.cy + r * Math.sin(-pr.midAngle * RAD);
+                  return (
+                    <text x={x} y={y} fill="#374151" fontSize={11} textAnchor={x > pr.cx ? "start" : "end"} dominantBaseline="central">
+                      {`${pr.payload.method}: ₺${(pr.payload.revenue || 0).toLocaleString("tr-TR")}`}
+                    </text>
+                  );
+                }}
+                labelLine={true}>
                 {paymentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
               </Pie>
               <Tooltip />
@@ -399,7 +411,20 @@ export function ProductsReport() {
           <h1 className="text-2xl font-bold flex items-center gap-2"><Package /> Ürün Raporları <ReportScopeBadge kind="exclude" /></h1>
           <p className="text-sm text-gray-500 mt-1">Tüm ürünlerin satış performansı — adet, ciro, güncel stok, en çok satan beden ve platform dağılımı.</p>
         </div>
-        <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
+        <div className="flex items-center gap-2">
+          <button onClick={async () => {
+            try {
+              const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
+              const b = await r.blob();
+              const u = URL.createObjectURL(b);
+              const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
+              URL.revokeObjectURL(u);
+            } catch { /* sessiz */ }
+          }} className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 shadow-sm" data-testid="products-export-xlsx">
+            ⬇ Excel İndir
+          </button>
+          <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
+        </div>
       </div>
 
       {/* Rapordan neye erişilir — kılavuz */}
@@ -450,17 +475,22 @@ export function ProductsReport() {
         </div>
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
           <span><span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — satışı olmayan ürünler de dahildir.</span>
-          <button onClick={async () => {
-            try {
-              const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
-              const b = await r.blob();
-              const u = URL.createObjectURL(b);
-              const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
-              URL.revokeObjectURL(u);
-            } catch { /* sessiz */ }
-          }} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700" data-testid="products-export-xlsx">
-            ⬇ Excel İndir
-          </button>
+          {/* Satış hızı dağılımı — filtrelenmiş listeye göre yüzde + adet */}
+          {rows.length > 0 && (() => {
+            const cnt = { green: 0, yellow: 0, red: 0 };
+            rows.forEach(r => { const c = (r.velocity || {}).code; if (cnt[c] != null) cnt[c]++; });
+            const pct = (n) => Math.round((n / rows.length) * 100);
+            return (
+              <span className="inline-flex items-center gap-2" data-testid="velocity-distribution">
+                <span className="inline-flex h-2.5 w-40 rounded overflow-hidden border border-gray-200">
+                  <span style={{ width: `${pct(cnt.green)}%` }} className="bg-green-500" />
+                  <span style={{ width: `${pct(cnt.yellow)}%` }} className="bg-yellow-400" />
+                  <span style={{ width: `${pct(cnt.red)}%` }} className="bg-red-500" />
+                </span>
+                <span className="text-[11px]">🟢 %{pct(cnt.green)} ({cnt.green}) · 🟡 %{pct(cnt.yellow)} ({cnt.yellow}) · 🔴 %{pct(cnt.red)} ({cnt.red})</span>
+              </span>
+            );
+          })()}
         </div>
         <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
           <table className="w-full text-sm">
@@ -486,7 +516,7 @@ export function ProductsReport() {
                 <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(key)}>
                   <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
                     <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
-                    {p.collection ? <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-500 rounded">{p.collection}</span> : null}
+                    {p.collection ? <span className="ml-2 px-2 py-0.5 text-xs font-bold uppercase tracking-wide bg-gray-800 text-white rounded">{p.collection}</span> : null}
                   </td>
                   <td className="p-3">
                     {p.velocity ? (

@@ -382,13 +382,25 @@ async def products_export_xlsx(
     ws.append(["Ürün", "Koleksiyon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
                "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
                "İptal Adet", "İade Adet", "Platform İptal/İade Detay"])
+    # Satış hızı: renkli hücre (yeşil/sarı/kırmızı) + etiket — panelle birebir aynı kodlama
+    from openpyxl.styles import PatternFill
+    _VEL_FILL = {"green": PatternFill("solid", fgColor="C6EFCE"),
+                 "yellow": PatternFill("solid", fgColor="FFEB9C"),
+                 "red": PatternFill("solid", fgColor="FFC7CE")}
+    _VEL_LABEL = {"green": "Hızlı", "yellow": "Orta", "red": "Yavaş"}
     for r in data.get("items", []):
         _crd = "; ".join(f"{x['platform']}: iptal {x['cancel']} / iade {x['return']}"
                          for x in (r.get("cancel_return_by_platform") or []))
+        _vel = r.get("velocity") or {}
+        _vcode = _vel.get("code") or ""
         ws.append([r.get("name"), r.get("collection") or "", r.get("qty"), r.get("revenue"),
                    r.get("orders"), r.get("current_stock"), r.get("best_size"),
-                   r.get("top_platform"), (r.get("velocity") or {}).get("weekly_rate"),
+                   r.get("top_platform"),
+                   f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)",
                    r.get("cancel_qty", 0), r.get("return_qty", 0), _crd])
+        _fill = _VEL_FILL.get(_vcode)
+        if _fill:
+            ws.cell(row=ws.max_row, column=9).fill = _fill
     for col, w in zip("ABCDEFGHIJKL", [42, 10, 12, 14, 10, 12, 16, 18, 12, 10, 10, 40]):
         ws.column_dimensions[col].width = w
     buf = _BytesIO()
