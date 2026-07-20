@@ -462,9 +462,7 @@ export default function Manufacturing() {
                   <td className="px-3 py-3">
                     <p className="font-medium">{item.product_name}</p>
                     <p className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${STAGE_COLORS[item.current_stage] || 'bg-gray-100'}`}>
-                        {stageLabel(item.current_stage)}
-                      </span>
+                      {/* Aşama rozeti kaldırıldı — aşama zaten üstteki timeline'da görünüyor */}
                       {item.payment_done
                         ? <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">ÖDENDİ</span>
                         : <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-200 rounded px-1 py-0.5">ÖDENMEDİ</span>}
