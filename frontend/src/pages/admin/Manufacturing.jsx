@@ -85,6 +85,9 @@ export default function Manufacturing() {
       actual_distribution: {},      // gerçekleşen kesim adedi {"Renk|Beden": n}
       sewing_workshop: "",          // dikim atölyesi adı (dikime geçince girilir)
       sewing_report_images: [],     // imalat (görsel) raporu — yüklenen görsel URL'leri
+      qc_result: "",                // kalite kontrol: "" | "gecti" | "kaldi" (kaldi → Re-FRI)
+      qc_date: "",                  // kalite kontrol tarihi
+      qc_images: [],                // kalite kontrol görselleri
       waste_meters: 0,
       notes: "",
       current_stage: "siparis_dosyasi",
@@ -176,6 +179,9 @@ export default function Manufacturing() {
       actual_distribution: item.actual_distribution || {},
       sewing_workshop: item.sewing_workshop || "",
       sewing_report_images: item.sewing_report_images || [],
+      qc_result: item.qc_result || "",
+      qc_date: item.qc_date || (item.stage_dates || {}).kalite_kontrol || "",
+      qc_images: item.qc_images || [],
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
       current_stage: item.current_stage || "siparis_dosyasi",
@@ -288,12 +294,12 @@ export default function Manufacturing() {
     }
   };
 
-  // Görsel (imalat) raporu: dosya seç → /upload/image → URL form.sewing_report_images'e eklenir
-  const [reportUploading, setReportUploading] = useState(false);
-  const uploadReportImages = async (fileList) => {
+  // Görsel yükleyici (dikim raporu + kalite kontrol): dosya seç → /upload/image → URL form[field]'a eklenir
+  const [reportUploading, setReportUploading] = useState("");  // "" | alan adı (hangi bölüm yüklüyor)
+  const uploadReportImages = async (fileList, field = "sewing_report_images") => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    setReportUploading(true);
+    setReportUploading(field);
     try {
       const token = localStorage.getItem("token");
       const urls = [];
@@ -304,13 +310,13 @@ export default function Manufacturing() {
         if (r.data?.url) urls.push(r.data.url);
       }
       if (urls.length) {
-        setForm((prev) => ({ ...prev, sewing_report_images: [...(prev.sewing_report_images || []), ...urls] }));
+        setForm((prev) => ({ ...prev, [field]: [...(prev[field] || []), ...urls] }));
         toast.success(`${urls.length} görsel yüklendi — Kaydet'e basmayı unutmayın`);
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Görsel yüklenemedi");
     } finally {
-      setReportUploading(false);
+      setReportUploading("");
     }
   };
 
@@ -474,6 +480,7 @@ export default function Manufacturing() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Dikim tarihi, atölye ve görsel imalat raporu">Dikim Başlangıcı</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Kalite kontrol: Geçti/Kaldı (kaldıysa Re-FRI), tarih ve görseller">Kalite Kontrol</th>
                 <th className="px-3 py-3"></th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün Aç</th>
               </tr>
@@ -624,6 +631,43 @@ export default function Manufacturing() {
                       );
                     })()}
                   </td>
+                  <td className="px-3 py-3 align-top">
+                    {(() => {
+                      const _qcDate = item.qc_date || (item.stage_dates || {}).kalite_kontrol;
+                      const _qcImgs = item.qc_images || [];
+                      if (!item.qc_result && !_qcDate && !_qcImgs.length)
+                        return <span className="text-xs text-gray-300">—</span>;
+                      return (
+                        <div className="space-y-1">
+                          {item.qc_result === "gecti" && (
+                            <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">GEÇTİ ✓</p>
+                          )}
+                          {item.qc_result === "kaldi" && (
+                            <p className="inline-flex items-center gap-1">
+                              <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">KALDI ✗</span>
+                              <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5" title="Yeniden kalite kontrol gerekli">Re-FRI</span>
+                            </p>
+                          )}
+                          {_qcDate && (
+                            <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(_qcDate).toLocaleDateString("tr-TR")}</p>
+                          )}
+                          {_qcImgs.length > 0 && (
+                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="Kalite kontrol görselleri — büyütmek için tıklayın">
+                              {_qcImgs.slice(0, 4).map((u, i) => (
+                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                                  <img src={_imgUrl(u)} alt={`kk ${i + 1}`}
+                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-amber-400" loading="lazy" />
+                                </a>
+                              ))}
+                              {_qcImgs.length > 4 && (
+                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_qcImgs.length - 4}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {/* Kırmızı yanıp sönen hatırlatıcı: bir sonraki aşamaya ilerletme gerekiyor */}
                     {_showDot && (
@@ -670,7 +714,7 @@ export default function Manufacturing() {
                 </tr>
                 {qtyDetail.has(item.id) && (
                   <tr className="bg-blue-50/40 border-b">
-                    <td colSpan={10} className="px-6 py-3">
+                    <td colSpan={11} className="px-6 py-3">
                       <div className="text-[11px] font-bold text-gray-600 uppercase mb-1.5">Adet Detayı — Sipariş → Kesilen</div>
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(item.size_distribution || {}).map(([k, q]) => {
@@ -1039,10 +1083,10 @@ export default function Manufacturing() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">Görsel Rapor <span className="text-gray-400 font-normal">(imalat raporu — fotoğraf)</span></label>
-                  <label className={`inline-flex items-center gap-1.5 px-3 py-2 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading ? "opacity-50 pointer-events-none" : "border-purple-300 text-purple-700 hover:bg-purple-50"}`}>
-                    {reportUploading ? "Yükleniyor…" : "＋ Görsel Yükle"}
+                  <label className={`inline-flex items-center gap-1.5 px-3 py-2 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading === "sewing_report_images" ? "opacity-50 pointer-events-none" : "border-purple-300 text-purple-700 hover:bg-purple-50"}`}>
+                    {reportUploading === "sewing_report_images" ? "Yükleniyor…" : "＋ Görsel Yükle"}
                     <input type="file" accept="image/*" multiple className="hidden" data-testid="mfg-report-upload"
-                      onChange={(e) => { uploadReportImages(e.target.files); e.target.value = ""; }} />
+                      onChange={(e) => { uploadReportImages(e.target.files, "sewing_report_images"); e.target.value = ""; }} />
                   </label>
                   {(form.sewing_report_images || []).length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
@@ -1053,6 +1097,61 @@ export default function Manufacturing() {
                           </a>
                           <button type="button"
                             onClick={() => setForm(f => ({ ...f, sewing_report_images: f.sewing_report_images.filter((_, j) => j !== i) }))}
+                            title="Görseli kaldır"
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full text-[10px] leading-none hidden group-hover:flex items-center justify-center">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Kalite Kontrol — Geçti/Kaldı (kaldıysa Re-FRI), tarih + görseller (listede sütunda görünür) */}
+            <div className="border-2 border-amber-100 bg-amber-50/30 rounded-lg p-3">
+              <p className="text-xs font-bold text-amber-700 uppercase mb-2">🔍 Kalite Kontrol</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Sonuç</label>
+                  <div className="flex gap-2">
+                    <button type="button" data-testid="qc-pass"
+                      onClick={() => setForm(f => ({ ...f, qc_result: f.qc_result === "gecti" ? "" : "gecti" }))}
+                      className={`flex-1 px-3 py-2 rounded text-sm font-bold border-2 transition ${form.qc_result === "gecti" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400"}`}>
+                      ✓ Geçti
+                    </button>
+                    <button type="button" data-testid="qc-fail"
+                      onClick={() => setForm(f => ({ ...f, qc_result: f.qc_result === "kaldi" ? "" : "kaldi" }))}
+                      className={`flex-1 px-3 py-2 rounded text-sm font-bold border-2 transition ${form.qc_result === "kaldi" ? "bg-red-600 text-white border-red-600" : "bg-white text-gray-600 border-gray-300 hover:border-red-400"}`}>
+                      ✗ Kaldı
+                    </button>
+                  </div>
+                  {form.qc_result === "kaldi" && (
+                    <p className="text-[10px] font-bold text-red-600 mt-1">Re-FRI — yeniden kalite kontrol gerekli; listede Re-FRI rozeti görünür.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Kalite Kontrol Tarihi</label>
+                  <input type="date" value={form.qc_date}
+                    onChange={e => setForm({ ...form, qc_date: e.target.value })}
+                    data-testid="qc-date"
+                    className="w-full border px-3 py-2 rounded text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Kalite Kontrol Görselleri</label>
+                  <label className={`inline-flex items-center gap-1.5 px-3 py-2 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading === "qc_images" ? "opacity-50 pointer-events-none" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}>
+                    {reportUploading === "qc_images" ? "Yükleniyor…" : "＋ Görsel Yükle"}
+                    <input type="file" accept="image/*" multiple className="hidden" data-testid="qc-upload"
+                      onChange={(e) => { uploadReportImages(e.target.files, "qc_images"); e.target.value = ""; }} />
+                  </label>
+                  {(form.qc_images || []).length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {form.qc_images.map((u, i) => (
+                        <div key={i} className="relative group">
+                          <a href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                            <img src={_imgUrl(u)} alt={`kk ${i + 1}`} className="w-16 h-16 object-cover rounded border" />
+                          </a>
+                          <button type="button"
+                            onClick={() => setForm(f => ({ ...f, qc_images: f.qc_images.filter((_, j) => j !== i) }))}
                             title="Görseli kaldır"
                             className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full text-[10px] leading-none hidden group-hover:flex items-center justify-center">×</button>
                         </div>

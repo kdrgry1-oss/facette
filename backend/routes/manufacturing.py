@@ -152,6 +152,9 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "actual_distribution": payload.get("actual_distribution") or {},  # gerçekleşen kesim adedi {"Renk|Beden": n}
         "sewing_workshop": (payload.get("sewing_workshop") or "").strip(),  # dikim atölyesi adı
         "sewing_report_images": payload.get("sewing_report_images") or [],  # imalat (görsel) raporu URL listesi
+        "qc_result": payload.get("qc_result") or "",       # kalite kontrol: "" | "gecti" | "kaldi" (kaldi → Re-FRI)
+        "qc_date": payload.get("qc_date") or "",           # kalite kontrol tarihi
+        "qc_images": payload.get("qc_images") or [],       # kalite kontrol görselleri URL listesi
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -198,6 +201,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "order_no", "order_flags", "stock_code", "colors",
         "has_lining", "color_approvals", "cutting_start_date", "actual_distribution", "product_created",
         "sewing_workshop", "sewing_report_images",
+        "qc_result", "qc_date", "qc_images",
     ):
         if f in payload:
             update[f] = payload[f]
