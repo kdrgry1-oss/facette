@@ -60,19 +60,19 @@ export function SalesReport() {
       .then((r) => setWeekdayData(r.data)).catch(() => {});
     axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
+    loadRangeDetail();
   };
   const [cancelRet, setCancelRet] = useState([]);
 
-  // Saat/Gün analizi + Gün Detayı ("hangi günlerde ne sipariş edilmiş")
+  // Saat/Gün analizi + Sipariş Edilen Ürünler (sayfadaki tarih aralığına bağlı)
   const [hourData, setHourData] = useState(null);
   const [weekdayData, setWeekdayData] = useState(null);
-  const [dayDate, setDayDate] = useState(new Date().toISOString().slice(0, 10));
   const [dayDetail, setDayDetail] = useState(null);
-  const loadDay = (d) => {
-    axios.get(`${API}/admin/reports/day-orders`, { headers: authHeaders(), params: { date: d, source } })
+  const loadRangeDetail = () => {
+    axios.get(`${API}/admin/reports/day-orders`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setDayDetail(r.data)).catch(() => setDayDetail(null));
   };
-  useEffect(() => { loadDay(dayDate); /* eslint-disable-next-line */ }, [dayDate, source]);
+  useEffect(() => { loadRangeDetail(); /* eslint-disable-next-line */ }, [source]);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
@@ -230,11 +230,8 @@ export function SalesReport() {
       {/* 📋 Gün Detayı — seçilen günde NE sipariş edilmiş (ürün/beden bazında) */}
       <div className="bg-white border rounded-xl p-4" data-testid="day-detail">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-          <h2 className="text-sm font-bold uppercase tracking-wider">Gün Detayı — O Gün Ne Sipariş Edildi?</h2>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dayDate} onChange={(e) => setDayDate(e.target.value)}
-              className="text-sm px-2 py-1 border rounded" data-testid="day-detail-date" />
-          </div>
+          <h2 className="text-sm font-bold uppercase tracking-wider">Sipariş Edilen Ürünler ({from} → {to})</h2>
+          <span className="text-[11px] text-gray-400">Üstteki tarih aralığı + kaynak filtresine göre</span>
         </div>
         {dayDetail ? (
           <>

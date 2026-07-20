@@ -240,16 +240,25 @@ async def sales_by_weekday(
 
 @router.get("/day-orders")
 async def day_orders(
-    date: str = Query(..., description="YYYY-MM-DD (TR günü)"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD (tek TR günü — geriye uyumluluk)"),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     source: Optional[str] = Query(None),
     current_user: dict = Depends(require_admin),
 ):
-    """Gün Detayı: seçilen TR gününde NE sipariş edilmiş — ürün/beden bazında adet + ciro."""
-    try:
-        d0 = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) - timedelta(hours=3)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Geçersiz tarih (YYYY-MM-DD)")
-    s, e = d0.isoformat(), (d0 + timedelta(days=1)).isoformat()
+    """Sipariş edilen ürünler: SEÇİLİ TARİH ARALIĞINDA (sayfa filtresi) ürün/beden
+    bazında adet + ciro. Tek 'date' verilirse o gün (geriye uyumlu)."""
+    if start_date and end_date:
+        s, e = _iso_range(start_date, end_date)
+        date = f"{start_date[:10]} → {end_date[:10]}"
+    elif date:
+        try:
+            d0 = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) - timedelta(hours=3)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz tarih (YYYY-MM-DD)")
+        s, e = d0.isoformat(), (d0 + timedelta(days=1)).isoformat()
+    else:
+        raise HTTPException(status_code=400, detail="date veya start_date+end_date gerekli")
     m = {"created_at": {"$gte": s, "$lt": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
     sc = _source_cond(source)
     if sc:
