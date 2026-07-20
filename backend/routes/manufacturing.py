@@ -145,6 +145,8 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "agreed_total": float(payload.get("agreed_total", 0) or 0),
         "payment_done": bool(payload.get("payment_done")),  # tek tik: ödeme yapıldı mı
         "payment_done_at": now_iso if payload.get("payment_done") else None,
+        "has_lining": bool(payload.get("has_lining")),      # astarlı ürün → renk bazlı astar okeyi
+        "color_approvals": payload.get("color_approvals") or {},  # {"Renk": {fabric, lining}}
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -186,6 +188,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "unit_price", "agreed_total", "payments", "cost_lines",
         "purchase_orders", "waste_meters", "supplier_id", "notes",
         "order_no", "order_flags", "stock_code", "colors",
+        "has_lining", "color_approvals",
     ):
         if f in payload:
             update[f] = payload[f]

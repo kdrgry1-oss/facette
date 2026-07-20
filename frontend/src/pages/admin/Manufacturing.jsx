@@ -73,6 +73,8 @@ export default function Manufacturing() {
       unit_price: 0,
       agreed_total: 0,
       payment_done: false,          // tek tik: ödeme yapıldı mı
+      has_lining: false,            // astarlı ürün mü (Astar Okeyi kolonunu açar)
+      color_approvals: {},          // {"Renk": {fabric: bool, lining: bool}}
       waste_meters: 0,
       notes: "",
       current_stage: "siparis_dosyasi",
@@ -158,6 +160,8 @@ export default function Manufacturing() {
       unit_price: item.unit_price || 0,
       agreed_total: item.agreed_total || 0,
       payment_done: !!item.payment_done,
+      has_lining: !!item.has_lining,
+      color_approvals: item.color_approvals || {},
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
       current_stage: item.current_stage || "siparis_dosyasi",
@@ -280,6 +284,14 @@ export default function Manufacturing() {
     ...f, sizes: f.sizes.filter(x => x !== s),
     size_distribution: Object.fromEntries(Object.entries(f.size_distribution).filter(([k]) => (k.includes("|") ? k.split("|")[1] : k) !== s)),
   }));
+  // Renk bazlı onaylar: kumaş okeyi her renkte; astar okeyi yalnız astarlı üründe
+  const approvalOf = (color, kind) => !!(form.color_approvals?.[color || "_tek"]?.[kind]);
+  const toggleApproval = (color, kind) => setForm(f => {
+    const key = color || "_tek";
+    const cur = f.color_approvals?.[key] || {};
+    return { ...f, color_approvals: { ...(f.color_approvals || {}), [key]: { ...cur, [kind]: !cur[kind] } } };
+  });
+
   const rowTotal = (color) => form.sizes.reduce((s, sz) => s + cellVal(color, sz), 0);
   const grandTotal = (form.colors.length ? form.colors : [""]).reduce((s, c) => s + rowTotal(c), 0);
 
@@ -503,10 +515,18 @@ export default function Manufacturing() {
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-2 flex items-center gap-2 justify-between">
                 <span className="flex items-center gap-2"><Package size={12} /> Sipariş Edilen Renkler × Bedenler</span>
-                <button type="button" onClick={openPicker}
-                  className="text-xs bg-rose-600 text-white hover:bg-rose-700 px-3 py-1.5 rounded font-semibold" data-testid="mfg-open-picker">
-                  <Plus size={12} className="inline" /> Renk / Beden Seç
-                </button>
+                <span className="flex items-center gap-2">
+                  {/* Astar ön seçeneği: astarlı üründe her renk için Astar Okeyi kolonu açılır */}
+                  <button type="button" onClick={() => setForm(f => ({ ...f, has_lining: !f.has_lining }))}
+                    data-testid="mfg-has-lining"
+                    className={`text-xs px-3 py-1.5 rounded font-semibold border transition ${form.has_lining ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400"}`}>
+                    {form.has_lining ? "Astarlı Ürün ✓" : "Astarlı Ürün mü?"}
+                  </button>
+                  <button type="button" onClick={openPicker}
+                    className="text-xs bg-rose-600 text-white hover:bg-rose-700 px-3 py-1.5 rounded font-semibold" data-testid="mfg-open-picker">
+                    <Plus size={12} className="inline" /> Renk / Beden Seç
+                  </button>
+                </span>
               </label>
               {form.sizes.length === 0 ? (
                 <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
@@ -525,6 +545,8 @@ export default function Manufacturing() {
                           </th>
                         ))}
                         <th className="px-3 py-2 text-right">Sipariş Adedi</th>
+                        <th className="px-2 py-2 text-center">Kumaş Okeyi</th>
+                        {form.has_lining && <th className="px-2 py-2 text-center">Astar Okeyi</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -542,6 +564,24 @@ export default function Manufacturing() {
                             </td>
                           ))}
                           <td className="px-3 py-1.5 text-right font-bold tabular-nums">{rowTotal(c)}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button type="button" onClick={() => toggleApproval(c, "fabric")}
+                              data-testid={`fabric-ok-${c || "tek"}`}
+                              title="Bu rengin kumaşı onaylandı mı?"
+                              className={`w-7 h-7 rounded border-2 text-sm font-bold transition ${approvalOf(c, "fabric") ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-gray-300 hover:border-emerald-400 text-transparent"}`}>
+                              ✓
+                            </button>
+                          </td>
+                          {form.has_lining && (
+                            <td className="px-2 py-1.5 text-center">
+                              <button type="button" onClick={() => toggleApproval(c, "lining")}
+                                data-testid={`lining-ok-${c || "tek"}`}
+                                title="Bu rengin astarı onaylandı mı?"
+                                className={`w-7 h-7 rounded border-2 text-sm font-bold transition ${approvalOf(c, "lining") ? "bg-indigo-600 text-white border-indigo-600" : "bg-white border-gray-300 hover:border-indigo-400 text-transparent"}`}>
+                                ✓
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
