@@ -78,7 +78,8 @@ def _barcode_svg_inline(code: str) -> str:
         return ""
     try:
         clean = "".join(ch for ch in str(code) if ch.isalnum())
-        opts = {"write_text": False, "module_height": 16.0, "module_width": 0.46, "quiet_zone": 1.0}
+        # Barkod çubukları büyütüldü (etiketi doldursun) — genişlik CSS'te %100'e ölçeklenir.
+        opts = {"write_text": False, "module_height": 19.0, "module_width": 0.46, "quiet_zone": 1.0}
         if len(clean) == 13 and clean.isdigit():
             bc = barcode.get("ean13", clean[:12], writer=SVGWriter())
         else:
@@ -159,15 +160,17 @@ def _build_html(cards_html: str, title: str = "Barkod Kartlari") -> str:
     display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
     text-align: left; gap: 1px; page-break-inside: avoid;
   }
-  .name { font-size: 10px; font-weight: 700; line-height: 1.15; width: 100%;
+  /* İçerik 5x4cm etiketi NEREDEYSE TAMAMEN kaplar (kullanıcı isteği):
+     yazılar büyütüldü, barkod etiket genişliğine ölçeklenir. */
+  .name { font-size: 13px; font-weight: 800; line-height: 1.12; width: 100%;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .cardno { font-size: 9.5px; font-weight: 600; color: #000; line-height: 1.25; }
+  .cardno { font-size: 11.5px; font-weight: 700; color: #000; line-height: 1.2; }
   .row { display: flex; justify-content: space-between; align-items: baseline; width: 100%;
-    font-size: 10px; font-weight: 600; margin: 1px 0; }
-  .row .size { font-weight: 800; }
-  .barcode-svg { display: block; max-width: 100%; height: auto; margin: 2px 0 0 0; }
-  .barcode-text { font-family: "Mulish", Arial, sans-serif; font-weight: 700;
-    font-size: 11px; letter-spacing: 0.1em; line-height: 1; margin-top: 1px; }
+    font-size: 13px; font-weight: 700; margin: 1px 0; }
+  .row .size { font-weight: 800; font-size: 14px; }
+  .barcode-svg { display: block; width: 100%; height: auto; margin: 2px 0 0 0; }
+  .barcode-text { font-family: "Mulish", Arial, sans-serif; font-weight: 800;
+    font-size: 14px; letter-spacing: 0.14em; line-height: 1; margin-top: 2px; }
   @media print { .no-print { display: none; } .sheet { margin: 0; } }
 """
     css = (css.replace("__SHEET_W__", SHEET_W).replace("__LABEL_W__", LABEL_W)

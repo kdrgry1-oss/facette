@@ -720,14 +720,12 @@ export default function ProductDetail() {
             </div>
 
             {/* Desktop: sol thumbnail şeridi + orta büyük görsel (Simon Miller usulü).
-                Küçük resimler BÜYÜK (140px), ana görsel max-genişlikle sınırlı
-                (aşırı uzamasın) — kullanıcı isteği. */}
-            <div className="hidden lg:flex gap-4 justify-center items-start">
+                Küçük resimler 92px tek kolon, ana görsel 480px — 3-4 gün önceki düzene
+                geri dönüldü (kullanıcı isteği). */}
+            <div className="hidden lg:flex gap-4 justify-center">
               {displayImages.length > 1 && (
-                /* Sol şerit: YALNIZ ilk 5 kutucuk, tek kolon alt alta. 6.–8. görseller sağa
-                   ayrı kolona DEĞİL, ana ürün görselinin ALTINA (aşağıya) yerleşir. */
-                <div className="flex flex-col gap-2.5 shrink-0 [&>button]:w-[140px]">
-                  {displayImages.slice(0, 5).map((img, index) => (
+                <div className="flex flex-col gap-2 w-[92px] shrink-0">
+                  {displayImages.map((img, index) => (
                     <button
                       key={index}
                       onClick={() => setSelectedImage(index)}
@@ -739,7 +737,7 @@ export default function ProductDetail() {
                       data-testid={`pdp-thumb-${index}`}
                     >
                       <img
-                        src={optimizeImg(img, 300)}
+                        src={optimizeImg(img, 200)}
                         alt=""
                         className="w-full h-full object-cover object-top"
                         loading="lazy"
@@ -749,7 +747,7 @@ export default function ProductDetail() {
                   ))}
                 </div>
               )}
-              <div className="flex-1 min-w-0 lg:max-w-[560px]">
+              <div className="flex-1 min-w-0 lg:max-w-[480px]">
                 <div
                   className="relative aspect-[2/3] bg-stone-50 overflow-hidden cursor-zoom-in"
                   onMouseEnter={() => setZoom((z) => ({ ...z, on: true }))}
@@ -793,34 +791,6 @@ export default function ProductDetail() {
                     decoding="async"
                   />
                 </div>
-                {/* 6.–8. görsel: ana görselin ALTINDA yatay şerit (kullanıcı isteği). */}
-                {displayImages.length > 5 && (
-                  <div className="flex flex-wrap gap-2.5 mt-2.5 [&>button]:w-[140px]">
-                    {displayImages.slice(5).map((img, i) => {
-                      const index = i + 5;
-                      return (
-                        <button
-                          key={index}
-                          onClick={() => setSelectedImage(index)}
-                          onMouseEnter={() => setSelectedImage(index)}
-                          className={`relative aspect-[2/3] bg-stone-50 overflow-hidden border transition-colors ${
-                            index === selectedImage ? "border-black" : "border-transparent hover:border-gray-300"
-                          }`}
-                          aria-label={`Görsel ${index + 1}`}
-                          data-testid={`pdp-thumb-${index}`}
-                        >
-                          <img
-                            src={optimizeImg(img, 300)}
-                            alt=""
-                            className="w-full h-full object-cover object-top"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1425,17 +1395,38 @@ export default function ProductDetail() {
                     loading="lazy"
                   />
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h4 className="text-sm font-medium text-gray-800 mb-1.5">{product.name}</h4>
-                  {product.description && (
-                    <>
-                      <p className="text-[11px] font-semibold text-gray-800 mb-1">Ürün Özellikleri</p>
-                      <div
-                        className="text-[11px] text-gray-600 leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-0 [&_p]:mb-1"
-                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.description) }}
-                      />
-                    </>
-                  )}
+                  {product.description && (() => {
+                    // "Yıkama ve Bakım" bölümü SAĞDAKİ boş alana, Ürün Özellikleri ile
+                    // aynı hizada — açıklama HTML'i Yıkama başlığından ikiye bölünür.
+                    const _html = sanitizeHtml(product.description);
+                    const _m = _html.search(/Y[ıi]kama/i);
+                    let _left = _html, _right = "";
+                    if (_m > 0) {
+                      const _before = _html.slice(0, _m);
+                      const _cut = Math.max(_before.lastIndexOf("<p"), _before.lastIndexOf("<h"),
+                        _before.lastIndexOf("<div"), _before.lastIndexOf("<ul"),
+                        _before.lastIndexOf("<strong"), _before.lastIndexOf("<b"));
+                      const _idx = _cut > 0 ? _cut : _m;
+                      _left = _html.slice(0, _idx);
+                      _right = _html.slice(_idx);
+                    }
+                    const _cls = "text-[11px] text-gray-600 leading-snug [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-0 [&_p]:mb-1";
+                    return (
+                      <div className="sm:grid sm:grid-cols-2 sm:gap-6">
+                        <div>
+                          <p className="text-[11px] font-semibold text-gray-800 mb-1">Ürün Özellikleri</p>
+                          <div className={_cls} dangerouslySetInnerHTML={{ __html: _left }} />
+                        </div>
+                        {_right && (
+                          <div className="mt-2 sm:mt-0">
+                            <div className={_cls} dangerouslySetInnerHTML={{ __html: _right }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {sizeTableData.product_size && (
                     <p className="text-[11px] text-gray-700 mt-2"><span className="font-semibold text-gray-800">Ürün Bedeni:</span> {sizeTableData.product_size}</p>
                   )}
