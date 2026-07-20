@@ -140,8 +140,8 @@ export default function AdminApp() {
         <Route path="amazon" element={<AmazonSpApi />} />
         <Route path="dpp-uyum" element={<Compliance />} />
         <Route path="ayarlar/capi-loglar" element={<CapiLogs />} />
-        <Route path="raporlar/iade-ve-trend" element={<ReportsAdvanced />} />
-        <Route path="raporlar/konum-kanal" element={<ReportsInsights />} />
+        <Route path="raporlar/iade-ve-trend" element={<Navigate to="/admin/raporlar/urun" replace />} />
+        <Route path="raporlar/konum-kanal" element={<Navigate to="/admin/raporlar/satis" replace />} />
         <Route path="ayarlar/sosyal-giris" element={<SocialAuthSettings />} />
         <Route path="ayarlar/siparis-durumlari" element={<OrderStatusSettings />} />
         <Route path="pazaryerleri" element={<MarketplaceHub />} />
@@ -196,7 +196,7 @@ export default function AdminApp() {
         <Route path="kargo-odeme-kurallari" element={<ShippingPaymentRules />} />
         <Route path="doviz" element={<CurrencyRates />} />
         <Route path="toplu-mail" element={<BulkMail />} />
-        <Route path="raporlar/gelismis" element={<ExtraReports />} />
+        <Route path="raporlar/gelismis" element={<Navigate to="/admin/raporlar/satis" replace />} />
         <Route path="raporlar/kar-stok" element={<ReportsExtended />} />
         <Route path="gorevler" element={<AdminTasks />} />
       </Route>

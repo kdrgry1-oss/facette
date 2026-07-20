@@ -61,8 +61,15 @@ export function SalesReport() {
     axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
     loadRangeDetail();
+    // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
+    axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 15 } })
+      .then((r) => setLocData(r.data.rows || [])).catch(() => {});
+    axios.get(`${API}/admin/reports/by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+      .then((r) => setSrcData(r.data.rows || [])).catch(() => {});
   };
   const [cancelRet, setCancelRet] = useState([]);
+  const [locData, setLocData] = useState([]);
+  const [srcData, setSrcData] = useState([]);
 
   // Saat/Gün analizi + Sipariş Edilen Ürünler (sayfadaki tarih aralığına bağlı)
   const [hourData, setHourData] = useState(null);
@@ -198,6 +205,46 @@ export function SalesReport() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* 🗺️ İl/İlçe & Kanal — eski ayrı sekmeden buraya taşındı */}
+      {(locData.length > 0 || srcData.length > 0) && (
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="bg-white border rounded-xl p-4" data-testid="location-block">
+            <h2 className="text-sm font-bold uppercase tracking-wider mb-2">İl Bazında Satış (İlk 15)</h2>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr><th className="text-left p-2">İl</th><th className="text-right p-2">Sipariş</th><th className="text-right p-2">Ciro</th></tr>
+              </thead>
+              <tbody>
+                {locData.map((r) => (
+                  <tr key={r.location} className="border-t">
+                    <td className="p-2 font-medium">{r.location || "—"}</td>
+                    <td className="p-2 text-right tabular-nums">{r.orders}</td>
+                    <td className="p-2 text-right tabular-nums font-semibold">{tl(r.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="bg-white border rounded-xl p-4" data-testid="channel-block">
+            <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Kanal Bazında Satış</h2>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr><th className="text-left p-2">Kanal</th><th className="text-right p-2">Sipariş</th><th className="text-right p-2">Ciro</th></tr>
+              </thead>
+              <tbody>
+                {srcData.map((r) => (
+                  <tr key={r.channel} className="border-t">
+                    <td className="p-2 font-medium">{r.channel}</td>
+                    <td className="p-2 text-right tabular-nums">{r.orders}</td>
+                    <td className="p-2 text-right tabular-nums font-semibold">{tl(r.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 🔄 Pazaryerlerine göre iade & iptal durumları */}
       {cancelRet.length > 0 && (
@@ -373,7 +420,13 @@ export function ProductsReport() {
     ]);
     setTop(t.data.items || []);
     setCats(c.data.items || []);
+    // İade & İptal raporu (ürün bazlı — platform/tarih/ada göre filtrelenebilir)
+    axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+      .then((r) => setCrRows(r.data.items || [])).catch(() => {});
   };
+  const [crRows, setCrRows] = useState([]);
+  const [crQ, setCrQ] = useState("");
+  const [crPlat, setCrPlat] = useState("");
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
@@ -591,6 +644,65 @@ export function ProductsReport() {
             {cats.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
           </tbody>
         </table>
+      </div>
+
+      {/* 🔄 İADE & İPTAL RAPORU — platform / tarih (üst filtre) / ürün adına göre */}
+      <div className="bg-white border rounded-xl p-4" data-testid="cr-products-block">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider">İade &amp; İptal Raporu ({from} → {to})</h2>
+          <div className="flex gap-2">
+            <select value={crPlat} onChange={(e) => setCrPlat(e.target.value)} className="border rounded px-2 py-1.5 text-xs" data-testid="cr-plat-filter">
+              <option value="">Tüm Platformlar</option>
+              {[...new Set(crRows.map(r => r.platform))].map(pl => <option key={pl} value={pl}>{pl}</option>)}
+            </select>
+            <input value={crQ} onChange={(e) => setCrQ(e.target.value)} placeholder="Ürün adı ara..."
+              className="border rounded px-3 py-1.5 text-xs w-44" data-testid="cr-name-search" />
+          </div>
+        </div>
+        {(() => {
+          const f = crQ.trim().toLocaleLowerCase("tr");
+          const list = crRows.filter(r => (!crPlat || r.platform === crPlat) && (!f || (r.name || "").toLocaleLowerCase("tr").includes(f)));
+          const tot = list.reduce((a, r) => ({ cq: a.cq + r.cancel_qty, ct: a.ct + r.cancel_total, rq: a.rq + r.return_qty, rt: a.rt + r.return_total }), { cq: 0, ct: 0, rq: 0, rt: 0 });
+          return list.length === 0 ? (
+            <p className="text-sm text-gray-400 py-4 text-center">Bu filtrede iade/iptal kaydı yok.</p>
+          ) : (
+            <div className="max-h-96 overflow-y-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
+                  <tr>
+                    <th className="text-left p-2.5">Ürün</th>
+                    <th className="text-left p-2.5">Platform</th>
+                    <th className="text-right p-2.5">İptal Adet</th>
+                    <th className="text-right p-2.5">İptal Tutar</th>
+                    <th className="text-right p-2.5">İade Adet</th>
+                    <th className="text-right p-2.5">İade Tutar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((r, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2.5">{r.name}</td>
+                      <td className="p-2.5">{r.platform}</td>
+                      <td className="p-2.5 text-right tabular-nums text-rose-600 font-semibold">{r.cancel_qty || ""}</td>
+                      <td className="p-2.5 text-right tabular-nums">{r.cancel_total ? `₺${r.cancel_total.toLocaleString("tr-TR")}` : ""}</td>
+                      <td className="p-2.5 text-right tabular-nums text-amber-600 font-semibold">{r.return_qty || ""}</td>
+                      <td className="p-2.5 text-right tabular-nums">{r.return_total ? `₺${r.return_total.toLocaleString("tr-TR")}` : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 font-bold sticky bottom-0">
+                  <tr className="border-t-2">
+                    <td className="p-2.5" colSpan={2}>TOPLAM</td>
+                    <td className="p-2.5 text-right tabular-nums text-rose-700">{tot.cq}</td>
+                    <td className="p-2.5 text-right tabular-nums">₺{tot.ct.toLocaleString("tr-TR")}</td>
+                    <td className="p-2.5 text-right tabular-nums text-amber-700">{tot.rq}</td>
+                    <td className="p-2.5 text-right tabular-nums">₺{tot.rt.toLocaleString("tr-TR")}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

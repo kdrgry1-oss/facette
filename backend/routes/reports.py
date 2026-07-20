@@ -893,6 +893,60 @@ async def payment_report(
     return {"items": out}
 
 
+@router.get("/cancel-return-products")
+async def cancel_return_products(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Ürün bazlı İADE & İPTAL raporu (Ürün Raporları altındaki alan): tarih aralığında
+    iptal/iade edilen siparişlerin kalemleri — ürün adı + platform kırılımıyla.
+    Frontend ada göre arar, platforma göre süzer."""
+    s, e = _iso_range(start_date, end_date)
+    _RETURN_ST = ["return_requested", "return_approved", "return_in_transit",
+                  "returned", "refunded", "partial_refunded"]
+    _CANCEL_ST = ["cancelled", "cancel_refunded"]
+    m = {"created_at": {"$gte": s, "$lte": e}, "status": {"$in": _RETURN_ST + _CANCEL_ST}}
+    sc = _source_cond(source)
+    if sc:
+        m.update(sc)
+    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    pipeline = [
+        {"$match": m},
+        {"$addFields": {"_plat": _plat,
+                        "_kind": {"$cond": [{"$in": ["$status", _CANCEL_ST]}, "cancel", "return"]}}},
+        {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$group": {
+            "_id": {"name": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", "Ürün"]}]},
+                    "plat": "$_plat", "kind": "$_kind"},
+            "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "total": {"$sum": {"$multiply": [
+                {"$ifNull": ["$items.quantity", 1]},
+                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]}]}},
+        }},
+    ]
+    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    rows: dict = {}
+    async for r in db.orders.aggregate(pipeline):
+        key = (r["_id"]["name"], r["_id"]["plat"])
+        d = rows.setdefault(key, {"name": r["_id"]["name"],
+                                  "platform": _SRC.get(r["_id"]["plat"], r["_id"]["plat"] or "Site"),
+                                  "cancel_qty": 0, "cancel_total": 0.0,
+                                  "return_qty": 0, "return_total": 0.0})
+        if r["_id"]["kind"] == "cancel":
+            d["cancel_qty"] += int(r["qty"])
+            d["cancel_total"] += float(r["total"] or 0)
+        else:
+            d["return_qty"] += int(r["qty"])
+            d["return_total"] += float(r["total"] or 0)
+    out = sorted(rows.values(), key=lambda x: -(x["cancel_qty"] + x["return_qty"]))[:800]
+    for d in out:
+        d["cancel_total"] = round(d["cancel_total"], 2)
+        d["return_total"] = round(d["return_total"], 2)
+    return {"items": out}
+
+
 @router.get("/cancel-return-by-source")
 async def cancel_return_by_source(
     start_date: Optional[str] = None,
