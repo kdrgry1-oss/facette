@@ -17,36 +17,43 @@ from .deps import db, require_admin, logger
 router = APIRouter(prefix="/manufacturing", tags=["manufacturing"])
 
 
-# Canonical stage order
+# Canonical stage order — 6 sadeleştirilmiş aşama (kullanıcı isteği; timeline görünümü)
 STAGES = [
-    "anlasma",               # Anlaşma imzalandı
-    "numune_hazirlaniyor",   # Numune hazırlanıyor
-    "numune_onaylandi",      # Numune onaylandı
-    "kumas_siparisi",        # Kumaş siparişi verildi
-    "kumas_teslim",          # Kumaş teslim alındı
-    "aksesuar",              # Aksesuar/Tela/İplik
-    "kesim",                 # Kesim başladı
-    "dikim",                 # Dikim başladı
-    "utu_paketleme",         # Ütü/Paketleme
-    "kalite_kontrol",        # Kalite Kontrol
-    "teslim_alindi",         # Teslim Alındı (Depoya Girdi)
-    "fatura_kesildi",        # Fatura Kesildi
+    "siparis_dosyasi",   # Sipariş Dosyası (eski: Anlaşma İmzalandı)
+    "kumas_okeyi",       # Kumaş Okeyi
+    "kesim",             # Kesim Başlangıcı
+    "dikim",             # Dikiş Başlangıcı
+    "kalite_kontrol",    # Kalite Kontrol
+    "teslim_alindi",     # Depo Teslimat (stok artışı bu aşamada tetiklenir)
 ]
 
 STAGE_LABELS = {
-    "anlasma": "Anlaşma İmzalandı",
-    "numune_hazirlaniyor": "Numune Hazırlanıyor",
-    "numune_onaylandi": "Numune Onaylandı",
-    "kumas_siparisi": "Kumaş Siparişi Verildi",
-    "kumas_teslim": "Kumaş Teslim Alındı",
-    "aksesuar": "Aksesuar/Tela/İplik",
-    "kesim": "Kesim Başladı",
-    "dikim": "Dikim Başladı",
-    "utu_paketleme": "Ütü / Paketleme",
+    "siparis_dosyasi": "Sipariş Dosyası",
+    "kumas_okeyi": "Kumaş Okeyi",
+    "kesim": "Kesim Başlangıcı",
+    "dikim": "Dikiş Başlangıcı",
     "kalite_kontrol": "Kalite Kontrol",
-    "teslim_alindi": "Teslim Alındı (Depoya Girdi)",
-    "fatura_kesildi": "Fatura Kesildi",
+    "teslim_alindi": "Depo Teslimat",
 }
+
+# Eski 12'li aşama setinden kalan kayıtlar en yakın yeni aşamaya taşınır (tembel migrasyon)
+_LEGACY_STAGE_MAP = {
+    "anlasma": "siparis_dosyasi",
+    "numune_hazirlaniyor": "siparis_dosyasi",
+    "numune_onaylandi": "siparis_dosyasi",
+    "kumas_siparisi": "kumas_okeyi",
+    "kumas_teslim": "kumas_okeyi",
+    "aksesuar": "kumas_okeyi",
+    "utu_paketleme": "kalite_kontrol",
+    "fatura_kesildi": "teslim_alindi",
+}
+
+
+async def _migrate_legacy_stages():
+    """Eski aşama anahtarlı kayıtları yeni sete taşır — idempotent, listede tembel çağrılır."""
+    for old, new in _LEGACY_STAGE_MAP.items():
+        await db.manufacturing.update_many(
+            {"current_stage": old}, {"$set": {"current_stage": new}})
 
 
 @router.get("/stages")
@@ -60,6 +67,7 @@ async def list_manufacturing(
     search: Optional[str] = None,
     current_user: dict = Depends(require_admin),
 ):
+    await _migrate_legacy_stages()  # idempotent — eski aşama anahtarlarını yeni sete taşır
     query = {}
     if stage:
         query["current_stage"] = stage
@@ -135,6 +143,8 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "total_units": sum((payload.get("size_distribution") or {}).values()) if payload.get("size_distribution") else payload.get("total_units", 0),
         "unit_price": float(payload.get("unit_price", 0) or 0),
         "agreed_total": float(payload.get("agreed_total", 0) or 0),
+        "payment_done": bool(payload.get("payment_done")),  # tek tik: ödeme yapıldı mı
+        "payment_done_at": now_iso if payload.get("payment_done") else None,
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -179,6 +189,13 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
     ):
         if f in payload:
             update[f] = payload[f]
+    if "payment_done" in payload:
+        _pd = bool(payload.get("payment_done"))
+        update["payment_done"] = _pd
+        if _pd and not existing.get("payment_done"):
+            update["payment_done_at"] = datetime.now(timezone.utc).isoformat()
+        elif not _pd:
+            update["payment_done_at"] = None
     if "size_distribution" in payload:
         update["total_units"] = sum((payload.get("size_distribution") or {}).values())
     if "payments" in payload:

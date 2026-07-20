@@ -42,6 +42,7 @@ import GiftCards from "./pages/admin/GiftCards";
 import ProductReviews from "./pages/admin/ProductReviews";
 import AbandonedCarts from "./pages/admin/AbandonedCarts";
 import { SalesReport, ProductsReport, StockReport, MembersReport } from "./pages/admin/Reports";
+import DecisionBoard from "./pages/admin/DecisionBoard";
 import { SeoRedirects, SeoMeta } from "./pages/admin/SeoAdmin";
 import {
   Brands, ProductTags, MemberGroups, Announcements, Popups,
@@ -179,6 +180,7 @@ export default function AdminApp() {
         <Route path="yorumlar" element={<ProductReviews />} />
         <Route path="terkedilmis-sepet" element={<AbandonedCarts />} />
         <Route path="raporlar/karlilik" element={<ProfitabilityAnalysis />} />
+        <Route path="raporlar/karar-kurulu" element={<DecisionBoard />} />
         <Route path="raporlar/satis" element={<SalesReport />} />
         <Route path="raporlar/urun" element={<ProductsReport />} />
         <Route path="raporlar/stok" element={<StockReport />} />

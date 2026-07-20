@@ -50,6 +50,7 @@ from routes.admin_rbac import router as admin_rbac_router
 from routes.seo import router as seo_router
 from routes.size_tables import router as size_tables_router, public_router as size_tables_public_router
 from routes.manufacturing import router as manufacturing_router, suppliers_router as manufacturing_suppliers_router
+from routes.decision_board import router as decision_board_router
 from routes.ai_chatbot import router as ai_chatbot_router
 from routes.ai_assistant import router as ai_assistant_router
 from routes.locations import router as locations_router
@@ -700,6 +701,7 @@ api_router.include_router(admin_rbac_router)
 api_router.include_router(size_tables_router)
 api_router.include_router(size_tables_public_router)
 api_router.include_router(manufacturing_router)
+api_router.include_router(decision_board_router)
 api_router.include_router(manufacturing_suppliers_router)
 api_router.include_router(ai_chatbot_router)
 api_router.include_router(ai_assistant_router)

@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package,
-  FileText, Calendar, DollarSign, Users, Clock, CheckCircle2,
+  Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package, CheckCircle2,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -28,6 +27,8 @@ function _plus21(dateStr) {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STAGE_COLORS = {
+  siparis_dosyasi: "bg-slate-100 text-slate-700",
+  kumas_okeyi: "bg-blue-100 text-blue-700",
   anlasma: "bg-slate-100 text-slate-700",
   numune_hazirlaniyor: "bg-amber-100 text-amber-700",
   numune_onaylandi: "bg-green-100 text-green-700",
@@ -71,11 +72,10 @@ export default function Manufacturing() {
       size_distribution: {},        // {"Renk|Beden": adet}
       unit_price: 0,
       agreed_total: 0,
-      payments: [],
-      cost_lines: [],
+      payment_done: false,          // tek tik: ödeme yapıldı mı
       waste_meters: 0,
       notes: "",
-      current_stage: "anlasma",
+      current_stage: "siparis_dosyasi",
     };
   }
 
@@ -157,11 +157,10 @@ export default function Manufacturing() {
       size_distribution: _dist,
       unit_price: item.unit_price || 0,
       agreed_total: item.agreed_total || 0,
-      payments: item.payments || [],
-      cost_lines: item.cost_lines || [],
+      payment_done: !!item.payment_done,
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
-      current_stage: item.current_stage || "anlasma",
+      current_stage: item.current_stage || "siparis_dosyasi",
     });
     setModalOpen(true);
   };
@@ -296,21 +295,6 @@ export default function Manufacturing() {
     } catch (e) { toast.error(e.response?.data?.detail || "Aktarılamadı"); }
   };
 
-  const addCostLine = () => setForm(f => ({
-    ...f,
-    cost_lines: [...(f.cost_lines || []), { id: crypto.randomUUID(), label: "", amount: 0, note: "" }],
-  }));
-  const removeCostLine = (id) => setForm(f => ({ ...f, cost_lines: f.cost_lines.filter(c => c.id !== id) }));
-
-  const addPayment = () => setForm(f => ({
-    ...f,
-    payments: [...(f.payments || []), { id: crypto.randomUUID(), date: new Date().toISOString().substring(0, 10), amount: 0, method: "Havale", note: "" }],
-  }));
-  const removePayment = (id) => setForm(f => ({ ...f, payments: f.payments.filter(p => p.id !== id) }));
-
-  const totalCost = (form.cost_lines || []).reduce((sum, c) => sum + Number(c.amount || 0), 0);
-  const totalPaid = (form.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
   return (
     <div className="p-6 max-w-7xl mx-auto" data-testid="manufacturing-page">
       <div className="flex justify-between items-center mb-6">
@@ -326,26 +310,32 @@ export default function Manufacturing() {
         </button>
       </div>
 
-      {/* Stage stats */}
-      <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-7 gap-3 mb-6">
-        <button
-          onClick={() => setStageFilter("")}
-          className={`bg-white p-3 rounded-lg shadow-sm hover:shadow-md text-left ${!stageFilter ? "ring-2 ring-black" : ""}`}
-        >
-          <p className="text-xl font-bold">{items.length}</p>
-          <p className="text-xs text-gray-500">Tümü</p>
-        </button>
-        {stages.map(s => (
-          <button
-            key={s.key}
-            onClick={() => setStageFilter(s.key)}
-            data-testid={`stage-filter-${s.key}`}
-            className={`bg-white p-3 rounded-lg shadow-sm hover:shadow-md text-left ${stageFilter === s.key ? "ring-2 ring-black" : ""}`}
-          >
-            <p className="text-xl font-bold">{counts[s.key] || 0}</p>
-            <p className="text-xs text-gray-500 truncate">{s.label}</p>
-          </button>
-        ))}
+      {/* Aşamalar — kutucuk yerine TIMELINE (kullanıcı isteği); tıklayınca filtreler */}
+      <div className="bg-white rounded-xl shadow-sm p-4 mb-6 overflow-x-auto">
+        <div className="flex items-start min-w-[640px]">
+          {[{ key: "", label: "Tümü", count: Object.values(counts).reduce((a, b) => a + b, 0) },
+            ...stages.map(s => ({ key: s.key, label: s.label, count: counts[s.key] || 0 }))].map((n, i) => {
+            const active = stageFilter === n.key;
+            return (
+              <div key={n.key || "all"} className="flex items-start flex-1 min-w-0">
+                {i > 0 && <div className="flex-1 h-0.5 bg-gray-200 mt-[19px] min-w-[16px]" />}
+                <button
+                  onClick={() => setStageFilter(n.key)}
+                  data-testid={n.key ? `stage-filter-${n.key}` : "stage-filter-all"}
+                  className="flex flex-col items-center gap-1 shrink-0 px-1 group"
+                >
+                  <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 transition
+                    ${active ? "bg-rose-600 text-white border-rose-600 shadow" : "bg-white border-gray-300 text-gray-700 group-hover:border-rose-400"}`}>
+                    {n.count}
+                  </span>
+                  <span className={`text-[11px] leading-tight text-center max-w-[86px] ${active ? "font-bold text-rose-700" : "text-gray-500"}`}>
+                    {n.label}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* List */}
@@ -381,10 +371,12 @@ export default function Manufacturing() {
                   <td className="px-4 py-3 text-sm">{item.partner_name}</td>
                   <td className="px-4 py-3 text-sm font-bold">{item.total_units}</td>
                   <td className="px-4 py-3 text-xs">
-                    <p><b>{(item.paid_total || 0).toFixed(2)}</b>₺ <span className="text-gray-400">/</span> {(item.agreed_total || 0).toFixed(2)}₺</p>
-                    <p className={`text-[10px] ${item.remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {item.remaining > 0 ? `Kalan: ${item.remaining.toFixed(2)}₺` : "Tamamlandı"}
-                    </p>
+                    <p className="font-semibold tabular-nums">{(item.agreed_total || 0).toFixed(2)}₺</p>
+                    {item.payment_done ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">Ödendi ✓</span>
+                    ) : (
+                      <span className="text-[10px] text-gray-400">Ödenmedi</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${STAGE_COLORS[item.current_stage] || 'bg-gray-100'}`}>
@@ -612,70 +604,35 @@ export default function Manufacturing() {
               </div>
             )}
 
-            {/* Finansal */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Finansal — tek satır: birim fiyat + otomatik toplam + ödeme yapıldı tiki */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">Birim Fiyat (₺, KDV Hariç)</label>
                 <input type="number" step="0.01" value={form.unit_price}
                   onChange={e => setForm({ ...form, unit_price: e.target.value })}
                   className="w-full border px-3 py-2 rounded text-sm" />
                 {Number(form.unit_price) > 0 && (
-                  <p className="text-[11px] text-emerald-700 mt-1" data-testid="mfg-vat-hint">
-                    %10 KDV dahil: <b>{(Number(form.unit_price) * 1.10).toFixed(2)} ₺</b>
-                    {grandTotal > 0 && <> · {grandTotal} adet × KDV'li = <b>{(Number(form.unit_price) * 1.10 * grandTotal).toFixed(2)} ₺</b></>}
+                  <p className="text-[11px] text-emerald-700 mt-1 whitespace-nowrap overflow-hidden text-ellipsis" data-testid="mfg-vat-hint">
+                    KDV'li: <b>{(Number(form.unit_price) * 1.10).toFixed(2)} ₺</b>{grandTotal > 0 && <> · {grandTotal} adet KDV'li: <b>{(Number(form.unit_price) * 1.10 * grandTotal).toFixed(2)} ₺</b></>}
                   </p>
                 )}
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺) <span className="text-gray-400 font-normal">(adet × birim fiyat — otomatik)</span></label>
-                <div className="w-full border px-3 py-2 rounded text-sm bg-gray-50 font-semibold tabular-nums" data-testid="mfg-agreed-total">
+                <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺)</label>
+                <div className="w-full border px-3 py-2 rounded text-sm bg-gray-50 font-semibold tabular-nums whitespace-nowrap" data-testid="mfg-agreed-total">
                   {(Number(form.unit_price || 0) * grandTotal).toFixed(2)} ₺
-                  {Number(form.unit_price) > 0 && grandTotal > 0 && (
-                    <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal} adet × {Number(form.unit_price).toFixed(2)} ₺)</span>
-                  )}
+                  <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal} adet × {Number(form.unit_price || 0).toFixed(2)} ₺)</span>
                 </div>
               </div>
-            </div>
-
-            {/* Payments */}
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-xs font-bold text-gray-600 flex items-center gap-2">
-                  <DollarSign size={12} /> Ödemeler ({totalPaid.toFixed(2)}₺)
-                </label>
-                <button type="button" onClick={addPayment} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded">
-                  <Plus size={12} className="inline" /> Ödeme Ekle
+              <div>
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, payment_done: !f.payment_done }))}
+                  data-testid="mfg-payment-done"
+                  className={`w-full px-3 py-2 rounded text-sm font-semibold border-2 transition flex items-center justify-center gap-2
+                    ${form.payment_done ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400"}`}>
+                  <CheckCircle2 size={16} /> {form.payment_done ? "Ödeme Yapıldı ✓" : "Ödeme Yapıldı mı?"}
                 </button>
               </div>
-              {(form.payments || []).map((p, i) => (
-                <div key={p.id || i} className="grid grid-cols-12 gap-2 mb-1">
-                  <input type="date" value={p.date || ""} onChange={e => setForm(f => ({ ...f, payments: f.payments.map(x => x.id === p.id ? { ...x, date: e.target.value } : x) }))} className="col-span-3 border px-2 py-1 rounded text-xs" />
-                  <input type="number" step="0.01" value={p.amount || 0} placeholder="Tutar" onChange={e => setForm(f => ({ ...f, payments: f.payments.map(x => x.id === p.id ? { ...x, amount: e.target.value } : x) }))} className="col-span-3 border px-2 py-1 rounded text-xs" />
-                  <input value={p.method || ""} placeholder="Havale/Nakit/Kart" onChange={e => setForm(f => ({ ...f, payments: f.payments.map(x => x.id === p.id ? { ...x, method: e.target.value } : x) }))} className="col-span-2 border px-2 py-1 rounded text-xs" />
-                  <input value={p.note || ""} placeholder="Not" onChange={e => setForm(f => ({ ...f, payments: f.payments.map(x => x.id === p.id ? { ...x, note: e.target.value } : x) }))} className="col-span-3 border px-2 py-1 rounded text-xs" />
-                  <button type="button" onClick={() => removePayment(p.id)} className="col-span-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={13} className="mx-auto" /></button>
-                </div>
-              ))}
-            </div>
-
-            {/* Cost lines */}
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="text-xs font-bold text-gray-600 flex items-center gap-2">
-                  <FileText size={12} /> Maliyet Kalemleri ({totalCost.toFixed(2)}₺)
-                </label>
-                <button type="button" onClick={addCostLine} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded">
-                  <Plus size={12} className="inline" /> Kalem Ekle
-                </button>
-              </div>
-              {(form.cost_lines || []).map((c, i) => (
-                <div key={c.id || i} className="grid grid-cols-12 gap-2 mb-1">
-                  <input value={c.label || ""} placeholder="Kumaş / Aksesuar / Dikim..." onChange={e => setForm(f => ({ ...f, cost_lines: f.cost_lines.map(x => x.id === c.id ? { ...x, label: e.target.value } : x) }))} className="col-span-5 border px-2 py-1 rounded text-xs" />
-                  <input type="number" step="0.01" value={c.amount || 0} placeholder="Tutar" onChange={e => setForm(f => ({ ...f, cost_lines: f.cost_lines.map(x => x.id === c.id ? { ...x, amount: e.target.value } : x) }))} className="col-span-3 border px-2 py-1 rounded text-xs" />
-                  <input value={c.note || ""} placeholder="Not" onChange={e => setForm(f => ({ ...f, cost_lines: f.cost_lines.map(x => x.id === c.id ? { ...x, note: e.target.value } : x) }))} className="col-span-3 border px-2 py-1 rounded text-xs" />
-                  <button type="button" onClick={() => removeCostLine(c.id)} className="col-span-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={13} className="mx-auto" /></button>
-                </div>
-              ))}
             </div>
 
             <div>

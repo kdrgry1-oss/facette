@@ -52,6 +52,7 @@ export const navigationGroups = [
     label: "Raporlar",
     icon: TrendingUp,
     children: [
+      { label: "Karar Destek Kurulu", path: "/admin/raporlar/karar-kurulu", icon: Brain },
       { label: "Satış Raporları", path: "/admin/raporlar/satis", icon: TrendingUp },
       { label: "Kârlılık Analizi", path: "/admin/raporlar/karlilik", icon: TrendingUp },
       { label: "Kâr & Stok Değer", path: "/admin/raporlar/kar-stok", icon: TrendingUp },
