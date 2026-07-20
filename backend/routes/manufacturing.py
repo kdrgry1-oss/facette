@@ -147,6 +147,8 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "payment_done_at": now_iso if payload.get("payment_done") else None,
         "has_lining": bool(payload.get("has_lining")),      # astarlı ürün → renk bazlı astar okeyi
         "color_approvals": payload.get("color_approvals") or {},  # {"Renk": {fabric, lining}}
+        "cutting_start_date": payload.get("cutting_start_date", ""),  # kesim başlangıç tarihi
+        "actual_distribution": payload.get("actual_distribution") or {},  # gerçekleşen kesim adedi {"Renk|Beden": n}
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -188,7 +190,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "unit_price", "agreed_total", "payments", "cost_lines",
         "purchase_orders", "waste_meters", "supplier_id", "notes",
         "order_no", "order_flags", "stock_code", "colors",
-        "has_lining", "color_approvals",
+        "has_lining", "color_approvals", "cutting_start_date", "actual_distribution",
     ):
         if f in payload:
             update[f] = payload[f]
@@ -231,6 +233,9 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
         "stage_history": history,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Kesim Başlangıcı'na geçerken kullanıcı kesim başlangıç tarihini girer (kullanıcı isteği)
+    if new_stage == "kesim" and payload.get("cutting_start_date"):
+        update["cutting_start_date"] = str(payload.get("cutting_start_date"))[:10]
 
     # F11: On "teslim_alindi" increment stock per size distribution.
     # DENETİM FIX (idempotent): stok artışı SADECE BİR KEZ yapılmalı. Eskiden 'teslim_alindi'ye

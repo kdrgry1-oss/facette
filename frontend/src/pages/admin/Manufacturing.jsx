@@ -75,6 +75,8 @@ export default function Manufacturing() {
       payment_done: false,          // tek tik: ödeme yapıldı mı
       has_lining: false,            // astarlı ürün mü (Astar Okeyi kolonunu açar)
       color_approvals: {},          // {"Renk": {fabric: bool, lining: bool}}
+      cutting_start_date: "",       // kesim başlangıç tarihi (kesime geçerken sorulur)
+      actual_distribution: {},      // gerçekleşen kesim adedi {"Renk|Beden": n}
       waste_meters: 0,
       notes: "",
       current_stage: "siparis_dosyasi",
@@ -162,6 +164,8 @@ export default function Manufacturing() {
       payment_done: !!item.payment_done,
       has_lining: !!item.has_lining,
       color_approvals: item.color_approvals || {},
+      cutting_start_date: item.cutting_start_date || "",
+      actual_distribution: item.actual_distribution || {},
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
       current_stage: item.current_stage || "siparis_dosyasi",
@@ -186,6 +190,12 @@ export default function Manufacturing() {
           .map(([k, v]) => [k, Number(v)])
       );
       payload.unit_price = Number(payload.unit_price || 0);
+      // Gerçekleşen kesim adetleri: yalnız sayı girilen hücreler kaydedilir
+      payload.actual_distribution = Object.fromEntries(
+        Object.entries(payload.actual_distribution || {})
+          .filter(([, v]) => v !== "" && v !== null && v !== undefined)
+          .map(([k, v]) => [k, Number(v)])
+      );
       // Toplam anlaşma bedeli OTOMATİK: genel toplam adet × birim fiyat (kullanıcı isteği)
       const _qty = Object.values(payload.size_distribution).reduce((a, b) => a + Number(b || 0), 0);
       payload.agreed_total = Number((payload.unit_price * _qty).toFixed(2));
@@ -207,12 +217,19 @@ export default function Manufacturing() {
   };
 
   const advanceStage = async (item, newStage) => {
+    // Kesim Başlangıcı'na geçerken kesim başlangıç tarihi istenir (kullanıcı isteği)
+    let cuttingDate = "";
+    if (newStage === "kesim") {
+      cuttingDate = window.prompt("Kesim başlangıç tarihi (YYYY-AA-GG):", new Date().toISOString().substring(0, 10));
+      if (cuttingDate === null) return;
+      cuttingDate = (cuttingDate || "").trim();
+    }
     const note = window.prompt(`"${stageLabel(newStage)}" aşamasına geçiyorsunuz. Not (opsiyonel):`);
     if (note === null) return;
     try {
       const token = localStorage.getItem("token");
       await axios.post(`${API}/manufacturing/${item.id}/advance`,
-        { stage: newStage, note },
+        { stage: newStage, note, ...(cuttingDate ? { cutting_start_date: cuttingDate } : {}) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success("Aşama güncellendi");
@@ -311,6 +328,14 @@ export default function Manufacturing() {
     return { ...f, color_approvals: { ...(f.color_approvals || {}), [key]: _stampApproval(cur, kind) } };
   });
 
+  // Gerçekleşen (kesilen) adet — kesim ve sonraki aşamalarda girilir; fire/fazla % gösterilir
+  const actualVal = (color, size) => form.actual_distribution?.[matrixKey(color, size)];
+  const setActual = (color, size, val) => setForm(f => ({
+    ...f,
+    actual_distribution: { ...(f.actual_distribution || {}), [matrixKey(color, size)]: val === "" ? "" : Number(val || 0) },
+  }));
+  const showActuals = !!editing && ["kesim", "dikim", "kalite_kontrol", "teslim_alindi"].includes(form.current_stage);
+
   const rowTotal = (color) => form.sizes.reduce((s, sz) => s + cellVal(color, sz), 0);
   const grandTotal = (form.colors.length ? form.colors : [""]).reduce((s, c) => s + rowTotal(c), 0);
 
@@ -397,15 +422,10 @@ export default function Manufacturing() {
                 const _delivered = item.current_stage === "teslim_alindi";
                 const _rowColors = (item.colors?.length ? item.colors
                   : [...new Set(Object.keys(item.size_distribution || {}).map(k => k.includes("|") ? k.split("|")[0] : ""))].filter(Boolean));
-                // Okey tamamlanma + süre ölçümü: astarlı üründe EN SON astar okeyi baz alınır
+                // Okey tamamlanma (hatırlatıcı nokta için) — zaman damgaları çip tooltip'inde
                 const _keys = (_rowColors.length ? _rowColors : [""]).map(c => c || "_tek");
                 const _ap = item.color_approvals || {};
                 const _okeysDone = _keys.every(k => _ap[k]?.fabric) && (!item.has_lining || _keys.every(k => _ap[k]?.lining));
-                const _okeyDates = _keys.map(k => _ap[k]?.fabric_at)
-                  .concat(item.has_lining ? _keys.map(k => _ap[k]?.lining_at) : []).filter(Boolean).sort();
-                const _lastOkey = (_okeysDone && _okeyDates.length) ? _okeyDates[_okeyDates.length - 1] : null;
-                const _okeyDays = (item.payment_done_at && _lastOkey)
-                  ? Math.max(0, Math.round((new Date(_lastOkey) - new Date(item.payment_done_at)) / 864e5)) : null;
                 // Kırmızı yanıp sönen hatırlatıcı: kumaş okeyinde okeyler tamamsa → kesime geç;
                 // kesim ve sonraki ara aşamalarda her zaman (ilerletme dış haberle yapılır)
                 const _showDot = (_okeysDone && item.current_stage === "kumas_okeyi")
@@ -429,6 +449,9 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 text-sm font-bold text-right tabular-nums">{item.total_units}</td>
                   <td className="px-3 py-3 text-xs">
                     <p className="text-gray-700">{item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}</p>
+                    {item.cutting_start_date && (
+                      <p className="text-[10px] text-orange-600">Kesim: {new Date(item.cutting_start_date).toLocaleDateString('tr-TR')}</p>
+                    )}
                     {_delivered ? (
                       <p className="text-[10px] font-bold text-emerald-600">Teslim alındı ✓</p>
                     ) : _days == null ? null : _days < 0 ? (
@@ -472,11 +495,6 @@ export default function Manufacturing() {
                           );
                         })}
                       </div>
-                    )}
-                    {_okeyDays != null && (
-                      <p className="text-[9px] text-gray-500 mt-1" title="Ödeme Yapıldı tıklandığı andan son okeye (astarlıysa son astar okeyine) geçen süre">
-                        Ödeme → okey: <b className="text-gray-700">{_okeyDays === 0 ? "aynı gün" : `${_okeyDays} gün`}</b>
-                      </p>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -620,6 +638,12 @@ export default function Manufacturing() {
                   </button>
                 </span>
               </label>
+              {showActuals && form.sizes.length > 0 && (
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1.5">
+                  Kesim aşamasındasınız: her hücrede üstteki kutu <b>sipariş adedi</b>, alttaki kesikli kutu <b>gerçekleşen (kesilen) adet</b>tir.
+                  Fark varsa yanında <b className="text-red-600">−% fire</b> / <b className="text-emerald-600">+% fazla</b> gösterilir.
+                </p>
+              )}
               {form.sizes.length === 0 ? (
                 <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
                   "Renk / Beden Seç" ile hazır tablodan seçim yapın — kombinasyon tablosu burada oluşur.
@@ -648,13 +672,36 @@ export default function Manufacturing() {
                             {c || "(Tek renk)"}
                             {c && <button type="button" onClick={() => removeColor(c)} className="ml-1.5 text-red-400 hover:text-red-600" title="Rengi kaldır">×</button>}
                           </td>
-                          {form.sizes.map(s => (
-                            <td key={s} className="px-1.5 py-1.5 text-center">
-                              <input type="number" min={0} value={cellVal(c, s) || ""}
+                          {form.sizes.map(s => {
+                            const _ord = cellVal(c, s);
+                            const _act = actualVal(c, s);
+                            const _hasAct = showActuals && _act !== undefined && _act !== "" && _ord > 0;
+                            const _pct = _hasAct ? ((Number(_act) - _ord) / _ord) * 100 : null;
+                            return (
+                            <td key={s} className="px-1.5 py-1.5 text-center align-top">
+                              <input type="number" min={0} value={_ord || ""}
                                 onChange={e => setCell(c, s, e.target.value)}
                                 className="w-16 border px-1.5 py-1 rounded text-sm text-center" placeholder="0" />
+                              {showActuals && (
+                                <div className="mt-0.5">
+                                  <input type="number" min={0} value={_act ?? ""}
+                                    onChange={e => setActual(c, s, e.target.value)}
+                                    title="Gerçekleşen (kesilen) adet"
+                                    className="w-16 border border-dashed border-amber-300 bg-amber-50/40 px-1.5 py-0.5 rounded text-xs text-center" placeholder="kesilen" />
+                                  {_pct != null && Math.round(_pct) !== 0 && (
+                                    <p className={`text-[9px] font-bold mt-0.5 ${_pct < 0 ? "text-red-600" : "text-emerald-600"}`}
+                                      title={_pct < 0 ? "Fire: sipariş edilenden az kesildi" : "Fazla: sipariş edilenden çok kesildi"}>
+                                      {_pct > 0 ? "+" : ""}{_pct.toFixed(1).replace(".0", "")}%
+                                    </p>
+                                  )}
+                                  {_pct != null && Math.round(_pct) === 0 && (
+                                    <p className="text-[9px] text-gray-400 mt-0.5">tam</p>
+                                  )}
+                                </div>
+                              )}
                             </td>
-                          ))}
+                            );
+                          })}
                           <td className="px-3 py-1.5 text-right font-bold tabular-nums">{rowTotal(c)}</td>
                           <td className="px-2 py-1.5 text-center">
                             <button type="button" onClick={() => toggleApproval(c, "fabric")}
