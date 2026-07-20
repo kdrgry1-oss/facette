@@ -9,6 +9,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../../components/ui/dialog";
 
+function _plus21(dateStr) {
+  // Tahmini teslim = sipariş tarihi + 21 gün (kullanıcı isteği)
+  try {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + 21);
+    return d.toISOString().substring(0, 10);
+  } catch { return ""; }
+}
+
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STAGE_COLORS = {
@@ -41,14 +50,18 @@ export default function Manufacturing() {
   const [form, setForm] = useState(initialForm());
 
   function initialForm() {
+    const _today = new Date().toISOString().substring(0, 10);
     return {
       product_name: "",
-      partner_name: "FACETTE İç Stok",
-      partner_contact: "",
-      responsible_user: "",
-      agreement_date: new Date().toISOString().substring(0, 10),
-      expected_delivery_date: "",
-      size_distribution: {},
+      supplier_id: "",              // İmalatçı (zorunlu, kayıtlı listeden)
+      order_no: "",                 // İmalat Sipariş No (boşsa otomatik IMLT-... atanır)
+      order_flags: { new: true, rpt: false }, // Yeni Sipariş / RPT
+      stock_code: "",               // ürün ilk burada doğar
+      agreement_date: _today,       // Sipariş Tarihi
+      expected_delivery_date: _plus21(_today), // otomatik +21 gün
+      colors: [],                   // sipariş edilen renkler
+      sizes: [],                    // bedenler (matris kolonları)
+      size_distribution: {},        // {"Renk|Beden": adet}
       unit_price: 0,
       agreed_total: 0,
       payments: [],
@@ -58,6 +71,33 @@ export default function Manufacturing() {
       current_stage: "anlasma",
     };
   }
+
+  // İmalatçı listesi (kayıtlı) + inline ekleme
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const fetchSuppliers = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.get(`${API}/manufacturing-suppliers`, { headers: { Authorization: `Bearer ${token}` } });
+      setSuppliers(r.data.items || r.data || []);
+    } catch { /* sessiz */ }
+  };
+  useEffect(() => { fetchSuppliers(); }, []);
+  const addSupplierInline = async () => {
+    const name = window.prompt("Yeni imalatçı adı:", supplierSearch.trim());
+    if (!name || !name.trim()) return;
+    const phone = window.prompt("Telefon (opsiyonel):") || "";
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.post(`${API}/manufacturing-suppliers`, { name: name.trim(), phone, type: "atolye" },
+        { headers: { Authorization: `Bearer ${token}` } });
+      const sup = r.data.supplier || r.data;
+      toast.success("İmalatçı eklendi");
+      await fetchSuppliers();
+      if (sup?.id) setForm((f) => ({ ...f, supplier_id: sup.id }));
+      setSupplierSearch("");
+    } catch (e) { toast.error(e.response?.data?.detail || "İmalatçı eklenemedi"); }
+  };
 
   useEffect(() => { fetchAll(); }, [stageFilter]);
 
@@ -93,14 +133,21 @@ export default function Manufacturing() {
 
   const openEdit = (item) => {
     setEditing(item);
+    // Mevcut size_distribution'dan renk/beden eksenlerini çıkar ("Renk|Beden" veya çıplak beden)
+    const _dist = item.size_distribution || {};
+    const _colors = [...new Set(Object.keys(_dist).map((k) => (k.includes("|") ? k.split("|")[0] : "")).filter(Boolean))];
+    const _sizes = [...new Set(Object.keys(_dist).map((k) => (k.includes("|") ? k.split("|")[1] : k)))];
     setForm({
       product_name: item.product_name || "",
-      partner_name: item.partner_name || "",
-      partner_contact: item.partner_contact || "",
-      responsible_user: item.responsible_user || "",
+      supplier_id: item.supplier_id || "",
+      order_no: item.order_no || item.code || "",
+      order_flags: item.order_flags || { new: false, rpt: false },
+      stock_code: item.stock_code || "",
+      colors: item.colors?.length ? item.colors : _colors,
+      sizes: _sizes,
       agreement_date: (item.agreement_date || "").substring(0, 10),
       expected_delivery_date: (item.expected_delivery_date || "").substring(0, 10),
-      size_distribution: item.size_distribution || {},
+      size_distribution: _dist,
       unit_price: item.unit_price || 0,
       agreed_total: item.agreed_total || 0,
       payments: item.payments || [],
@@ -115,6 +162,7 @@ export default function Manufacturing() {
   const saveRecord = async (e) => {
     e?.preventDefault?.();
     if (!form.product_name.trim()) { toast.error("Ürün adı gerekli"); return; }
+    if (!form.supplier_id) { toast.error("İmalatçı seçimi zorunlu — listeden seçin veya ekleyin"); return; }
     setSaving(true);
     try {
       const token = localStorage.getItem("token");
@@ -181,10 +229,45 @@ export default function Manufacturing() {
     return idx >= 0 && idx < stages.length - 1 ? stages[idx + 1].key : null;
   };
 
-  const updateSize = (size, val) => setForm(f => ({
+  // ── Renk × Beden kombinasyon matrisi ──────────────────────────────────
+  const matrixKey = (color, size) => (color ? `${color}|${size}` : size);
+  const cellVal = (color, size) => Number(form.size_distribution?.[matrixKey(color, size)] || 0);
+  const setCell = (color, size, val) => setForm(f => ({
     ...f,
-    size_distribution: { ...f.size_distribution, [size]: val },
+    size_distribution: { ...f.size_distribution, [matrixKey(color, size)]: Number(val || 0) },
   }));
+  const addColor = () => {
+    const c = window.prompt("Renk adı (ör. Siyah):");
+    if (!c || !c.trim()) return;
+    setForm(f => f.colors.includes(c.trim()) ? f : { ...f, colors: [...f.colors, c.trim()] });
+  };
+  const addSize = () => {
+    const s = window.prompt("Beden (ör. S veya 36):");
+    if (!s || !s.trim()) return;
+    setForm(f => f.sizes.includes(s.trim().toUpperCase()) ? f : { ...f, sizes: [...f.sizes, s.trim().toUpperCase()] });
+  };
+  const removeColor = (c) => setForm(f => ({
+    ...f, colors: f.colors.filter(x => x !== c),
+    size_distribution: Object.fromEntries(Object.entries(f.size_distribution).filter(([k]) => !k.startsWith(c + "|"))),
+  }));
+  const removeSize = (s) => setForm(f => ({
+    ...f, sizes: f.sizes.filter(x => x !== s),
+    size_distribution: Object.fromEntries(Object.entries(f.size_distribution).filter(([k]) => (k.includes("|") ? k.split("|")[1] : k) !== s)),
+  }));
+  const rowTotal = (color) => form.sizes.reduce((s, sz) => s + cellVal(color, sz), 0);
+  const grandTotal = (form.colors.length ? form.colors : [""]).reduce((s, c) => s + rowTotal(c), 0);
+
+  // "Ürünler Kartına Aktar" — son aşamada imalattan ürün oluştur
+  const transferToProducts = async (item) => {
+    if (!await window.appConfirm(`"${item.product_name}" imalat kaydından ürün kartı oluşturulacak (taslak). Devam?`)) return;
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.post(`${API}/manufacturing/${item.id}/create-product`, {},
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(r.data?.message || "Ürün kartı oluşturuldu");
+      fetchAll();
+    } catch (e) { toast.error(e.response?.data?.detail || "Aktarılamadı"); }
+  };
 
   const addCostLine = () => setForm(f => ({
     ...f,
@@ -285,6 +368,20 @@ export default function Manufacturing() {
                     {item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {/* Son aşama: imalattan ürün kartı oluştur (kullanıcı isteği) */}
+                    {["teslim_alindi", "fatura_kesildi"].includes(item.current_stage) && !item.product_created && (
+                      <button
+                        onClick={() => transferToProducts(item)}
+                        data-testid={`transfer-${item.id}`}
+                        className="px-2 py-1 text-xs bg-emerald-600 text-white hover:bg-emerald-700 rounded font-medium mr-1"
+                        title="Renk/beden kombinasyonlarından taslak ürün kartı oluşturur"
+                      >
+                        Ürünler Kartına Aktar
+                      </button>
+                    )}
+                    {item.product_created && (
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 mr-1">ürüne aktarıldı ✓</span>
+                    )}
                     {nextStage(item.current_stage) && (
                       <button
                         onClick={() => advanceStage(item, nextStage(item.current_stage))}
@@ -325,81 +422,128 @@ export default function Manufacturing() {
                   data-testid="mfg-product-name" className="w-full border px-3 py-2 rounded text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">İş Ortağı / Atölye</label>
-                <input value={form.partner_name} onChange={e => setForm({ ...form, partner_name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
+                <label className="block text-xs font-bold text-gray-600 mb-1">İmalatçı <span className="text-red-500">*</span></label>
+                <input value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)}
+                  placeholder="İmalatçı ara..." className="w-full border px-3 py-1.5 rounded text-xs mb-1" data-testid="mfg-supplier-search" />
+                <select value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })}
+                  required data-testid="mfg-supplier-select" className="w-full border px-3 py-2 rounded text-sm">
+                  <option value="">— İmalatçı seçin —</option>
+                  {suppliers
+                    .filter(s => !supplierSearch.trim() || (s.name || "").toLocaleLowerCase("tr").includes(supplierSearch.trim().toLocaleLowerCase("tr")))
+                    .map(s => <option key={s.id} value={s.id}>{s.name}{s.phone ? ` (${s.phone})` : ""}</option>)}
+                </select>
+                <button type="button" onClick={addSupplierInline}
+                  className="mt-1 text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-supplier">
+                  <Plus size={12} className="inline" /> İmalatçı Ekle
+                </button>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">İletişim (Telefon/E-posta)</label>
-                <input value={form.partner_contact} onChange={e => setForm({ ...form, partner_contact: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
+                <label className="block text-xs font-bold text-gray-600 mb-1">İmalat Sipariş No</label>
+                <input value={form.order_no} onChange={e => setForm({ ...form, order_no: e.target.value })}
+                  placeholder="Boş bırakılırsa otomatik (IMLT-...)" className="w-full border px-3 py-2 rounded text-sm" />
+                <div className="flex items-center gap-4 mt-2">
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold">
+                    <input type="checkbox" checked={!!form.order_flags?.new}
+                      onChange={e => setForm({ ...form, order_flags: { ...form.order_flags, new: e.target.checked } })}
+                      className="accent-rose-600" data-testid="mfg-flag-new" /> Yeni Sipariş
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold">
+                    <input type="checkbox" checked={!!form.order_flags?.rpt}
+                      onChange={e => setForm({ ...form, order_flags: { ...form.order_flags, rpt: e.target.checked } })}
+                      className="accent-rose-600" data-testid="mfg-flag-rpt" /> RPT
+                  </label>
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Sorumlu Kullanıcı</label>
-                <input value={form.responsible_user} onChange={e => setForm({ ...form, responsible_user: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
+                <label className="block text-xs font-bold text-gray-600 mb-1">Sipariş Tarihi</label>
+                <input type="date" value={form.agreement_date}
+                  onChange={e => setForm({ ...form, agreement_date: e.target.value, expected_delivery_date: _plus21(e.target.value) })}
+                  className="w-full border px-3 py-2 rounded text-sm" data-testid="mfg-order-date" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Anlaşma Tarihi</label>
-                <input type="date" value={form.agreement_date} onChange={e => setForm({ ...form, agreement_date: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Tahmini Teslim Tarihi</label>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Tahmini Teslim Tarihi <span className="text-gray-400 font-normal">(sipariş +21 gün otomatik)</span></label>
                 <input type="date" value={form.expected_delivery_date} onChange={e => setForm({ ...form, expected_delivery_date: e.target.value })}
                   className="w-full border px-3 py-2 rounded text-sm" />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Stok Kodu <span className="text-gray-400 font-normal">(ürün ilk burada oluşur)</span></label>
+                <input value={form.stock_code} onChange={e => setForm({ ...form, stock_code: e.target.value.toUpperCase() })}
+                  placeholder="FCFW07000..." className="w-full border px-3 py-2 rounded text-sm font-mono" data-testid="mfg-stock-code" />
+              </div>
             </div>
 
-            {/* Size distribution - kullanıcı kendi ekler */}
+            {/* Renk × Beden kombinasyon matrisi (kullanıcı isteği): satır=renk, kolon=beden,
+                hücre=adet; satır sonunda toplam, tablonun altında sağda GENEL TOPLAM. */}
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-2 flex items-center gap-2 justify-between">
-                <span className="flex items-center gap-2"><Package size={12} /> Beden Dağılımı</span>
-                <button type="button" onClick={() => {
-                  const s = window.prompt("Beden adı (örn: M, 42, 3XL):");
-                  if (!s || !s.trim()) return;
-                  setForm(f => ({ ...f, size_distribution: { ...(f.size_distribution || {}), [s.trim()]: 0 } }));
-                }} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded normal-case">
-                  <Plus size={12} className="inline" /> Beden Ekle
-                </button>
+                <span className="flex items-center gap-2"><Package size={12} /> Sipariş Edilen Renkler × Bedenler</span>
+                <span className="flex gap-1">
+                  <button type="button" onClick={addColor} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-color">
+                    <Plus size={12} className="inline" /> Renk Ekle
+                  </button>
+                  <button type="button" onClick={addSize} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-size">
+                    <Plus size={12} className="inline" /> Beden Ekle
+                  </button>
+                </span>
               </label>
-              {Object.keys(form.size_distribution || {}).length === 0 ? (
+              {form.sizes.length === 0 ? (
                 <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
-                  Henüz beden eklenmedi. "Beden Ekle" ile istediğiniz bedenleri tanımlayın.
+                  Önce "Renk Ekle" ve "Beden Ekle" ile eksenleri tanımlayın — kombinasyon tablosu burada oluşur.
                 </div>
               ) : (
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-2 bg-rose-50 border border-rose-200 rounded-lg p-3">
-                  {Object.keys(form.size_distribution).map(s => (
-                    <div key={s} className="relative">
-                      <label className="text-[10px] font-bold text-rose-700">{s}</label>
-                      <input type="number" min={0} value={form.size_distribution[s] || 0}
-                        onChange={e => updateSize(s, e.target.value)}
-                        className="w-full border px-2 py-1 rounded text-sm pr-6" />
-                      <button type="button" onClick={() => {
-                        setForm(f => {
-                          const sd = { ...f.size_distribution };
-                          delete sd[s];
-                          return { ...f, size_distribution: sd };
-                        });
-                      }} className="absolute top-5 right-1 text-red-400 hover:text-red-600" title="Kaldır">
-                        <Trash2 size={10} />
-                      </button>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto border border-rose-200 rounded-lg">
+                  <table className="w-full text-sm" data-testid="mfg-matrix">
+                    <thead className="bg-rose-50 text-xs text-rose-700">
+                      <tr>
+                        <th className="text-left px-3 py-2">Renk \ Beden</th>
+                        {form.sizes.map(s => (
+                          <th key={s} className="px-2 py-2 text-center">
+                            {s}
+                            <button type="button" onClick={() => removeSize(s)} className="ml-1 text-red-400 hover:text-red-600" title="Bedeni kaldır">×</button>
+                          </th>
+                        ))}
+                        <th className="px-3 py-2 text-right">Sipariş Adedi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(form.colors.length ? form.colors : [""]).map(c => (
+                        <tr key={c || "_tek"} className="border-t">
+                          <td className="px-3 py-1.5 font-semibold whitespace-nowrap">
+                            {c || "(Tek renk)"}
+                            {c && <button type="button" onClick={() => removeColor(c)} className="ml-1.5 text-red-400 hover:text-red-600" title="Rengi kaldır">×</button>}
+                          </td>
+                          {form.sizes.map(s => (
+                            <td key={s} className="px-1.5 py-1.5 text-center">
+                              <input type="number" min={0} value={cellVal(c, s) || ""}
+                                onChange={e => setCell(c, s, e.target.value)}
+                                className="w-16 border px-1.5 py-1 rounded text-sm text-center" placeholder="0" />
+                            </td>
+                          ))}
+                          <td className="px-3 py-1.5 text-right font-bold tabular-nums">{rowTotal(c)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-              <p className="text-xs text-gray-500 mt-1">
-                Toplam: <b>{Object.values(form.size_distribution || {}).reduce((a, b) => Number(a) + Number(b), 0)}</b> adet
+              <p className="text-sm text-gray-700 mt-1.5 text-right">
+                GENEL TOPLAM: <b className="text-rose-700" data-testid="mfg-grand-total">{grandTotal}</b> adet
               </p>
             </div>
 
             {/* Finansal */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Birim Fiyat (₺)</label>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Birim Fiyat (₺, KDV Hariç)</label>
                 <input type="number" step="0.01" value={form.unit_price}
                   onChange={e => setForm({ ...form, unit_price: e.target.value })}
                   className="w-full border px-3 py-2 rounded text-sm" />
+                {Number(form.unit_price) > 0 && (
+                  <p className="text-[11px] text-emerald-700 mt-1" data-testid="mfg-vat-hint">
+                    %10 KDV dahil: <b>{(Number(form.unit_price) * 1.10).toFixed(2)} ₺</b>
+                    {grandTotal > 0 && <> · {grandTotal} adet × KDV'li = <b>{(Number(form.unit_price) * 1.10 * grandTotal).toFixed(2)} ₺</b></>}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺)</label>

@@ -8,7 +8,7 @@ Tracks manufacturing orders end-to-end:
 - On "teslim alındı" (delivered/stocked) the product stock is incremented
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
 
@@ -96,16 +96,41 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
     cnt = await db.manufacturing.count_documents({"code": {"$regex": f"^IMLT-{year}-"}})
     code = f"IMLT-{year}-{cnt + 1:04d}"
 
+    # İmalatçı ZORUNLU ve kayıtlı listeden gelir (kullanıcı isteği).
+    supplier_id = (payload.get("supplier_id") or "").strip()
+    if not supplier_id:
+        raise HTTPException(status_code=400, detail="İmalatçı seçimi zorunlu — listeden seçin veya yeni imalatçı ekleyin")
+    _sup = await db.manufacturing_suppliers.find_one({"id": supplier_id}, {"_id": 0, "name": 1})
+    if not _sup:
+        raise HTTPException(status_code=400, detail="Seçilen imalatçı bulunamadı")
+
+    _order_date = payload.get("agreement_date", now_iso)
+    # Tahmini teslim: verilmemişse sipariş tarihi + 21 gün OTOMATİK.
+    _exp = payload.get("expected_delivery_date")
+    if not _exp:
+        try:
+            _d = datetime.fromisoformat(str(_order_date)[:10])
+            _exp = (_d + timedelta(days=21)).strftime("%Y-%m-%d")
+        except Exception:
+            _exp = None
+
     doc = {
         "id": str(uuid.uuid4()),
         "code": code,
+        "order_no": (payload.get("order_no") or code).strip(),  # İmalat Sipariş No
+        "order_flags": {  # Yeni Sipariş / RPT işaret kutuları
+            "new": bool((payload.get("order_flags") or {}).get("new")),
+            "rpt": bool((payload.get("order_flags") or {}).get("rpt")),
+        },
+        "stock_code": (payload.get("stock_code") or "").strip(),  # ürün ilk burada doğar
+        "colors": payload.get("colors") or [],  # sipariş edilen renkler
         "product_id": payload.get("product_id", ""),
         "product_name": payload.get("product_name", ""),
-        "partner_name": payload.get("partner_name", "FACETTE İç Stok"),
+        "partner_name": _sup["name"],
         "partner_contact": payload.get("partner_contact", ""),
         "responsible_user": payload.get("responsible_user", current_user.get("email", "")),
-        "agreement_date": payload.get("agreement_date", now_iso),
-        "expected_delivery_date": payload.get("expected_delivery_date"),
+        "agreement_date": _order_date,  # Sipariş Tarihi
+        "expected_delivery_date": _exp,
         "size_distribution": payload.get("size_distribution", {}),  # e.g. {"S":10,"M":20}
         "total_units": sum((payload.get("size_distribution") or {}).values()) if payload.get("size_distribution") else payload.get("total_units", 0),
         "unit_price": float(payload.get("unit_price", 0) or 0),
@@ -114,7 +139,7 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
         "waste_meters": float(payload.get("waste_meters", 0) or 0),  # F10 – fire
-        "supplier_id": payload.get("supplier_id", ""),  # F7
+        "supplier_id": supplier_id,  # F7 — zorunlu, kayıtlı imalatçı
         "current_stage": payload.get("current_stage", STAGES[0]),
         "stage_history": [{
             "stage": payload.get("current_stage", STAGES[0]),
@@ -147,9 +172,10 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
     update = {"updated_at": datetime.now(timezone.utc).isoformat()}
     for f in (
         "product_id", "product_name", "partner_name", "partner_contact",
-        "responsible_user", "expected_delivery_date", "size_distribution",
+        "responsible_user", "agreement_date", "expected_delivery_date", "size_distribution",
         "unit_price", "agreed_total", "payments", "cost_lines",
         "purchase_orders", "waste_meters", "supplier_id", "notes",
+        "order_no", "order_flags", "stock_code", "colors",
     ):
         if f in payload:
             update[f] = payload[f]
@@ -262,6 +288,83 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
 
     await db.manufacturing.update_one({"id": record_id}, {"$set": update})
     return {"success": True, "new_stage": new_stage}
+
+
+@router.post("/{record_id}/create-product")
+async def create_product_from_manufacturing(record_id: str, current_user: dict = Depends(require_admin)):
+    """"Ürünler Kartına Aktar" — imalat kaydından ürün oluşturur (kullanıcı isteği:
+    ürün İLK imalatta doğar, son aşamada onaylanınca Ürünler sayfasına aktarılır).
+
+    - Yalnız teslim_alindi / fatura_kesildi aşamasında çalışır.
+    - size_distribution ("Renk|Beden" → adet) → variants[{color,size,stock}] map'lenir;
+      barkod/urun_id üretimi ve çok renkte renk-başına ürün ayrıştırma products.create_product'ta.
+    - Ürün TASLAK (is_active=False) açılır — fiyat/görsel Ürünler sayfasında tamamlanır.
+    - Atomik bayrak (product_created) mükerrer aktarımı engeller; stok bu aktarımla
+      yazıldığından kayıt stock_incremented=True işaretlenir (çift stok artışı olmaz).
+    """
+    rec = await db.manufacturing.find_one({"id": record_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    if rec.get("current_stage") not in ("teslim_alindi", "fatura_kesildi"):
+        raise HTTPException(status_code=400, detail="Aktarım yalnız 'Teslim Alındı' sonrasında yapılabilir")
+    if rec.get("product_created"):
+        raise HTTPException(status_code=409, detail="Bu kayıttan ürün zaten oluşturulmuş")
+    dist = rec.get("size_distribution") or {}
+    if not dist:
+        raise HTTPException(status_code=400, detail="Renk/beden dağılımı boş — önce kombinasyon tablosunu doldurun")
+
+    lock = await db.manufacturing.update_one(
+        {"id": record_id, "product_created": {"$ne": True}},
+        {"$set": {"product_created": True, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not lock.modified_count:
+        raise HTTPException(status_code=409, detail="Aktarım zaten yapılmış")
+
+    variants = []
+    for key, qty in dist.items():
+        try:
+            q = int(qty or 0)
+        except Exception:
+            q = 0
+        if q <= 0:
+            continue
+        if "|" in str(key):
+            color, size = str(key).split("|", 1)
+        else:
+            color, size = "", str(key)
+        variants.append({"size": size.strip(), "color": color.strip(), "stock": q})
+
+    from .products import create_product as _create_product
+    payload = {
+        "name": rec.get("product_name") or "",
+        "stock_code": rec.get("stock_code") or "",
+        "variants": variants,
+        "manufacturer": rec.get("partner_name") or "FACETTE",
+        "purchase_price": float(rec.get("unit_price") or 0),
+        "is_active": False,  # taslak — fiyat/görsel tamamlanınca yayına alınır
+        "notes": f"İmalat kaydından aktarıldı: {rec.get('code')}",
+    }
+    try:
+        res = await _create_product(payload, current_user)
+    except Exception as e:
+        # Aktarım başarısızsa bayrağı geri aç (tekrar denenebilsin)
+        await db.manufacturing.update_one({"id": record_id}, {"$set": {"product_created": False}})
+        raise HTTPException(status_code=500, detail=f"Ürün oluşturulamadı: {e}")
+
+    pids = res.get("product_ids") or ([res.get("id")] if res.get("id") else [])
+    await db.manufacturing.update_one(
+        {"id": record_id},
+        {"$set": {"product_id": (pids[0] if pids else ""), "created_product_ids": pids,
+                  "stock_incremented": True,
+                  "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await db.stock_movements.insert_one({
+        "id": str(uuid.uuid4()), "type": "manufacturing_delivered",
+        "record_id": record_id, "record_code": rec.get("code"),
+        "items": [{"color_size": k, "qty": v} for k, v in dist.items()],
+        "created_by": current_user.get("email", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"success": True, "product_ids": pids,
+            "message": f"{len(pids) or 1} ürün kartı oluşturuldu (taslak) — Ürünler sayfasından fiyat/görsel ekleyip yayına alın"}
 
 
 @router.post("/{record_id}/files")
