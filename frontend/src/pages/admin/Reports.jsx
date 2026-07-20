@@ -32,7 +32,10 @@ function DateBar({ from, setFrom, to, setTo, onRefresh }) {
 // --- Sales ---
 export function SalesReport() {
   const { from, setFrom, to, setTo } = useDateRange();
-  const [groupBy, setGroupBy] = useState("day");
+  // Günlük/Haftalık/Aylık seçici KALDIRILDI (tarih filtresiyle çakışıyordu) —
+  // kırılım aralığın uzunluğundan otomatik: ≤31 gün günlük, ≤120 gün haftalık, üstü aylık.
+  const _rangeDays = Math.max(1, Math.round((new Date(to) - new Date(from)) / 864e5) + 1);
+  const groupBy = _rangeDays <= 31 ? "day" : _rangeDays <= 120 ? "week" : "month";
   const [source, setSource] = useState("all");
   const [data, setData] = useState(null);
   const [paymentData, setPayData] = useState([]);
@@ -70,7 +73,7 @@ export function SalesReport() {
       .then((r) => setDayDetail(r.data)).catch(() => setDayDetail(null));
   };
   useEffect(() => { loadDay(dayDate); /* eslint-disable-next-line */ }, [dayDate, source]);
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy, source]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
   return (
@@ -87,11 +90,6 @@ export function SalesReport() {
             <option value="trendyol">Trendyol</option>
             <option value="hepsiburada">Hepsiburada</option>
             <option value="temu">Temu</option>
-          </select>
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className="px-3 py-1.5 border rounded text-sm">
-            <option value="day">Günlük</option>
-            <option value="week">Haftalık</option>
-            <option value="month">Aylık</option>
           </select>
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
         </div>
@@ -279,7 +277,7 @@ export function SalesReport() {
       <div className="bg-white rounded-xl border p-5">
         {/* Başlık seçilen kırılımı söyler; az kovalı (haftalık/aylık) görünümde iki nokta
             arasına çizgi çekmek yanıltıcıydı → gruplu görünümde ÇUBUK grafik kullanılır. */}
-        <h3 className="font-semibold mb-3">{{ day: "Günlük", week: "Haftalık", month: "Aylık" }[groupBy] || "Günlük"} Ciro & Sipariş</h3>
+        <h3 className="font-semibold mb-3">{{ day: "Günlük", week: "Haftalık", month: "Aylık" }[groupBy] || "Günlük"} Ciro & Sipariş <span className="text-[11px] font-normal text-gray-400">(aralığa göre otomatik)</span></h3>
         <ResponsiveContainer width="100%" height={300}>
           {groupBy === "day" ? (
             <LineChart data={data?.rows || []}>
