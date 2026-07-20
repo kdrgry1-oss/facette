@@ -508,7 +508,13 @@ export default function Manufacturing() {
                 <tr className="border-b hover:bg-gray-50" data-testid={`mfg-row-${item.code}`}>
                   <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
                   <td className="px-3 py-3 text-sm font-semibold">{item.partner_name || "—"}</td>
-                  <td className="px-3 py-3 font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</td>
+                  <td className="px-3 py-3">
+                    <p className="font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</p>
+                    {item.order_flags?.rpt && (
+                      <span className="inline-block mt-0.5 text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5"
+                        title="Tekrar sipariş (repeat)">RPT</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3">
                     <p className="font-medium">{item.product_name}</p>
                     <p className="flex items-center gap-1.5 mt-0.5">
