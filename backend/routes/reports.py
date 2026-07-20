@@ -405,8 +405,8 @@ async def products_export_xlsx(
     ws = wb.active
     ws.title = "Ürün Raporu"
     ws.append(["Ürün", "Sezon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
-               "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
-               "İptal Adet", "İade Adet", "Platform İptal/İade Detay"])
+               "Kapsama (Hafta)", "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
+               "İptal Adet", "İade Adet", "İade %", "Platform İptal/İade Detay"])
     # Satış hızı: renkli hücre (yeşil/sarı/kırmızı) + etiket — panelle birebir aynı kodlama
     from openpyxl.styles import PatternFill
     _VEL_FILL = {"green": PatternFill("solid", fgColor="C6EFCE"),
@@ -418,15 +418,21 @@ async def products_export_xlsx(
                          for x in (r.get("cancel_return_by_platform") or []))
         _vel = r.get("velocity") or {}
         _vcode = _vel.get("code") or ""
+        _wr = float(_vel.get("weekly_rate") or 0)
+        _stok = r.get("current_stock")
+        _cover = round(_stok / _wr, 1) if (_stok is not None and _wr > 0) else ""
+        _rq = int(r.get("return_qty") or 0)
+        _tq = int(r.get("qty") or 0) + _rq
+        _rpct = round(100 * _rq / _tq, 1) if _tq > 0 else ""
         ws.append([r.get("name"), r.get("season") or "", r.get("qty"), r.get("revenue"),
-                   r.get("orders"), r.get("current_stock"), r.get("best_size"),
+                   r.get("orders"), _stok, _cover, r.get("best_size"),
                    r.get("top_platform"),
                    f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)",
-                   r.get("cancel_qty", 0), r.get("return_qty", 0), _crd])
+                   r.get("cancel_qty", 0), _rq, _rpct, _crd])
         _fill = _VEL_FILL.get(_vcode)
         if _fill:
-            ws.cell(row=ws.max_row, column=9).fill = _fill
-    for col, w in zip("ABCDEFGHIJKL", [42, 10, 12, 14, 10, 12, 16, 18, 12, 10, 10, 40]):
+            ws.cell(row=ws.max_row, column=10).fill = _fill
+    for col, w in zip("ABCDEFGHIJKLMN", [42, 10, 12, 14, 10, 12, 14, 16, 18, 14, 10, 10, 8, 40]):
         ws.column_dimensions[col].width = w
     buf = _BytesIO()
     wb.save(buf)

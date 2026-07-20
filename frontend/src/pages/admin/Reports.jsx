@@ -4,7 +4,6 @@ import axios from "axios";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 import { TrendingUp, Package, Users, Truck, CreditCard, RefreshCw } from "lucide-react";
 import ReportScopeBadge from "../../components/ReportScopeBadge";
-import DecisionBoard from "./DecisionBoard";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("token")}` });
@@ -415,7 +414,7 @@ export function ProductsReport() {
   const [collFilter, setCollFilter] = useState("");   // Sezon filtresi (İlkbahar/Yaz/Sonbahar/Kış)
   const [velFilter, setVelFilter] = useState("");      // D4 — satış hızı (green/yellow/red)
   const [expanded, setExpanded] = useState(() => new Set()); // açılır: beden dağılımı
-  const [showBoard, setShowBoard] = useState(false);         // Karar Destek Kurulu paneli (gömülü)
+  const [top90Map, setTop90Map] = useState({});              // İvme: 90 günlük haftalık hız haritası
   const toggleExpand = (k) => setExpanded(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const load = async () => {
@@ -428,6 +427,14 @@ export function ProductsReport() {
     // İade & İptal raporu (ürün bazlı — platform/tarih/ada göre filtrelenebilir)
     axios.get(`${API}/admin/reports/cancel-return-products`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setCrRows(r.data.items || [])).catch(() => {});
+    // İVME: seçili aralıktaki hız, 90 günlük tabana kıyaslanır (yükselen/sönen ürün tespiti)
+    const d90 = new Date(new Date(to).getTime() - 90 * 864e5).toISOString().slice(0, 10);
+    axios.get(`${API}/admin/reports/products/top`, { headers: authHeaders(), params: { start_date: d90, end_date: to + "T23:59:59", limit: 2000 } })
+      .then((r) => {
+        const m = {};
+        (r.data.items || []).forEach(p => { if (p.product_id) m[p.product_id] = (p.velocity || {}).weekly_rate ?? 0; });
+        setTop90Map(m);
+      }).catch(() => {});
   };
   const [crRows, setCrRows] = useState([]);
   const [crQ, setCrQ] = useState("");
@@ -444,7 +451,19 @@ export function ProductsReport() {
   const velMeta = { green: { label: "Hızlı (haftada 5+)", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta (haftada 1-4)", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş (ayda 0-2)", cls: "bg-red-100 text-red-700 border-red-200" } };
   const rows = (() => {
     const f = q.trim().toLocaleLowerCase("tr");
-    let r = f ? top.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f)) : [...top];
+    // Uzman kurulu geliştirmeleri: kapsama (kaç haftalık stok), ivme (30g vs 90g hız), iade %
+    let r = top.map(p => {
+      const wr = (p.velocity || {}).weekly_rate ?? 0;
+      const prev = top90Map[p.product_id];
+      const totQ = (p.qty || 0) + (p.return_qty || 0);
+      return {
+        ...p,
+        _cover: (p.current_stock != null && wr > 0) ? p.current_stock / wr : null,
+        _mom: (prev != null && (wr > 0 || prev > 0)) ? wr - prev : null,
+        _retpct: totQ > 0 ? (100 * (p.return_qty || 0)) / totQ : 0,
+      };
+    });
+    if (f) r = r.filter(p => (p.name || "").toLocaleLowerCase("tr").includes(f));
     if (platFilter) r = r.filter(p => (p.platform_breakdown || []).some(x => x.platform === platFilter));
     if (sizeFilter) r = r.filter(p => (p.size_breakdown || []).some(x => x.size === sizeFilter));
     if (collFilter) r = r.filter(p => (p.season || "") === collFilter);
@@ -492,17 +511,6 @@ export function ProductsReport() {
         <span className="font-semibold">Bu raporda:</span> Seçili tarih aralığında (iptal & iade hariç) her ürünün toplam <b>satış adedi</b> ve <b>cirosu</b>, <b>güncel stok</b> durumu, <b>en çok satan bedeni</b> ve <b>hangi platformdan</b> ne kadar sattığı yer alır. Kolon başlıklarına tıklayarak (ör. cirodan yükseğe/düşüğe) sıralayabilir, arama ile ürün filtreleyebilirsiniz.
       </div>
 
-      {/* 🧠 Karar Destek Kurulu — ürün raporunun İÇİNDE (ayrı sekme değil, kullanıcı isteği) */}
-      <div className="bg-white border-2 border-violet-200 rounded-xl">
-        <button onClick={() => setShowBoard(v => !v)} data-testid="toggle-decision-board"
-          className="w-full flex items-center justify-between px-5 py-3 text-left">
-          <span className="font-bold text-violet-800 flex items-center gap-2">
-            🧠 Karar Destek Kurulu <span className="text-xs font-normal text-violet-500">— uzman ajanlar bu rapordaki verileri tartışır, kararların altına yorum yazarsınız</span>
-          </span>
-          <span className="text-violet-600 text-sm font-semibold">{showBoard ? "Gizle ▴" : "Raporu Aç ▾"}</span>
-        </button>
-        {showBoard && <div className="px-5 pb-5"><DecisionBoard embed /></div>}
-      </div>
 
       <div className="bg-white rounded-xl border p-5">
         <h3 className="font-semibold mb-3">En Çok Satan 10 Ürün (Ciro)</h3>
@@ -572,13 +580,16 @@ export function ProductsReport() {
                 <SortTh k="name">Ürün</SortTh>
                 <SortTh k="season">Sezon</SortTh>
                 <SortTh k="velocity">Satış Hızı</SortTh>
+                <SortTh k="_mom">İvme</SortTh>
                 <SortTh k="qty" right>Adet</SortTh>
                 <SortTh k="revenue" right>Ciro</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
+                <SortTh k="_cover" right>Kapsama</SortTh>
                 <SortTh k="best_size">En Çok Beden</SortTh>
                 <SortTh k="top_platform">Platform</SortTh>
                 <SortTh k="cancel_qty" right>İptal</SortTh>
                 <SortTh k="return_qty" right>İade</SortTh>
+                <SortTh k="_retpct" right>İade %</SortTh>
               </tr>
             </thead>
             <tbody>
@@ -599,9 +610,29 @@ export function ProductsReport() {
                       </span>
                     ) : "—"}
                   </td>
+                  <td className="p-3 text-xs whitespace-nowrap">
+                    {p._mom == null ? "" : (() => {
+                      const wr = (p.velocity || {}).weekly_rate ?? 0;
+                      const prev = wr - p._mom;
+                      if (wr >= prev * 1.25 && p._mom >= 0.5) return <span className="text-emerald-600 font-bold" title={`90g: ${prev.toFixed(1)}/hf → şimdi: ${wr.toFixed(1)}/hf`}>▲ Yükseliyor</span>;
+                      if (wr <= prev * 0.75 && -p._mom >= 0.5) return <span className="text-rose-600 font-bold" title={`90g: ${prev.toFixed(1)}/hf → şimdi: ${wr.toFixed(1)}/hf`}>▼ Düşüyor</span>;
+                      return <span className="text-gray-400" title={`90g: ${prev.toFixed(1)}/hf → şimdi: ${wr.toFixed(1)}/hf`}>→ Stabil</span>;
+                    })()}
+                  </td>
                   <td className="p-3 text-right">{p.qty}</td>
                   <td className="p-3 text-right font-semibold">₺{(p.revenue || 0).toLocaleString("tr-TR")}</td>
                   <td className={`p-3 text-right ${p.current_stock === 0 ? "text-red-600 font-semibold" : ""}`}>{p.current_stock == null ? "—" : p.current_stock}</td>
+                  <td className="p-3 text-right text-xs whitespace-nowrap">
+                    {p._cover == null ? (
+                      ((p.velocity || {}).weekly_rate ?? 0) === 0 && (p.current_stock || 0) > 0 ? <span className="text-gray-400" title="Bu aralıkta hiç satmadı — stok eritilemiyor">∞</span> : "—"
+                    ) : p._cover <= 4 ? (
+                      <span className="text-red-600 font-bold" title="4 haftadan az stok kaldı — acil üretim/tedarik">{p._cover.toFixed(1)} hf ⚠</span>
+                    ) : p._cover >= 26 ? (
+                      <span className="text-gray-400" title="26+ haftalık stok — aşırı stok, eritme adayı">{p._cover.toFixed(0)} hf</span>
+                    ) : (
+                      <span className="tabular-nums">{p._cover.toFixed(1)} hf</span>
+                    )}
+                  </td>
                   <td className="p-3">{p.best_size || "—"}</td>
                   <td className="p-3" title={(p.platform_breakdown || []).map(x => `${platLabel(x.platform)}: ${x.qty}`).join(", ")}>
                     {(p.platform_breakdown || []).map(x => platLabel(x.platform)).join(", ") || "—"}
@@ -614,10 +645,14 @@ export function ProductsReport() {
                     title={(p.cancel_return_by_platform || []).map(x => `${platLabel(x.platform)}: iade ${x.return}`).join(", ")}>
                     {p.return_qty || 0}
                   </td>
+                  <td className={`p-3 text-right tabular-nums text-xs ${p._retpct >= 15 ? "text-red-600 font-bold" : p._retpct >= 8 ? "text-amber-600 font-semibold" : "text-gray-400"}`}
+                    title={p._retpct >= 15 ? "İade oranı %15+ — bu ürün muhtemelen zarar ettiriyor (kalıp/beden denetimi önerilir)" : ""}>
+                    {p._retpct > 0 ? `%${p._retpct.toFixed(1)}` : ""}
+                  </td>
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={10} className="px-8 py-3">
+                    <td colSpan={13} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
@@ -642,7 +677,7 @@ export function ProductsReport() {
                 </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={10} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={13} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
         </div>

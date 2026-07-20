@@ -4590,6 +4590,36 @@ async def get_trendyol_issue_reasons(current_user: dict = Depends(require_admin)
             {"id": 6, "name": "İade Süresi Geçmiş"},
             {"id": 21, "name": "Ürün Kullanılmış / Etiketi Koparılmış"}
         ]
+@router.get("/trendyol/claims/{claim_id}/media-probe")
+async def probe_claim_media(claim_id: str, current_user: dict = Depends(require_admin)):
+    """TANI ucu: müşteri iade görselleri TY API'de hangi uçtan geliyor — adayları dener.
+    (Görsel özelliği yerleşince kaldırılabilir; yalnız GET, veri değiştirmez.)"""
+    config = await get_trendyol_config()
+    if not config.get("is_active"):
+        raise HTTPException(status_code=400, detail="Trendyol entegrasyonu yapılandırılmamış")
+    from trendyol_client import TrendyolClient
+    client = TrendyolClient(config["supplier_id"], config["api_key"], config["api_secret"])
+    sid = config["supplier_id"]
+    import httpx as _httpx
+    candidates = [
+        f"/order/sellers/{sid}/claims?claimIds={claim_id}",
+        f"/order/sellers/{sid}/claims/{claim_id}/claim-issue-reasons",
+        f"/order/sellers/{sid}/claims/{claim_id}/files",
+        f"/order/sellers/{sid}/claims/{claim_id}/audit",
+        f"/order/sellers/{sid}/claims/items/{claim_id}/media",
+        f"/order/sellers/{sid}/claims/{claim_id}/gallery",
+    ]
+    out = []
+    async with _httpx.AsyncClient(timeout=20.0) as hc:
+        for ep in candidates:
+            try:
+                r = await hc.get(f"{client.base_url}{ep}", headers=client._get_headers())
+                out.append({"endpoint": ep, "status": r.status_code, "body": r.text[:800]})
+            except Exception as e:
+                out.append({"endpoint": ep, "status": "err", "body": str(e)[:200]})
+    return {"claim_id": claim_id, "results": out}
+
+
 @router.get("/trendyol/claims/{claim_id}")
 async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(require_admin)):
     """Tek bir iade/iptal kaydının detayını getir."""

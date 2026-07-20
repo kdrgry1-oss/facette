@@ -184,24 +184,28 @@ export default function Returns() {
 
   useEffect(() => { fetchClaims(); }, [fetchClaims]);
 
-  // Auto-refresh every 5 minutes
+  // CANLI EŞ ZAMANLILIK: sayfa açılır açılmaz + her 2 dakikada bir pazaryerinden
+  // HIZLI senkron (30 günlük pencere) çekilir; sekme sayıları TY/HB paneliyle uyuşur.
+  // (Eskiden açılışta senkron YOKTU — sayılar 5 dk'ya kadar bayat kalıyordu.)
   useEffect(() => {
     const syncAndRefresh = async () => {
       if (platform !== "trendyol" && platform !== "hepsiburada") return;
       try {
         const token = localStorage.getItem("token");
         const syncUrl = platform === "hepsiburada"
-          ? `${API}/integrations/hepsiburada/claims/sync`
-          : `${API}/integrations/trendyol/claims/sync`;
+          ? `${API}/integrations/hepsiburada/claims/sync?days_back=30`
+          : `${API}/integrations/trendyol/claims/sync?days_back=30`;
         await axios.get(syncUrl, {
           headers: { Authorization: `Bearer ${token}` }
         });
         await fetchClaims();
       } catch (e) { /* silent */ }
     };
-    autoRefreshRef.current = setInterval(syncAndRefresh, 5 * 60 * 1000);
+    syncAndRefresh(); // açılışta hemen canlı çek
+    autoRefreshRef.current = setInterval(syncAndRefresh, 2 * 60 * 1000);
     return () => clearInterval(autoRefreshRef.current);
-  }, [fetchClaims]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform]);
 
   const handleSync = async () => {
     setSyncing(true);
