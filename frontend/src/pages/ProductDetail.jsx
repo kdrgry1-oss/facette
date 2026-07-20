@@ -846,9 +846,19 @@ export default function ProductDetail() {
                   {(() => {
                     // "Beden Seçiniz" yerine KALIBA göre dinamik tavsiye (kullanıcı isteği).
                     // Kaynak: ürün formundaki size_advice VEYA Özellikler'deki "Kalıp" değeri.
-                    const _attrFit = ((product.attributes || []).find(
-                      (a) => (a.name || "").toLocaleLowerCase("tr").includes("kalıp"))?.value || "")
-                      .toLocaleLowerCase("tr");
+                    // DİKKAT: attributes bazı (XML kaynaklı) ürünlerde LİSTE değil SÖZLÜK —
+                    // dizi varsayımı sayfayı çökertiyordu; iki format da desteklenir.
+                    const _attrs = product.attributes;
+                    let _attrFitRaw = "";
+                    if (Array.isArray(_attrs)) {
+                      _attrFitRaw = _attrs.find(
+                        (a) => ((a?.name || a?.type || "")).toLocaleLowerCase("tr").includes("kalıp"))?.value || "";
+                    } else if (_attrs && typeof _attrs === "object") {
+                      const _k = Object.keys(_attrs).find((k) => k.toLocaleLowerCase("tr").includes("kalıp"));
+                      const _v = _k ? _attrs[_k] : "";
+                      _attrFitRaw = (typeof _v === "object" ? _v?.value : _v) || "";
+                    }
+                    const _attrFit = String(_attrFitRaw).toLocaleLowerCase("tr");
                     const _fit = product.size_advice
                       || (_attrFit.includes("oversize") || _attrFit.includes("bol") ? "bol"
                         : _attrFit.includes("slim") || _attrFit.includes("dar") ? "dar"
