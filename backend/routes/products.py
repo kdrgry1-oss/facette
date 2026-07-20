@@ -1683,6 +1683,7 @@ async def create_product(
         "sku": product_data.get("sku", ""),
         "supplier": product_data.get("supplier", ""),
         "manufacturer": product_data.get("manufacturer", "FACETTE"),
+        "season": (product_data.get("season") or "").strip(),  # İlkbahar/Yaz/Sonbahar/Kış — rapor sezon filtresi buradan beslenir
         # FAZ 7 — İmalat modülü için ek alanlar
         "collection": product_data.get("collection", ""),   # ör. "2026 İlkbahar/Yaz"
         "purchase_price": float(product_data.get("purchase_price", 0) or 0),  # Alış fiyatı
@@ -2635,6 +2636,24 @@ async def get_product_attributes(product_id: str, current_user: dict = Depends(r
     if not product:
         raise HTTPException(status_code=404, detail="Urun bulunamadi")
     return {"attributes": product.get("attributes", []), "name": product.get("name"), "stock_code": product.get("stock_code")}
+
+
+@router.post("/backfill-season")
+async def backfill_product_seasons_endpoint(current_user: dict = Depends(require_admin)):
+    """TEK SEFERLİK/idempotent: 'season' alanı boş ürünlere, öznitelikteki 'Sezon'
+    değerinden 4 sezona normalize edilmiş değer yazar (İlkbahar/Yaz/Sonbahar/Kış)."""
+    from .reports import _season_from_attrs
+    updated = 0
+    scanned = 0
+    async for p in db.products.find(
+            {"$or": [{"season": {"$exists": False}}, {"season": ""}, {"season": None}]},
+            {"_id": 0, "id": 1, "attributes": 1}):
+        scanned += 1
+        s = _season_from_attrs(p.get("attributes"))
+        if s:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"season": s}})
+            updated += 1
+    return {"scanned": scanned, "updated": updated}
 
 
 @router.put("/{product_id}/attributes")

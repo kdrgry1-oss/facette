@@ -498,14 +498,15 @@ async def top_products(
             q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
         async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1,
                                              "barcode": 1, "collection": 1, "created_at": 1, "stock_code": 1,
-                                             "attributes": 1}):
+                                             "attributes": 1, "season": 1}):
             variants = p.get("variants") or []
             stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
             info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock,
                     "collection": (p.get("collection") or "").strip(),
                     "created_at": p.get("created_at") or None,
                     "stock_code": (p.get("stock_code") or "").strip(),
-                    "season": _season_from_attrs(p.get("attributes"))}
+                    # Sezon: önce ürün kartındaki zorunlu 'season' alanı; eskiler için öznitelik fallback
+                    "season": (p.get("season") or "").strip() or _season_from_attrs(p.get("attributes"))}
             by_id[str(p.get("id"))] = info
             if p.get("barcode"):
                 by_bc[str(p["barcode"])] = info
@@ -575,7 +576,7 @@ async def top_products(
     async for p in db.products.find(
             {"is_active": True, "is_deleted": {"$ne": True}},
             {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "collection": 1,
-             "created_at": 1, "stock_code": 1, "attributes": 1}):
+             "created_at": 1, "stock_code": 1, "attributes": 1, "season": 1}):
         if str(p.get("id")) in _seen_ids:
             continue
         variants = p.get("variants") or []
@@ -586,7 +587,7 @@ async def top_products(
             "_sizes": {}, "_plats": {},
             "collection": _collection_from_code(p.get("stock_code")) or (p.get("collection") or "").strip(),
             "created_at": p.get("created_at"), "stock_code": (p.get("stock_code") or "").strip(),
-            "season": _season_from_attrs(p.get("attributes")),
+            "season": (p.get("season") or "").strip() or _season_from_attrs(p.get("attributes")),
         }
 
     # İPTAL & İADE — ürün bazında, platform kırılımlı (aynı kalem-anahtar çözümüyle)

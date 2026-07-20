@@ -353,7 +353,7 @@ export default function AdminProducts() {
     name: "", slug: "", description: "", short_description: "",
     price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
     images: [], is_active: false, is_featured: false, is_new: false,
-    stock: 0, stock_code: "", barcode: "", sku: "",
+    stock: 0, stock_code: "", season: "", barcode: "", sku: "",
     urun_karti_id: "", urun_id: "",
     // Ticimax fields
     variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
@@ -1202,6 +1202,11 @@ export default function AdminProducts() {
    */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Sezon zorunlu (kullanıcı isteği) — rapor sezon filtresi bu alandan beslenir
+    if (!formData.season) {
+      toast.error("Sezon Bilgisi zorunlu — Temel sekmesinde 'Envanter & Kimlik' altından seçin");
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
@@ -1667,6 +1672,7 @@ export default function AdminProducts() {
       is_new: product.is_new ?? false,
       stock: product.stock || 0,
       stock_code: product.stock_code || "",
+      season: product.season || "",
       barcode: product.barcode || "",
       sku: product.sku || "",
       urun_karti_id: product.urun_karti_id || "",
@@ -1741,7 +1747,7 @@ export default function AdminProducts() {
       name: "", slug: "", description: "", short_description: "",
       price: 0, sale_price: null, category_name: "", categories: [], brand: "FACETTE",
       images: [], is_active: false, is_featured: false, is_new: false,
-      stock: 0, stock_code: "", barcode: "", sku: "",
+      stock: 0, stock_code: "", season: "", barcode: "", sku: "",
       urun_karti_id: "", urun_id: "",
       variation_code: "", gtip_code: "", unit: "ADET", keywords: "",
       supplier: "", manufacturer: "FACETTE", max_installment: 9, purchase_price: 0, member_price_1: null,
@@ -2522,6 +2528,23 @@ export default function AdminProducts() {
                             Üret (FCSS)
                           </button>
                         </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Sezon Bilgisi <span className="text-red-500">*</span></label>
+                        <select
+                          value={formData.season || ""}
+                          onChange={(e) => setFormData({ ...formData, season: e.target.value })}
+                          data-testid="product-season-select"
+                          className={`w-full border px-3 py-2 rounded-lg bg-gray-50 focus:bg-white outline-none transition-all text-sm ${formData.season ? "border-gray-200 focus:border-black" : "border-red-300"}`}
+                        >
+                          <option value="">— Sezon seçin (zorunlu) —</option>
+                          <option value="Yaz">Yaz</option>
+                          <option value="Sonbahar">Sonbahar</option>
+                          <option value="Kış">Kış</option>
+                          <option value="İlkbahar">İlkbahar</option>
+                        </select>
+                        <p className="text-[10px] text-gray-400 mt-1">Ürün raporlarındaki Sezon kolonu ve filtresi bu alandan beslenir.</p>
                       </div>
 
                       <div>
