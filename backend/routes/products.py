@@ -2641,8 +2641,14 @@ async def get_product_attributes(product_id: str, current_user: dict = Depends(r
 @router.post("/backfill-season")
 async def backfill_product_seasons_endpoint(current_user: dict = Depends(require_admin)):
     """TEK SEFERLİK/idempotent: 'season' alanı boş ürünlere, öznitelikteki 'Sezon'
-    değerinden 4 sezona normalize edilmiş değer yazar (İlkbahar/Yaz/Sonbahar/Kış)."""
+    değerinden normalize edilmiş değer yazar (İlkbahar/Sonbahar · Tüm Sezonlar · Yaz · Kış).
+    Ayrıca eski taksonomideki kayıtları yeni değerlere taşır (İlkbahar→İlkbahar/Sonbahar vb.)."""
     from .reports import _season_from_attrs
+    # Eski değerleri yeni taksonomiye taşı (idempotent)
+    _mig = await db.products.update_many(
+        {"season": {"$in": ["İlkbahar", "Sonbahar"]}},
+        {"$set": {"season": "İlkbahar/Sonbahar"}})
+    migrated = _mig.modified_count
     updated = 0
     scanned = 0
     async for p in db.products.find(
@@ -2653,7 +2659,7 @@ async def backfill_product_seasons_endpoint(current_user: dict = Depends(require
         if s:
             await db.products.update_one({"id": p["id"]}, {"$set": {"season": s}})
             updated += 1
-    return {"scanned": scanned, "updated": updated}
+    return {"scanned": scanned, "updated": updated, "migrated": migrated}
 
 
 @router.put("/{product_id}/attributes")
@@ -2929,7 +2935,8 @@ async def export_products_excel(
         raise HTTPException(status_code=500, detail=f"Dışa aktarma hatası: {str(e)}")
 
 def _norm_season_cell(val) -> str:
-    """Excel'deki Sezon hücresini 4 kanonik değere indirger (Yaz/Kış/İlkbahar/Sonbahar).
+    """Excel'deki Sezon hücresini 4 kanonik değere indirger:
+    İlkbahar/Sonbahar · Tüm Sezonlar · Yaz · Kış.
     Türkçe İ/ı büyük-küçük tuzağına takılmamak için aksan/kombine işaretler soyulur.
     Boş/tanınmayan değer '' döner — mevcut sezon SİLİNMEZ, satır atlanır."""
     import unicodedata
@@ -2938,7 +2945,14 @@ def _norm_season_cell(val) -> str:
         return ""
     folded = "".join(c for c in unicodedata.normalize("NFKD", s.casefold())
                      if not unicodedata.combining(c)).replace("ı", "i")
-    return {"yaz": "Yaz", "kis": "Kış", "ilkbahar": "İlkbahar", "sonbahar": "Sonbahar"}.get(folded, "")
+    return {
+        "yaz": "Yaz", "kis": "Kış",
+        # Ara sezonlar tek grupta: tek başına ilkbahar/sonbahar da bu gruba düşer
+        "ilkbahar": "İlkbahar/Sonbahar", "sonbahar": "İlkbahar/Sonbahar",
+        "ilkbahar/sonbahar": "İlkbahar/Sonbahar", "ilkbahar-sonbahar": "İlkbahar/Sonbahar",
+        "tum sezonlar": "Tüm Sezonlar", "tum sezon": "Tüm Sezonlar",
+        "4 mevsim": "Tüm Sezonlar", "all season": "Tüm Sezonlar",
+    }.get(folded, "")
 
 
 @router.post("/import/excel")

@@ -76,9 +76,10 @@ def _collection_from_code(*codes) -> str:
 
 
 def _season_from_attrs(attrs) -> str:
-    """Ürünün 'Sezon' özniteliğini 4 sezona normalize eder: İlkbahar / Yaz / Sonbahar / Kış.
-    Veri yoksa BOŞ döner (varsayım yapılmaz). Kombine etiketlerde (SPRING-SUMMER,
-    FALL-WINTER) geç sezon esas alınır."""
+    """Ürünün 'Sezon' özniteliğini 4 kanonik değere normalize eder:
+    İlkbahar/Sonbahar · Tüm Sezonlar · Yaz · Kış. Veri yoksa BOŞ döner (varsayım
+    yapılmaz). Kombine etiketlerde (SPRING-SUMMER, FALL-WINTER) geç sezon esas alınır;
+    ara sezonlar (ilkbahar/sonbahar) tek 'İlkbahar/Sonbahar' grubunda toplanır."""
     val = ""
     for a in (attrs or []):
         if isinstance(a, dict) and str(a.get("name") or a.get("type") or "").strip().lower() in ("sezon", "season"):
@@ -89,14 +90,14 @@ def _season_from_attrs(attrs) -> str:
     v = val.lower().replace("i̇", "i")
     if not v:
         return ""
+    if "tüm sezon" in v or "tum sezon" in v or "4 mevsim" in v or "all season" in v or "mevsim" in v:
+        return "Tüm Sezonlar"
     if "kış" in v or "kis" in v or "winter" in v:
         return "Kış"
-    if "sonbahar" in v or "fall" in v or "autumn" in v:
-        return "Sonbahar"
     if "yaz" in v or "summer" in v:
         return "Yaz"
-    if "ilkbahar" in v or "spring" in v or "bahar" in v:
-        return "İlkbahar"
+    if "sonbahar" in v or "fall" in v or "autumn" in v or "ilkbahar" in v or "spring" in v or "bahar" in v:
+        return "İlkbahar/Sonbahar"
     return ""
 
 

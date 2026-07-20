@@ -2583,10 +2583,10 @@ export default function AdminProducts() {
                           className={`w-full border px-3 py-2 rounded-lg bg-gray-50 focus:bg-white outline-none transition-all text-sm ${formData.season ? "border-gray-200 focus:border-black" : "border-red-300"}`}
                         >
                           <option value="">— Sezon seçin (zorunlu) —</option>
+                          <option value="İlkbahar/Sonbahar">İlkbahar/Sonbahar</option>
+                          <option value="Tüm Sezonlar">Tüm Sezonlar</option>
                           <option value="Yaz">Yaz</option>
-                          <option value="Sonbahar">Sonbahar</option>
                           <option value="Kış">Kış</option>
-                          <option value="İlkbahar">İlkbahar</option>
                         </select>
                         <p className="text-[10px] text-gray-400 mt-1">Ürün raporlarındaki Sezon kolonu ve filtresi bu alandan beslenir.</p>
                       </div>
