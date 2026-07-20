@@ -119,6 +119,58 @@ export function SalesReport() {
         <span className="text-[11px] text-gray-400 ml-2">{data?.totals?.orders ?? 0} sipariş ortalaması</span>
       </div>
 
+      {/* 🏬 Pazaryerine Göre Satış · İptal · İade — TEK tablo (eski iki ayrı blok birleştirildi) */}
+      {(srcData.length > 0 || cancelRet.length > 0) && (
+        <div className="bg-white border rounded-xl p-4" data-testid="channel-combined">
+          <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Pazaryerine Göre Satış · İptal · İade</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="text-left p-2">Kanal</th>
+                  <th className="text-right p-2">Sipariş</th>
+                  <th className="text-right p-2">Ciro</th>
+                  <th className="text-right p-2">İptal</th>
+                  <th className="text-right p-2">İptal Tutarı</th>
+                  <th className="text-right p-2">İptal %</th>
+                  <th className="text-right p-2">İade</th>
+                  <th className="text-right p-2">İade Tutarı</th>
+                  <th className="text-right p-2">İade %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  // Satış (sales-by-platform) + iptal/iade (by-source) kanal adına göre birleşir
+                  const crBy = Object.fromEntries(cancelRet.map(r => [r.source, r]));
+                  const names = [...new Set([...srcData.map(r => r.channel), ...cancelRet.map(r => r.source)])];
+                  return names.map(nm => {
+                    const s = srcData.find(r => r.channel === nm) || { orders: 0, revenue: 0 };
+                    const c = crBy[nm] || { cancel_orders: 0, cancel_total: 0, return_orders: 0, return_total: 0 };
+                    const tot = (s.orders || 0) + (c.cancel_orders || 0) + (c.return_orders || 0);
+                    const cp = tot ? (100 * (c.cancel_orders || 0)) / tot : 0;
+                    const rp = tot ? (100 * (c.return_orders || 0)) / tot : 0;
+                    return (
+                      <tr key={nm} className="border-t">
+                        <td className="p-2 font-medium">{nm}</td>
+                        <td className="p-2 text-right tabular-nums">{s.orders || 0}</td>
+                        <td className="p-2 text-right tabular-nums font-semibold">{tl(s.revenue)}</td>
+                        <td className="p-2 text-right tabular-nums">{c.cancel_orders || 0}</td>
+                        <td className="p-2 text-right tabular-nums text-rose-600">{tl(c.cancel_total)}</td>
+                        <td className={`p-2 text-right tabular-nums text-xs ${cp >= 10 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{cp ? `%${cp.toFixed(1)}` : ""}</td>
+                        <td className="p-2 text-right tabular-nums">{c.return_orders || 0}</td>
+                        <td className="p-2 text-right tabular-nums text-amber-600">{tl(c.return_total)}</td>
+                        <td className={`p-2 text-right tabular-nums text-xs ${rp >= 15 ? "text-rose-600 font-bold" : "text-gray-500"}`}>{rp ? `%${rp.toFixed(1)}` : ""}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1">Oranlar o kanalın toplam siparişine (satış + iptal + iade) göredir.</p>
+        </div>
+      )}
+
       {/* ⏰ Saat Analizi + 📅 Gün Analizi — reklam planlaması için */}
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="bg-white border rounded-xl p-4" data-testid="hour-analysis">
@@ -163,77 +215,29 @@ export function SalesReport() {
         </div>
       </div>
 
-      {/* 🗺️ İl & Kanal — İl artık GRAFİK (81 il sığmazsa yatay kaydırma) */}
-      {(locData.length > 0 || srcData.length > 0) && (
-        <div className="grid lg:grid-cols-2 gap-4">
-          <div className="bg-white border rounded-xl p-4" data-testid="location-block">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-bold uppercase tracking-wider">İl Bazında Satış</h2>
-              <span className="text-[11px] text-gray-400">{locData.length} il · sığmazsa yana kaydırın →</span>
-            </div>
-            <div className="overflow-x-auto pb-1">
-              <BarChart width={Math.max(560, locData.length * 44)} height={280} data={locData}
-                margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="location" interval={0} angle={-45} textAnchor="end" height={60} tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-                <Tooltip content={({ active, payload, label }) => (active && payload?.length) ? (
-                  <div className="bg-white border rounded-lg shadow px-3 py-2 text-xs">
-                    <div className="font-semibold mb-0.5">{label}</div>
-                    <div>Sipariş: <b>{payload[0].payload.orders}</b></div>
-                    <div>Ciro: <b>{tl(payload[0].payload.revenue)}</b></div>
-                  </div>
-                ) : null} />
-                <Bar dataKey="orders" name="Sipariş" fill="#0ea5e9" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </div>
+      {/* 🗺️ İl Bazında Satış — TAM GENİŞLİK, sığmazsa yatay kaydırma */}
+      {locData.length > 0 && (
+        <div className="bg-white border rounded-xl p-4" data-testid="location-block">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">İl Bazında Satış</h2>
+            <span className="text-[11px] text-gray-400">{locData.length} il · sığmazsa yana kaydırın →</span>
           </div>
-          <div className="bg-white border rounded-xl p-4" data-testid="channel-block">
-            <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Kanal Bazında Satış</h2>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                <tr><th className="text-left p-2">Kanal</th><th className="text-right p-2">Sipariş</th><th className="text-right p-2">Ciro</th></tr>
-              </thead>
-              <tbody>
-                {srcData.map((r) => (
-                  <tr key={r.channel} className="border-t">
-                    <td className="p-2 font-medium">{r.channel}</td>
-                    <td className="p-2 text-right tabular-nums">{r.orders}</td>
-                    <td className="p-2 text-right tabular-nums font-semibold">{tl(r.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="overflow-x-auto pb-1">
+            <BarChart width={Math.max(1100, locData.length * 44)} height={300} data={locData}
+              margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="location" interval={0} angle={-45} textAnchor="end" height={60} tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip content={({ active, payload, label }) => (active && payload?.length) ? (
+                <div className="bg-white border rounded-lg shadow px-3 py-2 text-xs">
+                  <div className="font-semibold mb-0.5">{label}</div>
+                  <div>Sipariş: <b>{payload[0].payload.orders}</b></div>
+                  <div>Ciro: <b>{tl(payload[0].payload.revenue)}</b></div>
+                </div>
+              ) : null} />
+              <Bar dataKey="orders" name="Sipariş" fill="#0ea5e9" radius={[3, 3, 0, 0]} />
+            </BarChart>
           </div>
-        </div>
-      )}
-
-      {/* 🔄 Pazaryerlerine göre iade & iptal durumları */}
-      {cancelRet.length > 0 && (
-        <div className="bg-white border rounded-xl p-4" data-testid="cancel-return-by-source">
-          <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Pazaryerlerine Göre İade &amp; İptal</h2>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="text-left p-2">Kaynak</th>
-                <th className="text-right p-2">İptal (adet)</th>
-                <th className="text-right p-2">İptal Tutarı</th>
-                <th className="text-right p-2">İade (adet)</th>
-                <th className="text-right p-2">İade Tutarı</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cancelRet.map((r) => (
-                <tr key={r.source} className="border-t">
-                  <td className="p-2 font-medium">{r.source}</td>
-                  <td className="p-2 text-right tabular-nums">{r.cancel_orders}</td>
-                  <td className="p-2 text-right tabular-nums text-rose-600">{tl(r.cancel_total)}</td>
-                  <td className="p-2 text-right tabular-nums">{r.return_orders}</td>
-                  <td className="p-2 text-right tabular-nums text-amber-600">{tl(r.return_total)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
