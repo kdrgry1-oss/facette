@@ -367,7 +367,7 @@ export function ProductsReport() {
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
   const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
-  const velMeta = { green: { label: "Hızlı (haftada 5+)", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta (haftada 1-4)", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş (ayda 0-2)", cls: "bg-red-100 text-red-700 border-red-200" } };
+  const velMeta = { green: { label: "Hızlı", cls: "bg-green-100 text-green-700 border-green-200" }, yellow: { label: "Orta", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" }, red: { label: "Yavaş", cls: "bg-red-100 text-red-700 border-red-200" } };
   const rows = (() => {
     const f = q.trim().toLocaleLowerCase("tr");
     // Uzman kurulu geliştirmeleri: kapsama (kaç haftalık stok), ivme (30g vs 90g hız), iade %
@@ -463,9 +463,9 @@ export function ProductsReport() {
             </select>
             <select value={velFilter} onChange={e => setVelFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
               <option value="">Tüm Hızlar</option>
-              <option value="green">🟢 Hızlı (haftada 5+)</option>
-              <option value="yellow">🟡 Orta (haftada 1-4)</option>
-              <option value="red">🔴 Yavaş (ayda 0-2)</option>
+              <option value="green">🟢 Hızlı</option>
+              <option value="yellow">🟡 Orta</option>
+              <option value="red">🔴 Yavaş</option>
             </select>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Ürün ara…" className="border rounded-lg px-3 py-1.5 text-sm w-48" />
             <button onClick={exportXlsx} className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700" data-testid="products-export-xlsx-inline" title="Ürün raporunu Excel olarak indir">
@@ -527,8 +527,9 @@ export function ProductsReport() {
                   <td className="p-3 text-xs whitespace-nowrap">{p.season || ""}</td>
                   <td className="p-3">
                     {p.velocity ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border ${(velMeta[p.velocity.code] || {}).cls || ""}`} title={`${p.velocity.weekly_rate}/hafta`}>
-                        {(velMeta[p.velocity.code] || {}).label || p.velocity.code}
+                      <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border whitespace-nowrap ${(velMeta[p.velocity.code] || {}).cls || ""}`}
+                        title="Seçili tarih aralığındaki ortalama haftalık satış adedi">
+                        {(velMeta[p.velocity.code] || {}).label || p.velocity.code} · {(p.velocity.weekly_rate ?? 0).toLocaleString("tr-TR")}/hafta
                       </span>
                     ) : "—"}
                   </td>
