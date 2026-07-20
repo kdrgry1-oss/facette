@@ -201,6 +201,12 @@ RULE_CATALOG = [
     {"group": "Sadakat & Referans", "key": "welcome.reward_value", "label": "Hoş geldin ödül değeri",
      "type": "number", "default": 10, "unit": "₺/%", "options": [5, 10, 15, 50, 100],
      "help": "Hoş geldin kuponunun değeri (tipine göre ₺ veya %)."},
+    {"group": "Raporlar", "key": "report.velocity_green_min", "label": "Satış hızı: YEŞİL alt sınırı",
+     "type": "number", "default": 13, "unit": "adet/hafta", "options": [3, 5, 8, 10, 13, 15, 20],
+     "help": "Ürün raporunda haftalık satış hızı bu değerin ÜZERİNDE veya eşitse ürün YEŞİL (hızlı) sayılır."},
+    {"group": "Raporlar", "key": "report.velocity_yellow_min", "label": "Satış hızı: SARI alt sınırı",
+     "type": "number", "default": 5, "unit": "adet/hafta", "options": [1, 2, 3, 5, 8, 10],
+     "help": "Haftalık hız bu değer ile yeşil sınırı arasındaysa SARI (orta); altındaysa KIRMIZI (yavaş)."},
 ]
 
 _CATALOG_BY_KEY = {r["key"]: r for r in RULE_CATALOG}

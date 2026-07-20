@@ -571,14 +571,22 @@ async def top_products(
         _range_days = float(90)
     _weeks = max(1.0, _range_days / 7.0)
 
+    # Hız eşikleri İşletme Kuralları'ndan (admin-ayarlanabilir): yeşil ≥13, sarı ≥5 varsayılan
+    from business_rules import get_rule as _vel_rule
+    try:
+        _green_min = float(await _vel_rule(db, "report.velocity_green_min", 13) or 13)
+        _yellow_min = float(await _vel_rule(db, "report.velocity_yellow_min", 5) or 5)
+    except Exception:
+        _green_min, _yellow_min = 13.0, 5.0
+
     def _velocity(qty: int):
         wr = qty / _weeks
-        if wr >= 5:
-            code, label = "green", "Hızlı (haftada 5+)"
-        elif wr >= 1:
-            code, label = "yellow", "Orta (haftada 1-4)"
+        if wr >= _green_min:
+            code, label = "green", "Hızlı"
+        elif wr >= _yellow_min:
+            code, label = "yellow", "Orta"
         else:
-            code, label = "red", "Yavaş (ayda 0-2)"
+            code, label = "red", "Yavaş"
         return {"weekly_rate": round(wr, 1), "code": code, "label": label}
 
     # SATIŞI OLMAYAN ürünler de listelensin ("143 ürün" yalnız satışı olanlardı) —
