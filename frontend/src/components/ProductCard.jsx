@@ -57,9 +57,10 @@ export default function ProductCard({ product, listId = "", listName = "", index
   const effectiveStock = variants.length > 0 ? variantStock : (Number(product.stock) || 0);
   const isSoldOut = effectiveStock <= 0;
 
-  const displayedImage = activeSib?.image
-    ? activeSib.image
-    : (images[currentImageIndex] || images[0] || "/placeholder.jpg");
+  // Katmanlı galeri: hover/kaydırmada src DEĞİŞTİRİLMEZ (yüklenene kadar beyaz alan +
+  // alt yazısı [ürün adı] görünüyordu). Taban görsel hep altta kalır; diğer kareler ilk
+  // etkileşimde üstte şeffaf katman olarak yüklenir, opaklıkla geçiş yapılır.
+  const [galleryReady, setGalleryReady] = useState(false);
 
   const handleQuickAdd = (e) => {
     e.preventDefault();
@@ -126,6 +127,7 @@ export default function ProductCard({ product, listId = "", listName = "", index
 
   const handleTouchStart = (e) => {
     if (activeSib || !hasMultipleImages) return;
+    setGalleryReady(true);
     const t = e.touches[0];
     touchRef.current = { x: t.clientX, y: t.clientY, swiping: false };
   };
@@ -153,19 +155,43 @@ export default function ProductCard({ product, listId = "", listName = "", index
         <div
           ref={imageContainerRef}
           className="relative aspect-[2/3] bg-white overflow-hidden"
+          onMouseEnter={() => { if (hasMultipleImages) setGalleryReady(true); }}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* Taban görsel — her zaman altta ve dolu; üst katman yüklenene kadar bu görünür */}
           <img
-            src={optimizeImg(displayedImage, 700)}
+            src={optimizeImg(images[0] || "/placeholder.jpg", 700)}
             alt={product.name}
-            className="w-full h-full object-cover object-top transition-opacity duration-200"
+            className="w-full h-full object-cover object-top"
             loading="lazy"
             decoding="async"
           />
+          {/* Galeri kareleri — ilk etkileşimde topluca yüklenir (ön-yükleme), opaklıkla geçilir.
+              alt="" olduğundan yüklenirken ASLA yazı/beyaz kutu görünmez. */}
+          {galleryReady && !activeSib && images.slice(1).map((im, i) => (
+            <img
+              key={im}
+              src={optimizeImg(im, 700)}
+              alt=""
+              aria-hidden="true"
+              className={`absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-150 ${currentImageIndex === i + 1 ? "opacity-100" : "opacity-0"}`}
+              decoding="async"
+            />
+          ))}
+          {/* Renk kardeşi önizlemesi — o da katman: yüklenene kadar taban görünür */}
+          {activeSib?.image && (
+            <img
+              src={optimizeImg(activeSib.image, 700)}
+              alt=""
+              aria-hidden="true"
+              className="absolute inset-0 w-full h-full object-cover object-top"
+              decoding="async"
+            />
+          )}
 
           {/* Tükendi rozeti */}
           {isSoldOut && (
