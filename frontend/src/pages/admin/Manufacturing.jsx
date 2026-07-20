@@ -495,9 +495,10 @@ export default function Manufacturing() {
                     {!item.payment_done && (
                       <p className="text-[10px] font-bold mb-1 text-amber-600">ÖDEME BEKLİYOR</p>
                     )}
-                    {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir; KUMAŞ/ASTAR hizalı */}
-                    <div className="flex flex-wrap gap-1 max-w-[200px] items-center">
-                      <span className="text-[9px] text-emerald-600 font-bold uppercase w-11 shrink-0">Kumaş:</span>
+                    {/* Renk bazlı kumaş okeyi — etiket sabit kolonda, çipler kendi kolonunda sarar (simetrik) */}
+                    <div className="flex items-start gap-1">
+                      <span className="text-[9px] text-emerald-600 font-bold uppercase w-11 shrink-0 mt-1">Kumaş:</span>
+                      <div className="flex flex-wrap gap-1 max-w-[190px]">
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
                         const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
                         const at = item.color_approvals?.[c || "_tek"]?.fabric_at;
@@ -509,10 +510,12 @@ export default function Manufacturing() {
                           </button>
                         );
                       })}
+                      </div>
                     </div>
                     {item.has_lining && (
-                      <div className="flex flex-wrap gap-1 max-w-[200px] mt-1 items-center">
-                        <span className="text-[9px] text-indigo-500 font-bold uppercase w-11 shrink-0">Astar:</span>
+                      <div className="flex items-start gap-1 mt-1">
+                        <span className="text-[9px] text-indigo-500 font-bold uppercase w-11 shrink-0 mt-1">Astar:</span>
+                        <div className="flex flex-wrap gap-1 max-w-[190px]">
                         {(_rowColors.length ? _rowColors : [""]).map(c => {
                           const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
                           const at = item.color_approvals?.[c || "_tek"]?.lining_at;
@@ -524,6 +527,7 @@ export default function Manufacturing() {
                             </button>
                           );
                         })}
+                        </div>
                       </div>
                     )}
                   </td>
