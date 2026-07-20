@@ -3013,6 +3013,13 @@ async def _sync_hepsiburada_claims_core(days_back: int = 60) -> dict:
         if len(rows) < limit:
             break
         offset += limit
+    # DENETİM HATA-1 (HB ayağı): onaylanmış HB iadelerini sipariş durumuna yansıt
+    # (yalnız statü + iz alanları; stok/kupon mantığına dokunulmaz).
+    try:
+        from .integrations_common import apply_accepted_claims_to_orders
+        await apply_accepted_claims_to_orders(platforms=["hepsiburada"], dry_run=False)
+    except Exception as _ae:
+        logger.error(f"[hb claims->orders return] {_ae}")
     return {"success": True, "synced": synced}
 
 

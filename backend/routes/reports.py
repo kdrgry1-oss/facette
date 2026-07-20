@@ -307,8 +307,16 @@ async def day_orders(
         rows.append({"name": r["_id"]["name"], "size": r["_id"]["size"],
                      "qty": int(r["qty"]), "revenue": round(float(r["revenue"]), 2)})
     order_count = await db.orders.count_documents(m)
+    # DENETİM HATA-2: total_qty 300 satır LİMİTİNDEN SONRA toplanıyordu → uzun listelerde
+    # sessizce eksik (30g'de 87 adet kayıp). Toplam artık limitsiz ayrı toplamadan gelir.
+    _tq = 0
+    async for r in db.orders.aggregate([
+            {"$match": m},
+            {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+            {"$group": {"_id": None, "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}}]):
+        _tq = int(r["qty"])
     return {"date": date, "order_count": order_count,
-            "total_qty": sum(r["qty"] for r in rows), "rows": rows}
+            "total_qty": _tq, "rows": rows}
 
 
 @router.get("/sales")
@@ -325,7 +333,10 @@ async def sales(
         {"$match": _base_match(s, e, source)},
         {
             "$group": {
-                "_id": {"$dateToString": {"format": fmt, "date": {"$dateFromString": {"dateString": "$created_at"}}}},
+                # DENETİM HATA-6: timezone verilmeyince günler UTC'ye göre kesiliyordu —
+                # TR gününün ilk 3 saati önceki güne yazılıyordu. TR saatiyle grupla.
+                "_id": {"$dateToString": {"format": fmt, "timezone": "+03:00",
+                                          "date": {"$dateFromString": {"dateString": "$created_at"}}}},
                 "orders": {"$sum": 1},
                 "revenue": {"$sum": {"$ifNull": ["$total", 0]}},
                 "items": {"$sum": {"$size": {"$ifNull": ["$items", []]}}},
@@ -606,8 +617,31 @@ async def top_products(
                     "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}},
     ]
     import unicodedata as _ud3
+    _cr_rows = [r async for r in db.orders.aggregate(_cr_pipe)]
+    # DENETİM HATA-4: pencerede hiç SATIŞI olmayan ürünün iadesi by_bc/by_id'de
+    # bulunamayıp isim-anahtarına düşüyor, katalogdaki ürün satırıyla birleşemiyordu
+    # (iade kayboluyordu). İade kalemlerinin barkod/pid'leri için ek ürün sorgusu yapılır.
+    _miss_bc = {r["_id"].get("bc") for r in _cr_rows
+                if r["_id"].get("bc") and r["_id"]["bc"] not in by_bc}
+    _miss_pid = {r["_id"].get("pid") for r in _cr_rows
+                 if r["_id"].get("pid") and r["_id"]["pid"] not in by_id}
+    if _miss_bc or _miss_pid:
+        _q2 = {"$or": []}
+        if _miss_pid:
+            _q2["$or"].append({"id": {"$in": list(_miss_pid)}})
+        if _miss_bc:
+            _q2["$or"] += [{"barcode": {"$in": list(_miss_bc)}},
+                           {"variants.barcode": {"$in": list(_miss_bc)}}]
+        async for p in db.products.find(_q2, {"_id": 0, "id": 1, "name": 1, "barcode": 1, "variants.barcode": 1}):
+            _inf = {"id": str(p.get("id")), "name": p.get("name") or ""}
+            by_id.setdefault(str(p.get("id")), _inf)
+            if p.get("barcode"):
+                by_bc.setdefault(str(p["barcode"]), _inf)
+            for v in (p.get("variants") or []):
+                if v.get("barcode"):
+                    by_bc.setdefault(str(v["barcode"]), _inf)
     cr_map: dict = {}
-    async for r in db.orders.aggregate(_cr_pipe):
+    for r in _cr_rows:
         i = r["_id"]
         pm = by_bc.get(i.get("bc") or "") or by_id.get(i.get("pid") or "") or {}
         _cname = pm.get("name") or i.get("nm") or "(isimsiz ürün)"
@@ -988,17 +1022,21 @@ async def cancel_return_products(
             "_id": {"name": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", "Ürün"]}]},
                     "plat": "$_plat", "kind": "$_kind"},
             "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            # DENETİM HATA-3: unit_price İSKONTO ÖNCESİ liste fiyatı — tutarlar %11-14 şişiyordu.
+            # Önce items.price (ödenen net birim), yoksa unit_price kullanılır (by-source ile eşitlenir).
             "total": {"$sum": {"$multiply": [
                 {"$ifNull": ["$items.quantity", 1]},
-                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]}]}},
+                {"$ifNull": ["$items.price", {"$ifNull": ["$items.unit_price", 0]}]}]}},
         }},
     ]
-    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    _SRC = {"site": "Site", "facette": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
     rows: dict = {}
     async for r in db.orders.aggregate(pipeline):
-        key = (r["_id"]["name"], r["_id"]["plat"])
+        # 'facette' etiketi de Site'dır (DENETİM HATA-3 eki) — aynı ürünün iki satırı birleşsin
+        _pl = "site" if (r["_id"]["plat"] or "site") in ("site", "facette") else r["_id"]["plat"]
+        key = (r["_id"]["name"], _pl)
         d = rows.setdefault(key, {"name": r["_id"]["name"],
-                                  "platform": _SRC.get(r["_id"]["plat"], r["_id"]["plat"] or "Site"),
+                                  "platform": _SRC.get(_pl, _pl or "Site"),
                                   "cancel_qty": 0, "cancel_total": 0.0,
                                   "return_qty": 0, "return_total": 0.0})
         if r["_id"]["kind"] == "cancel":

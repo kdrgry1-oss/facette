@@ -753,8 +753,23 @@ def _search_tr_regex(s: str) -> str:
 _TR_TZ = timezone(timedelta(hours=3))
 
 
+def _tr_naive_to_utc(s):
+    """Saat içeren ama saat dilimi İÇERMEYEN tarih ('YYYY-MM-DDTHH:MM[:SS]') TR yerel
+    saati kabul edilip UTC ISO'ya çevrilir. (DENETİM HATA-7: bu tarihler UTC sanılıyordu →
+    7 günlük pencere sessizce 7g3s'e uzuyor, satış hızı ~%1,8 düşük çıkıyordu.)"""
+    try:
+        if ("T" in s or " " in s) and ("+" not in s) and ("Z" not in s.upper()):
+            dt = datetime.fromisoformat(s.replace(" ", "T"))
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=_TR_TZ).astimezone(timezone.utc).isoformat()
+    except Exception:
+        pass
+    return s
+
+
 def tr_day_start_utc(d):
-    """'YYYY-MM-DD' (TR gün başı 00:00) → UTC ISO. Tam ISO/boş ise dokunmadan döndürür."""
+    """'YYYY-MM-DD' (TR gün başı 00:00) → UTC ISO. Saatli-tz'siz tarih TR saati kabul edilir;
+    tam ISO (tz'li) / boş ise dokunmadan döndürür."""
     s = str(d or "").strip()
     if len(s) == 10 and s[4] == "-" and s[7] == "-":
         try:
@@ -762,11 +777,12 @@ def tr_day_start_utc(d):
             return datetime(y, m, dd, 0, 0, 0, 0, tzinfo=_TR_TZ).astimezone(timezone.utc).isoformat()
         except Exception:
             return s
-    return s
+    return _tr_naive_to_utc(s)
 
 
 def tr_day_end_utc(d):
-    """'YYYY-MM-DD' (TR gün sonu 23:59:59.999999) → UTC ISO. Tam ISO/boş ise dokunmaz."""
+    """'YYYY-MM-DD' (TR gün sonu 23:59:59.999999) → UTC ISO. Saatli-tz'siz tarih TR saati
+    kabul edilir; tam ISO (tz'li) / boş ise dokunmaz."""
     s = str(d or "").strip()
     if len(s) == 10 and s[4] == "-" and s[7] == "-":
         try:
@@ -774,7 +790,7 @@ def tr_day_end_utc(d):
             return datetime(y, m, dd, 23, 59, 59, 999999, tzinfo=_TR_TZ).astimezone(timezone.utc).isoformat()
         except Exception:
             return s
-    return s
+    return _tr_naive_to_utc(s)
 
 
 def tr_range_to_utc(start, end):

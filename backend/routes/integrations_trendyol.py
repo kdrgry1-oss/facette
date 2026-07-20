@@ -25,6 +25,9 @@ from .integrations_common import (
     _RETURN_STATUS_KEYS,
     _build_product_query_from_payload,
     _claim_bucket,
+    _claim_is_site_order,
+    _ORDER_EXCLUDED_FOR_RETURN,
+    apply_accepted_claims_to_orders,
     _closest_trendyol_value,
     _decrement_stock_for_imported_order,
     _dedupe_products_by_stock_code,
@@ -3839,6 +3842,27 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
                     except Exception as _ce:
                         logger.error(f"[trendyol claim->order reason {order_number}] {_ce}")
 
+                # DENETİM HATA-1: onaylanmış İADE (Accepted, iptal-dışı) siparişe yansıtılır —
+                # aksi halde parası iade edilen sipariş raporlarda "satış" kalır (net ciro şişer).
+                # Yalnız statü + iz alanları; STOK/kupon/ödeme alanlarına DOKUNULMAZ (değişmez #6).
+                if order_number and claim_doc.get("claim_status") == "Accepted" and claim_type != "CANCEL":
+                    try:
+                        _now2 = datetime.now(timezone.utc).isoformat()
+                        await db.orders.update_one(
+                            {"order_number": str(order_number),
+                             "$or": [{"platform": "trendyol"}, {"marketplace": "trendyol"}],
+                             "status": {"$nin": _ORDER_EXCLUDED_FOR_RETURN}},
+                            {"$set": {"status": "returned",
+                                      "returned_at": claim_doc.get("accepted_at") or _now2,
+                                      "return_source": "trendyol_claim",
+                                      "return_claim_id": claim_id,
+                                      "updated_at": _now2},
+                             "$push": {"status_history": {"status": "returned", "at": _now2,
+                                                          "by": "claims-sync",
+                                                          "note": f"Trendyol iadesi onaylı (claim {claim_id})"}}})
+                    except Exception as _re:
+                        logger.error(f"[trendyol claim->order return {order_number}] {_re}")
+
             current_page += 1
             if current_page >= total_pages:
                 break
@@ -3852,6 +3876,18 @@ async def _sync_trendyol_claims_core(days_back: int = 1095):
         "total_synced": total_synced,
         "days_back": days_back
     }
+@router.get("/trendyol/claims/apply-returns-to-orders")
+async def apply_returns_to_orders_endpoint(
+    dry_run: bool = True,
+    platform: str = "",
+    current_user: dict = Depends(require_admin),
+):
+    """DENETİM HATA-1 geçmiş onarımı: onaylanmış pazaryeri iadelerini siparişlere yansıtır.
+    dry_run=true (varsayılan) yalnız sayar, YAZMAZ. Uygulamak için ?dry_run=false."""
+    plats = [platform.strip().lower()] if platform.strip() else None
+    return await apply_accepted_claims_to_orders(platforms=plats, dry_run=dry_run)
+
+
 @router.get("/trendyol/claims/sync")
 async def sync_trendyol_claims(
     days_back: int = 1095,
@@ -4041,8 +4077,15 @@ async def get_trendyol_claims(
     elif _plt in ("trendyol", ""):
         platform_scoped = [c for c in deduped
                            if str(c.get("platform") or "").lower() != "hepsiburada"]
+    elif _plt in ("facette", "site", "web"):
+        # DENETİM HATA-5: site iadeleri bu koleksiyonda DEĞİL (customer_returns'te) —
+        # eskiden tüm pazaryeri kayıtları dönüyordu. Site sinyali taşıyanlar süzülür
+        # (pratikte boş liste), pazaryeri kayıtları asla dönmez.
+        platform_scoped = [c for c in deduped if _claim_is_site_order(c)]
     else:
-        platform_scoped = deduped
+        # Bilinmeyen platform değeri: her şeyi döndürme — yalnız birebir eşleşen
+        platform_scoped = [c for c in deduped
+                           if str(c.get("platform") or "").lower() == _plt]
 
     # İptal (Cancelled iade statüsü) bu iade ekranından TAMAMEN dışlanır; iptaller
     # ayrı bir alandan yönetilir. Böylece "Tüm İadeler" sekmesi ve "Toplam İade"

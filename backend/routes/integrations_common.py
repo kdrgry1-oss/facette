@@ -1845,6 +1845,65 @@ def _claim_bucket(c: dict) -> str:
     if st == "Created":
         return "kargoya_verilen" if has_cargo else "talep_olusturulan"
     return "talep_olusturulan"
+# DENETİM HATA-1: sipariş bu statülerdeyse iade işaretlemesi YAPILMAZ (zaten iptal/iade)
+_ORDER_EXCLUDED_FOR_RETURN = [
+    "cancelled", "cancel_refunded",
+    "return_requested", "return_approved", "return_in_transit",
+    "returned", "refunded", "partial_refunded",
+]
+
+
+async def apply_accepted_claims_to_orders(platforms=None, dry_run: bool = False) -> dict:
+    """Onaylanmış (Accepted) pazaryeri İADE taleplerini sipariş durumuna yansıtır
+    (status → 'returned'). DENETİM HATA-1: bu yansıma olmadığı için parası iade edilmiş
+    ~1.500 Trendyol siparişi raporlarda 'satış' görünüyor, net ciro 90 günde ~2,9M TL şişiyordu.
+
+    GÜVENLİK (CLAUDE.md değişmezleri): yalnız STATÜ + iz alanları yazılır — STOK, kupon,
+    puan, ödeme alanlarına DOKUNULMAZ. Koşullu update (status $nin) idempotentliği ve
+    yarışı garanti eder. claim_type=CANCEL kapsam dışı (iptaller sipariş senkronunda işlenir).
+    platforms: ör. ["hepsiburada"] — yalnız o platformların claim'leri taranır."""
+    q = {"claim_status": "Accepted", "claim_type": {"$ne": "CANCEL"},
+         "order_number": {"$exists": True, "$nin": [None, ""]}}
+    if platforms:
+        q["platform"] = {"$in": list(platforms)}
+    stats = {"claims": 0, "updated": 0, "already": 0, "no_order": 0}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    seen = set()
+    async for c in db.trendyol_claims.find(
+            q, {"_id": 0, "claim_id": 1, "order_number": 1, "platform": 1, "accepted_at": 1}):
+        stats["claims"] += 1
+        onum = str(c.get("order_number"))
+        if not onum or onum in seen:
+            continue
+        seen.add(onum)
+        plat = str(c.get("platform") or "trendyol").lower()
+        _match = {"order_number": onum,
+                  "$or": [{"platform": plat}, {"marketplace": plat}],
+                  "status": {"$nin": _ORDER_EXCLUDED_FOR_RETURN}}
+        if dry_run:
+            if await db.orders.find_one(_match, {"_id": 1}):
+                stats["updated"] += 1
+            elif await db.orders.find_one({"order_number": onum}, {"_id": 1}):
+                stats["already"] += 1
+            else:
+                stats["no_order"] += 1
+            continue
+        res = await db.orders.update_one(_match, {
+            "$set": {"status": "returned",
+                     "returned_at": c.get("accepted_at") or now_iso,
+                     "return_source": f"{plat}_claim",
+                     "return_claim_id": c.get("claim_id"),
+                     "updated_at": now_iso},
+            "$push": {"status_history": {"status": "returned", "at": now_iso,
+                                         "by": "claims-sync",
+                                         "note": f"Pazaryeri iadesi onaylı (claim {c.get('claim_id')})"}}})
+        if res.modified_count:
+            stats["updated"] += 1
+        else:
+            stats["already"] += 1
+    return stats
+
+
 def _first_seen_stamps(claim: dict) -> dict:
     """Yeni bir claim ilk kez yazılırken status'una göre onay/ret tarih damgası üretir.
 
