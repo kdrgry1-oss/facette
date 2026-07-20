@@ -170,6 +170,8 @@ export default function Manufacturing() {
     e?.preventDefault?.();
     if (!form.product_name.trim()) { toast.error("Ürün adı gerekli"); return; }
     if (!form.supplier_id) { toast.error("İmalatçı seçimi zorunlu — listeden seçin veya ekleyin"); return; }
+    if (!String(form.order_no || "").trim()) { toast.error("İmalat Sipariş No zorunlu"); return; }
+    if (!form.agreement_date) { toast.error("Sipariş Tarihi zorunlu"); return; }
     setSaving(true);
     try {
       const token = localStorage.getItem("token");
@@ -181,8 +183,10 @@ export default function Manufacturing() {
           .map(([k, v]) => [k, Number(v)])
       );
       payload.unit_price = Number(payload.unit_price || 0);
-      payload.agreed_total = Number(payload.agreed_total || 0);
-      payload.waste_meters = Number(payload.waste_meters || 0);
+      // Toplam anlaşma bedeli OTOMATİK: genel toplam adet × birim fiyat (kullanıcı isteği)
+      const _qty = Object.values(payload.size_distribution).reduce((a, b) => a + Number(b || 0), 0);
+      payload.agreed_total = Number((payload.unit_price * _qty).toFixed(2));
+      payload.waste_meters = 0;
       if (editing) {
         await axios.put(`${API}/manufacturing/${editing.id}`, payload, hdr);
         toast.success("Kayıt güncellendi");
@@ -446,14 +450,10 @@ export default function Manufacturing() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">İmalatçı <span className="text-red-500">*</span></label>
-                <input value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)}
-                  placeholder="İmalatçı ara..." className="w-full border px-3 py-1.5 rounded text-xs mb-1" data-testid="mfg-supplier-search" />
                 <select value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })}
                   required data-testid="mfg-supplier-select" className="w-full border px-3 py-2 rounded text-sm">
                   <option value="">— İmalatçı seçin —</option>
-                  {suppliers
-                    .filter(s => !supplierSearch.trim() || (s.name || "").toLocaleLowerCase("tr").includes(supplierSearch.trim().toLocaleLowerCase("tr")))
-                    .map(s => <option key={s.id} value={s.id}>{s.name}{s.phone ? ` (${s.phone})` : ""}</option>)}
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}{s.phone ? ` (${s.phone})` : ""}</option>)}
                 </select>
                 <button type="button" onClick={addSupplierInline}
                   className="mt-1 text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-supplier">
@@ -461,9 +461,9 @@ export default function Manufacturing() {
                 </button>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">İmalat Sipariş No</label>
+                <label className="block text-xs font-bold text-gray-600 mb-1">İmalat Sipariş No <span className="text-red-500">*</span></label>
                 <input value={form.order_no} onChange={e => setForm({ ...form, order_no: e.target.value })}
-                  placeholder="Boş bırakılırsa otomatik (IMLT-...)" className="w-full border px-3 py-2 rounded text-sm" />
+                  required placeholder="Örn: IMLT-2026-0012" className="w-full border px-3 py-2 rounded text-sm" />
                 <div className="flex items-center gap-4 mt-2">
                   <label className="inline-flex items-center gap-1.5 text-xs font-semibold">
                     <input type="checkbox" checked={!!form.order_flags?.new}
@@ -478,7 +478,7 @@ export default function Manufacturing() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Sipariş Tarihi</label>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Sipariş Tarihi <span className="text-red-500">*</span></label>
                 <input type="date" value={form.agreement_date}
                   onChange={e => setForm({ ...form, agreement_date: e.target.value, expected_delivery_date: _plus21(e.target.value) })}
                   className="w-full border px-3 py-2 rounded text-sm" data-testid="mfg-order-date" />
@@ -489,9 +489,20 @@ export default function Manufacturing() {
                   className="w-full border px-3 py-2 rounded text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Stok Kodu <span className="text-gray-400 font-normal">(ürün ilk burada oluşur)</span></label>
-                <input value={form.stock_code} onChange={e => setForm({ ...form, stock_code: e.target.value.toUpperCase() })}
-                  placeholder="FCFW07000..." className="w-full border px-3 py-2 rounded text-sm font-mono" data-testid="mfg-stock-code" />
+                <label className="block text-xs font-bold text-gray-600 mb-1">Stok Kodu <span className="text-gray-400 font-normal">(FCFW/FCSS seç — otomatik üretilir)</span></label>
+                <div className="flex gap-2">
+                  <input value={form.stock_code} readOnly placeholder="Üret butonuyla oluşur"
+                    className="flex-1 border px-3 py-2 rounded text-sm font-mono bg-gray-50" data-testid="mfg-stock-code" />
+                  {/* Ürün kartındaki kuralla birebir aynı: FCFW/FCSS + 6 haneli numara */}
+                  <button type="button" onClick={() => setForm({ ...form, stock_code: `FCFW${Math.floor(100000 + Math.random() * 900000)}` })}
+                    className="px-3 py-2 bg-orange-100 text-orange-800 rounded-lg text-[10px] font-black tracking-widest uppercase whitespace-nowrap hover:bg-orange-200" data-testid="mfg-gen-fcfw">
+                    Üret (FCFW)
+                  </button>
+                  <button type="button" onClick={() => setForm({ ...form, stock_code: `FCSS${Math.floor(100000 + Math.random() * 900000)}` })}
+                    className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-[10px] font-black tracking-widest uppercase whitespace-nowrap hover:bg-blue-200" data-testid="mfg-gen-fcss">
+                    Üret (FCSS)
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -616,16 +627,13 @@ export default function Manufacturing() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺)</label>
-                <input type="number" step="0.01" value={form.agreed_total}
-                  onChange={e => setForm({ ...form, agreed_total: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Fire (metre)</label>
-                <input type="number" step="0.1" value={form.waste_meters}
-                  onChange={e => setForm({ ...form, waste_meters: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
+                <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺) <span className="text-gray-400 font-normal">(adet × birim fiyat — otomatik)</span></label>
+                <div className="w-full border px-3 py-2 rounded text-sm bg-gray-50 font-semibold tabular-nums" data-testid="mfg-agreed-total">
+                  {(Number(form.unit_price || 0) * grandTotal).toFixed(2)} ₺
+                  {Number(form.unit_price) > 0 && grandTotal > 0 && (
+                    <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal} adet × {Number(form.unit_price).toFixed(2)} ₺)</span>
+                  )}
+                </div>
               </div>
             </div>
 

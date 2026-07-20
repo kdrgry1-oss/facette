@@ -893,6 +893,31 @@ async def payment_report(
     return {"items": out}
 
 
+@router.get("/sales-by-platform")
+async def sales_by_platform(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
+    """Kanal Bazında Satış — yalnız SİTE + PAZARYERLERİ (Instagram/Google gibi trafik
+    kaynakları DEĞİL; sipariş platform alanından). İptal/iade hariç."""
+    s, e = _iso_range(start_date, end_date)
+    _plat = {"$toLower": {"$ifNull": ["$platform", {"$ifNull": ["$marketplace", "site"]}]}}
+    pipeline = [
+        {"$match": {"created_at": {"$gte": s, "$lte": e}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$group": {"_id": {"$cond": [{"$in": [_plat, ["trendyol", "hepsiburada", "temu"]]}, _plat, "site"]},
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$sort": {"revenue": -1}},
+    ]
+    _SRC = {"site": "Site", "trendyol": "Trendyol", "hepsiburada": "Hepsiburada", "temu": "Temu"}
+    rows = []
+    async for r in db.orders.aggregate(pipeline):
+        rows.append({"channel": _SRC.get(r["_id"], r["_id"]), "orders": r["orders"],
+                     "revenue": round(float(r["revenue"] or 0), 2)})
+    return {"rows": rows}
+
+
 @router.get("/cancel-return-products")
 async def cancel_return_products(
     start_date: Optional[str] = None,

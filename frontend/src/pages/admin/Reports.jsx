@@ -59,9 +59,10 @@ export function SalesReport() {
       .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
     loadRangeDetail();
     // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
-    axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 15 } })
+    axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
       .then((r) => setLocData(r.data.rows || [])).catch(() => {});
-    axios.get(`${API}/admin/reports/by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
+    // Kanal = yalnız Site + pazaryerleri (Instagram/Google trafik kaynakları değil)
+    axios.get(`${API}/admin/reports/sales-by-platform`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setSrcData(r.data.rows || [])).catch(() => {});
   };
   const [cancelRet, setCancelRet] = useState([]);
@@ -72,6 +73,9 @@ export function SalesReport() {
   const [hourData, setHourData] = useState(null);
   const [weekdayData, setWeekdayData] = useState(null);
   const [dayDetail, setDayDetail] = useState(null);
+  const [ddQ, setDdQ] = useState("");                       // ürün adı araması
+  const [ddOpen, setDdOpen] = useState(() => new Set());    // bedenleri açık ürünler
+  const toggleDd = (k) => setDdOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const loadRangeDetail = () => {
     axios.get(`${API}/admin/reports/day-orders`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
       .then((r) => setDayDetail(r.data)).catch(() => setDayDetail(null));
@@ -169,25 +173,30 @@ export function SalesReport() {
         </div>
       </div>
 
-      {/* 🗺️ İl/İlçe & Kanal — eski ayrı sekmeden buraya taşındı */}
+      {/* 🗺️ İl & Kanal — İl artık GRAFİK (81 il sığmazsa yatay kaydırma) */}
       {(locData.length > 0 || srcData.length > 0) && (
         <div className="grid lg:grid-cols-2 gap-4">
           <div className="bg-white border rounded-xl p-4" data-testid="location-block">
-            <h2 className="text-sm font-bold uppercase tracking-wider mb-2">İl Bazında Satış (İlk 15)</h2>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                <tr><th className="text-left p-2">İl</th><th className="text-right p-2">Sipariş</th><th className="text-right p-2">Ciro</th></tr>
-              </thead>
-              <tbody>
-                {locData.map((r) => (
-                  <tr key={r.location} className="border-t">
-                    <td className="p-2 font-medium">{r.location || "—"}</td>
-                    <td className="p-2 text-right tabular-nums">{r.orders}</td>
-                    <td className="p-2 text-right tabular-nums font-semibold">{tl(r.revenue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-bold uppercase tracking-wider">İl Bazında Satış</h2>
+              <span className="text-[11px] text-gray-400">{locData.length} il · sığmazsa yana kaydırın →</span>
+            </div>
+            <div className="overflow-x-auto pb-1">
+              <BarChart width={Math.max(560, locData.length * 44)} height={280} data={locData}
+                margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="location" interval={0} angle={-45} textAnchor="end" height={60} tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                <Tooltip content={({ active, payload, label }) => (active && payload?.length) ? (
+                  <div className="bg-white border rounded-lg shadow px-3 py-2 text-xs">
+                    <div className="font-semibold mb-0.5">{label}</div>
+                    <div>Sipariş: <b>{payload[0].payload.orders}</b></div>
+                    <div>Ciro: <b>{tl(payload[0].payload.revenue)}</b></div>
+                  </div>
+                ) : null} />
+                <Bar dataKey="orders" name="Sipariş" fill="#0ea5e9" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </div>
           </div>
           <div className="bg-white border rounded-xl p-4" data-testid="channel-block">
             <h2 className="text-sm font-bold uppercase tracking-wider mb-2">Kanal Bazında Satış</h2>
@@ -242,15 +251,30 @@ export function SalesReport() {
       <div className="bg-white border rounded-xl p-4" data-testid="day-detail">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
           <h2 className="text-sm font-bold uppercase tracking-wider">Sipariş Edilen Ürünler ({from} → {to})</h2>
-          <span className="text-[11px] text-gray-400">Üstteki tarih aralığı + kaynak filtresine göre</span>
+          <div className="flex items-center gap-2">
+            <input value={ddQ} onChange={(e) => setDdQ(e.target.value)} placeholder="Ürün adı ara…"
+              className="border rounded-lg px-3 py-1.5 text-xs w-48" data-testid="day-detail-search" />
+            <span className="text-[11px] text-gray-400 hidden sm:inline">Üstteki tarih aralığı + kaynak filtresine göre</span>
+          </div>
         </div>
         {dayDetail ? (
           <>
             <p className="text-[11px] text-gray-500 mb-2">
               {dayDetail.date}: <b>{dayDetail.order_count}</b> sipariş · <b>{dayDetail.total_qty}</b> ürün
-              {source !== "all" && <> · kaynak: {source}</>}
+              {source !== "all" && <> · kaynak: {source}</>} · ürüne tıklayınca beden kırılımı açılır
             </p>
-            {dayDetail.rows?.length ? (
+            {(() => {
+              // Varsayılan görünüm ÜRÜN toplamı (tüm bedenler); tıklayınca bedenler ayrı satır açılır
+              const f = ddQ.trim().toLocaleLowerCase("tr");
+              const flt = (dayDetail.rows || []).filter(r => !f || (r.name || "").toLocaleLowerCase("tr").includes(f));
+              const groups = []; const gi = {};
+              flt.forEach(r => {
+                const k = r.name || "—";
+                if (gi[k] == null) { gi[k] = groups.length; groups.push({ name: k, qty: 0, revenue: 0, sizes: [] }); }
+                const g = groups[gi[k]]; g.qty += r.qty || 0; g.revenue += r.revenue || 0; g.sizes.push(r);
+              });
+              groups.sort((a, b) => b.qty - a.qty);
+              return groups.length ? (
               <div className="max-h-80 overflow-y-auto border rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
@@ -262,20 +286,36 @@ export function SalesReport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dayDetail.rows.map((r, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="p-2.5">{r.name}</td>
-                        <td className="p-2.5">{r.size || "—"}</td>
-                        <td className="p-2.5 text-right font-semibold tabular-nums">{r.qty}</td>
-                        <td className="p-2.5 text-right tabular-nums">{tl(r.revenue)}</td>
-                      </tr>
-                    ))}
+                    {groups.map((g) => {
+                      const open = ddOpen.has(g.name);
+                      return (
+                        <Fragment key={g.name}>
+                          <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleDd(g.name)}>
+                            <td className="p-2.5 font-medium">
+                              <span className="inline-block w-3 text-gray-400 mr-1">{open ? "▾" : "▸"}</span>{g.name}
+                            </td>
+                            <td className="p-2.5 text-xs text-gray-400">{g.sizes.length > 1 ? `${g.sizes.length} beden` : (g.sizes[0]?.size || "—")}</td>
+                            <td className="p-2.5 text-right font-semibold tabular-nums">{g.qty}</td>
+                            <td className="p-2.5 text-right tabular-nums">{tl(g.revenue)}</td>
+                          </tr>
+                          {open && g.sizes.map((r, i) => (
+                            <tr key={g.name + i} className="bg-gray-50/60">
+                              <td className="p-2 pl-10 text-xs text-gray-500">↳ {r.name}</td>
+                              <td className="p-2 text-xs font-semibold">{r.size || "—"}</td>
+                              <td className="p-2 text-right tabular-nums text-xs">{r.qty}</td>
+                              <td className="p-2 text-right tabular-nums text-xs">{tl(r.revenue)}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-            ) : (
-              <p className="text-sm text-gray-400 py-4 text-center">Bu günde sipariş yok.</p>
-            )}
+              ) : (
+                <p className="text-sm text-gray-400 py-4 text-center">{f ? "Aramayla eşleşen ürün yok." : "Bu aralıkta sipariş yok."}</p>
+              );
+            })()}
           </>
         ) : (
           <p className="text-sm text-gray-400 py-4 text-center">Yükleniyor…</p>
@@ -414,6 +454,15 @@ export function ProductsReport() {
     });
     return r;
   })();
+  const exportXlsx = async () => {
+    try {
+      const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
+      const b = await r.blob();
+      const u = URL.createObjectURL(b);
+      const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
+      URL.revokeObjectURL(u);
+    } catch { /* sessiz */ }
+  };
   const SortTh = ({ k, children, right }) => (
     <th onClick={() => toggleSort(k)} className={`p-3 cursor-pointer select-none hover:text-gray-900 ${right ? "text-right" : "text-left"}`}>
       {children}{sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
@@ -428,15 +477,7 @@ export function ProductsReport() {
           <p className="text-sm text-gray-500 mt-1">Tüm ürünlerin satış performansı — adet, ciro, güncel stok, en çok satan beden ve platform dağılımı.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={async () => {
-            try {
-              const r = await fetch(`${API}/admin/reports/products/export-xlsx?start_date=${from}&end_date=${to}T23:59:59`, { headers: authHeaders() });
-              const b = await r.blob();
-              const u = URL.createObjectURL(b);
-              const a = document.createElement("a"); a.href = u; a.download = "urun-raporu.xlsx"; a.click();
-              URL.revokeObjectURL(u);
-            } catch { /* sessiz */ }
-          }} className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 shadow-sm" data-testid="products-export-xlsx">
+          <button onClick={exportXlsx} className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 shadow-sm" data-testid="products-export-xlsx">
             ⬇ Excel İndir
           </button>
           <DateBar from={from} setFrom={setFrom} to={to} setTo={setTo} onRefresh={load} />
@@ -487,6 +528,9 @@ export function ProductsReport() {
               <option value="red">🔴 Yavaş (ayda 0-2)</option>
             </select>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Ürün ara…" className="border rounded-lg px-3 py-1.5 text-sm w-48" />
+            <button onClick={exportXlsx} className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700" data-testid="products-export-xlsx-inline" title="Ürün raporunu Excel olarak indir">
+              ⬇ Excel
+            </button>
           </div>
         </div>
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
