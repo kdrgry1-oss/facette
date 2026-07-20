@@ -736,11 +736,15 @@ export default function Header({ hideMenu = false }) {
 
       {/* Search Overlay */}
       {searchOpen && (
-        <div className="fixed inset-0 bg-white z-[60] overflow-y-auto" style={{ animation: "facetteSearchIn .2s ease-out" }}>
+        {/* Mobil klavye düzeltmesi: 100dvh (dinamik viewport) — klavye açılınca kap
+            küçülür, içerik klavyenin ARKASINDA kalmaz; overscroll-contain ile arka
+            sayfa kaymaz. Mobilde üst boşluklar kısaltıldı ki giriş + sonuçlar
+            klavyenin üstünde görünür kalsın. */}
+        <div className="fixed inset-x-0 top-0 h-[100dvh] bg-white z-[60] overflow-y-auto overscroll-contain" style={{ animation: "facetteSearchIn .2s ease-out" }}>
           <style>{`@keyframes facetteSearchIn{from{opacity:0}to{opacity:1}}@keyframes facetteSearchUp{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}`}</style>
-          <div className="px-5 md:px-10 pt-5 pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
+          <div className="px-5 md:px-10 pt-4 md:pt-5 pb-40 md:pb-16" style={{ animation: "facetteSearchUp .28s ease-out" }}>
             {/* Üst bar: logo + kapat */}
-            <div className="flex items-center justify-between mb-8 md:mb-12">
+            <div className="flex items-center justify-between mb-4 md:mb-12">
               <Link to="/" onClick={closeSearch} aria-label="FACETTE"><img src="/logo.webp" alt="FACETTE" className="h-5" /></Link>
               <button onClick={closeSearch} className="inline-flex items-center gap-1.5 text-[11px] tracking-[0.18em] uppercase hover:opacity-60 transition-opacity" aria-label="Kapat">
                 Kapat <X size={18} strokeWidth={1.4} />
@@ -748,7 +752,7 @@ export default function Header({ hideMenu = false }) {
             </div>
 
             {/* 3 kolon: sol kategori | orta arama | sağ hesap (Zara düzeni) */}
-            <div className="grid grid-cols-1 md:grid-cols-[170px_1fr_170px] gap-8 md:gap-12 items-start mb-12 md:mb-16">
+            <div className="grid grid-cols-1 md:grid-cols-[170px_1fr_170px] gap-8 md:gap-12 items-start mb-5 md:mb-16">
               {/* SOL: kategoriler (desktop) */}
               <nav className="hidden md:flex flex-col gap-3.5 text-[11px] tracking-[0.18em] uppercase">
                 <Link to="/giyim" onClick={closeSearch} className="hover:opacity-60 transition-opacity">Giyim</Link>
