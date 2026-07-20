@@ -398,16 +398,13 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</td>
                   <td className="px-3 py-3">
                     <p className="font-medium">{item.product_name}</p>
-                    <p className="text-[10px] text-gray-500">
-                      {Object.entries(item.size_distribution || {}).map(([s, q]) => `${s}:${q}`).join(" · ")}
-                    </p>
                     <p className="flex items-center gap-1.5 mt-0.5">
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${STAGE_COLORS[item.current_stage] || 'bg-gray-100'}`}>
                         {stageLabel(item.current_stage)}
                       </span>
                       {item.payment_done
-                        ? <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">Ödendi ✓</span>
-                        : <span className="text-[9px] text-gray-400">Ödenmedi · {(item.agreed_total || 0).toFixed(0)}₺</span>}
+                        ? <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">ÖDENDİ</span>
+                        : <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-200 rounded px-1 py-0.5">ÖDENMEDİ</span>}
                     </p>
                   </td>
                   <td className="px-3 py-3 text-sm font-bold text-right tabular-nums">{item.total_units}</td>
@@ -422,6 +419,10 @@ export default function Manufacturing() {
                     )}
                   </td>
                   <td className="px-3 py-3">
+                    {/* Ödeme durumu (kullanıcı isteği: bu sütunda da görünsün) */}
+                    <p className={`text-[10px] font-bold mb-1 ${item.payment_done ? "text-emerald-600" : "text-amber-600"}`}>
+                      {item.payment_done ? "ÖDENDİ" : "ÖDEME BEKLİYOR"}
+                    </p>
                     {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir */}
                     <div className="flex flex-wrap gap-1 max-w-[180px]">
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
