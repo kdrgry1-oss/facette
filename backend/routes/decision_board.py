@@ -44,7 +44,7 @@ async def _collect_data(period_days: int) -> dict:
         top_products(limit=2000, start_date=start, end_date=end, source=None, current_user=_SYSTEM_USER),
         top_products(limit=2000, start_date=start90, end_date=end, source=None, current_user=_SYSTEM_USER),
         stock_report(current_user=_SYSTEM_USER),
-        cancel_return_products(start_date=start90, end_date=end, current_user=_SYSTEM_USER),
+        cancel_return_products(start_date=start90, end_date=end, source=None, current_user=_SYSTEM_USER),
         sales(start_date=start365, end_date=end, group_by="week", source=None, current_user=_SYSTEM_USER),
     )
 
