@@ -284,6 +284,19 @@ export default function Manufacturing() {
     ...f, sizes: f.sizes.filter(x => x !== s),
     size_distribution: Object.fromEntries(Object.entries(f.size_distribution).filter(([k]) => (k.includes("|") ? k.split("|")[1] : k) !== s)),
   }));
+  // Listeden tek tıkla renk onayı değiştir (modal açmadan) — iyimser güncelle + sunucuya yaz
+  const toggleRowApproval = async (item, color, kind) => {
+    const key = color || "_tek";
+    const cur = item.color_approvals?.[key] || {};
+    const next = { ...(item.color_approvals || {}), [key]: { ...cur, [kind]: !cur[kind] } };
+    setItems(prev => prev.map(x => x.id === item.id ? { ...x, color_approvals: next } : x));
+    try {
+      const token = localStorage.getItem("token");
+      await axios.put(`${API}/manufacturing/${item.id}`, { color_approvals: next },
+        { headers: { Authorization: `Bearer ${token}` } });
+    } catch { toast.error("Onay kaydedilemedi"); fetchAll(); }
+  };
+
   // Renk bazlı onaylar: kumaş okeyi her renkte; astar okeyi yalnız astarlı üründe
   const approvalOf = (color, kind) => !!(form.color_approvals?.[color || "_tek"]?.[kind]);
   const toggleApproval = (color, kind) => setForm(f => {
@@ -360,43 +373,83 @@ export default function Manufacturing() {
           <table className="w-full">
             <thead className="border-b bg-gray-50">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Kod</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Ürün</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">İş Ortağı</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Adet</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Ödeme</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Aşama</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-gray-500 uppercase">Tarih</th>
-                <th className="px-4 py-3"></th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase w-10">#</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalatçı</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalat Sipariş No</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün</th>
+                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Toplam Adet</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Tarihi</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
+                <th className="px-3 py-3"></th>
               </tr>
             </thead>
             <tbody>
-              {items.map(item => (
+              {items.map((item, idx) => {
+                // Kalan gün: tahmini teslim (sipariş tarihi + 21 gün kuralı) − bugün
+                const _exp = item.expected_delivery_date || (item.agreement_date ? _plus21(item.agreement_date) : "");
+                const _days = _exp ? Math.ceil((new Date(String(_exp).substring(0, 10)) - new Date(new Date().toISOString().substring(0, 10))) / 864e5) : null;
+                const _delivered = item.current_stage === "teslim_alindi";
+                const _rowColors = (item.colors?.length ? item.colors
+                  : [...new Set(Object.keys(item.size_distribution || {}).map(k => k.includes("|") ? k.split("|")[0] : ""))].filter(Boolean));
+                return (
                 <tr key={item.id} className="border-b hover:bg-gray-50" data-testid={`mfg-row-${item.code}`}>
-                  <td className="px-4 py-3 font-mono text-xs text-rose-600 font-bold">{item.code}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
+                  <td className="px-3 py-3 text-sm font-semibold">{item.partner_name || "—"}</td>
+                  <td className="px-3 py-3 font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</td>
+                  <td className="px-3 py-3">
                     <p className="font-medium">{item.product_name}</p>
                     <p className="text-[10px] text-gray-500">
                       {Object.entries(item.size_distribution || {}).map(([s, q]) => `${s}:${q}`).join(" · ")}
                     </p>
+                    <p className="flex items-center gap-1.5 mt-0.5">
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${STAGE_COLORS[item.current_stage] || 'bg-gray-100'}`}>
+                        {stageLabel(item.current_stage)}
+                      </span>
+                      {item.payment_done
+                        ? <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">Ödendi ✓</span>
+                        : <span className="text-[9px] text-gray-400">Ödenmedi · {(item.agreed_total || 0).toFixed(0)}₺</span>}
+                    </p>
                   </td>
-                  <td className="px-4 py-3 text-sm">{item.partner_name}</td>
-                  <td className="px-4 py-3 text-sm font-bold">{item.total_units}</td>
-                  <td className="px-4 py-3 text-xs">
-                    <p className="font-semibold tabular-nums">{(item.agreed_total || 0).toFixed(2)}₺</p>
-                    {item.payment_done ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">Ödendi ✓</span>
+                  <td className="px-3 py-3 text-sm font-bold text-right tabular-nums">{item.total_units}</td>
+                  <td className="px-3 py-3 text-xs">
+                    <p className="text-gray-700">{item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}</p>
+                    {_delivered ? (
+                      <p className="text-[10px] font-bold text-emerald-600">Teslim alındı ✓</p>
+                    ) : _days == null ? null : _days < 0 ? (
+                      <p className="text-[11px] font-bold text-red-700">{Math.abs(_days)} gün GECİKTİ!</p>
                     ) : (
-                      <span className="text-[10px] text-gray-400">Ödenmedi</span>
+                      <p className="text-[11px] font-bold text-red-600">{_days} gün kaldı</p>
                     )}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${STAGE_COLORS[item.current_stage] || 'bg-gray-100'}`}>
-                      {stageLabel(item.current_stage)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}
+                  <td className="px-3 py-3">
+                    {/* Renk bazlı kumaş okeyi — listeden tıklanıp değiştirilebilir */}
+                    <div className="flex flex-wrap gap-1 max-w-[180px]">
+                      {(_rowColors.length ? _rowColors : [""]).map(c => {
+                        const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
+                        return (
+                          <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "fabric")}
+                            title={`${c || "Tek renk"} — kumaş ${ok ? "onaylı (kaldırmak için tıkla)" : "onaysız (onaylamak için tıkla)"}`}
+                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-500 border-gray-300 hover:border-emerald-400"}`}>
+                            {c || "Tek"} {ok ? "✓" : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {item.has_lining && (
+                      <div className="flex flex-wrap gap-1 max-w-[180px] mt-1 items-center">
+                        <span className="text-[9px] text-indigo-500 font-bold uppercase">Astar:</span>
+                        {(_rowColors.length ? _rowColors : [""]).map(c => {
+                          const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
+                          return (
+                            <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "lining")}
+                              title={`${c || "Tek renk"} — astar ${ok ? "onaylı" : "onaysız"}`}
+                              className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border transition ${ok ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-500 border-gray-300 hover:border-indigo-400"}`}>
+                              {c || "Tek"} {ok ? "✓" : ""}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {/* Son aşama: imalattan ürün kartı oluştur (kullanıcı isteği) */}
@@ -430,7 +483,8 @@ export default function Manufacturing() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
