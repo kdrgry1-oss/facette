@@ -18,6 +18,37 @@ export default function AdminInstagram() {
   // Otomatik kurulum: App ID + Secret + KISA token → backend uzatır, IG hesabını bulur, senkronlar
   const [auto, setAuto] = useState({ app_id: "", app_secret: "", short_token: "" });
   const [autoBusy, setAutoBusy] = useState(false);
+  const [showTokenFlow, setShowTokenFlow] = useState(false); // alternatif (token yapıştırma) akışı
+
+  // TEK TIK: App ID+Secret kaydedilir → Facebook onay ekranına yönlendirilir → dönüşte
+  // backend code'u token'a çevirir, IG hesabını bulur, senkronlar (token yapıştırmak GEREKMEZ).
+  const startOAuth = async () => {
+    if (!settings?.app_secret_set && (!auto.app_id.trim() || !auto.app_secret.trim())) {
+      toast.error("İlk bağlantı için App ID ve App Secret girin (bir kez)"); return;
+    }
+    setAutoBusy(true);
+    try {
+      const t = localStorage.getItem("token");
+      const r = await axios.post(`${API}/admin/instagram/oauth-start`,
+        { app_id: auto.app_id.trim(), app_secret: auto.app_secret.trim() },
+        { headers: { Authorization: `Bearer ${t}` } });
+      if (r.data?.auth_url) window.location.href = r.data.auth_url;
+      else { toast.error("Yönlendirme URL'i alınamadı"); setAutoBusy(false); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Bağlantı başlatılamadı"); setAutoBusy(false); }
+  };
+
+  // OAuth dönüşü: /admin/instagram?ig_connected=1&ig_user=... veya ?ig_error=...
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("ig_connected") === "1") {
+      toast.success(`@${q.get("ig_user") || "hesap"} bağlandı · ${q.get("ig_synced") || 0} gönderi çekildi 🎉`);
+    } else if (q.get("ig_error")) {
+      toast.error(`Instagram bağlantısı: ${q.get("ig_error")}`, { duration: 10000 });
+    } else return;
+    window.history.replaceState({}, "", window.location.pathname);
+    loadSettings(); loadPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const runAutoSetup = async () => {
     if (!auto.app_id.trim() || !auto.app_secret.trim() || !auto.short_token.trim()) {
       toast.error("App ID, App Secret ve kısa token üçü de gerekli"); return;
@@ -153,27 +184,59 @@ export default function AdminInstagram() {
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">Son hata: {settings.last_error}</div>
       )}
 
-      {/* ⚡ OTOMATİK KURULUM — kısa token yapıştır, gerisini backend yapar */}
+      {/* ⚡ TEK TIK BAĞLANTI — token almak GEREKMEZ: Facebook onay ekranına gider, gerisini sunucu yapar */}
       <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 mb-4">
-        <h2 className="text-sm font-bold uppercase tracking-wider mb-1 text-emerald-800">⚡ Otomatik Kurulum (Önerilen)</h2>
+        <h2 className="text-sm font-bold uppercase tracking-wider mb-1 text-emerald-800">⚡ Tek Tık Bağlantı (Önerilen — token gerekmez)</h2>
         <p className="text-xs text-emerald-700 mb-3">
-          <a className="underline font-semibold" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>'dan
-          (izinler: <b>instagram_basic</b> + <b>pages_show_list</b>) aldığınız KISA ömürlü token'ı ve app bilgilerinizi yapıştırın —
-          token uzatma (60 gün), Instagram hesabını bulma, kaydetme ve ilk senkronu sistem kendisi yapar.
-          App ID/Secret: developers.facebook.com → uygulamanız → Ayarlar → Temel.
+          Token/Explorer ile uğraşmayın: aşağıya <b>bir kez</b> App ID + App Secret girin
+          (<a className="underline font-semibold" href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer">developers.facebook.com/apps</a> →
+          uygulamanız → <b>Ayarlar → Temel</b>) ve "Facebook ile Bağlan"a basın. Facebook'ta kendi hesabınızla
+          onay verirsiniz; token alma, uzatma, Instagram hesabını bulma ve ilk senkronu sistem kendisi yapar.
         </p>
-        <div className="grid md:grid-cols-3 gap-3 mb-3">
-          <input value={auto.app_id} onChange={(e) => setAuto({ ...auto, app_id: e.target.value })}
-            placeholder="App ID (ör. 1234567890)" className="border px-3 py-2 rounded text-sm" />
-          <input type="password" value={auto.app_secret} onChange={(e) => setAuto({ ...auto, app_secret: e.target.value })}
-            placeholder="App Secret" className="border px-3 py-2 rounded text-sm" />
-          <input type="password" value={auto.short_token} onChange={(e) => setAuto({ ...auto, short_token: e.target.value })}
-            placeholder="Kısa ömürlü token (EAAB...)" className="border px-3 py-2 rounded text-sm" />
+        <div className="bg-white/70 border border-emerald-200 rounded-lg p-2.5 mb-3 text-[11px] text-gray-600">
+          <b>Bir kez yapılacak app ayarı:</b> uygulamanızda <b>Facebook Login</b> ürünü ekli olmalı ve
+          <b> Facebook Login → Settings → Valid OAuth Redirect URIs</b> alanına şu adres eklenmeli:
+          <div className="flex items-center gap-2 mt-1">
+            <code className="bg-gray-100 px-2 py-1 rounded text-[10px] break-all">{settings.oauth_redirect_uri || "https://api.facette.com.tr/api/instagram/oauth/callback"}</code>
+            <button type="button" className="text-emerald-700 font-bold underline shrink-0"
+              onClick={() => { navigator.clipboard?.writeText(settings.oauth_redirect_uri || "https://api.facette.com.tr/api/instagram/oauth/callback"); toast.success("Kopyalandı"); }}>
+              kopyala
+            </button>
+          </div>
         </div>
-        <button onClick={runAutoSetup} disabled={autoBusy}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
-          {autoBusy ? "Bağlanıyor…" : "⚡ Bağla ve Senkronla"}
-        </button>
+        <div className="grid md:grid-cols-2 gap-3 mb-3">
+          <input value={auto.app_id} onChange={(e) => setAuto({ ...auto, app_id: e.target.value })}
+            placeholder={settings.app_id ? `App ID (kayıtlı: ${settings.app_id})` : "App ID (ör. 1234567890)"}
+            className="border px-3 py-2 rounded text-sm" />
+          <input type="password" value={auto.app_secret} onChange={(e) => setAuto({ ...auto, app_secret: e.target.value })}
+            placeholder={settings.app_secret_set ? "App Secret (kayıtlı — değişmeyecekse boş bırakın)" : "App Secret"}
+            className="border px-3 py-2 rounded text-sm" />
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button onClick={startOAuth} disabled={autoBusy}
+            className="px-5 py-2.5 bg-[#1877F2] text-white rounded-lg text-sm font-bold hover:bg-[#0f66d6] disabled:opacity-50">
+            {autoBusy ? "Yönlendiriliyor…" : "🔗 Facebook ile Bağlan"}
+          </button>
+          <button type="button" onClick={() => setShowTokenFlow(v => !v)} className="text-xs text-emerald-700 underline">
+            {showTokenFlow ? "token akışını gizle" : "Alternatif: elimde token var"}
+          </button>
+        </div>
+        {showTokenFlow && (
+          <div className="mt-3 pt-3 border-t border-emerald-200">
+            <p className="text-xs text-emerald-700 mb-2">
+              <a className="underline font-semibold" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>'dan
+              (izinler: <b>instagram_basic</b> + <b>pages_show_list</b>) alınan KISA ömürlü token'ı yapıştırın — gerisini sistem yapar.
+            </p>
+            <div className="flex gap-3 flex-wrap">
+              <input type="password" value={auto.short_token} onChange={(e) => setAuto({ ...auto, short_token: e.target.value })}
+                placeholder="Kısa ömürlü token (EAAB...)" className="border px-3 py-2 rounded text-sm flex-1 min-w-[220px]" />
+              <button onClick={runAutoSetup} disabled={autoBusy}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
+                {autoBusy ? "Bağlanıyor…" : "⚡ Bağla ve Senkronla"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Token / Ayarlar */}

@@ -18,7 +18,11 @@ ENDPOINTS:
 =============================================================================
 """
 import logging
+import os
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from datetime import datetime, timezone
 
 import httpx
@@ -37,6 +41,13 @@ public_router = APIRouter(prefix="/instagram", tags=["instagram-public"])
 admin_router = APIRouter(prefix="/admin/instagram", tags=["instagram-admin"])
 
 _GRAPH = "https://graph.facebook.com/v19.0"
+# OAuth (tek tık bağlantı) — kullanıcı token'ı Graph Explorer'dan almak zorunda kalmaz:
+# panel "Facebook ile Bağlan" der → Facebook onay ekranı → bu callback'e döner →
+# code'u token'a çeviren, IG hesabını bulan ve senkronu başlatan sunucudur.
+_API_PUBLIC_BASE = (os.environ.get("PUBLIC_API_BASE") or "https://api.facette.com.tr/api").rstrip("/")
+_OAUTH_REDIRECT_URI = f"{_API_PUBLIC_BASE}/instagram/oauth/callback"
+_ADMIN_RETURN_URL = (os.environ.get("SITE_URL") or "https://www.facette.com.tr").rstrip("/") + "/admin/instagram"
+_OAUTH_SCOPE = "instagram_basic,pages_show_list"
 
 
 def _now():
@@ -97,6 +108,9 @@ async def get_settings(current_user: dict = Depends(require_admin)):
     return {
         "connected": bool(s.get("access_token")),
         "token_set": bool(s.get("access_token")),
+        "app_id": s.get("app_id", ""),
+        "app_secret_set": bool(s.get("app_secret")),
+        "oauth_redirect_uri": _OAUTH_REDIRECT_URI,
         "ig_user_id": s.get("ig_user_id", ""),
         "source": s.get("source", "media"),
         "auto_sync": bool(s.get("auto_sync", False)),
@@ -135,13 +149,18 @@ async def auto_setup(payload: dict, current_user: dict = Depends(require_admin))
     short_token = str((payload or {}).get("short_token") or "").strip()
     if not (app_id and app_secret and short_token):
         raise HTTPException(status_code=400, detail="App ID, App Secret ve kısa token zorunlu")
+    return await _finalize_connect(app_id, app_secret, short_token)
 
+
+async def _finalize_connect(app_id: str, app_secret: str, user_token: str) -> dict:
+    """Ortak son adım (auto-setup + OAuth callback): kullanıcı token'ını uzun ömürlüye
+    çevirir, bağlı Instagram Business hesabını bulur, şifreli kaydeder, ilk senkronu koşar."""
     async with httpx.AsyncClient(timeout=30) as client:
         # 1) Kısa token → uzun ömürlü (60 gün) kullanıcı token'ı
         r = await client.get(f"{_GRAPH}/oauth/access_token", params={
             "grant_type": "fb_exchange_token",
             "client_id": app_id, "client_secret": app_secret,
-            "fb_exchange_token": short_token})
+            "fb_exchange_token": user_token})
         if r.status_code != 200:
             _err = ((r.json() or {}).get("error") or {}).get("message", r.text) if r.headers.get("content-type", "").startswith("application/json") else r.text
             raise HTTPException(status_code=502, detail=f"Token uzatılamadı: {_err}")
@@ -204,6 +223,90 @@ async def auto_setup(payload: dict, current_user: dict = Depends(require_admin))
             "page": ig.get("page"), "synced": synced,
             "message": f"@{ig.get('username') or 'hesap'} bağlandı · {synced} gönderi çekildi"
                        + (f" · ilk senkron uyarısı: {sync_err}" if sync_err else "")}
+
+
+@admin_router.post("/oauth-start")
+async def oauth_start(payload: dict, current_user: dict = Depends(require_admin)):
+    """TEK TIK BAĞLANTI (adım 1): App ID+Secret'ı kaydeder, Facebook onay ekranı URL'ini döner.
+    Panel bu URL'e yönlendirir; kullanıcı KENDİ tarayıcısında Facebook'a girip onay verir —
+    şifre/token hiçbir zaman panele girilmez. Dönüş /instagram/oauth/callback'e olur."""
+    s = await _get_settings()
+    app_id = str((payload or {}).get("app_id") or "").strip() or str(s.get("app_id") or "").strip()
+    app_secret = str((payload or {}).get("app_secret") or "").strip()
+    if not app_secret and s.get("app_secret"):
+        app_secret = decrypt(s.get("app_secret"))
+    if not (app_id and app_secret):
+        raise HTTPException(status_code=400, detail="App ID ve App Secret gerekli (bir kez girilir, sonra kayıtlıdır)")
+
+    state = generate_id()
+    await db.settings.update_one(
+        {"id": "instagram"},
+        {"$set": {"app_id": app_id, "app_secret": encrypt(app_secret),
+                  "oauth_state": state, "oauth_state_at": _now().isoformat(),
+                  "updated_at": _now().isoformat()},
+         "$setOnInsert": {"id": "instagram"}}, upsert=True)
+
+    auth_url = "https://www.facebook.com/v19.0/dialog/oauth?" + urlencode({
+        "client_id": app_id,
+        "redirect_uri": _OAUTH_REDIRECT_URI,
+        "state": state,
+        "scope": _OAUTH_SCOPE,
+        "response_type": "code",
+    })
+    return {"auth_url": auth_url, "redirect_uri": _OAUTH_REDIRECT_URI}
+
+
+@public_router.get("/oauth/callback")
+async def oauth_callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
+    """TEK TIK BAĞLANTI (adım 2): Facebook onayından dönen 'code'u sunucu token'a çevirir,
+    IG hesabını bulur, kaydeder, senkronlar; tarayıcıyı panele geri yollar.
+    Kimlik güvencesi 'state' parametresidir (oauth-start'ta admin oturumunda üretildi)."""
+    def _back(params: dict):
+        return RedirectResponse(url=f"{_ADMIN_RETURN_URL}?{urlencode(params)}", status_code=302)
+
+    if error:
+        return _back({"ig_error": (error_description or error)[:180]})
+    s = await _get_settings()
+    saved_state = s.get("oauth_state") or ""
+    ok_state = bool(state and saved_state and state == saved_state)
+    if ok_state:
+        try:  # state en fazla 30 dk geçerli
+            _age = (_now() - datetime.fromisoformat(s.get("oauth_state_at"))).total_seconds()
+            ok_state = _age < 1800
+        except Exception:
+            ok_state = False
+    if not ok_state or not code:
+        return _back({"ig_error": "Oturum doğrulanamadı (state) — panelden tekrar 'Facebook ile Bağlan' deneyin"})
+    # state tek kullanımlık
+    await db.settings.update_one({"id": "instagram"}, {"$unset": {"oauth_state": "", "oauth_state_at": ""}})
+
+    app_id = str(s.get("app_id") or "").strip()
+    app_secret = decrypt(s.get("app_secret")) if s.get("app_secret") else ""
+    if not (app_id and app_secret):
+        return _back({"ig_error": "App bilgileri bulunamadı — App ID/Secret girip tekrar deneyin"})
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{_GRAPH}/oauth/access_token", params={
+                "client_id": app_id, "client_secret": app_secret,
+                "redirect_uri": _OAUTH_REDIRECT_URI, "code": code})
+        if r.status_code != 200:
+            try:
+                _err = ((r.json() or {}).get("error") or {}).get("message") or r.text
+            except Exception:
+                _err = r.text
+            return _back({"ig_error": f"Token alınamadı: {str(_err)[:160]}"})
+        user_token = (r.json() or {}).get("access_token") or ""
+        if not user_token:
+            return _back({"ig_error": "Facebook token dönmedi"})
+        result = await _finalize_connect(app_id, app_secret, user_token)
+        return _back({"ig_connected": "1", "ig_user": result.get("ig_username") or "",
+                      "ig_synced": str(result.get("synced") or 0)})
+    except HTTPException as e:
+        return _back({"ig_error": str(e.detail)[:180]})
+    except Exception as e:  # pragma: no cover
+        logger.exception("instagram oauth callback")
+        return _back({"ig_error": f"Beklenmeyen hata: {str(e)[:140]}"})
 
 
 @admin_router.post("/disconnect")
