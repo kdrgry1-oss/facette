@@ -783,34 +783,37 @@ export default function Manufacturing() {
               </div>
             )}
 
-            {/* Finansal — tek satır: birim fiyat + otomatik toplam + ödeme yapıldı tiki */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            {/* Finansal — üç kolon TAM HİZALI: eşit etiket satırı + eşit yükseklikte kontrol + sabit ipucu alanı */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Birim Fiyat (₺, KDV Hariç)</label>
+                <label className="block text-xs font-bold text-gray-600 mb-1 h-4">Birim Fiyat (₺, KDV Hariç)</label>
                 <input type="number" step="0.01" value={form.unit_price}
                   onChange={e => setForm({ ...form, unit_price: e.target.value })}
-                  className="w-full border px-3 py-2 rounded text-sm" />
-                {Number(form.unit_price) > 0 && (
-                  <p className="text-[11px] text-emerald-700 mt-1 whitespace-nowrap overflow-hidden text-ellipsis" data-testid="mfg-vat-hint">
+                  className="w-full h-[42px] border px-3 rounded text-sm" />
+                <p className="text-[11px] text-emerald-700 mt-1 min-h-[16px] whitespace-nowrap overflow-hidden text-ellipsis" data-testid="mfg-vat-hint">
+                  {Number(form.unit_price) > 0 && (<>
                     KDV'li: <b>{(Number(form.unit_price) * 1.10).toFixed(2)} ₺</b>{grandTotal > 0 && <> · {grandTotal} adet KDV'li: <b>{(Number(form.unit_price) * 1.10 * grandTotal).toFixed(2)} ₺</b></>}
-                  </p>
-                )}
+                  </>)}
+                </p>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-600 mb-1">Toplam Anlaşma Bedeli (₺)</label>
-                <div className="w-full border px-3 py-2 rounded text-sm bg-gray-50 font-semibold tabular-nums whitespace-nowrap" data-testid="mfg-agreed-total">
+                <label className="block text-xs font-bold text-gray-600 mb-1 h-4">Toplam Anlaşma Bedeli (₺)</label>
+                <div className="w-full h-[42px] border px-3 rounded text-sm bg-gray-50 font-semibold tabular-nums whitespace-nowrap flex items-center" data-testid="mfg-agreed-total">
                   {(Number(form.unit_price || 0) * grandTotal).toFixed(2)} ₺
                   <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal} adet × {Number(form.unit_price || 0).toFixed(2)} ₺)</span>
                 </div>
+                <p className="mt-1 min-h-[16px]" />
               </div>
               <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1 h-4">Ödeme Durumu</label>
                 <button type="button"
                   onClick={() => setForm(f => ({ ...f, payment_done: !f.payment_done }))}
                   data-testid="mfg-payment-done"
-                  className={`w-full px-3 py-2 rounded text-sm font-semibold border-2 transition flex items-center justify-center gap-2
+                  className={`w-full h-[42px] px-3 rounded text-sm font-semibold border-2 transition flex items-center justify-center gap-2
                     ${form.payment_done ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400"}`}>
                   <CheckCircle2 size={16} /> {form.payment_done ? "Ödeme Yapıldı ✓" : "Ödeme Yapıldı mı?"}
                 </button>
+                <p className="mt-1 min-h-[16px]" />
               </div>
             </div>
 
