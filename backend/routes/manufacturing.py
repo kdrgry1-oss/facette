@@ -190,7 +190,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "unit_price", "agreed_total", "payments", "cost_lines",
         "purchase_orders", "waste_meters", "supplier_id", "notes",
         "order_no", "order_flags", "stock_code", "colors",
-        "has_lining", "color_approvals", "cutting_start_date", "actual_distribution",
+        "has_lining", "color_approvals", "cutting_start_date", "actual_distribution", "product_created",
     ):
         if f in payload:
             update[f] = payload[f]

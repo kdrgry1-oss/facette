@@ -527,6 +527,38 @@ export default function AdminProducts() {
   // Deep-link: /admin/urunler?aktar=barkod → "Barkod ile Trendyol'a Aktar" pop-up'ını otomatik aç.
   // (Pazaryeri Hub'ından hızlı erişim için.)
   useEffect(() => {
+    // İMALATTAN ÜRÜN AÇ: İmalat Takip'teki "Ürün Aç" butonu Yeni Ürün formunu
+    // üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden=stok) önden dolu açar.
+    if (searchParams.get("newFromMfg") === "1") {
+      const raw = sessionStorage.getItem("mfg_product_prefill");
+      if (raw) {
+        try {
+          const p = JSON.parse(raw);
+          resetForm();
+          setFormData(f => ({
+            ...f,
+            name: p.name || "",
+            stock_code: p.stock_code || "",
+            season: p.season || "",
+            purchase_price: Number(p.purchase_price || 0),
+            manufacturer: p.manufacturer || "FACETTE",
+            mfg_record_id: p.mfg_record_id || "",
+            is_active: false, // satışa açmadan önce kalan bilgiler girilecek
+            variants: (p.variants || []).map((v, i) => ({
+              id: `var-mfg-${i}-${v.size}-${v.color}`.replace(/\s+/g, ""),
+              size: v.size || "", color: v.color || "",
+              stock: Number(v.stock || 0), barcode: "", stock_code: p.stock_code || "",
+            })),
+          }));
+          setModalOpen(true);
+          toast.success("Ürün kartı imalat bilgileriyle dolduruldu — kalan alanları tamamlayıp kaydedin");
+        } catch { /* sessiz */ }
+        sessionStorage.removeItem("mfg_product_prefill");
+      }
+      searchParams.delete("newFromMfg");
+      setSearchParams(searchParams, { replace: true });
+      return;
+    }
     if (searchParams.get("aktar") === "barkod") {
       setBarcodePushOpen(true);
       const next = new URLSearchParams(searchParams);
@@ -1341,6 +1373,11 @@ export default function AdminProducts() {
           await axios.post(`${API}/products`, payload, { headers });
           toast.success("Ürün oluşturuldu");
         }
+      }
+      // İmalattan açılan üründe kaydı 'ürün açıldı ✓' olarak işaretle (rozet + tekrar açılmasın)
+      if (!editingProduct && formData.mfg_record_id) {
+        axios.put(`${API}/manufacturing/${formData.mfg_record_id}`,
+          { product_created: true }, { headers }).catch(() => {});
       }
       setModalOpen(false);
       resetForm();

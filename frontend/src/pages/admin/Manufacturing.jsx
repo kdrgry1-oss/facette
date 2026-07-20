@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -44,6 +45,7 @@ const STAGE_COLORS = {
 };
 
 export default function Manufacturing() {
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [stages, setStages] = useState([]);
   const [counts, setCounts] = useState({});
@@ -216,6 +218,31 @@ export default function Manufacturing() {
     }
   };
 
+  // Depo teslimatındaki kaydı ÜRÜN KARTINA taşı: Ürünler sayfasındaki "Yeni Ürün" formu
+  // üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden=stok) önden dolu açılır.
+  const openProductFromMfg = (item) => {
+    const dist = Object.keys(item.actual_distribution || {}).length
+      ? item.actual_distribution : (item.size_distribution || {});
+    const variants = Object.entries(dist)
+      .filter(([, q]) => Number(q) > 0)
+      .map(([k, q]) => {
+        const [color, size] = k.includes("|") ? k.split("|") : ["", k];
+        return { size, color, stock: Number(q) };
+      });
+    const sc = (item.stock_code || "").toUpperCase();
+    const season = sc.startsWith("FCFW") ? "Kış" : sc.startsWith("FCSS") ? "Yaz" : "";
+    sessionStorage.setItem("mfg_product_prefill", JSON.stringify({
+      mfg_record_id: item.id,
+      name: item.product_name || "",
+      stock_code: item.stock_code || "",
+      season,
+      purchase_price: Number(item.unit_price || 0),
+      manufacturer: item.partner_name || "FACETTE",
+      variants,
+    }));
+    navigate("/admin/urunler?newFromMfg=1");
+  };
+
   // Her aşama geçişinde kullanıcı o aşamanın TARİHİNİ girer (kullanıcı isteği)
   const _STAGE_DATE_LABELS = {
     kumas_okeyi: "Kumaş okeyi tarihi",
@@ -346,18 +373,6 @@ export default function Manufacturing() {
   const rowTotal = (color) => form.sizes.reduce((s, sz) => s + cellVal(color, sz), 0);
   const grandTotal = (form.colors.length ? form.colors : [""]).reduce((s, c) => s + rowTotal(c), 0);
 
-  // "Ürünler Kartına Aktar" — son aşamada imalattan ürün oluştur
-  const transferToProducts = async (item) => {
-    if (!await window.appConfirm(`"${item.product_name}" imalat kaydından ürün kartı oluşturulacak (taslak). Devam?`)) return;
-    try {
-      const token = localStorage.getItem("token");
-      const r = await axios.post(`${API}/manufacturing/${item.id}/create-product`, {},
-        { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(r.data?.message || "Ürün kartı oluşturuldu");
-      fetchAll();
-    } catch (e) { toast.error(e.response?.data?.detail || "Aktarılamadı"); }
-  };
-
   return (
     <div className="p-6 max-w-7xl mx-auto" data-testid="manufacturing-page">
       <div className="flex justify-between items-center mb-6">
@@ -420,6 +435,7 @@ export default function Manufacturing() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
                 <th className="px-3 py-3"></th>
+                <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün Aç</th>
               </tr>
             </thead>
             <tbody>
@@ -531,20 +547,6 @@ export default function Manufacturing() {
                         <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
                       </span>
                     )}
-                    {/* Son aşama: imalattan ürün kartı oluştur (kullanıcı isteği) */}
-                    {["teslim_alindi", "fatura_kesildi"].includes(item.current_stage) && !item.product_created && (
-                      <button
-                        onClick={() => transferToProducts(item)}
-                        data-testid={`transfer-${item.id}`}
-                        className="px-2 py-1 text-xs bg-emerald-600 text-white hover:bg-emerald-700 rounded font-medium mr-1"
-                        title="Renk/beden kombinasyonlarından taslak ürün kartı oluşturur"
-                      >
-                        Ürünler Kartına Aktar
-                      </button>
-                    )}
-                    {item.product_created && (
-                      <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 mr-1">ürüne aktarıldı ✓</span>
-                    )}
                     {nextStage(item.current_stage) && (
                       <button
                         onClick={() => advanceStage(item, nextStage(item.current_stage))}
@@ -560,6 +562,22 @@ export default function Manufacturing() {
                     <button onClick={() => deleteRecord(item)} className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded">
                       <Trash2 size={13} className="inline" />
                     </button>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {["teslim_alindi", "fatura_kesildi"].includes(item.current_stage) ? (
+                      item.product_created ? (
+                        <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">ürün açıldı ✓</span>
+                      ) : (
+                        <button onClick={() => openProductFromMfg(item)}
+                          data-testid={`open-product-${item.id}`}
+                          title="Üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden stokları) Yeni Ürün formunu açar"
+                          className="px-2.5 py-1.5 text-xs bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg font-bold whitespace-nowrap">
+                          🛍 Ürün Aç
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
                   </td>
                 </tr>
                 );
