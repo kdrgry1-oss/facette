@@ -379,7 +379,7 @@ async def products_export_xlsx(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Ürün Raporu"
-    ws.append(["Ürün", "Koleksiyon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
+    ws.append(["Ürün", "Sezon", "Satış Adedi", "Ciro (TL)", "Sipariş", "Güncel Stok",
                "En Çok Satan Beden", "En Çok Satan Platform", "Haftalık Hız",
                "İptal Adet", "İade Adet", "Platform İptal/İade Detay"])
     # Satış hızı: renkli hücre (yeşil/sarı/kırmızı) + etiket — panelle birebir aynı kodlama
@@ -388,12 +388,20 @@ async def products_export_xlsx(
                  "yellow": PatternFill("solid", fgColor="FFEB9C"),
                  "red": PatternFill("solid", fgColor="FFC7CE")}
     _VEL_LABEL = {"green": "Hızlı", "yellow": "Orta", "red": "Yavaş"}
+    # Panelle aynı sezon adlandırması: FCFW → Sonbahar/Kış, FCSS → İlkbahar/Yaz
+    def _season(c):
+        s = (c or "").lower()
+        if "fcfw" in s:
+            return "Sonbahar/Kış"
+        if "fcss" in s:
+            return "İlkbahar/Yaz"
+        return (c or "").strip()
     for r in data.get("items", []):
         _crd = "; ".join(f"{x['platform']}: iptal {x['cancel']} / iade {x['return']}"
                          for x in (r.get("cancel_return_by_platform") or []))
         _vel = r.get("velocity") or {}
         _vcode = _vel.get("code") or ""
-        ws.append([r.get("name"), r.get("collection") or "", r.get("qty"), r.get("revenue"),
+        ws.append([r.get("name"), _season(r.get("collection")), r.get("qty"), r.get("revenue"),
                    r.get("orders"), r.get("current_stock"), r.get("best_size"),
                    r.get("top_platform"),
                    f"{_VEL_LABEL.get(_vcode, '')} ({_vel.get('weekly_rate', 0)}/hafta)",

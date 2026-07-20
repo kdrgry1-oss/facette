@@ -433,6 +433,13 @@ export function ProductsReport() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
+  // Sezon = stok kodu koleksiyonundan: FCFW → Sonbahar/Kış, FCSS → İlkbahar/Yaz
+  const seasonLabel = (c) => {
+    const s = (c || "").toLowerCase();
+    if (s.includes("fcfw")) return "Sonbahar/Kış";
+    if (s.includes("fcss")) return "İlkbahar/Yaz";
+    return (c || "").trim() || "—";
+  };
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" ? "asc" : "desc"); } };
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
@@ -516,9 +523,9 @@ export function ProductsReport() {
               {sizeOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             {collOptions.length > 0 && (
-              <select value={collFilter} onChange={e => setCollFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
-                <option value="">Tüm Koleksiyonlar</option>
-                {collOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              <select value={collFilter} onChange={e => setCollFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm" data-testid="season-filter">
+                <option value="">Tüm Sezonlar</option>
+                {collOptions.map(c => <option key={c} value={c}>{seasonLabel(c)}</option>)}
               </select>
             )}
             <select value={velFilter} onChange={e => setVelFilter(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
@@ -557,6 +564,7 @@ export function ProductsReport() {
             <thead className="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
               <tr>
                 <SortTh k="name">Ürün</SortTh>
+                <SortTh k="collection">Sezon</SortTh>
                 <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="qty" right>Adet</SortTh>
                 <SortTh k="revenue" right>Ciro</SortTh>
@@ -576,8 +584,8 @@ export function ProductsReport() {
                 <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpand(key)}>
                   <td className="p-3 font-medium max-w-xs truncate" title={p.name}>
                     <span className="inline-block w-3 text-gray-400 mr-1">{isOpen ? "▾" : "▸"}</span>{p.name}
-                    {p.collection ? <span className="ml-2 px-2 py-0.5 text-xs font-bold uppercase tracking-wide bg-gray-800 text-white rounded">{p.collection}</span> : null}
                   </td>
+                  <td className="p-3 text-xs whitespace-nowrap" title={p.collection || ""}>{seasonLabel(p.collection)}</td>
                   <td className="p-3">
                     {p.velocity ? (
                       <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border ${(velMeta[p.velocity.code] || {}).cls || ""}`} title={`${p.velocity.weekly_rate}/hafta`}>
@@ -603,7 +611,7 @@ export function ProductsReport() {
                 </tr>
                 {isOpen && (
                   <tr className="bg-gray-50/60">
-                    <td colSpan={9} className="px-8 py-3">
+                    <td colSpan={10} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
@@ -628,7 +636,7 @@ export function ProductsReport() {
                 </Fragment>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={10} className="p-4 text-center text-gray-400">Veri yok.</td></tr>}
             </tbody>
           </table>
         </div>
