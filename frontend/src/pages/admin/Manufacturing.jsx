@@ -4,6 +4,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package, CheckCircle2,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -560,14 +561,14 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
                   <td className="px-3 py-3 text-sm font-semibold">{item.partner_name || "—"}</td>
                   <td className="px-3 py-3">
-                    <p className="font-mono text-xs text-black font-bold">{item.order_no || item.code}</p>
+                    <p className="text-sm font-semibold">{item.order_no || item.code}</p>
                     {item.order_flags?.rpt && (
                       <span className="inline-block mt-0.5 text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5"
                         title="Tekrar sipariş (repeat)">RPT</span>
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <p className="font-medium">{item.product_name}</p>
+                    <p className="text-sm font-semibold">{item.product_name}</p>
                     <p className="flex items-center gap-1.5 mt-0.5">
                       {/* Aşama rozeti kaldırıldı — aşama zaten üstteki timeline'da görünüyor */}
                       {item.payment_done
@@ -685,17 +686,12 @@ export default function Manufacturing() {
                             )}
                           </div>
                           {_imgs.length > 0 && (
-                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="Görsel imalat raporu — büyütmek için tıklayın">
-                              {_imgs.slice(0, 4).map((u, i) => (
-                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
-                                  <img src={_imgUrl(u)} alt={`rapor ${i + 1}`}
-                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-rose-400" loading="lazy" />
-                                </a>
-                              ))}
-                              {_imgs.length > 4 && (
-                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_imgs.length - 4}</span>
-                              )}
-                            </div>
+                            <a href={_imgUrl(_imgs[0])} target="_blank" rel="noreferrer"
+                              title={`${_imgs.length} görsel rapor — açmak için tıklayın (tümü düzenleme ekranında)`}
+                              className="inline-flex items-center gap-1 text-gray-500 hover:text-black">
+                              <ImageIcon size={16} strokeWidth={1.5} />
+                              {_imgs.length > 1 && <span className="text-[10px] font-bold">×{_imgs.length}</span>}
+                            </a>
                           )}
                         </div>
                       );
@@ -726,17 +722,12 @@ export default function Manufacturing() {
                             )}
                           </div>
                           {_qcImgs.length > 0 && (
-                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="Kalite kontrol görselleri — büyütmek için tıklayın">
-                              {_qcImgs.slice(0, 4).map((u, i) => (
-                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
-                                  <img src={_imgUrl(u)} alt={`kk ${i + 1}`}
-                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-amber-400" loading="lazy" />
-                                </a>
-                              ))}
-                              {_qcImgs.length > 4 && (
-                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_qcImgs.length - 4}</span>
-                              )}
-                            </div>
+                            <a href={_imgUrl(_qcImgs[0])} target="_blank" rel="noreferrer"
+                              title={`${_qcImgs.length} kalite kontrol görseli — açmak için tıklayın (tümü düzenleme ekranında)`}
+                              className="inline-flex items-center gap-1 text-gray-500 hover:text-black">
+                              <ImageIcon size={16} strokeWidth={1.5} />
+                              {_qcImgs.length > 1 && <span className="text-[10px] font-bold">×{_qcImgs.length}</span>}
+                            </a>
                           )}
                           {/* 2. kalite kontrol (Re-FRI sonrası tekrar) — varsa ayrı satırda */}
                           {(item.qc2_result || item.qc2_date || (item.qc2_images || []).length > 0) && (
@@ -755,17 +746,12 @@ export default function Manufacturing() {
                                 </p>
                               )}
                               {(item.qc2_images || []).length > 0 && (
-                                <div className="flex flex-wrap gap-1 max-w-[150px]">
-                                  {(item.qc2_images || []).slice(0, 4).map((u, i) => (
-                                    <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
-                                      <img src={_imgUrl(u)} alt={`2.kk ${i + 1}`}
-                                        className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-amber-400" loading="lazy" />
-                                    </a>
-                                  ))}
-                                  {(item.qc2_images || []).length > 4 && (
-                                    <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{(item.qc2_images || []).length - 4}</span>
-                                  )}
-                                </div>
+                                <a href={_imgUrl(item.qc2_images[0])} target="_blank" rel="noreferrer"
+                                  title={`${item.qc2_images.length} görsel — açmak için tıklayın`}
+                                  className="inline-flex items-center gap-1 text-gray-500 hover:text-black">
+                                  <ImageIcon size={16} strokeWidth={1.5} />
+                                  {item.qc2_images.length > 1 && <span className="text-[10px] font-bold">×{item.qc2_images.length}</span>}
+                                </a>
                               )}
                             </div>
                           )}
@@ -798,17 +784,12 @@ export default function Manufacturing() {
                             </p>
                           </div>
                           {_allImgs.length > 0 && (
-                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="İrsaliye görselleri — büyütmek için tıklayın">
-                              {_allImgs.slice(0, 4).map((u, i) => (
-                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
-                                  <img src={_imgUrl(u)} alt={`irsaliye ${i + 1}`}
-                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-sky-400" loading="lazy" />
-                                </a>
-                              ))}
-                              {_allImgs.length > 4 && (
-                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_allImgs.length - 4}</span>
-                              )}
-                            </div>
+                            <a href={_imgUrl(_allImgs[0])} target="_blank" rel="noreferrer"
+                              title={`${_allImgs.length} irsaliye görseli — açmak için tıklayın (tümü düzenleme ekranında)`}
+                              className="inline-flex items-center gap-1 text-gray-500 hover:text-black">
+                              <ImageIcon size={16} strokeWidth={1.5} />
+                              {_allImgs.length > 1 && <span className="text-[10px] font-bold">×{_allImgs.length}</span>}
+                            </a>
                           )}
                         </div>
                       );
@@ -848,9 +829,9 @@ export default function Manufacturing() {
                       ) : (
                         <button onClick={() => openProductFromMfg(item)}
                           data-testid={`open-product-${item.id}`}
-                          title="Üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden stokları) Yeni Ürün formunu açar"
-                          className="px-2.5 py-1.5 text-xs bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg font-bold whitespace-nowrap">
-                          🛍 Ürün Aç
+                          title="Ürün Aç — üretim bilgileriyle (ad, stok kodu, sezon, alış fiyatı, renk×beden stokları) Yeni Ürün formunu açar"
+                          className="w-10 h-10 inline-flex items-center justify-center text-black hover:bg-gray-100 rounded-lg text-3xl font-light leading-none">
+                          +
                         </button>
                       )
                     ) : (
