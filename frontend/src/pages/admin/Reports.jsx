@@ -476,7 +476,7 @@ export function ProductsReport() {
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
           <span>
             <span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — satışı olmayan ürünler de dahildir.
-            <span className="text-gray-400"> Adet/Ciro NET'tir (iade+iptal hariç): tüm satışı iade edilen ürün 0 adet + iade sayısıyla görünür.</span>
+            <span className="text-gray-400"> Satış Adedi/Ciro NET'tir (iade+iptal hariç): tüm satışı iade edilen ürün 0 satış + iade sayısıyla görünür.</span>
           </span>
           {/* Satış hızı dağılımı — filtrelenmiş listeye göre yüzde + adet */}
           {rows.length > 0 && (() => {
@@ -503,8 +503,8 @@ export function ProductsReport() {
                 <SortTh k="season">Sezon</SortTh>
                 <SortTh k="velocity">Satış Hızı</SortTh>
                 <SortTh k="_mom">İvme</SortTh>
-                <SortTh k="qty" right>Net Adet</SortTh>
-                <SortTh k="revenue" right>Net Ciro</SortTh>
+                <SortTh k="qty" right>Satış Adedi</SortTh>
+                <SortTh k="revenue" right>Ciro</SortTh>
                 <SortTh k="current_stock" right>Güncel Stok</SortTh>
                 <SortTh k="_cover" right>Kapsama</SortTh>
                 <SortTh k="best_size">En Çok Beden</SortTh>
