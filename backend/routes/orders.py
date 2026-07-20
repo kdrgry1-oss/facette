@@ -1946,6 +1946,14 @@ async def update_order_status(
     except Exception as stock_err:
         logger.error(f"Stock restore/re-decrement on status change failed: {stock_err}")
 
+    # İptal (normal veya 'İptal Ödemesi Yapıldı'): kupon hakkı serbest bırakılır —
+    # müşteri hoş geldin/tek kullanımlık kodunu yeni siparişte tekrar kullanabilir.
+    if status in ("cancelled", "cancel_refunded"):
+        try:
+            await release_order_redemptions(order_id)
+        except Exception as _cr_err:
+            logger.warning(f"[coupon] statü iptalinde serbest bırakma başarısız ({order_id}): {_cr_err}")
+
     return {"message": f"Sipariş durumu '{status}' olarak güncellendi"}
 
 @router.put("/{order_id}/mark-paid")
@@ -2194,6 +2202,40 @@ _RESTORE_MOVE_TYPES = ["order_cancelled", "auto_cancel_expired", "manual_increme
                        "return_restock"]  # A1: pazaryeri claim/site iade restock'u da guard'a dahil
 
 
+async def release_order_redemptions(order_or_id) -> int:
+    """Sipariş İPTAL edilince kupon kullanım kayıtlarını siler → müşteri kodu (örn. ilk
+    üyelik %10 hoş geldin) YENİDEN kullanabilir. İdempotent (delete_many)."""
+    oid = order_or_id if isinstance(order_or_id, str) else (order_or_id or {}).get("id")
+    if not oid:
+        return 0
+    res = await db.coupon_redemptions.delete_many({"order_id": oid})
+    if res.deleted_count:
+        logger.info(f"[coupon] iptal → {res.deleted_count} kupon hakkı serbest bırakıldı (sipariş {oid})")
+    return res.deleted_count
+
+
+async def release_cancelled_redemptions_backfill():
+    """TEK SEFERLİK (bayrak korumalı): geçmişte iptal edilmiş siparişlerde yanan kupon
+    haklarını geri açar (örn. hoş geldin kodunu kullanıp siparişini iptal eden müşteri
+    kodu tekrar kullanamıyordu)."""
+    flag = await db.settings.find_one({"id": "coupon_cancel_release_backfill"}, {"_id": 0})
+    if flag and flag.get("done"):
+        return
+    scanned = released = 0
+    async for r in db.coupon_redemptions.find({}, {"_id": 1, "order_id": 1}):
+        scanned += 1
+        o = await db.orders.find_one({"id": r.get("order_id")}, {"_id": 0, "status": 1})
+        if o and o.get("status") in ("cancelled", "cancel_refunded"):
+            await db.coupon_redemptions.delete_one({"_id": r["_id"]})
+            released += 1
+    await db.settings.update_one(
+        {"id": "coupon_cancel_release_backfill"},
+        {"$set": {"done": True, "scanned": scanned, "released": released,
+                  "at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    logger.info(f"[coupon backfill] tarandı={scanned} serbest bırakıldı={released}")
+
+
 async def record_order_redemptions(order: dict) -> None:
     """Siparişin kuponlarını coupon_redemptions'a yazar (usage_limit / per_user sayımı için).
     İdempotent: aynı (coupon_id, order_id) için ikinci kez yazmaz. FİYATA DOKUNMAZ.
@@ -2310,6 +2352,11 @@ async def _restock_order_once(order: dict, move_type: str) -> list:
             await refund_points_once(order)
         except Exception as _ly_err:
             logger.warning(f"[loyalty] iptal puan iadesi başarısız (sipariş {oid}): {_ly_err}")
+        # Kupon hakkı serbest bırakılır (hoş geldin vb. kod iptal sonrası yeniden kullanılabilir).
+        try:
+            await release_order_redemptions(order)
+        except Exception as _cr_err:
+            logger.warning(f"[coupon] iptal serbest bırakma başarısız (sipariş {oid}): {_cr_err}")
     if oid and await db.stock_movements.find_one(
             {"order_id": oid, "type": {"$in": _RESTORE_MOVE_TYPES}}, {"_id": 1}):
         return []  # zaten iade edilmiş

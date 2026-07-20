@@ -372,7 +372,7 @@ async def _coupon_used_count(coupon_id: str, coupon_code: str = "", restrict_ors
         oq = {
             "$and": [
                 {"$or": coup_or},
-                {"status": {"$nin": ["cancelled", "returned", "refunded", "return_approved", "returned_partial"]}},
+                {"status": {"$nin": ["cancelled", "cancel_refunded", "returned", "refunded", "return_approved", "returned_partial"]}},
                 {"payment_status": {"$nin": ["paid", "failed", "expired", "refunded"]}},
                 {"created_at": {"$gte": _since}},
             ]
@@ -448,7 +448,8 @@ async def _evaluate_single(c: dict, cart_total: float, items: list,
         # başarısız olan bir deneme müşteriyi "ilk sipariş" hakkından mahrum bırakıyordu.
         prior = await db.orders.count_documents({
             "$or": ors,
-            "status": {"$nin": ["cancelled"]},
+            # "cancel_refunded" (İptal Ödemesi Yapıldı) de iptaldir — ilk sipariş hakkını yakmaz.
+            "status": {"$nin": ["cancelled", "cancel_refunded"]},
             "payment_status": {"$nin": ["failed", "expired"]},
         })
         if prior > 0:

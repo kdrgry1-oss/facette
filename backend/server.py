@@ -305,6 +305,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Review date backfill start warning: {e}")
 
+    # Tek seferlik onarım: geçmişte iptal edilmiş siparişlerde yanan kupon hakları
+    # geri açılır (hoş geldin kodu iptal sonrası tekrar kullanılamıyordu) — bayrak korumalı.
+    try:
+        import asyncio as _asyncio
+        from routes.orders import release_cancelled_redemptions_backfill
+        _asyncio.create_task(release_cancelled_redemptions_backfill())
+    except Exception as e:
+        logger.warning(f"Coupon cancel-release backfill start warning: {e}")
+
     # Tek seferlik migrasyon: kapida odemeyi varsayilan olarak KAPAT.
     # Admin panelinden (Ayarlar > Odeme Yontemleri) tekrar acilabilir; bu blok
     # _cod_default_off_v1 isaretiyle korundugu icin SADECE BIR KEZ calisir ve
