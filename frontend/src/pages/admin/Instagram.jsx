@@ -15,6 +15,24 @@ export default function AdminInstagram() {
   const [posts, setPosts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ access_token: "", ig_user_id: "", source: "media", auto_sync: false });
+  // Otomatik kurulum: App ID + Secret + KISA token → backend uzatır, IG hesabını bulur, senkronlar
+  const [auto, setAuto] = useState({ app_id: "", app_secret: "", short_token: "" });
+  const [autoBusy, setAutoBusy] = useState(false);
+  const runAutoSetup = async () => {
+    if (!auto.app_id.trim() || !auto.app_secret.trim() || !auto.short_token.trim()) {
+      toast.error("App ID, App Secret ve kısa token üçü de gerekli"); return;
+    }
+    setAutoBusy(true);
+    try {
+      const token = localStorage.getItem("token");
+      const r = await axios.post(`${API}/admin/instagram/auto-setup`, auto,
+        { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(r.data?.message || "Instagram bağlandı");
+      setAuto({ app_id: "", app_secret: "", short_token: "" });
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Otomatik kurulum başarısız"); }
+    finally { setAutoBusy(false); }
+  };
   const [manual, setManual] = useState({ image: "", permalink: "", product_link: "", caption: "" });
   const token = localStorage.getItem("token");
   const auth = { headers: { Authorization: `Bearer ${token}` } };
@@ -134,6 +152,29 @@ export default function AdminInstagram() {
       {settings.last_error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">Son hata: {settings.last_error}</div>
       )}
+
+      {/* ⚡ OTOMATİK KURULUM — kısa token yapıştır, gerisini backend yapar */}
+      <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 mb-4">
+        <h2 className="text-sm font-bold uppercase tracking-wider mb-1 text-emerald-800">⚡ Otomatik Kurulum (Önerilen)</h2>
+        <p className="text-xs text-emerald-700 mb-3">
+          <a className="underline font-semibold" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>'dan
+          (izinler: <b>instagram_basic</b> + <b>pages_show_list</b>) aldığınız KISA ömürlü token'ı ve app bilgilerinizi yapıştırın —
+          token uzatma (60 gün), Instagram hesabını bulma, kaydetme ve ilk senkronu sistem kendisi yapar.
+          App ID/Secret: developers.facebook.com → uygulamanız → Ayarlar → Temel.
+        </p>
+        <div className="grid md:grid-cols-3 gap-3 mb-3">
+          <input value={auto.app_id} onChange={(e) => setAuto({ ...auto, app_id: e.target.value })}
+            placeholder="App ID (ör. 1234567890)" className="border px-3 py-2 rounded text-sm" />
+          <input type="password" value={auto.app_secret} onChange={(e) => setAuto({ ...auto, app_secret: e.target.value })}
+            placeholder="App Secret" className="border px-3 py-2 rounded text-sm" />
+          <input type="password" value={auto.short_token} onChange={(e) => setAuto({ ...auto, short_token: e.target.value })}
+            placeholder="Kısa ömürlü token (EAAB...)" className="border px-3 py-2 rounded text-sm" />
+        </div>
+        <button onClick={runAutoSetup} disabled={autoBusy}
+          className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50">
+          {autoBusy ? "Bağlanıyor…" : "⚡ Bağla ve Senkronla"}
+        </button>
+      </div>
 
       {/* Token / Ayarlar */}
       <div className="bg-white border rounded-xl p-4 mb-4">

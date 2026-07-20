@@ -124,6 +124,88 @@ async def update_settings(payload: dict, current_user: dict = Depends(require_ad
     return {"success": True}
 
 
+@admin_router.post("/auto-setup")
+async def auto_setup(payload: dict, current_user: dict = Depends(require_admin)):
+    """OTOMATİK KURULUM: Graph Explorer'dan alınan KISA ömürlü token + App ID/Secret ile
+    her şeyi backend halleder — uzun ömürlü token'a çevirir, bağlı sayfayı ve Instagram
+    Business hesabını bulur, ayarları kaydeder, ilk senkronu çalıştırır.
+    (Meta alan adları yalnız sunucudan erişilebilir olduğundan bu iş burada yapılır.)"""
+    app_id = str((payload or {}).get("app_id") or "").strip()
+    app_secret = str((payload or {}).get("app_secret") or "").strip()
+    short_token = str((payload or {}).get("short_token") or "").strip()
+    if not (app_id and app_secret and short_token):
+        raise HTTPException(status_code=400, detail="App ID, App Secret ve kısa token zorunlu")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # 1) Kısa token → uzun ömürlü (60 gün) kullanıcı token'ı
+        r = await client.get(f"{_GRAPH}/oauth/access_token", params={
+            "grant_type": "fb_exchange_token",
+            "client_id": app_id, "client_secret": app_secret,
+            "fb_exchange_token": short_token})
+        if r.status_code != 200:
+            _err = ((r.json() or {}).get("error") or {}).get("message", r.text) if r.headers.get("content-type", "").startswith("application/json") else r.text
+            raise HTTPException(status_code=502, detail=f"Token uzatılamadı: {_err}")
+        long_token = (r.json() or {}).get("access_token") or ""
+        if not long_token:
+            raise HTTPException(status_code=502, detail="Uzun ömürlü token alınamadı")
+
+        # 2) Bağlı sayfalar → instagram_business_account
+        r2 = await client.get(f"{_GRAPH}/me/accounts", params={
+            "fields": "id,name,instagram_business_account{id,username}",
+            "access_token": long_token})
+        if r2.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Sayfalar okunamadı: {r2.text[:300]}")
+        pages = (r2.json() or {}).get("data", []) or []
+        ig = None
+        for p in pages:
+            iba = p.get("instagram_business_account")
+            if iba and iba.get("id"):
+                ig = {"id": iba["id"], "username": iba.get("username", ""), "page": p.get("name", "")}
+                break
+        if not ig:
+            raise HTTPException(status_code=400, detail=(
+                "Bağlı Instagram Business hesabı bulunamadı. Instagram hesabınızın 'Profesyonel (İşletme)' "
+                "olduğundan ve bir Facebook Sayfasına bağlı olduğundan emin olun; token izinlerinde "
+                "instagram_basic + pages_show_list olmalı."))
+
+    # 3) Kaydet (token şifreli) + otomatik senkron aç
+    await db.settings.update_one(
+        {"id": "instagram"},
+        {"$set": {"access_token": encrypt(long_token), "ig_user_id": ig["id"],
+                  "auto_sync": True, "source": "media",
+                  "app_id": app_id, "app_secret": encrypt(app_secret),
+                  "last_error": "", "updated_at": _now().isoformat()},
+         "$setOnInsert": {"id": "instagram"}}, upsert=True)
+
+    # 4) İlk senkron (hata olursa kurulum yine başarılı sayılır — mesajda belirtilir)
+    synced, sync_err = 0, ""
+    try:
+        items = await _fetch_from_graph(long_token, ig["id"], "media", 30)
+        for it in items:
+            img = _media_image(it)
+            if not img:
+                continue
+            await db.instagram_posts.update_one(
+                {"ig_id": it.get("id")},
+                {"$set": {"ig_id": it.get("id"), "image": img,
+                          "permalink": it.get("permalink", ""),
+                          "caption": (it.get("caption") or "")[:300],
+                          "timestamp": it.get("timestamp", ""), "active": True,
+                          "source": "graph", "updated_at": _now().isoformat()},
+                 "$setOnInsert": {"id": generate_id()}}, upsert=True)
+            synced += 1
+        await db.settings.update_one({"id": "instagram"}, {"$set": {"last_sync": _now().isoformat()}})
+    except HTTPException as e:
+        sync_err = str(e.detail)
+    except Exception as e:
+        sync_err = str(e)[:200]
+
+    return {"success": True, "ig_username": ig.get("username"), "ig_user_id": ig["id"],
+            "page": ig.get("page"), "synced": synced,
+            "message": f"@{ig.get('username') or 'hesap'} bağlandı · {synced} gönderi çekildi"
+                       + (f" · ilk senkron uyarısı: {sync_err}" if sync_err else "")}
+
+
 @admin_router.post("/disconnect")
 async def disconnect(current_user: dict = Depends(require_admin)):
     """Token'ı temizle (bağlantıyı kes). Gönderiler silinmez."""
