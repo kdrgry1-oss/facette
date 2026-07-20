@@ -432,7 +432,6 @@ export default function Manufacturing() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalatçı</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalat Sipariş No</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün</th>
-                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Edilen Toplam Adet</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Tarihi</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
@@ -473,7 +472,6 @@ export default function Manufacturing() {
                         : <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-200 rounded px-1 py-0.5">ÖDENMEDİ</span>}
                     </p>
                   </td>
-                  <td className="px-3 py-3 text-sm font-bold text-right tabular-nums">{item.total_units}</td>
                   <td className="px-3 py-3 text-xs">
                     <p className="text-gray-700">{item.agreement_date ? new Date(item.agreement_date).toLocaleDateString('tr-TR') : '—'}</p>
                     {(() => {
@@ -600,7 +598,7 @@ export default function Manufacturing() {
                 </tr>
                 {qtyDetail.has(item.id) && (
                   <tr className="bg-blue-50/40 border-b">
-                    <td colSpan={10} className="px-6 py-3">
+                    <td colSpan={9} className="px-6 py-3">
                       <div className="text-[11px] font-bold text-gray-600 uppercase mb-1.5">Adet Detayı — Sipariş → Kesilen</div>
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(item.size_distribution || {}).map(([k, q]) => {
