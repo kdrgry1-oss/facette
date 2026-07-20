@@ -1866,37 +1866,48 @@ async def apply_accepted_claims_to_orders(platforms=None, dry_run: bool = False)
          "order_number": {"$exists": True, "$nin": [None, ""]}}
     if platforms:
         q["platform"] = {"$in": list(platforms)}
-    stats = {"claims": 0, "updated": 0, "already": 0, "no_order": 0}
     now_iso = datetime.now(timezone.utc).isoformat()
-    seen = set()
+    # 1) Onaylı iade taleplerini sipariş no bazında topla (TOPLU — tekil sorgu değil;
+    #    15k+ claim'de tek tek find_one CF 100sn sınırını aşıyordu)
+    claims_by_order: dict = {}
     async for c in db.trendyol_claims.find(
             q, {"_id": 0, "claim_id": 1, "order_number": 1, "platform": 1, "accepted_at": 1}):
-        stats["claims"] += 1
-        onum = str(c.get("order_number"))
-        if not onum or onum in seen:
+        onum = str(c.get("order_number") or "")
+        if onum and onum not in claims_by_order:
+            claims_by_order[onum] = c
+    stats = {"claims": len(claims_by_order), "updated": 0, "already": 0, "no_order": 0}
+    if not claims_by_order:
+        return stats
+    # 2) İlgili siparişleri toplu çek (5000'lik parçalarla $in)
+    onums = list(claims_by_order.keys())
+    orders_status: dict = {}
+    for i in range(0, len(onums), 5000):
+        async for o in db.orders.find({"order_number": {"$in": onums[i:i + 5000]}},
+                                      {"_id": 0, "id": 1, "order_number": 1, "status": 1}):
+            orders_status[str(o.get("order_number"))] = o
+    # 3) Sınıflandır + (dry değilse) güncelle — yalnız statü + iz alanları
+    for onum, c in claims_by_order.items():
+        o = orders_status.get(onum)
+        if not o:
+            stats["no_order"] += 1
             continue
-        seen.add(onum)
-        plat = str(c.get("platform") or "trendyol").lower()
-        _match = {"order_number": onum,
-                  "$or": [{"platform": plat}, {"marketplace": plat}],
-                  "status": {"$nin": _ORDER_EXCLUDED_FOR_RETURN}}
+        if o.get("status") in _ORDER_EXCLUDED_FOR_RETURN:
+            stats["already"] += 1
+            continue
         if dry_run:
-            if await db.orders.find_one(_match, {"_id": 1}):
-                stats["updated"] += 1
-            elif await db.orders.find_one({"order_number": onum}, {"_id": 1}):
-                stats["already"] += 1
-            else:
-                stats["no_order"] += 1
+            stats["updated"] += 1
             continue
-        res = await db.orders.update_one(_match, {
-            "$set": {"status": "returned",
-                     "returned_at": c.get("accepted_at") or now_iso,
-                     "return_source": f"{plat}_claim",
-                     "return_claim_id": c.get("claim_id"),
-                     "updated_at": now_iso},
-            "$push": {"status_history": {"status": "returned", "at": now_iso,
-                                         "by": "claims-sync",
-                                         "note": f"Pazaryeri iadesi onaylı (claim {c.get('claim_id')})"}}})
+        plat = str(c.get("platform") or "trendyol").lower()
+        res = await db.orders.update_one(
+            {"id": o["id"], "status": {"$nin": _ORDER_EXCLUDED_FOR_RETURN}},
+            {"$set": {"status": "returned",
+                      "returned_at": c.get("accepted_at") or now_iso,
+                      "return_source": f"{plat}_claim",
+                      "return_claim_id": c.get("claim_id"),
+                      "updated_at": now_iso},
+             "$push": {"status_history": {"status": "returned", "at": now_iso,
+                                          "by": "claims-sync",
+                                          "note": f"Pazaryeri iadesi onaylı (claim {c.get('claim_id')})"}}})
         if res.modified_count:
             stats["updated"] += 1
         else:
