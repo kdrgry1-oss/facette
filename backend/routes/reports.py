@@ -153,6 +153,102 @@ async def sales_summary(current_user: dict = Depends(require_admin)):
     }
 
 
+@router.get("/sales-by-hour")
+async def sales_by_hour(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Saat Analizi (00-24, TR saati): hangi saatlerde satış geliyor — sipariş + ciro.
+    Reklam planlaması için zirve saat aralığı da döner."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$addFields": {"_d": {"$dateFromString": {"dateString": "$created_at", "onError": None}}}},
+        {"$match": {"_d": {"$ne": None}}},
+        {"$group": {"_id": {"$hour": {"date": "$_d", "timezone": "+03:00"}},
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$sort": {"_id": 1}},
+    ]
+    by = {int(r["_id"]): r async for r in db.orders.aggregate(pipeline)}
+    rows = [{"hour": h, "label": f"{h:02d}:00",
+             "orders": int(by.get(h, {}).get("orders", 0)),
+             "revenue": round(float(by.get(h, {}).get("revenue", 0)), 2)} for h in range(24)]
+    peak = max(rows, key=lambda r: r["orders"]) if any(r["orders"] for r in rows) else None
+    return {"rows": rows,
+            "peak": ({"range": f"{peak['hour']:02d}:00-{(peak['hour'] + 1) % 24:02d}:00",
+                      "orders": peak["orders"]} if peak else None)}
+
+
+@router.get("/sales-by-weekday")
+async def sales_by_weekday(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Gün Analizi: haftanın hangi günü daha çok satıyor (TR saati) — sipariş + ciro."""
+    s, e = _iso_range(start_date, end_date)
+    pipeline = [
+        {"$match": _base_match(s, e, source)},
+        {"$addFields": {"_d": {"$dateFromString": {"dateString": "$created_at", "onError": None}}}},
+        {"$match": {"_d": {"$ne": None}}},
+        {"$group": {"_id": {"$isoDayOfWeek": {"date": "$_d", "timezone": "+03:00"}},
+                    "orders": {"$sum": 1},
+                    "revenue": {"$sum": {"$ifNull": ["$total", 0]}}}},
+        {"$sort": {"_id": 1}},
+    ]
+    _DAYS = {1: "Pazartesi", 2: "Salı", 3: "Çarşamba", 4: "Perşembe",
+             5: "Cuma", 6: "Cumartesi", 7: "Pazar"}
+    by = {int(r["_id"]): r async for r in db.orders.aggregate(pipeline)}
+    rows = [{"day": d, "label": _DAYS[d],
+             "orders": int(by.get(d, {}).get("orders", 0)),
+             "revenue": round(float(by.get(d, {}).get("revenue", 0)), 2)} for d in range(1, 8)]
+    peak = max(rows, key=lambda r: r["orders"]) if any(r["orders"] for r in rows) else None
+    return {"rows": rows, "peak": (peak["label"] if peak else None)}
+
+
+@router.get("/day-orders")
+async def day_orders(
+    date: str = Query(..., description="YYYY-MM-DD (TR günü)"),
+    source: Optional[str] = Query(None),
+    current_user: dict = Depends(require_admin),
+):
+    """Gün Detayı: seçilen TR gününde NE sipariş edilmiş — ürün/beden bazında adet + ciro."""
+    try:
+        d0 = datetime.fromisoformat(date).replace(tzinfo=timezone.utc) - timedelta(hours=3)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz tarih (YYYY-MM-DD)")
+    s, e = d0.isoformat(), (d0 + timedelta(days=1)).isoformat()
+    m = {"created_at": {"$gte": s, "$lt": e}, "status": {"$nin": _EXCLUDED_STATUSES}}
+    sc = _source_cond(source)
+    if sc:
+        m.update(sc)
+    pipeline = [
+        {"$match": m},
+        {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$group": {
+            "_id": {"name": {"$ifNull": ["$items.product_name", {"$ifNull": ["$items.name", "Ürün"]}]},
+                    "size": {"$ifNull": ["$items.size", ""]}},
+            "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}},
+            "revenue": {"$sum": {"$multiply": [
+                {"$ifNull": ["$items.quantity", 1]},
+                {"$ifNull": ["$items.unit_price", {"$ifNull": ["$items.price", 0]}]}]}},
+        }},
+        {"$sort": {"qty": -1}},
+        {"$limit": 300},
+    ]
+    rows = []
+    async for r in db.orders.aggregate(pipeline):
+        rows.append({"name": r["_id"]["name"], "size": r["_id"]["size"],
+                     "qty": int(r["qty"]), "revenue": round(float(r["revenue"]), 2)})
+    order_count = await db.orders.count_documents(m)
+    return {"date": date, "order_count": order_count,
+            "total_qty": sum(r["qty"] for r in rows), "rows": rows}
+
+
 @router.get("/sales")
 async def sales(
     start_date: Optional[str] = None,

@@ -50,7 +50,23 @@ export function SalesReport() {
     setBrk(b.data);
     axios.get(`${API}/admin/reports/sales-summary`, { headers: authHeaders() })
       .then((r) => setSummary(r.data)).catch(() => {});
+    // Saat + Gün analizi (reklam planlaması) — aynı tarih aralığı ve kaynak filtresiyle
+    axios.get(`${API}/admin/reports/sales-by-hour`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
+      .then((r) => setHourData(r.data)).catch(() => {});
+    axios.get(`${API}/admin/reports/sales-by-weekday`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
+      .then((r) => setWeekdayData(r.data)).catch(() => {});
   };
+
+  // Saat/Gün analizi + Gün Detayı ("hangi günlerde ne sipariş edilmiş")
+  const [hourData, setHourData] = useState(null);
+  const [weekdayData, setWeekdayData] = useState(null);
+  const [dayDate, setDayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dayDetail, setDayDetail] = useState(null);
+  const loadDay = (d) => {
+    axios.get(`${API}/admin/reports/day-orders`, { headers: authHeaders(), params: { date: d, source } })
+      .then((r) => setDayDetail(r.data)).catch(() => setDayDetail(null));
+  };
+  useEffect(() => { loadDay(dayDate); /* eslint-disable-next-line */ }, [dayDate, source]);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupBy, source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
@@ -128,6 +144,97 @@ export function SalesReport() {
       </div>
       {/* Ortalama sepet (net) küçük satır */}
       <div className="text-sm text-gray-500 -mt-2">Ortalama Sepet (net): <b className="text-gray-800">{tl(data?.totals?.aov)}</b></div>
+
+      {/* ⏰ Saat Analizi + 📅 Gün Analizi — reklam planlaması için */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        <div className="bg-white border rounded-xl p-4" data-testid="hour-analysis">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Saat Analizi</h2>
+            {hourData?.peak && (
+              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5">
+                Zirve: {hourData.peak.range} ({hourData.peak.orders} sipariş)
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400 mb-2">Seçili tarih aralığında siparişlerin saat dağılımı (TR saati)</p>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={hourData?.rows || []}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={2} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip formatter={(v, n) => n === "revenue" ? [tl(v), "Ciro"] : [v, "Sipariş"]} />
+              <Bar dataKey="orders" name="Sipariş" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="bg-white border rounded-xl p-4" data-testid="weekday-analysis">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Gün Analizi</h2>
+            {weekdayData?.peak && (
+              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5">
+                En güçlü gün: {weekdayData.peak}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400 mb-2">Haftanın hangi günü daha çok satıyor — reklam planlamasında kullanın</p>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={weekdayData?.rows || []}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip formatter={(v, n) => n === "revenue" ? [tl(v), "Ciro"] : [v, "Sipariş"]} />
+              <Bar dataKey="orders" name="Sipariş" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* 📋 Gün Detayı — seçilen günde NE sipariş edilmiş (ürün/beden bazında) */}
+      <div className="bg-white border rounded-xl p-4" data-testid="day-detail">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider">Gün Detayı — O Gün Ne Sipariş Edildi?</h2>
+          <div className="flex items-center gap-2">
+            <input type="date" value={dayDate} onChange={(e) => setDayDate(e.target.value)}
+              className="text-sm px-2 py-1 border rounded" data-testid="day-detail-date" />
+          </div>
+        </div>
+        {dayDetail ? (
+          <>
+            <p className="text-[11px] text-gray-500 mb-2">
+              {dayDetail.date}: <b>{dayDetail.order_count}</b> sipariş · <b>{dayDetail.total_qty}</b> ürün
+              {source !== "all" && <> · kaynak: {source}</>}
+            </p>
+            {dayDetail.rows?.length ? (
+              <div className="max-h-80 overflow-y-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
+                    <tr>
+                      <th className="text-left p-2.5">Ürün</th>
+                      <th className="text-left p-2.5">Beden</th>
+                      <th className="text-right p-2.5">Adet</th>
+                      <th className="text-right p-2.5">Ciro</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dayDetail.rows.map((r, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-2.5">{r.name}</td>
+                        <td className="p-2.5">{r.size || "—"}</td>
+                        <td className="p-2.5 text-right font-semibold tabular-nums">{r.qty}</td>
+                        <td className="p-2.5 text-right tabular-nums">{tl(r.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 py-4 text-center">Bu günde sipariş yok.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-gray-400 py-4 text-center">Yükleniyor…</p>
+        )}
+      </div>
 
       <div className="bg-white rounded-xl border p-5">
         <h3 className="font-semibold mb-3">Günlük Ciro & Sipariş</h3>
