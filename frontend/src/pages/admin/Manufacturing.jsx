@@ -267,7 +267,8 @@ export default function Manufacturing() {
       name: item.product_name || "",
       stock_code: item.stock_code || "",
       season,
-      purchase_price: Number(item.unit_price || 0),
+      // Alış fiyatı KDV DAHİL taşınır (birim fiyat KDV hariç girilir, %10 KDV eklenir)
+      purchase_price: Number((Number(item.unit_price || 0) * 1.10).toFixed(2)),
       manufacturer: item.partner_name || "FACETTE",
       variants,
     }));
@@ -558,7 +559,7 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
                   <td className="px-3 py-3 text-sm font-semibold">{item.partner_name || "—"}</td>
                   <td className="px-3 py-3">
-                    <p className="font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</p>
+                    <p className="font-mono text-xs text-black font-bold">{item.order_no || item.code}</p>
                     {item.order_flags?.rpt && (
                       <span className="inline-block mt-0.5 text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5"
                         title="Tekrar sipariş (repeat)">RPT</span>
@@ -609,7 +610,7 @@ export default function Manufacturing() {
                     )}
                     {/* Renk bazlı kumaş okeyi — etiket sabit kolonda, çipler kendi kolonunda sarar (simetrik) */}
                     <div className="flex items-start gap-1">
-                      <span className="text-[9px] text-emerald-600 font-bold uppercase w-11 shrink-0 mt-1">Kumaş:</span>
+                      <span className="text-[9px] text-black font-bold uppercase w-11 shrink-0 mt-1">Kumaş:</span>
                       <div className="flex flex-wrap gap-1 max-w-[190px]">
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
                         const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
@@ -626,7 +627,7 @@ export default function Manufacturing() {
                     </div>
                     {item.has_lining && (
                       <div className="flex items-start gap-1 mt-1">
-                        <span className="text-[9px] text-indigo-500 font-bold uppercase w-11 shrink-0 mt-1">Astar:</span>
+                        <span className="text-[9px] text-black font-bold uppercase w-11 shrink-0 mt-1">Astar:</span>
                         <div className="flex flex-wrap gap-1 max-w-[190px]">
                         {(_rowColors.length ? _rowColors : [""]).map(c => {
                           const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
@@ -652,7 +653,7 @@ export default function Manufacturing() {
                         <div>
                           <p className="text-[9px] text-gray-400 whitespace-nowrap">Sipariş: <b className="text-gray-600">{item.total_units || 0}</b></p>
                           {_actTot > 0 ? (
-                            <p className={`text-sm font-bold tabular-nums whitespace-nowrap ${_actTot < (item.total_units || 0) ? "text-red-600" : _actTot > (item.total_units || 0) ? "text-emerald-600" : "text-gray-800"}`}>
+                            <p className="text-sm font-bold tabular-nums whitespace-nowrap text-black">
                               Kesilen: {_actTot}
                             </p>
                           ) : (
@@ -671,14 +672,17 @@ export default function Manufacturing() {
                         return <span className="text-xs text-gray-300">—</span>;
                       return (
                         <div className="space-y-1">
-                          {_dkDate && (
-                            <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(_dkDate).toLocaleDateString("tr-TR")}</p>
-                          )}
-                          {item.sewing_workshop && (
-                            <p className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 inline-block whitespace-nowrap">
-                              🏭 {item.sewing_workshop}
-                            </p>
-                          )}
+                          {/* Hizalama sözleşmesi (KK sütunuyla ortak): 1. satır TARİH, 2. satır ROZET, 3. satır GÖRSELLER */}
+                          <p className="text-xs text-gray-700 whitespace-nowrap h-4">
+                            {_dkDate ? new Date(_dkDate).toLocaleDateString("tr-TR") : ""}
+                          </p>
+                          <div className="min-h-[22px]">
+                            {item.sewing_workshop && (
+                              <p className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 inline-block whitespace-nowrap">
+                                🏭 {item.sewing_workshop}
+                              </p>
+                            )}
+                          </div>
                           {_imgs.length > 0 && (
                             <div className="flex flex-wrap gap-1 max-w-[150px]" title="Görsel imalat raporu — büyütmek için tıklayın">
                               {_imgs.slice(0, 4).map((u, i) => (
@@ -705,18 +709,21 @@ export default function Manufacturing() {
                         return <span className="text-xs text-gray-300">—</span>;
                       return (
                         <div className="space-y-1">
-                          {item.qc_result === "gecti" && (
-                            <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">GEÇTİ ✓</p>
-                          )}
-                          {item.qc_result === "kaldi" && (
-                            <p className="inline-flex items-center gap-1">
-                              <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">KALDI ✗</span>
-                              <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5" title="Yeniden kalite kontrol gerekli">Re-FRI</span>
-                            </p>
-                          )}
-                          {_qcDate && (
-                            <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(_qcDate).toLocaleDateString("tr-TR")}</p>
-                          )}
+                          {/* Hizalama sözleşmesi (Dikim sütunuyla ortak): 1. satır TARİH, 2. satır ROZET, 3. satır GÖRSELLER */}
+                          <p className="text-xs text-gray-700 whitespace-nowrap h-4">
+                            {_qcDate ? new Date(_qcDate).toLocaleDateString("tr-TR") : ""}
+                          </p>
+                          <div className="min-h-[22px]">
+                            {item.qc_result === "gecti" && (
+                              <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">GEÇTİ ✓</p>
+                            )}
+                            {item.qc_result === "kaldi" && (
+                              <p className="inline-flex items-center gap-1 whitespace-nowrap">
+                                <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">KALDI ✗</span>
+                                <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5" title="Yeniden kalite kontrol gerekli">Re-FRI</span>
+                              </p>
+                            )}
+                          </div>
                           {_qcImgs.length > 0 && (
                             <div className="flex flex-wrap gap-1 max-w-[150px]" title="Kalite kontrol görselleri — büyütmek için tıklayın">
                               {_qcImgs.slice(0, 4).map((u, i) => (
@@ -734,17 +741,17 @@ export default function Manufacturing() {
                           {(item.qc2_result || item.qc2_date || (item.qc2_images || []).length > 0) && (
                             <div className="pt-1 mt-1 border-t border-gray-100 space-y-1">
                               <p className="text-[9px] font-bold text-gray-400 uppercase">2. Kontrol</p>
+                              {item.qc2_date && (
+                                <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(item.qc2_date).toLocaleDateString("tr-TR")}</p>
+                              )}
                               {item.qc2_result === "gecti" && (
                                 <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">GEÇTİ ✓</p>
                               )}
                               {item.qc2_result === "kaldi" && (
-                                <p className="inline-flex items-center gap-1">
+                                <p className="inline-flex items-center gap-1 whitespace-nowrap">
                                   <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">KALDI ✗</span>
                                   <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5" title="Yeniden kalite kontrol gerekli">Re-FRI</span>
                                 </p>
-                              )}
-                              {item.qc2_date && (
-                                <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(item.qc2_date).toLocaleDateString("tr-TR")}</p>
                               )}
                               {(item.qc2_images || []).length > 0 && (
                                 <div className="flex flex-wrap gap-1 max-w-[150px]">
@@ -780,7 +787,7 @@ export default function Manufacturing() {
                       <button
                         onClick={() => advanceStage(item, nextStage(item.current_stage))}
                         data-testid={`advance-${item.id}`}
-                        className="px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded font-medium"
+                        className="px-2 py-1 text-xs text-black hover:bg-gray-100 rounded font-medium"
                       >
                         <ChevronRight size={13} className="inline" /> İlerlet
                       </button>
@@ -986,12 +993,6 @@ export default function Manufacturing() {
                   </button>
                 </span>
               </label>
-              {showActuals && form.sizes.length > 0 && (
-                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1.5">
-                  Kesim aşamasındasınız: her hücrede üstteki kutu <b>sipariş adedi</b>, alttaki kesikli kutu <b>gerçekleşen (kesilen) adet</b>tir.
-                  Fark varsa yanında <b className="text-red-600">−% fire</b> / <b className="text-emerald-600">+% fazla</b> gösterilir.
-                </p>
-              )}
               {form.sizes.length === 0 ? (
                 <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
                   "Renk / Beden Seç" ile hazır tablodan seçim yapın — kombinasyon tablosu burada oluşur.
@@ -999,7 +1000,7 @@ export default function Manufacturing() {
               ) : (
                 <div className="overflow-x-auto border border-rose-200 rounded-lg">
                   <table className="w-full text-sm" data-testid="mfg-matrix">
-                    <thead className="bg-rose-50 text-xs text-rose-700">
+                    <thead className="bg-gray-50 text-xs text-black">
                       <tr>
                         <th className="text-left px-3 py-2">Renk \ Beden</th>
                         {form.sizes.map(s => (
@@ -1138,17 +1139,13 @@ export default function Manufacturing() {
                 <input type="number" step="0.01" value={form.unit_price}
                   onChange={e => setForm({ ...form, unit_price: e.target.value })}
                   className="w-full h-[42px] border px-3 rounded text-sm" />
-                <p className="text-[11px] text-emerald-700 mt-1 min-h-[16px] whitespace-nowrap overflow-hidden text-ellipsis" data-testid="mfg-vat-hint">
-                  {Number(form.unit_price) > 0 && (<>
-                    KDV'li: <b>{(Number(form.unit_price) * 1.10).toFixed(2)} ₺</b>{grandTotal > 0 && <> · {grandTotal} adet KDV'li: <b>{(Number(form.unit_price) * 1.10 * grandTotal).toFixed(2)} ₺</b></>}
-                  </>)}
-                </p>
+                <p className="mt-1 min-h-[16px]" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1 h-4">Toplam Anlaşma Bedeli (₺)</label>
                 <div className="w-full h-[42px] border px-3 rounded text-sm bg-gray-50 font-semibold tabular-nums whitespace-nowrap flex items-center" data-testid="mfg-agreed-total">
-                  {(Number(form.unit_price || 0) * grandTotal).toFixed(2)} ₺
-                  <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal} adet × {Number(form.unit_price || 0).toFixed(2)} ₺)</span>
+                  {(Number(form.unit_price || 0) * grandTotal).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                  <span className="text-[11px] text-gray-400 font-normal ml-2">({grandTotal.toLocaleString("tr-TR")} adet × {Number(form.unit_price || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺)</span>
                 </div>
                 <p className="mt-1 min-h-[16px]" />
               </div>
@@ -1345,10 +1342,11 @@ export default function Manufacturing() {
                       )}
                       {Object.keys(form.size_distribution || {}).map(k => (
                         <label key={k} className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                          <span className="flex-1 truncate" title={k}>{k}</span>
+                          {/* Kutu, ait olduğu renk|bedenin SOLUNDA — sağdaki komşu etikete aitmiş gibi görünmesin */}
                           <input type="number" min="0" value={d.items?.[k] ?? ""}
                             onChange={(e) => setDeliveryItem(di, k, e.target.value)}
-                            className="w-14 border rounded px-1.5 py-1 text-xs text-right" placeholder="0" />
+                            className="w-14 border rounded px-1.5 py-1 text-xs text-right shrink-0" placeholder="0" />
+                          <span className="flex-1 truncate" title={k}>{k}</span>
                         </label>
                       ))}
                     </div>
