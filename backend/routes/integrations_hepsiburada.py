@@ -493,6 +493,35 @@ async def hepsiburada_oms_diag(on: str = "", key: str = "", current_user: dict =
     if on:
         results["by_number"] = await timed(lambda: client.get_order_by_number(on), 10)
     return {"ok": True, "info": info, "results": results}
+@router.get("/hepsiburada/claims/{claim_number}/media-probe")
+async def hb_claim_media_probe(claim_number: str, current_user: dict = Depends(require_admin)):
+    """TANI: HB müşteri iade görselleri OMS'te hangi uçtan geliyor — adayları dener (yalnız GET)."""
+    from .category_mapping import _get_hb_client
+    client, err = await _get_hb_client()
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    import urllib.parse as _up
+    cn = _up.quote(str(claim_number), safe="")
+    mid = client.merchant_id
+    candidates = [
+        f"/claims/number/{cn}",
+        f"/claims/number/{cn}/documents",
+        f"/claims/number/{cn}/images",
+        f"/claims/number/{cn}/attachments",
+        f"/claims/number/{cn}/detail",
+        f"/claims/merchantid/{mid}/number/{cn}",
+    ]
+    out = []
+    import asyncio as _aio
+    for ep in candidates:
+        try:
+            r = await _aio.wait_for(_aio.to_thread(client._oms_get, ep, None), timeout=12)
+            out.append({"endpoint": ep, "status": 200, "body": str(r)[:800]})
+        except Exception as e:
+            out.append({"endpoint": ep, "status": "err", "body": str(e)[:300]})
+    return {"claim_number": claim_number, "results": out}
+
+
 @router.get("/hepsiburada/orders/import-by-number")
 async def hepsiburada_import_by_number(on: str = "", current_user: dict = Depends(require_admin)):
     """Siparişi numarayla OMS'ten çekip doğrudan panele (db.orders) aktarır.
