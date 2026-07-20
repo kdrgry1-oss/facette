@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
@@ -58,6 +58,8 @@ export default function Manufacturing() {
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState(initialForm());
+  const [qtyDetail, setQtyDetail] = useState(() => new Set()); // Toplam Adet detay satırı açık kayıtlar
+  const toggleQtyDetail = (id) => setQtyDetail(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   function initialForm() {
     const _today = new Date().toISOString().substring(0, 10);
@@ -455,7 +457,8 @@ export default function Manufacturing() {
                 const _showDot = (_okeysDone && item.current_stage === "kumas_okeyi")
                   || ["kesim", "dikim", "kalite_kontrol"].includes(item.current_stage);
                 return (
-                <tr key={item.id} className="border-b hover:bg-gray-50" data-testid={`mfg-row-${item.code}`}>
+                <Fragment key={item.id}>
+                <tr className="border-b hover:bg-gray-50" data-testid={`mfg-row-${item.code}`}>
                   <td className="px-3 py-3 text-sm font-bold text-gray-400 tabular-nums">{idx + 1}</td>
                   <td className="px-3 py-3 text-sm font-semibold">{item.partner_name || "—"}</td>
                   <td className="px-3 py-3 font-mono text-xs text-rose-600 font-bold">{item.order_no || item.code}</td>
@@ -529,14 +532,13 @@ export default function Manufacturing() {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right">
+                  <td className="px-3 py-3 text-right cursor-pointer hover:bg-gray-100 rounded"
+                    onClick={() => toggleQtyDetail(item.id)}
+                    title="Detay için tıklayın — renk|beden bazında sipariş → kesilen">
                     {(() => {
                       const _actTot = Object.values(item.actual_distribution || {}).reduce((a, b) => a + Number(b || 0), 0);
-                      // Detay ipucu: her Renk|Beden için sipariş → gerçekleşen
-                      const _detail = Object.entries(item.size_distribution || {})
-                        .map(([k, q]) => `${k}: ${q} → ${(item.actual_distribution || {})[k] ?? "?"}`).join("\n");
                       return (
-                        <div title={_detail || undefined}>
+                        <div>
                           <p className="text-[9px] text-gray-400 whitespace-nowrap">Sipariş: <b className="text-gray-600">{item.total_units || 0}</b></p>
                           {_actTot > 0 ? (
                             <p className={`text-sm font-bold tabular-nums whitespace-nowrap ${_actTot < (item.total_units || 0) ? "text-red-600" : _actTot > (item.total_units || 0) ? "text-emerald-600" : "text-gray-800"}`}>
@@ -545,6 +547,7 @@ export default function Manufacturing() {
                           ) : (
                             <p className="text-[10px] text-gray-300">Kesilen: —</p>
                           )}
+                          <p className="text-[9px] text-blue-500">{qtyDetail.has(item.id) ? "detayı gizle ▴" : "detay ▾"}</p>
                         </div>
                       );
                     })()}
@@ -593,6 +596,31 @@ export default function Manufacturing() {
                     )}
                   </td>
                 </tr>
+                {qtyDetail.has(item.id) && (
+                  <tr className="bg-blue-50/40 border-b">
+                    <td colSpan={10} className="px-6 py-3">
+                      <div className="text-[11px] font-bold text-gray-600 uppercase mb-1.5">Adet Detayı — Sipariş → Kesilen</div>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(item.size_distribution || {}).map(([k, q]) => {
+                          const act = (item.actual_distribution || {})[k];
+                          const diff = act != null && q > 0 ? ((Number(act) - q) / q) * 100 : null;
+                          return (
+                            <span key={k} className="px-2.5 py-1 bg-white border rounded-lg text-xs whitespace-nowrap">
+                              <b>{k}</b>: {q} → {act ?? "—"}
+                              {diff != null && Math.round(diff) !== 0 && (
+                                <b className={diff < 0 ? "text-red-600 ml-1" : "text-emerald-600 ml-1"}>
+                                  {diff > 0 ? "+" : ""}{diff.toFixed(1).replace(".0", "")}%
+                                </b>
+                              )}
+                            </span>
+                          );
+                        })}
+                        {Object.keys(item.size_distribution || {}).length === 0 && <span className="text-xs text-gray-400">Dağılım girilmemiş.</span>}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 );
               })}
             </tbody>
