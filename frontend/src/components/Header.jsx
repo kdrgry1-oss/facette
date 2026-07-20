@@ -448,7 +448,24 @@ export default function Header({ hideMenu = false }) {
           >
             <div className="max-w-screen-2xl mx-auto px-8 py-6">
               <div className="flex gap-12">
-                {/* Kolonlar — panele girilen başlık + alt kategoriler (birbirine yakın, genişliğe yayılmaz) */}
+                {/* Kolonlar — panele girilen başlık + alt kategoriler (birbirine yakın, genişliğe yayılmaz).
+                    Hiçbir kolonda alt kategori yoksa (ör. koleksiyon listesi) başlıklar TEK kolonda ALT ALTA. */}
+                {cols.every((c) => !c.items.length) ? (
+                <ul className="space-y-1">
+                  {cols.map((col) => (
+                    <li key={col.title}>
+                      <Link
+                        to={col.link}
+                        className="block py-1 text-sm text-gray-700 hover:text-black transition-colors"
+                        onClick={() => setActiveMenu(null)}
+                        onMouseEnter={() => setHoveredCategory(col.slug)}
+                      >
+                        {col.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                ) : (
                 <div className={MEGA_LINK_GRID} style={megaCols(cols.length || 3)}>
                   {cols.map((col) => (
                     // Kolon başlığına/alanına gelince o ana kategorinin ürünleri sağda çıksın
@@ -488,6 +505,7 @@ export default function Header({ hideMenu = false }) {
                     </div>
                   ))}
                 </div>
+                )}
 
                 {/* Right: Hover edilen kategorinin en çok satan 3 ürünü */}
                 <div className="flex-shrink-0 flex gap-3 min-w-[564px] ml-auto">
@@ -537,9 +555,12 @@ export default function Header({ hideMenu = false }) {
                       <div className="pb-3 pl-1 space-y-3">
                         {cols.map((col) => (
                           <div key={col.title}>
+                            {/* Alt kategorisi olmayan kolon (ör. koleksiyon) normal satır linki olarak ALT ALTA */}
                             <Link
                               to={col.link}
-                              className="block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
+                              className={col.items.length
+                                ? "block text-[10px] tracking-[0.25em] uppercase text-black/40 mb-1.5 hover:underline"
+                                : "block py-1.5 text-[13px] font-light text-black/75"}
                               onClick={() => setMobileMenuOpen(false)}
                             >
                               {col.title}

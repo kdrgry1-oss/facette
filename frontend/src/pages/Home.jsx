@@ -470,7 +470,7 @@ function ProductSlider({ block, products }) {
             {title && <h2 className="text-3xl md:text-5xl font-light tracking-tight text-black leading-none">{title}</h2>}
             {subtitle && <p className="mt-3 text-sm md:text-[15px] text-gray-500 font-light max-w-md leading-relaxed">{subtitle}</p>}
           </div>
-          <Link to={ctaHref} className="shrink-0 inline-flex items-center gap-1.5 md:gap-2 text-[10px] md:text-[11px] tracking-[0.18em] md:tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-300 hover:border-black pb-1 md:pb-1.5 transition-colors whitespace-nowrap">
+          <Link to={ctaHref} className="shrink-0 inline-flex items-center gap-1.5 md:gap-2 text-[10px] md:text-[11px] tracking-[0.18em] md:tracking-[0.24em] uppercase text-gray-600 hover:text-black border-b border-gray-600 hover:border-black pb-1 md:pb-1.5 transition-colors whitespace-nowrap">
             {ctaLabel} <ArrowRight size={13} />
           </Link>
         </div>
