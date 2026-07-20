@@ -175,6 +175,37 @@ export default function ProductDetail() {
   const [similarProducts, setSimilarProducts] = useState([]);
   const [comboProducts, setComboProducts] = useState([]);
   const [recentItems, setRecentItems] = useState([]); // son gezilenler (önceki sayfalardan)
+  // Son gezilen kartların fiyat/kampanyası CANLI tazelenir: localStorage'daki eski
+  // anlık görüntüler kampanyayı bilmediğinden indirimli (kırmızı) fiyat görünmüyordu.
+  // Sepetle aynı sunucu-otoriter kaynak: POST /products/cart-pricing.
+  const _rvIdsKey = recentItems.map((x) => x && x.id).filter(Boolean).join(",");
+  useEffect(() => {
+    if (!_rvIdsKey) return;
+    let cancel = false;
+    axios.post(`${API}/products/cart-pricing`, { product_ids: _rvIdsKey.split(",") })
+      .then((r) => {
+        if (cancel || !r.data?.items) return;
+        setRecentItems((prev) => {
+          let changed = false;
+          const next = prev.map((it) => {
+            const info = r.data.items[it.id];
+            if (!info) return it;
+            const patch = {
+              price: info.price, sale_price: info.sale_price,
+              campaign_discount_percent: info.campaign_discount_percent,
+            };
+            if (Number(it.price) === Number(info.price) && Number(it.sale_price || 0) === Number(info.sale_price || 0)
+                && Number(it.campaign_discount_percent || 0) === Number(info.campaign_discount_percent || 0)) return it;
+            changed = true;
+            return { ...it, ...patch };
+          });
+          return changed ? next : prev;
+        });
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_rvIdsKey]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   // Masaüstü büyük görsel büyüteci (hover → imlecin olduğu bölge büyür)
@@ -345,13 +376,19 @@ export default function ProductDetail() {
         try {
           const _p = res.data;
           setRecentItems(readRecentlyViewed().filter((x) => x && x.id !== _p.id).slice(0, 10));
+          const _rvImg = (() => {
+            const im = (_p.images && _p.images[0]) || _p.image || "";
+            return (typeof im === "object" && im !== null) ? (im.url || im.src || "") : im;
+          })();
           pushRecentlyViewed({
             id: _p.id,
             name: _p.name,
             slug: _p.slug || _p.id,
-            image: (_p.images && _p.images[0]) || _p.image || "",
+            image: _rvImg,
             price: _p.price,
             sale_price: _p.sale_price,
+            // Kampanya olmadan kaydedilirse kartta indirim görünmüyordu
+            campaign_discount_percent: _p.campaign_discount_percent,
           });
         } catch { /* sessiz */ }
 
