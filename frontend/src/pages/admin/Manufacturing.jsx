@@ -9,6 +9,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../../components/ui/dialog";
 
+// Renk/Beden seçim penceresi için hazır listeler (tıkla-seç; özel değer de eklenebilir)
+const PRESET_COLORS = ["Siyah", "Beyaz", "Ekru", "Bej", "Taş", "Vizon", "Kahve", "Camel",
+  "Lacivert", "Mavi", "Buz Mavi", "Kırmızı", "Bordo", "Yeşil", "Haki", "Mint",
+  "Gri", "Antrasit", "Pembe", "Pudra", "Lila", "Mor", "Sarı", "Turuncu"];
+const PRESET_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XS/S", "M/L", "STD",
+  "34", "36", "38", "40", "42", "44", "46", "48"];
+
 function _plus21(dateStr) {
   // Tahmini teslim = sipariş tarihi + 21 gün (kullanıcı isteği)
   try {
@@ -236,15 +243,31 @@ export default function Manufacturing() {
     ...f,
     size_distribution: { ...f.size_distribution, [matrixKey(color, size)]: Number(val || 0) },
   }));
-  const addColor = () => {
-    const c = window.prompt("Renk adı (ör. Siyah):");
-    if (!c || !c.trim()) return;
-    setForm(f => f.colors.includes(c.trim()) ? f : { ...f, colors: [...f.colors, c.trim()] });
+  // Renk/Beden seçim penceresi (prompt yerine tablo — kullanıcı isteği)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickColors, setPickColors] = useState([]);
+  const [pickSizes, setPickSizes] = useState([]);
+  const [customColor, setCustomColor] = useState("");
+  const [customSize, setCustomSize] = useState("");
+  const openPicker = () => {
+    setPickColors([...form.colors]);
+    setPickSizes([...form.sizes]);
+    setCustomColor(""); setCustomSize("");
+    setPickerOpen(true);
   };
-  const addSize = () => {
-    const s = window.prompt("Beden (ör. S veya 36):");
-    if (!s || !s.trim()) return;
-    setForm(f => f.sizes.includes(s.trim().toUpperCase()) ? f : { ...f, sizes: [...f.sizes, s.trim().toUpperCase()] });
+  const togglePick = (list, setList, val) =>
+    setList(list.includes(val) ? list.filter(x => x !== val) : [...list, val]);
+  const applyPicker = () => {
+    setForm(f => {
+      // Seçimden çıkarılan renk/bedenlerin matris hücreleri temizlenir
+      const dist = Object.fromEntries(Object.entries(f.size_distribution || {}).filter(([k]) => {
+        const c = k.includes("|") ? k.split("|")[0] : "";
+        const s = k.includes("|") ? k.split("|")[1] : k;
+        return (c === "" ? pickColors.length === 0 : pickColors.includes(c)) && pickSizes.includes(s);
+      }));
+      return { ...f, colors: pickColors, sizes: pickSizes, size_distribution: dist };
+    });
+    setPickerOpen(false);
   };
   const removeColor = (c) => setForm(f => ({
     ...f, colors: f.colors.filter(x => x !== c),
@@ -477,18 +500,14 @@ export default function Manufacturing() {
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-2 flex items-center gap-2 justify-between">
                 <span className="flex items-center gap-2"><Package size={12} /> Sipariş Edilen Renkler × Bedenler</span>
-                <span className="flex gap-1">
-                  <button type="button" onClick={addColor} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-color">
-                    <Plus size={12} className="inline" /> Renk Ekle
-                  </button>
-                  <button type="button" onClick={addSize} className="text-xs text-rose-600 hover:bg-rose-50 px-2 py-1 rounded" data-testid="mfg-add-size">
-                    <Plus size={12} className="inline" /> Beden Ekle
-                  </button>
-                </span>
+                <button type="button" onClick={openPicker}
+                  className="text-xs bg-rose-600 text-white hover:bg-rose-700 px-3 py-1.5 rounded font-semibold" data-testid="mfg-open-picker">
+                  <Plus size={12} className="inline" /> Renk / Beden Seç
+                </button>
               </label>
               {form.sizes.length === 0 ? (
                 <div className="bg-gray-50 border-2 border-dashed rounded-lg p-4 text-center text-xs text-gray-400">
-                  Önce "Renk Ekle" ve "Beden Ekle" ile eksenleri tanımlayın — kombinasyon tablosu burada oluşur.
+                  "Renk / Beden Seç" ile hazır tablodan seçim yapın — kombinasyon tablosu burada oluşur.
                 </div>
               ) : (
                 <div className="overflow-x-auto border border-rose-200 rounded-lg">
@@ -530,6 +549,57 @@ export default function Manufacturing() {
                 GENEL TOPLAM: <b className="text-rose-700" data-testid="mfg-grand-total">{grandTotal}</b> adet
               </p>
             </div>
+
+            {/* Renk/Beden seçim penceresi — hazır tablodan tıkla-seç + özel değer */}
+            {pickerOpen && (
+              <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
+                <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()} data-testid="mfg-picker">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-sm uppercase tracking-wider">Renk & Beden Seçimi</h3>
+                    <button type="button" onClick={() => setPickerOpen(false)} className="text-gray-400 hover:text-black text-lg leading-none">×</button>
+                  </div>
+                  <p className="text-xs font-bold text-gray-600 mb-2">Renkler <span className="font-normal text-gray-400">({pickColors.length} seçili)</span></p>
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {[...new Set([...PRESET_COLORS, ...pickColors])].map(c => (
+                      <button key={c} type="button" onClick={() => togglePick(pickColors, setPickColors, c)}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${pickColors.includes(c) ? "bg-rose-600 text-white border-rose-600" : "bg-white text-gray-700 border-gray-300 hover:border-rose-400"}`}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mb-5">
+                    <input value={customColor} onChange={e => setCustomColor(e.target.value)} placeholder="Özel renk yaz..."
+                      className="border rounded px-3 py-1.5 text-xs flex-1"
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); if (customColor.trim()) { togglePick(pickColors, setPickColors, customColor.trim()); setCustomColor(""); } } }} />
+                    <button type="button" onClick={() => { if (customColor.trim()) { togglePick(pickColors, setPickColors, customColor.trim()); setCustomColor(""); } }}
+                      className="text-xs border rounded px-3 hover:bg-gray-50">Ekle</button>
+                  </div>
+                  <p className="text-xs font-bold text-gray-600 mb-2">Bedenler <span className="font-normal text-gray-400">({pickSizes.length} seçili)</span></p>
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {[...new Set([...PRESET_SIZES, ...pickSizes])].map(s => (
+                      <button key={s} type="button" onClick={() => togglePick(pickSizes, setPickSizes, s)}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${pickSizes.includes(s) ? "bg-rose-600 text-white border-rose-600" : "bg-white text-gray-700 border-gray-300 hover:border-rose-400"}`}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mb-5">
+                    <input value={customSize} onChange={e => setCustomSize(e.target.value)} placeholder="Özel beden yaz..."
+                      className="border rounded px-3 py-1.5 text-xs flex-1"
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); if (customSize.trim()) { togglePick(pickSizes, setPickSizes, customSize.trim().toUpperCase()); setCustomSize(""); } } }} />
+                    <button type="button" onClick={() => { if (customSize.trim()) { togglePick(pickSizes, setPickSizes, customSize.trim().toUpperCase()); setCustomSize(""); } }}
+                      className="text-xs border rounded px-3 hover:bg-gray-50">Ekle</button>
+                  </div>
+                  <div className="flex justify-end gap-2 border-t pt-3">
+                    <button type="button" onClick={() => setPickerOpen(false)} className="px-4 py-2 text-sm border rounded-lg">Vazgeç</button>
+                    <button type="button" onClick={applyPicker} data-testid="mfg-picker-apply"
+                      className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 font-semibold">
+                      Uygula ({pickColors.length} renk × {pickSizes.length} beden)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Finansal */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
