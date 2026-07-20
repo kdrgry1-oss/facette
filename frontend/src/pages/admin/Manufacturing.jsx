@@ -26,6 +26,8 @@ function _plus21(dateStr) {
 }
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+// Yüklenen görsel URL'i göreli ise (/api/upload/files/...) backend origin'iyle tamamla
+const _imgUrl = (u) => (!u ? "" : String(u).startsWith("http") ? u : `${process.env.REACT_APP_BACKEND_URL}${String(u).startsWith("/") ? "" : "/"}${u}`);
 
 const STAGE_COLORS = {
   siparis_dosyasi: "bg-slate-100 text-slate-700",
@@ -81,6 +83,8 @@ export default function Manufacturing() {
       color_approvals: {},          // {"Renk": {fabric: bool, lining: bool}}
       cutting_start_date: "",       // kesim başlangıç tarihi (kesime geçerken sorulur)
       actual_distribution: {},      // gerçekleşen kesim adedi {"Renk|Beden": n}
+      sewing_workshop: "",          // dikim atölyesi adı (dikime geçince girilir)
+      sewing_report_images: [],     // imalat (görsel) raporu — yüklenen görsel URL'leri
       waste_meters: 0,
       notes: "",
       current_stage: "siparis_dosyasi",
@@ -170,6 +174,8 @@ export default function Manufacturing() {
       color_approvals: item.color_approvals || {},
       cutting_start_date: item.cutting_start_date || "",
       actual_distribution: item.actual_distribution || {},
+      sewing_workshop: item.sewing_workshop || "",
+      sewing_report_images: item.sewing_report_images || [],
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
       current_stage: item.current_stage || "siparis_dosyasi",
@@ -260,6 +266,7 @@ export default function Manufacturing() {
       item, stage: newStage,
       date: _STAGE_DATE_LABELS[newStage] ? new Date().toISOString().substring(0, 10) : "",
       note: "",
+      workshop: newStage === "dikim" ? (item.sewing_workshop || "") : "",
     });
   };
   const confirmAdvance = async () => {
@@ -268,7 +275,8 @@ export default function Manufacturing() {
     try {
       const token = localStorage.getItem("token");
       await axios.post(`${API}/manufacturing/${m.item.id}/advance`,
-        { stage: m.stage, note: m.note || "", ...(m.date ? { stage_date: m.date } : {}) },
+        { stage: m.stage, note: m.note || "", ...(m.date ? { stage_date: m.date } : {}),
+          ...(m.stage === "dikim" && m.workshop?.trim() ? { sewing_workshop: m.workshop.trim() } : {}) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success("Aşama güncellendi");
@@ -277,6 +285,32 @@ export default function Manufacturing() {
       fetchAll();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Aşama değiştirilemedi");
+    }
+  };
+
+  // Görsel (imalat) raporu: dosya seç → /upload/image → URL form.sewing_report_images'e eklenir
+  const [reportUploading, setReportUploading] = useState(false);
+  const uploadReportImages = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setReportUploading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const urls = [];
+      for (const f of files) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await axios.post(`${API}/upload/image`, fd, { headers: { Authorization: `Bearer ${token}` } });
+        if (r.data?.url) urls.push(r.data.url);
+      }
+      if (urls.length) {
+        setForm((prev) => ({ ...prev, sewing_report_images: [...(prev.sewing_report_images || []), ...urls] }));
+        toast.success(`${urls.length} görsel yüklendi — Kaydet'e basmayı unutmayın`);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Görsel yüklenemedi");
+    } finally {
+      setReportUploading(false);
     }
   };
 
@@ -439,6 +473,7 @@ export default function Manufacturing() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Tarihi</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Dikim tarihi, atölye ve görsel imalat raporu">Dikim Başlangıcı</th>
                 <th className="px-3 py-3"></th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün Aç</th>
               </tr>
@@ -556,6 +591,39 @@ export default function Manufacturing() {
                       );
                     })()}
                   </td>
+                  <td className="px-3 py-3 align-top">
+                    {(() => {
+                      const _dkDate = (item.stage_dates || {}).dikim;
+                      const _imgs = item.sewing_report_images || [];
+                      if (!_dkDate && !item.sewing_workshop && !_imgs.length)
+                        return <span className="text-xs text-gray-300">—</span>;
+                      return (
+                        <div className="space-y-1">
+                          {_dkDate && (
+                            <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(_dkDate).toLocaleDateString("tr-TR")}</p>
+                          )}
+                          {item.sewing_workshop && (
+                            <p className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded px-1.5 py-0.5 inline-block whitespace-nowrap">
+                              🏭 {item.sewing_workshop}
+                            </p>
+                          )}
+                          {_imgs.length > 0 && (
+                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="Görsel imalat raporu — büyütmek için tıklayın">
+                              {_imgs.slice(0, 4).map((u, i) => (
+                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                                  <img src={_imgUrl(u)} alt={`rapor ${i + 1}`}
+                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-rose-400" loading="lazy" />
+                                </a>
+                              ))}
+                              {_imgs.length > 4 && (
+                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_imgs.length - 4}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {/* Kırmızı yanıp sönen hatırlatıcı: bir sonraki aşamaya ilerletme gerekiyor */}
                     {_showDot && (
@@ -602,7 +670,7 @@ export default function Manufacturing() {
                 </tr>
                 {qtyDetail.has(item.id) && (
                   <tr className="bg-blue-50/40 border-b">
-                    <td colSpan={9} className="px-6 py-3">
+                    <td colSpan={10} className="px-6 py-3">
                       <div className="text-[11px] font-bold text-gray-600 uppercase mb-1.5">Adet Detayı — Sipariş → Kesilen</div>
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(item.size_distribution || {}).map(([k, q]) => {
@@ -654,6 +722,15 @@ export default function Manufacturing() {
                   <input type="date" value={advanceModal.date}
                     onChange={(e) => setAdvanceModal({ ...advanceModal, date: e.target.value })}
                     className="w-full border px-3 py-2 rounded-lg text-sm" data-testid="advance-date" />
+                </div>
+              )}
+              {advanceModal.stage === "dikim" && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Dikim Atölyesi <span className="text-gray-400 font-normal">(opsiyonel — sonradan da girilebilir)</span></label>
+                  <input type="text" value={advanceModal.workshop || ""}
+                    onChange={(e) => setAdvanceModal({ ...advanceModal, workshop: e.target.value })}
+                    placeholder="Ör: Yıldız Tekstil Atölyesi"
+                    className="w-full border px-3 py-2 rounded-lg text-sm" data-testid="advance-workshop" />
                 </div>
               )}
               <div>
@@ -944,6 +1021,45 @@ export default function Manufacturing() {
                   <CheckCircle2 size={16} /> {form.payment_done ? "Ödeme Yapıldı ✓" : "Ödeme Yapıldı mı?"}
                 </button>
                 <p className="mt-1 min-h-[16px]" />
+              </div>
+            </div>
+
+            {/* Dikim Başlangıcı — atölye adı + görsel imalat raporu (listede sütun altında da görünür) */}
+            <div className="border-2 border-purple-100 bg-purple-50/30 rounded-lg p-3">
+              <p className="text-xs font-bold text-purple-700 uppercase mb-2">🧵 Dikim Başlangıcı</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Dikim Atölyesi</label>
+                  <input value={form.sewing_workshop}
+                    onChange={e => setForm({ ...form, sewing_workshop: e.target.value })}
+                    placeholder="Ör: Yıldız Tekstil Atölyesi"
+                    data-testid="mfg-sewing-workshop"
+                    className="w-full border px-3 py-2 rounded text-sm" />
+                  <p className="text-[10px] text-gray-400 mt-1">Dikime ilerletirken de girilebilir; listede Dikim Başlangıcı sütununda görünür.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Görsel Rapor <span className="text-gray-400 font-normal">(imalat raporu — fotoğraf)</span></label>
+                  <label className={`inline-flex items-center gap-1.5 px-3 py-2 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading ? "opacity-50 pointer-events-none" : "border-purple-300 text-purple-700 hover:bg-purple-50"}`}>
+                    {reportUploading ? "Yükleniyor…" : "＋ Görsel Yükle"}
+                    <input type="file" accept="image/*" multiple className="hidden" data-testid="mfg-report-upload"
+                      onChange={(e) => { uploadReportImages(e.target.files); e.target.value = ""; }} />
+                  </label>
+                  {(form.sewing_report_images || []).length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {form.sewing_report_images.map((u, i) => (
+                        <div key={i} className="relative group">
+                          <a href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                            <img src={_imgUrl(u)} alt={`rapor ${i + 1}`} className="w-16 h-16 object-cover rounded border" />
+                          </a>
+                          <button type="button"
+                            onClick={() => setForm(f => ({ ...f, sewing_report_images: f.sewing_report_images.filter((_, j) => j !== i) }))}
+                            title="Görseli kaldır"
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full text-[10px] leading-none hidden group-hover:flex items-center justify-center">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

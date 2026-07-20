@@ -150,6 +150,8 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "color_approvals": payload.get("color_approvals") or {},  # {"Renk": {fabric, lining}}
         "cutting_start_date": payload.get("cutting_start_date", ""),  # kesim başlangıç tarihi
         "actual_distribution": payload.get("actual_distribution") or {},  # gerçekleşen kesim adedi {"Renk|Beden": n}
+        "sewing_workshop": (payload.get("sewing_workshop") or "").strip(),  # dikim atölyesi adı
+        "sewing_report_images": payload.get("sewing_report_images") or [],  # imalat (görsel) raporu URL listesi
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -195,6 +197,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "purchase_orders", "waste_meters", "supplier_id", "notes",
         "order_no", "order_flags", "stock_code", "colors",
         "has_lining", "color_approvals", "cutting_start_date", "actual_distribution", "product_created",
+        "sewing_workshop", "sewing_report_images",
     ):
         if f in payload:
             update[f] = payload[f]
@@ -246,6 +249,10 @@ async def advance_stage(record_id: str, payload: dict, current_user: dict = Depe
         update[f"stage_dates.{new_stage}"] = _sd
         if new_stage == "kesim":
             update["cutting_start_date"] = _sd  # geriye uyumluluk
+    # Dikime geçerken atölye adı girilebilir (kullanıcı isteği)
+    _ws = str(payload.get("sewing_workshop") or "").strip()
+    if _ws:
+        update["sewing_workshop"] = _ws
 
     # F11: On "teslim_alindi" increment stock per size distribution.
     # DENETİM FIX (idempotent): stok artışı SADECE BİR KEZ yapılmalı. Eskiden 'teslim_alindi'ye
