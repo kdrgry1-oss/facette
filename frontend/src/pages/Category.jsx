@@ -260,82 +260,137 @@ export default function Category() {
     <div className="min-h-screen bg-white" data-testid="category-page">
       <Header />
 
-      <div className="w-full px-2 md:px-4">
-        {/* Breadcrumb — ortalı: Anasayfa / (Üst Kategori) / Bu Sayfa (SUUD tarzı) */}
-        <nav className="pt-5 md:pt-7 flex items-center justify-center gap-2 text-[13px] md:text-sm flex-wrap" aria-label="breadcrumb" data-testid="category-breadcrumb">
-          <Link to="/" className="text-gray-400 hover:text-black transition-colors">Anasayfa</Link>
-          <span className="text-gray-300">/</span>
-          {parentCategory && (
-            <>
-              <Link to={`/${parentCategory.slug}`} className="text-gray-400 hover:text-black transition-colors">{parentCategory.name}</Link>
-              <span className="text-gray-300">/</span>
-            </>
-          )}
-          <span className="text-black">{categoryName}</span>
-        </nav>
-
-        {/* Ortalanmış büyük kategori başlığı */}
-        <div className="pt-6 pb-6 md:pt-8 md:pb-8 text-center">
-          <h1 className="text-2xl md:text-3xl font-normal tracking-tight text-stone-900">
-            {categoryName}
-          </h1>
-        </div>
-
-        {/* Toolbar — üç bölge, dikey ayraçlı: + Filtreleme | Sıralama | Görünüm 1 2 4 */}
-        <div className="grid grid-cols-3 items-stretch border-b">
-          <button
-            onClick={openFilter}
-            className="flex items-center justify-start gap-2 py-4 pr-2 text-sm hover:opacity-60 transition-opacity border-r border-gray-200"
-            data-testid="filter-btn"
-          >
-            <span className="text-xl leading-none font-light" aria-hidden="true">+</span>
-            <span>Filtreleme{activeCount > 0 ? ` (${activeCount})` : ""}</span>
-          </button>
-
-          <div className="relative border-r border-gray-200">
-            <button
-              onClick={() => setSortOpen((v) => !v)}
-              className="w-full h-full py-4 text-sm hover:opacity-60 transition-opacity"
-              data-testid="sort-btn"
-            >
-              Sıralama
-            </button>
-            {sortOpen && (
+      <div className="w-full px-2 md:px-4 relative">
+        {/* ── MOBİL: ortalı breadcrumb + ortalı büyük başlık + 3 bölgeli toolbar ── */}
+        <div className="md:hidden">
+          <nav className="pt-5 flex items-center justify-center gap-2 text-[13px] flex-wrap" aria-label="breadcrumb" data-testid="category-breadcrumb">
+            <Link to="/" className="text-gray-400 hover:text-black transition-colors">Anasayfa</Link>
+            <span className="text-gray-300">/</span>
+            {parentCategory && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} aria-hidden="true" />
-                <div className="absolute top-full left-1/2 -translate-x-1/2 z-20 bg-white border border-gray-200 shadow-lg min-w-[220px] py-1">
-                  {sortOptions.map((o) => {
-                    const cur = `${sort}:${order}` === o.value;
-                    return (
-                      <button
-                        key={o.value}
-                        onClick={() => applySort(o.value)}
-                        className={`flex items-center justify-between w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 ${cur ? "font-semibold text-black" : "text-gray-600"}`}
-                      >
-                        {o.label} {cur && <Check size={14} />}
-                      </button>
-                    );
-                  })}
-                </div>
+                <Link to={`/${parentCategory.slug}`} className="text-gray-400 hover:text-black transition-colors">{parentCategory.name}</Link>
+                <span className="text-gray-300">/</span>
               </>
             )}
+            <span className="text-black">{categoryName}</span>
+          </nav>
+
+          <div className="pt-6 pb-6 text-center">
+            <h1 className="text-2xl font-normal tracking-tight text-stone-900">{categoryName}</h1>
           </div>
 
-          <div className="flex items-center justify-end gap-3 md:gap-4 py-4 pl-2">
-            <span className="text-sm">Görünüm</span>
-            {[1, 2, 4].map((n) => (
+          <div className="grid grid-cols-3 items-stretch border-b">
+            <button
+              onClick={openFilter}
+              className="flex items-center justify-start gap-2 py-4 pr-2 text-sm hover:opacity-60 transition-opacity border-r border-gray-200"
+              data-testid="filter-btn"
+            >
+              <span className="text-xl leading-none font-light" aria-hidden="true">+</span>
+              <span>Filtreleme{activeCount > 0 ? ` (${activeCount})` : ""}</span>
+            </button>
+
+            <div className="relative border-r border-gray-200">
               <button
-                key={n}
-                onClick={() => setGridCols(n)}
-                data-testid={`grid-${n}`}
-                aria-label={`${n}'li görünüm`}
-                className={`text-sm tabular-nums transition-colors ${gridCols === n ? "font-bold text-black" : "text-gray-400 hover:text-black"}`}
+                onClick={() => setSortOpen((v) => !v)}
+                className="w-full h-full py-4 text-sm hover:opacity-60 transition-opacity"
+                data-testid="sort-btn"
               >
-                {n}
+                Sıralama
               </button>
-            ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 py-4 pl-2">
+              <span className="text-sm">Görünüm</span>
+              {[1, 2, 4].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setGridCols(n)}
+                  data-testid={`grid-${n}`}
+                  aria-label={`${n}'li görünüm`}
+                  className={`text-sm tabular-nums transition-colors ${gridCols === n ? "font-bold text-black" : "text-gray-400 hover:text-black"}`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* ── MASAÜSTÜ (SUUD tarzı): SOLDA başlık; altında solda breadcrumb, sağda
+            + Filtreleme | Sıralama Seçiniz | Görünüm 1 2 4 ── */}
+        <div className="hidden md:block">
+          <h1 className="pt-8 text-2xl font-normal tracking-tight text-stone-900">{categoryName}</h1>
+          <div className="flex items-center justify-between gap-4 mt-9 pb-3 border-b border-gray-100">
+            <nav className="flex items-center gap-2 text-sm flex-wrap" aria-label="breadcrumb" data-testid="category-breadcrumb-desktop">
+              <Link to="/" className="text-gray-400 hover:text-black transition-colors">Anasayfa</Link>
+              <span className="text-gray-300">/</span>
+              {parentCategory && (
+                <>
+                  <Link to={`/${parentCategory.slug}`} className="text-gray-400 hover:text-black transition-colors">{parentCategory.name}</Link>
+                  <span className="text-gray-300">/</span>
+                </>
+              )}
+              <span className="text-black">{categoryName}</span>
+            </nav>
+
+            <div className="flex items-center">
+              <button
+                onClick={openFilter}
+                className="flex items-center gap-2 text-sm hover:opacity-60 transition-opacity pr-6"
+                data-testid="filter-btn-desktop"
+              >
+                <span className="text-xl leading-none font-light" aria-hidden="true">+</span>
+                <span>Filtreleme{activeCount > 0 ? ` (${activeCount})` : ""}</span>
+              </button>
+
+              <div className="relative pr-6">
+                <button
+                  onClick={() => setSortOpen((v) => !v)}
+                  className="text-sm hover:opacity-60 transition-opacity"
+                  data-testid="sort-btn-desktop"
+                >
+                  Sıralama Seçiniz
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 border-l border-gray-200 pl-6">
+                <span className="text-sm">Görünüm</span>
+                {[1, 2, 4].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setGridCols(n)}
+                    data-testid={`grid-desktop-${n}`}
+                    aria-label={`${n}'li görünüm`}
+                    className={`text-sm tabular-nums transition-colors ${gridCols === n ? "font-bold text-black underline underline-offset-4" : "text-gray-400 hover:text-black"}`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Sıralama menüsü — mobil ve masaüstü butonlarının ortak açılır penceresi */}
+        {sortOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} aria-hidden="true" />
+            <div className="absolute right-4 md:right-10 z-20 bg-white border border-gray-200 shadow-lg min-w-[220px] py-1">
+              {sortOptions.map((o) => {
+                const cur = `${sort}:${order}` === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    onClick={() => applySort(o.value)}
+                    className={`flex items-center justify-between w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 ${cur ? "font-semibold text-black" : "text-gray-600"}`}
+                  >
+                    {o.label} {cur && <Check size={14} />}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         {/* Products Grid */}
         <div className="py-8">
