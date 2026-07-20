@@ -459,8 +459,10 @@ function ProductSlider({ block, products }) {
     el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.85), behavior: "smooth" });
   };
 
+  // Blok yönetiminden ayarlanabilir arka plan (ör. krem #EFECE6) — boşsa şeffaf kalır
+  const sectionBg = block?.settings?.bg_color || "";
   return (
-    <section className="w-full py-10 md:py-14" data-testid="product-slider">
+    <section className="w-full py-10 md:py-14" style={sectionBg ? { backgroundColor: sectionBg } : undefined} data-testid="product-slider">
       {/* Başlık bloğu — girildiyse: sol büyük serif başlık + alt yazı, sağda "Tümünü Gör →"
           (2. görsel tarzı). Standalone alt "Tümünü Gör" butonu kaldırıldı. */}
       {(title || subtitle) && (

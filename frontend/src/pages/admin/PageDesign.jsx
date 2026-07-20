@@ -1371,6 +1371,18 @@ export default function PageDesign() {
                       className="flex-1 border px-3 py-2 rounded text-sm"
                     />
                   </div>
+                  <div className="w-44">
+                    <label className="block text-xs font-medium mb-1 text-gray-600">Arka Plan Rengi <span className="text-gray-400">(boş = şeffaf)</span></label>
+                    <div className="flex gap-1.5">
+                      <input type="color" value={formData.settings?.bg_color || "#ffffff"}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="w-10 h-9 border rounded cursor-pointer" />
+                      <input type="text" value={formData.settings?.bg_color || ""}
+                        placeholder="#EFECE6"
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, bg_color: e.target.value } })}
+                        className="flex-1 border px-2 py-2 rounded text-sm font-mono" />
+                    </div>
+                  </div>
                 </div>
 
                 {(formData.settings?.source === "category") && (

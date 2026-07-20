@@ -460,7 +460,7 @@ export default function Header({ hideMenu = false }) {
                       <Search size={17} strokeWidth={1.4} />
                       <span className="hidden md:inline text-[11px] tracking-[0.2em] uppercase leading-none">Ara</span>
                     </span>
-                    <span className="hidden md:block mt-1.5 h-px bg-current w-24 md:w-32"></span>
+                    <span className="hidden md:block mt-1.5 h-px bg-current w-36 md:w-48"></span>
                   </button>
                   {user && (
                     <Link to="/hesabim?tab=favorites" className="inline-flex p-2 hover:opacity-60 relative" aria-label="Kaydedilenler" data-testid="favorites-btn">
