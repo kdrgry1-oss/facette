@@ -2846,7 +2846,7 @@ async def export_products_excel(
         _proj = {
             "_id": 0, "id": 1, "name": 1, "category_name": 1, "brand": 1,
             "stock_code": 1, "barcode": 1, "price": 1, "sale_price": 1, "stock": 1,
-            "description": 1, "is_active": 1, "variants": 1, "attributes": 1,
+            "description": 1, "is_active": 1, "variants": 1, "attributes": 1, "season": 1,
         }
         products = await db.products.find(query, _proj).to_list(None)
         
@@ -2887,6 +2887,7 @@ async def export_products_excel(
                     "Kategori": p.get("category_name"),
                     "Marka": p.get("brand"),
                     "Stok Kodu": v.get("stock_code") or p.get("stock_code"),
+                    "Sezon": p.get("season", ""),
                     "Barkod": v.get("barcode") or p.get("barcode"),
                     "Beden": v.get("size", ""),
                     "Renk": v.get("color", ""),
@@ -2927,6 +2928,19 @@ async def export_products_excel(
         logger.error(f"Excel export error: {e}")
         raise HTTPException(status_code=500, detail=f"Dışa aktarma hatası: {str(e)}")
 
+def _norm_season_cell(val) -> str:
+    """Excel'deki Sezon hücresini 4 kanonik değere indirger (Yaz/Kış/İlkbahar/Sonbahar).
+    Türkçe İ/ı büyük-küçük tuzağına takılmamak için aksan/kombine işaretler soyulur.
+    Boş/tanınmayan değer '' döner — mevcut sezon SİLİNMEZ, satır atlanır."""
+    import unicodedata
+    s = str(val or "").strip()
+    if not s or s.lower() == "nan":
+        return ""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", s.casefold())
+                     if not unicodedata.combining(c)).replace("ı", "i")
+    return {"yaz": "Yaz", "kis": "Kış", "ilkbahar": "İlkbahar", "sonbahar": "Sonbahar"}.get(folded, "")
+
+
 @router.post("/import/excel")
 async def import_products_excel(file: UploadFile = File(...), current_user: dict = Depends(require_admin)):
     """Import or update products from an Excel file"""
@@ -2947,6 +2961,9 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                 barcode = str(row.get("Barkod", "")).strip()
                 if not barcode or barcode == "nan":
                     continue
+
+                # Sezon (ürün düzeyi) — geçerli değer varsa güncellenir, boş/bilinmeyen dokunmaz
+                _season = _norm_season_cell(row.get("Sezon")) if "Sezon" in df.columns else ""
                 
                 # Parse dynamic attributes from columns
                 parsed_attrs = []
@@ -2981,6 +2998,8 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                     }
                     if parsed_attrs:
                         update_fields["attributes"] = parsed_attrs
+                    if _season:
+                        update_fields["season"] = _season
 
                     await db.products.update_one(
                         {"id": existing["id"], "variants.barcode": barcode},
@@ -3009,7 +3028,9 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                         }
                         if parsed_attrs:
                             update_fields["attributes"] = parsed_attrs
-                        
+                        if _season:
+                            update_fields["season"] = _season
+
                         await db.products.update_one(
                             {"id": prod_by_name["id"]},
                             {"$push": {"variants": variant}, "$set": update_fields}
@@ -3029,6 +3050,7 @@ async def import_products_excel(file: UploadFile = File(...), current_user: dict
                             "sale_price": variant["sale_price"],
                             "stock": variant["stock"],
                             "is_active": True,
+                            "season": _season,
                             "variants": [variant],
                             "images": [],
                             "attributes": parsed_attrs,
