@@ -532,10 +532,21 @@ export default function Manufacturing() {
                   <td className="px-3 py-3 text-right">
                     {(() => {
                       const _actTot = Object.values(item.actual_distribution || {}).reduce((a, b) => a + Number(b || 0), 0);
-                      return _actTot > 0
-                        ? <span className={`text-sm font-bold tabular-nums ${_actTot < (item.total_units || 0) ? "text-red-600" : _actTot > (item.total_units || 0) ? "text-emerald-600" : ""}`}
-                            title={`Gerçekleşen (kesilen) toplam — sipariş: ${item.total_units || 0}`}>{_actTot}</span>
-                        : <span className="text-xs text-gray-300">—</span>;
+                      // Detay ipucu: her Renk|Beden için sipariş → gerçekleşen
+                      const _detail = Object.entries(item.size_distribution || {})
+                        .map(([k, q]) => `${k}: ${q} → ${(item.actual_distribution || {})[k] ?? "?"}`).join("\n");
+                      return (
+                        <div title={_detail || undefined}>
+                          <p className="text-[9px] text-gray-400 whitespace-nowrap">Sipariş: <b className="text-gray-600">{item.total_units || 0}</b></p>
+                          {_actTot > 0 ? (
+                            <p className={`text-sm font-bold tabular-nums whitespace-nowrap ${_actTot < (item.total_units || 0) ? "text-red-600" : _actTot > (item.total_units || 0) ? "text-emerald-600" : "text-gray-800"}`}>
+                              Kesilen: {_actTot}
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-gray-300">Kesilen: —</p>
+                          )}
+                        </div>
+                      );
                     })()}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
