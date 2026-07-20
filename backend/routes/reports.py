@@ -621,6 +621,7 @@ async def top_products(
         {"$group": {"_id": {"bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
                             "pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}},
                             "nm": {"$ifNull": ["$items.name", {"$ifNull": ["$items.product_name", ""]}]},
+                            "sz": {"$toString": {"$ifNull": ["$items.size", ""]}},
                             "kind": "$_kind", "plat": "$_plat"},
                     "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}},
     ]
@@ -654,10 +655,12 @@ async def top_products(
         pm = by_bc.get(i.get("bc") or "") or by_id.get(i.get("pid") or "") or {}
         _cname = pm.get("name") or i.get("nm") or "(isimsiz ürün)"
         gk = pm.get("id") or (i.get("pid") or None) or f"nm:{_ud3.normalize('NFC', _cname).strip().lower()}"
-        d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}})
+        d = cr_map.setdefault(gk, {"cancel": 0, "return": 0, "by_plat": {}, "by_size": {}})
         d[i["kind"]] += int(r["qty"])
         bp = d["by_plat"].setdefault((i.get("plat") or "site"), {"cancel": 0, "return": 0})
         bp[i["kind"]] += int(r["qty"])
+        bs = d["by_size"].setdefault(((i.get("sz") or "").strip() or "—"), {"cancel": 0, "return": 0})
+        bs[i["kind"]] += int(r["qty"])
 
     out = []
     for gkey, m in merged.items():
@@ -677,6 +680,10 @@ async def top_products(
             "cancel_return_by_platform": [
                 {"platform": k, "cancel": v["cancel"], "return": v["return"]}
                 for k, v in sorted((_cr.get("by_plat") or {}).items())],
+            # Beden bazlı iptal/iade — açılır satırdaki Toplam/İptal/İade/Net kırılımı için
+            "cancel_return_by_size": [
+                {"size": k, "cancel": v["cancel"], "return": v["return"]}
+                for k, v in sorted((_cr.get("by_size") or {}).items())],
         })
     out.sort(key=lambda x: -x["revenue"])
     return {"items": out[:limit], "range_days": round(_range_days, 1), "weeks": round(_weeks, 1)}

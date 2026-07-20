@@ -581,12 +581,42 @@ export function ProductsReport() {
                     <td colSpan={14} className="px-8 py-3">
                       <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
                         <div>
-                          <div className="font-semibold text-gray-700 mb-1">Beden Dağılımı (adet)</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(p.size_breakdown || []).length ? (p.size_breakdown || []).map(s => (
-                              <span key={s.size} className="px-2 py-0.5 bg-white border rounded-full">{s.size}: <b>{s.qty}</b></span>
-                            )) : <span className="text-gray-400">—</span>}
-                          </div>
+                          <div className="font-semibold text-gray-700 mb-1">Beden Bazında — Toplam / İptal / İade / Net</div>
+                          {(() => {
+                            // Net (size_breakdown) + iptal/iade (cancel_return_by_size) beden bazında birleşir
+                            const m = {};
+                            (p.size_breakdown || []).forEach(s => { m[s.size || "—"] = { net: s.qty, c: 0, r: 0 }; });
+                            (p.cancel_return_by_size || []).forEach(s => {
+                              const k = s.size || "—";
+                              if (!m[k]) m[k] = { net: 0, c: 0, r: 0 };
+                              m[k].c += s.cancel || 0; m[k].r += s.return || 0;
+                            });
+                            const rowsz = Object.entries(m).sort((a, b) => a[0].localeCompare(b[0], "tr", { numeric: true }));
+                            return rowsz.length ? (
+                              <table className="text-xs bg-white border rounded-lg overflow-hidden">
+                                <thead className="bg-gray-100 text-gray-500 uppercase">
+                                  <tr>
+                                    <th className="px-2.5 py-1 text-left">Beden</th>
+                                    <th className="px-2.5 py-1 text-right">Toplam</th>
+                                    <th className="px-2.5 py-1 text-right">İptal</th>
+                                    <th className="px-2.5 py-1 text-right">İade</th>
+                                    <th className="px-2.5 py-1 text-right">Net</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rowsz.map(([sz, v]) => (
+                                    <tr key={sz} className="border-t">
+                                      <td className="px-2.5 py-1 font-semibold">{sz}</td>
+                                      <td className="px-2.5 py-1 text-right tabular-nums font-semibold">{v.net + v.c + v.r}</td>
+                                      <td className={`px-2.5 py-1 text-right tabular-nums ${v.c ? "text-rose-600" : "text-gray-300"}`}>{v.c}</td>
+                                      <td className={`px-2.5 py-1 text-right tabular-nums ${v.r ? "text-amber-600" : "text-gray-300"}`}>{v.r}</td>
+                                      <td className="px-2.5 py-1 text-right tabular-nums font-bold">{v.net}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : <span className="text-gray-400">—</span>;
+                          })()}
                         </div>
                         <div>
                           <div className="font-semibold text-gray-700 mb-1">Platform Dağılımı (adet)</div>
