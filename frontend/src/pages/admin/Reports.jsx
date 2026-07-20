@@ -57,7 +57,6 @@ export function SalesReport() {
       .then((r) => setWeekdayData(r.data)).catch(() => {});
     axios.get(`${API}/admin/reports/cancel-return-by-source`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59" } })
       .then((r) => setCancelRet(r.data.items || [])).catch(() => {});
-    loadRangeDetail();
     // İl/İlçe & Kanal (eski ayrı sekme buraya taşındı — kullanıcı isteği)
     axios.get(`${API}/admin/reports/by-location`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", group: "city", source, limit: 100 } })
       .then((r) => setLocData(r.data.rows || [])).catch(() => {});
@@ -72,15 +71,6 @@ export function SalesReport() {
   // Saat/Gün analizi + Sipariş Edilen Ürünler (sayfadaki tarih aralığına bağlı)
   const [hourData, setHourData] = useState(null);
   const [weekdayData, setWeekdayData] = useState(null);
-  const [dayDetail, setDayDetail] = useState(null);
-  const [ddQ, setDdQ] = useState("");                       // ürün adı araması
-  const [ddOpen, setDdOpen] = useState(() => new Set());    // bedenleri açık ürünler
-  const toggleDd = (k) => setDdOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
-  const loadRangeDetail = () => {
-    axios.get(`${API}/admin/reports/day-orders`, { headers: authHeaders(), params: { start_date: from, end_date: to + "T23:59:59", source } })
-      .then((r) => setDayDetail(r.data)).catch(() => setDayDetail(null));
-  };
-  useEffect(() => { loadRangeDetail(); /* eslint-disable-next-line */ }, [source]);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [source]);
   const tl = (v) => `₺${(v ?? 0).toLocaleString("tr-TR")}`;
 
@@ -246,81 +236,6 @@ export function SalesReport() {
           </table>
         </div>
       )}
-
-      {/* 📋 Gün Detayı — seçilen günde NE sipariş edilmiş (ürün/beden bazında) */}
-      <div className="bg-white border rounded-xl p-4" data-testid="day-detail">
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-          <h2 className="text-sm font-bold uppercase tracking-wider">Sipariş Edilen Ürünler ({from} → {to})</h2>
-          <div className="flex items-center gap-2">
-            <input value={ddQ} onChange={(e) => setDdQ(e.target.value)} placeholder="Ürün adı ara…"
-              className="border rounded-lg px-3 py-1.5 text-xs w-48" data-testid="day-detail-search" />
-            <span className="text-[11px] text-gray-400 hidden sm:inline">Üstteki tarih aralığı + kaynak filtresine göre</span>
-          </div>
-        </div>
-        {dayDetail ? (
-          <>
-            <p className="text-[11px] text-gray-500 mb-2">
-              {dayDetail.date}: <b>{dayDetail.order_count}</b> sipariş · <b>{dayDetail.total_qty}</b> ürün
-              {source !== "all" && <> · kaynak: {source}</>} · ürüne tıklayınca beden kırılımı açılır
-            </p>
-            {(() => {
-              // Varsayılan görünüm ÜRÜN toplamı (tüm bedenler); tıklayınca bedenler ayrı satır açılır
-              const f = ddQ.trim().toLocaleLowerCase("tr");
-              const flt = (dayDetail.rows || []).filter(r => !f || (r.name || "").toLocaleLowerCase("tr").includes(f));
-              const groups = []; const gi = {};
-              flt.forEach(r => {
-                const k = r.name || "—";
-                if (gi[k] == null) { gi[k] = groups.length; groups.push({ name: k, qty: 0, revenue: 0, sizes: [] }); }
-                const g = groups[gi[k]]; g.qty += r.qty || 0; g.revenue += r.revenue || 0; g.sizes.push(r);
-              });
-              groups.sort((a, b) => b.qty - a.qty);
-              return groups.length ? (
-              <div className="max-h-80 overflow-y-auto border rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase sticky top-0">
-                    <tr>
-                      <th className="text-left p-2.5">Ürün</th>
-                      <th className="text-left p-2.5">Beden</th>
-                      <th className="text-right p-2.5">Adet</th>
-                      <th className="text-right p-2.5">Ciro</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {groups.map((g) => {
-                      const open = ddOpen.has(g.name);
-                      return (
-                        <Fragment key={g.name}>
-                          <tr className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => toggleDd(g.name)}>
-                            <td className="p-2.5 font-medium">
-                              <span className="inline-block w-3 text-gray-400 mr-1">{open ? "▾" : "▸"}</span>{g.name}
-                            </td>
-                            <td className="p-2.5 text-xs text-gray-400">{g.sizes.length > 1 ? `${g.sizes.length} beden` : (g.sizes[0]?.size || "—")}</td>
-                            <td className="p-2.5 text-right font-semibold tabular-nums">{g.qty}</td>
-                            <td className="p-2.5 text-right tabular-nums">{tl(g.revenue)}</td>
-                          </tr>
-                          {open && g.sizes.map((r, i) => (
-                            <tr key={g.name + i} className="bg-gray-50/60">
-                              <td className="p-2 pl-10 text-xs text-gray-500">↳ {r.name}</td>
-                              <td className="p-2 text-xs font-semibold">{r.size || "—"}</td>
-                              <td className="p-2 text-right tabular-nums text-xs">{r.qty}</td>
-                              <td className="p-2 text-right tabular-nums text-xs">{tl(r.revenue)}</td>
-                            </tr>
-                          ))}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              ) : (
-                <p className="text-sm text-gray-400 py-4 text-center">{f ? "Aramayla eşleşen ürün yok." : "Bu aralıkta sipariş yok."}</p>
-              );
-            })()}
-          </>
-        ) : (
-          <p className="text-sm text-gray-400 py-4 text-center">Yükleniyor…</p>
-        )}
-      </div>
 
       <div className="bg-white rounded-xl border p-5">
         {/* Başlık seçilen kırılımı söyler; az kovalı (haftalık/aylık) görünümde iki nokta
