@@ -88,6 +88,10 @@ export default function Manufacturing() {
       qc_result: "",                // kalite kontrol: "" | "gecti" | "kaldi" (kaldi → Re-FRI)
       qc_date: "",                  // kalite kontrol tarihi
       qc_images: [],                // kalite kontrol görselleri
+      qc2_result: "",               // 2. kalite kontrol (Re-FRI sonrası)
+      qc2_date: "",
+      qc2_images: [],
+      deliveries: [],               // depo sevkiyatları [{date, items:{"Renk|Beden":n}, note_images:[]}]
       waste_meters: 0,
       notes: "",
       current_stage: "siparis_dosyasi",
@@ -182,6 +186,10 @@ export default function Manufacturing() {
       qc_result: item.qc_result || "",
       qc_date: item.qc_date || (item.stage_dates || {}).kalite_kontrol || "",
       qc_images: item.qc_images || [],
+      qc2_result: item.qc2_result || "",
+      qc2_date: item.qc2_date || "",
+      qc2_images: item.qc2_images || [],
+      deliveries: item.deliveries || [],
       waste_meters: item.waste_meters || 0,
       notes: item.notes || "",
       current_stage: item.current_stage || "siparis_dosyasi",
@@ -212,6 +220,15 @@ export default function Manufacturing() {
           .filter(([, v]) => v !== "" && v !== null && v !== undefined)
           .map(([k, v]) => [k, Number(v)])
       );
+      // Sevkiyatlar: boş kayıtlar atılır, adetler sayıya çevrilir
+      payload.deliveries = (payload.deliveries || []).map(d => ({
+        ...d,
+        items: Object.fromEntries(
+          Object.entries(d.items || {})
+            .filter(([, v]) => v !== "" && v != null && Number(v) > 0)
+            .map(([k, v]) => [k, Number(v)])
+        ),
+      })).filter(d => d.date || Object.keys(d.items).length || (d.note_images || []).length);
       // Toplam anlaşma bedeli OTOMATİK: genel toplam adet × birim fiyat (kullanıcı isteği)
       const _qty = Object.values(payload.size_distribution).reduce((a, b) => a + Number(b || 0), 0);
       payload.agreed_total = Number((payload.unit_price * _qty).toFixed(2));
@@ -294,21 +311,25 @@ export default function Manufacturing() {
     }
   };
 
-  // Görsel yükleyici (dikim raporu + kalite kontrol): dosya seç → /upload/image → URL form[field]'a eklenir
+  // Görsel yükleyici (dikim raporu + kalite kontrol + irsaliye): dosya seç → /upload/image → URL listesi
   const [reportUploading, setReportUploading] = useState("");  // "" | alan adı (hangi bölüm yüklüyor)
-  const uploadReportImages = async (fileList, field = "sewing_report_images") => {
+  const _uploadImages = async (fileList) => {
     const files = Array.from(fileList || []);
-    if (!files.length) return;
+    if (!files.length) return [];
+    const token = localStorage.getItem("token");
+    const urls = [];
+    for (const f of files) {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await axios.post(`${API}/upload/image`, fd, { headers: { Authorization: `Bearer ${token}` } });
+      if (r.data?.url) urls.push(r.data.url);
+    }
+    return urls;
+  };
+  const uploadReportImages = async (fileList, field = "sewing_report_images") => {
     setReportUploading(field);
     try {
-      const token = localStorage.getItem("token");
-      const urls = [];
-      for (const f of files) {
-        const fd = new FormData();
-        fd.append("file", f);
-        const r = await axios.post(`${API}/upload/image`, fd, { headers: { Authorization: `Bearer ${token}` } });
-        if (r.data?.url) urls.push(r.data.url);
-      }
+      const urls = await _uploadImages(fileList);
       if (urls.length) {
         setForm((prev) => ({ ...prev, [field]: [...(prev[field] || []), ...urls] }));
         toast.success(`${urls.length} görsel yüklendi — Kaydet'e basmayı unutmayın`);
@@ -319,6 +340,34 @@ export default function Manufacturing() {
       setReportUploading("");
     }
   };
+  // Sevkiyat kartına irsaliye görseli yükle (di: deliveries dizisindeki sıra)
+  const uploadDeliveryImages = async (di, fileList) => {
+    setReportUploading(`delivery_${di}`);
+    try {
+      const urls = await _uploadImages(fileList);
+      if (urls.length) {
+        setForm((prev) => ({
+          ...prev,
+          deliveries: (prev.deliveries || []).map((d, j) => j === di
+            ? { ...d, note_images: [...(d.note_images || []), ...urls] } : d),
+        }));
+        toast.success(`${urls.length} irsaliye görseli yüklendi — Kaydet'i unutmayın`);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Görsel yüklenemedi");
+    } finally {
+      setReportUploading("");
+    }
+  };
+  const setDeliveryField = (di, patch) => setForm((prev) => ({
+    ...prev,
+    deliveries: (prev.deliveries || []).map((d, j) => (j === di ? { ...d, ...patch } : d)),
+  }));
+  const setDeliveryItem = (di, key, val) => setForm((prev) => ({
+    ...prev,
+    deliveries: (prev.deliveries || []).map((d, j) => (j === di
+      ? { ...d, items: { ...(d.items || {}), [key]: val } } : d)),
+  }));
 
   const deleteRecord = async (item) => {
     if (!await window.appConfirm(`"${item.code}" kaydını silmek istiyor musunuz?`)) return;
@@ -535,6 +584,16 @@ export default function Manufacturing() {
                         </p>
                       ));
                     })()}
+                    {(item.deliveries || []).length > 0 && (() => {
+                      const _shipped = (item.deliveries || []).reduce((a, d) =>
+                        a + Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0), 0);
+                      return (
+                        <p className="text-[10px] font-bold text-sky-700 whitespace-nowrap"
+                          title={`${(item.deliveries || []).length} sevkiyat — detay için düzenleye girin`}>
+                          Sevk: {_shipped}/{item.total_units || 0}
+                        </p>
+                      );
+                    })()}
                     {_delivered ? (
                       <p className="text-[10px] font-bold text-emerald-600">Teslim alındı ✓</p>
                     ) : _days == null ? null : _days < 0 ? (
@@ -641,7 +700,8 @@ export default function Manufacturing() {
                     {(() => {
                       const _qcDate = item.qc_date || (item.stage_dates || {}).kalite_kontrol;
                       const _qcImgs = item.qc_images || [];
-                      if (!item.qc_result && !_qcDate && !_qcImgs.length)
+                      if (!item.qc_result && !_qcDate && !_qcImgs.length
+                        && !item.qc2_result && !item.qc2_date && !(item.qc2_images || []).length)
                         return <span className="text-xs text-gray-300">—</span>;
                       return (
                         <div className="space-y-1">
@@ -667,6 +727,37 @@ export default function Manufacturing() {
                               ))}
                               {_qcImgs.length > 4 && (
                                 <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_qcImgs.length - 4}</span>
+                              )}
+                            </div>
+                          )}
+                          {/* 2. kalite kontrol (Re-FRI sonrası tekrar) — varsa ayrı satırda */}
+                          {(item.qc2_result || item.qc2_date || (item.qc2_images || []).length > 0) && (
+                            <div className="pt-1 mt-1 border-t border-gray-100 space-y-1">
+                              <p className="text-[9px] font-bold text-gray-400 uppercase">2. Kontrol</p>
+                              {item.qc2_result === "gecti" && (
+                                <p className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 inline-block">GEÇTİ ✓</p>
+                              )}
+                              {item.qc2_result === "kaldi" && (
+                                <p className="inline-flex items-center gap-1">
+                                  <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5">KALDI ✗</span>
+                                  <span className="text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5" title="Yeniden kalite kontrol gerekli">Re-FRI</span>
+                                </p>
+                              )}
+                              {item.qc2_date && (
+                                <p className="text-xs text-gray-700 whitespace-nowrap">{new Date(item.qc2_date).toLocaleDateString("tr-TR")}</p>
+                              )}
+                              {(item.qc2_images || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1 max-w-[150px]">
+                                  {(item.qc2_images || []).slice(0, 4).map((u, i) => (
+                                    <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                                      <img src={_imgUrl(u)} alt={`2.kk ${i + 1}`}
+                                        className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-amber-400" loading="lazy" />
+                                    </a>
+                                  ))}
+                                  {(item.qc2_images || []).length > 4 && (
+                                    <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{(item.qc2_images || []).length - 4}</span>
+                                  )}
+                                </div>
                               )}
                             </div>
                           )}
@@ -1166,6 +1257,122 @@ export default function Manufacturing() {
                   )}
                 </div>
               </div>
+
+              {/* 2. Kalite Kontrol — ilk kontrol KALDI ise (veya veri girildiyse) aynı yapıda ikinci tur */}
+              {(form.qc_result === "kaldi" || form.qc2_result || form.qc2_date || (form.qc2_images || []).length > 0) && (
+                <div className="mt-3 pt-3 border-t-2 border-red-100">
+                  <p className="text-xs font-bold text-red-700 uppercase mb-2">🔁 2. Kalite Kontrol (Re-FRI)</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Sonuç</label>
+                      <div className="flex gap-2">
+                        <button type="button" data-testid="qc2-pass"
+                          onClick={() => setForm(f => ({ ...f, qc2_result: f.qc2_result === "gecti" ? "" : "gecti" }))}
+                          className={`flex-1 px-3 py-2 rounded text-sm font-bold border-2 transition ${form.qc2_result === "gecti" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:border-emerald-400"}`}>
+                          ✓ Geçti
+                        </button>
+                        <button type="button" data-testid="qc2-fail"
+                          onClick={() => setForm(f => ({ ...f, qc2_result: f.qc2_result === "kaldi" ? "" : "kaldi" }))}
+                          className={`flex-1 px-3 py-2 rounded text-sm font-bold border-2 transition ${form.qc2_result === "kaldi" ? "bg-red-600 text-white border-red-600" : "bg-white text-gray-600 border-gray-300 hover:border-red-400"}`}>
+                          ✗ Kaldı
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">2. Kontrol Tarihi</label>
+                      <input type="date" value={form.qc2_date}
+                        onChange={e => setForm({ ...form, qc2_date: e.target.value })}
+                        className="w-full border px-3 py-2 rounded text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">2. Kontrol Görselleri</label>
+                      <label className={`inline-flex items-center gap-1.5 px-3 py-2 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading === "qc2_images" ? "opacity-50 pointer-events-none" : "border-red-300 text-red-700 hover:bg-red-50"}`}>
+                        {reportUploading === "qc2_images" ? "Yükleniyor…" : "＋ Görsel Yükle"}
+                        <input type="file" accept="image/*" multiple className="hidden"
+                          onChange={(e) => { uploadReportImages(e.target.files, "qc2_images"); e.target.value = ""; }} />
+                      </label>
+                      {(form.qc2_images || []).length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {form.qc2_images.map((u, i) => (
+                            <div key={i} className="relative group">
+                              <a href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                                <img src={_imgUrl(u)} alt={`2.kk ${i + 1}`} className="w-16 h-16 object-cover rounded border" />
+                              </a>
+                              <button type="button"
+                                onClick={() => setForm(f => ({ ...f, qc2_images: f.qc2_images.filter((_, j) => j !== i) }))}
+                                title="Görseli kaldır"
+                                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full text-[10px] leading-none hidden group-hover:flex items-center justify-center">×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Depo Sevkiyatları — tarih + renk/beden adet + irsaliye görselleri; listede Sevk x/y */}
+            <div className="border-2 border-sky-100 bg-sky-50/30 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-sky-700 uppercase">🚚 Depo Sevkiyatları</p>
+                <button type="button" data-testid="add-delivery"
+                  onClick={() => setForm(f => ({ ...f, deliveries: [...(f.deliveries || []), { date: new Date().toISOString().substring(0, 10), items: {}, note_images: [] }] }))}
+                  className="px-3 py-1.5 text-xs font-bold text-sky-700 border-2 border-dashed border-sky-300 rounded hover:bg-sky-50">
+                  ＋ Sevkiyat Ekle
+                </button>
+              </div>
+              {(form.deliveries || []).length === 0 && (
+                <p className="text-[11px] text-gray-400">Henüz sevkiyat girilmedi. Her parti geldiğinde "Sevkiyat Ekle" ile tarih, adetler ve irsaliye görselini kaydedin — listede toplam Sevk: x/y olarak görünür.</p>
+              )}
+              {(form.deliveries || []).map((d, di) => {
+                const _dTot = Object.values(d.items || {}).reduce((a, b) => a + Number(b || 0), 0);
+                return (
+                  <div key={di} className="border bg-white rounded-lg p-2.5 mb-2">
+                    <div className="flex items-center gap-3 flex-wrap mb-2">
+                      <span className="text-xs font-bold text-gray-500">#{di + 1}</span>
+                      <input type="date" value={d.date || ""}
+                        onChange={(e) => setDeliveryField(di, { date: e.target.value })}
+                        className="border px-2 py-1.5 rounded text-sm" />
+                      <span className="text-xs text-gray-500">Toplam: <b className="text-sky-700">{_dTot}</b> adet</span>
+                      <button type="button" onClick={() => setForm(f => ({ ...f, deliveries: f.deliveries.filter((_, j) => j !== di) }))}
+                        className="ml-auto text-xs text-red-500 hover:bg-red-50 rounded px-2 py-1">Sevkiyatı Sil</button>
+                    </div>
+                    {/* Renk|Beden bazında gelen adetler — sipariş matrisindeki kalemler */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 mb-2">
+                      {Object.keys(form.size_distribution || {}).length === 0 && (
+                        <p className="text-[11px] text-gray-400 col-span-full">Önce yukarıda sipariş adet matrisini doldurun.</p>
+                      )}
+                      {Object.keys(form.size_distribution || {}).map(k => (
+                        <label key={k} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                          <span className="flex-1 truncate" title={k}>{k}</span>
+                          <input type="number" min="0" value={d.items?.[k] ?? ""}
+                            onChange={(e) => setDeliveryItem(di, k, e.target.value)}
+                            className="w-14 border rounded px-1.5 py-1 text-xs text-right" placeholder="0" />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-start gap-2 flex-wrap">
+                      <label className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-dashed rounded text-xs font-semibold cursor-pointer transition ${reportUploading === `delivery_${di}` ? "opacity-50 pointer-events-none" : "border-sky-300 text-sky-700 hover:bg-sky-50"}`}>
+                        {reportUploading === `delivery_${di}` ? "Yükleniyor…" : "＋ İrsaliye Görseli"}
+                        <input type="file" accept="image/*" multiple className="hidden"
+                          onChange={(e) => { uploadDeliveryImages(di, e.target.files); e.target.value = ""; }} />
+                      </label>
+                      {(d.note_images || []).map((u, i) => (
+                        <div key={i} className="relative group">
+                          <a href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                            <img src={_imgUrl(u)} alt={`irsaliye ${i + 1}`} className="w-12 h-12 object-cover rounded border" />
+                          </a>
+                          <button type="button"
+                            onClick={() => setDeliveryField(di, { note_images: (d.note_images || []).filter((_, j) => j !== i) })}
+                            title="Görseli kaldır"
+                            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full text-[10px] leading-none hidden group-hover:flex items-center justify-center">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div>

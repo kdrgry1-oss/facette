@@ -155,6 +155,11 @@ async def create_manufacturing(payload: dict, current_user: dict = Depends(requi
         "qc_result": payload.get("qc_result") or "",       # kalite kontrol: "" | "gecti" | "kaldi" (kaldi → Re-FRI)
         "qc_date": payload.get("qc_date") or "",           # kalite kontrol tarihi
         "qc_images": payload.get("qc_images") or [],       # kalite kontrol görselleri URL listesi
+        "qc2_result": payload.get("qc2_result") or "",     # 2. kalite kontrol (Re-FRI sonrası tekrar)
+        "qc2_date": payload.get("qc2_date") or "",
+        "qc2_images": payload.get("qc2_images") or [],
+        # Depo sevkiyatları: [{date, items:{"Renk|Beden": n}, note_images:[url]}] — kısmi teslimat takibi
+        "deliveries": payload.get("deliveries") or [],
         "payments": payload.get("payments", []),
         "cost_lines": payload.get("cost_lines", []),  # F8 – maliyet kalemleri
         "purchase_orders": payload.get("purchase_orders", []),  # F11
@@ -202,6 +207,7 @@ async def update_manufacturing(record_id: str, payload: dict, current_user: dict
         "has_lining", "color_approvals", "cutting_start_date", "actual_distribution", "product_created",
         "sewing_workshop", "sewing_report_images",
         "qc_result", "qc_date", "qc_images",
+        "qc2_result", "qc2_date", "qc2_images", "deliveries",
     ):
         if f in payload:
             update[f] = payload[f]
