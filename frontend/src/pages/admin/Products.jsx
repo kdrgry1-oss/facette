@@ -2195,7 +2195,14 @@ export default function AdminProducts() {
                     <a href={`/${product.slug || product.id}`} target="_blank" rel="noopener noreferrer" className="font-medium line-clamp-1 text-orange-600 hover:text-orange-800 hover:underline">
                       {product.name}
                     </a>
-                    <p className="text-xs text-gray-500">{product.category_name}</p>
+                    <p className="text-xs text-gray-500">
+                      {(() => {
+                        // Ürünün BAĞLI OLDUĞU TÜM kategoriler (yalnız birincil değil — kullanıcı isteği)
+                        const _ids = [...new Set([...(product.category_ids || []), ...(product.categories || [])].map(String))];
+                        const _names = _ids.map((id) => categories.find((c) => String(c.id) === id)?.name).filter(Boolean);
+                        return [...new Set([product.category_name, ..._names].filter(Boolean))].join(" · ") || "—";
+                      })()}
+                    </p>
                   </td>
                   <td className="text-sm font-mono whitespace-nowrap">{product.stock_code || product.sku || '-'}</td>
                   <td>
