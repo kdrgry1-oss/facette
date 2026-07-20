@@ -531,6 +531,7 @@ export default function Manufacturing() {
                 <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Dikim tarihi, atölye ve görsel imalat raporu">Dikim Başlangıcı</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Kalite kontrol: Geçti/Kaldı (kaldıysa Re-FRI), tarih ve görseller">Kalite Kontrol</th>
+                <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Depoya gelen toplam adet (birden çok sevkiyat toplanır) + irsaliye görselleri">Depo Sevkiyat</th>
                 <th className="px-3 py-3"></th>
                 <th className="text-center px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün Aç</th>
               </tr>
@@ -772,6 +773,47 @@ export default function Manufacturing() {
                       );
                     })()}
                   </td>
+                  <td className="px-3 py-3 align-top">
+                    {(() => {
+                      const _dels = item.deliveries || [];
+                      if (!_dels.length) return <span className="text-xs text-gray-300">—</span>;
+                      const _shipped = _dels.reduce((a, d) =>
+                        a + Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0), 0);
+                      const _lastDate = _dels.map(d => d.date).filter(Boolean).sort().slice(-1)[0];
+                      const _allImgs = _dels.flatMap(d => d.note_images || []);
+                      const _tip = _dels.map((d, i) => {
+                        const t = Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0);
+                        return `#${i + 1} ${d.date ? new Date(d.date).toLocaleDateString("tr-TR") : "?"}: ${t} adet`;
+                      }).join("\n");
+                      return (
+                        <div className="space-y-1">
+                          {/* Hizalama sözleşmesi: 1. satır TARİH (son sevkiyat), 2. satır TOPLAM rozeti, 3. satır irsaliye görselleri */}
+                          <p className="text-xs text-gray-700 whitespace-nowrap h-4">
+                            {_lastDate ? new Date(_lastDate).toLocaleDateString("tr-TR") : ""}
+                          </p>
+                          <div className="min-h-[22px]">
+                            <p className="text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 inline-block whitespace-nowrap"
+                              title={_tip}>
+                              Toplam: {_shipped}/{item.total_units || 0}{_dels.length > 1 ? ` · ${_dels.length} sevkiyat` : ""}
+                            </p>
+                          </div>
+                          {_allImgs.length > 0 && (
+                            <div className="flex flex-wrap gap-1 max-w-[150px]" title="İrsaliye görselleri — büyütmek için tıklayın">
+                              {_allImgs.slice(0, 4).map((u, i) => (
+                                <a key={i} href={_imgUrl(u)} target="_blank" rel="noreferrer">
+                                  <img src={_imgUrl(u)} alt={`irsaliye ${i + 1}`}
+                                    className="w-9 h-9 object-cover rounded border hover:ring-2 hover:ring-sky-400" loading="lazy" />
+                                </a>
+                              ))}
+                              {_allImgs.length > 4 && (
+                                <span className="w-9 h-9 rounded border bg-gray-100 text-[10px] font-bold text-gray-500 flex items-center justify-center">+{_allImgs.length - 4}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {/* Kırmızı yanıp sönen hatırlatıcı: bir sonraki aşamaya ilerletme gerekiyor */}
                     {_showDot && (
@@ -818,7 +860,7 @@ export default function Manufacturing() {
                 </tr>
                 {qtyDetail.has(item.id) && (
                   <tr className="bg-blue-50/40 border-b">
-                    <td colSpan={11} className="px-6 py-3">
+                    <td colSpan={12} className="px-6 py-3">
                       <div className="text-[11px] font-bold text-gray-600 uppercase mb-1.5">Adet Detayı — Sipariş → Kesilen</div>
                       <div className="flex flex-wrap gap-2">
                         {Object.entries(item.size_distribution || {}).map(([k, q]) => {
