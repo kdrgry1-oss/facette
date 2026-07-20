@@ -436,9 +436,9 @@ export function ProductsReport() {
         <ResponsiveContainer width="100%" height={340}>
           <BarChart data={top.slice(0, 10)} layout="vertical" margin={{ left: 120 }}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" tick={{ fontSize: 11 }} />
+            <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => Number(v).toLocaleString("tr-TR")} />
             <YAxis dataKey="name" type="category" width={200} tick={{ fontSize: 10 }} />
-            <Tooltip />
+            <Tooltip formatter={(v) => [`₺${Number(v).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Ciro"]} />
             <Bar dataKey="revenue" fill="#3b82f6" name="Ciro (₺)" />
           </BarChart>
         </ResponsiveContainer>
