@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
-import { SlidersHorizontal, Square, Columns2, Grid2X2, X, Check } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { X, Check } from "lucide-react";
 import axios from "axios";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -217,6 +217,21 @@ export default function Category() {
     currentCategory?.name ||
     slug?.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ||
     "Tüm Ürünler";
+  // Breadcrumb için üst kategori (varsa): Anasayfa / Üst Kategori / Bu Sayfa
+  const parentCategory = currentCategory?.parent_id
+    ? categories.find((c) => String(c.id) === String(currentCategory.parent_id)) || null
+    : null;
+
+  // Sıralama menüsü (toolbar ortası) — seçim URL'e yazılır, liste yenilenir
+  const [sortOpen, setSortOpen] = useState(false);
+  const applySort = (value) => {
+    const [sk, so] = value.split(":");
+    const next = new URLSearchParams(searchParams);
+    next.set("sort", sk); next.set("order", so);
+    next.delete("page");
+    setSearchParams(next);
+    setSortOpen(false);
+  };
 
   const sortOptions = [
     { label: "En Yeniler", value: "created_at:desc" },
@@ -246,36 +261,79 @@ export default function Category() {
       <Header />
 
       <div className="w-full px-2 md:px-4">
-        {/* Category Title — Mango usulü sade başlık */}
-        <div className="pt-8 pb-4 md:pt-10">
-          <h1 className="text-xl md:text-2xl font-normal tracking-tight text-stone-900">
+        {/* Breadcrumb — ortalı: Anasayfa / (Üst Kategori) / Bu Sayfa (SUUD tarzı) */}
+        <nav className="pt-5 md:pt-7 flex items-center justify-center gap-2 text-[13px] md:text-sm flex-wrap" aria-label="breadcrumb" data-testid="category-breadcrumb">
+          <Link to="/" className="text-gray-400 hover:text-black transition-colors">Anasayfa</Link>
+          <span className="text-gray-300">/</span>
+          {parentCategory && (
+            <>
+              <Link to={`/${parentCategory.slug}`} className="text-gray-400 hover:text-black transition-colors">{parentCategory.name}</Link>
+              <span className="text-gray-300">/</span>
+            </>
+          )}
+          <span className="text-black">{categoryName}</span>
+        </nav>
+
+        {/* Ortalanmış büyük kategori başlığı */}
+        <div className="pt-6 pb-6 md:pt-8 md:pb-8 text-center">
+          <h1 className="text-2xl md:text-3xl font-normal tracking-tight text-stone-900">
             {categoryName}
           </h1>
         </div>
 
-        {/* Toolbar */}
-        <div className="flex items-center justify-between py-4 border-b">
+        {/* Toolbar — üç bölge, dikey ayraçlı: + Filtreleme | Sıralama | Görünüm 1 2 4 */}
+        <div className="grid grid-cols-3 items-stretch border-b">
           <button
             onClick={openFilter}
-            className="flex items-center gap-2 text-sm hover:opacity-60 transition-opacity"
+            className="flex items-center justify-start gap-2 py-4 pr-2 text-sm hover:opacity-60 transition-opacity border-r border-gray-200"
             data-testid="filter-btn"
           >
-            <SlidersHorizontal size={16} strokeWidth={1.5} />
-            <span>Filtrele{activeCount > 0 ? ` (${activeCount})` : ""}</span>
+            <span className="text-xl leading-none font-light" aria-hidden="true">+</span>
+            <span>Filtreleme{activeCount > 0 ? ` (${activeCount})` : ""}</span>
           </button>
 
-          <span className="text-sm text-gray-500 hidden md:block">{total} Ürün</span>
+          <div className="relative border-r border-gray-200">
+            <button
+              onClick={() => setSortOpen((v) => !v)}
+              className="w-full h-full py-4 text-sm hover:opacity-60 transition-opacity"
+              data-testid="sort-btn"
+            >
+              Sıralama
+            </button>
+            {sortOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} aria-hidden="true" />
+                <div className="absolute top-full left-1/2 -translate-x-1/2 z-20 bg-white border border-gray-200 shadow-lg min-w-[220px] py-1">
+                  {sortOptions.map((o) => {
+                    const cur = `${sort}:${order}` === o.value;
+                    return (
+                      <button
+                        key={o.value}
+                        onClick={() => applySort(o.value)}
+                        className={`flex items-center justify-between w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 ${cur ? "font-semibold text-black" : "text-gray-600"}`}
+                      >
+                        {o.label} {cur && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
 
-          <div className="flex items-center gap-3">
-            <button onClick={() => setGridCols(1)} className={`p-1 ${gridCols === 1 ? "text-black" : "text-gray-400"}`} data-testid="grid-1" aria-label="Tekli görünüm">
-              <Square size={18} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => setGridCols(2)} className={`p-1 ${gridCols === 2 ? "text-black" : "text-gray-400"}`} data-testid="grid-2" aria-label="İkili görünüm">
-              <Columns2 size={18} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => setGridCols(4)} className={`p-1 ${gridCols === 4 ? "text-black" : "text-gray-400"}`} data-testid="grid-4" aria-label="Dörtlü görünüm">
-              <Grid2X2 size={18} strokeWidth={1.5} />
-            </button>
+          <div className="flex items-center justify-end gap-3 md:gap-4 py-4 pl-2">
+            <span className="text-sm">Görünüm</span>
+            {[1, 2, 4].map((n) => (
+              <button
+                key={n}
+                onClick={() => setGridCols(n)}
+                data-testid={`grid-${n}`}
+                aria-label={`${n}'li görünüm`}
+                className={`text-sm tabular-nums transition-colors ${gridCols === n ? "font-bold text-black" : "text-gray-400 hover:text-black"}`}
+              >
+                {n}
+              </button>
+            ))}
           </div>
         </div>
 
