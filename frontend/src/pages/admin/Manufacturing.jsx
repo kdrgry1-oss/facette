@@ -253,23 +253,27 @@ export default function Manufacturing() {
     kalite_kontrol: "Kalite kontrol tarihi",
     teslim_alindi: "Depo teslim tarihi",
   };
-  const advanceStage = async (item, newStage) => {
-    let stageDate = "";
-    if (_STAGE_DATE_LABELS[newStage]) {
-      stageDate = window.prompt(`${_STAGE_DATE_LABELS[newStage]} (YYYY-AA-GG):`, new Date().toISOString().substring(0, 10));
-      if (stageDate === null) return;
-      stageDate = (stageDate || "").trim();
-    }
-    const note = window.prompt(`"${stageLabel(newStage)}" aşamasına geçiyorsunuz. Not (opsiyonel):`);
-    if (note === null) return;
+  // İlerletme artık tarayıcı prompt'u yerine tasarıma uygun modal ile (kullanıcı isteği)
+  const [advanceModal, setAdvanceModal] = useState(null); // {item, stage, date, note}
+  const advanceStage = (item, newStage) => {
+    setAdvanceModal({
+      item, stage: newStage,
+      date: _STAGE_DATE_LABELS[newStage] ? new Date().toISOString().substring(0, 10) : "",
+      note: "",
+    });
+  };
+  const confirmAdvance = async () => {
+    const m = advanceModal;
+    if (!m) return;
     try {
       const token = localStorage.getItem("token");
-      await axios.post(`${API}/manufacturing/${item.id}/advance`,
-        { stage: newStage, note, ...(stageDate ? { stage_date: stageDate } : {}) },
+      await axios.post(`${API}/manufacturing/${m.item.id}/advance`,
+        { stage: m.stage, note: m.note || "", ...(m.date ? { stage_date: m.date } : {}) },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success("Aşama güncellendi");
-      if (newStage === "teslim_alindi") toast.success("Stok otomatik güncellendi");
+      if (m.stage === "teslim_alindi") toast.success("Stok otomatik güncellendi");
+      setAdvanceModal(null);
       fetchAll();
     } catch (err) {
       toast.error(err.response?.data?.detail || "Aşama değiştirilemedi");
@@ -627,6 +631,50 @@ export default function Manufacturing() {
           </table>
         )}
       </div>
+
+      {/* Aşama İlerletme Modalı — tarayıcı prompt yerine tasarıma uygun pencere */}
+      <Dialog open={!!advanceModal} onOpenChange={(o) => { if (!o) setAdvanceModal(null); }}>
+        <DialogContent className="max-w-md" data-testid="advance-modal">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ChevronRight size={18} className="text-rose-600" />
+              {advanceModal ? stageLabel(advanceModal.stage) : ""} aşamasına ilerlet
+            </DialogTitle>
+          </DialogHeader>
+          {advanceModal && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500">
+                <b className="text-gray-800">{advanceModal.item.product_name}</b> kaydı
+                "<b>{stageLabel(advanceModal.item.current_stage)}</b>" aşamasından
+                "<b className="text-rose-700">{stageLabel(advanceModal.stage)}</b>" aşamasına taşınacak.
+              </p>
+              {_STAGE_DATE_LABELS[advanceModal.stage] && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">{_STAGE_DATE_LABELS[advanceModal.stage]}</label>
+                  <input type="date" value={advanceModal.date}
+                    onChange={(e) => setAdvanceModal({ ...advanceModal, date: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg text-sm" data-testid="advance-date" />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Not <span className="text-gray-400 font-normal">(opsiyonel)</span></label>
+                <textarea rows={2} value={advanceModal.note}
+                  onChange={(e) => setAdvanceModal({ ...advanceModal, note: e.target.value })}
+                  placeholder="Ör: kumaş 2 top eksik geldi…"
+                  className="w-full border px-3 py-2 rounded-lg text-sm" />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button type="button" onClick={() => setAdvanceModal(null)}
+                  className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Vazgeç</button>
+                <button type="button" onClick={confirmAdvance} data-testid="advance-confirm"
+                  className="px-5 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 font-semibold inline-flex items-center gap-1.5">
+                  <ChevronRight size={15} /> İlerlet
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Create / Edit Modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
