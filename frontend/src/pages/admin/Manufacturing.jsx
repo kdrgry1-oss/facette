@@ -415,9 +415,10 @@ export default function Manufacturing() {
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalatçı</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">İmalat Sipariş No</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Ürün</th>
-                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Toplam Adet</th>
+                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Edilen Toplam Adet</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Sipariş Tarihi</th>
                 <th className="text-left px-3 py-3 text-xs font-bold text-gray-500 uppercase">Kumaş Okeyi</th>
+                <th className="text-right px-3 py-3 text-xs font-bold text-gray-500 uppercase" title="Gerçekleşen (kesilen) toplam adet">Toplam Adet</th>
                 <th className="px-3 py-3"></th>
               </tr>
             </thead>
@@ -509,6 +510,15 @@ export default function Manufacturing() {
                         })}
                       </div>
                     )}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {(() => {
+                      const _actTot = Object.values(item.actual_distribution || {}).reduce((a, b) => a + Number(b || 0), 0);
+                      return _actTot > 0
+                        ? <span className={`text-sm font-bold tabular-nums ${_actTot < (item.total_units || 0) ? "text-red-600" : _actTot > (item.total_units || 0) ? "text-emerald-600" : ""}`}
+                            title={`Gerçekleşen (kesilen) toplam — sipariş: ${item.total_units || 0}`}>{_actTot}</span>
+                        : <span className="text-xs text-gray-300">—</span>;
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {/* Kırmızı yanıp sönen hatırlatıcı: bir sonraki aşamaya ilerletme gerekiyor */}
@@ -741,7 +751,7 @@ export default function Manufacturing() {
                 </div>
               )}
               <p className="text-sm text-gray-700 mt-1.5 text-right">
-                GENEL TOPLAM: <b className="text-rose-700" data-testid="mfg-grand-total">{grandTotal}</b> adet
+                TOPLAM SİPARİŞ ADEDİ: <b className="text-rose-700" data-testid="mfg-grand-total">{grandTotal}</b> adet
               </p>
             </div>
 
