@@ -251,7 +251,7 @@ export default function Dashboard() {
           color="bg-green-500"
         />
         <StatCard
-          title="Toplam Ürün"
+          title="Satıştaki Ürün (Aktif)"
           value={stats.total_products}
           icon={Package}
           color="bg-purple-500"

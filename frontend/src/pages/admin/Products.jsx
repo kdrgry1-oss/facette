@@ -1925,7 +1925,7 @@ export default function AdminProducts() {
   return (
     <div data-testid="admin-products">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Ürünler ({total})</h1>
+        <h1 className="text-2xl font-bold">Ürünler ({total}) <span className="text-sm font-normal text-gray-400">aktif + pasif tüm katalog</span></h1>
         <div className="flex items-center gap-3">
           <input
             type="file"

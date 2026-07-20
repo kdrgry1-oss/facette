@@ -475,7 +475,7 @@ export function ProductsReport() {
         </div>
         <div className="flex items-center justify-between px-1 pb-2 text-xs text-gray-500">
           <span>
-            <span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — satışı olmayan ürünler de dahildir.
+            <span className="font-semibold text-gray-800">{rows.length}</span> ürün listeleniyor{rows.length !== top.length ? ` (toplam ${top.length})` : ""} — aktif katalog (satışı olmayanlar dahil) + seçili dönemde satış yapmış pasif ürünler.
             <span className="text-gray-400"> Satış Adedi/Ciro NET'tir (iade+iptal hariç): tüm satışı iade edilen ürün 0 satış + iade sayısıyla görünür.</span>
           </span>
           {/* Satış hızı dağılımı — filtrelenmiş listeye göre yüzde + adet */}

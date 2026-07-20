@@ -67,7 +67,8 @@ async def get_dashboard_stats(
         cnt_today, revenue_today = await _sum_range(today_iso)
 
         total_orders = await db.orders.count_documents(plat_match if plat_match else {})
-        total_products = await db.products.count_documents({"is_active": True})
+        # Satıştaki (aktif) ürün — silinmişler hariç (aksi halde Ürünler sayfasıyla çelişiyordu)
+        total_products = await db.products.count_documents({"is_active": True, "is_deleted": {"$ne": True}})
         total_customers = await db.users.count_documents({"is_admin": {"$ne": True}})
 
         growth_orders = ((cnt_range - prev_cnt) / max(prev_cnt, 1)) * 100 if prev_cnt else 0
