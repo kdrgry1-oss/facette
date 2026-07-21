@@ -4930,9 +4930,16 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Yeniden kesimde koçan numarası DEĞİŞİYORSA eski numarayı kaybetme (muhasebe
+    # mutabakatı: fiziki eski kağıt durur — hangi numaranın iptal/yenilenmiş olduğu
+    # previous_numbers'tan izlenir; 1217 vs 840 sayım farkının bir nedeni buydu).
+    _gp_upd = {"$set": gider_pusulasi}
+    _old_no = (_existing_gp or {}).get("display_number")
+    if _old_no and _old_no != display_number:
+        _gp_upd["$addToSet"] = {"previous_numbers": _old_no}
     await db.gider_pusulasi.update_one(
         {"claim_id": claim_id},
-        {"$set": gider_pusulasi},
+        _gp_upd,
         upsert=True
     )
 
