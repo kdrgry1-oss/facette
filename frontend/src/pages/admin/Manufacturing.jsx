@@ -598,16 +598,6 @@ export default function Manufacturing() {
                         </p>
                       ));
                     })()}
-                    {(item.deliveries || []).length > 0 && (() => {
-                      const _shipped = (item.deliveries || []).reduce((a, d) =>
-                        a + Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0), 0);
-                      return (
-                        <p className="text-[10px] font-bold text-sky-700 whitespace-nowrap"
-                          title={`${(item.deliveries || []).length} sevkiyat — detay için düzenleye girin`}>
-                          Sevk: {_shipped}/{item.total_units || 0}
-                        </p>
-                      );
-                    })()}
                     {_delivered ? (
                       <p className="text-[10px] font-bold text-emerald-600">Teslim alındı ✓</p>
                     ) : _days == null ? null : _days < 0 ? (
@@ -784,7 +774,7 @@ export default function Manufacturing() {
                           {_dels.map((d, i) => {
                             const t = Object.values(d.items || {}).reduce((x, y) => x + Number(y || 0), 0);
                             return (
-                              <p key={i} className="text-sm font-semibold whitespace-nowrap">
+                              <p key={i} className="text-xs text-gray-700 whitespace-nowrap">
                                 {t} adet · {d.date ? new Date(d.date).toLocaleDateString("tr-TR") : "—"}
                               </p>
                             );
