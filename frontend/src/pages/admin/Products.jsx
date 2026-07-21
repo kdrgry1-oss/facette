@@ -3385,6 +3385,7 @@ export default function AdminProducts() {
               <TabsContent value="sizetable" className="space-y-6 m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <SizeTablePanel
                   productId={editingProduct?.id}
+                  productName={formData.name || editingProduct?.name || ""}
                   variants={formData.variants}
                   onToast={(m, t) => (t === 'err' ? toast.error(m) : toast.success(m))}
                 />

@@ -7,7 +7,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // Default measurement columns for apparel
 const DEFAULT_COLUMNS = ["Göğüs", "Bel", "Kalça", "Omuz", "Kol Boyu", "Boy"];
 
-export default function SizeTablePanel({ productId, variants = [], onToast }) {
+export default function SizeTablePanel({ productId, productName = "", variants = [], onToast }) {
   const [sizes, setSizes] = useState([]);
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [values, setValues] = useState({});
@@ -135,11 +135,15 @@ export default function SizeTablePanel({ productId, variants = [], onToast }) {
       const res = await axios.post(`${API}/size-tables/${productId}/generate-image`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      // B3: görseli otomatik indir (JPEG) — ayrıca ürünün son görseli olarak eklendi.
+      // B3: görseli otomatik indir (JPEG) — dosya adı ÜRÜN ADI (kullanıcı isteği).
       if (res.data?.data_url) {
         const a = document.createElement("a");
         a.href = res.data.data_url;
-        a.download = `beden-tablosu-${productId}.jpg`;
+        const _slug = (productName || "").trim()
+          .replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s").replace(/ı/g, "i")
+          .replace(/ö/g, "o").replace(/ç/g, "c").replace(/[ĞÜŞİÖÇ]/g, (c) => ({ "Ğ": "G", "Ü": "U", "Ş": "S", "İ": "I", "Ö": "O", "Ç": "C" }[c]))
+          .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        a.download = `${_slug || `beden-tablosu-${productId}`}.jpg`;
         document.body.appendChild(a); a.click(); a.remove();
       }
       onToast?.(`Görsel oluşturuldu (${Math.round(res.data.image_bytes / 1024)} KB), indirildi ve ürünün son görseli olarak eklendi.`);
