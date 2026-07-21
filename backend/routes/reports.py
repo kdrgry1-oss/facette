@@ -503,11 +503,13 @@ async def top_products(
     bcs = [r.get("barcode") for r in raw if r.get("barcode")]
     by_id, by_bc = {}, {}
     if pids or bcs:
-        q = {"$or": []}
+        _ors = []
         if pids:
-            q["$or"].append({"id": {"$in": pids}})
+            _ors.append({"id": {"$in": pids}})
         if bcs:
-            q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
+            _ors += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
+        # Silinmiş ürün kartları eşleşmeye girmez (kullanıcı isteği: silinmiş ürün raporda görünmesin)
+        q = {"$and": [{"$or": _ors}, {"is_deleted": {"$ne": True}}]}
         async for p in db.products.find(q, {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1,
                                              "barcode": 1, "collection": 1, "created_at": 1, "stock_code": 1,
                                              "attributes": 1, "season": 1}):
@@ -544,6 +546,7 @@ async def top_products(
         if not m:
             m = merged[gkey] = {
                 "product_id": pm.get("id") or r.get("pid"), "name": name,
+                "_matched": bool(pm),  # katalogda hâlâ var olan bir ürüne bağlandı mı?
                 "qty": 0, "revenue": 0.0, "orders": 0,
                 "current_stock": pm.get("stock", None), "_sizes": {}, "_plats": {},
                 "stock_by_size": pm.get("stock_by_size") or {},
@@ -563,6 +566,9 @@ async def top_products(
         m["_sizes"][_sz] = m["_sizes"].get(_sz, 0) + _q
         _pl = (r["_id"].get("plat") or "site").strip().lower() or "site"
         m["_plats"][_pl] = m["_plats"].get(_pl, 0) + _q
+    # Kullanıcı isteği: kataloğdan SİLİNMİŞ ya da hiçbir ürün kartına eşleşmeyen
+    # kalemlerin satırları ürün raporunda GÖSTERİLMEZ (yalnız mevcut kartlar listelenir).
+    merged = {k: m for k, m in merged.items() if m.pop("_matched", False)}
     # D4 — Satış hızı (velocity) renk kodu. Seçili tarih aralığının hafta sayısına göre
     # HAFTALIK ortalama satış hesaplanır: yeşil ≥5/hafta, sarı 1-4/hafta, kırmızı <1/hafta (~ayda 0-2).
     try:
