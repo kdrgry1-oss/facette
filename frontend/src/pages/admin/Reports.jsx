@@ -363,7 +363,8 @@ export function ProductsReport() {
   const platLabel = (p) => ({ site: "Site", trendyol: "Trendyol", hepsiburada: "Hepsiburada", temu: "Temu" }[p] || (p ? p[0].toUpperCase() + p.slice(1) : "—"));
   // Sezon ürün kartındaki 'Sezon' özniteliğinden gelir (backend normalize eder); yoksa boş.
   const SEASONS = ["İlkbahar/Sonbahar", "Tüm Sezonlar", "Yaz", "Kış"];
-  const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" ? "asc" : "desc"); } };
+  // Kapsama ilk tıkta KÜÇÜKTEN büyüğe: RPT durumu acil olanlar (az haftası kalanlar) üstte.
+  const toggleSort = (k) => { if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc"); else { setSortKey(k); setSortDir(k === "name" || k === "best_size" || k === "_cover" ? "asc" : "desc"); } };
   // Filtre seçenekleri (veriden)
   const platOptions = Array.from(new Set(top.flatMap(p => (p.platform_breakdown || []).map(x => x.platform)))).sort();
   const sizeOptions = Array.from(new Set(top.flatMap(p => (p.size_breakdown || []).map(x => x.size)))).filter(s => s && s !== "—").sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
@@ -392,6 +393,14 @@ export function ProductsReport() {
     if (velFilter) r = r.filter(p => (p.velocity || {}).code === velFilter);
     r.sort((a, b) => {
       if (sortKey === "velocity") { const va = (a.velocity || {}).weekly_rate ?? -1, vb = (b.velocity || {}).weekly_rate ?? -1; return sortDir === "asc" ? va - vb : vb - va; }
+      if (sortKey === "_cover") {
+        // Satışsız (∞/—) satırlar HER İKİ yönde de en sona — acil RPT'ler öne çıksın.
+        const na = a._cover, nb = b._cover;
+        if (na == null && nb == null) return 0;
+        if (na == null) return 1;
+        if (nb == null) return -1;
+        return sortDir === "asc" ? na - nb : nb - na;
+      }
       let va = a[sortKey], vb = b[sortKey];
       if (sortKey === "name" || sortKey === "best_size" || sortKey === "top_platform" || sortKey === "season") { va = (va || "").toString(); vb = (vb || "").toString(); return sortDir === "asc" ? va.localeCompare(vb, "tr") : vb.localeCompare(va, "tr"); }
       va = va ?? -1; vb = vb ?? -1; return sortDir === "asc" ? va - vb : vb - va;

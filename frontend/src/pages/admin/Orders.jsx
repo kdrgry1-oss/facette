@@ -1771,23 +1771,36 @@ export default function AdminOrders({ unpaidView = false }) {
                   <p className="text-[11px] text-amber-800 mt-1">VKN 10 hane ise kesimde Doğan'a e-Fatura mükellefiyeti sorulur; mükellef değilse e-Arşiv kesilir. (Bu siparişte VKN'yi girip Kaydet → sonra Fatura Kes.)</p>
                 </div>
               ) : (() => {
+                // Fatura Bilgileri — HER siparişte gösterilir (kullanıcı isteği):
+                // kurumsal ise ünvan/VKN/vergi dairesi, bireysel ise müşteri adı + e-Arşiv;
+                // kesilmişse fatura no ve tarihi de burada.
                 const bi = selectedOrder.billing_info || {};
                 const ba = selectedOrder.billing_address || {};
+                const sa = selectedOrder.shipping_address || {};
                 const company = bi.company_name || ba.company_name || "";
                 const taxOffice = bi.tax_office || ba.tax_office || "";
                 const taxNumber = bi.tax_number || ba.tax_number || ba.tax_no || ba.vkn || "";
                 const isCorp = bi.is_corporate || ba.is_corporate || !!(company || taxNumber || taxOffice);
-                if (!isCorp) return null;
-                const eInv = bi.e_invoice_user === true
-                  ? "Evet (e-Fatura)"
-                  : (String(taxNumber).length === 10 ? "Olası (VKN — kesimde sorgulanır)" : "Hayır (e-Arşiv)");
+                const invNo = selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number || "";
+                const invDate = selectedOrder.invoice?.issued_at || selectedOrder.invoice_issued_at || selectedOrder.invoice_date || "";
+                const billName = company || [sa.first_name, sa.last_name].filter(Boolean).join(" ") || "-";
+                const eInv = isCorp
+                  ? (bi.e_invoice_user === true
+                      ? "Evet (e-Fatura)"
+                      : (String(taxNumber).length === 10 ? "Olası (VKN — kesimde sorgulanır)" : "Hayır (e-Arşiv)"))
+                  : "Hayır (e-Arşiv)";
                 return (
                   <div className="p-4 border rounded bg-amber-50 border-amber-200">
-                    <h3 className="font-medium mb-2 flex items-center gap-1 text-amber-900">🏢 Kurumsal Fatura Bilgileri</h3>
+                    <h3 className="font-medium mb-2 flex items-center gap-1 text-amber-900">
+                      🧾 Fatura Bilgileri
+                      <span className={`ml-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${isCorp ? "bg-amber-200 text-amber-900" : "bg-gray-200 text-gray-700"}`}>
+                        {isCorp ? "Kurumsal" : "Bireysel"}
+                      </span>
+                    </h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                       <div>
-                        <div className="text-xs text-gray-500 uppercase">Ünvan</div>
-                        <div className="font-semibold text-amber-900">{company || "-"}</div>
+                        <div className="text-xs text-gray-500 uppercase">{isCorp ? "Ünvan" : "Fatura Adı"}</div>
+                        <div className="font-semibold text-amber-900">{billName}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 uppercase">VKN / TCKN</div>
@@ -1801,6 +1814,16 @@ export default function AdminOrders({ unpaidView = false }) {
                         <div className="text-xs text-gray-500 uppercase">e-Fatura Mükellefi</div>
                         <div className="font-semibold text-amber-900">{eInv}</div>
                       </div>
+                      <div>
+                        <div className="text-xs text-gray-500 uppercase">Fatura No</div>
+                        <div className="font-mono font-semibold text-amber-900">{invNo || "Kesilmedi"}</div>
+                      </div>
+                      {invDate && (
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">Kesim Tarihi</div>
+                          <div className="font-semibold text-amber-900">{new Date(invDate).toLocaleString("tr-TR")}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
