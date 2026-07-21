@@ -354,15 +354,17 @@ export default function Header({ hideMenu = false }) {
                     <img src="/logo.webp" alt="FACETTE" className={`h-4 ${heroOverlay ? "brightness-0 invert" : ""}`} />
                   </Link>
 
-                  <nav className="hidden lg:flex items-center gap-5">
+                  {/* iPad (lg, ~1024-1280px) sıkışması: sekmeler lg'de daha kompakt (küçük punto,
+                      dar tracking, dar gap), xl'de tam boy — logoya binme/overlap engellenir. */}
+                  <nav className="hidden lg:flex items-center gap-3 xl:gap-5 min-w-0 pr-3">
                     {/* Sekmeler TAMAMEN panelden (Tasarım > Menü Yönetimi): ad, sıra, tip (link/mega), stil.
                         style=accent → elmas işaretli premium stil; style=sale → kırmızı. */}
                     {visibleTabs.map((tab) => {
                       const isAccent = tab.style === "accent";
                       const isSale = tab.style === "sale";
                       const cls = isAccent
-                        ? "group relative text-xs font-medium tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5"
-                        : `text-xs font-normal tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60${isSale ? " text-red-700" : ""}`;
+                        ? "group relative text-[11px] xl:text-xs font-medium tracking-[0.16em] xl:tracking-[0.28em] uppercase py-4 leading-none flex items-center gap-1.5 whitespace-nowrap"
+                        : `text-[11px] xl:text-xs font-normal tracking-[0.1em] xl:tracking-[0.2em] uppercase py-4 leading-none flex items-center hover:opacity-60 whitespace-nowrap${isSale ? " text-red-700" : ""}`;
                       const inner = (
                         <>
                           {isAccent && <span className="inline-block w-[5px] h-[5px] rotate-45 bg-current opacity-55 group-hover:opacity-100 transition-opacity duration-300" aria-hidden="true" />}
@@ -392,8 +394,8 @@ export default function Header({ hideMenu = false }) {
             </div>
 
             {/* Center: Logo — sadece masaüstünde (mobil logo yukarıda, sol blokta) */}
-            <Link to="/" className="hidden lg:block flex-shrink-0" data-testid="header-logo">
-              <img src="/logo.webp" alt="FACETTE" className={`h-6 ${heroOverlay ? "brightness-0 invert" : ""}`} />
+            <Link to="/" className="hidden lg:block flex-shrink-0 mx-4" data-testid="header-logo">
+              <img src="/logo.webp" alt="FACETTE" className={`h-5 xl:h-6 ${heroOverlay ? "brightness-0 invert" : ""}`} />
             </Link>
 
             {/* Right: Icons (mobile: search icon + account + favorites + cart, Mango tarzı; desktop: full set) */}

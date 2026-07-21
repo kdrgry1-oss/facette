@@ -1716,7 +1716,7 @@ export default function AdminOrders({ unpaidView = false }) {
               {/* Customer Info */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="p-4 border rounded">
-                  <h3 className="font-medium mb-2">Müşteri Bilgileri</h3>
+                  <h3 className="font-medium mb-3">{editMode ? "Müşteri Bilgileri" : "Teslimat Adresi"}</h3>
                   {editMode ? (
                     <div className="space-y-2">
                       <div className="grid grid-cols-2 gap-2">
@@ -1726,46 +1726,27 @@ export default function AdminOrders({ unpaidView = false }) {
                       <input className="border rounded px-2 py-1 text-sm w-full" placeholder="E-posta" value={editData.shipping_address.email || ""} onChange={(e) => setSA("email", e.target.value)} />
                       <input className="border rounded px-2 py-1 text-sm w-full" placeholder="Telefon" value={editData.shipping_address.phone || ""} onChange={(e) => setSA("phone", e.target.value)} />
                     </div>
-                  ) : (
-                    <>
-                      <p>{selectedOrder.shipping_address?.first_name} {selectedOrder.shipping_address?.last_name}</p>
-                      <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.email}</p>
-                      <p className="text-sm text-gray-500">{selectedOrder.shipping_address?.phone}</p>
-                      {(() => {
-                        // Fatura bilgileri — ayrı kutu yerine burada kompakt (kullanıcı isteği: 2 kutu).
-                        const bi = selectedOrder.billing_info || {};
-                        const ba = selectedOrder.billing_address || {};
-                        const company = bi.company_name || ba.company_name || "";
-                        const taxOffice = bi.tax_office || ba.tax_office || "";
-                        const taxNumber = bi.tax_number || ba.tax_number || ba.tax_no || ba.vkn || "";
-                        const isCorp = bi.is_corporate || ba.is_corporate || !!(company || taxNumber || taxOffice);
-                        const invNo = selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number || "";
-                        const eInv = isCorp
-                          ? (bi.e_invoice_user === true
-                              ? "e-Fatura"
-                              : (String(taxNumber).length === 10 ? "VKN — kesimde sorgulanır" : "e-Arşiv"))
-                          : "e-Arşiv";
-                        return (
-                          <div className="mt-3 pt-3 border-t text-sm space-y-0.5">
-                            <p className="font-medium flex items-center gap-2">
-                              🧾 Fatura
-                              <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${isCorp ? "bg-amber-100 text-amber-900" : "bg-gray-100 text-gray-600"}`}>
-                                {isCorp ? "Kurumsal" : "Bireysel"}
-                              </span>
-                              <span className="text-xs text-gray-500">{eInv}</span>
-                            </p>
-                            {company && <p className="text-gray-700">Ünvan: <span className="font-medium">{company}</span></p>}
-                            {taxNumber && <p className="text-gray-700">VKN/TCKN: <span className="font-mono font-medium">{taxNumber}</span></p>}
-                            {taxOffice && <p className="text-gray-700">Vergi Dairesi: <span className="font-medium">{taxOffice}</span></p>}
-                            <p className="text-gray-700">Fatura No: <span className="font-mono font-medium">{invNo || "Kesilmedi"}</span></p>
-                          </div>
-                        );
-                      })()}
-                    </>
-                  )}
+                  ) : (() => {
+                    const sa = selectedOrder.shipping_address || {};
+                    const Row = ({ l, v, mono }) => v ? (
+                      <div className="flex gap-2 text-sm">
+                        <span className="text-gray-500 w-28 shrink-0 font-medium">{l}:</span>
+                        <span className={mono ? "font-mono" : ""}>{v}</span>
+                      </div>
+                    ) : null;
+                    const addr = [sa.address, [sa.district, sa.city].filter(Boolean).join(" / ")].filter(Boolean).join(" — ");
+                    return (
+                      <div className="space-y-1.5">
+                        <Row l="Ad-Soyad" v={[sa.first_name, sa.last_name].filter(Boolean).join(" ")} />
+                        <Row l="Adres" v={addr} />
+                        <Row l="Telefon" v={sa.phone} />
+                        <Row l="E-Posta" v={sa.email} />
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="p-4 border rounded">
-                  <h3 className="font-medium mb-2">Teslimat Adresi</h3>
+                  <h3 className="font-medium mb-3">{editMode ? "Teslimat Adresi" : "Fatura Adresi"}</h3>
                   {editMode ? (
                     <div className="space-y-2">
                       <textarea rows={2} className="border rounded px-2 py-1 text-sm w-full resize-none" placeholder="Açık adres" value={editData.shipping_address.address || ""} onChange={(e) => setSA("address", e.target.value)} />
@@ -1774,12 +1755,38 @@ export default function AdminOrders({ unpaidView = false }) {
                         <input className="border rounded px-2 py-1 text-sm w-full" placeholder="İl" value={editData.shipping_address.city || ""} onChange={(e) => setSA("city", e.target.value)} />
                       </div>
                     </div>
-                  ) : (
-                    <>
-                      <p className="text-sm">{selectedOrder.shipping_address?.address}</p>
-                      <p className="text-sm">{selectedOrder.shipping_address?.district} / {selectedOrder.shipping_address?.city}</p>
-                    </>
-                  )}
+                  ) : (() => {
+                    // Trendyol "Fatura Bilgileri" düzeni: Ad-Soyad/Ünvan, Adres, E-Fatura Mükellefi
+                    // + (doluysa) VKN/Vergi Dairesi ve Fatura No — teslimatla YAN YANA tek kutu.
+                    const sa = selectedOrder.shipping_address || {};
+                    const bi = selectedOrder.billing_info || {};
+                    const ba = selectedOrder.billing_address || {};
+                    const company = bi.company_name || ba.company_name || "";
+                    const taxOffice = bi.tax_office || ba.tax_office || "";
+                    const taxNumber = bi.tax_number || ba.tax_number || ba.tax_no || ba.vkn || "";
+                    const isCorp = bi.is_corporate || ba.is_corporate || !!(company || taxNumber || taxOffice);
+                    const invNo = selectedOrder.invoice?.invoice_number || selectedOrder.invoice_number || "";
+                    const eInv = bi.e_invoice_user === true ? "Evet" : (isCorp && String(taxNumber).length === 10 ? "Kesimde sorgulanır" : "Hayır");
+                    const bAddr = [ba.address, [ba.district, ba.city].filter(Boolean).join(" / ")].filter(Boolean).join(" — ")
+                      || [sa.address, [sa.district, sa.city].filter(Boolean).join(" / ")].filter(Boolean).join(" — ");
+                    const bName = company || [ba.first_name || sa.first_name, ba.last_name || sa.last_name].filter(Boolean).join(" ");
+                    const Row = ({ l, v, mono }) => v ? (
+                      <div className="flex gap-2 text-sm">
+                        <span className="text-gray-500 w-36 shrink-0 font-medium">{l}:</span>
+                        <span className={mono ? "font-mono" : ""}>{v}</span>
+                      </div>
+                    ) : null;
+                    return (
+                      <div className="space-y-1.5">
+                        <Row l={isCorp ? "Ünvan" : "Ad-Soyad"} v={bName} />
+                        <Row l="Adres" v={bAddr} />
+                        <Row l="E-Fatura Mükellefi" v={eInv} />
+                        <Row l="VKN / TCKN" v={taxNumber} mono />
+                        <Row l="Vergi Dairesi" v={taxOffice} />
+                        <Row l="Fatura No" v={invNo || "Kesilmedi"} mono />
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

@@ -2439,9 +2439,9 @@ export default function AdminProducts() {
                   <td>
                     <div className="flex gap-1 items-center">
                         <button
-                          onClick={() => { window.open(`/admin/urunler/${product.id}`, '_blank'); }}
+                          onClick={() => openEditModal(product)}
                           className="p-1.5 hover:bg-gray-100 rounded"
-                          title="Düzenle (Yeni Sekmede Açılır)"
+                          title="Düzenle"
                           data-testid={`product-edit-modal-${product.id}`}
                         >
                           <Edit size={16} />
