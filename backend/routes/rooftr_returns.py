@@ -111,7 +111,7 @@ async def list_rooftr_return_orders(
         "return_approved_at": 1, "refund_paid_at": 1, "return_request": 1,
         "cargo_tracking_number": 1, "cargo_tracking_url": 1, "cargo_provider_name": 1,
         "iyzico_retrieve_response": 1, "installment": 1, "admin_notes": 1,
-        "invoice_type": 1, "billing_info": 1,
+        "invoice_type": 1, "billing_info": 1, "free_shipping_threshold": 1,
     }
 
     cursor = (
@@ -195,6 +195,7 @@ async def list_rooftr_return_orders(
             ],
             "invoice_number": o.get("invoice_number") or "",
             "is_efatura": _order_is_efatura(o),
+            "free_shipping_threshold": o.get("free_shipping_threshold"),
             "created_at": o.get("created_at") or "",
             "updated_at": o.get("updated_at") or "",
             "return_approved_at": o.get("return_approved_at") or "",
@@ -315,10 +316,12 @@ async def list_rooftr_return_orders(
     # Ücretsiz-kargo siparişlerinde kısmi iade mahsubu için standart kargo ücreti
     # (vitrin/checkout ile AYNI kaynak: settings.cargo_fees[default] → settings.shipping_fee)
     _free_ship_fee = 0.0
+    _free_ship_threshold = 0.0
     try:
         _s = await db.settings.find_one(
             {"id": "main"},
-            {"_id": 0, "cargo_fees": 1, "default_cargo_company": 1, "shipping_fee": 1},
+            {"_id": 0, "cargo_fees": 1, "default_cargo_company": 1, "shipping_fee": 1,
+             "free_shipping_threshold": 1},
         ) or {}
         _cf = _s.get("cargo_fees") or {}
         _dc = _s.get("default_cargo_company") or ""
@@ -326,6 +329,8 @@ async def list_rooftr_return_orders(
             _free_ship_fee = float(_cf.get(_dc))
         elif _s.get("shipping_fee") not in (None, ""):
             _free_ship_fee = float(_s.get("shipping_fee"))
+        if _s.get("free_shipping_threshold") not in (None, ""):
+            _free_ship_threshold = float(_s.get("free_shipping_threshold"))
     except Exception:
         _free_ship_fee = 0.0
 
@@ -333,6 +338,7 @@ async def list_rooftr_return_orders(
         "success": True,
         "orders": rows,
         "free_ship_fee": round(_free_ship_fee or 0, 2),
+        "free_shipping_threshold": round(_free_ship_threshold or 0, 2),
         "total": total,
         "page": page,
         "limit": limit,

@@ -123,6 +123,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
   const [editRows, setEditRows] = useState({}); // onaylanmış iadede kalem seçimini düzenleme kilidi açık mı: { orderId: true }
   const [seededRows, setSeededRows] = useState({}); // onay geçmişi kutucukları bir kez önişaretlendi mi (tekrar ezmesin)
   const [freeShipFee, setFreeShipFee] = useState(0); // ücretsiz-kargo mahsup tutarı (ayarlardan)
+  const [freeShipThreshold, setFreeShipThreshold] = useState(0); // ücretsiz kargo eşiği (ayarlardan)
   // Tek kaynak: durum listesi Ayarlar → Sipariş Durumları'ndan beslenir (görünürlük + özel durumlar dahil).
   const [statusOpts, setStatusOpts] = useState(STATUS_OPTS);        // dropdown (yalnız "görünür" olanlar)
   const [statusLabelMap, setStatusLabelMap] = useState(STATUS_LABEL); // tüm etiketler (pasif olanlar da)
@@ -163,6 +164,7 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
       const res = await axios.get(`${API}/admin/rooftr/return-orders?${params}`, auth());
       setRows(res.data.orders || []);
       setFreeShipFee(Number(res.data.free_ship_fee) || 0);
+      setFreeShipThreshold(Number(res.data.free_shipping_threshold) || 0);
       setStatusCounts(res.data.status_counts || {});
       setPaymentCounts(res.data.payment_counts || {});
       setTotalReturns(res.data.total_returns || 0);
@@ -763,24 +765,43 @@ export default function RooftrReturns({ embedded = false, gpStart = "085490", on
                           );
                         })()}
 
-                        {/* Kargo bedeli — tek anlam: "kargoyu müşteriden KES (mahsup)".
-                            Kusur müşterideyse (bana uymadı vb.) işaretle → iade tutarından düşülür.
-                            Tam iadede de tiklenebilir: işaretliyse net = ödenen − kargo. */}
+                        {/* Kargo bedeli — "kargoyu müşteriden KES (mahsup)". Kutu ARTIK TÜM
+                            siparişlerde görünür (kullanıcı isteği). Ücretsiz kargo ile alınan
+                            siparişte kısmi iade sonrası KALAN tutar eşiğin altına düşerse
+                            (müşteri ücretsiz kargo hakkını kaybeder) KIRMIZI uyarı çıkar. */}
                         {(() => {
-                          // FATURA NE İSE O: yalnız faturada ÖDENMİŞ kargo varsa mahsup gösterilir.
-                          // Ücretsiz kargoda uydurma 99 TL ÇEKİLMEZ (kutu hiç gösterilmez).
                           const paid = Number(r.shipping_cost) > 0;
-                          const amt = paid ? Number(r.shipping_cost) : 0;
-                          if (amt <= 0) return null;
+                          // Ödenmiş kargo varsa onu, yoksa standart kargo ücretini (ayarlardan) kes.
+                          const amt = paid ? Number(r.shipping_cost) : (Number(freeShipFee) || 0);
                           const sel = !!cargoSel[r.id];
                           const locked = r.return_is_approved && !editRows[r.id];
+                          // Kalan (iade sonrası tutulan) net tutar
+                          const _base = Number(r.subtotal);
+                          const dr = (_base > 0 && Number(r.discount) > 0) ? Math.min(1, Number(r.discount) / _base) : 0;
+                          let retNet = 0, anySel = false;
+                          (r.items || []).forEach((it, i) => {
+                            if (selItems[`${r.id}::${i}`]) { anySel = true; retNet += ((Number(it.qty) || 1) * (Number(it.price) || 0)) * (1 - dr); }
+                          });
+                          const orderNet = Number(r.total) || 0;
+                          const keptNet = Math.max(0, orderNet - retNet);
+                          const threshold = Number(r.free_shipping_threshold) || Number(freeShipThreshold) || 0;
+                          // Uyarı: sipariş ücretsiz kargo ile alınmış (kargo ödenmemiş) + kısmi iade
+                          // (kalan > 0) + kalan tutar eşiğin ALTINA düşmüş.
+                          const belowThreshold = !paid && threshold > 0 && anySel && keptNet > 0.01 && keptNet < threshold;
                           return (
-                            <label className={`mt-1 inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 ${locked ? "cursor-default" : "cursor-pointer"} ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
-                              <input type="checkbox" checked={sel} disabled={locked}
-                                onChange={() => !locked && toggleCargo(r.id)} className="shrink-0" />
-                              <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
-                              <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>
-                            </label>
+                            <div className="mt-1 space-y-1">
+                              <label className={`inline-flex items-center gap-2 text-xs border rounded-md px-2.5 py-1.5 ${locked ? "cursor-default" : "cursor-pointer"} ${sel ? "bg-amber-50 border-amber-300 text-gray-900" : "bg-white text-gray-900"}`}>
+                                <input type="checkbox" checked={sel} disabled={locked}
+                                  onChange={() => !locked && toggleCargo(r.id)} className="shrink-0" />
+                                <span className="font-medium whitespace-nowrap">Kargoyu müşteriden kes</span>
+                                {amt > 0 && <span className={`font-semibold whitespace-nowrap ${sel ? "text-amber-700" : "text-gray-400"}`}>−{fmtTL(amt)}</span>}
+                              </label>
+                              {belowThreshold && !sel && (
+                                <div className="block text-xs bg-red-50 border border-red-300 text-red-700 rounded-md px-2.5 py-1.5 font-semibold max-w-2xl">
+                                  ⚠️ İade sonrası kalan tutar {fmtTL(keptNet)} — ücretsiz kargo eşiğinin ({fmtTL(threshold)}) ALTINDA. Müşteri ücretsiz kargo hakkını kaybetti; <b>kargoyu müşteriden kesmelisiniz</b> (yukarıdaki kutuyu işaretleyin).
+                                </div>
+                              )}
+                            </div>
                           );
                         })()}
 
