@@ -21,7 +21,11 @@ router = APIRouter(prefix="/size-tables", tags=["size-tables"])
 
 
 def _find_font(size=28):
+    # ÖNCE depoya gömülü font (Railway imajında sistem fontu YOK — bitmap fallback'e
+    # düşünce yazı minicik ve Türkçe karakterler kutu çıkıyordu).
+    _bundled = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "DejaVuSans.ttf")
     candidates = [
+        _bundled,
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -32,7 +36,10 @@ def _find_font(size=28):
                 return ImageFont.truetype(c, size)
             except Exception:
                 continue
-    return ImageFont.load_default()
+    try:
+        return ImageFont.load_default(size=size)  # Pillow ≥10.1: ölçeklenebilir varsayılan
+    except Exception:
+        return ImageFont.load_default()
 
 
 def render_size_table_image(
