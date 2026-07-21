@@ -4859,6 +4859,17 @@ async def trendyol_shipment_probe(order_number: str = "", current_user: dict = D
                     "status": pkg.get("status"),
                     "cargoTrackingNumber": pkg.get("cargoTrackingNumber"),
                     "lines_status": [l.get("orderLineItemStatusName") for l in (pkg.get("lines") or [])[:4]],
+                    # KESİN TUTAR KAYNAĞI: satır bazlı fiyat alanları (birim vs satır ayrımı için)
+                    "lines_fin": [{
+                        "barcode": l.get("barcode"),
+                        "productName": l.get("productName"),
+                        "quantity": l.get("quantity"),
+                        "price": l.get("price"),
+                        "amount": l.get("amount"),
+                        "lineGrossAmount": l.get("lineGrossAmount"),
+                        "discount": l.get("discount"),
+                        "status": l.get("orderLineItemStatusName"),
+                    } for l in (pkg.get("lines") or [])],
                     "top_keys": list(pkg.keys()),
                 })
             probed.append({"order_number": on, "http": r.status_code, "package_count": len(data.get("content") or []), "packages": pkgs})
