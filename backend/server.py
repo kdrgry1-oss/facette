@@ -229,6 +229,22 @@ async def lifespan(app: FastAPI):
         await db.orders.create_index([("status", 1), ("created_at", -1)])
         await db.orders.create_index([("platform", 1), ("created_at", -1)])
         await db.orders.create_index([("payment_status", 1), ("created_at", -1)])
+        # İADE / GİDER PUSULASI performansı (Atlas "Scanned/Returned > 1000" uyarısı):
+        # bu koleksiyonlar order_number/claim_id/return_id/status ile SÜREKLİ sorgulanıyordu
+        # ama index YOKTU → her sorgu tam koleksiyon taraması. Sık filtre alanlarını indeksle.
+        await db.trendyol_claims.create_index("order_number")
+        await db.trendyol_claims.create_index([("platform", 1), ("claim_status", 1)])
+        await db.trendyol_claims.create_index([("claim_status", 1)])
+        await db.trendyol_claims.create_index([("created_date", -1)])
+        await db.trendyol_claims.create_index("has_gider_pusulasi")
+        await db.customer_returns.create_index("order_id")
+        await db.customer_returns.create_index("order_number")
+        await db.customer_returns.create_index([("status", 1), ("created_at", -1)])
+        await db.customer_returns.create_index([("created_at", -1)])
+        await db.gider_pusulasi.create_index("claim_id")
+        await db.gider_pusulasi.create_index("return_id")
+        await db.gider_pusulasi.create_index("order_number")
+        await db.gider_pusulasi.create_index([("number", -1)])
         await db.order_events.create_index([("order_id", 1), ("created_at", -1)])
         await db.order_events.create_index([("created_at", -1)])
         await db.orders_deleted.create_index([("deleted_at", -1)])
