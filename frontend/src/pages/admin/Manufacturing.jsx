@@ -266,11 +266,13 @@ export default function Manufacturing() {
   const openProductFromMfg = (item) => {
     const dist = Object.keys(item.actual_distribution || {}).length
       ? item.actual_distribution : (item.size_distribution || {});
+    // Renk×beden yapısı üretimden gelir ama STOK OTOMATİK ÇEKİLMEZ (kullanıcı kararı):
+    // stok girişi ürün kartında elle yapılır — depo sayımı/sevkiyat farkları otomatik yazılmasın.
     const variants = Object.entries(dist)
       .filter(([, q]) => Number(q) > 0)
-      .map(([k, q]) => {
+      .map(([k]) => {
         const [color, size] = k.includes("|") ? k.split("|") : ["", k];
-        return { size, color, stock: Number(q) };
+        return { size, color, stock: 0 };
       });
     const sc = (item.stock_code || "").toUpperCase();
     const season = sc.startsWith("FCFW") ? "Kış" : sc.startsWith("FCSS") ? "Yaz" : "";
