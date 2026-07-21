@@ -6,7 +6,17 @@ import {
   Factory, Plus, ChevronRight, Save, Trash2, Edit, X, Package, CheckCircle2,
   Image as ImageIcon,
 } from "lucide-react";
-import { resolveColor, needsBorder } from "../../lib/colorMap";
+import { resolveColor, needsBorder, MULTI_GRADIENT } from "../../lib/colorMap";
+
+// Renk adı → swatch stili ({type:"solid"|"multi"}|null döner; hex DEĞİL — o yüzden burada çözülür)
+function _swatchStyle(name) {
+  const rc = resolveColor(name || "");
+  if (rc?.type === "solid") {
+    return { background: rc.value, ...(needsBorder(rc.value) ? { border: "1px solid #d1d5db" } : {}) };
+  }
+  if (rc?.type === "multi") return { background: MULTI_GRADIENT };
+  return { background: "#e5e7eb", border: "1px solid #d1d5db" };  // bilinmeyen renk → gri
+}
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../../components/ui/dialog";
@@ -618,14 +628,12 @@ export default function Manufacturing() {
                       {(_rowColors.length ? _rowColors : [""]).map(c => {
                         const ok = !!(item.color_approvals?.[c || "_tek"]?.fabric);
                         const at = item.color_approvals?.[c || "_tek"]?.fabric_at;
-                        const hex = resolveColor(c || "") || "#d1d5db";
                         return (
                           // Rengin KENDİSİ küçük kare kutu + yanında onay tiki (oval/dolgu rozet yok)
                           <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "fabric")}
                             title={`${c || "Tek renk"} — kumaş ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız (onaylamak için tıkla)"}`}
                             className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-gray-100 transition">
-                            <span className="w-4 h-4 rounded-[3px] shrink-0"
-                              style={{ background: hex, ...(needsBorder(hex) ? { border: "1px solid #d1d5db" } : {}) }} />
+                            <span className="w-4 h-4 rounded-[3px] shrink-0" style={_swatchStyle(c)} />
                             <span className={`w-3.5 h-3.5 rounded-[2px] text-[9px] leading-none flex items-center justify-center border ${ok ? "bg-black text-white border-black" : "bg-white border-gray-300 text-transparent"}`}>✓</span>
                           </button>
                         );
@@ -639,13 +647,11 @@ export default function Manufacturing() {
                         {(_rowColors.length ? _rowColors : [""]).map(c => {
                           const ok = !!(item.color_approvals?.[c || "_tek"]?.lining);
                           const at = item.color_approvals?.[c || "_tek"]?.lining_at;
-                          const hex = resolveColor(c || "") || "#d1d5db";
                           return (
                             <button key={c || "_tek"} type="button" onClick={() => toggleRowApproval(item, c, "lining")}
                               title={`${c || "Tek renk"} — astar ${ok ? `onaylı${at ? " (" + new Date(at).toLocaleDateString("tr-TR") + ")" : ""}` : "onaysız (onaylamak için tıkla)"}`}
                               className="inline-flex items-center gap-1 px-1 py-0.5 rounded hover:bg-gray-100 transition">
-                              <span className="w-4 h-4 rounded-[3px] shrink-0"
-                                style={{ background: hex, ...(needsBorder(hex) ? { border: "1px solid #d1d5db" } : {}) }} />
+                              <span className="w-4 h-4 rounded-[3px] shrink-0" style={_swatchStyle(c)} />
                               <span className={`w-3.5 h-3.5 rounded-[2px] text-[9px] leading-none flex items-center justify-center border ${ok ? "bg-black text-white border-black" : "bg-white border-gray-300 text-transparent"}`}>✓</span>
                             </button>
                           );
