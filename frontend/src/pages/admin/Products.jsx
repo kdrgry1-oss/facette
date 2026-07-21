@@ -2702,24 +2702,20 @@ export default function AdminProducts() {
                         <p className="text-[10px] text-gray-400 mt-1">Ürün raporlarındaki Sezon kolonu ve filtresi bu alandan beslenir.</p>
                       </div>
 
+                      {/* SKU ve Tedarikçi alanları kullanıcı isteğiyle kaldırıldı */}
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">SKU</label>
-                        <input
-                          type="text"
-                          value={formData.sku}
-                          onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                          className="w-full border-gray-200 border px-3 py-2 rounded-lg bg-gray-50 focus:bg-white focus:border-black outline-none transition-all font-mono text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tedarikçi</label>
-                        <input
-                          type="text"
-                          value={formData.supplier}
-                          onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
-                          placeholder="Boş bırakılabilir"
-                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
-                        />
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Beden Önerisi (Kalıp)</label>
+                        <select
+                          value={formData.size_advice || ""}
+                          onChange={(e) => setFormData({ ...formData, size_advice: e.target.value })}
+                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all text-sm"
+                          title="Ürün sayfasında beden seçiminin yanında öneri yazısı çıkar"
+                        >
+                          <option value="">Belirtme</option>
+                          <option value="dar">Dar / Slim Fit → bir beden büyük öner</option>
+                          <option value="normal">Normal / Regular → kendi bedenini al</option>
+                          <option value="bol">Bol / Oversize → bir beden küçük öner</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Üretici</label>
@@ -2744,6 +2740,27 @@ export default function AdminProducts() {
                               onChange={(e) => setFormData({ ...formData, urun_id: e.target.value })}
                               placeholder="—"
                               data-testid="input-urun-id"
+                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
+                            />
+                          </div>
+                          {/* Kimlik & Kodlar bölümü kaldırıldı — Ürün Kart ID ve GTİP buraya taşındı */}
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1">Ürün Kart ID</label>
+                            <input
+                              type="text"
+                              value={(formData.ticimax_fields || {}).URUNKARTIID || ""}
+                              onChange={(e) => updateDetailField("URUNKARTIID", e.target.value)}
+                              placeholder="—"
+                              className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-gray-400 mb-1">GTİP Kodu</label>
+                            <input
+                              type="text"
+                              value={(formData.ticimax_fields || {}).GTIPKODU || ""}
+                              onChange={(e) => updateDetailField("GTIPKODU", e.target.value)}
+                              placeholder="—"
                               className="w-full border-gray-200 border px-3 py-2 rounded-lg font-mono text-xs bg-gray-50 focus:bg-white focus:border-black outline-none"
                             />
                           </div>
@@ -2786,7 +2803,8 @@ export default function AdminProducts() {
                     </div>
                   </div>
                 </div>
-                {renderDetailFields(["Kimlik & Kodlar", "Temel Bilgiler", "Tarihler"])}
+                {/* "Kimlik & Kodlar / Temel Bilgiler / Tarihler" akordeonu kaldırıldı (kullanıcı isteği).
+                    Ürün Kart ID + GTİP Kodu yukarıdaki Entegrasyon Kodları bölümüne taşındı. */}
               </TabsContent>
 
               {/* Pricing Tab */}
@@ -2847,20 +2865,7 @@ export default function AdminProducts() {
                           <span className="text-[11px] text-gray-400">satış fiyatından indirim</span>
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Beden Önerisi (Kalıp)</label>
-                        <select
-                          value={formData.size_advice || ""}
-                          onChange={(e) => setFormData({ ...formData, size_advice: e.target.value })}
-                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all text-sm"
-                          title="Ürün sayfasında beden seçiminin yanında öneri yazısı çıkar"
-                        >
-                          <option value="">Belirtme</option>
-                          <option value="dar">Dar / Slim Fit → bir beden büyük öner</option>
-                          <option value="normal">Normal / Regular → kendi bedenini al</option>
-                          <option value="bol">Bol / Oversize → bir beden küçük öner</option>
-                        </select>
-                      </div>
+                      {/* Beden Önerisi (Kalıp) Temel sekmesine (Sezon'un altına) taşındı */}
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Alış Fiyatı (TL)</label>
                         <input
@@ -2883,24 +2888,7 @@ export default function AdminProducts() {
                         />
                         <p className="text-[10px] text-gray-400 mt-1">Üye Tipi 1 fiyatından çekilir. Storefront'ta üye tipi 1 grubuna özel fiyat olarak gösterilir.</p>
                       </div>
-                      {/* FAZ 7 — İmalat modülü için */}
-                      <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Koleksiyon</label>
-                        <input
-                          type="text" list="product-collections-list"
-                          value={formData.collection || ""}
-                          onChange={(e) => setFormData({ ...formData, collection: e.target.value })}
-                          placeholder="ör. 2026 İlkbahar/Yaz"
-                          className="w-full border-gray-200 border px-3 py-2 rounded-lg focus:border-black outline-none transition-all"
-                          data-testid="product-collection"
-                        />
-                        <datalist id="product-collections-list">
-                          <option value="2026 İlkbahar/Yaz" />
-                          <option value="2026 Sonbahar/Kış" />
-                          <option value="2025 Sonbahar/Kış" />
-                          <option value="Basic / Sürekli Koleksiyon" />
-                        </datalist>
-                      </div>
+                      {/* Koleksiyon alanı kullanıcı isteğiyle kaldırıldı (sezon zorunlu alanı Temel'de) */}
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Renk (Ana)</label>
                         <input
