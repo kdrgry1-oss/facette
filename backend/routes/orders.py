@@ -7134,8 +7134,10 @@ async def export_gider_pusulasi_excel(
     seen_claim, seen_return = set(), set()
     records = []
     for gp in all_vouchers:
-        # Süzgeç TALEP tarihine göre (iadeler sayfasıyla tutarlı) — pusula kesim tarihine göre değil.
-        if not _in_range(_req_date_for(gp)):
+        # KESİLMİŞ pusulada süzgeç KESİM tarihine göre (muhasebe mutabakatı: fiziki
+        # pusula destesi ve Excel'deki 'Fatura Tarihi' kolonu kesim tarihidir — aynı
+        # tarihle süzülmezse aylık sayım fiziki desteyle tutmuyordu: 1217 vs 1074).
+        if not _in_range(gp.get("date") or gp.get("created_at") or _req_date_for(gp)):
             continue
         # kaynak süzgeci: site pusulası source=site; TY/HB pusulasında claim_id var → platform claim'den
         cid = str(gp.get("claim_id") or "")
@@ -7277,7 +7279,10 @@ async def export_gider_pusulasi_excel(
                 g["_status"] = _ostat.get(str(g.get("order_number")), "")
 
     # SADECE izin verilen durumlar: reddedilen / iptal / sadece-talep / işlemde HARİÇ.
-    records = [g for g in records if _status_ok(g.get("_status"))]
+    # İSTİSNA (muhasebe mutabakatı): pusulası FİİLEN KESİLMİŞ kayıt (seri no atanmış)
+    # durum ne olursa olsun Excel'e GİRER — fiziki pusula var, listeden düşemez.
+    records = [g for g in records
+               if (g.get("number") or g.get("display_number")) or _status_ok(g.get("_status"))]
 
     # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
     pids = set()
