@@ -2008,6 +2008,19 @@ export default function AdminOrders({ unpaidView = false }) {
                       <span>Kargo</span>
                       <span>{Number(selectedOrder.shipping_cost || 0) === 0 ? "Ücretsiz" : `${selectedOrder.shipping_cost?.toFixed(2)} TL`}</span>
                     </div>
+                    {/* Hediye paketi / puan da dökümde görünsün — listede var, detayda yoktu */}
+                    {selectedOrder.gift_wrap && Number(selectedOrder.gift_wrap_price) > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span>🎁 Hediye Paketi</span>
+                        <span>{Number(selectedOrder.gift_wrap_price).toFixed(2)} TL</span>
+                      </div>
+                    )}
+                    {Number(selectedOrder.points_used) > 0 && (
+                      <div className="flex justify-between text-sm text-green-600">
+                        <span>Puan Kullanımı</span>
+                        <span>-{Number(selectedOrder.points_used).toFixed(2)} TL</span>
+                      </div>
+                    )}
                     <div className="flex justify-between font-medium text-lg pt-2 border-t">
                       <span>Toplam</span>
                       <span>{selectedOrder.total?.toFixed(2)} TL</span>
