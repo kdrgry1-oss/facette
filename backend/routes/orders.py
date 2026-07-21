@@ -2160,18 +2160,49 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
         qty = int(it.get("quantity", 1) or 1)
         if not barcode:
             continue
-        # Y4: ATOMİK varyant stok düşümü. Önceki kod tüm varyant dizisini Python'da okuyup
-        # $set ile geri yazıyordu → eşzamanlı iki sipariş birbirinin düşüşünü eziyordu (oversell).
-        # Artık yalnızca eşleşen varyanta arrayFilters ile atomik $inc uygulanır; max(0,..) kelepçesi
-        # de kaldırıldı (düşüş/iade simetrik olsun, negatif stok bir sinyaldir — sürüklenme olmaz).
-        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1})
+        # Y4: ATOMİK varyant stok düşümü (arrayFilters $inc — eşzamanlı sipariş kaybı yok).
+        # NEGATİF STOK YASAK (kullanıcı kararı): düşüşte önce KOŞULLU dene (stok >= adet);
+        # yetmiyorsa 0'a SABİTLE ve uyarı logla/push'la — pazaryeri satışı geri çevrilemez ama
+        # stok eksiye sürüklenmez (eksi değer vitrine/rapora yanlış sinyal veriyordu).
+        prod = await db.products.find_one({"variants.barcode": barcode}, {"_id": 0, "id": 1, "name": 1})
         if prod:
-            await db.products.update_one(
-                {"id": prod["id"], "variants.barcode": barcode},
-                {"$inc": {"variants.$[v].stock": delta * qty},
-                 "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
-                array_filters=[{"v.barcode": barcode}],
-            )
+            _now_iso = datetime.now(timezone.utc).isoformat()
+            _applied = delta * qty
+            if delta < 0:
+                _res = await db.products.update_one(
+                    {"id": prod["id"], "variants": {"$elemMatch": {"barcode": barcode, "stock": {"$gte": qty}}}},
+                    {"$inc": {"variants.$.stock": -qty}, "$set": {"updated_at": _now_iso}},
+                )
+                if _res.modified_count == 0:
+                    # Stok yetersiz (pazaryeri satışı / mutabakat) → 0'a sabitle, negatife inme
+                    _doc = await db.products.find_one(
+                        {"id": prod["id"], "variants.barcode": barcode}, {"_id": 0, "variants.$": 1})
+                    _cur = int(((_doc or {}).get("variants") or [{}])[0].get("stock") or 0)
+                    _applied = -max(0, _cur)   # düşülebilen kadar (0'daysa hiç)
+                    await db.products.update_one(
+                        {"id": prod["id"], "variants.barcode": barcode},
+                        {"$set": {"variants.$[v].stock": 0, "updated_at": _now_iso}},
+                        array_filters=[{"v.barcode": barcode}],
+                    )
+                    logger.warning(
+                        f"[NEGATİF-STOK ENGELLENDİ] {barcode} ({prod.get('name','')}) stok {_cur} iken "
+                        f"{qty} adetlik düşüm geldi (sipariş {order.get('order_number','?')}, "
+                        f"platform {order.get('platform','site')}) → 0'a sabitlendi. Pazaryeri stoğu güncel olmayabilir!")
+                    try:
+                        from .push import send_push_to_admins
+                        await send_push_to_admins(
+                            "⚠️ Stok 0'dayken satış geldi",
+                            f"{prod.get('name','ürün')} ({barcode}) — {order.get('platform','site')} "
+                            f"siparişi {order.get('order_number','')}. Stok 0'a sabitlendi; pazaryeri stoklarını kontrol edin.",
+                            {"type": "oversold_alert"})
+                    except Exception:
+                        pass
+            else:
+                await db.products.update_one(
+                    {"id": prod["id"], "variants.barcode": barcode},
+                    {"$inc": {"variants.$[v].stock": delta * qty}, "$set": {"updated_at": _now_iso}},
+                    array_filters=[{"v.barcode": barcode}],
+                )
             # Ana (parent) stok = varyant stoklarının toplamı — tek atomik pipeline update ile.
             await db.products.update_one(
                 {"id": prod["id"]},
@@ -2181,16 +2212,32 @@ async def _stock_delta_for_order(order: dict, delta: int) -> list:
                     "in": {"$toInt": {"$ifNull": ["$$vv.stock", 0]}},
                 }}}}}],
             )
-            movements.append({"barcode": barcode, "delta": delta * qty, "product_id": prod["id"]})
+            _mv = {"barcode": barcode, "delta": _applied, "product_id": prod["id"]}
+            if _applied != delta * qty:
+                _mv["requested_delta"] = delta * qty
+                _mv["oversold"] = True   # stok yetmedi, 0'a sabitlendi
+            movements.append(_mv)
         else:
             # Fallback product-level barcode
-            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1})
+            p2 = await db.products.find_one({"barcode": barcode}, {"_id": 0, "id": 1, "stock": 1})
             if p2:
-                await db.products.update_one(
-                    {"id": p2["id"]},
-                    {"$inc": {"stock": delta * qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
-                )
-                movements.append({"barcode": barcode, "delta": delta * qty, "product_id": p2["id"]})
+                _applied2 = delta * qty
+                if delta < 0:
+                    _res2 = await db.products.update_one(
+                        {"id": p2["id"], "stock": {"$gte": qty}},
+                        {"$inc": {"stock": -qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+                    if _res2.modified_count == 0:
+                        _cur2 = max(0, int(p2.get("stock") or 0))
+                        _applied2 = -_cur2
+                        await db.products.update_one(
+                            {"id": p2["id"]},
+                            {"$set": {"stock": 0, "updated_at": datetime.now(timezone.utc).isoformat()}})
+                        logger.warning(f"[NEGATİF-STOK ENGELLENDİ] ürün-düzeyi {barcode} → 0'a sabitlendi (sipariş {order.get('order_number','?')})")
+                else:
+                    await db.products.update_one(
+                        {"id": p2["id"]},
+                        {"$inc": {"stock": delta * qty}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+                movements.append({"barcode": barcode, "delta": _applied2, "product_id": p2["id"]})
     return movements
 
 

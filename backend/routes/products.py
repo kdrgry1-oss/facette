@@ -2672,6 +2672,39 @@ async def update_product_attributes(product_id: str, payload: dict, current_user
     )
     return {"success": True, "message": "Ozellikler guncellendi"}
 
+@router.post("/fix-negative-stock")
+async def fix_negative_stock(current_user: dict = Depends(require_admin)):
+    """İDEMPOTENT: eksiye düşmüş (stok < 0) varyant/ürün stoklarını 0'a sabitler ve
+    parent stoğu varyant toplamından yeniden hesaplar. Negatif stok artık oluşamaz
+    (sipariş düşümleri 0'da kelepçeli) — bu uç geçmişten kalanları temizler."""
+    fixed = []
+    async for p in db.products.find(
+            {"$or": [{"variants.stock": {"$lt": 0}}, {"stock": {"$lt": 0}}]},
+            {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1}):
+        _bad = [{"barcode": v.get("barcode"), "size": v.get("size"), "stock": v.get("stock")}
+                for v in (p.get("variants") or []) if int(v.get("stock") or 0) < 0]
+        await db.products.update_one(
+            {"id": p["id"]},
+            {"$set": {"variants.$[v].stock": 0,
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+            array_filters=[{"v.stock": {"$lt": 0}}],
+        ) if _bad else None
+        # parent stok = varyant toplamı (varyantsızsa negatif parent 0'a çekilir)
+        if p.get("variants"):
+            await db.products.update_one(
+                {"id": p["id"]},
+                [{"$set": {"stock": {"$sum": {"$map": {
+                    "input": {"$ifNull": ["$variants", []]}, "as": "vv",
+                    "in": {"$max": [0, {"$toInt": {"$ifNull": ["$$vv.stock", 0]}}]},
+                }}}}}],
+            )
+        elif int(p.get("stock") or 0) < 0:
+            await db.products.update_one({"id": p["id"]}, {"$set": {"stock": 0}})
+        fixed.append({"id": p["id"], "name": p.get("name"), "negative_variants": _bad,
+                      "old_parent_stock": p.get("stock")})
+    return {"fixed_count": len(fixed), "fixed": fixed[:50]}
+
+
 @router.post("/bulk-update-vat")
 async def bulk_update_vat(
     payload: dict,
