@@ -1243,10 +1243,17 @@ async def list_trashed_products(
 @router.get("/{product_id}")
 async def get_product(product_id: str, request: Request):
     """Get single product by ID or slug"""
-    product = await db.products.find_one(
+    # Aynı slug hem AKTİF bir kartta hem çöp kutusundaki eski bir kopyada olabilir
+    # (ör. koptalanıp silinen kartlar). find_one ilk ekleneni döndürüp aktif ürünü
+    # gölgeliyordu → müşteri "Ürün bulunamadı" görüyordu. Önce aktif+silinmemiş
+    # eşleşme seçilir; yoksa (admin çöp görüntüleme vb. için) ilk eşleşmeye düşülür.
+    _cands = await db.products.find(
         {"$or": [{"id": product_id}, {"slug": product_id}, {"slug_aliases": product_id}]},
         {"_id": 0}
-    )
+    ).to_list(10)
+    product = (next((c for c in _cands if c.get("is_active") is True and not c.get("is_deleted")), None)
+               or next((c for c in _cands if not c.get("is_deleted")), None)
+               or (_cands[0] if _cands else None))
     if not product:
         raise HTTPException(status_code=404, detail="Ürün bulunamadı")
     # PASİF/SİLİNMİŞ ürün direkt link ile açılamaz: yalnızca admin görebilir,
