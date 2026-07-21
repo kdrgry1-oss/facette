@@ -1763,6 +1763,106 @@ def _lead(fn):
     return _w
 
 
+async def alert_critical_stock_for_rpt():
+    """RPT (tekrar üretim) uyarısı — GÜNDE BİR: son 30 günün satış hızına göre kalan stoğun
+    kapsaması eşiğin (varsayılan 4 hafta = 21 gün üretim + 1 hafta güvenlik payı) altına
+    düşen AKTİF ürünler için admin push atar. Eşikler İşletme Kuralları'ndan ayarlanır:
+      kritik stok = haftalık hız × report.reorder_cover_weeks
+    Yalnız hız ≥ report.velocity_yellow_min olan (RPT'ye değer) ürünler uyarılır;
+    ürün başına en fazla 7 günde bir tekrarlanır (rpt_alerted_at)."""
+    from routes.deps import db
+    from routes.reports import _EXCLUDED_STATUSES
+    from business_rules import get_rule
+    try:
+        cover_weeks = float(await get_rule(db, "report.reorder_cover_weeks", 4) or 4)
+        min_rate = float(await get_rule(db, "report.velocity_yellow_min", 5) or 5)
+    except Exception:
+        cover_weeks, min_rate = 4.0, 5.0
+    now = datetime.now(timezone.utc)
+    s = (now - timedelta(days=30)).isoformat()
+
+    # Son 30 gün satışları — kalem bazında (barkod + pid)
+    pipe = [
+        {"$match": {"created_at": {"$gte": s}, "status": {"$nin": _EXCLUDED_STATUSES}}},
+        {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": False}},
+        {"$group": {"_id": {"bc": {"$toString": {"$ifNull": ["$items.barcode", ""]}},
+                            "pid": {"$toString": {"$ifNull": ["$items.product_id", ""]}}},
+                    "qty": {"$sum": {"$ifNull": ["$items.quantity", 1]}}}},
+    ]
+    rows = [r async for r in db.orders.aggregate(pipe)]
+    bcs = [r["_id"]["bc"] for r in rows if r["_id"].get("bc")]
+    pids = [r["_id"]["pid"] for r in rows if r["_id"].get("pid")]
+
+    by_bc, by_id = {}, {}
+    q = {"$or": []}
+    if pids:
+        q["$or"].append({"id": {"$in": pids}})
+    if bcs:
+        q["$or"] += [{"barcode": {"$in": bcs}}, {"variants.barcode": {"$in": bcs}}]
+    if not q["$or"]:
+        return
+    async for p in db.products.find(
+            {**q, "is_active": True, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "name": 1, "stock": 1, "variants": 1, "barcode": 1,
+             "rpt_alerted_at": 1}):
+        variants = p.get("variants") or []
+        stock = sum(int(v.get("stock") or 0) for v in variants) if variants else int(p.get("stock") or 0)
+        info = {"id": str(p.get("id")), "name": p.get("name") or "", "stock": stock,
+                "rpt_alerted_at": p.get("rpt_alerted_at")}
+        by_id[info["id"]] = info
+        if p.get("barcode"):
+            by_bc[str(p["barcode"])] = info
+        for v in variants:
+            if v.get("barcode"):
+                by_bc[str(v["barcode"])] = info
+
+    # Ürün bazında 30 günlük adet topla
+    qty_by_pid = {}
+    for r in rows:
+        info = by_bc.get(r["_id"].get("bc") or "") or by_id.get(r["_id"].get("pid") or "")
+        if info:
+            qty_by_pid[info["id"]] = qty_by_pid.get(info["id"], 0) + int(r.get("qty") or 0)
+
+    critical = []
+    for pid, qty30 in qty_by_pid.items():
+        info = by_id.get(pid)
+        if not info:
+            continue
+        rate = qty30 / (30.0 / 7.0)   # haftalık hız
+        if rate < min_rate:
+            continue                   # yavaş ürün — RPT uyarısına değmez
+        threshold = rate * cover_weeks
+        if info["stock"] > threshold:
+            continue
+        # 7 günde birden sık tekrarlama
+        try:
+            if info.get("rpt_alerted_at") and (now - datetime.fromisoformat(str(info["rpt_alerted_at"]))).days < 7:
+                continue
+        except Exception:
+            pass
+        critical.append({"id": pid, "name": info["name"], "stock": info["stock"],
+                         "rate": round(rate, 1), "threshold": int(threshold)})
+
+    if not critical:
+        return
+    critical.sort(key=lambda x: x["stock"] / max(x["rate"], 0.1))  # en acil (en az hafta kalan) önce
+    lines = [f"• {c['name'][:40]}: stok {c['stock']} (hız {c['rate']}/hf, eşik ~{c['threshold']})"
+             for c in critical[:4]]
+    if len(critical) > 4:
+        lines.append(f"…ve {len(critical) - 4} ürün daha")
+    try:
+        from routes.push import send_push_to_admins
+        await send_push_to_admins(
+            f"🧵 RPT zamanı: {len(critical)} ürün kritik stokta",
+            "\n".join(lines),
+            {"type": "rpt_alert"})
+    except Exception as e:
+        logger.warning("[rpt-alert] push gönderilemedi: %s", e)
+    for c in critical:
+        await db.products.update_one({"id": c["id"]}, {"$set": {"rpt_alerted_at": now.isoformat()}})
+    logger.info("[rpt-alert] %d ürün için RPT uyarısı gönderildi", len(critical))
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -1843,6 +1943,16 @@ def start_scheduler():
         )
     except Exception as _e:
         logging.getLogger("scheduler").warning("[scheduler] trendyol yorum job eklenemedi: %s", _e)
+    # RPT kritik stok uyarısı — her sabah 05:00 UTC (08:00 TR): kapsaması eşiğin altına
+    # düşen ürünler için admin push (21 gün üretim + güvenlik payı; İşletme Kuralları'ndan ayarlı).
+    _add(
+        alert_critical_stock_for_rpt,
+        "cron",
+        hour=5, minute=0,
+        id="rpt_critical_stock_alert",
+        max_instances=1,
+        coalesce=True,
+    )
     # Marketplace auto-sync tick — her 1 dk'da çalışır, sonra tek tek
     # account'lara ait interval'lere göre ürün/sipariş senkronu planlar.
     # Bu sayede "3 dk'da bir ürün gönder" gibi ince ayarlar çalışır.

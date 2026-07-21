@@ -207,6 +207,10 @@ RULE_CATALOG = [
     {"group": "Raporlar", "key": "report.velocity_yellow_min", "label": "Satış hızı: SARI alt sınırı",
      "type": "number", "default": 5, "unit": "adet/hafta", "options": [1, 2, 3, 5, 8, 10],
      "help": "Haftalık hız bu değer ile yeşil sınırı arasındaysa SARI (orta); altındaysa KIRMIZI (yavaş)."},
+    {"group": "Raporlar", "key": "report.reorder_cover_weeks", "label": "RPT uyarısı: kritik kapsama (hafta)",
+     "type": "number", "default": 4, "unit": "hafta", "options": [3, 4, 5, 6],
+     "help": "Kalan stok, haftalık satış hızı × bu hafta sayısının ALTINA inince günlük RPT (tekrar üretim) "
+             "uyarısı gönderilir. Varsayılan 4 = 21 gün üretim süresi + 1 hafta güvenlik payı."},
 ]
 
 _CATALOG_BY_KEY = {r["key"]: r for r in RULE_CATALOG}
