@@ -5155,6 +5155,112 @@ async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(
     )
 
     return {"success": True, "gider_pusulasi": gider_pusulasi}
+@router.post("/trendyol/claims/gp-bulk-range")
+async def gp_bulk_by_range(payload: dict, current_user: dict = Depends(require_admin)):
+    """Tarih aralığındaki YALNIZ ONAYLANMIŞ ve pusulası HENÜZ OLMAYAN iadeler için
+    (site + Trendyol + Hepsiburada tek havuz, iade talep tarihine göre sıralı)
+    toplu gider pusulası keser (kullanıcı isteği).
+
+    payload: {date_from, date_to, sources:["site","trendyol","hepsiburada"],
+              start_no:"085500", limit:50, dry_run:false}
+    dry_run=true → kesmeden aday listesini döndürür (önizleme/kontrollü kesim)."""
+    date_from = str(payload.get("date_from") or "").strip()
+    date_to = str(payload.get("date_to") or "").strip()
+    sources = payload.get("sources") or ["site", "trendyol", "hepsiburada"]
+    limit = max(1, min(int(payload.get("limit") or 50), 200))
+    dry = bool(payload.get("dry_run"))
+    start_no = str(payload.get("start_no") or "").strip()
+    try:
+        base = int(start_no) if start_no else None
+    except ValueError:
+        base = None
+    if not dry and base is None:
+        raise HTTPException(status_code=400, detail="Başlangıç koçan numarası (start_no) zorunlu")
+
+    def _in_range(v):
+        s = str(v or "")[:10]
+        if not s:
+            return False
+        if date_from and s < date_from:
+            return False
+        if date_to and s > date_to:
+            return False
+        return True
+
+    # Pusulası zaten olanlar atlanır — ölçüt KOÇAN NUMARASI: numarası temizlenmiş
+    # (clear-numbers) pusulalar havuza GERİ girer ve yeni sıralı numara alır.
+    _has_no = {"$or": [{"number": {"$exists": True, "$ne": None}},
+                       {"display_number": {"$exists": True, "$nin": ["", None]}}]}
+    gp_claims = {str(g.get("claim_id")) for g in await db.gider_pusulasi.find(
+        {"claim_id": {"$exists": True, "$ne": ""}, **_has_no},
+        {"_id": 0, "claim_id": 1}).to_list(None)}
+    gp_returns = {str(g.get("return_id")) for g in await db.gider_pusulasi.find(
+        {"return_id": {"$exists": True, "$ne": ""}, **_has_no},
+        {"_id": 0, "return_id": 1}).to_list(None)}
+
+    cands = []
+    if "trendyol" in sources or "hepsiburada" in sources:
+        async for c in db.trendyol_claims.find(
+                {"claim_status": "Accepted"},
+                {"_id": 0, "claim_id": 1, "order_number": 1, "customer_name": 1,
+                 "created_date": 1, "refund_amount": 1, "platform": 1, "has_gider_pusulasi": 1}):
+            plat = "hepsiburada" if str(c.get("platform") or "").lower() == "hepsiburada" else "trendyol"
+            if plat not in sources:
+                continue
+            cid = str(c.get("claim_id") or "")
+            if not cid or cid.startswith("ord:"):
+                continue
+            if c.get("has_gider_pusulasi") or cid in gp_claims:
+                continue
+            if not _in_range(c.get("created_date")):
+                continue
+            cands.append({"kaynak": plat, "key": cid, "siparis": c.get("order_number") or "",
+                          "musteri": c.get("customer_name") or "",
+                          "tarih": str(c.get("created_date") or "")[:10],
+                          "tutar": round(float(c.get("refund_amount") or 0), 2)})
+    if "site" in sources:
+        async for r in db.customer_returns.find(
+                {"status": {"$in": ["approved", "refunded", "partial_refunded"]}},
+                {"_id": 0, "id": 1, "order_number": 1, "created_at": 1, "refund_amount": 1}):
+            rid = str(r.get("id") or "")
+            if not rid or rid in gp_returns:
+                continue
+            if not _in_range(r.get("created_at")):
+                continue
+            cands.append({"kaynak": "site", "key": rid, "siparis": r.get("order_number") or "",
+                          "musteri": "", "tarih": str(r.get("created_at") or "")[:10],
+                          "tutar": round(float(r.get("refund_amount") or 0), 2)})
+
+    cands.sort(key=lambda x: x["tarih"])  # iade talep tarihine göre eskiden yeniye
+    batch = cands[:limit]
+    if dry:
+        return {"dry_run": True, "toplam_aday": len(cands), "bu_partide": len(batch),
+                "adaylar": batch}
+
+    from .orders import site_return_gider_pusulasi
+    kesilen, hatalar = [], []
+    n = 0
+    for c in batch:
+        tno = f"{base + n:06d}"
+        try:
+            if c["kaynak"] == "site":
+                res = await site_return_gider_pusulasi(c["key"], {"tracking_no": tno}, current_user)
+            else:
+                res = await generate_gider_pusulasi(c["key"], {"tracking_no": tno}, current_user)
+            gp = (res or {}).get("gider_pusulasi") or {}
+            kesilen.append({**c, "gp_no": gp.get("display_number") or tno,
+                            "net": (gp.get("totals") or {}).get("net")})
+            n += 1
+        except HTTPException as he:
+            hatalar.append({**c, "hata": str(he.detail)[:140]})
+        except Exception as e:
+            hatalar.append({**c, "hata": str(e)[:140]})
+    next_no = f"{base + n:06d}"
+    return {"success": True, "kesilen": len(kesilen), "hata": len(hatalar),
+            "kalan_aday": max(0, len(cands) - len(batch)), "next_no": next_no,
+            "detay": kesilen, "hatalar": hatalar[:20]}
+
+
 @router.post("/trendyol/claims/bulk-gider-pusulasi")
 async def bulk_generate_gider_pusulasi(payload: dict, current_user: dict = Depends(require_admin)):
     """Generate expense receipts for multiple claims"""

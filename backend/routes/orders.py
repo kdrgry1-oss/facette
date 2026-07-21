@@ -7049,6 +7049,7 @@ async def export_gider_pusulasi_excel(
     date_to: Optional[str] = None,
     source: Optional[str] = None,   # site | trendyol | hepsiburada | all(None) → TÜMÜ (varsayılan)
     only_refunded: bool = False,    # False=TÜM iade durumları; True=yalnız iade bedeli ödenmiş
+    only_with_gp: bool = False,     # True=YALNIZ pusulası kesilmiş (seri no'lu) satırlar (kullanıcı isteği)
     current_user: dict = Depends(require_permission("returns.expense_note")),
 ):
     """Gider pusulalarını MUHASEBE formatında Excel'e aktarır (görseldeki kolon düzeni):
@@ -7310,6 +7311,9 @@ async def export_gider_pusulasi_excel(
     # durum ne olursa olsun Excel'e GİRER — fiziki pusula var, listeden düşemez.
     records = [g for g in records
                if (g.get("number") or g.get("display_number")) or _status_ok(g.get("_status"))]
+    # only_with_gp: pusulası OLUŞMAMIŞ hiçbir satır Excel'e girmez (kullanıcı isteği).
+    if only_with_gp:
+        records = [g for g in records if (g.get("number") or g.get("display_number"))]
 
     # Ürün KDV oranlarını toplu çek (kalem barcode alanı product_id tutar).
     pids = set()
@@ -7499,6 +7503,49 @@ async def set_voucher_number(payload: dict = Body(...),
     if gp.get("order_number"):
         await db.orders.update_one({"order_number": gp["order_number"]}, {"$set": {"gider_pusulasi_no": new_no}})
     return {"success": True, "display_number": new_no}
+
+
+@router.post("/returns/gider-pusulasi/clear-numbers")
+async def clear_gider_pusulasi_numbers(payload: dict = Body(default={}),
+                                       current_user: dict = Depends(require_permission("returns.expense_note"))):
+    """TÜM eski gider pusulası koçan numaralarını temizler (kullanıcı: 'eski koçan
+    numaralarını sil, ben yeni numara atayacağım'). Numara previous_numbers'a taşınır
+    (muhasebe izi kaybolmaz); pusula belgesi ve TUTARLAR aynen durur, yalnız numara
+    boşalır. Numarası boşalan iadeler toplu kesim (gp-bulk-range) havuzuna yeniden
+    girer ve yeni sıralı koçan numarası alır. dry_run=true → yalnız sayım döner."""
+    dry = bool((payload or {}).get("dry_run"))
+    q = {"$or": [{"display_number": {"$exists": True, "$nin": ["", None]}},
+                 {"number": {"$exists": True, "$ne": None}}]}
+    total = await db.gider_pusulasi.count_documents(q)
+    if dry:
+        sample = await db.gider_pusulasi.find(
+            q, {"_id": 0, "display_number": 1, "order_number": 1, "claim_id": 1, "return_id": 1}
+        ).limit(10).to_list(10)
+        return {"dry_run": True, "temizlenecek": total, "ornek": sample}
+    cleared = 0
+    async for g in db.gider_pusulasi.find(q, {"_id": 1, "display_number": 1}):
+        upd = {"$unset": {"number": "", "display_number": ""}}
+        old = str(g.get("display_number") or "").strip()
+        if old:
+            upd["$addToSet"] = {"previous_numbers": old}
+        await db.gider_pusulasi.update_one({"_id": g["_id"]}, upd)
+        cleared += 1
+    # Bağlı kayıtlardaki numara/bayrakları da sıfırla → panel tutarlı, havuz yeniden dolar.
+    r1 = await db.trendyol_claims.update_many(
+        {"$or": [{"has_gider_pusulasi": True},
+                 {"gider_pusulasi_no": {"$exists": True, "$nin": ["", None]}}]},
+        {"$unset": {"has_gider_pusulasi": "", "gider_pusulasi_no": ""}})
+    r2 = await db.customer_returns.update_many(
+        {"$or": [{"has_gider_pusulasi": True},
+                 {"gider_pusulasi_no": {"$exists": True, "$nin": ["", None]}}]},
+        {"$unset": {"has_gider_pusulasi": "", "gider_pusulasi_no": ""}})
+    r3 = await db.orders.update_many(
+        {"gider_pusulasi_no": {"$exists": True, "$nin": ["", None]}},
+        {"$unset": {"gider_pusulasi_no": ""}})
+    return {"success": True, "pusula_temizlenen": cleared,
+            "claim_temizlenen": r1.modified_count,
+            "site_iade_temizlenen": r2.modified_count,
+            "siparis_temizlenen": r3.modified_count}
 
 
 # ============================================================================

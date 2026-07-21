@@ -262,6 +262,13 @@ export default function Returns() {
   const [gpFrom, setGpFrom] = useState("");
   const [gpTo, setGpTo] = useState("");
   const [gpSource, setGpSource] = useState("all"); // Excel iade kaynağı filtresi
+  // Excel'e YALNIZ pusulası kesilmiş (seri no almış) iadeler girsin (kullanıcı isteği).
+  // Varsayılan AÇIK: "gider pusulası oluşmayan hiçbir siparişi indirmesin".
+  const [gpOnlyCut, setGpOnlyCut] = useState(true);
+  // Toplu pusula kesimi (tarih aralığı + kaynak, YALNIZ onaylanan iadeler) — kontrollü partiler
+  const [gpBulkCount, setGpBulkCount] = useState(10);
+  const [gpBulkBusy, setGpBulkBusy] = useState(false);
+  const [gpBulkPreview, setGpBulkPreview] = useState(null); // dry_run sonucu
   // Hazır tarih aralıkları — "son 30 gün" gibi çekimleri tek tıkla, elle yazmadan doldurur.
   // Yerel (TR) tarihi YYYY-MM-DD üretir; type="date" bu formatı bekler.
   const _ymd = (dt) => {
@@ -292,6 +299,8 @@ export default function Returns() {
       if (gpTo) params.append("date_to", gpTo);
       // İade kaynağı filtresi (kullanıcı isteği): tümü | site | trendyol | hepsiburada
       if (gpSource && gpSource !== "all") params.append("source", gpSource);
+      // Yalnız pusulası kesilenler: seri no'suz iade satırları Excel'e girmez
+      if (gpOnlyCut) params.append("only_with_gp", "1");
       const qs = params.toString();
       const res = await fetch(`${API}/orders/returns/gider-pusulasi/export${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
@@ -311,6 +320,40 @@ export default function Returns() {
       toast.error("Gider pusulası aktarımı başarısız");
     } finally {
       setGpExporting(false);
+    }
+  };
+
+  // Toplu Gider Pusulası — YALNIZ ONAYLANAN iadeler (site + Trendyol + Hepsiburada ortak
+  // havuz, iade talep tarihine göre eskiden yeniye). dry=true: kesmeden önizleme;
+  // dry=false: başlangıç no'dan itibaren sıralı koçanla partiyi keser.
+  const runGpBulk = async (dry) => {
+    if (!gpFrom || !gpTo) { toast.error("Önce yukarıdan tarih aralığı seçin"); return; }
+    if (!dry && !window.confirm(
+      `${gpBulkCount} adede kadar pusula, ${pad6(gpStart)} numarasından başlayarak kesilecek. Devam?`)) return;
+    setGpBulkBusy(true);
+    try {
+      const token = localStorage.getItem("token");
+      const sources = gpSource === "all" ? ["site", "trendyol", "hepsiburada"] : [gpSource];
+      const res = await axios.post(`${API}/integrations/trendyol/claims/gp-bulk-range`,
+        { date_from: gpFrom, date_to: gpTo, sources, start_no: pad6(gpStart),
+          limit: gpBulkCount, dry_run: !!dry },
+        { headers: { Authorization: `Bearer ${token}` } });
+      if (dry) {
+        setGpBulkPreview(res.data);
+      } else {
+        const d = res.data || {};
+        if (d.next_no) { setGpStart(d.next_no); localStorage.setItem("gp_next_no", d.next_no); }
+        setGpBulkPreview(null);
+        toast.success(`${d.kesilen || 0} pusula kesildi · hata ${d.hata || 0} · kalan aday ${d.kalan_aday || 0}`);
+        if (d.hata > 0 && Array.isArray(d.hatalar) && d.hatalar.length) {
+          toast.error(`İlk hata: ${d.hatalar[0].siparis || d.hatalar[0].key} — ${d.hatalar[0].hata}`);
+        }
+        fetchClaims();
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Toplu pusula işlemi başarısız");
+    } finally {
+      setGpBulkBusy(false);
     }
   };
 
@@ -555,7 +598,7 @@ export default function Returns() {
                 data-testid="bulk-print-btn"
                 className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 transition-colors disabled:opacity-50">
                 <Printer size={16} />
-                Toplu Yazdır ({selectedIds.size})
+                Pusula Kes + Yazdır ({selectedIds.size})
               </button>
             )}
             {/* TEK Excel: tüm gider pusulaları (site + Trendyol + Hepsiburada), seçili tarih
@@ -583,6 +626,13 @@ export default function Returns() {
                   <option value="hepsiburada">Hepsiburada</option>
                 </select>
               </div>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer pb-2"
+                title="Açıkken Excel'e YALNIZ gider pusulası kesilmiş (seri no almış) iadeler girer; pusulası olmayan hiçbir satır inmez">
+                <input type="checkbox" checked={gpOnlyCut}
+                  onChange={(e) => setGpOnlyCut(e.target.checked)}
+                  data-testid="gp-only-cut" />
+                Yalnız pusulası kesilenler
+              </label>
               <button onClick={exportGiderPusulasi} disabled={gpExporting}
                 data-testid="export-gider-pusulasi-btn"
                 title="Gider pusulalarını (seçili tarih aralığı + iade kaynağına göre) muhasebe formatında Excel indir"
@@ -643,6 +693,83 @@ export default function Returns() {
           <p className="text-[11px] text-purple-600 ml-auto max-w-xs pb-1">
             A4 yatay, aynı pusula 4 kopya. Numara kağıda basılmaz (matbuda var); takip için satırda/önizlemede görünür. Her iade çıktısı no'yu 1 ilerletir.
           </p>
+        </div>
+
+        {/* Toplu Gider Pusulası — YALNIZ ONAYLANAN iadeler. Yukarıdaki tarih aralığı +
+            iade kaynağı filtresini kullanır; başlangıç no yukarıdaki ortak alandan gelir.
+            Önizle (kesmeden aday listesi) → Oluştur (kontrollü parti). */}
+        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <p className="text-[11px] font-bold text-emerald-800 uppercase mb-1">Toplu Gider Pusulası — Onaylanan İadeler</p>
+              <p className="text-[11px] text-emerald-700 max-w-md">
+                Yukarıda seçili tarih aralığı ({gpFrom || "—"} → {gpTo || "—"}) ve kaynak
+                ({gpSource === "all" ? "site + Trendyol + Hepsiburada" : gpSource}) içindeki
+                <b> yalnız iadesi ONAYLANMIŞ ve pusulası henüz olmayan</b> iadeler, iade talep
+                tarihine göre sıralanır; {pad6(gpStart)} numarasından itibaren sıralı koçanla kesilir.
+              </p>
+            </div>
+            <div className="flex flex-col">
+              <label className="text-[10px] text-emerald-700 uppercase tracking-wider mb-0.5">Parti Adedi</label>
+              <select value={gpBulkCount} onChange={(e) => setGpBulkCount(parseInt(e.target.value, 10))}
+                data-testid="gp-bulk-count"
+                className="border border-emerald-300 rounded-lg px-2 py-1.5 text-sm bg-white">
+                {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <button onClick={() => runGpBulk(true)} disabled={gpBulkBusy}
+              data-testid="gp-bulk-preview-btn"
+              className="px-4 py-2 border border-emerald-400 text-emerald-800 rounded-lg text-sm font-bold hover:bg-emerald-100 transition-colors disabled:opacity-50">
+              {gpBulkBusy ? "..." : "Önizle"}
+            </button>
+            <button onClick={() => runGpBulk(false)} disabled={gpBulkBusy || !gpBulkPreview}
+              data-testid="gp-bulk-run-btn"
+              title={gpBulkPreview ? "Önizlemedeki partiyi kes" : "Önce Önizle ile aday listesini kontrol edin"}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50">
+              {gpBulkBusy ? "Kesiliyor..." : `Pusula Kes (${Math.min(gpBulkCount, gpBulkPreview?.bu_partide ?? gpBulkCount)})`}
+            </button>
+            {gpBulkPreview && (
+              <button onClick={() => setGpBulkPreview(null)}
+                className="px-3 py-2 text-xs text-emerald-700 hover:text-emerald-900">Önizlemeyi kapat</button>
+            )}
+          </div>
+          {gpBulkPreview && (
+            <div className="mt-3 border-t border-emerald-200 pt-2">
+              <p className="text-xs font-semibold text-emerald-800 mb-1.5">
+                Toplam aday: {gpBulkPreview.toplam_aday} · Bu partide kesilecek: {gpBulkPreview.bu_partide}
+                {gpBulkPreview.toplam_aday > gpBulkPreview.bu_partide &&
+                  ` (kalan ${gpBulkPreview.toplam_aday - gpBulkPreview.bu_partide} sonraki partilerde)`}
+              </p>
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-emerald-700">
+                      <th className="py-1 pr-2">#</th>
+                      <th className="py-1 pr-2">Kaynak</th>
+                      <th className="py-1 pr-2">Sipariş</th>
+                      <th className="py-1 pr-2">Müşteri</th>
+                      <th className="py-1 pr-2">İade Tarihi</th>
+                      <th className="py-1 pr-2 text-right">Tutar</th>
+                      <th className="py-1">Alacağı No</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(gpBulkPreview.adaylar || []).map((a, i) => (
+                      <tr key={a.key} className="border-t border-emerald-100">
+                        <td className="py-1 pr-2 text-gray-500">{i + 1}</td>
+                        <td className="py-1 pr-2 capitalize">{a.kaynak}</td>
+                        <td className="py-1 pr-2 font-mono">{a.siparis}</td>
+                        <td className="py-1 pr-2">{a.musteri || "—"}</td>
+                        <td className="py-1 pr-2">{a.tarih}</td>
+                        <td className="py-1 pr-2 text-right">{Number(a.tutar || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} ₺</td>
+                        <td className="py-1 font-mono">{pad6(parseInt(pad6(gpStart) || "0", 10) + i)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
 
