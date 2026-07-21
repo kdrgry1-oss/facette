@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from io import BytesIO
 from datetime import datetime, timezone
 import base64
+import re
 import uuid
 import os
 
@@ -41,6 +42,44 @@ def _find_font(size=28, bold=False):
         return ImageFont.load_default(size=size)  # Pillow ≥10.1: ölçeklenebilir varsayılan
     except Exception:
         return ImageFont.load_default()
+
+
+def _tr_title(s: str) -> str:
+    """Ölçü etiketini Türkçe kurala göre Baş Harfleri Büyük yazar (omuz→Omuz,
+    göğüs→Göğüs, kol boyu→Kol Boyu). Türkçe i/ı ayrımı korunur."""
+    out = []
+    for w in str(s or "").split():
+        first = {"i": "İ", "ı": "I"}.get(w[0], w[0].upper())
+        rest = w[1:].replace("I", "ı").replace("İ", "i").lower()
+        out.append(first + rest)
+    return " ".join(out)
+
+
+def _clean_label(s: str) -> str:
+    """Yaygın yazım hatalarını düzelt + Türkçe baş-harf büyüt (görsel/tablo etiketi)."""
+    return _tr_title(re.sub(r"(?i)boyuu", "boyu", str(s or "")))
+
+
+def _normalize_table_labels(columns, values):
+    """Kolon etiketlerini _clean_label'dan geçirir, values sözlüğünün kolon
+    anahtarlarını yeni ada taşır. Düzeltme sonrası çakışan kolonlar teke iner
+    (dolu değer korunur). İdempotent."""
+    rename, new_cols, seen = {}, [], set()
+    for c in (columns or []):
+        nc = _clean_label(c) or str(c)
+        rename[str(c)] = nc
+        if nc not in seen:
+            seen.add(nc)
+            new_cols.append(nc)
+    new_values = {}
+    for size, m in (values or {}).items():
+        nm = {}
+        for k, v in (m if isinstance(m, dict) else {}).items():
+            nk = rename.get(str(k), str(k))
+            if nk not in nm or (str(v).strip() and not str(nm.get(nk, "")).strip()):
+                nm[nk] = v
+        new_values[size] = nm
+    return new_cols, new_values
 
 
 def render_size_table_image(
@@ -120,7 +159,7 @@ def render_size_table_image(
 
     for col in rows:
         draw.line([(label_x, y - 14), (W - 90, y - 14)], fill=LINE, width=1)
-        draw.text((label_x, y), col[:22], fill=GRAY, font=font_label)
+        draw.text((label_x, y), _clean_label(col)[:22], fill=GRAY, font=font_label)
         for i, s in enumerate(sizes):
             val = str(values.get(s, {}).get(col, "")).strip() or "-"
             val = val.replace(".", ",")  # ondalıklar virgülle (70,5)
@@ -177,6 +216,25 @@ async def get_size_table(product_id: str, current_user: dict = Depends(require_a
     return st
 
 
+@router.post("/maintenance/fix-labels")
+async def fix_size_table_labels(current_user: dict = Depends(require_admin)):
+    """Tüm ölçü tablolarında kolon etiketlerini düzeltir (boyuu→boyu + Türkçe
+    baş-harf büyütme) ve values anahtarlarını yeni ada taşır. İdempotent."""
+    fixed = scanned = 0
+    async for st in db.size_tables.find({}):
+        scanned += 1
+        cols = st.get("columns") or []
+        new_cols, new_values = _normalize_table_labels(cols, st.get("values") or {})
+        if new_cols == [str(c) for c in cols] and new_values == (st.get("values") or {}):
+            continue
+        await db.size_tables.update_one(
+            {"_id": st["_id"]},
+            {"$set": {"columns": new_cols, "values": new_values}},
+        )
+        fixed += 1
+    return {"scanned": scanned, "fixed": fixed}
+
+
 @router.post("/{product_id}")
 async def save_size_table(product_id: str, payload: dict, current_user: dict = Depends(require_admin)):
     sizes = payload.get("sizes", [])
@@ -184,6 +242,10 @@ async def save_size_table(product_id: str, payload: dict, current_user: dict = D
     values = payload.get("values", {})
     if not isinstance(sizes, list) or not isinstance(columns, list):
         raise HTTPException(status_code=400, detail="sizes ve columns liste olmalı")
+
+    # Etiketleri kayıtta normalize et (baş harfler büyük + yazım düzeltmesi) —
+    # storefront tablosu ve görsel aynı temiz etiketi kullansın.
+    columns, values = _normalize_table_labels(columns, values)
 
     doc = {
         "product_id": product_id,

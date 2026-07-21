@@ -34,7 +34,7 @@
  */
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router-dom";
-import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, Link2, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Eye, EyeOff, Copy, Upload, Image, X, MoreHorizontal, Layers, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Store, RefreshCw, Check, Globe, Download, FileSpreadsheet, CheckSquare, Square, Printer, Tag, AlertTriangle } from "lucide-react";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -225,18 +225,24 @@ export default function AdminProducts() {
     else setSelectedProducts(products.map((p) => p.id));
   };
   const [editingProduct, setEditingProduct] = useState(null);
-  // #22: Stok hareketleri modal
-  const [stockMovesProduct, setStockMovesProduct] = useState(null);
-  const [stockMoves, setStockMoves] = useState([]);
-  const [stockMovesLoading, setStockMovesLoading] = useState(false);
-  const openStockMoves = async (product) => {
-    setStockMovesProduct(product); setStockMoves([]); setStockMovesLoading(true);
+  // Listedeki fiyat hücresinden hızlı düzenleme: {id, price, sale_price}
+  const [priceEdit, setPriceEdit] = useState(null);
+  const savePriceEdit = async () => {
+    if (!priceEdit) return;
+    const price = parseFloat(priceEdit.price) || 0;
+    const sale_price = priceEdit.sale_price === "" || priceEdit.sale_price === null
+      ? null : (parseFloat(priceEdit.sale_price) || null);
+    if (price <= 0) { toast.error("Satış fiyatı 0'dan büyük olmalı"); return; }
+    if (sale_price && sale_price >= price) { toast.error("İndirimli fiyat, satış fiyatından küçük olmalı"); return; }
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API}/products/${product.id}/stock-movements`, { headers: { Authorization: `Bearer ${token}` } });
-      setStockMoves(res.data?.movements || []);
-    } catch { setStockMoves([]); }
-    finally { setStockMovesLoading(false); }
+      await axios.put(`${API}/products/${priceEdit.id}`, { price, sale_price }, { headers: { Authorization: `Bearer ${token}` } });
+      setProducts((prev) => prev.map((p) => (p.id === priceEdit.id ? { ...p, price, sale_price } : p)));
+      setPriceEdit(null);
+      toast.success("Fiyat güncellendi");
+    } catch {
+      toast.error("Fiyat güncellenemedi");
+    }
   };
   // technicalDetails: XML/Ticimax description'dan parse edilen teknik özellikler.
   // Shape: { kumas: {label, value}, kalip: {label, value}, ... } VEYA boş obj
@@ -2360,13 +2366,47 @@ export default function AdminProducts() {
                     ))}
                   </td>
                   <td>
-                    {product.sale_price ? (
-                      <div>
-                        <span className="text-red-600">{product.sale_price?.toFixed(2)} TL</span>
-                        <span className="text-xs text-gray-400 line-through block">{product.price?.toFixed(2)} TL</span>
+                    {priceEdit?.id === product.id ? (
+                      <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="number" step="0.01" autoFocus
+                          value={priceEdit.price}
+                          onChange={(e) => setPriceEdit((pe) => ({ ...pe, price: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') savePriceEdit(); if (e.key === 'Escape') setPriceEdit(null); }}
+                          placeholder="Satış Fiyatı"
+                          title="Satış Fiyatı"
+                          className="w-24 border border-gray-300 rounded px-2 py-1 text-sm focus:border-black outline-none"
+                        />
+                        <input
+                          type="number" step="0.01"
+                          value={priceEdit.sale_price ?? ''}
+                          onChange={(e) => setPriceEdit((pe) => ({ ...pe, sale_price: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') savePriceEdit(); if (e.key === 'Escape') setPriceEdit(null); }}
+                          placeholder="İndirimli (boş=yok)"
+                          title="İndirimli Fiyat (boş bırak = indirim yok)"
+                          className="w-24 border border-gray-300 rounded px-2 py-1 text-sm text-red-600 focus:border-black outline-none"
+                        />
+                        <div className="flex gap-1">
+                          <button onClick={savePriceEdit} className="px-2 py-0.5 text-xs font-bold bg-black text-white rounded hover:bg-gray-800">✓</button>
+                          <button onClick={() => setPriceEdit(null)} className="px-2 py-0.5 text-xs font-bold bg-gray-200 text-gray-600 rounded hover:bg-gray-300">✕</button>
+                        </div>
                       </div>
                     ) : (
-                      <span>{product.price?.toFixed(2)} TL</span>
+                      <button
+                        onClick={() => setPriceEdit({ id: product.id, price: product.price ?? '', sale_price: product.sale_price ?? '' })}
+                        title="Fiyatı düzenle (ürün kartındaki Satış / İndirimli fiyat alanları)"
+                        className="text-left hover:bg-orange-50 rounded px-1 -mx-1 cursor-pointer"
+                        data-testid={`product-price-edit-${product.id}`}
+                      >
+                        {product.sale_price ? (
+                          <div>
+                            <span className="text-red-600">{product.sale_price?.toFixed(2)} TL</span>
+                            <span className="text-xs text-gray-400 line-through block">{product.price?.toFixed(2)} TL</span>
+                          </div>
+                        ) : (
+                          <span>{product.price?.toFixed(2)} TL</span>
+                        )}
+                      </button>
                     )}
                   </td>
                   <td>
@@ -2396,19 +2436,13 @@ export default function AdminProducts() {
                   </td>
                   <td>
                     <div className="flex gap-1 items-center">
-                        <button onClick={() => openEditModal(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Hızlı Düzenle (Modal)" data-testid={`product-edit-modal-${product.id}`}>
-                          <Edit size={16} />
-                        </button>
-                        <button onClick={() => openStockMoves(product)} className="p-1.5 hover:bg-purple-100 rounded text-purple-600" title="Stok Hareketleri" data-testid={`product-stock-moves-${product.id}`}>
-                          <Layers size={16} />
-                        </button>
                         <button
                           onClick={() => { window.open(`/admin/urunler/${product.id}`, '_blank'); }}
-                          className="p-1.5 hover:bg-blue-100 rounded text-blue-600"
-                          title="Yeni Sekmede Aç (Direct Link)"
-                          data-testid={`product-open-page-${product.id}`}
+                          className="p-1.5 hover:bg-gray-100 rounded"
+                          title="Düzenle (Yeni Sekmede Açılır)"
+                          data-testid={`product-edit-modal-${product.id}`}
                         >
-                          <Link2 size={16} />
+                          <Edit size={16} />
                         </button>
                         <button onClick={() => handleDuplicate(product)} className="p-1.5 hover:bg-gray-100 rounded" title="Kopyala">
                           <Copy size={16} />
@@ -4064,7 +4098,7 @@ export default function AdminProducts() {
                     <th className="text-left px-4 py-3 font-bold text-gray-600">Stok Kodu</th>
                     <th className="text-left px-4 py-3 font-bold text-gray-600">Barkod</th>
                     <th className="text-center px-4 py-3 font-bold text-gray-600 w-24">Stok</th>
-                    <th className="text-right px-4 py-3 font-bold text-gray-600 w-32">Fiyat (TL)</th>
+                    <th className="text-right px-4 py-3 font-bold text-gray-600 w-32" title="Ürün kartındaki Satış / İndirimli fiyat alanlarından gelir">Fiyat (TL)</th>
                     <th className="text-center px-4 py-3 font-bold text-gray-600 w-24">Durum</th>
                   </tr>
                 </thead>
@@ -4116,17 +4150,10 @@ export default function AdminProducts() {
                           className={`w-20 border-gray-200 border px-2 py-1.5 rounded text-center font-bold bg-white focus:border-black outline-none ${variant.stock < 5 ? 'text-red-600 border-red-200' : 'text-gray-900'}`}
                         />
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <input
-                          type="number"
-                          value={variant.sale_price !== undefined && variant.sale_price !== null ? variant.sale_price : (variant.price || selectedProductForVariants.price || 0)}
-                          onChange={(e) => {
-                           const newVariants = [...selectedProductForVariants.variants];
-                           newVariants[idx] = { ...variant, sale_price: parseFloat(e.target.value) || 0 };
-                           setSelectedProductForVariants({ ...selectedProductForVariants, variants: newVariants });
-                          }}
-                          className="w-24 border-gray-200 border px-2 py-1.5 rounded text-right font-bold bg-white focus:border-black outline-none text-red-600"
-                        />
+                      <td className="px-4 py-3 text-right" title="Fiyat ürün kartındaki Satış / İndirimli fiyat alanlarından gelir — listeden veya ürün düzenleden değiştirin">
+                        <span className="font-bold text-red-600">
+                          {Number(selectedProductForVariants.sale_price || selectedProductForVariants.price || 0).toFixed(2)}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button
@@ -4540,51 +4567,6 @@ export default function AdminProducts() {
           )}
         </DialogContent>
       </Dialog>
-
-      {/* #22: ── Stok Hareketleri ─────────────────────────────── */}
-      {stockMovesProduct && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={() => setStockMovesProduct(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white">
-              <div>
-                <div className="font-semibold text-gray-900">Stok Hareketleri</div>
-                <div className="text-xs text-gray-500 truncate max-w-[420px]">{stockMovesProduct.name}</div>
-              </div>
-              <button onClick={() => setStockMovesProduct(null)} className="text-gray-400 hover:text-gray-700"><X size={18} /></button>
-            </div>
-            <div className="p-4">
-              {stockMovesLoading ? (
-                <div className="text-center text-gray-400 py-8 text-sm">Yükleniyor…</div>
-              ) : stockMoves.length === 0 ? (
-                <div className="text-center text-gray-400 py-8 text-sm">Bu ürün için stok hareketi kaydı yok.</div>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left px-2 py-1.5 font-medium">Tarih</th>
-                      <th className="text-left px-2 py-1.5 font-medium">Sebep</th>
-                      <th className="text-right px-2 py-1.5 font-medium">Değişim</th>
-                      <th className="text-left px-2 py-1.5 font-medium">Sipariş</th>
-                      <th className="text-left px-2 py-1.5 font-medium">Kaynak</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockMoves.map((m, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="px-2 py-1.5 whitespace-nowrap">{m.date ? new Date(m.date).toLocaleString("tr-TR") : "—"}</td>
-                        <td className="px-2 py-1.5">{m.reason}</td>
-                        <td className={`px-2 py-1.5 text-right font-bold ${m.delta > 0 ? "text-emerald-600" : m.delta < 0 ? "text-red-600" : "text-gray-500"}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</td>
-                        <td className="px-2 py-1.5">{m.order_number || "—"}</td>
-                        <td className="px-2 py-1.5 text-gray-500">{m.by || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Barkod Yazdırma: Beden Seçimi ─────────────────────────────── */}
       {barcodeSizeModal && (
