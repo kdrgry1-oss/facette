@@ -429,6 +429,7 @@ async def get_orders(
     """Get orders with pagination (admin only)"""
     skip = (page - 1) * limit
     query = {}
+    _default_hidden = False  # varsayılan iade/iptal gizlemesi uygulandı mı? (hidden_summary için)
     _show_hidden = str(show_hidden).lower() in ("1", "true", "yes")
     # Belirli sipariş araması mı? (Sipariş No / Fatura / Kargo / Telefon / E-posta / Kupon / genel arama)
     # → ödeme başarısız/junk siparişler bile no ile BULUNABİLMELİ; varsayılan gizleme uygulanmaz.
@@ -461,6 +462,7 @@ async def get_orders(
             "return_requested", "return_in_transit", "return_rejected", "partial_refunded",
             "payment_failed",  # ödemesi hiç alınamamış (başarısız kart) sipariş → ana listede GÖRÜNMEZ
         ]}
+        _default_hidden = True
     if phone:
         query["shipping_address.phone"] = {"$regex": re.escape(str(phone)), "$options": "i"}  # ReDoS koruması
     if email:
@@ -634,11 +636,36 @@ async def get_orders(
     except Exception as _e:
         logger.warning(f"order image enrich skipped: {_e}")
 
+    # Gizlenen sipariş özeti (kullanıcı isteği): kullanıcı 'Gizlenenleri göster'i açmak zorunda
+    # kalmasın — aynı filtre aralığında İadeler/İptaller sayfalarına giden sipariş sayıları
+    # yanıtla döner, panel bunları ilgili sayfalara linkleyerek gösterir.
+    hidden_summary = None
+    if _default_hidden:
+        try:
+            _hsig = "hs:" + _sig
+            _hc = _ORDERS_COUNT_CACHE.get(_hsig)
+            if _hc and (_now - _hc[1] < _ORDERS_COUNT_TTL):
+                hidden_summary = _hc[0]
+            else:
+                _base = {k: v for k, v in query.items() if k not in ("status", "$and")}
+                _iade_q = {**_base, "status": {"$in": [
+                    "returned", "refunded", "return_approved", "return_requested",
+                    "return_in_transit", "return_rejected", "partial_refunded"]}}
+                _iptal_q = {**_base, "status": "cancelled"}
+                _iade_n, _iptal_n = await _aio.gather(
+                    db.orders.count_documents(_iade_q),
+                    db.orders.count_documents(_iptal_q))
+                hidden_summary = {"iade": _iade_n, "iptal": _iptal_n}
+                _ORDERS_COUNT_CACHE[_hsig] = (hidden_summary, _now)
+        except Exception as _he:
+            logger.warning(f"hidden_summary hesaplanamadı: {_he}")
+
     return {
         "orders": orders,
         "total": total,
         "page": page,
-        "pages": (total + limit - 1) // limit
+        "pages": (total + limit - 1) // limit,
+        "hidden_summary": hidden_summary,
     }
 
 @router.get("/by-number/{order_number}")

@@ -96,6 +96,8 @@ export default function AdminOrders({ unpaidView = false }) {
   const [page, setPage] = useState(() => _loadOrdersView().page || 1);
   const [pageSize, setPageSize] = useState(() => _loadOrdersView().pageSize || 20);
   const [total, setTotal] = useState(0);
+  // Varsayılan görünümde gizlenen iade/iptal sayıları — ilgili sayfalara linkle gösterilir
+  const [hiddenSummary, setHiddenSummary] = useState(null);
   // --- Gelişmiş Filtreler (kullanıcı talebiyle geri eklendi) ---
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   // Sayfa yenilenince TÜM arama/filtre alanları sıfırlanır (kalıcılık YOK) —
@@ -210,6 +212,7 @@ export default function AdminOrders({ unpaidView = false }) {
       const list = res.data?.orders || [];
       setOrders(list);
       setTotal(res.data?.total || 0);
+      setHiddenSummary(res.data?.hidden_summary || null);
       setLoading(false);   // liste geldi → spinner'ı hemen kaldır; risk skorları arka planda yüklenir
 
       // FAZ 6 — Yüksek iade oranlı müşterileri ARKA PLANDA çek (sayfa yüklemesini bloklamaz)
@@ -1106,6 +1109,25 @@ export default function AdminOrders({ unpaidView = false }) {
             ince bir navigasyon katmanı olarak çalışır.
           - ALT (full) Pagination: tam numaralı + git kutusu.
           ================================================================= */}
+
+      {/* Gizlenen iade/iptal özeti — kullanıcı 'Gizlenenleri göster' açmak zorunda kalmaz;
+          bu siparişler otomatik olarak İadeler/İptaller sayfalarındadır, buradan tek tıkla gider. */}
+      {hiddenSummary && (hiddenSummary.iade > 0 || hiddenSummary.iptal > 0) && (
+        <div className="mb-2 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap" data-testid="orders-hidden-summary">
+          <span className="font-medium text-amber-900">Bu filtrede ayrıca:</span>
+          {hiddenSummary.iade > 0 && (
+            <a href="/admin/iadeler" className="text-blue-700 hover:underline font-semibold">
+              {hiddenSummary.iade} iade → İadeler sayfasında
+            </a>
+          )}
+          {hiddenSummary.iade > 0 && hiddenSummary.iptal > 0 && <span className="text-gray-400">·</span>}
+          {hiddenSummary.iptal > 0 && (
+            <a href="/admin/iptaller" className="text-blue-700 hover:underline font-semibold">
+              {hiddenSummary.iptal} iptal → İptaller sayfasında
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Üst (compact) pagination */}
       {total > 0 && (
