@@ -4801,6 +4801,80 @@ async def get_trendyol_claim_detail(claim_id: str, current_user: dict = Depends(
     if not claim:
         raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
     return claim
+@router.post("/trendyol/claims/vouchers/recompute")
+async def recompute_claim_vouchers(payload: Optional[dict] = Body(default=None),
+                                   current_user: dict = Depends(require_admin)):
+    """ESKİ kesilen Trendyol/HB gider pusulalarını GÜNCEL tutar kurallarıyla yeniden
+    hesaplar (tam iadede net = Trendyol'un gerçek iade tutarı; vade/kargo mutabakatı).
+    - Numara ve previous_numbers KORUNUR (idempotent yeniden kesim).
+    - KISMİ pusulalar korunur: pusuladaki kalemler claim kalemlerine (barkod+adet)
+      eşlenip aynı seçim item_indexes olarak geçilir; eşlenemeyen atlanır.
+    - Kurumsal/e-Fatura engeline takılanlar atlanır (değiştirilmez)."""
+    payload = payload or {}
+    limit = int(payload.get("limit", 5000) or 5000)
+    only_mismatch = payload.get("only_mismatch", True)
+    recomputed = changed = skipped = failed = 0
+    errors = []
+    async for gp in db.gider_pusulasi.find(
+            {"claim_id": {"$exists": True, "$ne": ""}},
+            {"_id": 0, "claim_id": 1, "items": 1, "totals": 1}).limit(limit):
+        cid = str(gp.get("claim_id") or "")
+        claim = await db.trendyol_claims.find_one({"claim_id": cid}, {"_id": 0, "items": 1, "refund_amount": 1})
+        if not claim:
+            skipped += 1
+            continue
+        gp_items = gp.get("items") or []
+        cl_items = claim.get("items") or []
+        sel_payload = None
+        if gp_items and cl_items and len(gp_items) < len(cl_items):
+            # Kısmi pusula: kalemleri (barkod, adet) ile claim index'lerine eşle
+            used = set()
+            idxs = []
+            ok = True
+            for gi in gp_items:
+                g_bc = str(gi.get("barcode") or "").strip()
+                g_q = int(gi.get("quantity", 1) or 1)
+                hit = None
+                for i, ci in enumerate(cl_items):
+                    if i in used:
+                        continue
+                    if str(ci.get("barcode") or "").strip() == g_bc and int(ci.get("quantity", 1) or 1) == g_q:
+                        hit = i
+                        break
+                if hit is None:
+                    ok = False
+                    break
+                used.add(hit)
+                idxs.append(hit)
+            if not ok:
+                skipped += 1
+                continue
+            sel_payload = {"item_indexes": idxs}
+        else:
+            # TAM pusula — yalnız tutarı güncel kuralla uyuşmayanları yeniden kes
+            if only_mismatch:
+                _old_net = round(float((gp.get("totals") or {}).get("net") or 0), 2)
+                _ref = round(float(claim.get("refund_amount") or 0), 2)
+                if _ref <= 0 or abs(_old_net - _ref) < 0.01:
+                    skipped += 1
+                    continue
+        try:
+            _old_net = round(float((gp.get("totals") or {}).get("net") or 0), 2)
+            res = await generate_gider_pusulasi(cid, payload=sel_payload, current_user=current_user)
+            recomputed += 1
+            _new_net = round(float(((res or {}).get("gider_pusulasi") or {}).get("totals", {}).get("net") or 0), 2)
+            if abs(_new_net - _old_net) >= 0.01:
+                changed += 1
+        except HTTPException as he:
+            failed += 1
+            errors.append({"claim_id": cid, "detail": str(he.detail)[:120]})
+        except Exception as e:
+            failed += 1
+            errors.append({"claim_id": cid, "detail": str(e)[:120]})
+    return {"success": True, "recomputed": recomputed, "amount_changed": changed,
+            "skipped": skipped, "failed": failed, "errors": errors[:30]}
+
+
 @router.post("/trendyol/claims/{claim_id}/gider-pusulasi")
 async def generate_gider_pusulasi(claim_id: str, payload: Optional[dict] = Body(default=None), current_user: dict = Depends(require_admin)):
     """Generate expense receipt (gider pusulası) data for a return claim"""
