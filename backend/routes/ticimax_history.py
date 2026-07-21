@@ -62,6 +62,37 @@ async def _api_key() -> str:
     return s.get("api_key") or "AKG0M8DTRSEBAIA898JA6HW22EDIU3"
 
 
+@router.get("/wsdl-probe")
+async def ticimax_wsdl_probe(current_user: dict = Depends(require_admin)):
+    """SiparisServis WSDL'ine Railway'den erişimi ve harici şema referanslarını teşhis eder."""
+    import httpx
+    import re as _re
+    from ticimax_client import SIPARIS_WSDL
+    out = {"wsdl_url": SIPARIS_WSDL}
+    try:
+        async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as c:
+            r = await c.get(SIPARIS_WSDL)
+            body = r.text or ""
+            out["status"] = r.status_code
+            out["final_url"] = str(r.url)
+            out["head"] = body[:300]
+            refs = sorted(set(_re.findall(r'(?:schemaLocation|location)="([^"]+)"', body)))
+            out["external_refs"] = refs[:20]
+            ref_status = {}
+            for u in refs[:8]:
+                if not u.lower().startswith("http"):
+                    continue
+                try:
+                    rr = await c.get(u)
+                    ref_status[u] = {"status": rr.status_code, "head": (rr.text or "")[:120]}
+                except Exception as e:
+                    ref_status[u] = {"error": str(e)[:150]}
+            out["ref_status"] = ref_status
+    except Exception as e:
+        out["error"] = str(e)[:300]
+    return out
+
+
 @router.get("/orders/probe")
 async def ticimax_orders_probe(
     start_date: str, end_date: str, page: int = 1,
