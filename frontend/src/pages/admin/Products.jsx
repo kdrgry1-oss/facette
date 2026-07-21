@@ -2926,16 +2926,12 @@ export default function AdminProducts() {
                     </div>
                   </div>
 
-                  {/* "Ürün Durumları" paneli kullanıcı isteğiyle kaldırıldı — Aktif/Yeni/Fırsat
-                      anahtarları Temel sekmesindeki Özellikler kartından yönetiliyor. */}
-                </div>
-
-                <div className="bg-orange-50 p-8 rounded-xl border border-orange-200 shadow-sm">
-                  <h3 className="font-semibold text-lg text-orange-900 mb-6 flex items-center gap-2">
-                    <span className="w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center text-sm font-bold">2</span>
-                    Trendyol Fiyatlandırma Ayarları
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Trendyol Fiyatlandırma sağ kolona taşındı — sol Fiyatlandırma kartıyla yan yana */}
+                  <div className="bg-orange-50 p-6 rounded-xl border border-orange-200 shadow-sm h-fit">
+                    <h3 className="font-semibold text-lg text-orange-900 mb-5 flex items-center gap-2">
+                      <span className="w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center text-sm font-bold">2</span>
+                      Trendyol Fiyatlandırma Ayarları
+                    </h3>
                     <div className="space-y-4">
                       <div className="bg-white p-4 rounded-lg border border-orange-100 flex items-start gap-3">
                         <input
@@ -2963,19 +2959,19 @@ export default function AdminProducts() {
                           />
                         </div>
                       )}
-                    </div>
 
-                    <div className="bg-white p-6 rounded-lg border border-orange-100 flex flex-col justify-center">
-                      <p className="text-xs font-bold text-gray-500 uppercase mb-4 tracking-widest text-center">Tahmini Trendyol Satış Fiyatı</p>
-                      <div className="text-center">
-                        <span className="text-4xl font-black text-orange-600">
-                          {(((formData.member_price_1 || formData.price) || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
-                        </span>
-                        <span className="text-xl font-bold text-orange-400 ml-1">TL</span>
+                      <div className="bg-white p-6 rounded-lg border border-orange-100 flex flex-col justify-center">
+                        <p className="text-xs font-bold text-gray-500 uppercase mb-4 tracking-widest text-center">Tahmini Trendyol Satış Fiyatı</p>
+                        <div className="text-center">
+                          <span className="text-4xl font-black text-orange-600">
+                            {(((formData.member_price_1 || formData.price) || 0) * (1 + (formData.use_default_markup ? globalTrendyolMarkup : (formData.markup_rate || 0)) / 100)).toFixed(2)}
+                          </span>
+                          <span className="text-xl font-bold text-orange-400 ml-1">TL</span>
+                        </div>
+                        <p className="text-[10px] text-gray-400 text-center mt-4">
+                          * KDV ve kargo masrafları fiyata dahildir. {formData.use_default_markup ? 'Global' : 'Özel'} markup uygulanmıştır.
+                        </p>
                       </div>
-                      <p className="text-[10px] text-gray-400 text-center mt-4">
-                        * KDV ve kargo masrafları fiyata dahildir. {formData.use_default_markup ? 'Global' : 'Özel'} markup uygulanmıştır.
-                      </p>
                     </div>
                   </div>
                 </div>
