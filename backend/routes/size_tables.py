@@ -20,14 +20,15 @@ from .deps import db, require_admin, logger
 router = APIRouter(prefix="/size-tables", tags=["size-tables"])
 
 
-def _find_font(size=28):
+def _find_font(size=28, bold=False):
     # ÖNCE depoya gömülü font (Railway imajında sistem fontu YOK — bitmap fallback'e
     # düşünce yazı minicik ve Türkçe karakterler kutu çıkıyordu).
-    _bundled = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "DejaVuSans.ttf")
+    _fname = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    _bundled = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", _fname)
     candidates = [
         _bundled,
+        f"/usr/share/fonts/truetype/dejavu/{_fname}",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     ]
     for c in candidates:
@@ -58,29 +59,35 @@ def render_size_table_image(
     3) altında kutusuz/çizgisiz ferah tablo — 'Bedenler  S  M  L' başlık satırı,
     her ölçü ayrı satırda (etiket solda, değerler beden kolonlarının altında ortalı).
     Manken silüeti, başlık bandı ve marka damgası kaldırıldı."""
+    # SEÇİLEN TASARIM: "C — Hairline Çizgili" (kullanıcı seçimi):
+    # bold beden başlıkları, gri ölçü etiketleri, satır aralarında kıl inceliğinde çizgiler.
     W, H = 1200, 1800
     img = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(img)
 
-    font_name = _find_font(62)
-    font_head = _find_font(44)
-    font_cell = _find_font(42)
+    INK = (24, 24, 27)
+    GRAY = (120, 120, 128)
+    LINE = (228, 228, 232)
+    font_name = _find_font(52)
+    font_head_b = _find_font(32, bold=True)
+    font_label = _find_font(29)
+    font_cell = _find_font(31)
 
     rows = [str(c) for c in (columns or [])]
     n_rows = len(rows)
 
-    y = 40
+    y = 50
     # 1) Ürün görseli — oran korunarak sığdırılır; tablo satır sayısına göre yükseklik ayarlanır
     if product_image:
         try:
             pim = Image.open(BytesIO(product_image)).convert("RGB")
-            _needed_below = 150 + (n_rows + 1) * 112 + 60  # ad + tablo satırları + alt boşluk
+            _needed_below = 175 + (n_rows + 1) * 84 + 60  # ad + tablo satırları + alt boşluk
             max_h = max(480, H - y - _needed_below)
             max_w = 680
             r = min(max_w / pim.width, max_h / pim.height)
             pim = pim.resize((max(1, int(pim.width * r)), max(1, int(pim.height * r))))
             img.paste(pim, ((W - pim.width) // 2, y))
-            y += pim.height + 44
+            y += pim.height + 55
         except Exception:
             y += 10
     else:
@@ -89,12 +96,12 @@ def render_size_table_image(
     # 2) Ürün adı — ortalı
     name = (product_name or "").strip()[:60]
     tw = draw.textlength(name, font=font_name)
-    draw.text(((W - tw) / 2, y), name, fill=(17, 24, 39), font=font_name)
-    y += 130
+    draw.text(((W - tw) / 2, y), name, fill=INK, font=font_name)
+    y += 120
 
-    # 3) Tablo — çizgisiz/ferah. Sol etiket + beden kolonları (değerler kolon merkezinde)
-    label_x = 60
-    col_area_l, col_area_r = 520, W - 80
+    # 3) Tablo — sol etiket + beden kolonları; her ölçü satırının ÜSTÜNDE ince çizgi
+    label_x = 90
+    col_area_l, col_area_r = 430, W - 90
     n_sizes = max(1, len(sizes))
     col_w = (col_area_r - col_area_l) / n_sizes
 
@@ -103,20 +110,21 @@ def render_size_table_image(
         return cx0 - draw.textlength(text, font=font) / 2
 
     remaining = H - y - 60
-    row_gap = max(100, min(180, int(remaining / max(1, n_rows + 1))))
+    row_gap = max(76, min(110, int(remaining / max(1, n_rows + 1))))
 
-    draw.text((label_x, y), "Bedenler", fill=(17, 24, 39), font=font_head)
+    draw.text((label_x, y), "Bedenler", fill=INK, font=font_head_b)
     for i, s in enumerate(sizes):
         t = str(s)
-        draw.text((_center_x(i, t, font_head), y), t, fill=(17, 24, 39), font=font_head)
+        draw.text((_center_x(i, t, font_head_b), y), t, fill=INK, font=font_head_b)
     y += row_gap
 
     for col in rows:
-        draw.text((label_x, y), col[:22], fill=(17, 24, 39), font=font_head)
+        draw.line([(label_x, y - 14), (W - 90, y - 14)], fill=LINE, width=1)
+        draw.text((label_x, y), col[:22], fill=GRAY, font=font_label)
         for i, s in enumerate(sizes):
             val = str(values.get(s, {}).get(col, "")).strip() or "-"
-            val = val.replace(".", ",")  # örnekteki gibi ondalık virgülle (70,5)
-            draw.text((_center_x(i, val, font_cell), y), val, fill=(17, 24, 39), font=font_cell)
+            val = val.replace(".", ",")  # ondalıklar virgülle (70,5)
+            draw.text((_center_x(i, val, font_cell), y), val, fill=INK, font=font_cell)
         y += row_gap
 
     out = BytesIO()
